@@ -111,9 +111,14 @@ terminal it sets:
   password prompt with `$SSHPASS`, since a GUI app has no TTY.
 - `LOCAL_PORT` — a free port for the host end of the SSH tunnel.
 
-To shrink the VM's footprint, set `VM_MEMORY` (MiB), `VM_CPU` and `VM_HEADLESS`
-when running `tart-prototype.sh` (the app does not set them). They map to
-`tart set --memory/--cpu` and `--no-graphics`. See
+The VM runs **headless** by default (`--no-graphics`): no host window showing
+the whole guest desktop. Tick «Показывать окно VM» (or `VM_HEADLESS=0` for the
+script) to see it — e.g. to watch a VM that does not get an IP. Note that
+without the window you see Safari only through the agent (`/screenshot`).
+
+To shrink the VM's footprint, set `VM_MEMORY` (MiB) and `VM_CPU` when running
+`tart-prototype.sh` (the app does not set them). They map to
+`tart set --memory/--cpu`. See
 [vm/SLIMMING.md](../SLIMMING.md) for a stable minimum (~1536 MiB) and the
 in-guest service-disabling (`vm/slim.sh`) and measurement scripts.
 
@@ -159,3 +164,30 @@ Covers the stage model, `tart` progress parsing, and runs the real
 `tart-prototype.sh` against stub `tart`/`ssh`/`scp`/`curl` through the same
 process-group runner the app uses — including cancelling it mid-launch. They
 run on Linux and macOS (where the script runs under the system bash 3.2).
+
+## When the VM never gets an IP
+
+`tart-prototype.sh` polls `tart ip` for `IP_TIMEOUT` seconds (default 120),
+printing `still waiting for VM IP (Ns of 120s, TART_NET=…)` every 10 s — the
+app shows it as «Ожидание IP-адреса VM: N из 120 с…». It now stops early and
+says why instead of waiting:
+
+| Log line | Meaning |
+|----------|---------|
+| `tart run exited before the VM got an IP (code N, …)` | `tart run` failed at start; its own error is the line above. Typical: the VM is already running, two macOS VMs already run (Apple's limit per host), softnet failed to start. |
+| `softnet not found …` | A profile runs over softnet (`TART_NET=softnet`); install it: `brew install cirruslabs/cli/softnet`. |
+| `Failed to get VM IP after Ns (TART_NET=…)` | The VM runs but got no DHCP lease. Followed by a hint for the network mode and the list of running VMs. Turn on «Показывать окно VM» to see whether macOS booted. |
+| `warning: '<vm>' has the same MAC …` | Two VMs share a MAC (e.g. a profile imported next to its source): one DHCP lease for both. Fix: `tart set <vm> --random-mac`. |
+
+How the address is found: `shared` and `softnet` VMs get it from the host's
+DHCP server (`/var/db/dhcpd_leases`, which `tart ip` reads); `bridged` VMs get it
+from the LAN and are found via ARP on `BRIDGE_IF`.
+
+Plain launches use `shared` and profiles use `softnet`, so a plain launch
+working while a profile hangs usually points to softnet.
+
+**Two VMs at once:** Virtualization.framework allows at most two macOS guests
+per host. The script can run two (each gets its own lease on shared/softnet),
+but the app drives one launch at a time: stop the running VM before starting
+another profile.
+

@@ -202,6 +202,14 @@ final class LauncherEnvironmentTests: XCTestCase {
         XCTAssertEqual(environment["LOCAL_PORT"], "50123")
         XCTAssertNil(environment["KEEP_VM"])
         XCTAssertEqual(environment["HOME"], "/Users/me")
+        XCTAssertEqual(environment["VM_HEADLESS"], "1", "no VM window unless asked")
+    }
+
+    func testScriptEnvironmentShowWindow() {
+        let environment = LauncherEnvironment.scriptEnvironment(
+            base: ["VM_HEADLESS": "1"], tartPath: "/bin/tart", askPass: URL(fileURLWithPath: "/tmp/a.sh"),
+            localPort: nil, showWindow: true)
+        XCTAssertEqual(environment["VM_HEADLESS"], "0")
     }
 
     func testScriptEnvironmentFailClosedAndCookies() {

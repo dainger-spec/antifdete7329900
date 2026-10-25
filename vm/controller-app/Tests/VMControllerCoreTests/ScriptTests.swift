@@ -158,7 +158,8 @@ final class ScriptIntegrationTests: XCTestCase {
         XCTAssertFalse(run.events.contains { if case .error = $0 { return true }; return false })
 
         let calls = host.calls
-        XCTAssertTrue(calls.contains("tart run safari-profile"), "shared networking passes no --net flag")
+        XCTAssertTrue(calls.contains("tart run safari-profile --no-graphics"),
+                      "shared networking passes no --net flag; headless by default")
         XCTAssertTrue(calls.contains("tart ip safari-profile"))
         XCTAssertTrue(calls.contains { $0.contains(#"-d {"url":"https://example.com/a\"b"}"#) },
                       "the navigate body is valid JSON even with a quote in the URL")
@@ -186,7 +187,7 @@ final class ScriptIntegrationTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 3, "the group signal interrupts the poll at once")
 
         let calls = host.calls
-        XCTAssertTrue(calls.contains("tart run safari-profile --net-bridged=en0"))
+        XCTAssertTrue(calls.contains("tart run safari-profile --net-bridged=en0 --no-graphics"))
         XCTAssertTrue(calls.contains("tart ip --resolver=arp safari-profile"))
         XCTAssertTrue(calls.contains("tart stop safari-profile"))
     }
@@ -213,7 +214,7 @@ final class ScriptIntegrationTests: XCTestCase {
         let run = try host.launch(url: "https://example.com",
                                   extraEnvironment: ["TART_NET": "softnet", "SOFTNET_ALLOW": "10.0.0.9/32"])
         try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
-        XCTAssertTrue(host.calls.contains("tart run safari-profile --net-softnet --net-softnet-allow 10.0.0.9/32"),
+        XCTAssertTrue(host.calls.contains("tart run safari-profile --net-softnet --net-softnet-allow 10.0.0.9/32 --no-graphics"),
                       "softnet with an allowlist restricts egress to the proxy")
         run.process.signalGroup(SIGINT)
         _ = await run.process.waitForExit(timeout: 15)
@@ -286,9 +287,52 @@ final class ScriptIntegrationTests: XCTestCase {
         let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "shared"])
         try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
         XCTAssertFalse(host.calls.contains { $0.hasPrefix("tart set") }, "no tart set without VM_MEMORY/VM_CPU")
-        XCTAssertTrue(host.calls.contains("tart run safari-profile"), "no --no-graphics without VM_HEADLESS")
+        XCTAssertTrue(host.calls.contains("tart run safari-profile --no-graphics"), "headless when VM_HEADLESS is unset")
         run.process.signalGroup(SIGINT)
         _ = await run.process.waitForExit(timeout: 15)
+    }
+
+    func testShowWindowWithHeadlessZero() async throws {
+        let run = try host.launch(url: "https://example.com",
+                                  extraEnvironment: ["TART_NET": "shared", "VM_HEADLESS": "0"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertTrue(host.calls.contains("tart run safari-profile"), "VM_HEADLESS=0 shows the VM window")
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
+    /// `tart run` dying at once (VM already running, two-VM limit, softnet)
+    /// must fail fast with a reason, not wait out the IP poll.
+    func testTartRunDyingFailsFastInsteadOfWaitingForIP() async throws {
+        try host.setFlag("run-dies")
+        let started = Date()
+        let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "shared"])
+        let code = await run.process.waitForExit(timeout: 20)
+        XCTAssertEqual(code, 1)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 10)
+        XCTAssertTrue(run.events.contains { if case .error(let text) = $0 { return text.contains("tart run") }; return false })
+        XCTAssertFalse(host.calls.contains("tart stop safari-profile"), "a VM we did not start is not stopped")
+    }
+
+    func testIPTimeoutReportsProgressThenError() async throws {
+        try host.setFlag("no-ip")
+        let run = try host.launch(url: "https://example.com",
+                                  extraEnvironment: ["TART_NET": "shared", "IP_TIMEOUT": "10"])
+        let code = await run.process.waitForExit(timeout: 30)
+        XCTAssertEqual(code, 1)
+        XCTAssertTrue(run.events.contains(.detail(.vm, "Ожидание IP-адреса VM: 10 из 10 с…")),
+                      "the wait shows elapsed time")
+        XCTAssertTrue(run.events.contains { if case .error(let text) = $0 { return text.contains("IP-адрес") }; return false })
+        XCTAssertTrue(host.calls.contains("tart stop safari-profile"), "our VM is stopped on timeout")
+    }
+
+    func testSoftnetMissingIsReportedBeforeStarting() async throws {
+        try host.removeStub("softnet")
+        let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "softnet"])
+        let code = await run.process.waitForExit(timeout: 20)
+        XCTAssertEqual(code, 1)
+        XCTAssertTrue(run.events.contains { if case .error(let text) = $0 { return text.contains("softnet") }; return false })
+        XCTAssertFalse(host.calls.contains { $0.hasPrefix("tart run") })
     }
 
     func testSigintToBashAloneNoLongerResumesTheScript() async throws {
@@ -358,7 +402,8 @@ final class FakeHost {
         \(log)
         case "$1" in
           list) printf 'Source Name           Disk Size State\\nlocal  safari-profile 50   24   stopped\\n' ;;
-          run)  echo $$ > "$FAKE_STATE/run.pid"; exec sleep 300 ;;
+          run)  [ -f "$FAKE_STATE/run-dies" ] && { echo "Error: VM is already running" >&2; exit 1; }
+                echo $$ > "$FAKE_STATE/run.pid"; exec sleep 300 ;;
           ip)   [ -f "$FAKE_STATE/no-ip" ] || echo 192.168.64.5 ;;
           stop) [ -f "$FAKE_STATE/run.pid" ] && kill "$(cat "$FAKE_STATE/run.pid")" 2>/dev/null; true ;;
         esac
@@ -385,12 +430,17 @@ final class FakeHost {
         exit 0
         """)
         try stub("sshpass", "shift; exec \"$@\"") // in case a real one is installed
+        try stub("softnet", log) // only looked up; tart (stubbed) would start it
     }
 
     private func stub(_ name: String, _ body: String) throws {
         let url = bin.appendingPathComponent(name)
         try "#!/bin/sh\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    }
+
+    func removeStub(_ name: String) throws {
+        try FileManager.default.removeItem(at: bin.appendingPathComponent(name))
     }
 
     func setFlag(_ name: String) throws {

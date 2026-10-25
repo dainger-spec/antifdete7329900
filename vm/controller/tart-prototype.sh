@@ -25,7 +25,10 @@
 #                  (comma-separated). Empty = no egress. Needs the softnet helper.
 #   VM_MEMORY    RAM cap in MiB, applied with `tart set` (empty = image default)
 #   VM_CPU       CPU core count, applied with `tart set` (empty = image default)
-#   VM_HEADLESS  "1" = run with --no-graphics (no host window). See vm/SLIMMING.md.
+#   VM_HEADLESS  "1" (default) = run with --no-graphics: no host window with the
+#                guest desktop; Safari still renders on the guest's display.
+#                "0" or empty = show the VM window. See vm/SLIMMING.md.
+#   IP_TIMEOUT   seconds to wait for the VM's IP before failing (default: 120)
 #   VM_RUN_ARGS  extra flags appended to `tart run`, split on spaces (e.g. to
 #                pass a build-specific device toggle your tart supports)
 #   IDENTITY_PROFILE  profile name: once SSH is up, run vm/identity.sh in the
@@ -51,7 +54,10 @@ TART_NET="${TART_NET:-bridged}"
 BRIDGE_IF="${BRIDGE_IF:-en0}"
 VM_MEMORY="${VM_MEMORY:-}"
 VM_CPU="${VM_CPU:-}"
-VM_HEADLESS="${VM_HEADLESS:-}"
+# Unset → headless; an explicit empty value keeps its old meaning (window).
+VM_HEADLESS="${VM_HEADLESS-1}"
+[[ "$VM_HEADLESS" == "0" ]] && VM_HEADLESS=""
+IP_TIMEOUT="${IP_TIMEOUT:-120}"
 VM_RUN_ARGS="${VM_RUN_ARGS:-}"
 IDENTITY_PROFILE="${IDENTITY_PROFILE:-}"
 
@@ -84,6 +90,12 @@ trap 'exit 143' TERM
 for tool in tart ssh scp curl; do
   command -v "$tool" &>/dev/null || { echo "$tool not found"; exit 1; }
 done
+# Tart starts the softnet helper itself; without it `tart run --net-softnet`
+# dies at once and the VM never gets an address.
+if [[ "$TART_NET" == "softnet" ]] && ! command -v softnet &>/dev/null; then
+  echo "softnet not found (TART_NET=softnet needs it: brew install cirruslabs/cli/softnet)"
+  exit 1
+fi
 
 # sshpass is only needed for password auth; key-based auth works without it.
 # Default to a no-op `env` prefix rather than an empty array: on macOS /bin/bash
@@ -133,7 +145,7 @@ fi
 RUN_ARGS=(${RUN_NET_ARGS[@]+"${RUN_NET_ARGS[@]}"})
 # --no-graphics drops the host window. Safari still renders on the guest's
 # virtual display; if your Tart build removes that display headless and
-# screenshots/pages break, leave VM_HEADLESS unset (see vm/SLIMMING.md).
+# screenshots/pages break, set VM_HEADLESS=0 (see vm/SLIMMING.md).
 [[ -n "$VM_HEADLESS" ]] && RUN_ARGS+=(--no-graphics)
 # Extra run flags, space-split (e.g. a device toggle specific to your tart).
 if [[ -n "$VM_RUN_ARGS" ]]; then
@@ -145,14 +157,48 @@ echo "==> Starting VM '$VM_NAME'"
 tart run "$VM_NAME" ${RUN_ARGS[@]+"${RUN_ARGS[@]}"} &
 TART_PID=$!
 
+# Two VMs with one MAC (e.g. a profile imported next to its source) get the
+# same DHCP lease: `tart ip` then finds the other VM's address, or none.
+VMS_DIR="${TART_HOME:-$HOME/.tart}/vms"
+mac_of() { sed -n 's/.*"macAddress" *: *"\([^"]*\)".*/\1/p' "$VMS_DIR/$1/config.json" 2>/dev/null | head -1 || true; }
+OWN_MAC="$(mac_of "$VM_NAME")"
+if [[ -n "$OWN_MAC" ]]; then
+  for dir in "$VMS_DIR"/*/; do
+    other="$(basename "$dir")"
+    [[ "$other" != "$VM_NAME" && "$(mac_of "$other")" == "$OWN_MAC" ]] || continue
+    echo "    warning: '$other' has the same MAC $OWN_MAC; fix with: tart set $VM_NAME --random-mac"
+  done
+fi
+
 echo "==> Waiting for VM IP..."
 IP=""
-for _ in $(seq 1 60); do
+WAITED=0
+while (( WAITED < IP_TIMEOUT )); do
+  # tart run failing at once (VM already running, Apple's limit of two macOS
+  # VMs, softnet refusing to start) used to look like a slow boot. Checked
+  # before `tart ip`: a VM someone else already runs has an IP, but not ours.
+  if ! kill -0 "$TART_PID" 2>/dev/null; then
+    rc=0; wait "$TART_PID" || rc=$?
+    TART_PID="" # nothing of ours to stop; don't `tart stop` someone else's VM
+    echo "tart run exited before the VM got an IP (code $rc, TART_NET=$TART_NET); its error is above"
+    exit 1
+  fi
   IP="$(tart ip ${IP_ARGS[@]+"${IP_ARGS[@]}"} "$VM_NAME" 2>/dev/null || true)"
-  [[ -n "$IP" ]] && break
+  [[ -n "$IP" ]] && kill -0 "$TART_PID" 2>/dev/null && break
+  IP=""
   sleep 2
+  WAITED=$((WAITED + 2))
+  (( WAITED % 10 == 0 )) && echo "    still waiting for VM IP (${WAITED}s of ${IP_TIMEOUT}s, TART_NET=$TART_NET)"
 done
-[[ -z "$IP" ]] && { echo "Failed to get VM IP"; exit 1; }
+if [[ -z "$IP" ]]; then
+  echo "Failed to get VM IP after ${IP_TIMEOUT}s (TART_NET=$TART_NET)"
+  case "$TART_NET" in
+    bridged) echo "    bridged: the address is found via ARP on $BRIDGE_IF; the VM must get a LAN DHCP lease (try TART_NET=shared)" ;;
+    *) echo "    $TART_NET: the address comes from the host's DHCP leases (/var/db/dhcpd_leases); check the VM window (VM_HEADLESS=0) to see if macOS booted" ;;
+  esac
+  echo "    running VMs: $(tart list 2>/dev/null | awk '$NF == "running" {print $2}' | tr '\n' ' ')"
+  exit 1
+fi
 echo "VM IP: $IP"
 
 echo "==> Waiting for SSH..."

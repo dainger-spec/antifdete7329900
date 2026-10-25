@@ -50,8 +50,14 @@ public struct ScriptOutputParser: Sendable {
     }
 
     static let errorRules: [ErrorRule] = [
+        ErrorRule(prefix: "tart run exited before the VM got an IP",
+                  message: "VM не запустилась: tart run сразу завершился (его ошибка — в журнале). Частые причины: "
+                      + "эта VM уже запущена, уже работают две macOS-VM (ограничение Apple), не стартовал softnet."),
         ErrorRule(prefix: "Failed to get VM IP",
-                  message: "VM не получила IP-адрес. Проверьте окно VM: загрузилась ли macOS."),
+                  message: "VM не получила IP-адрес за отведённое время. Подробности — в журнале; "
+                      + "чтобы увидеть, загрузилась ли macOS, включите «Показывать окно VM»."),
+        ErrorRule(prefix: "softnet not found",
+                  message: "Для профиля нужен softnet (сеть только через прокси): brew install cirruslabs/cli/softnet"),
         ErrorRule(prefix: "SSH did not come up",
                   message: "Не удалось подключиться к VM по SSH. В образе Cirrus Labs логин admin, пароль admin; "
                       + "в VM должен быть включён «Удалённый вход»."),
@@ -71,6 +77,14 @@ public struct ScriptOutputParser: Sendable {
 
     public init() {}
 
+    /// "still waiting for VM IP (30s of 120s, …)" → (30, 120).
+    static func ipWait(_ line: String) -> (elapsed: Int, limit: Int)? {
+        let prefix = "still waiting for VM IP ("
+        guard line.hasPrefix(prefix) else { return nil }
+        let numbers = line.dropFirst(prefix.count).split(whereSeparator: { !$0.isNumber }).prefix(2).compactMap { Int($0) }
+        return numbers.count == 2 ? (numbers[0], numbers[1]) : nil
+    }
+
     public mutating func consume(_ rawLine: String) -> ScriptEvent? {
         let line = rawLine.trimmingCharacters(in: .whitespaces)
         if line.hasPrefix("==> ") {
@@ -80,6 +94,9 @@ public struct ScriptOutputParser: Sendable {
             }
             if body.hasPrefix("Stopping VM") { return .stopping }
             return nil
+        }
+        if let waited = Self.ipWait(line) {
+            return .detail(.vm, "Ожидание IP-адреса VM: \(waited.elapsed) из \(waited.limit) с…")
         }
         if line.hasPrefix("VM IP: ") {
             let ip = String(line.dropFirst("VM IP: ".count))

@@ -130,10 +130,12 @@ public enum LauncherEnvironment {
     /// `network` picks TART_NET/SOFTNET_ALLOW: a profile with a proxy runs
     /// fail-closed over softnet; the plain dev launch (nil) uses shared NAT so
     /// `tart ip` resolves and the host can reach the VM. `cookiesFile`, when
-    /// set, is POSTed to the agent's /cookies before navigating.
+    /// set, is POSTed to the agent's /cookies before navigating. `showWindow`
+    /// false (the default) runs the VM headless, so the guest desktop never
+    /// pops up on the host.
     public static func scriptEnvironment(base: [String: String], tartPath: String, askPass: URL,
                                          localPort: UInt16?, network: NetworkPolicy? = nil,
-                                         cookiesFile: String? = nil) -> [String: String] {
+                                         cookiesFile: String? = nil, showWindow: Bool = false) -> [String: String] {
         var environment = base
         let tartDirectory = URL(fileURLWithPath: tartPath).deletingLastPathComponent().path
         environment["PATH"] = searchPath(base["PATH"], prepending: [tartDirectory])
@@ -144,6 +146,7 @@ public enum LauncherEnvironment {
         environment["SSH_ASKPASS_REQUIRE"] = "force"
         if let localPort { environment["LOCAL_PORT"] = String(localPort) }
         if let cookiesFile { environment["COOKIES_FILE"] = cookiesFile } else { environment["COOKIES_FILE"] = nil }
+        environment["VM_HEADLESS"] = showWindow ? "0" : "1"
         // These only make sense for a terminal user.
         environment["KEEP_VM"] = nil
         environment["SHOT"] = nil

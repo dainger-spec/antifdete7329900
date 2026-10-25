@@ -68,6 +68,11 @@ struct ContentView: View {
                         .disabled(!model.canCancel)
                 }
             }
+            Toggle("Показывать окно VM", isOn: $model.showVMWindow)
+                .toggleStyle(.checkbox)
+                .disabled(!model.canStart)
+                .help("Окно со всем рабочим столом macOS гостя. Выключено — VM работает без окна; "
+                    + "включите, если нужно увидеть экран VM (например, когда она не получает IP).")
             if let urlError = model.urlError {
                 Text(urlError)
                     .font(.caption)

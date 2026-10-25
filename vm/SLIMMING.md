@@ -32,7 +32,8 @@ VM_MEMORY=1536 VM_CPU=2 ./vm/controller/tart-prototype.sh safari-profile https:/
 3. **Less disk — `slim.sh` cleanup, `--aggressive`, `--strip-dev` (guest).**
    Caches/logs always; app languages and docs with `--aggressive`;
    `/Library/Developer` (Xcode/CLT — the biggest single item) with `--strip-dev`.
-4. **No host window — `VM_HEADLESS=1` (`--no-graphics`).** Host-side only.
+4. **No host window — `VM_HEADLESS=1` (`--no-graphics`), the default.** Host-side only;
+   `VM_HEADLESS=0` (app: «Показывать окно VM») brings the window back.
 
 ## `vm/slim.sh`
 
@@ -93,10 +94,11 @@ tart set safari-profile --memory 1536 --cpu 2
   remove. The CLI has no documented audio toggle; if *your* Tart build adds one,
   pass it through with `VM_RUN_ARGS` on the controller (e.g.
   `VM_RUN_ARGS=--no-audio`) rather than assuming it exists.
-- **Display:** `VM_HEADLESS=1` adds `--no-graphics` (no host window). The guest
-  keeps its virtual display so Safari renders and `/screenshot` works on current
-  Tart; if a build removes the display headless and pages/screenshots break,
-  leave `VM_HEADLESS` unset — the saving is host-side and small.
+- **Display:** headless is the default — `--no-graphics` (no host window with
+  the guest desktop). The guest keeps its virtual display, so Safari renders and
+  `/screenshot` works on current Tart. Not verified on every Tart build: if
+  yours drops the display headless and pages/screenshots break, run with
+  `VM_HEADLESS=0` (app: tick «Показывать окно VM»).
 
 ## Measuring
 

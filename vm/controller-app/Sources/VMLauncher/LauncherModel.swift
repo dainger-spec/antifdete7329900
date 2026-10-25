@@ -43,6 +43,11 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var urlError: String?
     @Published private(set) var log: [LogLine] = []
     @Published private(set) var tartHelp: TartHelp?
+    /// Show the VM's window (the whole guest desktop) on the host. Off by
+    /// default: the VM runs headless. Applies from the next launch.
+    @Published var showVMWindow: Bool {
+        didSet { UserDefaults.standard.set(showVMWindow, forKey: "showVMWindow") }
+    }
 
     let profileStore = ProfileStore()
     private let fileLog = FileLog()
@@ -67,6 +72,7 @@ final class LauncherModel: ObservableObject {
     private var scriptError: String?
     private var imageStep = "Скачивание образа"
     private var lastOutputLine: String?
+    private var launchedWithWindow = false
     private var nextLogID = 0
 
     /// No cached environment check yet → treat as a first run (show onboarding).
@@ -74,6 +80,7 @@ final class LauncherModel: ObservableObject {
 
     init() {
         urlText = UserDefaults.standard.string(forKey: "lastURL") ?? "https://browserleaks.com"
+        showVMWindow = UserDefaults.standard.bool(forKey: "showVMWindow")
         var environment = ProcessInfo.processInfo.environment
         // A Finder-launched app has PATH=/usr/bin:/bin:/usr/sbin:/sbin; Homebrew's tart lives elsewhere.
         environment["PATH"] = LauncherEnvironment.searchPath(environment["PATH"])
@@ -314,7 +321,9 @@ final class LauncherModel: ObservableObject {
         }
         let environment = LauncherEnvironment.scriptEnvironment(
             base: baseEnvironment, tartPath: tart, askPass: askPass,
-            localPort: LauncherEnvironment.freeLocalPort(), network: network, cookiesFile: cookiesFile)
+            localPort: LauncherEnvironment.freeLocalPort(), network: network, cookiesFile: cookiesFile,
+            showWindow: showVMWindow)
+        launchedWithWindow = showVMWindow
 
         scriptParser = ScriptOutputParser()
         scriptError = nil
@@ -346,10 +355,11 @@ final class LauncherModel: ObservableObject {
             progress.update(stage, detail: detail)
         case .ready(let ip):
             progress.finish(.safari, detail: "Открыт \(targetURL ?? "адрес")")
-            progress.finish(.done, detail: ip.map { "Safari открыт в окне VM · IP \($0)" } ?? "Safari открыт в окне VM")
+            let place = launchedWithWindow ? "в окне VM" : "в VM (окно VM скрыто)"
+            progress.finish(.done, detail: ip.map { "Safari открыт \(place) · IP \($0)" } ?? "Safari открыт \(place)")
             if phase == .running {
                 phase = .ready
-                setStatus("Готово — Safari открыт в окне VM")
+                setStatus("Готово — Safari открыт \(place)")
                 // Remember the profile's last URL for next time.
                 if let profile = activeProfile, let url = targetURL {
                     try? profileStore.update(profile.id) { $0.lastURL = url }
