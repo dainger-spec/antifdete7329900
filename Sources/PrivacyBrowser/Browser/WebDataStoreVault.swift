@@ -62,7 +62,7 @@ final class WebDataStoreVault {
         let archive = repository.webDataArchiveURL(for: profileID)
         guard FileManager.default.fileExists(atPath: archive.path) else { return }
         let library = Self.libraryDirectory
-        try await Task.detached(priority: .userInitiated) {
+        _ = try await Task.detached(priority: .userInitiated) {
             try EncryptedDirectoryArchive.unseal(from: archive, key: key) { label in
                 try Self.destination(forLabel: label, profileID: profileID, library: library)
             }
