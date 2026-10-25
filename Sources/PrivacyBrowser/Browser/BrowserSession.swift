@@ -29,6 +29,8 @@ final class BrowserSession {
     let configuration: ProfileConfiguration
     let passwordVault: PasswordVault
     let library: ProfileLibrary
+    /// The encrypted download store, or nil when the profile saves downloads to ~/Downloads.
+    let downloads: ProfileDownloads?
     var onAllWindowsClosed: (() -> Void)?
 
     private(set) var dataStore: WKWebsiteDataStore?
@@ -37,13 +39,17 @@ final class BrowserSession {
     private var libraryWindow: LibraryWindowController?
     private var isClosing = false
 
+    /// `contentRuleList`: the profile's compiled tracker-blocking rules (`ContentBlocking.compile`),
+    /// attached before any web view exists so that the first page load is already filtered.
     init(profileID: UUID, profileName: String, configuration: ProfileConfiguration,
-         passwordVault: PasswordVault, library: ProfileLibrary) {
+         passwordVault: PasswordVault, library: ProfileLibrary, downloads: ProfileDownloads? = nil,
+         contentRuleList: WKContentRuleList? = nil) {
         self.profileID = profileID
         self.profileName = profileName
         self.configuration = configuration
         self.passwordVault = passwordVault
         self.library = library
+        self.downloads = downloads
 
         let store: WKWebsiteDataStore = configuration.ephemeral
             ? .nonPersistent()
@@ -56,13 +62,14 @@ final class BrowserSession {
         // (a synced profile keeps its canvas identity), different between profiles.
         self.userContentController = BehaviorSets.makeUserContentController(
             for: configuration, canvasSeed: PrivacyScripts.canvasSeed(for: profileID))
+        if let contentRuleList { userContentController.add(contentRuleList) }
     }
 
     var windowCount: Int { windows.count }
 
     var tabContext: BrowserTabContext {
         BrowserTabContext(profileName: profileName, userAgent: configuration.effectiveUserAgent,
-                          passwordVault: passwordVault, library: library)
+                          passwordVault: passwordVault, library: library, downloads: downloads)
     }
 
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
@@ -148,7 +155,10 @@ final class BrowserSession {
             controller.close()
         }
         library.flush()
+        downloads?.shutDown()
         userContentController.removeAllUserScripts()
+        userContentController.removeAllContentRuleLists()
+        ContentBlocking.removeStore(for: profileID)
         dataStore = nil
     }
 }

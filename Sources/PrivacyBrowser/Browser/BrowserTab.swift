@@ -25,6 +25,8 @@ struct BrowserTabContext {
     let userAgent: String?
     let passwordVault: PasswordVault
     let library: ProfileLibrary
+    /// Encrypted per-profile downloads; nil → this tab saves to ~/Downloads itself.
+    let downloads: ProfileDownloads?
 }
 
 /// One tab: a `WKWebView` and its navigation, UI and download delegates.
@@ -183,11 +185,20 @@ extension BrowserTab: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
-        download.delegate = self
+        handOver(download)
     }
 
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
-        download.delegate = self
+        handOver(download)
+    }
+
+    /// Encrypted downloads belong to the profile session (they outlive this tab); plain ones stay here.
+    private func handOver(_ download: WKDownload) {
+        if let downloads = context.downloads {
+            downloads.adopt(download)
+        } else {
+            download.delegate = self
+        }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -337,9 +348,10 @@ extension BrowserTab: WKUIDelegate {
 // MARK: - WKDownloadDelegate
 
 extension BrowserTab: WKDownloadDelegate {
-    /// LIMITATION: downloaded files are written to ~/Downloads unencrypted; they are outside the
-    /// profile's encrypted storage. In the App Sandbox this needs
-    /// `com.apple.security.files.downloads.read-write`.
+    /// Only for profiles with encrypted downloads turned off (`ProfileConfiguration.encryptDownloads`):
+    /// files are written to ~/Downloads unencrypted, outside the profile's encrypted storage. In the
+    /// App Sandbox this needs `com.apple.security.files.downloads.read-write`. Encrypted downloads
+    /// are handled by `ProfileDownloads`.
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
         completionHandler(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename))

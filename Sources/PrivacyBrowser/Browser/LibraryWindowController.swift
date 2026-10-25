@@ -12,7 +12,8 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
         let navigation = LibraryNavigation()
         self.navigation = navigation
         self.onClose = onClose
-        let hosting = NSHostingController(rootView: LibraryView(library: session.library, navigation: navigation, open: open))
+        let hosting = NSHostingController(rootView: LibraryView(library: session.library, navigation: navigation,
+                                                                 downloads: session.downloads, open: open))
         let window = NSWindow(contentViewController: hosting)
         window.title = String(format: L("window.library.title"), session.profileName)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]

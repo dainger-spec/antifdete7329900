@@ -8,32 +8,48 @@ final class LibraryNavigation: ObservableObject {
     @Published var section: LibraryView.Section = .bookmarks
 }
 
-/// Per-profile bookmarks and history. Only available while the profile runs (the data is
-/// decrypted only then).
+/// Per-profile bookmarks, history and encrypted downloads. Only available while the profile
+/// runs (the data is decrypted only then).
 struct LibraryView: View {
     enum Section: String, CaseIterable, Identifiable {
-        case bookmarks, history
+        case bookmarks, history, downloads
         var id: String { rawValue }
-        var labelKey: String { self == .bookmarks ? "library.tab.bookmarks" : "library.tab.history" }
+        var labelKey: String {
+            switch self {
+            case .bookmarks: return "library.tab.bookmarks"
+            case .history: return "library.tab.history"
+            case .downloads: return "library.tab.downloads"
+            }
+        }
     }
 
     @ObservedObject var library: ProfileLibrary
     @ObservedObject var navigation: LibraryNavigation
+    /// nil when the profile saves downloads to ~/Downloads (no Downloads pane).
+    let downloads: ProfileDownloads?
     let open: (URL) -> Void
+
+    private var sections: [Section] { Section.allCases.filter { $0 != .downloads || downloads != nil } }
 
     var body: some View {
         VStack(spacing: 0) {
             Picker("", selection: $navigation.section) {
-                ForEach(Section.allCases) { Text(L($0.labelKey)).tag($0) }
+                ForEach(sections) { Text(L($0.labelKey)).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 280)
+            .frame(width: CGFloat(sections.count) * 130)
             .padding(12)
             Divider()
             switch navigation.section {
             case .bookmarks: BookmarksPane(library: library, open: open)
             case .history: HistoryPane(library: library, open: open)
+            case .downloads:
+                if let downloads {
+                    DownloadsPane(downloads: downloads)
+                } else {
+                    BookmarksPane(library: library, open: open)
+                }
             }
         }
         .frame(minWidth: 580, minHeight: 440)
@@ -309,5 +325,80 @@ private struct HistoryPane: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
+    }
+}
+
+// MARK: - Downloads
+
+private struct DownloadsPane: View {
+    @ObservedObject var downloads: ProfileDownloads
+    @State private var selection: UUID?
+    @State private var pendingDelete: DownloadEntry?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(L("downloads.notice"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            List(selection: $selection) {
+                if !downloads.active.isEmpty {
+                    SwiftUI.Section(L("downloads.inProgress")) {
+                        ForEach(downloads.active) { item in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.filename).lineLimit(1)
+                                ProgressView(value: item.fraction)
+                            }
+                        }
+                    }
+                }
+                SwiftUI.Section(L("downloads.saved")) {
+                    ForEach(downloads.entries) { entry in
+                        HStack {
+                            Image(systemName: "lock.doc").foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.filename).lineLimit(1)
+                                Text(subtitle(entry)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            Button(L("downloads.open")) { downloads.open(entry) }
+                            Button(L("downloads.saveCopy")) { downloads.saveCopy(entry, from: NSApp.keyWindow) }
+                        }
+                        .tag(entry.id)
+                        .contextMenu {
+                            Button(L("downloads.open")) { downloads.open(entry) }
+                            Button(L("downloads.saveCopy")) { downloads.saveCopy(entry, from: NSApp.keyWindow) }
+                            if let source = entry.sourceURL {
+                                Button(L("history.copyAddress")) {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(source, forType: .string)
+                                }
+                            }
+                            Divider()
+                            Button(L("common.delete"), role: .destructive) { pendingDelete = entry }
+                        }
+                    }
+                }
+            }
+            .overlay {
+                if downloads.entries.isEmpty && downloads.active.isEmpty {
+                    Text(L("downloads.empty")).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .confirmationDialog(String(format: L("downloads.delete.title"), pendingDelete?.filename ?? ""),
+                            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            presenting: pendingDelete) { entry in
+            Button(L("common.delete"), role: .destructive) { downloads.remove(entry) }
+        }
+    }
+
+    private func subtitle(_ entry: DownloadEntry) -> String {
+        let size = ByteCountFormatter.string(fromByteCount: Int64(clamping: entry.size), countStyle: .file)
+        let when = entry.createdAt.formatted(date: .abbreviated, time: .shortened)
+        let host = entry.sourceURL.flatMap { URL(string: $0)?.host }
+        return [size, when, host].compactMap { $0 }.joined(separator: " · ")
     }
 }

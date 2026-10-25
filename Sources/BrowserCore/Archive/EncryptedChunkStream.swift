@@ -13,7 +13,8 @@ import Foundation
 /// header  = magic "PBSA" | version u8 (=1) | chunkSize u32 | salt [32]
 /// chunk*  = sealedLength u32 | ciphertext [sealedLength-16] | tag [16]
 /// ```
-/// * Per-archive key: HKDF-SHA256(profileKey, salt: header.salt, info: "webdata-archive").
+/// * Per-archive key: HKDF-SHA256(profileKey, salt: header.salt, info: "webdata-archive"); other
+///   payloads use their own info string (downloads, backups).
 ///   A fresh random salt per archive means the key is never reused across archives,
 ///   so nonces can be deterministic.
 /// * Nonce of chunk i: `00 00 00 00 || u64(i)`.
@@ -29,8 +30,12 @@ enum EncryptedChunkStream {
     static let headerLength = 4 + 1 + 4 + saltLength
     static let maxChunkSize = 16 << 20
 
-    static func archiveKey(_ key: SymmetricKey, salt: Data) -> SymmetricKey {
-        key.derive(info: "webdata-archive", salt: salt)
+    /// HKDF info of WebKit data archives. Other users of the stream (downloads, backups) pass
+    /// their own purpose, so a chunk stream of one kind never opens as another.
+    static let webDataInfo = "webdata-archive"
+
+    static func archiveKey(_ key: SymmetricKey, salt: Data, info: String = webDataInfo) -> SymmetricKey {
+        key.derive(info: info, salt: salt)
     }
 
     static func nonce(_ index: UInt64) throws -> AES.GCM.Nonce {
@@ -56,7 +61,7 @@ final class EncryptedChunkWriter {
     private var index: UInt64 = 0
     private var finished = false
 
-    init(handle: FileHandle, key: SymmetricKey, chunkSize: Int) throws {
+    init(handle: FileHandle, key: SymmetricKey, chunkSize: Int, info: String = EncryptedChunkStream.webDataInfo) throws {
         precondition(chunkSize > 0 && chunkSize <= EncryptedChunkStream.maxChunkSize)
         self.handle = handle
         self.chunkSize = chunkSize
@@ -66,7 +71,7 @@ final class EncryptedChunkWriter {
         withUnsafeBytes(of: UInt32(chunkSize).bigEndian) { header.append(contentsOf: $0) }
         header.append(salt)
         self.header = header
-        self.key = EncryptedChunkStream.archiveKey(key, salt: salt)
+        self.key = EncryptedChunkStream.archiveKey(key, salt: salt, info: info)
         try handle.write(contentsOf: header)
     }
 
@@ -109,7 +114,7 @@ final class EncryptedChunkReader {
     private var index: UInt64 = 0
     private var sawFinal = false
 
-    init(handle: FileHandle, key: SymmetricKey) throws {
+    init(handle: FileHandle, key: SymmetricKey, info: String = EncryptedChunkStream.webDataInfo) throws {
         self.handle = handle
         let header = try Self.readExactly(handle, EncryptedChunkStream.headerLength, context: "header")
         guard header.prefix(4) == EncryptedChunkStream.magic else { throw CoreError.unsupportedFormat("not a PBSA archive") }
@@ -124,7 +129,7 @@ final class EncryptedChunkReader {
         let salt = header.suffix(EncryptedChunkStream.saltLength)
         self.header = header
         self.chunkSize = chunkSize
-        self.key = EncryptedChunkStream.archiveKey(key, salt: Data(salt))
+        self.key = EncryptedChunkStream.archiveKey(key, salt: Data(salt), info: info)
     }
 
     /// Returns exactly `count` plaintext bytes or throws.
@@ -135,6 +140,18 @@ final class EncryptedChunkReader {
         }
         let result = Data(buffer.prefix(count))
         buffer = Data(buffer.dropFirst(count))
+        return result
+    }
+
+    /// The next piece of plaintext (one chunk, or what is left of the buffer), or nil once the
+    /// final chunk has been consumed. Call `finish()` afterwards.
+    func readAvailable() throws -> Data? {
+        while buffer.isEmpty {
+            if sawFinal { return nil }
+            try readChunk()
+        }
+        let result = buffer
+        buffer = Data()
         return result
     }
 

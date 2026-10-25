@@ -1,7 +1,7 @@
 import Foundation
 
 /// Settings that belong to this device and vault, not to a profile, and are never synced:
-/// where to sync to and the outcome of the last sync. Stored as `settings.bin`,
+/// where to sync to, the outcome of the last sync, and when to lock automatically. Stored as `settings.bin`,
 /// AES-GCM with `HKDF(VMK, "device-settings")` — the sync token and folder location are
 /// therefore only readable after unlock.
 public struct DeviceSettings: Codable, Equatable, Sendable {
@@ -41,10 +41,39 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
 
     public var syncTarget: SyncTarget?
     public var lastSync: SyncStatus?
+    /// Optional so that `settings.bin` written before auto-lock existed still decodes.
+    public var autoLock: AutoLockSettings?
 
-    public init(syncTarget: SyncTarget? = nil, lastSync: SyncStatus? = nil) {
+    public init(syncTarget: SyncTarget? = nil, lastSync: SyncStatus? = nil, autoLock: AutoLockSettings? = nil) {
         self.syncTarget = syncTarget
         self.lastSync = lastSync
+        self.autoLock = autoLock
+    }
+
+    public var effectiveAutoLock: AutoLockSettings { autoLock ?? AutoLockSettings() }
+}
+
+/// When the app locks itself (stops and seals every profile, forgets all keys).
+public struct AutoLockSettings: Codable, Equatable, Sendable {
+    /// Lock after this many minutes without keyboard/mouse input anywhere on the Mac. `nil` = never.
+    public var idleMinutes: Int?
+    /// Lock when the Mac goes to sleep (the app holds sleep back briefly so sealing can finish).
+    public var lockOnSleep: Bool
+    /// Lock when the screen is locked or the screen saver starts.
+    public var lockOnScreenLock: Bool
+
+    public static let idleChoices = [1, 5, 10, 15, 30, 60, 120]
+
+    public init(idleMinutes: Int? = 15, lockOnSleep: Bool = true, lockOnScreenLock: Bool = false) {
+        self.idleMinutes = idleMinutes
+        self.lockOnSleep = lockOnSleep
+        self.lockOnScreenLock = lockOnScreenLock
+    }
+
+    /// True when `idleSeconds` of system-wide inactivity reach the idle limit.
+    public func shouldLock(afterIdleSeconds idleSeconds: Double) -> Bool {
+        guard let idleMinutes, idleMinutes > 0 else { return false }
+        return idleSeconds >= Double(idleMinutes) * 60
     }
 }
 

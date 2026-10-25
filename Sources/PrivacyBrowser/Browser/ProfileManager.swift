@@ -7,10 +7,11 @@ import os
 ///
 /// Lifecycle of a persistent profile:
 /// ```
-/// launch: unwrap profile key → decrypt config, passwords, history, bookmarks
-///         → decrypt WebKit data (webdata.pbsa → WebKit dirs)
+/// launch: unwrap profile key → decrypt config, passwords, history, bookmarks, download index
+///         → compile tracker-blocking rules → decrypt WebKit data (webdata.pbsa → WebKit dirs)
 ///         → create WKWebsiteDataStore(forIdentifier:) + proxy → open window(s)
-/// stop:   close windows/tabs → flush history → release data store → archive + encrypt WebKit dirs
+/// stop:   cancel active downloads, finish encrypting completed ones → close windows/tabs
+///         → flush history → release data store → archive + encrypt WebKit dirs
 ///         → WKWebsiteDataStore.remove(forIdentifier:) → drop profile key
 /// ```
 /// Any number of profiles can run at once; each has its own data store and proxy.
@@ -62,6 +63,13 @@ final class ProfileManager: ObservableObject {
         let library = ProfileLibrary(history: history, bookmarks: try repository.bookmarkStore(for: id, key: key),
                                      recordsHistory: configuration.historyEnabled)
         library.onError = { [weak self] message in self?.onError?(message) }
+        // Partial plaintext downloads of a crashed run are useless and must not linger.
+        repository.purgeIncomingDownloads(for: id)
+        let downloads = configuration.encryptDownloads
+            ? ProfileDownloads(vault: try repository.downloadVault(for: id, key: key)) : nil
+        downloads?.onError = { [weak self] message in self?.onError?(message) }
+        // Compiled before the WebKit data is unsealed: a failure here leaves nothing to re-seal.
+        let contentRuleList = try await ContentBlocking.compile(configuration.trackerBlocking, profileID: id)
 
         if !configuration.ephemeral {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
@@ -69,7 +77,8 @@ final class ProfileManager: ObservableObject {
         }
 
         let session = BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
-                                     passwordVault: passwords, library: library)
+                                     passwordVault: passwords, library: library, downloads: downloads,
+                                     contentRuleList: contentRuleList)
         session.onAllWindowsClosed = { [weak self] in
             // Return to the Profiles window right away; sealing then runs in the background and
             // flips the row to "Encrypting…" via busyProfileIDs.
@@ -103,9 +112,14 @@ final class ProfileManager: ObservableObject {
 
         session.onAllWindowsClosed = nil
         let ephemeral = session.configuration.ephemeral
+        // Downloads still running are cancelled (their network session must go); finished ones
+        // are encrypted before the profile key is dropped.
+        session.downloads?.shutDown()
+        await session.downloads?.finishPending()
         session.shutDown()
         // `session` is now the last reference; it is released when this scope ends, but its
         // data store reference was already dropped in shutDown().
+        defer { repository.purgeIncomingDownloads(for: id) }
         if !ephemeral, let key {
             try await webDataVault.seal(profileID: id, key: key)
         }
@@ -147,6 +161,9 @@ final class ProfileManager: ObservableObject {
         await webDataVault.deleteData(profileID: id)
     }
 
+    /// The running session of a profile (UI: downloads, library).
+    func session(for id: UUID) -> BrowserSession? { sessions[id] }
+
     // MARK: Passwords
 
     /// The running session's vault if the profile is running (single writer), otherwise a fresh one.
@@ -159,6 +176,9 @@ final class ProfileManager: ObservableObject {
 
     /// Seals WebKit data left unencrypted by a crash or forced quit. Run after unlock.
     func recoverUnsealedProfiles() async {
+        for summary in repository.list() where sessions[summary.id] == nil {
+            repository.purgeIncomingDownloads(for: summary.id)
+        }
         for summary in repository.list() where sessions[summary.id] == nil {
             guard !WebDataStoreVault.discoverDirectories(for: summary.id).isEmpty else { continue }
             log.notice("Re-sealing unencrypted WebKit data of \(summary.id.uuidString, privacy: .public)")

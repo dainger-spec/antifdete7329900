@@ -57,6 +57,7 @@ struct ProfileIndex: Codable, Equatable {
 /// profiles/<uuid>/history.bin      AEAD(historyKey, HistoryDocument JSON)
 /// profiles/<uuid>/bookmarks.bin    AEAD(bookmarksKey, BookmarkDocument JSON)
 /// profiles/<uuid>/webdata.pbsa     encrypted archive of the WebKit data store (app layer)
+/// profiles/<uuid>/downloads/       encrypted downloads (DownloadVault)
 /// ```
 /// Profile names are only readable after unlock. Profile configurations are only
 /// decrypted when launched or edited.
@@ -201,6 +202,20 @@ public final class ProfileRepository: @unchecked Sendable {
         try BookmarkStore(file: BookmarkStore.file(url: bookmarksURL(for: id), profileID: id, profileKey: key))
     }
 
+    /// The profile's encrypted download store (`downloads/`). Not synced.
+    public func downloadVault(for id: UUID, key: SymmetricKey) throws -> DownloadVault {
+        try DownloadVault(directory: downloadsDirectory(for: id), profileID: id, profileKey: key)
+    }
+
+    public func downloadsDirectory(for id: UUID) -> URL {
+        directory(for: id).appendingPathComponent("downloads", isDirectory: true)
+    }
+
+    /// Deletes partial plaintext downloads left by a crash. Needs no key.
+    public func purgeIncomingDownloads(for id: UUID) {
+        DownloadVault.purgeIncoming(inProfileDirectory: directory(for: id))
+    }
+
     // MARK: Sync support (raw encrypted files; see SyncEngine)
 
     func currentIndex() -> ProfileIndex {
@@ -245,6 +260,32 @@ public final class ProfileRepository: @unchecked Sendable {
         }
     }
 
+
+    // MARK: Backup support (see ProfileBackup)
+
+    func contains(_ id: UUID) -> Bool {
+        lock.withLock { index.entries.contains { $0.summary.id == id } }
+    }
+
+    func wasDeleted(_ id: UUID) -> Bool {
+        lock.withLock { index.deletedProfileIDs.contains(id) }
+    }
+
+    /// Adds `summary` with `key`, or replaces the entry with the same ID (key and summary).
+    func installProfile(_ summary: ProfileSummary, key: SymmetricKey) throws {
+        let wrapped = try AEAD.seal(key.rawBytes, key: vault.profileKeyWrappingKey, aad: Self.keyAAD(summary.id))
+        try lock.withLock {
+            var updated = index
+            let entry = ProfileIndexEntry(summary: summary, wrappedKey: wrapped)
+            if let position = updated.entries.firstIndex(where: { $0.summary.id == summary.id }) {
+                updated.entries[position] = entry
+            } else {
+                updated.entries.append(entry)
+            }
+            try saveIndex(updated)
+            index = updated
+        }
+    }
 
     // MARK: Private
 

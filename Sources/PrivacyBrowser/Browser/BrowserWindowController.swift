@@ -36,7 +36,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private var forwardButton: NSButton!
     private var reloadButton: NSButton!
     private var bookmarkButton: NSButton!
+    private var downloadsButton: NSButton?
     private var libraryObservation: AnyCancellable?
+    private var downloadsObservation: AnyCancellable?
     private var isClosing = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserWindow")
 
@@ -65,6 +67,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         libraryObservation = library.$bookmarks.sink { [weak self] _ in
             Task { @MainActor in self?.updateBookmarkButton() }
         }
+        downloadsObservation = session.downloads?.$active.sink { [weak self] active in
+            Task { @MainActor in self?.updateDownloadsButton(active: !active.isEmpty) }
+        }
     }
 
     @available(*, unavailable)
@@ -84,6 +89,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let historyButton = toolbarButton("clock.arrow.circlepath", "History (⌘Y)", #selector(showHistory))
         let fillButton = toolbarButton("key.fill", "Fill saved password", #selector(fillPassword(_:)))
         let saveButton = toolbarButton("key.viewfinder", "Save password from this page", #selector(savePassword))
+        if session?.downloads != nil {
+            downloadsButton = toolbarButton("arrow.down.circle", L("toolbar.downloads"), #selector(showDownloads))
+        }
 
         addressField.placeholderString = "Search or enter address"
         addressField.delegate = self
@@ -97,8 +105,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         badge.textColor = .secondaryLabelColor
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let bar = NSStackView(views: [backButton, forwardButton, reloadButton, addressField, bookmarkButton,
-                                      bookmarksMenuButton, historyButton, fillButton, saveButton, badge])
+        var barViews: [NSView] = [backButton, forwardButton, reloadButton, addressField, bookmarkButton,
+                                  bookmarksMenuButton, historyButton]
+        if let downloadsButton { barViews.append(downloadsButton) }
+        barViews += [fillButton, saveButton, badge]
+        let bar = NSStackView(views: barViews)
         bar.orientation = .horizontal
         bar.spacing = 6
         bar.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 10)
@@ -351,6 +362,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     @objc func showHistory() { session?.showLibrary(.history, from: self) }
+    @objc func showDownloads() { session?.showLibrary(.downloads, from: self) }
+
+    /// Filled icon while a download is in progress.
+    private func updateDownloadsButton(active: Bool) {
+        downloadsButton?.image = NSImage(systemSymbolName: active ? "arrow.down.circle.fill" : "arrow.down.circle",
+                                         accessibilityDescription: L("toolbar.downloads"))
+        downloadsButton?.contentTintColor = active ? .controlAccentColor : nil
+    }
     @objc func showBookmarks() { session?.showLibrary(.bookmarks, from: self) }
 
     // MARK: Passwords
@@ -436,6 +455,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         guard !isClosing else { return }
         isClosing = true
         libraryObservation = nil
+        downloadsObservation = nil
         tabs.forEach { $0.tearDown() }
         tabs.removeAll()
         window?.delegate = nil

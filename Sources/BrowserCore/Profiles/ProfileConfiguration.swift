@@ -53,6 +53,14 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// `nil` → the platform's default model. Ignored for macOS generations.
     public var deviceModelID: String?
 
+    /// NATIVE: a `WKContentRuleList` compiled from these settings blocks known trackers in this
+    /// profile only (see `ContentBlockerRules`). Default: `standard`.
+    public var trackerBlocking: TrackerBlockingSettings
+
+    /// Downloads go into the profile's encrypted store (`DownloadVault`) instead of ~/Downloads.
+    /// Default: on. Off restores the plain ~/Downloads behaviour.
+    public var encryptDownloads: Bool
+
     public init(startURL: URL? = nil,
                 userAgent: String? = nil,
                 proxy: ProxySettings? = nil,
@@ -64,7 +72,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 historyEnabled: Bool = true,
                 historyRetentionDays: Int? = 90,
                 deviceGenerationID: String? = nil,
-                deviceModelID: String? = nil) {
+                deviceModelID: String? = nil,
+                trackerBlocking: TrackerBlockingSettings = TrackerBlockingSettings(),
+                encryptDownloads: Bool = true) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -77,6 +87,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.historyRetentionDays = historyRetentionDays
         self.deviceGenerationID = deviceGenerationID
         self.deviceModelID = deviceModelID
+        self.trackerBlocking = trackerBlocking
+        self.encryptDownloads = encryptDownloads
     }
 
     /// A new profile seeded from a generation: the generation supplies the UA (by reference,
@@ -102,7 +114,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
-             safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID, deviceModelID
+             safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID, deviceModelID,
+             trackerBlocking, encryptDownloads
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -124,6 +137,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             : defaults.historyRetentionDays
         deviceGenerationID = try c.decodeIfPresent(String.self, forKey: .deviceGenerationID)
         deviceModelID = try c.decodeIfPresent(String.self, forKey: .deviceModelID)
+        trackerBlocking = try c.decodeIfPresent(TrackerBlockingSettings.self, forKey: .trackerBlocking) ?? defaults.trackerBlocking
+        encryptDownloads = try c.decodeIfPresent(Bool.self, forKey: .encryptDownloads) ?? defaults.encryptDownloads
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -142,6 +157,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(historyRetentionDays, forKey: .historyRetentionDays)
         try c.encodeIfPresent(deviceGenerationID, forKey: .deviceGenerationID)
         try c.encodeIfPresent(deviceModelID, forKey: .deviceModelID)
+        try c.encode(trackerBlocking, forKey: .trackerBlocking)
+        try c.encode(encryptDownloads, forKey: .encryptDownloads)
     }
 
     public var historyPolicy: HistoryStore.Policy {
@@ -170,6 +187,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         }
         try proxy?.validate()
         try geolocation.validate()
+        try trackerBlocking.validate()
     }
 }
 

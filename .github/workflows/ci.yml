@@ -13,7 +13,19 @@ jobs:
       - uses: swift-actions/setup-swift@v2
         with:
           swift-version: "6.0"
-      - run: swift test
+      - name: Core tests, including the real client against the real sync server
+        run: |
+          TOKEN=$(python3 server/pbsync_server.py add-token --db "$RUNNER_TEMP/sync.db" --vault '*')
+          python3 server/pbsync_server.py serve --db "$RUNNER_TEMP/sync.db" --port 18443 &
+          sleep 1
+          PB_SYNC_SERVER_URL=http://127.0.0.1:18443 PB_SYNC_SERVER_TOKEN="$TOKEN" swift test
+
+  sync-server:
+    name: Sync server tests (Python)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -W error::ResourceWarning server/test_pbsync_server.py
 
   shims:
     name: JavaScript shim tests (Node)

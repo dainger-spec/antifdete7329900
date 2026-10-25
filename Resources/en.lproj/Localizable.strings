@@ -17,6 +17,16 @@
 "common.ok" = "OK";
 "common.save" = "Save";
 "download.failed" = "Download failed: %@";
+"downloads.delete.title" = "Delete “%@” from the encrypted downloads?";
+"downloads.empty" = "No downloads yet";
+"downloads.error.encrypt" = "Could not encrypt the download: %@";
+"downloads.error.open" = "Could not open the download: %@";
+"downloads.error.save" = "Could not save a copy: %@";
+"downloads.inProgress" = "In progress";
+"downloads.notice" = "Downloads of this profile are stored encrypted with the profile key. “Open” decrypts a temporary copy that is deleted when the profile stops.";
+"downloads.open" = "Open";
+"downloads.saveCopy" = "Save Copy…";
+"downloads.saved" = "Encrypted downloads";
 "editor.defaultName" = "Profile %ld";
 "editor.deviceModel" = "Device model";
 "editor.deviceModel.default" = "Default";
@@ -105,6 +115,7 @@
 "library.openNewTab" = "Open in New Tab";
 "library.reorderHint" = "Drag to reorder within a folder";
 "library.tab.bookmarks" = "Bookmarks";
+"library.tab.downloads" = "Downloads";
 "library.tab.history" = "History";
 "media.allow" = "Allow %@ to use your %@?";
 "media.allowButton" = "Allow";
@@ -204,6 +215,7 @@
 "sync.title" = "Sync";
 "sync.to" = "Sync to";
 "tab.newTab" = "New Tab";
+"toolbar.downloads" = "Downloads";
 "unlock.action.unlock" = "Unlock";
 "unlock.subtitle" = "Enter your master password to continue.";
 "unlock.title" = "Vault locked";

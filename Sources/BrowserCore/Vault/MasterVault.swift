@@ -115,6 +115,11 @@ public final class UnlockedVault: @unchecked Sendable {
 
     private var vaultSalt: Data { withUnsafeBytes(of: header.vaultID.uuid) { Data($0) } }
 
+    /// Wraps the VMK under another key (quick unlock). The raw VMK never leaves the module.
+    func wrapMasterKey(with key: SymmetricKey, aad: String) throws -> Data {
+        try AEAD.seal(masterKey.rawBytes, key: key, aad: aad)
+    }
+
     /// Re-wraps the VMK under a key derived from `newPassword`. Data keys are unchanged.
     public func changePassword(current: String, new newPassword: String,
                                iterations: Int = KDFParameters.recommendedIterations) throws {

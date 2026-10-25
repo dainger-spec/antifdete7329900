@@ -17,6 +17,16 @@
 "common.ok" = "OK";
 "common.save" = "Сохранить";
 "download.failed" = "Загрузка не удалась: %@";
+"downloads.delete.title" = "Удалить «%@» из зашифрованных загрузок?";
+"downloads.empty" = "Загрузок пока нет";
+"downloads.error.encrypt" = "Не удалось зашифровать загрузку: %@";
+"downloads.error.open" = "Не удалось открыть загрузку: %@";
+"downloads.error.save" = "Не удалось сохранить копию: %@";
+"downloads.inProgress" = "Загружается";
+"downloads.notice" = "Загрузки этого профиля хранятся зашифрованными ключом профиля. «Открыть» расшифровывает временную копию, которая удаляется при остановке профиля.";
+"downloads.open" = "Открыть";
+"downloads.saveCopy" = "Сохранить копию…";
+"downloads.saved" = "Зашифрованные загрузки";
 "editor.defaultName" = "Профиль %ld";
 "editor.deviceModel" = "Модель устройства";
 "editor.deviceModel.default" = "По умолчанию";
@@ -105,6 +115,7 @@
 "library.openNewTab" = "Открыть в новой вкладке";
 "library.reorderHint" = "Перетащите, чтобы изменить порядок в папке";
 "library.tab.bookmarks" = "Закладки";
+"library.tab.downloads" = "Загрузки";
 "library.tab.history" = "История";
 "media.allow" = "Разрешить %@ доступ к %@?";
 "media.allowButton" = "Разрешить";
@@ -204,6 +215,7 @@
 "sync.title" = "Синхронизация";
 "sync.to" = "Куда синхронизировать";
 "tab.newTab" = "Новая вкладка";
+"toolbar.downloads" = "Загрузки";
 "unlock.action.unlock" = "Разблокировать";
 "unlock.subtitle" = "Введите мастер-пароль, чтобы продолжить.";
 "unlock.title" = "Хранилище заблокировано";
