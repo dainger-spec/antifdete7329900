@@ -12,6 +12,7 @@ struct ProfileDraft {
     var name = ""
     var startURL = ""
     var deviceGenerationID = DeviceGenerations.defaultID
+    var deviceModelID: String? = nil
     var customUserAgent = false
     var userAgent = ""
     var proxyEnabled = false
@@ -54,6 +55,7 @@ struct ProfileDraft {
         self.name = name
         startURL = c.startURL?.absoluteString ?? ""
         deviceGenerationID = c.deviceGenerationID ?? DeviceGenerations.defaultID
+        deviceModelID = c.deviceModelID
         customUserAgent = c.userAgent != nil
         userAgent = c.userAgent ?? ""
         if let proxy = c.proxy {
@@ -89,6 +91,7 @@ struct ProfileDraft {
             configuration.startURL = url
         }
         configuration.deviceGenerationID = deviceGenerationID
+        configuration.deviceModelID = deviceModelID
         if customUserAgent {
             configuration.userAgent = userAgent.trimmingCharacters(in: .whitespaces)
         }
@@ -148,6 +151,10 @@ struct ProfileEditorView: View {
     /// Which UA preset the current text matches ("custom" when it matches none).
     private var selectedGeneration: DeviceGeneration { DeviceGenerations.resolved(id: draft.deviceGenerationID) }
 
+    private var availableModels: [DeviceModel] {
+        DeviceModels.forPlatform(selectedGeneration.platform)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Text(target.isNew ? L("editor.title.new") : L("editor.title.edit"))
@@ -166,7 +173,7 @@ struct ProfileEditorView: View {
             }
             .formStyle(.grouped)
         }
-        .frame(width: 540, height: 660)
+        .frame(width: 540, height: 720)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
             ToolbarItem(placement: .confirmationAction) { Button(L("common.save"), action: save) }
@@ -187,6 +194,14 @@ struct ProfileEditorView: View {
             Picker(L("editor.generation"), selection: $draft.deviceGenerationID) {
                 ForEach(DeviceGenerations.all) { generation in
                     Text(L(generation.nameKey)).tag(generation.id)
+                }
+            }
+            if !availableModels.isEmpty {
+                Picker("Device model", selection: $draft.deviceModelID) {
+                    Text("Default").tag(String?.none)
+                    ForEach(availableModels) { model in
+                        Text(model.name).tag(Optional(model.id))
+                    }
                 }
             }
             if !selectedGeneration.matchesEngine {
