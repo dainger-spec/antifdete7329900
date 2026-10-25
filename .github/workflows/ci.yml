@@ -19,6 +19,15 @@ jobs:
           python3 server/pbsync_server.py serve --db "$RUNNER_TEMP/sync.db" --port 18443 &
           sleep 1
           PB_SYNC_SERVER_URL=http://127.0.0.1:18443 PB_SYNC_SERVER_TOKEN="$TOKEN" swift test
+      - name: VM controller core tests (runs tart-prototype.sh against stub tools)
+        run: swift test --package-path vm/controller-app
+
+  vm-agent:
+    name: In-VM agent tests (Python)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -W error::ResourceWarning vm/agent/test_pbagent.py
 
   sync-server:
     name: Sync server tests (Python)
@@ -74,3 +83,20 @@ jobs:
         with:
           name: PrivacyBrowser.app
           path: build/sandboxed/PrivacyBrowser.app
+
+  vm-launcher:
+    name: VM launcher app (macOS)
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: vm/controller-app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core tests (tart-prototype.sh under macOS bash 3.2)
+        run: swift test
+      - name: Build VMLauncher.app (the build runs its --self-check)
+        run: ZIP=1 scripts/build-app.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VMLauncher
+          path: vm/controller-app/build/VMLauncher.zip

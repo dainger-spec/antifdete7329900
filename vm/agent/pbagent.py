@@ -24,7 +24,7 @@ Endpoints (all but /healthz require `Authorization: Bearer <token>`):
 Safari is driven through a pluggable backend so the server logic can be unit
 tested off a Mac:
 
-    PB_AGENT_BACKEND=mac    AppleScript (osascript) + screencapture  (default)
+    PB_AGENT_BACKEND=mac    open -a Safari, pgrep, screencapture   (default)
     PB_AGENT_BACKEND=mock   in-memory, for tests / CI on any platform
 
 Run:
@@ -51,9 +51,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 AGENT_VERSION = "1"
 # Accept only plain http/https URLs with no control characters, so the value
-# can be handed to the backend (and, on macOS, to AppleScript as an argv item)
-# without surprises. AppleScript injection is impossible because the URL is
-# passed as a run-handler argument, never interpolated into the script text.
+# can be handed to the backend without surprises. On macOS it becomes one argv
+# item of `open -a Safari` (no shell, no script text), so it cannot inject
+# commands or AppleScript, and the scheme check keeps out file:/javascript:.
 URL_RE = re.compile(r"^https?://[^\s\x00-\x1f\x7f]{1,4000}$")
 MAX_BODY = 64 * 1024  # navigate bodies are tiny; cap well below that.
 
@@ -88,90 +88,62 @@ class SafariBackend:
         raise NotImplementedError
 
 
-# AppleScript that opens the URL in the front document, creating one if Safari
-# has no open documents. The URL arrives as argv item 1, so it is never parsed
-# as script text.
-_NAVIGATE_SCRIPT = """
-on run argv
-    set theURL to item 1 of argv
-    tell application "Safari"
-        activate
-        if (count of documents) = 0 then
-            make new document with properties {URL:theURL}
-        else
-            set URL of front document to theURL
-        end if
-    end tell
-end run
-"""
-
-_CURRENT_URL_SCRIPT = """
-tell application "Safari"
-    if (count of documents) = 0 then
-        return ""
-    else
-        return URL of front document
-    end if
-end tell
-"""
-
-
 class MacSafariBackend(SafariBackend):
-    """Drives the real Safari via osascript / screencapture. macOS only."""
+    """Drives the real Safari. macOS only.
+
+    Navigation and the "is Safari running" check deliberately avoid Apple
+    Events: the first `tell application "Safari"` from a new client pops an
+    Automation (TCC) consent dialog inside the VM and blocks until someone
+    clicks it, which would hang /navigate and /status in an unattended VM.
+    `open -a Safari <url>` goes through LaunchServices and needs no consent;
+    the URL is a separate argv item (no shell, no script text). Only /quit
+    still uses AppleScript, and /screenshot needs Screen Recording permission.
+    """
 
     name = "mac"
 
     def __init__(self, timeout: float = 20.0):
         self.timeout = timeout
+        self._last_url: str | None = None
+
+    def _run(self, argv: list[str], what: str, **kwargs) -> subprocess.CompletedProcess:
+        try:
+            return subprocess.run(argv, capture_output=True, text=True, timeout=self.timeout, **kwargs)
+        except FileNotFoundError as exc:  # not on macOS
+            raise SafariError(f"{what} not found (agent must run inside a macOS VM)") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise SafariError(f"{what} timed out") from exc
 
     def _osascript(self, script: str, *args: str) -> str:
-        try:
-            result = subprocess.run(
-                ["osascript", "-", *args],
-                input=script,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-            )
-        except FileNotFoundError as exc:  # not on macOS
-            raise SafariError("osascript not found (agent must run inside a macOS VM)") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise SafariError("osascript timed out") from exc
+        result = self._run(["osascript", "-", *args], "osascript", input=script)
         if result.returncode != 0:
             raise SafariError(result.stderr.strip() or "osascript failed")
         return result.stdout.strip()
 
     def navigate(self, url: str) -> None:
-        self._osascript(_NAVIGATE_SCRIPT, url)
+        result = self._run(["open", "-a", "Safari", url], "open")
+        if result.returncode != 0:
+            raise SafariError(result.stderr.strip() or "open failed")
+        self._last_url = url
 
     def status(self) -> dict:
+        # current_url is the last URL this agent opened: reading Safari's
+        # front document would need Apple Events (see the class docstring).
         running = self._is_running()
-        current = None
-        if running:
-            try:
-                current = self._osascript(_CURRENT_URL_SCRIPT) or None
-            except SafariError:
-                current = None
-        return {"running": running, "current_url": current}
+        return {"running": running, "current_url": self._last_url if running else None}
 
     def _is_running(self) -> bool:
         try:
-            out = subprocess.run(
-                ["osascript", "-e", 'tell application "System Events" to (name of processes) contains "Safari"'],
-                capture_output=True, text=True, timeout=self.timeout,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+            result = self._run(["pgrep", "-x", "Safari"], "pgrep")
+        except SafariError:
             return False
-        return out.returncode == 0 and out.stdout.strip() == "true"
+        return result.returncode == 0
 
     def screenshot(self) -> bytes:
         fd, path = tempfile.mkstemp(suffix=".png")
         os.close(fd)
         try:
-            result = subprocess.run(
-                ["screencapture", "-x", "-t", "png", path],
-                capture_output=True, text=True, timeout=self.timeout,
-            )
+            result = self._run(["screencapture", "-x", "-t", "png", path], "screencapture")
             if result.returncode != 0:
                 raise SafariError(result.stderr.strip() or "screencapture failed")
             with open(path, "rb") as fh:
@@ -179,10 +151,6 @@ class MacSafariBackend(SafariBackend):
             if not data:
                 raise SafariError("screencapture produced an empty file")
             return data
-        except FileNotFoundError as exc:
-            raise SafariError("screencapture not found (agent must run inside a macOS VM)") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise SafariError("screencapture timed out") from exc
         finally:
             try:
                 os.unlink(path)
@@ -191,6 +159,7 @@ class MacSafariBackend(SafariBackend):
 
     def quit(self) -> None:
         self._osascript('tell application "Safari" to quit')
+        self._last_url = None
 
 
 def _make_1x1_png() -> bytes:

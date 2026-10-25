@@ -171,5 +171,59 @@ class QuitAndMethodTests(AgentTestCase):
             conn.close()
 
 
+class MacBackendCommandTests(unittest.TestCase):
+    """The mac backend's command lines, with subprocess.run replaced: what runs
+    in the VM must never put the URL into a shell or into script text."""
+
+    def setUp(self) -> None:
+        self.calls: list[tuple[list[str], dict]] = []
+        self.returncode = 0
+        self.original_run = pbagent.subprocess.run
+
+        def fake_run(argv, **kwargs):
+            self.calls.append((list(argv), kwargs))
+            return pbagent.subprocess.CompletedProcess(argv, self.returncode, stdout="", stderr="boom")
+
+        pbagent.subprocess.run = fake_run
+        self.backend = pbagent.MacSafariBackend()
+
+    def tearDown(self) -> None:
+        pbagent.subprocess.run = self.original_run
+
+    def test_navigate_uses_open_with_url_as_one_argument(self):
+        url = 'https://example.com/a"b\'c;$(touch /tmp/x)'
+        self.backend.navigate(url)
+        argv, kwargs = self.calls[-1]
+        self.assertEqual(argv, ["open", "-a", "Safari", url])
+        self.assertNotIn("shell", kwargs)
+        self.assertNotIn("input", kwargs)  # no script text at all
+
+    def test_navigate_needs_no_apple_events(self):
+        self.backend.navigate("https://example.com")
+        self.backend.status()
+        self.assertFalse(any(argv[0] == "osascript" for argv, _ in self.calls))
+
+    def test_status_reports_last_opened_url_while_running(self):
+        self.backend.navigate("https://example.com/")
+        self.assertEqual(self.backend.status(), {"running": True, "current_url": "https://example.com/"})
+        self.assertEqual(self.calls[-1][0], ["pgrep", "-x", "Safari"])
+        self.returncode = 1  # pgrep: no Safari process
+        self.assertEqual(self.backend.status(), {"running": False, "current_url": None})
+
+    def test_failed_open_is_a_backend_error(self):
+        self.returncode = 1
+        with self.assertRaises(pbagent.SafariError):
+            self.backend.navigate("https://example.com")
+
+    def test_missing_tool_is_a_backend_error(self):
+        def missing(argv, **kwargs):
+            raise FileNotFoundError(argv[0])
+
+        pbagent.subprocess.run = missing
+        with self.assertRaises(pbagent.SafariError):
+            self.backend.navigate("https://example.com")
+        self.assertEqual(self.backend.status()["running"], False)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

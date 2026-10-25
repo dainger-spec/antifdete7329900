@@ -15,6 +15,9 @@
 #   LOCAL_PORT   host end of the SSH tunnel (default: AGENT_PORT)
 #   SHOT         path to save a screenshot  (default: none)
 #   KEEP_VM      "1" to leave the VM running on exit (default: stop it)
+#   TART_NET     "bridged" (default; --net-bridged=$BRIDGE_IF, IP via ARP) or
+#                "shared" (Tart's default NAT; IP via the host's DHCP leases)
+#   BRIDGE_IF    host interface for bridged networking (default: en0)
 #
 # This installs vm/agent/ into the VM as a LaunchAgent, opens an SSH tunnel to
 # the agent's loopback port, then calls POST /navigate. The agent control port
@@ -31,6 +34,8 @@ AGENT_PORT="${AGENT_PORT:-8777}"
 LOCAL_PORT="${LOCAL_PORT:-$AGENT_PORT}"
 SHOT="${SHOT:-}"
 KEEP_VM="${KEEP_VM:-}"
+TART_NET="${TART_NET:-bridged}"
+BRIDGE_IF="${BRIDGE_IF:-en0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="$(cd "$SCRIPT_DIR/../agent" && pwd)"
@@ -51,7 +56,12 @@ cleanup() {
   fi
   rm -f "$KNOWN_HOSTS"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+# Exit on INT/TERM (the EXIT trap then cleans up). A trap that only ran cleanup
+# would resume the script afterwards — e.g. keep polling for the VM's IP — when
+# the signal reaches bash alone rather than the whole terminal process group.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 for tool in tart ssh scp curl; do
   command -v "$tool" &>/dev/null || { echo "$tool not found"; exit 1; }
@@ -67,6 +77,15 @@ if command -v sshpass &>/dev/null; then
 fi
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$KNOWN_HOSTS" -o ConnectTimeout=10)
 
+# `tart ip` reads the host's DHCP leases by default, which only cover Tart's NAT
+# network; a bridged VM gets its address from the LAN and is found via ARP.
+# Arrays may be empty: "${a[@]+"${a[@]}"}" keeps bash 3.2 happy under `set -u`.
+case "$TART_NET" in
+  bridged) RUN_NET_ARGS=(--net-bridged="$BRIDGE_IF"); IP_ARGS=(--resolver=arp) ;;
+  shared)  RUN_NET_ARGS=(); IP_ARGS=() ;;
+  *) echo "TART_NET must be 'bridged' or 'shared' (got '$TART_NET')"; exit 2 ;;
+esac
+
 ssh_vm()  { "${SSH_WRAP[@]}" ssh  "${SSH_OPTS[@]}" "$SSH_USER@$IP" "$@"; }
 scp_vm()  { "${SSH_WRAP[@]}" scp  "${SSH_OPTS[@]}" "$@"; }
 
@@ -78,13 +97,13 @@ if ! tart list | grep -q "[[:space:]]$VM_NAME[[:space:]]" && ! tart list | grep 
 fi
 
 echo "==> Starting VM '$VM_NAME'"
-tart run "$VM_NAME" --net-bridged=en0 &
+tart run "$VM_NAME" ${RUN_NET_ARGS[@]+"${RUN_NET_ARGS[@]}"} &
 TART_PID=$!
 
 echo "==> Waiting for VM IP..."
 IP=""
 for _ in $(seq 1 60); do
-  IP="$(tart ip "$VM_NAME" 2>/dev/null || true)"
+  IP="$(tart ip ${IP_ARGS[@]+"${IP_ARGS[@]}"} "$VM_NAME" 2>/dev/null || true)"
   [[ -n "$IP" ]] && break
   sleep 2
 done
@@ -110,7 +129,10 @@ TOKEN="$(printf '%s\n' "$INSTALL_OUT" | sed -n 's/^PB_AGENT_TOKEN=//p' | tail -1
 echo "    agent installed; token captured"
 
 echo "==> Opening SSH tunnel localhost:$LOCAL_PORT -> VM 127.0.0.1:$AGENT_PORT"
-"${SSH_WRAP[@]}" ssh "${SSH_OPTS[@]}" -N -L "$LOCAL_PORT:127.0.0.1:$AGENT_PORT" "$SSH_USER@$IP" &
+# ExitOnForwardFailure: if LOCAL_PORT is taken, fail instead of leaving a tunnel
+# without a forward (curl would then talk to whatever owns that port).
+"${SSH_WRAP[@]}" ssh "${SSH_OPTS[@]}" -o ExitOnForwardFailure=yes \
+  -N -L "$LOCAL_PORT:127.0.0.1:$AGENT_PORT" "$SSH_USER@$IP" &
 TUNNEL_PID=$!
 
 AGENT="http://127.0.0.1:$LOCAL_PORT"
@@ -122,10 +144,13 @@ done
 curl -fsS "$AGENT/healthz" >/dev/null || { echo "Agent did not respond"; exit 1; }
 
 echo "==> Navigating Safari to $TARGET_URL"
+# Escape backslashes and quotes so any URL makes valid JSON (sed behaves the
+# same in BSD and GNU, unlike ${var//…} replacement quoting across bash versions).
+URL_JSON="$(printf '%s' "$TARGET_URL" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
 curl -fsS -X POST "$AGENT/navigate" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "$(printf '{"url":"%s"}' "$TARGET_URL")"
+  -d "{\"url\":\"$URL_JSON\"}"
 echo
 
 echo "==> Status:"

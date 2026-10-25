@@ -9,10 +9,24 @@ The WKWebView-based prototype provides multi-profile isolation, encryption, and 
 Each profile runs in a separate macOS VM with genuine Safari.
 
 - Design: [docs/VM_ARCHITECTURE.md](docs/VM_ARCHITECTURE.md)
+- App with a window: `vm/controller-app/` — **VMLauncher.app** (see below)
 - Prototype controller: `vm/controller/tart-prototype.sh`
 - In-VM agent: `vm/agent/` (implemented — stdlib HTTP service that drives Safari)
 
-### Quick start (prototype)
+### Quick start (app)
+
+```bash
+vm/controller-app/scripts/build-app.sh
+open vm/controller-app/build/VMLauncher.app
+```
+
+Enter a URL and press **Запустить**: the app checks for Tart (and offers to
+install it), downloads the macOS image on first use with a progress bar, boots
+the VM, installs the agent and opens Safari — each step shown in the window.
+Apple Silicon and macOS 14+ required. Details and a prebuilt zip from CI:
+[vm/controller-app/README.md](vm/controller-app/README.md).
+
+### Quick start (script)
 
 ```bash
 # Install Tart

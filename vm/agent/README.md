@@ -29,17 +29,24 @@ All but `/healthz` require `Authorization: Bearer <token>`.
 | GET    | `/screenshot` | —                         | `image/png` of the screen      |
 | POST   | `/quit`       | —                         | quits Safari                   |
 
-`/navigate` accepts only `http`/`https` URLs. The URL is passed to AppleScript
-as a run-handler argument, never interpolated into the script, so it cannot be
-used for AppleScript injection.
+`/navigate` accepts only `http`/`https` URLs. The URL becomes a single argv
+item of `open -a Safari` (no shell, no script text), so it cannot inject
+commands or AppleScript.
 
 ## Safari backends
 
 Safari is driven through a pluggable backend, selected with `--backend` or
 `$PB_AGENT_BACKEND`:
 
-- `mac` (default) — AppleScript via `osascript` + `screencapture`. macOS only.
+- `mac` (default) — `open -a Safari <url>`, `pgrep`, `screencapture`. macOS only.
 - `mock` — in-memory; lets the server be tested on any platform.
+
+The `mac` backend avoids Apple Events for `/navigate` and `/status`: the first
+`tell application "Safari"` from a new client shows an Automation consent
+dialog inside the VM and blocks until someone clicks it. So `current_url` in
+`/status` is the last URL the agent opened, not Safari's live front tab.
+`/quit` still uses AppleScript (expect the consent dialog on first use), and
+`/screenshot` needs Screen Recording permission for the agent's Python.
 
 ## Running
 

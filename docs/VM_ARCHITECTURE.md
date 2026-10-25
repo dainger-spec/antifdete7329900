@@ -50,6 +50,10 @@ VM (one per profile)
 
 Tart-based prototype in progress:
 
+- **Launcher app** (`vm/controller-app/`, VMLauncher.app) — SwiftUI window:
+  URL field, Start/Cancel, per-stage progress (Tart, image download with
+  percent, VM, agent, Safari), errors in the window. Runs the controller
+  script below rather than reimplementing it.
 - **Controller** (`vm/controller/tart-prototype.sh`) — boots a VM, installs the
   agent over SSH, opens an SSH tunnel to the agent's loopback port, and drives
   Safari to a URL (with an optional screenshot).
