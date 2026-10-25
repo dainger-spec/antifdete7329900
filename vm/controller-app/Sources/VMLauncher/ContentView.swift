@@ -14,6 +14,7 @@ struct ContentView: View {
             urlRow
             ProfilesSection(model: model)
             ResourceBar(model: model)
+            BaseImageSection(model: model)
             overall
             StageList(progress: model.progress)
             if model.phase == .needsTart, let help = model.tartHelp {
@@ -115,6 +116,40 @@ struct FirstRunHint: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
+    }
+}
+
+/// The base image: its ref, a manual "pull latest", and the honest note that
+/// existing profiles don't auto-migrate.
+struct BaseImageSection: View {
+    @ObservedObject var model: LauncherModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Базовый образ").font(.headline)
+                Spacer()
+                if model.baseUpdateInProgress {
+                    ProgressView().controlSize(.small)
+                    Text(model.baseUpdateDetail).font(.caption).foregroundStyle(.secondary)
+                }
+                Button("Обновить образ") { model.updateBaseImage() }
+                    .disabled(model.isBusy || model.baseUpdateInProgress)
+            }
+            Text(model.currentBaseImage)
+                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            Text(BaseImagePolicy.migrationNote)
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if !model.profilesOnOtherBase.isEmpty {
+                Text("На другом образе: \(model.profilesOnOtherBase.map(\.name).joined(separator: ", "))")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
     }
 }
 

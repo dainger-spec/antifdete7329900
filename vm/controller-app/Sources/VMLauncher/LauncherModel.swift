@@ -85,7 +85,7 @@ final class LauncherModel: ObservableObject {
     // MARK: - State for the view
 
     var isBusy: Bool { phase == .running || phase == .stopping }
-    var canStart: Bool { !isBusy && phase != .ready }
+    var canStart: Bool { !isBusy && phase != .ready && !baseUpdateInProgress }
     var canCancel: Bool { phase == .running }
     var hasActiveWork: Bool { isBusy || phase == .ready }
     var logText: String { log.map(\.text).joined(separator: "\n") }
@@ -509,6 +509,55 @@ final class LauncherModel: ObservableObject {
     }
 
     @Published private(set) var resource: ResourceReport?
+
+    // Base image.
+    @Published private(set) var baseUpdateInProgress = false
+    @Published private(set) var baseUpdateDetail = ""
+    public var currentBaseImage: String { LauncherDefaults.baseImage }
+    public var profilesOnOtherBase: [Profile] {
+        BaseImagePolicy.profilesOnOtherBase(profiles, currentBase: currentBaseImage)
+    }
+
+    /// Pull the latest base image into Tart's cache (for new profiles). Existing
+    /// profiles are independent clones — see BaseImagePolicy; this doesn't touch
+    /// them. Runs off the launch pipeline.
+    public func updateBaseImage() {
+        guard canStart, !baseUpdateInProgress else { return }
+        baseUpdateInProgress = true
+        baseUpdateDetail = "Запуск…"
+        appendLog("Обновление базового образа: tart pull \(currentBaseImage)", .info)
+        Task { @MainActor in
+            defer { baseUpdateInProgress = false }
+            guard let tart = TartSetup.locate(searchPath: baseEnvironment["PATH"] ?? "") else {
+                errorMessage = "Tart не найден"
+                baseUpdateDetail = "Tart не найден"
+                return
+            }
+            do {
+                let code = try await stream(tart, ProfilePlan.pullBase(currentBaseImage)) { [weak self] line in
+                    guard let self else { return }
+                    if let fraction = TartOutput.percent(in: line) {
+                        self.baseUpdateDetail = "\(Int((fraction * 100).rounded(.down)))%"
+                    } else if let label = TartOutput.label(in: line) {
+                        self.baseUpdateDetail = String(label.prefix(80))
+                    }
+                }
+                if code == 0 {
+                    baseUpdateDetail = "Готово"
+                    appendLog("Базовый образ обновлён", .info)
+                    await refreshResources()
+                } else {
+                    baseUpdateDetail = "Ошибка"
+                    errorMessage = "Не удалось обновить базовый образ (код \(code))"
+                    appendLog("Обновление образа не удалось (код \(code))", .error)
+                }
+            } catch {
+                baseUpdateDetail = "Ошибка"
+                errorMessage = "Не удалось обновить базовый образ: \(error)"
+                appendLog("Обновление образа не удалось: \(error)", .error)
+            }
+        }
+    }
 
     /// Recount running VMs, sum the profiles' disk use, read free RAM. Cheap
     /// enough to call on window appear and after a launch.

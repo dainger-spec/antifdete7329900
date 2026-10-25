@@ -147,9 +147,17 @@ Done here (core, tested on Linux/macOS CI):
       directory sizing + a `vm_stat` free-RAM parser, both unit-tested; the live
       `vm_stat` read is macOS-only).
 
-Next (need macOS to build/verify the UI and guest bits):
-- [ ] Base-image update: check, background download, migrate/warn
+- [x] Base-image update: a "Обновить образ" button pulls the latest base into
+      Tart's cache (`tart pull`, with progress), and the UI explains that
+      existing profiles are independent clones that don't auto-migrate
+      (`BaseImagePolicy`) — recreate a profile to move it to the new base. It
+      also lists any profiles pinned to a different base. (Detecting that
+      `:latest` actually moved, via an OCI digest check, is future work; the
+      pull simply fetches latest.)
+
+Everything above is in; what's left is polish needing a Mac:
 - [ ] Broader System Settings-style restyle of the main window
+- [ ] On-a-Mac verification pass (the checklist items flagged throughout)
 
 These are tracked so the UI work builds on this foundation rather than
 re-deriving it.

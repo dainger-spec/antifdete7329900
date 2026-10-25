@@ -83,6 +83,11 @@ public enum ProfilePlan {
         ["clone", profile.baseImage, profile.vmName]
     }
 
+    /// Pull the latest of a base image into Tart's cache.
+    public static func pullBase(_ image: String) -> [String] {
+        ["pull", image]
+    }
+
     /// Size the VM (while stopped).
     public static func size(_ profile: Profile, memoryMiB: Int, cpu: Int) -> [String] {
         ["set", profile.vmName, "--memory", String(memoryMiB), "--cpu", String(cpu)]
