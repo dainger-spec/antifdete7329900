@@ -23,6 +23,8 @@ enum SelfCheck {
             report(FileManager.default.isExecutableFile(atPath: script), "script is executable", script)
             let missing = LauncherEnvironment.missingAgentFiles(forScript: script)
             report(missing.isEmpty, "agent files", missing.isEmpty ? "all present" : "missing \(missing.joined(separator: ", "))")
+            let guest = LauncherEnvironment.missingGuestScripts(forScript: script)
+            report(guest.isEmpty, "guest scripts", guest.isEmpty ? "all present" : "missing \(guest.joined(separator: ", "))")
             let status = runQuietly("/bin/bash", ["-n", script])
             report(status == 0, "bash -n", "exit \(status)")
         } else {
@@ -46,6 +48,7 @@ enum SelfCheck {
         let tart = TartSetup.locate(searchPath: LauncherEnvironment.searchPath(environment["PATH"]))
         print("info tart: \(tart ?? "not installed (the app offers to download it)")")
         print("info Apple Silicon: \(HostInfo.isAppleSilicon)")
+        print("info in-app VM window: \(EmbeddedVM.isSupported ? "supported" : "not supported here (falls back to Tart's window)")")
         print(failures == 0 ? "self-check passed" : "self-check FAILED (\(failures))")
         return failures == 0 ? 0 : 1
     }

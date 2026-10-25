@@ -1,93 +1,6 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 import VMControllerCore
-
-/// The saved-profiles section in the main window: a list with launch / edit /
-/// delete, and "+" to add. Launching a row runs that profile (its own VM,
-/// fail-closed proxy, cookies, last URL).
-struct ProfilesSection: View {
-    @ObservedObject var model: LauncherModel
-    @State private var editing: EditorTarget?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Профили").font(.headline)
-                Spacer()
-                Button { importProfile() } label: { Label("Импорт…", systemImage: "square.and.arrow.down") }
-                    .help("Импортировать профиль из архива")
-                Button { editing = .new } label: { Label("Создать", systemImage: "plus") }
-                    .help("Создать профиль")
-            }
-
-            if model.profiles.isEmpty {
-                Text("Пока нет профилей. «Создать» — отдельная VM со своим прокси и cookies.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                VStack(spacing: 6) {
-                    ForEach(model.profiles) { profile in
-                        ProfileRow(profile: profile, model: model) { editing = .existing(profile) }
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
-        .sheet(item: $editing) { target in
-            ProfileEditor(model: model, target: target)
-                .frame(width: 420)
-        }
-    }
-
-    private func importProfile() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.message = "Выберите экспортированный профиль (.tar.gz)"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        model.importProfile(from: url)
-    }
-}
-
-struct ProfileRow: View {
-    let profile: Profile
-    @ObservedObject var model: LauncherModel
-    var onEdit: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "square.on.square.dashed").foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(profile.name).fontWeight(.medium)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Button("Запустить") { model.start(profile: profile) }
-                .disabled(!model.canStart)
-            Button { onEdit() } label: { Image(systemName: "pencil") }
-                .help("Изменить")
-            Button(role: .destructive) { model.deleteProfile(profile.id) } label: {
-                Image(systemName: "trash")
-            }
-            .help("Удалить")
-        }
-        .padding(.vertical, 2)
-    }
-
-    private var subtitle: String {
-        var parts = [profile.proxy ?? "без прокси (изоляция)"]
-        if profile.cookieCount > 0 { parts.append("cookies: \(profile.cookieCount)") }
-        if profile.clipboardShared { parts.append("буфер общий") }
-        return parts.joined(separator: " · ")
-    }
-}
 
 enum EditorTarget: Identifiable {
     case new
@@ -101,17 +14,16 @@ enum EditorTarget: Identifiable {
     }
 }
 
-/// Create or edit a profile: name, proxy, shared-clipboard toggle (off by
-/// default), and — for a saved profile — cookie import.
+/// Create or edit a profile: name, how it reaches the internet, the region
+/// sites see, and the shared clipboard (off by default).
 struct ProfileEditor: View {
     @ObservedObject var model: LauncherModel
     let target: EditorTarget
+    var onSaved: (Profile?) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
 
-    @State private var name = ""
-    @State private var proxy = ""
-    @State private var clipboardShared = false
-    @State private var cookieCount = 0
+    @State private var draft = ProfileDraft()
+    @State private var problem: String?
 
     private var existing: Profile? {
         if case .existing(let profile) = target { return profile }
@@ -119,86 +31,161 @@ struct ProfileEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(existing == nil ? "Новый профиль" : "Профиль").font(.title3).bold()
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                ProfileAvatar(name: draft.name.isEmpty ? "?" : draft.name, id: existing?.id ?? "new", size: 36)
+                Text(existing == nil ? "Новый профиль" : "Профиль «\(existing!.name)»").font(.title2.bold())
+            }
+            .padding(20)
 
             Form {
-                TextField("Имя", text: $name)
-                TextField("Прокси (socks5:// или http://, пусто = без выхода)", text: $proxy)
-                Toggle("Общий буфер обмена с хостом", isOn: $clipboardShared)
-                Text("Выключено по умолчанию, чтобы случайно не вставить данные с хоста в VM.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+                Section {
+                    TextField("Имя", text: $draft.name, prompt: Text("Например, Работа"))
+                }
 
-            if let existing {
-                Divider()
-                HStack {
-                    Text("Cookies: \(cookieCount)").foregroundStyle(.secondary)
-                    Spacer()
-                    if cookieCount > 0 {
-                        Button("Очистить") {
-                            try? model.profileStore.clearCookies(for: existing.id)
-                            model.reloadProfiles(); cookieCount = 0
+                Section {
+                    Picker("Интернет", selection: $draft.network) {
+                        Text("Через прокси").tag(NetworkMode.proxy)
+                        Text("Напрямую").tag(NetworkMode.direct)
+                        Text("Без интернета").tag(NetworkMode.offline)
+                    }
+                    .pickerStyle(.segmented)
+                    if draft.network == .proxy {
+                        TextField("Прокси", text: $draft.proxy, prompt: Text("socks5://user:pass@203.0.113.5:1080"))
+                    }
+                } header: {
+                    Text("Сеть")
+                } footer: {
+                    Text(networkFooter).font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Picker("Часовой пояс", selection: $draft.timeZone) {
+                        Text("Не менять").tag(String?.none)
+                        Divider()
+                        ForEach(TimeZoneOption.choices(including: draft.timeZone), id: \.self) { zone in
+                            Text(TimeZoneOption.label(zone)).tag(Optional(zone))
                         }
                     }
-                    Button("Импорт cookies…") { importCookies(into: existing) }
+                    Picker("Язык", selection: $draft.language) {
+                        Text("Не менять").tag(String?.none)
+                        Divider()
+                        ForEach(LanguageOption.choices(including: draft.language), id: \.self) { code in
+                            Text(LanguageOption.label(code)).tag(Optional(code))
+                        }
+                    }
+                } header: {
+                    Text("Регион")
+                } footer: {
+                    Text("Сайты видят часовой пояс и язык. Для профиля с прокси выберите те, что у страны прокси.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Netscape cookies.txt или JSON-экспорт расширения.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Divider()
-                HStack {
-                    Text("Профиль целиком").foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Экспорт…") { exportProfile(existing) }
+
+                Section {
+                    Toggle("Общий буфер обмена с этим Mac", isOn: $draft.clipboardShared)
+                } footer: {
+                    Text("Выключено по умолчанию, чтобы случайно не вставить в профиль данные с Mac.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Снапшот VM и настройки в один .tar.gz — для переноса на другой Mac.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
+            .formStyle(.grouped)
 
             HStack {
+                if let problem {
+                    Label(problem, systemImage: "exclamationmark.circle")
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer()
                 Button("Отмена") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(existing == nil ? "Создать" : "Сохранить") { save() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .buttonStyle(.borderedProminent)
             }
+            .padding(20)
         }
-        .padding(20)
+        .frame(width: 520)
         .onAppear {
-            if let existing {
-                name = existing.name
-                proxy = existing.proxy ?? ""
-                clipboardShared = existing.clipboardShared
-                cookieCount = existing.cookieCount
-            }
+            if let existing { draft = ProfileDraft(profile: existing) }
+        }
+        .onChange(of: draft) { _, _ in problem = nil }
+    }
+
+    private var networkFooter: String {
+        switch draft.network {
+        case .proxy:
+            "Весь трафик профиля идёт только через этот прокси. Если прокси недоступен, интернета нет — "
+                + "настоящий IP сайтам не виден. Прокси указывается IP-адресом; http:// или socks5://."
+        case .direct:
+            "Профиль выходит в интернет через этот Mac: сайты видят ваш IP."
+        case .offline:
+            "Профиль не выходит в сеть вообще."
         }
     }
 
     private func save() {
         if let existing {
-            model.updateProfile(existing.id, name: name, proxy: proxy, clipboardShared: clipboardShared)
+            problem = model.updateProfile(existing.id, draft)
+            if problem == nil {
+                onSaved(nil)
+                dismiss()
+            }
         } else {
-            _ = model.createProfile(name: name, proxy: proxy, clipboardShared: clipboardShared)
+            let (created, error) = model.createProfile(draft)
+            problem = error
+            if let created {
+                onSaved(created)
+                dismiss()
+            }
         }
-        dismiss()
+    }
+}
+
+/// Time zones offered in the editor: common ones, plus whatever the profile
+/// already has.
+enum TimeZoneOption {
+    static let common = [
+        "Europe/London", "Europe/Dublin", "Europe/Lisbon", "Europe/Paris", "Europe/Berlin", "Europe/Amsterdam",
+        "Europe/Madrid", "Europe/Rome", "Europe/Warsaw", "Europe/Prague", "Europe/Stockholm", "Europe/Helsinki",
+        "Europe/Kyiv", "Europe/Istanbul", "Europe/Moscow", "Asia/Dubai", "Asia/Tbilisi", "Asia/Almaty",
+        "Asia/Kolkata", "Asia/Bangkok", "Asia/Singapore", "Asia/Hong_Kong", "Asia/Shanghai", "Asia/Tokyo",
+        "Asia/Seoul", "Australia/Sydney", "America/New_York", "America/Chicago", "America/Denver",
+        "America/Los_Angeles", "America/Toronto", "America/Mexico_City", "America/Sao_Paulo",
+        "America/Buenos_Aires", "Africa/Cairo", "Africa/Johannesburg",
+    ]
+
+    static func choices(including current: String?) -> [String] {
+        guard let current, !common.contains(current) else { return common }
+        return [current] + common
     }
 
-    private func importCookies(into profile: Profile) {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.json, .plainText, .text]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        model.importCookies(for: profile.id, from: url)
-        cookieCount = model.profiles.first { $0.id == profile.id }?.cookieCount ?? cookieCount
+    static func label(_ identifier: String) -> String {
+        let city = identifier.split(separator: "/").last.map { $0.replacingOccurrences(of: "_", with: " ") } ?? identifier
+        guard let zone = TimeZone(identifier: identifier) else { return city }
+        let seconds = zone.secondsFromGMT()
+        let sign = seconds < 0 ? "−" : "+"
+        let hours = abs(seconds) / 3600
+        let minutes = abs(seconds) % 3600 / 60
+        return minutes == 0 ? "\(city) (UTC\(sign)\(hours))" : "\(city) (UTC\(sign)\(hours):\(String(format: "%02d", minutes)))"
+    }
+}
+
+/// Languages offered in the editor (BCP 47, as macOS wants them).
+enum LanguageOption {
+    static let common = [
+        "en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "it-IT", "pt-BR", "pt-PT", "nl-NL", "pl-PL",
+        "cs-CZ", "sv-SE", "fi-FI", "tr-TR", "uk-UA", "ru-RU", "ja-JP", "ko-KR", "zh-CN", "ar-AE",
+    ]
+
+    static func choices(including current: String?) -> [String] {
+        guard let current, !common.contains(current) else { return common }
+        return [current] + common
     }
 
-    private func exportProfile(_ profile: Profile) {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "\(Profile.slug(profile.name)).tar.gz"
-        panel.message = "Сохранить профиль как архив"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        model.exportProfile(profile, to: url)
+    static func label(_ code: String) -> String {
+        let name = Locale(identifier: "ru_RU").localizedString(forIdentifier: code) ?? code
+        return "\(name.prefix(1).uppercased())\(name.dropFirst())"
     }
 }

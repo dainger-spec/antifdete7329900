@@ -34,14 +34,22 @@ sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Info.plist > "$APP/Contents/Info.pl
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
 install -m 0755 "$VM_DIR/controller/tart-prototype.sh" "$RESOURCES/vm/controller/"
-install -m 0755 "$VM_DIR/identity.sh" "$VM_DIR/guest-proxy.sh" "$RESOURCES/vm/"
+install -m 0755 "$VM_DIR/identity.sh" "$VM_DIR/guest-proxy.sh" "$VM_DIR/guest-kiosk.sh" "$RESOURCES/vm/"
 install -m 0755 "$VM_DIR/agent/install.sh" "$RESOURCES/vm/agent/"
 install -m 0644 "$VM_DIR/agent/pbagent.py" "$VM_DIR/agent/binarycookies.py" \
   "$VM_DIR/agent/com.privacybrowser.agent.plist.template" \
   "$RESOURCES/vm/agent/"
 
-# Hardened runtime, no App Sandbox: the app has to run tart, bash and ssh.
-codesign --force --options runtime --timestamp=none --sign "$SIGN_IDENTITY" "$APP"
+# Your logo and icon, if present (see Resources/Brand/README.md).
+mkdir -p "$RESOURCES/Brand"
+[[ -f Resources/Brand/logo.png ]] && install -m 0644 Resources/Brand/logo.png "$RESOURCES/Brand/"
+[[ -f Resources/Brand/AppIcon.icns ]] && install -m 0644 Resources/Brand/AppIcon.icns "$RESOURCES/"
+
+# Hardened runtime, no App Sandbox: the app has to run tart, bash and ssh. The
+# virtualization entitlement lets it run profile VMs in its own window;
+# without it the app falls back to Tart's window.
+codesign --force --options runtime --timestamp=none --entitlements Resources/VMLauncher.entitlements \
+  --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --strict "$APP"
 
 # Fail the build if the bundle can't actually find its script and agent.

@@ -80,6 +80,18 @@ public enum LauncherEnvironment {
         }
     }
 
+    /// The in-guest scripts tart-prototype.sh pipes over SSH (from ..).
+    public static let guestScripts = ["identity.sh", "guest-proxy.sh", "guest-kiosk.sh"]
+
+    /// Guest scripts missing next to `script` (empty when the layout is intact).
+    public static func missingGuestScripts(forScript script: String) -> [String] {
+        let directory = URL(fileURLWithPath: script).deletingLastPathComponent()
+            .appendingPathComponent("..").standardizedFileURL
+        return guestScripts.filter {
+            !FileManager.default.isReadableFile(atPath: directory.appendingPathComponent($0).path)
+        }
+    }
+
     /// A free TCP port on 127.0.0.1 for the host end of the SSH tunnel.
     public static func freeLocalPort() -> UInt16? {
         #if canImport(Darwin)

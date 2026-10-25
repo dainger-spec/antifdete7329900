@@ -18,13 +18,24 @@ struct LauncherApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Window("Safari в VM", id: "launcher") {
+        Window(Brand.name, id: "launcher") {
             ContentView(model: appDelegate.model)
                 .task { await appDelegate.menuBar.refresh() }
         }
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
+        }
+
+        // The profile's Safari (its VM's screen), one at a time.
+        Window("Браузер", id: BrowserWindow.id) {
+            BrowserWindowView(model: appDelegate.model)
+        }
+        .defaultSize(width: 1280, height: 820)
+        .windowResizability(.contentMinSize)
+
+        Settings {
+            SettingsView(model: appDelegate.model)
         }
 
         MenuBarExtra {

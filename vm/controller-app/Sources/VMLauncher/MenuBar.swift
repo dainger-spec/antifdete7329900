@@ -55,7 +55,7 @@ struct MenuBarContent: View {
             }
         }
         Divider()
-        Text(menu.runningCount == 0 ? "Запущенных VM нет" : "Запущено VM: \(menu.runningCount)")
+        Text(menu.runningCount == 0 ? "Открытых профилей нет" : "Открыто профилей: \(menu.runningCount)")
         Divider()
         Button("Открыть окно") { activate() }
         Button("Обновить") { Task { await menu.refresh() } }
@@ -66,7 +66,9 @@ struct MenuBarContent: View {
 
     private func launch(_ profile: Profile) {
         activate()
-        launcher.start(profile: profile)
+        if launcher.start(profile: profile) {
+            openWindow(id: BrowserWindow.id)
+        }
     }
 
     private func activate() {
@@ -81,7 +83,7 @@ struct MenuBarLabel: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: menu.runningCount > 0 ? "shippingbox.fill" : "shippingbox")
+            Image(systemName: menu.runningCount > 0 ? "shield.lefthalf.filled" : "shield")
             if menu.runningCount > 0 {
                 Text("\(menu.runningCount)")
             }

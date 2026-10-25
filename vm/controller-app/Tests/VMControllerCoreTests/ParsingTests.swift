@@ -224,6 +224,12 @@ final class LauncherEnvironmentTests: XCTestCase {
         XCTAssertNil(plain["IDENTITY_PROFILE"], "never inherited from the app's environment")
     }
 
+    func testRepoLayoutHasTheGuestScripts() {
+        XCTAssertEqual(LauncherEnvironment.missingGuestScripts(forScript: TestPaths.script.path), [])
+        XCTAssertEqual(LauncherEnvironment.missingGuestScripts(forScript: "/nonexistent/controller/x.sh"),
+                       LauncherEnvironment.guestScripts)
+    }
+
     func testScriptEnvironmentShowWindow() {
         let environment = LauncherEnvironment.scriptEnvironment(
             base: ["VM_HEADLESS": "1"], tartPath: "/bin/tart", askPass: URL(fileURLWithPath: "/tmp/a.sh"),

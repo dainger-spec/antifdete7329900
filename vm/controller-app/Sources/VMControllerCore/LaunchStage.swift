@@ -16,11 +16,11 @@ public enum LaunchStage: Int, CaseIterable, Identifiable, Comparable, Sendable {
 
     public var title: String {
         switch self {
-        case .tart: "Проверка Tart"
-        case .image: "Образ macOS"
-        case .vm: "Запуск VM"
-        case .agent: "Установка агента"
-        case .safari: "Открытие Safari"
+        case .tart: "Подготовка"
+        case .image: "Система macOS"
+        case .vm: "Запуск системы"
+        case .agent: "Настройка браузера"
+        case .safari: "Открытие страницы"
         case .done: "Готово"
         }
     }
