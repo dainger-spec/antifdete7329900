@@ -80,9 +80,11 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 ## Using it
 
 1. On first launch, create a master password. It cannot be recovered.
-2. Use **＋** to create a profile and set its start URL, proxy, user agent, time zone,
-   geolocation, WebRTC policy, history recording and retention, and whether it is
-   ephemeral. Changes apply at the next launch.
+2. Use **＋** to create a profile and set its device/version, start URL, proxy, user agent,
+   time zone, geolocation, WebRTC policy, history recording and retention, and whether it is
+   ephemeral. Changes apply at the next launch. The **Device / version** picker tags the
+   profile with a target Apple OS version (macOS 26, iOS 26/27, iPadOS 26); this sets the
+   self-declared User-Agent only — it is not device emulation (see the limitations doc §2).
 3. **Launch** opens a window for the profile. Profiles run side by side, and every window
    and tab is labelled with its profile. Closing a profile's last window stops that profile
    and returns you to the Profiles window; the app stays open.
@@ -116,7 +118,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Per-profile history | Encrypted `HistoryStore`: coalesced per URL, search, clear ranges, retention, cap; records committed and same-document navigations; credentials and fragments stripped |
 | Per-profile bookmarks | Encrypted `BookmarkStore`: folders, ordering, edit; star toggle, bookmarks menu, Library window |
 | Per-profile proxy (SOCKS5, HTTP CONNECT, HTTPS-to-proxy, auth, bypass list) | `WKWebsiteDataStore.proxyConfigurations`, `allowFailover = false`. **CONNECT tunnelling, SOCKS5 remote DNS and fail-closed verified by the self-test** |
-| Per-profile user agent | `WKWebView.customUserAgent`, with a **Device** picker: *Safari on macOS* (matches the engine, recommended) and *Safari on iPhone/iPad* (UA string only, flagged as inconsistent) |
+| Version-aware profiles | **Device / version** picker (`DeviceGeneration`): macOS 26 / iOS 26 / iOS 27 / iPadOS 26. Sets the self-declared `User-Agent` and defaults, and names a behaviour set for future per-version script bundles. Does **not** switch the real WebKit core; only the macOS generation is engine-consistent (others flagged UA-only) |
+| Per-profile user agent | `WKWebView.customUserAgent` (an explicit UA overrides the generation) |
 | Russian / English UI | `Localizable.strings` (ru default, en fallback), deterministic bundle lookup |
 | Stable window lifecycle | closing a profile window never quits or crashes the app (use-after-free fixed); verified by the self-test |
 | Encryption at rest of everything the app writes | AES-256-GCM; PBKDF2-HMAC-SHA256 (600k) → vault key → HKDF per purpose |

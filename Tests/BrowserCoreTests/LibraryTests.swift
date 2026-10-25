@@ -201,20 +201,53 @@ final class ConfigurationCompatibilityTests: XCTestCase {
     }
 }
 
-final class UserAgentPresetTests: XCTestCase {
-    func testPresetsAndEngineConsistency() {
-        XCTAssertFalse(UserAgentPresets.all.isEmpty)
-        // The recommended preset must be engine-consistent and look like macOS Safari.
-        let mac = UserAgentPresets.preset(id: "safari-macos")
-        XCTAssertEqual(mac?.matchesEngine, true)
-        XCTAssertTrue(mac?.userAgent.contains("Macintosh") == true)
-        XCTAssertTrue(mac?.userAgent.contains("Safari") == true)
-        // Device-claim presets are honestly marked as NOT matching the engine.
-        XCTAssertEqual(UserAgentPresets.preset(id: "safari-iphone")?.matchesEngine, false)
-        XCTAssertEqual(UserAgentPresets.preset(id: "safari-ipad")?.matchesEngine, false)
-        // Round-trip lookup by UA string.
-        XCTAssertEqual(UserAgentPresets.matching(userAgent: mac?.userAgent)?.id, "safari-macos")
-        XCTAssertNil(UserAgentPresets.matching(userAgent: "Mozilla/5.0 Something Custom"))
-        XCTAssertNil(UserAgentPresets.matching(userAgent: nil))
+final class DeviceGenerationTests: XCTestCase {
+    func testCatalogAndEngineConsistency() {
+        XCTAssertFalse(DeviceGenerations.all.isEmpty)
+        // The default generation is the macOS one and is the only engine-consistent family.
+        let def = DeviceGenerations.resolved(id: nil)
+        XCTAssertEqual(def.id, DeviceGenerations.defaultID)
+        XCTAssertEqual(def.platform, .macOS)
+        XCTAssertTrue(def.matchesEngine)
+        XCTAssertTrue(def.userAgent.contains("Macintosh"))
+        // iOS/iPadOS generations are honestly marked as not matching the engine.
+        for id in ["ios-26", "ios-27", "ipados-26"] {
+            let gen = DeviceGenerations.generation(id: id)
+            XCTAssertNotNil(gen, id)
+            XCTAssertEqual(gen?.matchesEngine, false, id)
+        }
+        // Unknown ids fall back to the default rather than crashing.
+        XCTAssertEqual(DeviceGenerations.resolved(id: "nope").id, DeviceGenerations.defaultID)
+        XCTAssertNil(DeviceGenerations.generation(id: "nope"))
+    }
+
+    func testEffectiveUserAgentPrecedence() {
+        // Generation supplies the UA when there is no explicit override.
+        let ios = ProfileConfiguration(deviceGenerationID: "ios-26")
+        XCTAssertEqual(ios.effectiveUserAgent, DeviceGenerations.generation(id: "ios-26")?.userAgent)
+        XCTAssertTrue(ios.effectiveUserAgent?.contains("iPhone OS 26") == true)
+        // An explicit user agent overrides the generation.
+        let custom = ProfileConfiguration(userAgent: "Custom/1.0", deviceGenerationID: "ios-26")
+        XCTAssertEqual(custom.effectiveUserAgent, "Custom/1.0")
+        // No generation and no override → WebKit default (nil).
+        XCTAssertNil(ProfileConfiguration(deviceGenerationID: nil).effectiveUserAgent)
+        // An empty override string is treated as "no override" too.
+        XCTAssertNil(ProfileConfiguration(userAgent: "", deviceGenerationID: nil).effectiveUserAgent)
+    }
+
+    func testGenerationIDRoundTripsAndToleratesOldConfigs() throws {
+        var config = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: "ios-27"))
+        XCTAssertEqual(config.deviceGenerationID, "ios-27")
+        config.startURL = URL(string: "https://example.com")
+        let decoded = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: JSONCoding.encoder.encode(config))
+        XCTAssertEqual(decoded.deviceGenerationID, "ios-27")
+        // A config written before this field existed decodes with deviceGenerationID == nil
+        // (→ default generation), without error.
+        let legacy = """
+        {"ephemeral":false,"geolocation":{"deny":{}},"historyEnabled":true,"safeBrowsingEnabled":false,"webRTCPolicy":"disabled"}
+        """
+        let old = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(legacy.utf8))
+        XCTAssertNil(old.deviceGenerationID)
+        XCTAssertEqual(old.deviceGeneration.id, DeviceGenerations.defaultID)
     }
 }

@@ -72,18 +72,44 @@ This project does not make a Mac look like an iPhone, and doesn't claim to.
 | Geolocation | JS shim (deny / fixed coordinates) | approximation |
 | WebRTC exposure | JS shim (removed / relay-only) | approximation |
 
-The **Device** picker in the profile editor offers user-agent presets (`UserAgentPresets.swift`):
-
-- **Safari on macOS** *matches the engine*. Every other signal (features, rendering, TLS)
-  agrees with it, so it is the recommended and least distinctive choice.
-- **Safari on iPhone / iPad** are labelled *UA only* and show a warning in the editor. They
-  change the declared string, and nothing else. The real engine, hardware and network stack
-  still say "Mac", so the combination is internally inconsistent and easy to detect. They
-  exist for sites that only look at the UA string, for example to request a mobile layout.
-
 Keep the declared attributes consistent with each other: a Safari UA, plus a time zone and
 geolocation that match the proxy's exit location. An inconsistent combination, such as a
 Chrome UA on WebKit or a Tokyo time zone behind a Paris exit, is itself distinctive.
+
+### Version-aware profiles (device generations)
+
+Projects like iStealth tie a profile to a specific OS version and swap the browser *core*
+when Apple ships a new one. With public APIs we can do the version *tagging* but not the
+core swap. A profile carries a **device generation** (`DeviceGeneration` /
+`DeviceGenerations` in `BrowserCore`): a target Apple OS version — currently macOS 26,
+iOS 26, iOS 27, iPadOS 26 — chosen with the **Device / version** picker in the editor and
+stored in the profile (`deviceGenerationID`, encrypted like the rest).
+
+What a generation actually does, and only this:
+
+- supplies the self-declared `User-Agent` for that version (overridable with a custom UA);
+- seeds per-profile defaults (e.g. WebRTC policy) when a new profile picks it;
+- names a **behaviour set** (`behaviorSetID`) — the injected-script bundle. This is an
+  extension point (`BehaviorSets` in the app layer). Today every generation resolves to the
+  same WebKit shims, because with the current public API the observable behaviour does not
+  differ by declared version. When a future WebKit ships behaviours worth matching (and the
+  public API to do it), a new behaviour set is registered and new generations point at it,
+  with no change to the profile format.
+
+What it does **not** do, and cannot:
+
+- It does not switch the real WebKit core. The engine is always the Mac's system WebKit;
+  there is no public API to load an older or iOS WebKit build, and running a second engine
+  is out of scope. So a profile tagged "iOS 26" renders with the host Mac's WebKit, whatever
+  its real version.
+- Only the macOS generation is engine-consistent, and only when its version equals the Mac's
+  real Safari version (the editor still shows the string, which may differ from the host's).
+  The iOS/iPadOS generations change the UA string while every measured signal in the table
+  below still says "desktop Mac" — the editor flags this.
+
+Compared with a deeply integrated product that ships and switches genuine per-version WebKit
+cores, this is version *labelling*, not version *emulation*. It is honest about being
+Safari on this Mac.
 
 ### What remains impossible with public APIs
 

@@ -51,13 +51,14 @@ final class BrowserSession {
         // Applies to all network loads of this data store. An empty array = direct connection.
         store.proxyConfigurations = ProxyConfigurationFactory.make(configuration.proxy)
         self.dataStore = store
-        self.userContentController = PrivacyScripts.makeUserContentController(for: configuration)
+        // Routed through BehaviorSets so a profile's device generation selects its script bundle.
+        self.userContentController = BehaviorSets.makeUserContentController(for: configuration)
     }
 
     var windowCount: Int { windows.count }
 
     var tabContext: BrowserTabContext {
-        BrowserTabContext(profileName: profileName, userAgent: configuration.userAgent,
+        BrowserTabContext(profileName: profileName, userAgent: configuration.effectiveUserAgent,
                           passwordVault: passwordVault, library: library)
     }
 

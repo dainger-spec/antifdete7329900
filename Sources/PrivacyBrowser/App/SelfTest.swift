@@ -99,6 +99,7 @@ final class SelfTest {
         do {
             let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
             try await storageIsolationAndShims(repository)
+            try await deviceGenerations(repository)
             try await recoverySealing(repository)
             try await proxies(repository)
             try await tabsAndLibrary(repository)
@@ -360,6 +361,36 @@ final class SelfTest {
         controller.selectTab(number: 1)
         check("tabs: select tab 1", controller.selectedTab?.url == one)
         controller.close()
+    }
+
+    // MARK: Device generations (version-aware UA reaches the page)
+
+    /// A profile tagged with a device generation must apply that generation's self-declared
+    /// User-Agent to `navigator.userAgent` through the normal session → tab wiring, and an
+    /// explicit custom UA must still win.
+    private func deviceGenerations(_ repository: ProfileRepository) async throws {
+        func userAgent(for configuration: ProfileConfiguration) async throws -> String? {
+            let profile = try repository.create(name: "Gen \(UUID().uuidString.prefix(4))", configuration: configuration)
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            defer { session.shutDown() }
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            try await PageLoader.load(tab.webView, html: page, baseURL: origin)
+            return try await js(tab.webView, "return navigator.userAgent;") as? String
+        }
+
+        let iosUA = try await userAgent(for: .forGeneration(DeviceGenerations.resolved(id: "ios-26")))
+        check("generation: iOS 26 UA reaches navigator.userAgent",
+              iosUA?.contains("iPhone OS 26") == true, iosUA ?? "nil")
+
+        let macUA = try await userAgent(for: .forGeneration(DeviceGenerations.resolved(id: DeviceGenerations.defaultID)))
+        check("generation: default macOS UA reaches navigator.userAgent",
+              macUA?.contains("Macintosh") == true, macUA ?? "nil")
+
+        var override = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: "ios-27"))
+        override.userAgent = "PrivacyBrowserSelfTest/UA-Override"
+        let overrideUA = try await userAgent(for: override)
+        check("generation: explicit user agent overrides the generation",
+              overrideUA == "PrivacyBrowserSelfTest/UA-Override", overrideUA ?? "nil")
     }
 
     // MARK: Crash recovery sealing (regression for the post-unlock crash)

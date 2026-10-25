@@ -11,6 +11,7 @@ struct ProfileDraft {
 
     var name = ""
     var startURL = ""
+    var deviceGenerationID = DeviceGenerations.defaultID
     var customUserAgent = false
     var userAgent = ""
     var proxyEnabled = false
@@ -52,6 +53,7 @@ struct ProfileDraft {
     init(name: String, configuration c: ProfileConfiguration) {
         self.name = name
         startURL = c.startURL?.absoluteString ?? ""
+        deviceGenerationID = c.deviceGenerationID ?? DeviceGenerations.defaultID
         customUserAgent = c.userAgent != nil
         userAgent = c.userAgent ?? ""
         if let proxy = c.proxy {
@@ -86,6 +88,7 @@ struct ProfileDraft {
             guard let url = URL(string: trimmedURL) else { throw CoreError.invalidConfiguration(L("editor.error.startURL")) }
             configuration.startURL = url
         }
+        configuration.deviceGenerationID = deviceGenerationID
         if customUserAgent {
             configuration.userAgent = userAgent.trimmingCharacters(in: .whitespaces)
         }
@@ -141,12 +144,9 @@ struct ProfileEditorView: View {
     @State private var loaded = false
 
     private static let timeZones = TimeZone.knownTimeZoneIdentifiers.sorted()
-    private static let customUAID = "__custom__"
 
     /// Which UA preset the current text matches ("custom" when it matches none).
-    private var selectedPresetID: String {
-        UserAgentPresets.matching(userAgent: draft.customUserAgent ? draft.userAgent : nil)?.id ?? Self.customUAID
-    }
+    private var selectedGeneration: DeviceGeneration { DeviceGenerations.resolved(id: draft.deviceGenerationID) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -184,25 +184,26 @@ struct ProfileEditorView: View {
 
     private var identitySection: some View {
         Section {
-            Picker(L("editor.ua.preset"), selection: Binding(
-                get: { selectedPresetID },
-                set: { applyPreset(id: $0) })) {
-                ForEach(UserAgentPresets.all) { preset in
-                    Text(L(preset.nameKey)).tag(preset.id)
+            Picker(L("editor.generation"), selection: $draft.deviceGenerationID) {
+                ForEach(DeviceGenerations.all) { generation in
+                    Text(L(generation.nameKey)).tag(generation.id)
                 }
-                Text(L("editor.ua.custom")).tag(Self.customUAID)
+            }
+            if !selectedGeneration.matchesEngine {
+                Label(L("editor.generation.inconsistent"), systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
             }
             Toggle(L("editor.ua.useCustom"), isOn: $draft.customUserAgent)
             if draft.customUserAgent {
                 TextField(L("editor.ua.field"), text: $draft.userAgent, axis: .vertical).lineLimit(2...4)
-            }
-            if let preset = UserAgentPresets.matching(userAgent: draft.customUserAgent ? draft.userAgent : nil),
-               !preset.matchesEngine {
-                Label(L("editor.ua.inconsistent"), systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
+            } else {
+                LabeledContent(L("editor.ua.effective")) {
+                    Text(selectedGeneration.userAgent).font(.caption.monospaced())
+                        .foregroundStyle(.secondary).lineLimit(3).textSelection(.enabled)
+                }
             }
         } header: { Text(L("editor.section.identity")) } footer: {
-            Text(L("editor.ua.footer"))
+            Text(L("editor.generation.footer"))
         }
     }
 
@@ -265,16 +266,6 @@ struct ProfileEditorView: View {
             Toggle(L("editor.safeBrowsing"), isOn: $draft.safeBrowsing)
         } header: { Text(L("editor.section.privacy")) } footer: {
             Text(L("editor.privacy.footer"))
-        }
-    }
-
-    private func applyPreset(id: String) {
-        if id == Self.customUAID {
-            draft.customUserAgent = true
-            if UserAgentPresets.matching(userAgent: draft.userAgent) != nil { draft.userAgent = "" }
-        } else if let preset = UserAgentPresets.preset(id: id) {
-            draft.customUserAgent = true
-            draft.userAgent = preset.userAgent
         }
     }
 

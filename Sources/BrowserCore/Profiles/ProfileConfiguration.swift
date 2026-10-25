@@ -44,6 +44,10 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// History entries older than this are pruned. `nil` = keep forever.
     public var historyRetentionDays: Int?
 
+    /// Target Apple OS generation (`DeviceGenerations`). Supplies the self-declared User-Agent
+    /// and the behaviour set, unless `userAgent` overrides the UA. `nil` → the default generation.
+    public var deviceGenerationID: String?
+
     public init(startURL: URL? = nil,
                 userAgent: String? = nil,
                 proxy: ProxySettings? = nil,
@@ -53,7 +57,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 ephemeral: Bool = false,
                 safeBrowsingEnabled: Bool = false,
                 historyEnabled: Bool = true,
-                historyRetentionDays: Int? = 90) {
+                historyRetentionDays: Int? = 90,
+                deviceGenerationID: String? = nil) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -64,11 +69,29 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.safeBrowsingEnabled = safeBrowsingEnabled
         self.historyEnabled = historyEnabled
         self.historyRetentionDays = historyRetentionDays
+        self.deviceGenerationID = deviceGenerationID
+    }
+
+    /// A new profile seeded from a generation: the generation supplies the UA (by reference,
+    /// via `deviceGenerationID`) and its suggested defaults.
+    public static func forGeneration(_ generation: DeviceGeneration) -> ProfileConfiguration {
+        ProfileConfiguration(webRTCPolicy: generation.defaultWebRTCPolicy,
+                             deviceGenerationID: generation.id)
+    }
+
+    /// The resolved generation (default if none/unknown is stored).
+    public var deviceGeneration: DeviceGeneration { DeviceGenerations.resolved(id: deviceGenerationID) }
+
+    /// The User-Agent actually applied: an explicit `userAgent` override wins; otherwise the
+    /// selected generation's UA. `nil` means use the WebKit default.
+    public var effectiveUserAgent: String? {
+        if let userAgent, !userAgent.isEmpty { return userAgent }
+        return DeviceGenerations.generation(id: deviceGenerationID)?.userAgent
     }
 
     private enum CodingKeys: String, CodingKey {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
-             safeBrowsingEnabled, historyEnabled, historyRetentionDays
+             safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -88,6 +111,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         historyRetentionDays = c.contains(.historyRetentionDays)
             ? try c.decodeIfPresent(Int.self, forKey: .historyRetentionDays)
             : defaults.historyRetentionDays
+        deviceGenerationID = try c.decodeIfPresent(String.self, forKey: .deviceGenerationID)
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -104,6 +128,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(safeBrowsingEnabled, forKey: .safeBrowsingEnabled)
         try c.encode(historyEnabled, forKey: .historyEnabled)
         try c.encode(historyRetentionDays, forKey: .historyRetentionDays)
+        try c.encodeIfPresent(deviceGenerationID, forKey: .deviceGenerationID)
     }
 
     public var historyPolicy: HistoryStore.Policy {
