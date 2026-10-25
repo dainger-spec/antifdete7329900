@@ -1,22 +1,31 @@
 # VM Controller App
 
-Swift wrapper around VM management. Goal: user downloads the app, it handles the rest.
+Swift controller that checks for Tart, clones a base image if needed, and launches a VM.
 
 ## Status
 
-Stub. The working prototype is still `vm/controller/tart-prototype.sh`.
+Basic implementation. Still requires Tart installed on the host.
 
-## Planned
+## What it does
 
-- Bundle or download Tart/vfkit
-- Download base macOS image on first launch
-- Launch VM and install agent automatically
-- Simple UI or menu bar app
+1. Checks that `tart` is available
+2. Clones `ghcr.io/cirruslabs/macos-sonoma-base:latest` if the VM doesn't exist
+3. Launches the VM
 
-## Build
+## What it doesn't do yet
+
+- Bundle Tart (still needs `brew install`)
+- Install the in-VM agent automatically
+- Navigate Safari
+- Proxy configuration
+- UI
+
+## Build and run
 
 ```bash
 cd vm/controller-app
 swift build
-.build/debug/VMController https://example.com
+.build/debug/VMController https://browserleaks.com
 ```
+
+Requires Tart: `brew install cirruslabs/cli/tart`
