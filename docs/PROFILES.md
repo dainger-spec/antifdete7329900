@@ -9,9 +9,17 @@ and macOS); the app and CLI drive it.
 A **profile is one Tart VM**, cloned from a base image, with its own persistent
 disk, proxy, cookies and settings. The profile list is a JSON file
 (`ProfileStore`) at `~/Library/Application Support/VMLauncher/profiles.json`,
-written atomically. Each profile stores: `id`, `name`, `proxy`, `lastURL`,
-`baseImage`, `clipboardShared`, `cookieCount`, timestamps
-(`Sources/VMControllerCore/Profile.swift`).
+written atomically. Each profile stores: `id`, `name`, network mode and
+`proxy`, `timeZone`, `language`, `lastURL`, `baseImage`, `clipboardShared`,
+`cookieCount` and cookie import/apply times, `uniqueIdentity`, its VM name,
+timestamps (`Sources/VMControllerCore/Profile.swift`).
+
+The VM name (`pb-<name>-<id>`) is **fixed when the profile is created**.
+Earlier versions derived it from the current name, so renaming a profile
+pointed it at a VM that didn't exist (the next launch cloned a fresh one and
+the old VM, with all its data, was left behind). Old profiles are pinned on
+their first save; one already cut off this way gets its VM back on the next
+launch (`ProfileStore.adoptOrphanedVM`, matched by the id suffix).
 
 ### The snapshot model — and what Tart actually offers
 
@@ -25,20 +33,58 @@ So the lifecycle maps as (`ProfilePlan`):
 
 | Action | Tart | Why |
 |---|---|---|
-| **Create profile** | `tart clone <base> pb-<name>-<id>` | the clone is the profile; its disk is the "snapshot" |
+| **Create profile** | `tart clone <base> pb-<name>-<id>`, then `tart set … --random-serial --random-mac` | the clone is the profile; its disk is the "snapshot". The `set` gives it its own machine identity (below) |
 | **Run** | `tart run pb-<name>-<id> …` | boots from the profile's persistent disk = its last state |
 | **Close** | `tart stop pb-<name>-<id>` | disk already holds the new state — the save is automatic, no command needed |
-| **Delete** | `tart delete pb-<name>-<id>` | removes the VM (and any backups) |
+| **Delete** | `tart delete pb-<name>-<id>` + the profile's folder | removes the VM and its imported cookies — nothing of the profile stays on disk |
 | **Restore point** (optional) | `tart clone pb-<name>-<id> pb-<name>-<id>--<label>` | an explicit rollback copy |
 
 "Snapshot on close" is therefore **inherent**, not a separate step: because the
 disk persists, closing the VM *is* saving the snapshot. An explicit restore
 point is an extra clone (`ProfilePlan.backup`).
 
+## Are profiles really separate?
+
+What each profile has **of its own**:
+
+| | How |
+|---|---|
+| Disk: Safari's cookies, local storage, cache, history, saved logins, everything else | its own Tart VM (a clone; copy-on-write, but writes never reach another profile) |
+| Network path and IP | its network mode: its own proxy, direct, or none |
+| Serial number / hardware UUID (`VZMacMachineIdentifier`) | `tart set --random-serial` right after the clone. **`tart clone` copies the base image's identifier**, so profiles created before this all have the same one (the profile page offers «Сделать уникальным»; doing it on a used profile can lock Safari out of passwords saved in its "Local Items" keychain, which is bound to the machine) |
+| MAC address | `tart set --random-mac` (a clone of another *local* VM already gets one; one cloned from the OCI cache doesn't) |
+| Hostname | `Mac-<id>` (vm/identity.sh, seeded with the id, not the name) |
+| Time zone, language | per profile, set in the guest (sites read both) |
+| Clipboard | not shared with the Mac unless enabled |
+
+What is **the same in every profile** — a platform limit, see
+[HARDWARE_IDENTITY.md](HARDWARE_IDENTITY.md): macOS and Safari version (the
+base image), the paravirtualized GPU (WebGL/WebGPU strings), the fonts, and
+the "virtual Mac" hardware model. Screen size follows the browser window. So
+sites can't connect two profiles by stored data or IP, but a fingerprinting
+script sees the same *kind* of machine in each — as it would for two people on
+the same Mac model and macOS version.
+
+Imported profiles keep their source's serial number (moving a profile keeps
+its identity) and get a new MAC, so they can run next to the source.
+
+## Network modes
+
+| Mode | Policy | Sites see |
+|---|---|---|
+| **Через прокси** (`proxy`) | fail-closed, below | the proxy's IP; if the proxy is down, nothing loads |
+| **Напрямую** (`direct`) | Tart's/VZ's NAT | this Mac's IP |
+| **Без интернета** (`offline`) | fail-closed with nothing allowed | — |
+
+Profiles saved before modes existed: with a proxy → `proxy`; without →
+`direct` (they used to be isolated, so pages didn't load and nothing said
+why).
+
 ## Fail-closed networking
 
-**Goal: a profile's VM reaches the internet only through its proxy; with no
-proxy it has no internet at all** — it fails closed, never open.
+**Goal: a `proxy` profile's VM reaches the internet only through its proxy;
+an `offline` one — or a `proxy` one without a usable proxy — has no internet
+at all.** It fails closed, never open.
 
 > **Fixed 2026-10:** earlier versions passed only `--net-softnet-allow
 > <proxy>/32` (or `127.0.0.1/32`). That does **not** restrict egress: by
@@ -67,7 +113,9 @@ proxy set as the guest's system proxy.
 `NetworkPolicy.failClosed(proxy:)` encodes this (tested): IP proxy →
 `proxyOnly`, everything else → `isolated`. The controller takes
 `TART_NET=softnet` + `SOFTNET_ALLOW=<cidr>` and adds the deny-all and
-`in @host` itself.
+`in @host` itself. When the app runs the VM in its own window it starts
+softnet itself with the same rules (`SoftnetCommand`: `--block 0.0.0.0/0
+--allow "<proxy>/32,in @host"`).
 
 ### The guest proxy (`vm/guest-proxy.sh`)
 
@@ -131,12 +179,20 @@ normalized `[Cookie]` and serializes the JSON the agent consumes. Stored per
 profile at `…/VMLauncher/profiles/<id>/cookies.json`. Parsing, formats and
 round-trip are unit-tested.
 
-**Applying them:** the controller POSTs the profile's `cookies.json` to the
-agent's `/cookies` (pass `COOKIES_FILE=…` to `tart-prototype.sh`) before
-navigating. The agent (`vm/agent/binarycookies.py`) encodes Safari's
-`Cookies.binarycookies` store and writes it while Safari is stopped, so the
-next launch picks the cookies up; the encoder round-trips in tests. Writing the
-store (not `document.cookie`) preserves HttpOnly cookies, which JS can't set.
+**Applying them:** on the first launch after an import, the controller POSTs
+the profile's `cookies.json` to the agent's `/cookies` (pass `COOKIES_FILE=…`
+to `tart-prototype.sh`) before navigating. The agent
+(`vm/agent/binarycookies.py`) **merges** them into Safari's
+`Cookies.binarycookies` — an imported cookie replaces the one with the same
+domain/name/path, every cookie made inside the VM stays — writing a temp file
+and renaming it, with Safari stopped (`pkill`, no Apple Event). Later launches
+don't send them again (`Profile.needsCookieApply`), so a session Safari
+refreshed is never overwritten by the old imported one. Earlier versions
+rewrote the whole store on every launch, which logged the profile out of
+everything it had signed into in the VM. Cookies imported without an expiry
+get 30 days (the format has no "session" flag; 0 would mean 2001, i.e.
+already expired). Writing the store (not `document.cookie`) preserves HttpOnly
+cookies, which JS can't set.
 **To verify on a Mac:** the exact sandboxed container path
 (`~/Library/Containers/com.apple.Safari/Data/Library/Cookies/`, overridable
 with `$PB_SAFARI_COOKIES`) and that the sandbox permits writing it.
@@ -183,7 +239,11 @@ Done here (core, tested on Linux/macOS CI):
 
 - [x] Export/import a profile as one portable `.tar.gz` (manifest + cookies +
       the Tart VM directory). Import mints a fresh id and a non-clashing name
-      and drops the VM under the new name — no host binding. `ProfileBundle`
+      and drops the VM under the new name — no host binding. The archive is
+      treated as untrusted: only regular files (a symlinked cookies.json is
+      refused), cookies re-parsed and recounted, the VM found by its
+      config.json, everything rolled back on failure; the network mode and
+      region travel with it. `ProfileBundle`
       uses `tar`, so it's tested end-to-end on Linux with a stub VM dir; the UI
       has Экспорт/Импорт buttons (big real VMs are the on-a-Mac check).
 

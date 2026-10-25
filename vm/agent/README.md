@@ -29,6 +29,7 @@ All but `/healthz` require `Authorization: Bearer <token>`.
 | POST   | `/cookies`    | `{"cookies":[ … ]}`       | installs cookies into Safari   |
 | GET    | `/screenshot` | —                         | `image/png` of the screen      |
 | POST   | `/quit`       | —                         | quits Safari                   |
+| POST   | `/kiosk`      | `{"fill_screen":true}`    | keeps every Safari window the size of the screen (also after the display is resized); `false` stops |
 
 `/navigate` accepts only `http`/`https` URLs. The URL becomes a single argv
 item of `open -a Safari` (no shell, no script text), so it cannot inject
@@ -49,13 +50,24 @@ dialog inside the VM and blocks until someone clicks it. So `current_url` in
 `/quit` still uses AppleScript (expect the consent dialog on first use), and
 `/screenshot` needs Screen Recording permission for the agent's Python.
 
+`/kiosk` reads the screen size through AppleScriptObjC (no Apple Event) and
+sets Safari's window bounds every 2 s while Safari runs — that one is an Apple
+Event, so the profile shows the consent dialog once; until it's answered the
+loop backs off (30 s). With `vm/guest-kiosk.sh` (no Dock, menu bar or desktop)
+this makes the VM look like just Safari.
+
 ## Cookies
 
 `POST /cookies` with `{"cookies": [ … ]}` (the normalized array from the app's
 `CookieImport`, each cookie `{domain, name, value, path?, secure?, httpOnly?,
-expires?}`) installs them into Safari. The `mac` backend quits Safari, writes
-Safari's `Cookies.binarycookies` store (`binarycookies.py` encodes the format;
-path overridable with `$PB_SAFARI_COOKIES`), so the next launch picks them up.
+expires?}`) installs them into Safari. The `mac` backend stops Safari
+(`pkill`, waiting for it to exit), reads Safari's `Cookies.binarycookies`,
+**merges** the new cookies in (same domain/name/path replaced, every other
+cookie kept, raw flags preserved) and writes it back atomically (temp file +
+rename; `binarycookies.py` does the format; path overridable with
+`$PB_SAFARI_COOKIES`), so the next launch picks them up. A store it can't
+read is moved aside (`….unreadable-<time>`), not dropped. Cookies without an
+expiry get 30 days.
 The encoder round-trips in tests; whether a given Safari accepts a hand-written
 store (its sandboxed container path, permissions) is the one bit that needs a
 real Mac — see docs/PROFILES.md.
@@ -66,8 +78,9 @@ real Mac — see docs/PROFILES.md.
 as a LaunchAgent (`RunAtLoad` + `KeepAlive`), so it restarts at every login —
 after a reboot, with the VM set to auto-login, it is already running. The
 controller reads `~/.pbagent/token` and **reuses an installed agent instead of
-reinstalling** (`FORCE_INSTALL=1` forces a fresh install). So the agent is
-copied and installed once per VM, not on every launch.
+reinstalling** (`FORCE_INSTALL=1` forces a fresh install) — unless its files
+differ from the controller's copy (`cksum`), then it reinstalls, keeping the
+token. So the agent is copied once per VM and again only when it changed.
 
 ## Running
 

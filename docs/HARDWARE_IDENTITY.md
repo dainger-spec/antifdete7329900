@@ -59,25 +59,37 @@ deterministic and pinned for a known name, and the hostname rules.
 ## Applying the MAC
 
 The guest cannot pick its MAC: Virtualization.framework assigns it to the
-virtual NIC from the VM configuration, and changing it with `ifconfig` inside
-macOS is neither persistent nor reliable. Tart keeps it in the VM's
-`config.json` (`macAddress`) and offers only `tart set <vm> --random-mac` on
-the command line. To use the suggested value, with the VM **stopped**:
+virtual NIC from the VM configuration (Tart keeps it in `config.json`), and
+changing it with `ifconfig` inside macOS is neither persistent nor reliable.
+Set it on the host with the VM **stopped**:
 
 ```bash
+tart set safari-profile --random-mac                 # what the app does for each new profile
 MAC=$(vm/identity.sh --print work | sed -n 's/^MAC=//p' | tr 'A-F' 'a-f')
-CFG=~/.tart/vms/safari-profile/config.json        # $TART_HOME/vms/... if set
-grep macAddress "$CFG"                            # the key must exist
-cp "$CFG" "$CFG.bak"
-sed -i '' -E "s/(\"macAddress\" *: *\")[^\"]*/\1$MAC/" "$CFG"
-grep macAddress "$CFG"                            # check the new value
+tart set safari-profile --mac "$MAC"                 # or this script's stable value
 ```
 
-This edits Tart's own file format, not a documented interface; keep the
-backup and recheck after Tart upgrades. Two VMs on the same bridged LAN must
-never share a MAC: distinct profile names give distinct MACs (24 bits of
-hash), but check `grep macAddress ~/.tart/vms/*/config.json` if you also have
-VMs you did not set this way.
+Two VMs on the same network must never share a MAC: the controller warns when
+another VM has this VM's MAC, and imported profiles get a new one.
+
+## Serial number
+
+Each VM has a `VZMacMachineIdentifier` (Tart's `ecid`), which the guest shows
+as its serial number and hardware UUID. **`tart clone` copies it**, so every
+clone of one image is the same "Mac" to macOS and Apple's services. The app
+runs `tart set <vm> --random-serial --random-mac` right after creating a
+profile, before its first boot. For a profile that has already been used, a
+new identifier can lock Safari out of passwords kept in the "Local Items"
+keychain (bound to the machine), so the app only offers it, with that
+warning.
+
+## What the app sets per profile
+
+| | Where |
+|---|---|
+| Serial number + MAC | `tart set --random-serial --random-mac` at creation (`ProfilePlan.uniqueIdentity`) |
+| Hostname `Mac-<profile id>` | `identity.sh`, every launch (`IDENTITY_PROFILE`) — the id, so the profile's name never shows on the network |
+| Time zone, language | `identity.sh --timezone … --language …`, from the profile editor |
 
 ## What is not set (and cannot be)
 
@@ -87,7 +99,7 @@ Virtualization.framework, not from the guest and not copied from the host:
 | Parameter | Value in a guest | Why it can't be changed |
 |-----------|------------------|-------------------------|
 | `hw.model` | `VirtualMac2,1` | Fixed by the framework's `VZMacHardwareModel` |
-| Serial number / board ID | Generated per VM, not a real Mac's | Derived from the VM's `VZMacMachineIdentifier`; no API to set arbitrary values |
+| Serial number / board ID | From the VM's `VZMacMachineIdentifier`, not a real Mac's | Can be regenerated (`tart set --random-serial`, above) but not set to a chosen value |
 | `kern.hv_vmm_present` | `1` | Set by the hypervisor |
 | GPU | Apple paravirtualized GPU | The only GPU the framework provides |
 
@@ -103,8 +115,9 @@ If a profile uses a proxy in a specific region:
 - Set the VM timezone to match that region
 - Set the system locale / language to match
 
-This keeps time and language consistent with the network path. The controller
-does not do this automatically yet.
+This keeps time and language consistent with the network path. Choose both in
+the profile editor (Регион); the app applies them in the guest on every launch
+and restarts Safari when they change. It does not guess them from the proxy.
 
 ## Checking the environment
 
