@@ -193,14 +193,15 @@ final class ScriptIntegrationTests: XCTestCase {
 
     func testSizingAndHeadlessEnvReachTart() async throws {
         let run = try host.launch(url: "https://example.com",
-                                  extraEnvironment: ["TART_NET": "shared", "VM_MEMORY": "2048",
-                                                     "VM_CPU": "2", "VM_HEADLESS": "1"])
+                                  extraEnvironment: ["TART_NET": "shared", "VM_MEMORY": "1536",
+                                                     "VM_CPU": "2", "VM_HEADLESS": "1",
+                                                     "VM_RUN_ARGS": "--no-audio"])
         try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
         let calls = host.calls
-        XCTAssertTrue(calls.contains("tart set safari-profile --memory 2048 --cpu 2"),
+        XCTAssertTrue(calls.contains("tart set safari-profile --memory 1536 --cpu 2"),
                       "RAM/CPU caps are applied with tart set while stopped")
-        XCTAssertTrue(calls.contains("tart run safari-profile --no-graphics"),
-                      "VM_HEADLESS adds --no-graphics")
+        XCTAssertTrue(calls.contains("tart run safari-profile --no-graphics --no-audio"),
+                      "VM_HEADLESS adds --no-graphics and VM_RUN_ARGS is appended")
         // tart set must come before tart run (set requires a stopped VM).
         XCTAssertLessThan(calls.firstIndex { $0.hasPrefix("tart set") } ?? .max,
                           calls.firstIndex { $0.hasPrefix("tart run") } ?? .min)

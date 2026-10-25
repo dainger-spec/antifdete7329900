@@ -4,7 +4,7 @@
 # Run inside the VM (over SSH). It reads `vm_stat`, `sysctl` and `top` and
 # prints memory in MiB. The host-side cost of the VM — the figure that matters
 # for "how many VMs fit" — is the `tart run` process's RSS; measure that on the
-# host (see vm/tuning/README.md), not here.
+# host (see vm/SLIMMING.md), not here.
 #
 #   ./measure-ram.sh           # one human-readable sample
 #   ./measure-ram.sh --json    # one sample as JSON (easy to capture over SSH)

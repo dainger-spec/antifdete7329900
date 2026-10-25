@@ -103,8 +103,8 @@ terminal it sets:
 To shrink the VM's footprint, set `VM_MEMORY` (MiB), `VM_CPU` and `VM_HEADLESS`
 when running `tart-prototype.sh` (the app does not set them). They map to
 `tart set --memory/--cpu` and `--no-graphics`. See
-[vm/tuning/README.md](../tuning/README.md) for a stable minimum and the
-in-guest service-disabling and measurement scripts.
+[vm/SLIMMING.md](../SLIMMING.md) for a stable minimum (~1536 MiB) and the
+in-guest service-disabling (`vm/slim.sh`) and measurement scripts.
 
 The script runs in its own **process group**: Отмена signals the group the
 way Ctrl+C does in a terminal, so the script's trap stops the VM at once

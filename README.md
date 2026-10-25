@@ -12,7 +12,7 @@ Each profile runs in a separate macOS VM with genuine Safari.
 - App with a window: `vm/controller-app/` — **VMLauncher.app** (see below)
 - Prototype controller: `vm/controller/tart-prototype.sh`
 - In-VM agent: `vm/agent/` (implemented — stdlib HTTP service that drives Safari)
-- Slimming the VM (RAM/CPU caps, service disabling, measurement): `vm/tuning/`
+- Slimming the VM (RAM/CPU caps, service disabling, measurement): `vm/slim.sh`, [vm/SLIMMING.md](vm/SLIMMING.md)
 
 ### Quick start (app)
 

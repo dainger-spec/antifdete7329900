@@ -20,7 +20,9 @@
 #   BRIDGE_IF    host interface for bridged networking (default: en0)
 #   VM_MEMORY    RAM cap in MiB, applied with `tart set` (empty = image default)
 #   VM_CPU       CPU core count, applied with `tart set` (empty = image default)
-#   VM_HEADLESS  "1" = run with --no-graphics (no host window). See vm/tuning.
+#   VM_HEADLESS  "1" = run with --no-graphics (no host window). See vm/SLIMMING.md.
+#   VM_RUN_ARGS  extra flags appended to `tart run`, split on spaces (e.g. to
+#                pass a build-specific device toggle your tart supports)
 #
 # This installs vm/agent/ into the VM as a LaunchAgent, opens an SSH tunnel to
 # the agent's loopback port, then calls POST /navigate. The agent control port
@@ -42,6 +44,7 @@ BRIDGE_IF="${BRIDGE_IF:-en0}"
 VM_MEMORY="${VM_MEMORY:-}"
 VM_CPU="${VM_CPU:-}"
 VM_HEADLESS="${VM_HEADLESS:-}"
+VM_RUN_ARGS="${VM_RUN_ARGS:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="$(cd "$SCRIPT_DIR/../agent" && pwd)"
@@ -102,7 +105,7 @@ if ! tart list | grep -q "[[:space:]]${VM_NAME}[[:space:]]" && ! tart list | gre
   exit 1
 fi
 
-# Apply RAM/CPU caps while the VM is stopped (see vm/tuning for sizing advice).
+# Apply RAM/CPU caps while the VM is stopped (see vm/SLIMMING.md for sizing).
 if [[ -n "$VM_MEMORY$VM_CPU" ]]; then
   SET_ARGS=()
   [[ -n "$VM_MEMORY" ]] && SET_ARGS+=(--memory "$VM_MEMORY")
@@ -114,8 +117,13 @@ fi
 RUN_ARGS=(${RUN_NET_ARGS[@]+"${RUN_NET_ARGS[@]}"})
 # --no-graphics drops the host window. Safari still renders on the guest's
 # virtual display; if your Tart build removes that display headless and
-# screenshots/pages break, leave VM_HEADLESS unset (see vm/tuning/README.md).
+# screenshots/pages break, leave VM_HEADLESS unset (see vm/SLIMMING.md).
 [[ -n "$VM_HEADLESS" ]] && RUN_ARGS+=(--no-graphics)
+# Extra run flags, space-split (e.g. a device toggle specific to your tart).
+if [[ -n "$VM_RUN_ARGS" ]]; then
+  read -ra _EXTRA_RUN_ARGS <<< "$VM_RUN_ARGS"
+  RUN_ARGS+=("${_EXTRA_RUN_ARGS[@]}")
+fi
 
 echo "==> Starting VM '$VM_NAME'"
 tart run "$VM_NAME" ${RUN_ARGS[@]+"${RUN_ARGS[@]}"} &

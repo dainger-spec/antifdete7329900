@@ -43,8 +43,8 @@ VM (one per profile)
 ## Limitations
 
 - RAM/CPU: a stock VM is heavy, but the RAM is a hard cap set on the host
-  (`tart set --memory`), so it can be driven down — ~2 GB per VM with the base
-  image slimmed (`vm/tuning/`). Concurrency is still bounded by host RAM.
+  (`tart set --memory`), so it can be driven down — ~1.5–2 GB per VM with the
+  base image slimmed (`vm/slim.sh`). Concurrency is still bounded by host RAM.
 - Boot time: snapshots help, but not instant.
 - Apple ID / iCloud inside VMs is manual.
 
@@ -66,10 +66,10 @@ Tart-based prototype in progress:
   `vm/agent/install.sh`. Tested on any platform via the mock backend
   (`vm/agent/test_pbagent.py`).
 
-- **Tuning** (`vm/tuning/`) — RAM/CPU caps via `tart set` (wired into the
-  controller as `VM_MEMORY`/`VM_CPU`/`VM_HEADLESS`), an in-guest
-  service-disabling script (`slim-macos.sh`), disk cleanup (`cleanup-image.sh`)
-  and a memory meter (`measure-ram.sh`).
+- **Slimming** (`vm/slim.sh`, `vm/measure-ram.sh`, docs in `vm/SLIMMING.md`) —
+  RAM/CPU caps via `tart set` (wired into the controller as
+  `VM_MEMORY`/`VM_CPU`/`VM_HEADLESS`, plus a `VM_RUN_ARGS` passthrough), an
+  in-guest service-disabling + disk-cleanup script, and a memory meter.
 
 Agent step 4 of the flow ("request screenshots or send input") currently covers
 navigation and screenshots; richer input (clicks/typing) is future work.
