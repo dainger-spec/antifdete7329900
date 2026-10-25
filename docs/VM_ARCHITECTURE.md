@@ -2,11 +2,11 @@
 
 ## Goal
 
-Each profile runs in a separate macOS VM with real Safari. Sites see genuine WebKit, not a shimmed WKWebView.
+Each profile runs in a separate macOS VM with real Safari.
 
 ## Why
 
-Public WKWebView on macOS cannot emulate iOS Safari. Telemetry, JS behavior, network stack, fonts, and GPU all leak the host. A real Safari inside a VM does not have these contradictions.
+Public WKWebView on macOS has platform-level differences from iOS Safari (telemetry, JS behavior, network stack, fonts, GPU). A real Safari inside a VM avoids these differences.
 
 ## Components
 
@@ -37,7 +37,7 @@ VM (one per profile)
 ## Isolation
 
 - One profile = one VM (or one snapshot).
-- No shared cookies, storage, or fingerprints between VMs.
+- No shared cookies, storage, or state between VMs.
 - Network egress only through the assigned proxy.
 
 ## Limitations
@@ -45,7 +45,6 @@ VM (one per profile)
 - RAM/CPU: each VM needs ~4 GB+. 10 concurrent VMs is heavy.
 - Boot time: snapshots help, but not instant.
 - Apple ID / iCloud inside VMs is manual.
-- Hypervisor tells exist, but browser-level tells do not.
 
 ## Status
 
