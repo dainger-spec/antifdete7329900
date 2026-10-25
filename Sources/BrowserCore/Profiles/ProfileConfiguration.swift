@@ -48,9 +48,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// and the behaviour set, unless `userAgent` overrides the UA. `nil` → the default generation.
     public var deviceGenerationID: String?
 
-    /// Optional concrete device model (`DeviceModels`) for iOS/iPadOS profiles.
-    /// Overrides screen / hardwareConcurrency / deviceMemory / maxTouchPoints when set.
-    /// `nil` → use generation defaults.
+    /// Optional concrete device model (`DeviceModels`) for iOS/iPadOS profiles: the screen
+    /// geometry / hardwareConcurrency / maxTouchPoints the JS device shim declares.
+    /// `nil` → the platform's default model. Ignored for macOS generations.
     public var deviceModelID: String?
 
     public init(startURL: URL? = nil,
@@ -89,8 +89,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// The resolved generation (default if none/unknown is stored).
     public var deviceGeneration: DeviceGeneration { DeviceGenerations.resolved(id: deviceGenerationID) }
 
-    /// Resolved device model, if any.
-    public var deviceModel: DeviceModel? { DeviceModels.model(id: deviceModelID) }
+    /// Resolved device model, if any. `nil` for macOS generations and when the stored model
+    /// belongs to a different platform than the generation (stale after switching generations).
+    public var deviceModel: DeviceModel? { DeviceModels.model(id: deviceModelID, platform: deviceGeneration.platform) }
 
     /// The User-Agent actually applied: an explicit `userAgent` override wins; otherwise the
     /// selected generation's UA. `nil` means use the WebKit default.

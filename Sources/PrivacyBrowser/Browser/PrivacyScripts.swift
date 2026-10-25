@@ -2,47 +2,64 @@ import BrowserCore
 import Foundation
 import WebKit
 
-/// JavaScript shims for settings WebKit has no native per-web-view API for.
-/// Aggressive iOS-like spoofing driven by DeviceGeneration + optional DeviceModel.
-/// Still best-effort and detectable; not engine-level.
+/// JavaScript shims for settings WebKit has no native per-web-view API for:
+/// time zone, geolocation, WebRTC, and — for iOS/iPadOS device generations only — the
+/// self-declared device signals (`navigator.platform`, screen geometry, …).
+///
+/// PLATFORM LIMITATION — these are approximations, not engine-level enforcement:
+///   * Injected as a `WKUserScript` at document start into every frame (`forMainFrameOnly: false`)
+///     in the `.page` content world, i.e. they modify the objects the page sees.
+///   * Not applied inside Web Workers, Shared Workers, or Service Workers: WebKit does not
+///     inject user scripts there. Worker code sees the host time zone, the real
+///     `navigator.hardwareConcurrency`/`platform`, and has `Intl`/`Date` unpatched.
+///   * A page can detect the patches (e.g. `Function.prototype.toString` on patched functions,
+///     timing, property descriptors, or comparing canvas `getImageData` with `toDataURL`).
+///     They reduce what passive scripts learn; they do not hide the fact that a shim exists.
+///   * Child browsing contexts that the page reaches via `contentWindow`/`contentDocument`
+///     or `window.open` are patched synchronously on access. Access paths that bypass those
+///     getters (e.g. `window.frames[0]`, `window[0]`) can reach an unpatched about:blank frame
+///     before WebKit injects scripts into it.
+///   * The HTTP `Accept-Language` header and `navigator.language(s)` follow the system
+///     language; WKWebView has no public per-view override, so the shim leaves them alone
+///     (overriding only the JS side would contradict the header).
+///
+/// FINGERPRINTING LIMITATION — the device shims (`isIOS`) only change what the page *reads*:
+///   * macOS generations get no device shim at all: such a profile is genuinely Safari on this
+///     Mac, and every signal stays native and consistent.
+///   * iOS/iPadOS generations declare an iPhone/iPad in `navigator.platform`, `maxTouchPoints`,
+///     `hardwareConcurrency` and `screen`/`devicePixelRatio` (from the optional `DeviceModel`),
+///     and perturb canvas `getImageData` and the WebGL vendor/renderer strings. The real
+///     GPU, fonts, touch events, TLS fingerprint, codec and feature set still say "desktop
+///     WebKit"; see docs/ISOLATION_AND_LIMITATIONS.md §2. Only properties Safari actually
+///     exposes are touched: Safari has no `navigator.deviceMemory` or `navigator.connection`,
+///     so the shim does not add them (that would be a tell, not a disguise).
 enum PrivacyScripts {
     struct ShimConfiguration: Encodable {
         var timeZone: String?
         var geolocation: Geolocation
         var webRTC: String
-        var platform: String
-        var vendor: String
-        var hardwareConcurrency: Int
-        var deviceMemory: Double
-        var maxTouchPoints: Int
-        var languages: [String]
-        var screenWidth: Int
-        var screenHeight: Int
-        var devicePixelRatio: Double
+        /// Device shims are applied only when true (iOS/iPadOS generation).
         var isIOS: Bool
-        var connectionEffectiveType: String
-        var connectionDownlink: Double
+        var device: Device?
 
         struct Geolocation: Encodable {
-            var mode: String
+            var mode: String // "deny" | "fixed"
             var latitude: Double?
             var longitude: Double?
             var accuracy: Double?
         }
+
+        struct Device: Encodable {
+            var platform: String // "iPhone" | "iPad"
+            var hardwareConcurrency: Int
+            var maxTouchPoints: Int
+            var screenWidth: Int
+            var screenHeight: Int
+            var devicePixelRatio: Double
+        }
     }
 
     static func shimConfiguration(for configuration: ProfileConfiguration) -> ShimConfiguration {
-        let gen = configuration.deviceGeneration
-        let isIOS = gen.platform == .iOS || gen.platform == .iPadOS
-        let model = configuration.deviceModel
-
-        let screenWidth = model?.screenWidth ?? (isIOS ? 390 : 1440)
-        let screenHeight = model?.screenHeight ?? (isIOS ? 844 : 900)
-        let dpr = model?.devicePixelRatio ?? (isIOS ? 3 : 2)
-        let cores = model?.hardwareConcurrency ?? (isIOS ? 6 : 8)
-        let mem = model?.deviceMemory ?? (isIOS ? 4 : 8)
-        let touch = model?.maxTouchPoints ?? (isIOS ? 5 : 0)
-
         let geolocation: ShimConfiguration.Geolocation
         switch configuration.geolocation {
         case .deny:
@@ -51,23 +68,25 @@ enum PrivacyScripts {
             geolocation = .init(mode: "fixed", latitude: latitude, longitude: longitude, accuracy: accuracy)
         }
 
-        return ShimConfiguration(
-            timeZone: configuration.timeZoneIdentifier,
-            geolocation: geolocation,
-            webRTC: configuration.webRTCPolicy.rawValue,
-            platform: isIOS ? (gen.platform == .iPadOS ? "iPad" : "iPhone") : "MacIntel",
-            vendor: "Apple Computer, Inc.",
-            hardwareConcurrency: cores,
-            deviceMemory: mem,
-            maxTouchPoints: touch,
-            languages: ["en-US", "en"],
-            screenWidth: screenWidth,
-            screenHeight: screenHeight,
-            devicePixelRatio: dpr,
-            isIOS: isIOS,
-            connectionEffectiveType: "4g",
-            connectionDownlink: isIOS ? 10 : 50
-        )
+        let generation = configuration.deviceGeneration
+        var device: ShimConfiguration.Device?
+        if generation.platform == .iOS || generation.platform == .iPadOS {
+            // `deviceModel` is nil when the stored model belongs to another platform, so an
+            // iPad model can't leak into an iPhone profile; fall back to a plain generation default.
+            let model = configuration.deviceModel ?? DeviceModels.defaultModel(for: generation.platform)
+            device = .init(platform: generation.platform == .iPadOS ? "iPad" : "iPhone",
+                           hardwareConcurrency: model.hardwareConcurrency,
+                           maxTouchPoints: model.maxTouchPoints,
+                           screenWidth: model.screenWidth,
+                           screenHeight: model.screenHeight,
+                           devicePixelRatio: model.devicePixelRatio)
+        }
+
+        return ShimConfiguration(timeZone: configuration.timeZoneIdentifier,
+                                 geolocation: geolocation,
+                                 webRTC: configuration.webRTCPolicy.rawValue,
+                                 isIOS: device != nil,
+                                 device: device)
     }
 
     static func makeUserContentController(for configuration: ProfileConfiguration) -> WKUserContentController {
@@ -80,10 +99,13 @@ enum PrivacyScripts {
     }
 
     static func source(for configuration: ProfileConfiguration) -> String {
+        // JSON is a subset of JS, so the encoded configuration is a safe literal: no string
+        // concatenation of user-provided values into code.
         let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration)), encoding: .utf8)) ?? "{}"
         return "(function (CONFIG) {\n" + shimBody + "\n})(" + json + ");"
     }
 
+    // BEGIN SHIM (extracted by scripts/test-shims.mjs for testing under Node)
     static let shimBody = #"""
 'use strict';
 const patched = new WeakSet();
@@ -91,13 +113,10 @@ const patched = new WeakSet();
 function patchWindow(w) {
   if (!w || patched.has(w)) return;
   patched.add(w);
-  try { patchNavigator(w); } catch (e) {}
-  try { patchScreen(w); } catch (e) {}
-  try { patchConnection(w); } catch (e) {}
-  if (CONFIG.isIOS) {
+  if (CONFIG.isIOS && CONFIG.device) {
+    try { patchNavigator(w, CONFIG.device); } catch (e) {}
+    try { patchScreen(w, CONFIG.device); } catch (e) {}
     try { patchCanvasWebGL(w); } catch (e) {}
-    try { patchFonts(w); } catch (e) {}
-    try { patchAudio(w); } catch (e) {}
   }
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
@@ -105,99 +124,73 @@ function patchWindow(w) {
   try { hookChildWindows(w); } catch (e) {}
 }
 
-function patchNavigator(w) {
+// ------------------------------------------------------- device (iOS/iPadOS generations)
+// Only the properties iOS Safari really exposes. `vendor` is already "Apple Computer, Inc."
+// on macOS WebKit; `language(s)` are left native (see the header comment).
+function patchNavigator(w, device) {
   const nav = w.navigator;
   if (!nav) return;
-  const define = (obj, prop, val) => Object.defineProperty(obj, prop, { value: val, writable: false, configurable: false });
-  define(nav, 'platform', CONFIG.platform);
-  define(nav, 'vendor', CONFIG.vendor);
-  define(nav, 'hardwareConcurrency', CONFIG.hardwareConcurrency);
-  define(nav, 'deviceMemory', CONFIG.deviceMemory);
-  define(nav, 'maxTouchPoints', CONFIG.maxTouchPoints);
-  define(nav, 'languages', Object.freeze(CONFIG.languages.slice()));
-  define(nav, 'language', CONFIG.languages[0]);
-  if (CONFIG.isIOS) {
-    define(nav, 'standalone', false);
-  }
+  define(nav, 'platform', device.platform);
+  define(nav, 'hardwareConcurrency', device.hardwareConcurrency);
+  define(nav, 'maxTouchPoints', device.maxTouchPoints);
+  define(nav, 'standalone', false); // iOS-only property (home-screen web app?)
 }
 
-function patchScreen(w) {
+function patchScreen(w, device) {
   const s = w.screen;
-  if (!s) return;
-  Object.defineProperty(s, 'width', { value: CONFIG.screenWidth, writable: false });
-  Object.defineProperty(s, 'height', { value: CONFIG.screenHeight, writable: false });
-  Object.defineProperty(s, 'availWidth', { value: CONFIG.screenWidth, writable: false });
-  Object.defineProperty(s, 'availHeight', { value: CONFIG.screenHeight, writable: false });
-  Object.defineProperty(w, 'devicePixelRatio', { value: CONFIG.devicePixelRatio, writable: false });
+  if (s) {
+    define(s, 'width', device.screenWidth);
+    define(s, 'height', device.screenHeight);
+    define(s, 'availWidth', device.screenWidth);
+    define(s, 'availHeight', device.screenHeight);
+  }
+  define(w, 'devicePixelRatio', device.devicePixelRatio);
 }
 
-function patchConnection(w) {
-  const nav = w.navigator;
-  if (!nav) return;
-  const conn = {
-    effectiveType: CONFIG.connectionEffectiveType,
-    downlink: CONFIG.connectionDownlink,
-    rtt: 50,
-    saveData: false,
-    type: 'cellular'
-  };
-  Object.defineProperty(nav, 'connection', { value: conn, writable: false, configurable: false });
-}
-
+// Canvas: perturbs the least-significant channel bits of getImageData so that two profiles
+// do not return byte-identical pixels. toDataURL/toBlob are NOT perturbed, so comparing the
+// two reveals the shim; the goal is to stop passive linking, not to survive an active check.
+// WebGL: only the debug vendor/renderer strings; everything the GPU measures stays real.
 function patchCanvasWebGL(w) {
   const proto = w.HTMLCanvasElement && w.HTMLCanvasElement.prototype;
-  if (proto && proto.getContext) {
-    const orig = proto.getContext;
-    proto.getContext = function (type, attrs) {
-      const ctx = orig.apply(this, arguments);
-      if (type === '2d' && ctx) {
-        const origToData = ctx.getImageData;
-        ctx.getImageData = function () {
-          const data = origToData.apply(this, arguments);
-          // Deterministic-ish noise based on length
-          const seed = data.data.length % 7;
-          for (let i = 0; i < data.data.length; i += 4) data.data[i] = (data.data[i] + seed) & 255;
-          return data;
-        };
+  const wrappedContexts = new WeakSet();
+  if (proto && typeof proto.getContext === 'function') {
+    const origGetContext = proto.getContext;
+    define(proto, 'getContext', function getContext(type) {
+      const ctx = origGetContext.apply(this, arguments);
+      // getContext returns the same object every time; wrap it once, not once per call.
+      if (type === '2d' && ctx && !wrappedContexts.has(ctx) && typeof ctx.getImageData === 'function') {
+        wrappedContexts.add(ctx);
+        const origGetImageData = ctx.getImageData;
+        define(ctx, 'getImageData', function getImageData() {
+          const image = origGetImageData.apply(this, arguments);
+          const px = image && image.data;
+          if (!px || px.length === 0) return image;
+          const seed = (px.length % 7) + 1;
+          for (let i = 0; i < px.length; i += 4) px[i] = (px[i] + seed) & 255;
+          return image;
+        });
       }
       return ctx;
-    };
+    });
   }
-  if (w.WebGLRenderingContext) {
-    const getParam = w.WebGLRenderingContext.prototype.getParameter;
-    w.WebGLRenderingContext.prototype.getParameter = function (p) {
-      if (p === 37445) return 'Apple Inc.';
-      if (p === 37446) return 'Apple GPU';
-      return getParam.apply(this, arguments);
-    };
-  }
-}
-
-function patchFonts(w) {
-  if (w.document && w.document.fonts) {
-    try {
-      Object.defineProperty(w.document.fonts, 'size', { value: 12, writable: false });
-    } catch (e) {}
+  for (const name of ['WebGLRenderingContext', 'WebGL2RenderingContext']) {
+    const Ctor = w[name];
+    if (!Ctor || !Ctor.prototype || typeof Ctor.prototype.getParameter !== 'function') continue;
+    const origGetParameter = Ctor.prototype.getParameter;
+    define(Ctor.prototype, 'getParameter', function getParameter(p) {
+      if (p === 0x9245) return 'Apple Inc.'; // UNMASKED_VENDOR_WEBGL
+      if (p === 0x9246) return 'Apple GPU';  // UNMASKED_RENDERER_WEBGL
+      return origGetParameter.apply(this, arguments);
+    });
   }
 }
 
-function patchAudio(w) {
-  if (!w.AudioContext && !w.webkitAudioContext) return;
-  const AC = w.AudioContext || w.webkitAudioContext;
-  if (AC.prototype.createAnalyser) {
-    const origCreate = AC.prototype.createAnalyser;
-    AC.prototype.createAnalyser = function () {
-      const analyser = origCreate.apply(this, arguments);
-      const origGet = analyser.getFloatFrequencyData;
-      analyser.getFloatFrequencyData = function (array) {
-        origGet.apply(this, arguments);
-        for (let i = 0; i < array.length; i++) array[i] += (Math.random() - 0.5) * 0.0001;
-      };
-      return analyser;
-    };
-  }
-}
-
+// ---------------------------------------------------------------- time zone
+// Covers: Intl.DateTimeFormat default zone (and everything built on it), Date local-time
+// getters, getTimezoneOffset, toString/toDateString/toTimeString, toLocale*String.
+// Not covered: Date constructed from local components (new Date(y, m, d)), Date.parse of
+// strings without an offset, and local setters (setHours, …) — these still use the host zone.
 function patchTimeZone(w, TZ) {
   const NativeDate = w.Date;
   const proto = NativeDate.prototype;
@@ -300,6 +293,7 @@ function patchTimeZone(w, TZ) {
   define(w.Intl, 'DateTimeFormat', DateTimeFormat);
 }
 
+// -------------------------------------------------------------- geolocation
 function patchGeolocation(w, geo) {
   const nav = w.navigator;
   if (!nav || !nav.geolocation) return;
@@ -344,6 +338,7 @@ function patchGeolocation(w, geo) {
   }
 }
 
+// ------------------------------------------------------------------- WebRTC
 function patchWebRTC(w, policy) {
   if (policy === 'unrestricted') return;
   const names = ['RTCPeerConnection', 'webkitRTCPeerConnection'];
@@ -355,6 +350,7 @@ function patchWebRTC(w, policy) {
     }
     return;
   }
+  // relayOnly: no host / server-reflexive candidates are gathered.
   const Native = w.RTCPeerConnection;
   if (!Native) return;
   const forceRelay = (config) => Object.assign({}, config, { iceTransportPolicy: 'relay' });
@@ -373,6 +369,7 @@ function patchWebRTC(w, policy) {
   }
 }
 
+// ----------------------------------------------------------- child windows
 function hookChildWindows(w) {
   const hook = (Ctor, prop, toWindow) => {
     if (!Ctor) return;
@@ -382,7 +379,7 @@ function hookChildWindows(w) {
       configurable: true, enumerable: descriptor.enumerable,
       get: function () {
         const value = descriptor.get.call(this);
-        try { patchWindow(toWindow(value)); } catch (e) {}
+        try { patchWindow(toWindow(value)); } catch (e) {} // cross-origin: inaccessible, and gets its own injection
         return value;
       }
     });
@@ -407,4 +404,5 @@ function define(target, name, value) {
 
 patchWindow(window);
 """#
+    // END SHIM
 }

@@ -1,7 +1,12 @@
 import Foundation
 
-/// Concrete device models used for iOS/iPadOS fingerprint consistency.
-/// Values are approximate real-device numbers (screen, dpr, cores, memory).
+/// Concrete device models for iOS/iPadOS generations: the self-declared screen geometry and
+/// hardware counts the JS device shim reports (`PrivacyScripts`). Values are approximate
+/// public numbers for the real devices. This is labelling only — see
+/// docs/ISOLATION_AND_LIMITATIONS.md §2 for what a model can and cannot change.
+///
+/// `deviceMemory` is kept for completeness of the catalog but is NOT exposed to pages:
+/// Safari has no `navigator.deviceMemory`, so reporting one would contradict the UA.
 public struct DeviceModel: Identifiable, Equatable, Sendable {
     public let id: String
     public let name: String
@@ -59,5 +64,21 @@ public enum DeviceModels {
     public static func model(id: String?) -> DeviceModel? {
         guard let id else { return nil }
         return all.first { $0.id == id }
+    }
+
+    /// The model with `id`, but only if it belongs to `platform`. A profile whose generation
+    /// was switched (iPad → iPhone) keeps a stale `deviceModelID`; this keeps an iPad screen
+    /// from being declared by an iPhone profile.
+    public static func model(id: String?, platform: DeviceGeneration.Platform) -> DeviceModel? {
+        guard let model = model(id: id), model.platform == platform else { return nil }
+        return model
+    }
+
+    /// What an iOS/iPadOS profile declares when no model is chosen (the first of its platform).
+    /// macOS has no models: those profiles report the real machine.
+    public static func defaultModel(for platform: DeviceGeneration.Platform) -> DeviceModel {
+        forPlatform(platform).first ?? DeviceModel(id: "generic-\(platform)", name: "Generic", platform: platform,
+                                                   screenWidth: 390, screenHeight: 844, devicePixelRatio: 3,
+                                                   hardwareConcurrency: 6, deviceMemory: 4, maxTouchPoints: 5)
     }
 }

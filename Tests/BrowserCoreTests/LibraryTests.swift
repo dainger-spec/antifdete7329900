@@ -251,3 +251,39 @@ final class DeviceGenerationTests: XCTestCase {
         XCTAssertEqual(old.deviceGeneration.id, DeviceGenerations.defaultID)
     }
 }
+
+final class DeviceModelTests: XCTestCase {
+    func testCatalogIsPerPlatformAndMacHasNone() {
+        XCTAssertFalse(DeviceModels.forPlatform(.iOS).isEmpty)
+        XCTAssertFalse(DeviceModels.forPlatform(.iPadOS).isEmpty)
+        XCTAssertTrue(DeviceModels.forPlatform(.macOS).isEmpty, "macOS profiles report the real machine")
+        XCTAssertEqual(Set(DeviceModels.all.map(\.id)).count, DeviceModels.all.count, "ids are unique")
+        for platform in [DeviceGeneration.Platform.iOS, .iPadOS] {
+            XCTAssertEqual(DeviceModels.defaultModel(for: platform).platform, platform)
+        }
+    }
+
+    func testModelLookupIsPlatformChecked() {
+        XCTAssertEqual(DeviceModels.model(id: "ipad-air", platform: .iPadOS)?.id, "ipad-air")
+        XCTAssertNil(DeviceModels.model(id: "ipad-air", platform: .iOS), "an iPad model must not apply to an iPhone profile")
+        XCTAssertNil(DeviceModels.model(id: "nope", platform: .iOS))
+        XCTAssertNil(DeviceModels.model(id: nil, platform: .iOS))
+    }
+
+    func testConfigurationResolvesModelAgainstItsGeneration() throws {
+        var config = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: "ipados-26"))
+        config.deviceModelID = "ipad-air"
+        XCTAssertEqual(config.deviceModel?.id, "ipad-air")
+        // Switching the generation to iPhone leaves a stale iPad id behind: it must resolve to nil.
+        config.deviceGenerationID = "ios-26"
+        XCTAssertNil(config.deviceModel)
+        // A macOS generation never has a model, whatever is stored.
+        config.deviceGenerationID = DeviceGenerations.defaultID
+        XCTAssertNil(config.deviceModel)
+        // The id round-trips and old configs decode without it.
+        let decoded = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: JSONCoding.encoder.encode(config))
+        XCTAssertEqual(decoded.deviceModelID, "ipad-air")
+        let legacy = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(#"{"ephemeral":false}"#.utf8))
+        XCTAssertNil(legacy.deviceModelID)
+    }
+}

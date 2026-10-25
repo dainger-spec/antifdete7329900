@@ -14,7 +14,13 @@ This is a prototype. The core has unit tests, and the app is checked end-to-end 
 real WebKit in CI. It has not had a security review, and some features are
 approximations limited by what WebKit exposes. The tables below say which parts are which.
 
-**Fingerprint spoofing note (2026-10-25):** iOS/iPadOS DeviceGeneration profiles now apply aggressive JS shims for navigator properties, screen geometry, canvas/WebGL noise, basic font and AudioContext noise. This is the practical maximum on public WKWebView. It does **not** achieve true iStealth-style engine-level iOS fidelity (TLS, real GPU, fonts, touch remain partially Mac and detectable).
+**About the iOS/iPadOS profiles:** they are labelling, not emulation. The generation sets an
+iPhone/iPad User-Agent and a JavaScript *device shim* that changes the values a page *reads*
+(`navigator.platform`, touch points, screen geometry, a canvas read-back, the WebGL vendor
+strings). Everything the engine and hardware *measure* — GPU output, fonts, touch events,
+codecs, TLS — is still this Mac, and the shim itself is detectable. macOS profiles get no
+shim at all. Details and the exact list in
+[docs/ISOLATION_AND_LIMITATIONS.md §2](docs/ISOLATION_AND_LIMITATIONS.md).
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, key hierarchy, on-disk layout, lifecycles, tabs, testing
 - [docs/ISOLATION_AND_LIMITATIONS.md](docs/ISOLATION_AND_LIMITATIONS.md): what is isolated, what leaks, fingerprinting, App Sandbox, verified results
@@ -73,7 +79,7 @@ PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 50 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 53 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, HTTP CONNECT and SOCKS5 proxies, fail-closed, tabs,
   history, bookmarks, the device-generation UA path, crash-recovery sealing, and the
@@ -86,8 +92,9 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 2. Use **＋** to create a profile and set its device/version, start URL, proxy, user agent,
    time zone, geolocation, WebRTC policy, history recording and retention, and whether it is
    ephemeral. Changes apply at the next launch. The **Device / version** picker tags the
-   profile with a target Apple OS version (macOS 26, iOS 26/27, iPadOS 26); iOS profiles now
-   also apply JS navigator/screen/canvas/WebGL/font/audio shims (see note above).
+   profile with a target Apple OS version (macOS 26, iOS 26/27, iPadOS 26). iOS/iPadOS
+   generations can also pick a **Device model** (iPhone 15/16/16 Pro/SE, iPad Pro 11"/Air),
+   which drives the device shim's declared screen and hardware values (see the note above).
 3. **Launch** opens a window for the profile. Profiles run side by side, and every window
    and tab is labelled with its profile. Closing a profile's last window stops that profile
    and returns you to the Profiles window; the app stays open.
@@ -121,7 +128,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Per-profile history | Encrypted `HistoryStore`: coalesced per URL, search, clear ranges, retention, cap; records committed and same-document navigations; credentials and fragments stripped |
 | Per-profile bookmarks | Encrypted `BookmarkStore`: folders, ordering, edit; star toggle, bookmarks menu, Library window |
 | Per-profile proxy (SOCKS5, HTTP CONNECT, HTTPS-to-proxy, auth, bypass list) | `WKWebsiteDataStore.proxyConfigurations`, `allowFailover = false`. **CONNECT tunnelling, SOCKS5 remote DNS and fail-closed verified by the self-test** |
-| Version-aware profiles | **Device / version** picker (`DeviceGeneration`): macOS 26 / iOS 26 / iOS 27 / iPadOS 26. Sets the self-declared `User-Agent` and defaults, and names a behaviour set. iOS profiles additionally inject navigator/screen/canvas/WebGL/font/audio shims. Does **not** switch the real WebKit core. |
+| Version-aware profiles | **Device / version** picker (`DeviceGeneration`) + **Device model** (`DeviceModel`): macOS 26 / iOS 26 / iOS 27 / iPadOS 26. Sets the self-declared `User-Agent` and defaults, names a behaviour set; iOS/iPadOS generations add the JS device shim (declared values only). Does **not** switch the real WebKit core; macOS profiles stay fully native |
 | Per-profile user agent | `WKWebView.customUserAgent` (an explicit UA overrides the generation) |
 | Russian / English UI | `Localizable.strings` (ru default, en fallback), deterministic bundle lookup |
 | Stable window lifecycle | closing a profile window never quits or crashes the app (use-after-free fixed); verified by the self-test |
@@ -138,13 +145,17 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Time zone | JS shim (`Intl`, `Date` getters, offsets, string forms) | Not in workers; local-component constructors, setters and `Date.parse` use the host zone; detectable |
 | Geolocation | JS shim: deny (default) or fixed coordinates | Detectable; the IP address reveals location unless the proxy matches |
 | WebRTC leak reduction | JS shim: remove `RTCPeerConnection` (default) or force relay-only | No engine switch; WebRTC UDP never uses the proxy; `window.frames[i]` gap |
-| Navigator / screen / canvas / WebGL / fonts / audio (iOS profiles) | Document-start JS shims | Not in workers; detectable; GPU/TLS/fonts still partially Mac |
+| Declared device (iOS/iPadOS profiles) | JS device shim: `navigator.platform`/`maxTouchPoints`/`hardwareConcurrency`/`standalone`, `screen`, `devicePixelRatio`, canvas `getImageData` perturbation, WebGL vendor/renderer strings | Not in workers; detectable (`toDataURL` vs `getImageData`, viewport vs screen); GPU, fonts, touch, codecs, TLS still Mac; no `deviceMemory`/`connection`/`languages` on purpose |
 | Password autofill | Explicit buttons in an isolated JS world | No automatic form detection; main frame only |
 
 ### Not implemented / limited
 
-- True engine-level iOS WebKit (private APIs or bundled core required). TLS ClientHello, real GPU renderer, full font set, touch behavior remain Mac.
-- Per-profile `Accept-Language` header (JS navigator.language is spoofed).
+- **Device emulation:** no engine-level iOS WebKit (would need private APIs or a bundled core).
+  Rendered canvas/WebGL pixels, audio, fonts, touch behaviour, codecs and the TLS fingerprint
+  are the host Mac's in every profile; two profiles of this app share them and can be linked.
+  See §2 of the limitations doc for exactly what the iOS device shim does and doesn't change.
+- Per-profile `Accept-Language` / `navigator.language` (no WKWebView API; deliberately not
+  half-spoofed in JS).
 - Sync server (only the client and its API spec), syncing of WebKit website data, and
   per-entry merging of passwords (concurrent edits keep the remote version plus a
   `.conflict` copy).

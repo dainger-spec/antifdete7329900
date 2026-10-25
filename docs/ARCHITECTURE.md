@@ -188,8 +188,13 @@ configs read as the default generation).
 - `BehaviorSets` (app layer) is the extension point for future WebKit versions: today all
   generations map to the current `PrivacyScripts` shims. Adding a new behaviour set and a new
   generation that points at it needs no change to the profile format or call sites.
-- This is version *labelling* (self-declared UA + defaults), not core switching. Public APIs
-  cannot load a different WebKit build; see ISOLATION_AND_LIMITATIONS §2.
+- iOS/iPadOS generations may carry a `deviceModelID` (`DeviceModels`: screen geometry, touch
+  points, core count). `ProfileConfiguration.deviceModel` resolves it only when the model's
+  platform matches the generation, so a stale id from a switched generation is ignored.
+  `PrivacyScripts.shimConfiguration` turns the generation + model into the `isIOS`/`device`
+  part of the shim config; macOS generations produce no device shim.
+- This is version *labelling* (self-declared UA, defaults, declared device values), not core
+  switching. Public APIs cannot load a different WebKit build; see ISOLATION_AND_LIMITATIONS §2.
 
 ## Testing
 

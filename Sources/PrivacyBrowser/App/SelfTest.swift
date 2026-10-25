@@ -369,14 +369,22 @@ final class SelfTest {
     /// User-Agent to `navigator.userAgent` through the normal session → tab wiring, and an
     /// explicit custom UA must still win.
     private func deviceGenerations(_ repository: ProfileRepository) async throws {
-        func userAgent(for configuration: ProfileConfiguration) async throws -> String? {
+        func evaluate(_ script: String, for configuration: ProfileConfiguration) async throws -> Any? {
             let profile = try repository.create(name: "Gen \(UUID().uuidString.prefix(4))", configuration: configuration)
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
             defer { session.shutDown() }
             let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
-            return try await js(tab.webView, "return navigator.userAgent;") as? String
+            return try await js(tab.webView, script)
         }
+        func userAgent(for configuration: ProfileConfiguration) async throws -> String? {
+            try await evaluate("return navigator.userAgent;", for: configuration) as? String
+        }
+        // What the device shim declares, in one JS round trip.
+        let deviceProbe = """
+            return [navigator.platform, navigator.maxTouchPoints, screen.width, devicePixelRatio,
+                    'connection' in navigator, 'deviceMemory' in navigator].join('|');
+            """
 
         let iosUA = try await userAgent(for: .forGeneration(DeviceGenerations.resolved(id: "ios-26")))
         check("generation: iOS 26 UA reaches navigator.userAgent",
@@ -391,6 +399,28 @@ final class SelfTest {
         let overrideUA = try await userAgent(for: override)
         check("generation: explicit user agent overrides the generation",
               overrideUA == "PrivacyBrowserSelfTest/UA-Override", overrideUA ?? "nil")
+
+        // Device shim: an iOS profile with a chosen model declares that model under JavaScriptCore,
+        // and does not invent navigator APIs Safari lacks.
+        var iphone = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: "ios-26"))
+        iphone.deviceModelID = "iphone-16-pro"
+        let iphoneProbe = try await evaluate(deviceProbe, for: iphone) as? String
+        check("device shim: iOS profile declares iPhone 16 Pro (platform, touch, screen, dpr; no connection/deviceMemory)",
+              iphoneProbe == "iPhone|5|402|3|false|false", iphoneProbe ?? "nil")
+
+        // A stale iPad model on an iPhone generation falls back to the iPhone default, never iPad.
+        var stale = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: "ios-26"))
+        stale.deviceModelID = "ipad-air"
+        let staleProbe = try await evaluate(deviceProbe, for: stale) as? String
+        let iphoneDefault = DeviceModels.defaultModel(for: .iOS)
+        check("device shim: iPad model on an iPhone generation falls back to the iPhone default",
+              staleProbe == "iPhone|5|\(iphoneDefault.screenWidth)|\(Int(iphoneDefault.devicePixelRatio))|false|false", staleProbe ?? "nil")
+
+        // macOS profiles get no device shim at all: platform and screen are the real machine's.
+        let macProbe = try await evaluate("return [navigator.platform, 'standalone' in navigator, 'connection' in navigator].join('|');",
+                                          for: .forGeneration(DeviceGenerations.resolved(id: DeviceGenerations.defaultID))) as? String
+        check("device shim: macOS profile stays native (MacIntel, no iOS-only or Chrome-only navigator props)",
+              macProbe == "MacIntel|false|false", macProbe ?? "nil")
     }
 
     // MARK: Crash recovery sealing (regression for the post-unlock crash)

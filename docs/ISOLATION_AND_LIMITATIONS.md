@@ -4,15 +4,11 @@ This document lists what is isolated, what is only approximated, and what is not
 addressed. It also gives a way to verify each claim on your own machine. The code
 comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back here.
 
-**Update 2026-10-25:** iOS/iPadOS profiles now apply aggressive document-start JS shims
-(navigator, screen, canvas/WebGL noise, fonts, audio, connection). This is the practical
-maximum on public WKWebView. It does **not** achieve engine-level iOS fidelity. See §2.
-
 ## 0. What is verified automatically
 
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 15 runner) for both the sandboxed and the unsandboxed build, with a local
-test proxy (`scripts/selftest_proxy.py`). Last observed results (macOS 15.7, 50/50 checks
+test proxy (`scripts/selftest_proxy.py`). Last observed results (macOS 15.7, 53/53 checks
 in both builds):
 
 | Claim | Self-test result |
@@ -29,6 +25,7 @@ in both builds):
 | Window lifecycle (crash fix) | closing one of two windows keeps the profile running; closing the last reports "all closed" once, on a later run-loop turn; `shutDown()` twice is safe |
 | Crash-recovery sealing | leftover website data from a crashed run is archived and deleted WITHOUT `WKWebsiteDataStore.remove(forIdentifier:)` (which aborted on an unknown id), then restores cleanly |
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
+| Device shim (iOS generations) | an iOS profile with a model declares it under JavaScriptCore (`platform`, `maxTouchPoints`, `screen`, `devicePixelRatio`) and invents no `navigator.connection`/`deviceMemory`; a stale iPad model on an iPhone generation falls back to the iPhone default; a macOS profile stays fully native |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
 
 Run it yourself: `build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test`. For the
@@ -57,48 +54,115 @@ Background tabs keep running. WebKit may throttle timers in views that aren't in
 | Shared | Why | Effect |
 |---|---|---|
 | WebKit networking process | WebKit runs one network process per app, with one session per data store inside it | Isolation is per session (logical), not per OS process |
-| Device fingerprint (partial) | see §2 | JS shims reduce some signals; GPU/TLS/fonts still linkable |
+| Device fingerprint | see §2 | Profiles can be linked by fingerprinting; the iOS device shim changes declared values only |
 | Downloads folder | Downloads go to `~/Downloads` in plaintext | Outside the encrypted storage |
 
 ## 2. Fingerprinting and "Apple device" consistency
 
-**Short answer:** every profile runs on the macOS system WebKit. iOS/iPadOS profiles now
-inject aggressive JS shims that override navigator properties, screen geometry, canvas/WebGL
-(with noise), basic fonts, audio analyser, and `navigator.connection`. This is the practical
-maximum with public APIs. It is **not** a genuine iPhone. GPU, TLS ClientHello, full font set,
-touch behaviour, and many timing signals still identify the host Mac. Sites with strong
-fingerprinting will still detect it.
+**Short answer:** every profile runs on the macOS system WebKit, so to a site it *is* Safari-on-a-Mac.
+A **macOS** generation leaves that untouched: it is genuine, not emulated, and every signal is
+consistent. An **iOS/iPadOS** generation adds a document-start JavaScript *device shim* that
+changes what the page *reads* (`navigator.platform`, touch points, screen geometry, canvas
+bytes, WebGL vendor strings) to match the declared iPhone/iPad. It does not change what the
+engine and the hardware *measure*. This is labelling plus JS overrides, not device emulation,
+and it is detectable. The project does not claim otherwise.
 
-### What is now spoofed via JS (iOS profiles)
+### What the public WKWebView / WebKit APIs let a profile control
 
-| Attribute | Mechanism | Notes |
+| Attribute | Mechanism | Reach |
 |---|---|---|
-| User-Agent | native `customUserAgent` + generation | string only |
-| navigator.platform / vendor / hardwareConcurrency / deviceMemory / maxTouchPoints / languages | JS defineProperty | main frame + hooked children |
-| screen width/height / devicePixelRatio | JS | driven by DeviceModel if set |
-| navigator.connection | JS | effectiveType / downlink |
-| Canvas 2D getImageData | JS noise | deterministic-ish, detectable |
-| WebGL UNMASKED_VENDOR / RENDERER | JS getParameter override | "Apple Inc." / "Apple GPU" |
-| document.fonts.size | JS | crude |
-| AudioContext analyser | JS noise on getFloatFrequencyData | minimal |
-| Time zone / geolocation / WebRTC | existing shims | see below |
+| Storage (cookies, localStorage, IndexedDB, cache, service workers) | `WKWebsiteDataStore(forIdentifier:)` | native, complete |
+| Egress IP and DNS | `proxyConfigurations` (SOCKS5 remote DNS, fail-closed) | native, verified |
+| User-Agent string (HTTP header + `navigator.userAgent`) | `customUserAgent` | native; changes the string only |
+| Time zone | JS shim (`Intl`, `Date` getters, offsets) | approximation; not in workers |
+| Geolocation | JS shim (deny / fixed coordinates) | approximation |
+| WebRTC exposure | JS shim (removed / relay-only) | approximation |
+| Declared device (iOS/iPadOS generations only) | JS device shim, see below | approximation; not in workers; detectable |
+
+Keep the declared attributes consistent with each other: a Safari UA, plus a time zone and
+geolocation that match the proxy's exit location. An inconsistent combination, such as a
+Chrome UA on WebKit or a Tokyo time zone behind a Paris exit, is itself distinctive.
+
+### Version-aware profiles (device generations and models)
+
+Projects like iStealth tie a profile to a specific OS version and swap the browser *core*
+when Apple ships a new one. With public APIs we can do the version *tagging* but not the
+core swap. A profile carries a **device generation** (`DeviceGeneration` /
+`DeviceGenerations` in `BrowserCore`): a target Apple OS version — currently macOS 26,
+iOS 26, iOS 27, iPadOS 26 — chosen with the **Device / version** picker in the editor and
+stored in the profile (`deviceGenerationID`, encrypted like the rest). iOS/iPadOS generations
+can additionally pick a **device model** (`DeviceModels`: iPhone 15/16/16 Pro/SE, iPad Pro 11"/Air;
+`deviceModelID`), which supplies the screen geometry and hardware counts the shim declares.
+A model is bound to its platform: an iPad model stored on a profile that was later switched to
+an iPhone generation is ignored (the editor also clears it).
+
+What a generation does:
+
+- supplies the self-declared `User-Agent` for that version (overridable with a custom UA);
+- seeds per-profile defaults (e.g. WebRTC policy) when a new profile picks it;
+- names a **behaviour set** (`behaviorSetID`, an extension point in `BehaviorSets`);
+- for iOS/iPadOS: enables the device shim below. For macOS: nothing else — the profile is
+  the real machine.
+
+What it does **not** do, and cannot:
+
+- It does not switch the real WebKit core. The engine is always the Mac's system WebKit;
+  there is no public API to load an older or iOS WebKit build, and running a second engine
+  is out of scope. A profile tagged "iOS 26" renders with the host Mac's WebKit.
+- Only the macOS generation is engine-consistent, and only when its version equals the Mac's
+  real Safari version. The editor flags the iOS/iPadOS generations as inconsistent.
+
+### The iOS device shim (what it changes, exactly)
+
+`PrivacyScripts` (`isIOS`), injected at document start into every frame, `.page` world:
+
+| Signal | Shim | Notes |
+|---|---|---|
+| `navigator.platform` | `"iPhone"` / `"iPad"` | |
+| `navigator.maxTouchPoints`, `hardwareConcurrency` | from the model | the real core count is still visible to workers |
+| `navigator.standalone` | `false` | iOS-only property, present on real iOS Safari |
+| `screen.width/height/availWidth/availHeight`, `devicePixelRatio` | from the model | `window.innerWidth`, `matchMedia`, CSS viewport and `outerWidth` are the real window; a 393-px "screen" under a 1200-px viewport is an obvious contradiction |
+| Canvas 2D `getImageData` | +1…7 on the red channel of each pixel, once per context | `toDataURL`/`toBlob` are untouched, so the two disagree; the noise is a function of the buffer length, i.e. the *same* for every profile — it stops byte-identical linking against a real iPhone baseline only, not between two profiles of this app |
+| WebGL / WebGL2 `getParameter(UNMASKED_VENDOR/RENDERER_WEBGL)` | `"Apple Inc."` / `"Apple GPU"` | all other WebGL parameters, extensions, limits and rendered pixels come from the real GPU |
+
+Deliberately **not** touched, and why:
+
+- `navigator.deviceMemory`, `navigator.connection`: Safari does not implement them. Adding
+  them would make the profile look like Chrome pretending to be Safari.
+- `navigator.language(s)`: the HTTP `Accept-Language` header cannot be changed per view, so
+  overriding only the JS side would create a header/JS mismatch. Both follow the system.
+- `navigator.vendor` is already `"Apple Computer, Inc."` on macOS WebKit.
+- `document.fonts`, `AudioContext`: an earlier revision set `document.fonts.size` to a
+  constant and added random noise to `AnalyserNode.getFloatFrequencyData`. Both were removed:
+  a constant `size` contradicts an empty `FontFaceSet`, and per-call random noise makes two
+  reads of the same audio differ, which is itself a detector. Neither changed the measured
+  font metrics or the rendered audio.
 
 ### What remains impossible with public APIs
 
-FINGERPRINTING LIMITATION. Still requires private WebKit, modified engine, or different hardware:
+FINGERPRINTING LIMITATION. Each of the following would require private WebKit API, a
+modified WebKit, or different hardware. None is attempted:
 
-| Signal | Why it still leaks |
+| Signal | Why a profile can't change it |
 |---|---|
-| Real canvas/WebGL pixels, extensions, limits, timing | Mac GPU + driver; noise is detectable |
-| Full font metrics / list | macOS fonts differ from iOS |
-| TLS ClientHello, HTTP/2 settings, header order | system network stack |
-| Touch / orientation / motion events | desktop engine |
-| Supported JS/CSS features, codecs | host WebKit version |
-| Workers | user scripts not injected |
+| Canvas 2D / WebGL rendered pixels, WebGL extensions and limits | produced by the Mac's GPU and driver; the shim only perturbs one read-back path and two strings |
+| AudioContext output | the Mac's audio stack |
+| Fonts (measured via text metrics) | macOS system fonts; iOS has a different font set |
+| Colour depth, `matchMedia` results, viewport/visualViewport, `outerWidth` | the real display and window |
+| Touch and pointer behaviour, `ontouchstart`, orientation and motion events | macOS WebKit is a desktop engine; there is no touch-input emulation API |
+| `navigator.languages`, `Accept-Language` | follow the app's language list; WKWebView has no per-view API |
+| Supported JS/CSS features, media codecs, WebKit version quirks | the installed macOS WebKit, which differs from iOS WebKit |
+| TLS ClientHello, HTTP/2 settings, header order | Apple's macOS network stack |
+| Anything inside Web/Shared/Service Workers | user scripts are not injected there |
+| `Function.prototype.toString` of patched functions, property descriptors | the shims are visible to a script that looks for them |
 
-Compared with products that claim engine-level iOS cores, this is still labelling + JS
-overrides, not emulation. The honest options for stronger separation remain outside the
-browser (separate user accounts, VMs, or real devices).
+Compared with a product that ships and switches genuine per-version WebKit cores, this is
+version *labelling* with declared-value overrides, not version *emulation*. Sites that run
+an active fingerprinting check will see the host Mac. The honest options for real separation
+between identities are outside the browser:
+- a separate macOS user account per identity (OS-level separation);
+- a different Mac or VM per identity (different hardware fingerprint);
+- for a genuine iPhone fingerprint, Safari on an actual iPhone.
 
 ## 3. Encryption at rest
 
@@ -203,10 +267,10 @@ the script into it can expose an unpatched constructor; `contentWindow`,
 
 | Setting | Implementation | Native? | Gaps |
 |---|---|---|---|
-| User agent | `WKWebView.customUserAgent`, with presets in the editor | yes (string only) | Other signals still Mac unless JS shims cover them |
+| User agent | `WKWebView.customUserAgent`, from the generation or a custom string | yes (string only) | `navigator.platform` etc. follow the engine unless the iOS device shim declares otherwise; feature set and TLS fingerprint still identify WebKit on macOS (§2) |
 | Time zone | JS: `Intl.DateTimeFormat` default `timeZone`, `Date` local getters, `getTimezoneOffset`, `toString`, `toDateString`, `toTimeString`, `toLocale*String` | no | Workers use the host zone. `new Date(y, m, d, …)`, local setters (`setHours` …) and `Date.parse` of strings without an offset use the host zone. Detectable |
 | Geolocation | JS: `navigator.geolocation` returns PERMISSION_DENIED, or fixed coordinates; `permissions.query({name:'geolocation'})` agrees | no | Detectable. The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed |
-| Language | JS navigator.language / languages | no | Accept-Language header still system |
+| Language | not implemented | — | WKWebView has no per-view `Accept-Language` / `navigator.languages` API; the shim leaves both native on purpose (§2) |
 
 The shim logic is tested under Node (`scripts/test-shims.mjs`) against ICU, across
 fixed-offset zones, DST transitions and 30-minute shifts. The key cases are also checked
@@ -244,5 +308,94 @@ credentials are never offered to a different site.
 ## 9. App Sandbox
 
 The default build (`scripts/build-app.sh`) is **sandboxed**. `SANDBOX=0` produces a
-hardened-runtime build without the sandbox, for debugging. See entitlements and
-container migration details in the original source.
+hardened-runtime build without the sandbox, for debugging. `build-app.sh` checks the
+signature and fails if the sandbox state isn't what was requested.
+
+**Entitlements** (`Resources/PrivacyBrowser.entitlements`):
+
+| Entitlement | Needed for |
+|---|---|
+| `com.apple.security.app-sandbox` | the sandbox itself |
+| `com.apple.security.network.client` | all WKWebView networking (WebKit's network process acts on the app's behalf), proxies, HTTP sync |
+| `com.apple.security.device.camera`, `…device.audio-input` | `getUserMedia`, after the in-app prompt (also required under the hardened runtime) |
+| `com.apple.security.files.user-selected.read-write` | `<input type=file>` uploads; choosing the sync folder (Powerbox) |
+| `com.apple.security.files.downloads.read-write` | saving downloads to `~/Downloads` |
+| `com.apple.security.files.bookmarks.app-scope` | remembering the sync folder across launches (security-scoped bookmark) |
+
+Not requested: `network.server` (the app never listens), location, contacts, calendars,
+printing, Apple Events, JIT (WebKit's JIT runs in Apple's own WebContent process).
+
+**What changes inside the sandbox:**
+
+- Every path comes from `FileManager.urls(for:in:)`, so the vault, WebKit data, caches and
+  temporary files all live in `~/Library/Containers/<bundle-id>/Data/`.
+  `PRIVACYBROWSER_VAULT_DIR` must point inside the container.
+- WebKit omits the bundle ID from its data paths when the process has a container.
+  `WebKitDataLayout` handles both layouts and translates archives sealed by the
+  unsandboxed build.
+- The container is another layer of protection for the plaintext WebKit data of running
+  profiles: other sandboxed apps can't read it. Unsandboxed processes of the same user still
+  can, subject to macOS's container privacy protection (TCC "App Data" prompts on macOS 14+).
+
+**Migrating from an unsandboxed build:** `Contents/Resources/container-migration.plist`
+makes macOS move `~/Library/Application Support/PrivacyBrowser` (and any unsealed WebKit
+data left by a crash) into the container on the sandboxed build's first launch. This is
+one-way, and happens only when the container doesn't exist yet. CI verifies it with a
+separate bundle ID.
+`WebDataStoreVault` then restores archives sealed by the old build at the sandboxed
+locations.
+
+## 10. Threat model summary
+
+**Protects against:**
+
+- Someone who gets a copy of the disk or a backup while the app is locked, or while the
+  relevant profile is stopped. They see only ciphertext and `vault.json` (KDF parameters).
+- Websites in one profile reading another profile's cookies, storage, history or bookmarks.
+- Casual IP and location leaks: fail-closed proxy, WebRTC off, geolocation denied.
+- A sync server or sync folder learning profile names, settings, passwords, history,
+  bookmarks or browsing data.
+- Other sandboxed apps reading the app's data (App Sandbox).
+
+**Does not protect against:**
+
+- Malware or root on the running machine (it can read memory and live plaintext).
+- Device fingerprinting that links profiles through hardware or rendering
+  characteristics (§2).
+- Offline guessing of a weak master password by anyone holding `vault.json`.
+- A sync server rolling back to an older complete snapshot (no signed manifest).
+
+## 11. App lifecycle, appearance and language
+
+**Window lifecycle.**
+- Closing a profile's last window stops that profile and seals its website data. The app
+  stays open, and the Profiles window comes back to the front.
+- Only ⌘Q or **Lock** stops everything. Quitting with profiles running waits until every
+  profile is sealed (`applicationShouldTerminate` → `.terminateLater`). A second ⌘Q during
+  that wait doesn't start a second shutdown.
+- Clicking the Dock icon with no window open shows the Profiles window again.
+
+**Crash fix.** Earlier builds released a browser window's controller from inside
+`windowWillClose`. That could free the `NSWindow` while AppKit was still closing it (a
+use-after-free), and the resulting crash took the whole app down, so it looked as if closing a
+profile window quit the app. The callback now runs on the next run-loop turn, and
+`BrowserSession.shutDown()` is idempotent. The self-test's `lifecycle:` checks cover this.
+
+**Appearance.** The app forces the light (Aqua) appearance, regardless of the system setting:
+`NSApp.appearance` plus `.preferredColorScheme(.light)`. Web content is not restyled; pages
+render as their sites define them.
+
+**Language.**
+- The UI defaults to Russian, with English as the fallback. Strings live in
+  `Resources/{ru,en}.lproj/Localizable.strings` (209 keys, both languages complete), which
+  `build-app.sh` copies into the app bundle.
+- Lookups go through an explicitly chosen bundle (`Localization.swift`), so the language is
+  deterministic within a launch. Setting `AppleLanguages` makes AppKit's own menus and
+  panels follow too.
+- `PRIVACYBROWSER_LANG=en` switches the UI to English.
+- Run outside the app bundle (`swift run`, or Xcode's SwiftPM scheme), the strings tables
+  are missing and keys are shown instead.
+- Pluralisation is simplified ("Профилей: 3"); there is no `.stringsdict` yet.
+- The UI language does **not** change what web pages see: `navigator.language` and
+  `Accept-Language` follow the app's language list, and there is no per-profile override (§2).
+

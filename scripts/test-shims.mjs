@@ -133,6 +133,55 @@ test('WebRTC unrestricted', () => {
   assert.equal(run(w, `new RTCPeerConnection({ iceTransportPolicy: 'all' }).config.iceTransportPolicy`), 'all');
 });
 
+// ---------------------------------------------------------------- device shim
+// Minimal stand-ins for the DOM objects the device shim touches.
+function deviceExtras() {
+  const ctx2d = { getImageData() { return { data: new Uint8ClampedArray([10, 20, 30, 255, 0, 0, 0, 0]) }; } };
+  class HTMLCanvasElement { getContext(type) { return type === '2d' ? ctx2d : null; } }
+  class WebGLRenderingContext { getParameter(p) { return `native:${p}`; } }
+  return {
+    screen: { width: 2560, height: 1440, availWidth: 2560, availHeight: 1415 },
+    HTMLCanvasElement, WebGLRenderingContext,
+  };
+}
+const iphone = { platform: 'iPhone', hardwareConcurrency: 6, maxTouchPoints: 5, screenWidth: 393, screenHeight: 852, devicePixelRatio: 3 };
+
+test('device shim: iOS generation declares the model', () => {
+  const w = makeWindow({ ...base, isIOS: true, device: iphone }, deviceExtras());
+  assert.equal(run(w, `navigator.platform`), 'iPhone');
+  assert.equal(run(w, `navigator.hardwareConcurrency`), 6);
+  assert.equal(run(w, `navigator.maxTouchPoints`), 5);
+  assert.equal(run(w, `navigator.standalone`), false);
+  assert.deepEqual(Array.from(run(w, `[screen.width, screen.height, screen.availWidth, screen.availHeight, devicePixelRatio]`)), [393, 852, 393, 852, 3]);
+  // Safari has neither of these; the shim must not invent them.
+  assert.equal(run(w, `'deviceMemory' in navigator`), false);
+  assert.equal(run(w, `'connection' in navigator`), false);
+  // navigator.language(s) stay native (Accept-Language can't be changed to match).
+  assert.equal(run(w, `'languages' in navigator`), false);
+});
+
+test('device shim: canvas noise applied once, WebGL strings overridden', () => {
+  const w = makeWindow({ ...base, isIOS: true, device: iphone }, deviceExtras());
+  const once = run(w, `(() => { const c = new HTMLCanvasElement(); c.getContext('2d'); c.getContext('2d'); return Array.from(c.getContext('2d').getImageData().data); })()`);
+  // 8 bytes → seed (8 % 7) + 1 = 2 on the red channel of each pixel, exactly once even though
+  // getContext ran three times for the same context object.
+  assert.deepEqual(Array.from(once), [12, 20, 30, 255, 2, 0, 0, 0]);
+  assert.equal(run(w, `new HTMLCanvasElement().getContext('webgl')`), null);
+  assert.equal(run(w, `new WebGLRenderingContext().getParameter(0x9245)`), 'Apple Inc.');
+  assert.equal(run(w, `new WebGLRenderingContext().getParameter(0x9246)`), 'Apple GPU');
+  assert.equal(run(w, `new WebGLRenderingContext().getParameter(1)`), 'native:1');
+});
+
+test('device shim: macOS generation leaves everything native', () => {
+  const w = makeWindow({ ...base, isIOS: false }, deviceExtras());
+  assert.equal(run(w, `'platform' in navigator`), false);
+  assert.equal(run(w, `screen.width`), 2560);
+  assert.equal(run(w, `typeof devicePixelRatio`), 'undefined');
+  const px = run(w, `Array.from(new HTMLCanvasElement().getContext('2d').getImageData().data)`);
+  assert.deepEqual(Array.from(px), [10, 20, 30, 255, 0, 0, 0, 0]);
+  assert.equal(run(w, `new WebGLRenderingContext().getParameter(0x9245)`), 'native:37445');
+});
+
 process.on('beforeExit', () => {
   if (failures) { console.log(`${failures} failure(s)`); process.exitCode = 1; }
   else console.log('all shim tests passed');
