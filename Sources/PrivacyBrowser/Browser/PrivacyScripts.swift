@@ -3,7 +3,7 @@ import Foundation
 import WebKit
 
 /// JavaScript shims for settings WebKit has no native per-web-view API for.
-/// Aggressive iOS-like spoofing: navigator, screen, canvas/WebGL, fonts, audio.
+/// Aggressive iOS-like spoofing driven by DeviceGeneration + optional DeviceModel.
 /// Still best-effort and detectable; not engine-level.
 enum PrivacyScripts {
     struct ShimConfiguration: Encodable {
@@ -20,6 +20,8 @@ enum PrivacyScripts {
         var screenHeight: Int
         var devicePixelRatio: Double
         var isIOS: Bool
+        var connectionEffectiveType: String
+        var connectionDownlink: Double
 
         struct Geolocation: Encodable {
             var mode: String
@@ -32,6 +34,15 @@ enum PrivacyScripts {
     static func shimConfiguration(for configuration: ProfileConfiguration) -> ShimConfiguration {
         let gen = configuration.deviceGeneration
         let isIOS = gen.platform == .iOS || gen.platform == .iPadOS
+        let model = configuration.deviceModel
+
+        let screenWidth = model?.screenWidth ?? (isIOS ? 390 : 1440)
+        let screenHeight = model?.screenHeight ?? (isIOS ? 844 : 900)
+        let dpr = model?.devicePixelRatio ?? (isIOS ? 3 : 2)
+        let cores = model?.hardwareConcurrency ?? (isIOS ? 6 : 8)
+        let mem = model?.deviceMemory ?? (isIOS ? 4 : 8)
+        let touch = model?.maxTouchPoints ?? (isIOS ? 5 : 0)
+
         let geolocation: ShimConfiguration.Geolocation
         switch configuration.geolocation {
         case .deny:
@@ -39,20 +50,23 @@ enum PrivacyScripts {
         case let .fixed(latitude, longitude, accuracy):
             geolocation = .init(mode: "fixed", latitude: latitude, longitude: longitude, accuracy: accuracy)
         }
+
         return ShimConfiguration(
             timeZone: configuration.timeZoneIdentifier,
             geolocation: geolocation,
             webRTC: configuration.webRTCPolicy.rawValue,
-            platform: isIOS ? "iPhone" : "MacIntel",
+            platform: isIOS ? (gen.platform == .iPadOS ? "iPad" : "iPhone") : "MacIntel",
             vendor: "Apple Computer, Inc.",
-            hardwareConcurrency: isIOS ? 6 : 8,
-            deviceMemory: isIOS ? 4 : 8,
-            maxTouchPoints: isIOS ? 5 : 0,
+            hardwareConcurrency: cores,
+            deviceMemory: mem,
+            maxTouchPoints: touch,
             languages: ["en-US", "en"],
-            screenWidth: isIOS ? 390 : 1440,
-            screenHeight: isIOS ? 844 : 900,
-            devicePixelRatio: isIOS ? 3 : 2,
-            isIOS: isIOS
+            screenWidth: screenWidth,
+            screenHeight: screenHeight,
+            devicePixelRatio: dpr,
+            isIOS: isIOS,
+            connectionEffectiveType: "4g",
+            connectionDownlink: isIOS ? 10 : 50
         )
     }
 
@@ -79,6 +93,7 @@ function patchWindow(w) {
   patched.add(w);
   try { patchNavigator(w); } catch (e) {}
   try { patchScreen(w); } catch (e) {}
+  try { patchConnection(w); } catch (e) {}
   if (CONFIG.isIOS) {
     try { patchCanvasWebGL(w); } catch (e) {}
     try { patchFonts(w); } catch (e) {}
@@ -116,6 +131,19 @@ function patchScreen(w) {
   Object.defineProperty(w, 'devicePixelRatio', { value: CONFIG.devicePixelRatio, writable: false });
 }
 
+function patchConnection(w) {
+  const nav = w.navigator;
+  if (!nav) return;
+  const conn = {
+    effectiveType: CONFIG.connectionEffectiveType,
+    downlink: CONFIG.connectionDownlink,
+    rtt: 50,
+    saveData: false,
+    type: 'cellular'
+  };
+  Object.defineProperty(nav, 'connection', { value: conn, writable: false, configurable: false });
+}
+
 function patchCanvasWebGL(w) {
   const proto = w.HTMLCanvasElement && w.HTMLCanvasElement.prototype;
   if (proto && proto.getContext) {
@@ -126,7 +154,9 @@ function patchCanvasWebGL(w) {
         const origToData = ctx.getImageData;
         ctx.getImageData = function () {
           const data = origToData.apply(this, arguments);
-          for (let i = 0; i < data.data.length; i += 4) data.data[i] = (data.data[i] + 1) & 255;
+          // Deterministic-ish noise based on length
+          const seed = data.data.length % 7;
+          for (let i = 0; i < data.data.length; i += 4) data.data[i] = (data.data[i] + seed) & 255;
           return data;
         };
       }
@@ -144,7 +174,6 @@ function patchCanvasWebGL(w) {
 }
 
 function patchFonts(w) {
-  // Crude font list reduction for iOS-like (system fonts only)
   if (w.document && w.document.fonts) {
     try {
       Object.defineProperty(w.document.fonts, 'size', { value: 12, writable: false });
@@ -155,8 +184,6 @@ function patchFonts(w) {
 function patchAudio(w) {
   if (!w.AudioContext && !w.webkitAudioContext) return;
   const AC = w.AudioContext || w.webkitAudioContext;
-  const orig = AC.prototype.getChannelData || AC.prototype.createAnalyser;
-  // Minimal noise on analyser if present
   if (AC.prototype.createAnalyser) {
     const origCreate = AC.prototype.createAnalyser;
     AC.prototype.createAnalyser = function () {
