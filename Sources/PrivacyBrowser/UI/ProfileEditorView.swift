@@ -148,14 +148,17 @@ struct ProfileEditorView: View {
 
     private static let timeZones = TimeZone.knownTimeZoneIdentifiers.sorted()
 
+    /// The generation the draft currently points at.
     private var selectedGeneration: DeviceGeneration { DeviceGenerations.resolved(id: draft.deviceGenerationID) }
 
     private var availableModels: [DeviceModel] {
         DeviceModels.forPlatform(selectedGeneration.platform)
     }
 
+    /// What the device shim will declare (nil for macOS: no shim, the real machine).
     private var effectiveModel: DeviceModel? {
-        DeviceModels.model(id: draft.deviceModelID, platform: selectedGeneration.platform)
+        guard !availableModels.isEmpty else { return nil }
+        return DeviceModels.model(id: draft.deviceModelID, platform: selectedGeneration.platform)
             ?? DeviceModels.defaultModel(for: selectedGeneration.platform)
     }
 
@@ -179,6 +182,7 @@ struct ProfileEditorView: View {
         }
         .frame(width: 540, height: 760)
         .onChange(of: draft.deviceGenerationID) { _, _ in
+            // A model belongs to one platform; drop it when the generation moves elsewhere.
             if DeviceModels.model(id: draft.deviceModelID, platform: selectedGeneration.platform) == nil {
                 draft.deviceModelID = nil
             }
@@ -214,7 +218,8 @@ struct ProfileEditorView: View {
                 }
                 if let m = effectiveModel {
                     LabeledContent(L("editor.deviceModel.effective")) {
-                        Text("\(m.screenWidth)×\(m.screenHeight) @ \(m.devicePixelRatio)x · \(m.hardwareConcurrency) cores · touch \(m.maxTouchPoints)")
+                        Text(String(format: L("editor.deviceModel.summary"), m.screenWidth, m.screenHeight,
+                                    m.devicePixelRatio.formatted(), m.hardwareConcurrency, m.maxTouchPoints))
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                     }

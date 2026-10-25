@@ -16,11 +16,12 @@ import WebKit
 /// docs/ISOLATION_AND_LIMITATIONS.md §2.
 @MainActor
 enum BehaviorSets {
-    static func makeUserContentController(for configuration: ProfileConfiguration, canvasSeed: Int = 0) -> WKUserContentController {
+    static func makeUserContentController(for configuration: ProfileConfiguration, canvasSeed: UInt32 = 0) -> WKUserContentController {
         switch configuration.deviceGeneration.behaviorSetID {
         case DeviceGenerations.desktopBehavior, DeviceGenerations.mobileBehavior:
             return PrivacyScripts.makeUserContentController(for: configuration, canvasSeed: canvasSeed)
         default:
+            // Unknown behaviour set (e.g. a profile from a newer build): fall back to the shims.
             return PrivacyScripts.makeUserContentController(for: configuration, canvasSeed: canvasSeed)
         }
     }

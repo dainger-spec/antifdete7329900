@@ -51,9 +51,11 @@ final class BrowserSession {
         // Applies to all network loads of this data store. An empty array = direct connection.
         store.proxyConfigurations = ProxyConfigurationFactory.make(configuration.proxy)
         self.dataStore = store
-        // Seed canvas noise from the profile UUID so two profiles do not collide.
-        let seed = profileID.uuidString.hashValue & 0x7FFFFFFF
-        self.userContentController = BehaviorSets.makeUserContentController(for: configuration, canvasSeed: seed)
+        // Routed through BehaviorSets so a profile's device generation selects its script bundle.
+        // The canvas seed is derived from the profile ID: stable across launches and machines
+        // (a synced profile keeps its canvas identity), different between profiles.
+        self.userContentController = BehaviorSets.makeUserContentController(
+            for: configuration, canvasSeed: PrivacyScripts.canvasSeed(for: profileID))
     }
 
     var windowCount: Int { windows.count }

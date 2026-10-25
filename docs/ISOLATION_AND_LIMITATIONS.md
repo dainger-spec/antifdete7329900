@@ -4,16 +4,11 @@ This document lists what is isolated, what is only approximated, and what is not
 addressed. It also gives a way to verify each claim on your own machine. The code
 comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back here.
 
-**Update 2026-10-25 (evening):** iOS device shim now also declares basic touch presence
-(`ontouchstart` + `PointerEvent.pointerType`) and uses a per-profile canvas seed (from the
-profile UUID hash) so two profiles of this app do not collide on `getImageData`. Accept-Language
-remains impossible per-view with public APIs (see below).
-
 ## 0. What is verified automatically
 
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 15 runner) for both the sandboxed and the unsandboxed build, with a local
-test proxy (`scripts/selftest_proxy.py`). Last observed results (macOS 15.7, 53/53 checks
+test proxy (`scripts/selftest_proxy.py`). Last observed results (macOS 15.7, 54/54 checks
 in both builds):
 
 | Claim | Self-test result |
@@ -30,7 +25,7 @@ in both builds):
 | Window lifecycle (crash fix) | closing one of two windows keeps the profile running; closing the last reports "all closed" once, on a later run-loop turn; `shutDown()` twice is safe |
 | Crash-recovery sealing | leftover website data from a crashed run is archived and deleted WITHOUT `WKWebsiteDataStore.remove(forIdentifier:)` (which aborted on an unknown id), then restores cleanly |
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
-| Device shim (iOS generations) | an iOS profile with a model declares it under JavaScriptCore (`platform`, `maxTouchPoints`, `screen`, `devicePixelRatio`) and invents no `navigator.connection`/`deviceMemory`; a stale iPad model on an iPhone generation falls back to the iPhone default; a macOS profile stays fully native |
+| Device shim (iOS generations) | an iOS profile with a model declares it under JavaScriptCore (`platform`, `maxTouchPoints`, `screen`, `devicePixelRatio`) and invents no `navigator.connection`/`deviceMemory`; a stale iPad model on an iPhone generation falls back to the iPhone default; a macOS profile stays fully native; canvas read-back noise is stable for one profile across sessions, differs between two profiles and is at most ±1 per channel |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
 
 Run it yourself: `build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test`. For the
@@ -68,7 +63,7 @@ Background tabs keep running. WebKit may throttle timers in views that aren't in
 A **macOS** generation leaves that untouched: it is genuine, not emulated, and every signal is
 consistent. An **iOS/iPadOS** generation adds a document-start JavaScript *device shim* that
 changes what the page *reads* (`navigator.platform`, touch points, screen geometry, canvas
-bytes, WebGL vendor strings, basic touch presence) to match the declared iPhone/iPad. It does not change what the
+bytes, WebGL vendor strings, `ontouchstart`) to match the declared iPhone/iPad. It does not change what the
 engine and the hardware *measure*. This is labelling plus JS overrides, not device emulation,
 and it is detectable. The project does not claim otherwise.
 
@@ -96,7 +91,7 @@ core swap. A profile carries a **device generation** (`DeviceGeneration` /
 `DeviceGenerations` in `BrowserCore`): a target Apple OS version — currently macOS 26,
 iOS 26, iOS 27, iPadOS 26 — chosen with the **Device / version** picker in the editor and
 stored in the profile (`deviceGenerationID`, encrypted like the rest). iOS/iPadOS generations
-can additionally pick a **device model** (`DeviceModels`: iPhone 15/16/16 Pro/SE, iPad Pro 11\"/Air;
+can additionally pick a **device model** (`DeviceModels`: iPhone 15/16/16 Pro/SE, iPad Pro 11"/Air;
 `deviceModelID`), which supplies the screen geometry and hardware counts the shim declares.
 A model is bound to its platform: an iPad model stored on a profile that was later switched to
 an iPhone generation is ignored (the editor also clears it).
@@ -126,9 +121,9 @@ What it does **not** do, and cannot:
 | `navigator.platform` | `"iPhone"` / `"iPad"` | |
 | `navigator.maxTouchPoints`, `hardwareConcurrency` | from the model | the real core count is still visible to workers |
 | `screen.width/height/availWidth/availHeight`, `devicePixelRatio` | from the model | `window.innerWidth`, `matchMedia`, CSS viewport and `outerWidth` are the real window; a 393-px "screen" under a 1200-px viewport is an obvious contradiction |
-| Canvas 2D `getImageData` | per-profile seed (from profile UUID hash) added to red channel | `toDataURL`/`toBlob` are untouched, so the two disagree; the seed makes two profiles of this app differ from each other |
+| Canvas 2D `getImageData` | the low bit of R/G/B flipped per pixel where a hash of (profile seed, x, y) says so; transparent pixels and alpha untouched | the seed is FNV-1a of the profile UUID: stable across launches and synced machines, different between profiles, deterministic on repeated reads. `toDataURL`/`toBlob` are untouched, so comparing the two paths reveals the shim |
 | WebGL / WebGL2 `getParameter(UNMASKED_VENDOR/RENDERER_WEBGL)` | `"Apple Inc."` / `"Apple GPU"` | all other WebGL parameters, extensions, limits and rendered pixels come from the real GPU |
-| Basic touch presence | `ontouchstart` defined, `PointerEvent.pointerType` forced to `"touch"` | real touch events and gestures still do not exist; this only affects property checks |
+| `ontouchstart` | declared (`null`) on `window` | consistent with `maxTouchPoints > 0`. No touch events are ever fired and `TouchEvent` stays undefined. Sites that pick touch handlers because of this property may ignore mouse clicks — if a site misbehaves, use a macOS profile for it |
 
 Deliberately **not** touched, and why:
 
@@ -138,6 +133,9 @@ Deliberately **not** touched, and why:
   per-view API for either. Overriding only the JS side would create a header/JS mismatch.
   Both follow the system language list. Setting `Accept-Language` on an individual `URLRequest`
   only affects that one load; subsequent navigations and subresource requests ignore it.
+- `PointerEvent.pointerType`: a revision forced it to `"touch"`. Removed: the events come
+  from a real mouse (pressure, size, hover and buttons contradict "touch"), and sites that
+  branch on it (drag, pointer capture, scrolling) broke.
 - `navigator.vendor` is already `"Apple Computer, Inc."` and `navigator.standalone` already
   `false` on macOS WebKit (the self-test confirmed the latter), so neither is redefined.
 - `document.fonts`, `AudioContext`: an earlier revision set `document.fonts.size` to a
@@ -316,5 +314,94 @@ credentials are never offered to a different site.
 ## 9. App Sandbox
 
 The default build (`scripts/build-app.sh`) is **sandboxed**. `SANDBOX=0` produces a
-hardened-runtime build without the sandbox, for debugging. See entitlements and
-container migration details in the original source.
+hardened-runtime build without the sandbox, for debugging. `build-app.sh` checks the
+signature and fails if the sandbox state isn't what was requested.
+
+**Entitlements** (`Resources/PrivacyBrowser.entitlements`):
+
+| Entitlement | Needed for |
+|---|---|
+| `com.apple.security.app-sandbox` | the sandbox itself |
+| `com.apple.security.network.client` | all WKWebView networking (WebKit's network process acts on the app's behalf), proxies, HTTP sync |
+| `com.apple.security.device.camera`, `…device.audio-input` | `getUserMedia`, after the in-app prompt (also required under the hardened runtime) |
+| `com.apple.security.files.user-selected.read-write` | `<input type=file>` uploads; choosing the sync folder (Powerbox) |
+| `com.apple.security.files.downloads.read-write` | saving downloads to `~/Downloads` |
+| `com.apple.security.files.bookmarks.app-scope` | remembering the sync folder across launches (security-scoped bookmark) |
+
+Not requested: `network.server` (the app never listens), location, contacts, calendars,
+printing, Apple Events, JIT (WebKit's JIT runs in Apple's own WebContent process).
+
+**What changes inside the sandbox:**
+
+- Every path comes from `FileManager.urls(for:in:)`, so the vault, WebKit data, caches and
+  temporary files all live in `~/Library/Containers/<bundle-id>/Data/`.
+  `PRIVACYBROWSER_VAULT_DIR` must point inside the container.
+- WebKit omits the bundle ID from its data paths when the process has a container.
+  `WebKitDataLayout` handles both layouts and translates archives sealed by the
+  unsandboxed build.
+- The container is another layer of protection for the plaintext WebKit data of running
+  profiles: other sandboxed apps can't read it. Unsandboxed processes of the same user still
+  can, subject to macOS's container privacy protection (TCC "App Data" prompts on macOS 14+).
+
+**Migrating from an unsandboxed build:** `Contents/Resources/container-migration.plist`
+makes macOS move `~/Library/Application Support/PrivacyBrowser` (and any unsealed WebKit
+data left by a crash) into the container on the sandboxed build's first launch. This is
+one-way, and happens only when the container doesn't exist yet. CI verifies it with a
+separate bundle ID.
+`WebDataStoreVault` then restores archives sealed by the old build at the sandboxed
+locations.
+
+## 10. Threat model summary
+
+**Protects against:**
+
+- Someone who gets a copy of the disk or a backup while the app is locked, or while the
+  relevant profile is stopped. They see only ciphertext and `vault.json` (KDF parameters).
+- Websites in one profile reading another profile's cookies, storage, history or bookmarks.
+- Casual IP and location leaks: fail-closed proxy, WebRTC off, geolocation denied.
+- A sync server or sync folder learning profile names, settings, passwords, history,
+  bookmarks or browsing data.
+- Other sandboxed apps reading the app's data (App Sandbox).
+
+**Does not protect against:**
+
+- Malware or root on the running machine (it can read memory and live plaintext).
+- Device fingerprinting that links profiles through hardware or rendering
+  characteristics (§2).
+- Offline guessing of a weak master password by anyone holding `vault.json`.
+- A sync server rolling back to an older complete snapshot (no signed manifest).
+
+## 11. App lifecycle, appearance and language
+
+**Window lifecycle.**
+- Closing a profile's last window stops that profile and seals its website data. The app
+  stays open, and the Profiles window comes back to the front.
+- Only ⌘Q or **Lock** stops everything. Quitting with profiles running waits until every
+  profile is sealed (`applicationShouldTerminate` → `.terminateLater`). A second ⌘Q during
+  that wait doesn't start a second shutdown.
+- Clicking the Dock icon with no window open shows the Profiles window again.
+
+**Crash fix.** Earlier builds released a browser window's controller from inside
+`windowWillClose`. That could free the `NSWindow` while AppKit was still closing it (a
+use-after-free), and the resulting crash took the whole app down, so it looked as if closing a
+profile window quit the app. The callback now runs on the next run-loop turn, and
+`BrowserSession.shutDown()` is idempotent. The self-test's `lifecycle:` checks cover this.
+
+**Appearance.** The app forces the light (Aqua) appearance, regardless of the system setting:
+`NSApp.appearance` plus `.preferredColorScheme(.light)`. Web content is not restyled; pages
+render as their sites define them.
+
+**Language.**
+- The UI defaults to Russian, with English as the fallback. Strings live in
+  `Resources/{ru,en}.lproj/Localizable.strings` (211 keys, both languages complete), which
+  `build-app.sh` copies into the app bundle.
+- Lookups go through an explicitly chosen bundle (`Localization.swift`), so the language is
+  deterministic within a launch. Setting `AppleLanguages` makes AppKit's own menus and
+  panels follow too.
+- `PRIVACYBROWSER_LANG=en` switches the UI to English.
+- Run outside the app bundle (`swift run`, or Xcode's SwiftPM scheme), the strings tables
+  are missing and keys are shown instead.
+- Pluralisation is simplified ("Профилей: 3"); there is no `.stringsdict` yet.
+- The UI language does **not** change what web pages see: `navigator.language` and
+  `Accept-Language` follow the app's language list, and there is no per-profile override (§2).
+

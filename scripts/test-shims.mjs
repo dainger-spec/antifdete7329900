@@ -139,9 +139,10 @@ function deviceExtras() {
   const ctx2d = { getImageData() { return { data: new Uint8ClampedArray([10, 20, 30, 255, 0, 0, 0, 0]) }; } };
   class HTMLCanvasElement { getContext(type) { return type === '2d' ? ctx2d : null; } }
   class WebGLRenderingContext { getParameter(p) { return `native:${p}`; } }
+  class PointerEvent { get pointerType() { return 'mouse'; } }
   return {
     screen: { width: 2560, height: 1440, availWidth: 2560, availHeight: 1415 },
-    HTMLCanvasElement, WebGLRenderingContext,
+    HTMLCanvasElement, WebGLRenderingContext, PointerEvent,
   };
 }
 const iphone = { platform: 'iPhone', hardwareConcurrency: 6, maxTouchPoints: 5, screenWidth: 393, screenHeight: 852, devicePixelRatio: 3 };
@@ -159,16 +160,36 @@ test('device shim: iOS generation declares the model', () => {
   assert.equal(run(w, `'languages' in navigator`), false);
 });
 
-test('device shim: canvas noise applied once, WebGL strings overridden', () => {
-  const w = makeWindow({ ...base, isIOS: true, device: iphone }, deviceExtras());
-  const once = run(w, `(() => { const c = new HTMLCanvasElement(); c.getContext('2d'); c.getContext('2d'); return Array.from(c.getContext('2d').getImageData().data); })()`);
-  // 8 bytes → seed (8 % 7) + 1 = 2 on the red channel of each pixel, exactly once even though
-  // getContext ran three times for the same context object.
-  assert.deepEqual(Array.from(once), [12, 20, 30, 255, 2, 0, 0, 0]);
+// Reads a 2x2 image through the shim: two opaque pixels, one transparent, one opaque.
+function readCanvas(seed, repeats = 1) {
+  const extras = deviceExtras();
+  const source = [10, 20, 30, 255, 40, 50, 60, 255, 0, 0, 0, 0, 70, 80, 90, 255];
+  extras.HTMLCanvasElement = class { getContext() { return this.ctx || (this.ctx = { getImageData() { return { width: 2, height: 2, data: new Uint8ClampedArray(source) }; } }); } };
+  const w = makeWindow({ ...base, isIOS: true, device: iphone, canvasSeed: seed }, extras);
+  return Array.from(run(w, `(() => { const c = new HTMLCanvasElement(); for (let i = 0; i < ${repeats}; i++) c.getContext('2d'); return Array.from(c.getContext('2d').getImageData(0, 0, 2, 2).data); })()`));
+}
+
+test('device shim: canvas noise is per-profile, deterministic, low-bit only, wrapped once', () => {
+  const source = [10, 20, 30, 255, 40, 50, 60, 255, 0, 0, 0, 0, 70, 80, 90, 255];
+  const a = readCanvas(0x1234abcd, 3);
+  assert.deepEqual(a, readCanvas(0x1234abcd, 1), 'same seed → same bytes; repeated getContext does not stack noise');
+  a.forEach((v, i) => assert.ok(Math.abs(v - source[i]) <= 1, `byte ${i} changed by more than 1`));
+  assert.deepEqual(a.slice(8, 12), [0, 0, 0, 0], 'transparent pixels untouched');
+  assert.deepEqual([a[3], a[7], a[15]], [255, 255, 255], 'alpha untouched');
+  // Different profiles must not read back identical bytes (try a few seeds; any two colliding
+  // on all 9 noised bits of this tiny image would be a 1/512 coincidence, not a design flaw).
+  const seeds = [1, 2, 3, 0xdeadbeef, 0x7fffffff].map((s) => readCanvas(s).join(','));
+  assert.ok(new Set(seeds).size >= 4, 'seeds produce distinct read-backs');
+});
+
+test('device shim: WebGL strings overridden, ontouchstart declared, pointerType left alone', () => {
+  const w = makeWindow({ ...base, isIOS: true, device: iphone, canvasSeed: 7 }, deviceExtras());
   assert.equal(run(w, `new HTMLCanvasElement().getContext('webgl')`), null);
   assert.equal(run(w, `new WebGLRenderingContext().getParameter(0x9245)`), 'Apple Inc.');
   assert.equal(run(w, `new WebGLRenderingContext().getParameter(0x9246)`), 'Apple GPU');
   assert.equal(run(w, `new WebGLRenderingContext().getParameter(1)`), 'native:1');
+  assert.equal(run(w, `'ontouchstart' in window && window.ontouchstart === null`), true);
+  assert.equal(run(w, `new PointerEvent().pointerType`), 'mouse', 'real mouse input keeps reporting mouse');
 });
 
 test('device shim: macOS generation leaves everything native', () => {
@@ -179,6 +200,7 @@ test('device shim: macOS generation leaves everything native', () => {
   const px = run(w, `Array.from(new HTMLCanvasElement().getContext('2d').getImageData().data)`);
   assert.deepEqual(Array.from(px), [10, 20, 30, 255, 0, 0, 0, 0]);
   assert.equal(run(w, `new WebGLRenderingContext().getParameter(0x9245)`), 'native:37445');
+  assert.equal(run(w, `'ontouchstart' in window`), false);
 });
 
 process.on('beforeExit', () => {

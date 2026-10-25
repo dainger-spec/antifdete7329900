@@ -21,6 +21,7 @@
 "editor.deviceModel" = "Device model";
 "editor.deviceModel.default" = "Default";
 "editor.deviceModel.effective" = "Declared screen / cores";
+"editor.deviceModel.summary" = "%ld×%ld @ %@x · %ld cores · %ld touch points";
 "editor.ephemeral" = "Ephemeral (no website data or history written to disk)";
 "editor.error.coords" = "Latitude, longitude and accuracy must be numbers";
 "editor.error.decrypt" = "Could not decrypt profile: %@";

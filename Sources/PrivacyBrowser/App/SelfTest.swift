@@ -371,7 +371,10 @@ final class SelfTest {
     private func deviceGenerations(_ repository: ProfileRepository) async throws {
         func evaluate(_ script: String, for configuration: ProfileConfiguration) async throws -> Any? {
             let profile = try repository.create(name: "Gen \(UUID().uuidString.prefix(4))", configuration: configuration)
-            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            return try await evaluate(script, inProfile: profile.id)
+        }
+        func evaluate(_ script: String, inProfile id: UUID) async throws -> Any? {
+            let session = try makeSession(repository, id, key: repository.profileKey(for: id))
             defer { session.shutDown() }
             let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
@@ -421,6 +424,32 @@ final class SelfTest {
                                           for: .forGeneration(DeviceGenerations.resolved(id: DeviceGenerations.defaultID))) as? String
         check("device shim: macOS profile stays native (MacIntel, no Chrome-only navigator props)",
               macProbe == "MacIntel|false|false", macProbe ?? "nil")
+
+        // Canvas noise under JavaScriptCore: stable for one profile across sessions (the seed is
+        // derived from the profile ID, not a per-launch hash), different between two profiles,
+        // and never more than ±1 per channel. Also: ontouchstart is declared for iOS profiles.
+        let canvasProbe = """
+            const c = document.createElement('canvas'); c.width = 16; c.height = 16;
+            const g = c.getContext('2d'); g.fillStyle = 'rgb(100,150,200)'; g.fillRect(0, 0, 16, 16);
+            const d = g.getImageData(0, 0, 16, 16).data;
+            let maxDelta = 0, sum = 0;
+            for (let i = 0; i < d.length; i += 4) {
+              maxDelta = Math.max(maxDelta, Math.abs(d[i] - 100), Math.abs(d[i + 1] - 150), Math.abs(d[i + 2] - 200));
+              sum = (sum * 31 + d[i] * 7 + d[i + 1] * 3 + d[i + 2]) >>> 0;
+            }
+            return [sum, maxDelta, 'ontouchstart' in window].join('|');
+            """
+        let iosConfig = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: "ios-26"))
+        let one = try repository.create(name: "Canvas A", configuration: iosConfig)
+        let two = try repository.create(name: "Canvas B", configuration: iosConfig)
+        let oneFirst = try await evaluate(canvasProbe, inProfile: one.id) as? String
+        let oneAgain = try await evaluate(canvasProbe, inProfile: one.id) as? String
+        let twoRead = try await evaluate(canvasProbe, inProfile: two.id) as? String
+        let parts = (oneFirst ?? "").split(separator: "|")
+        check("device shim: canvas noise is stable per profile, differs between profiles, ±1 only, ontouchstart declared",
+              oneFirst != nil && oneFirst == oneAgain && oneFirst != twoRead
+                && parts.count == 3 && parts[1] == "1" && parts[2] == "true",
+              "A=\(oneFirst ?? "nil") A'=\(oneAgain ?? "nil") B=\(twoRead ?? "nil")")
     }
 
     // MARK: Crash recovery sealing (regression for the post-unlock crash)

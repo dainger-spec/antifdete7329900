@@ -79,7 +79,7 @@ PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 53 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 54 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, HTTP CONNECT and SOCKS5 proxies, fail-closed, tabs,
   history, bookmarks, the device-generation UA path, crash-recovery sealing, and the
@@ -145,7 +145,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Time zone | JS shim (`Intl`, `Date` getters, offsets, string forms) | Not in workers; local-component constructors, setters and `Date.parse` use the host zone; detectable |
 | Geolocation | JS shim: deny (default) or fixed coordinates | Detectable; the IP address reveals location unless the proxy matches |
 | WebRTC leak reduction | JS shim: remove `RTCPeerConnection` (default) or force relay-only | No engine switch; WebRTC UDP never uses the proxy; `window.frames[i]` gap |
-| Declared device (iOS/iPadOS profiles) | JS device shim: `navigator.platform`/`maxTouchPoints`/`hardwareConcurrency`, `screen`, `devicePixelRatio`, canvas `getImageData` perturbation, WebGL vendor/renderer strings | Not in workers; detectable (`toDataURL` vs `getImageData`, viewport vs screen); GPU, fonts, touch, codecs, TLS still Mac; no `deviceMemory`/`connection`/`languages` on purpose |
+| Declared device (iOS/iPadOS profiles) | JS device shim: `navigator.platform`/`maxTouchPoints`/`hardwareConcurrency`, `screen`, `devicePixelRatio`, `ontouchstart`, per-profile canvas `getImageData` noise, WebGL vendor/renderer strings | Not in workers; detectable (`toDataURL` vs `getImageData`, viewport vs screen); GPU, fonts, touch, codecs, TLS still Mac; no `deviceMemory`/`connection`/`languages` on purpose |
 | Password autofill | Explicit buttons in an isolated JS world | No automatic form detection; main frame only |
 
 ### Not implemented / limited

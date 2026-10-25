@@ -28,7 +28,7 @@ import WebKit
 ///     Mac, and every signal stays native and consistent.
 ///   * iOS/iPadOS generations declare an iPhone/iPad in `navigator.platform`, `maxTouchPoints`,
 ///     `hardwareConcurrency` and `screen`/`devicePixelRatio` (from the optional `DeviceModel`),
-///     declare touch presence, and perturb canvas `getImageData` (seeded per profile) and the
+///     expose `ontouchstart`, and perturb canvas `getImageData` (seeded per profile) and the
 ///     WebGL vendor/renderer strings. The real GPU, fonts, touch events, TLS fingerprint, codec
 ///     and feature set still say "desktop WebKit"; see docs/ISOLATION_AND_LIMITATIONS.md §2.
 ///     Only properties Safari actually exposes are touched: Safari has no `navigator.deviceMemory`
@@ -41,8 +41,9 @@ enum PrivacyScripts {
         /// Device shims are applied only when true (iOS/iPadOS generation).
         var isIOS: Bool
         var device: Device?
-        /// Per-profile seed for canvas noise (so profiles do not collide on canvas hash).
-        var canvasSeed: Int
+        /// Per-profile seed for canvas noise (`canvasSeed(for:)`), so two iOS profiles of this
+        /// app don't read back identical canvas bytes. Unused by macOS profiles.
+        var canvasSeed: UInt32
 
         struct Geolocation: Encodable {
             var mode: String // "deny" | "fixed"
@@ -61,7 +62,21 @@ enum PrivacyScripts {
         }
     }
 
-    static func shimConfiguration(for configuration: ProfileConfiguration, canvasSeed: Int = 0) -> ShimConfiguration {
+    /// Deterministic 32-bit seed from the profile ID (FNV-1a over the UUID bytes). Not
+    /// `hashValue`: Swift randomises that per process, which would give a profile a new canvas
+    /// fingerprint on every launch — itself a linkable anomaly.
+    static func canvasSeed(for profileID: UUID) -> UInt32 {
+        var hash: UInt32 = 0x811C_9DC5
+        withUnsafeBytes(of: profileID.uuid) { bytes in
+            for byte in bytes {
+                hash ^= UInt32(byte)
+                hash = hash &* 0x0100_0193
+            }
+        }
+        return hash
+    }
+
+    static func shimConfiguration(for configuration: ProfileConfiguration, canvasSeed: UInt32 = 0) -> ShimConfiguration {
         let geolocation: ShimConfiguration.Geolocation
         switch configuration.geolocation {
         case .deny:
@@ -73,6 +88,8 @@ enum PrivacyScripts {
         let generation = configuration.deviceGeneration
         var device: ShimConfiguration.Device?
         if generation.platform == .iOS || generation.platform == .iPadOS {
+            // `deviceModel` is nil when the stored model belongs to another platform, so an
+            // iPad model can't leak into an iPhone profile; fall back to the platform default.
             let model = configuration.deviceModel ?? DeviceModels.defaultModel(for: generation.platform)
             device = .init(platform: generation.platform == .iPadOS ? "iPad" : "iPhone",
                            hardwareConcurrency: model.hardwareConcurrency,
@@ -90,7 +107,7 @@ enum PrivacyScripts {
                                  canvasSeed: canvasSeed)
     }
 
-    static func makeUserContentController(for configuration: ProfileConfiguration, canvasSeed: Int = 0) -> WKUserContentController {
+    static func makeUserContentController(for configuration: ProfileConfiguration, canvasSeed: UInt32 = 0) -> WKUserContentController {
         let controller = WKUserContentController()
         controller.addUserScript(WKUserScript(source: source(for: configuration, canvasSeed: canvasSeed),
                                               injectionTime: .atDocumentStart,
@@ -99,7 +116,9 @@ enum PrivacyScripts {
         return controller
     }
 
-    static func source(for configuration: ProfileConfiguration, canvasSeed: Int = 0) -> String {
+    static func source(for configuration: ProfileConfiguration, canvasSeed: UInt32 = 0) -> String {
+        // JSON is a subset of JS, so the encoded configuration is a safe literal: no string
+        // concatenation of user-provided values into code.
         let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration, canvasSeed: canvasSeed)), encoding: .utf8)) ?? "{}"
         return "(function (CONFIG) {\n" + shimBody + "\n})(" + json + ");"
     }
@@ -116,7 +135,7 @@ function patchWindow(w) {
     try { patchNavigator(w, CONFIG.device); } catch (e) {}
     try { patchScreen(w, CONFIG.device); } catch (e) {}
     try { patchTouch(w); } catch (e) {}
-    try { patchCanvasWebGL(w, CONFIG.canvasSeed || 0); } catch (e) {}
+    try { patchCanvasWebGL(w, (CONFIG.canvasSeed >>> 0) || 1); } catch (e) {}
   }
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
@@ -125,6 +144,9 @@ function patchWindow(w) {
 }
 
 // ------------------------------------------------------- device (iOS/iPadOS generations)
+// Only the properties iOS Safari really exposes. `vendor` is already "Apple Computer, Inc."
+// and `standalone` already exists on macOS WebKit; `language(s)` are left native (see the
+// header comment).
 function patchNavigator(w, device) {
   const nav = w.navigator;
   if (!nav) return;
@@ -144,24 +166,22 @@ function patchScreen(w, device) {
   define(w, 'devicePixelRatio', device.devicePixelRatio);
 }
 
-// Basic touch presence so 'ontouchstart' in window is true and PointerEvent reports touch.
+// Touch presence: `'ontouchstart' in window` is true on iOS, and maxTouchPoints > 0 without it
+// would be inconsistent. Only the property is declared — no touch events are ever fired, and
+// `TouchEvent` stays undefined (macOS WebKit has none), which a careful script can notice.
+// `PointerEvent.pointerType` is deliberately NOT forced to "touch": the events come from a
+// real mouse (pressure, width/height, hover, buttons say so), and sites that branch on
+// pointerType (drag, pointer capture, scroll handling) would break for the user.
 function patchTouch(w) {
-  try { define(w, 'ontouchstart', null); } catch (e) {}
-  if (w.PointerEvent && w.PointerEvent.prototype) {
-    const proto = w.PointerEvent.prototype;
-    const orig = Object.getOwnPropertyDescriptor(proto, 'pointerType');
-    if (orig && orig.get) {
-      Object.defineProperty(proto, 'pointerType', {
-        configurable: true,
-        enumerable: orig.enumerable,
-        get: function () { return 'touch'; }
-      });
-    }
-  }
+  if (!('ontouchstart' in w)) define(w, 'ontouchstart', null);
 }
 
-// Canvas: perturbs getImageData with a per-profile seed so two profiles do not return
-// byte-identical pixels. toDataURL/toBlob are NOT perturbed (active check reveals the shim).
+// Canvas: getImageData read-backs get per-pixel noise — the low bit of R/G/B is flipped where
+// a hash of (seed, absolute x, absolute y) says so. Deterministic: the same profile reads the
+// same bytes for the same pixel every time (repeated reads can't expose random noise), two
+// profiles differ, and fully transparent pixels stay untouched. toDataURL/toBlob are NOT
+// perturbed, so comparing the two paths reveals the shim; the goal is to stop passive
+// linking, not to survive an active check.
 // WebGL: only the debug vendor/renderer strings; everything the GPU measures stays real.
 function patchCanvasWebGL(w, seed) {
   const proto = w.HTMLCanvasElement && w.HTMLCanvasElement.prototype;
@@ -177,8 +197,13 @@ function patchCanvasWebGL(w, seed) {
           const image = origGetImageData.apply(this, arguments);
           const px = image && image.data;
           if (!px || px.length === 0) return image;
-          const s = (seed % 251) + 1;
-          for (let i = 0; i < px.length; i += 4) px[i] = (px[i] + s) & 255;
+          const sx = Math.trunc(+arguments[0]) || 0, sy = Math.trunc(+arguments[1]) || 0;
+          const width = image.width || 1;
+          for (let i = 0, n = 0; i < px.length; i += 4, n++) {
+            if (px[i + 3] === 0) continue;
+            const bits = pixelHash(seed, sx + (n % width), sy + Math.floor(n / width));
+            px[i] ^= bits & 1; px[i + 1] ^= (bits >>> 1) & 1; px[i + 2] ^= (bits >>> 2) & 1;
+          }
           return image;
         });
       }
@@ -197,7 +222,19 @@ function patchCanvasWebGL(w, seed) {
   }
 }
 
+// 32-bit integer hash of (seed, x, y); `Math.imul` keeps it in 32-bit arithmetic.
+function pixelHash(seed, x, y) {
+  let h = (seed ^ Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1)) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
 // ---------------------------------------------------------------- time zone
+// Covers: Intl.DateTimeFormat default zone (and everything built on it), Date local-time
+// getters, getTimezoneOffset, toString/toDateString/toTimeString, toLocale*String.
+// Not covered: Date constructed from local components (new Date(y, m, d)), Date.parse of
+// strings without an offset, and local setters (setHours, …) — these still use the host zone.
 function patchTimeZone(w, TZ) {
   const NativeDate = w.Date;
   const proto = NativeDate.prototype;
@@ -357,6 +394,7 @@ function patchWebRTC(w, policy) {
     }
     return;
   }
+  // relayOnly: no host / server-reflexive candidates are gathered.
   const Native = w.RTCPeerConnection;
   if (!Native) return;
   const forceRelay = (config) => Object.assign({}, config, { iceTransportPolicy: 'relay' });
@@ -385,7 +423,7 @@ function hookChildWindows(w) {
       configurable: true, enumerable: descriptor.enumerable,
       get: function () {
         const value = descriptor.get.call(this);
-        try { patchWindow(toWindow(value)); } catch (e) {}
+        try { patchWindow(toWindow(value)); } catch (e) {} // cross-origin: inaccessible, and gets its own injection
         return value;
       }
     });
@@ -410,4 +448,5 @@ function define(target, name, value) {
 
 patchWindow(window);
 """#
+    // END SHIM
 }
