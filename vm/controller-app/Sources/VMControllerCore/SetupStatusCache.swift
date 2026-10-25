@@ -11,15 +11,20 @@ public struct SetupStatus: Codable, Equatable, Sendable {
     public var tartVersion: String?
     public var baseImage: String
     public var baseImagePresent: Bool
+    /// The registry digest of the base image when it was last pulled, so a later
+    /// check can tell whether the tag has moved. nil = unknown (never recorded).
+    public var baseImageDigest: String?
     public var checkedAt: Date
 
     public init(tartPath: String? = nil, tartVersion: String? = nil,
                 baseImage: String = LauncherDefaults.baseImage,
-                baseImagePresent: Bool = false, checkedAt: Date = Date()) {
+                baseImagePresent: Bool = false, baseImageDigest: String? = nil,
+                checkedAt: Date = Date()) {
         self.tartPath = tartPath
         self.tartVersion = tartVersion
         self.baseImage = baseImage
         self.baseImagePresent = baseImagePresent
+        self.baseImageDigest = baseImageDigest
         self.checkedAt = checkedAt
     }
 

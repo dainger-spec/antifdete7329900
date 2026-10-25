@@ -151,9 +151,18 @@ Done here (core, tested on Linux/macOS CI):
       Tart's cache (`tart pull`, with progress), and the UI explains that
       existing profiles are independent clones that don't auto-migrate
       (`BaseImagePolicy`) — recreate a profile to move it to the new base. It
-      also lists any profiles pinned to a different base. (Detecting that
-      `:latest` actually moved, via an OCI digest check, is future work; the
-      pull simply fetches latest.)
+      also lists any profiles pinned to a different base.
+
+- [x] Update detection by digest: "Проверить обновление" asks the OCI registry
+      for the base tag's current digest (`OCIReference` parses the ref;
+      `RegistryClient` does an anonymous-token + manifest `HEAD` read — no
+      download) and compares it with the digest recorded at the last pull
+      (`SetupStatus.baseImageDigest`). The UI shows "Доступно обновление",
+      "Актуально", or nothing when it can't tell (never pulled via the app, or
+      the registry was unreachable) — `BaseImagePolicy.updateState`. A
+      successful pull records the new digest so the next check has a baseline.
+      Parsing, token extraction and the compare are unit-tested on Linux; the
+      live registry read runs only at runtime.
 
 Everything above is in; what's left is polish needing a Mac:
 - [ ] Broader System Settings-style restyle of the main window

@@ -129,15 +129,23 @@ struct BaseImageSection: View {
             HStack {
                 Text("Базовый образ").font(.headline)
                 Spacer()
-                if model.baseUpdateInProgress {
+                if model.baseUpdateInProgress || model.baseUpdateChecking {
                     ProgressView().controlSize(.small)
+                }
+                if model.baseUpdateInProgress {
                     Text(model.baseUpdateDetail).font(.caption).foregroundStyle(.secondary)
                 }
+                Button("Проверить обновление") { model.checkBaseImageUpdate() }
+                    .disabled(model.baseUpdateInProgress || model.baseUpdateChecking)
                 Button("Обновить образ") { model.updateBaseImage() }
                     .disabled(model.isBusy || model.baseUpdateInProgress)
             }
-            Text(model.currentBaseImage)
-                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            HStack(spacing: 6) {
+                Text(model.currentBaseImage)
+                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Spacer()
+                updateBadge
+            }
             Text(BaseImagePolicy.migrationNote)
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -150,6 +158,19 @@ struct BaseImageSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
+    }
+
+    @ViewBuilder private var updateBadge: some View {
+        switch model.baseUpdateState {
+        case .updateAvailable:
+            Label("Доступно обновление", systemImage: "arrow.down.circle")
+                .font(.caption).foregroundStyle(.orange)
+        case .upToDate:
+            Label("Актуально", systemImage: "checkmark.circle")
+                .font(.caption).foregroundStyle(.green)
+        case .unknown:
+            EmptyView()
+        }
     }
 }
 

@@ -513,9 +513,44 @@ final class LauncherModel: ObservableObject {
     // Base image.
     @Published private(set) var baseUpdateInProgress = false
     @Published private(set) var baseUpdateDetail = ""
+    /// Whether the registry has a newer base than the one last pulled here.
+    @Published private(set) var baseUpdateState: BaseUpdateState = .unknown
+    @Published private(set) var baseUpdateChecking = false
     public var currentBaseImage: String { LauncherDefaults.baseImage }
     public var profilesOnOtherBase: [Profile] {
         BaseImagePolicy.profilesOnOtherBase(profiles, currentBase: currentBaseImage)
+    }
+
+    /// Ask the registry for the base tag's current digest and compare it with
+    /// the one recorded at last pull — a read, not a download. Best-effort: on
+    /// any failure the state stays/returns to `.unknown`.
+    public func checkBaseImageUpdate() {
+        guard !baseUpdateChecking, !baseUpdateInProgress else { return }
+        baseUpdateChecking = true
+        Task { @MainActor in
+            defer { baseUpdateChecking = false }
+            guard let reference = OCIReference(currentBaseImage) else {
+                baseUpdateState = .unknown
+                return
+            }
+            let stored = statusCache.load()?.baseImageDigest
+            let remote = await RegistryClient.remoteDigest(for: reference)
+            baseUpdateState = BaseImagePolicy.updateState(stored: stored, remote: remote)
+        }
+    }
+
+    /// After a successful pull, remember the tag's current digest so a later
+    /// check can tell whether it has moved. Merges into the cached status
+    /// (keeping Tart path/version/presence); best-effort — a missed digest just
+    /// leaves the next check "unknown".
+    private func recordBaseImageDigest() async {
+        guard let reference = OCIReference(currentBaseImage),
+              let digest = await RegistryClient.remoteDigest(for: reference) else { return }
+        var status = statusCache.load() ?? SetupStatus(baseImage: currentBaseImage, baseImagePresent: true)
+        status.baseImageDigest = digest
+        status.checkedAt = Date()
+        statusCache.save(status)
+        baseUpdateState = .upToDate
     }
 
     /// Pull the latest base image into Tart's cache (for new profiles). Existing
@@ -545,6 +580,7 @@ final class LauncherModel: ObservableObject {
                 if code == 0 {
                     baseUpdateDetail = "Готово"
                     appendLog("Базовый образ обновлён", .info)
+                    await recordBaseImageDigest()
                     await refreshResources()
                 } else {
                     baseUpdateDetail = "Ошибка"
