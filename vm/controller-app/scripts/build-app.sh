@@ -34,6 +34,7 @@ sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Info.plist > "$APP/Contents/Info.pl
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
 install -m 0755 "$VM_DIR/controller/tart-prototype.sh" "$RESOURCES/vm/controller/"
+install -m 0755 "$VM_DIR/identity.sh" "$RESOURCES/vm/"
 install -m 0755 "$VM_DIR/agent/install.sh" "$RESOURCES/vm/agent/"
 install -m 0644 "$VM_DIR/agent/pbagent.py" "$VM_DIR/agent/binarycookies.py" \
   "$VM_DIR/agent/com.privacybrowser.agent.plist.template" \

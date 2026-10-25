@@ -233,6 +233,31 @@ final class ScriptIntegrationTests: XCTestCase {
         _ = await run.process.waitForExit(timeout: 15)
     }
 
+    func testIdentityProfileRunsIdentityScriptOverSSH() async throws {
+        let run = try host.launch(url: "https://example.com",
+                                  extraEnvironment: ["TART_NET": "shared", "IDENTITY_PROFILE": "my work"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertTrue(run.events.contains(.stage(.vm, detail: "Настройка имени хоста VM…")))
+        let calls = host.calls
+        let identity = calls.firstIndex { $0.hasPrefix("ssh ") && $0.contains(#"bash -s -- my\ work"#) }
+        XCTAssertNotNil(identity, "the profile name reaches the guest as one quoted argument")
+        XCTAssertLessThan(identity ?? .max, calls.firstIndex { $0.contains("cat ~/.pbagent/token") } ?? .min,
+                          "identity is set before the agent step")
+        let sent = try String(contentsOf: host.state.appendingPathComponent("identity-stdin"), encoding: .utf8)
+        let script = try String(contentsOf: TestPaths.identityScript, encoding: .utf8)
+        XCTAssertEqual(sent, script, "vm/identity.sh is piped to bash -s")
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
+    func testNoIdentityStepWithoutProfile() async throws {
+        let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "shared"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertFalse(host.calls.contains { $0.contains("bash -s") }, "identity is opt-in")
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
     func testForceInstallReinstallsEvenIfInstalled() async throws {
         try host.markInstalled(token: "old")
         let run = try host.launch(url: "https://example.com",
@@ -342,6 +367,7 @@ final class FakeHost {
         \(log)
         for arg in "$@"; do [ "$arg" = "-N" ] && exec sleep 300; done
         case "$*" in
+          *"bash -s"*) cat > "$FAKE_STATE/identity-stdin"; exit 0 ;;
           *"cat ~/.pbagent/token"*) [ -f "$FAKE_STATE/installed-token" ] && cat "$FAKE_STATE/installed-token"; exit 0 ;;
           *install.sh*) echo "Installed." >&2; echo "PB_AGENT_TOKEN=tok123"; exit 0 ;;
         esac

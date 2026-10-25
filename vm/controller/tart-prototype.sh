@@ -28,6 +28,9 @@
 #   VM_HEADLESS  "1" = run with --no-graphics (no host window). See vm/SLIMMING.md.
 #   VM_RUN_ARGS  extra flags appended to `tart run`, split on spaces (e.g. to
 #                pass a build-specific device toggle your tart supports)
+#   IDENTITY_PROFILE  profile name: once SSH is up, run vm/identity.sh in the
+#                guest to set a stable hostname for it (empty = skip). Failure
+#                is reported and the launch continues. See docs/HARDWARE_IDENTITY.md.
 #
 # This installs vm/agent/ into the VM as a LaunchAgent, opens an SSH tunnel to
 # the agent's loopback port, then calls POST /navigate. The agent control port
@@ -50,6 +53,7 @@ VM_MEMORY="${VM_MEMORY:-}"
 VM_CPU="${VM_CPU:-}"
 VM_HEADLESS="${VM_HEADLESS:-}"
 VM_RUN_ARGS="${VM_RUN_ARGS:-}"
+IDENTITY_PROFILE="${IDENTITY_PROFILE:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="$(cd "$SCRIPT_DIR/../agent" && pwd)"
@@ -157,6 +161,20 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 ssh_vm true 2>/dev/null || { echo "SSH did not come up"; exit 1; }
+
+if [[ -n "$IDENTITY_PROFILE" ]]; then
+  echo "==> Setting hardware identity for '$IDENTITY_PROFILE'"
+  IDENTITY_SH="$SCRIPT_DIR/../identity.sh"
+  if [[ ! -r "$IDENTITY_SH" ]]; then
+    echo "    identity.sh not found next to the controller (skipping)"
+  # The script goes over stdin; %q keeps any profile name one argument for the
+  # guest's login shell (zsh understands bash's quoting, $'…' included).
+  elif ssh_vm "bash -s -- $(printf '%q' "$IDENTITY_PROFILE")" < "$IDENTITY_SH"; then
+    echo "    hardware identity applied"
+  else
+    echo "    hardware identity not fully applied (continuing)"
+  fi
+fi
 
 echo "==> Installing in-VM agent"
 # Install once: if the agent is already installed (its token file exists) and

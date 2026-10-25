@@ -228,4 +228,5 @@ enum TestPaths {
         .deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent()
     static let script = vmDirectory.appendingPathComponent("controller/tart-prototype.sh")
+    static let identityScript = vmDirectory.appendingPathComponent("identity.sh")
 }

@@ -32,6 +32,7 @@ public struct ScriptOutputParser: Sendable {
         StageRule(prefix: "Starting VM", stage: .vm) { _ in "Запуск VM…" },
         StageRule(prefix: "Waiting for VM IP", stage: .vm) { _ in "Ожидание IP-адреса VM…" },
         StageRule(prefix: "Waiting for SSH", stage: .vm) { _ in "Ожидание SSH…" },
+        StageRule(prefix: "Setting hardware identity", stage: .vm) { _ in "Настройка имени хоста VM…" },
         StageRule(prefix: "Installing in-VM agent", stage: .agent) { _ in "Копирование и установка агента…" },
         StageRule(prefix: "Opening SSH tunnel", stage: .agent) { _ in "Открытие SSH-туннеля…" },
         StageRule(prefix: "Waiting for agent", stage: .agent) { _ in "Ожидание ответа агента…" },
