@@ -26,14 +26,31 @@ jobs:
       - run: TZ=America/New_York node scripts/test-shims.mjs
 
   macos:
-    name: macOS app build + core tests (CryptoKit)
+    name: macOS build, core tests, WebKit self-test
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - run: swift --version
       - run: swift test
-      - run: scripts/build-app.sh
+      - name: Build sandboxed app (default)
+        run: APP_DIR=build/sandboxed scripts/build-app.sh
+      - name: Build unsandboxed app
+        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Self-test against real WebKit (sandboxed and unsandboxed)
+        run: |
+          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 &
+          PROXY_PID=$!
+          sleep 1
+          export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081
+          status=0
+          for variant in sandboxed unsandboxed; do
+            echo "::group::self-test ($variant)"
+            build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test || status=1
+            echo "::endgroup::"
+          done
+          kill $PROXY_PID || true
+          exit $status
       - uses: actions/upload-artifact@v4
         with:
           name: PrivacyBrowser.app
-          path: build/PrivacyBrowser.app
+          path: build/sandboxed/PrivacyBrowser.app

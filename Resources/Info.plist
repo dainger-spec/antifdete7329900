@@ -33,6 +33,13 @@
 	<string>A website you are visiting requested access to the camera.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>A website you are visiting requested access to the microphone.</string>
+	<!-- A browser must load http:// pages. This relaxes App Transport Security for WKWebView
+	     content only; the app's own URLSession traffic (HTTP sync transport) stays HTTPS-only. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
 	<!-- Deliberately no NSLocationUsageDescription: the app never uses CoreLocation.
 	     Geolocation is answered by the per-profile JavaScript shim (deny or fixed coordinates). -->
 </dict>

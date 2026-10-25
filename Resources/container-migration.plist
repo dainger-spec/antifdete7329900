@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Executed once by macOS when the sandboxed app is first launched: moves data written by an
+	     earlier non-sandboxed build into the container. $(BUNDLE_ID) is substituted by build-app.sh.
+	     - the encrypted vault (profiles, settings, passwords, history, bookmarks, webdata.pbsa);
+	     - any unsealed WebKit data left by a crash, so that it is found and sealed after unlock
+	       (WebKitDataLayout translates its location to the sandboxed layout on the next restore). -->
+	<key>Move</key>
+	<array>
+		<string>${ApplicationSupport}/PrivacyBrowser</string>
+		<string>${Library}/WebKit/$(BUNDLE_ID)</string>
+		<string>${Library}/Caches/$(BUNDLE_ID)</string>
+	</array>
+</dict>
+</plist>

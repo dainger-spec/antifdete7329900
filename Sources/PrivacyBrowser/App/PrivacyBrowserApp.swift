@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-@main
+/// Started from `main.swift` (which also dispatches `--self-test`).
 struct PrivacyBrowserApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()

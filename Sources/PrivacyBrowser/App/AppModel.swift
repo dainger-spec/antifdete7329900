@@ -16,16 +16,11 @@ final class AppModel: ObservableObject {
     private(set) var manager: ProfileManager?
     private var managerObservation: AnyCancellable?
 
-    /// `~/Library/Application Support/PrivacyBrowser` (override with PRIVACYBROWSER_VAULT_DIR).
+    /// See `AppEnvironment.vaultDirectory` (inside the container when sandboxed).
     let root: URL
 
     init() {
-        if let override = ProcessInfo.processInfo.environment["PRIVACYBROWSER_VAULT_DIR"], !override.isEmpty {
-            root = URL(fileURLWithPath: override, isDirectory: true)
-        } else {
-            root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("PrivacyBrowser", isDirectory: true)
-        }
+        root = AppEnvironment.vaultDirectory
         phase = MasterVault.exists(in: root) ? .locked : .setup
     }
 

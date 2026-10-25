@@ -2,11 +2,26 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Hardened runtime, not sandboxed (see docs/ISOLATION_AND_LIMITATIONS.md, "App Sandbox").
-	     Under the hardened runtime, camera/microphone access needs these entitlements. -->
+	<!-- App Sandbox (default build). Every entitlement below is required; see
+	     docs/ISOLATION_AND_LIMITATIONS.md §7 for what each one is used for. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- WKWebView networking (WebKit's network process acts on the app's behalf) and sync. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- getUserMedia, only after the per-request in-app prompt. -->
 	<key>com.apple.security.device.camera</key>
 	<true/>
 	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- <input type=file> uploads and choosing the sync folder (NSOpenPanel / Powerbox). -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<!-- Downloads are saved to ~/Downloads. -->
+	<key>com.apple.security.files.downloads.read-write</key>
+	<true/>
+	<!-- Remember the chosen sync folder across launches (security-scoped bookmark). -->
+	<key>com.apple.security.files.bookmarks.app-scope</key>
 	<true/>
 </dict>
 </plist>
