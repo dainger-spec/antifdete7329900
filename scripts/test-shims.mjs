@@ -151,7 +151,6 @@ test('device shim: iOS generation declares the model', () => {
   assert.equal(run(w, `navigator.platform`), 'iPhone');
   assert.equal(run(w, `navigator.hardwareConcurrency`), 6);
   assert.equal(run(w, `navigator.maxTouchPoints`), 5);
-  assert.equal(run(w, `navigator.standalone`), false);
   assert.deepEqual(Array.from(run(w, `[screen.width, screen.height, screen.availWidth, screen.availHeight, devicePixelRatio]`)), [393, 852, 393, 852, 3]);
   // Safari has neither of these; the shim must not invent them.
   assert.equal(run(w, `'deviceMemory' in navigator`), false);

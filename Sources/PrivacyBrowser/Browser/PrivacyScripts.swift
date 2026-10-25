@@ -133,7 +133,7 @@ function patchNavigator(w, device) {
   define(nav, 'platform', device.platform);
   define(nav, 'hardwareConcurrency', device.hardwareConcurrency);
   define(nav, 'maxTouchPoints', device.maxTouchPoints);
-  define(nav, 'standalone', false); // iOS-only property (home-screen web app?)
+  // navigator.standalone already exists (false) on macOS WebKit; nothing to add.
 }
 
 function patchScreen(w, device) {

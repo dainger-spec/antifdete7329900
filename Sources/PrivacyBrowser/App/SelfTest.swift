@@ -417,9 +417,9 @@ final class SelfTest {
               staleProbe == "iPhone|5|\(iphoneDefault.screenWidth)|\(Int(iphoneDefault.devicePixelRatio))|false|false", staleProbe ?? "nil")
 
         // macOS profiles get no device shim at all: platform and screen are the real machine's.
-        let macProbe = try await evaluate("return [navigator.platform, 'standalone' in navigator, 'connection' in navigator].join('|');",
+        let macProbe = try await evaluate("return [navigator.platform, 'connection' in navigator, 'deviceMemory' in navigator].join('|');",
                                           for: .forGeneration(DeviceGenerations.resolved(id: DeviceGenerations.defaultID))) as? String
-        check("device shim: macOS profile stays native (MacIntel, no iOS-only or Chrome-only navigator props)",
+        check("device shim: macOS profile stays native (MacIntel, no Chrome-only navigator props)",
               macProbe == "MacIntel|false|false", macProbe ?? "nil")
     }
 

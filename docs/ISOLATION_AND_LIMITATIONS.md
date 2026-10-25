@@ -120,7 +120,6 @@ What it does **not** do, and cannot:
 |---|---|---|
 | `navigator.platform` | `"iPhone"` / `"iPad"` | |
 | `navigator.maxTouchPoints`, `hardwareConcurrency` | from the model | the real core count is still visible to workers |
-| `navigator.standalone` | `false` | iOS-only property, present on real iOS Safari |
 | `screen.width/height/availWidth/availHeight`, `devicePixelRatio` | from the model | `window.innerWidth`, `matchMedia`, CSS viewport and `outerWidth` are the real window; a 393-px "screen" under a 1200-px viewport is an obvious contradiction |
 | Canvas 2D `getImageData` | +1…7 on the red channel of each pixel, once per context | `toDataURL`/`toBlob` are untouched, so the two disagree; the noise is a function of the buffer length, i.e. the *same* for every profile — it stops byte-identical linking against a real iPhone baseline only, not between two profiles of this app |
 | WebGL / WebGL2 `getParameter(UNMASKED_VENDOR/RENDERER_WEBGL)` | `"Apple Inc."` / `"Apple GPU"` | all other WebGL parameters, extensions, limits and rendered pixels come from the real GPU |
@@ -131,7 +130,8 @@ Deliberately **not** touched, and why:
   them would make the profile look like Chrome pretending to be Safari.
 - `navigator.language(s)`: the HTTP `Accept-Language` header cannot be changed per view, so
   overriding only the JS side would create a header/JS mismatch. Both follow the system.
-- `navigator.vendor` is already `"Apple Computer, Inc."` on macOS WebKit.
+- `navigator.vendor` is already `"Apple Computer, Inc."` and `navigator.standalone` already
+  `false` on macOS WebKit (the self-test confirmed the latter), so neither is redefined.
 - `document.fonts`, `AudioContext`: an earlier revision set `document.fonts.size` to a
   constant and added random noise to `AnalyserNode.getFloatFrequencyData`. Both were removed:
   a constant `size` contradicts an empty `FontFaceSet`, and per-call random noise makes two
