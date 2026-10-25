@@ -9,9 +9,17 @@ enum VMControllerCLI {
     static func main() {
         let args = CommandLine.arguments
         guard args.count >= 2 else {
-            print("Usage: VMController <url>")
-            print("Example: VMController https://browserleaks.com")
+            print("""
+            Usage:
+              VMController <url>                      open a URL in the VM
+              VMController profiles list              list saved profiles (JSON store)
+              VMController profiles add <name> [--proxy <url>]
+              VMController profiles remove <id>
+            """)
             exit(1)
+        }
+        if args[1] == "profiles" {
+            exit(ProfilesCommand.run(Array(args.dropFirst(2))))
         }
         guard let url = URLInput.normalize(args[1]) else {
             print("Error: not an http(s) URL: \(args[1])")
@@ -23,6 +31,42 @@ enum VMControllerCLI {
         } catch {
             print("Error: \(error)")
             exit(1)
+        }
+    }
+}
+
+/// `VMController profiles …` — inspect and edit the JSON profile store from the
+/// command line (the app uses the same ProfileStore).
+enum ProfilesCommand {
+    static func run(_ args: [String]) -> Int32 {
+        let store = ProfileStore()
+        do {
+            switch args.first {
+            case "list", nil:
+                let profiles = try store.list()
+                if profiles.isEmpty { print("no profiles (\(store.url.path))") }
+                for p in profiles {
+                    let proxy = p.proxy ?? "no proxy (isolated / fail-closed)"
+                    print("\(p.id)  \(p.name)  [\(p.vmName)]  \(proxy)  cookies=\(p.cookieCount)")
+                }
+            case "add":
+                guard args.count >= 2 else { print("usage: profiles add <name> [--proxy <url>]"); return 1 }
+                var proxy: String?
+                if let i = args.firstIndex(of: "--proxy"), i + 1 < args.count { proxy = args[i + 1] }
+                let p = try store.add(Profile(name: args[1], proxy: proxy))
+                print("added \(p.id)  \(p.name)  [\(p.vmName)]")
+            case "remove":
+                guard args.count >= 2 else { print("usage: profiles remove <id>"); return 1 }
+                try store.remove(args[1])
+                print("removed \(args[1])")
+            case let other?:
+                print("unknown profiles command: \(other)")
+                return 1
+            }
+            return 0
+        } catch {
+            print("Error: \(error)")
+            return 1
         }
     }
 }

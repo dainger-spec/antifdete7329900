@@ -209,6 +209,16 @@ final class ScriptIntegrationTests: XCTestCase {
         _ = await run.process.waitForExit(timeout: 15)
     }
 
+    func testSoftnetFailClosedNetworking() async throws {
+        let run = try host.launch(url: "https://example.com",
+                                  extraEnvironment: ["TART_NET": "softnet", "SOFTNET_ALLOW": "10.0.0.9/32"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertTrue(host.calls.contains("tart run safari-profile --net-softnet --net-softnet-allow 10.0.0.9/32"),
+                      "softnet with an allowlist restricts egress to the proxy")
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
     func testNoSizingWhenUnset() async throws {
         let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "shared"])
         try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }

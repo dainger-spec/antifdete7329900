@@ -40,6 +40,11 @@ VM (one per profile)
 - No shared cookies, storage, or state between VMs.
 - Network egress only through the assigned proxy.
 
+See [PROFILES.md](PROFILES.md) for the profile system: snapshots are Tart
+clones (there is no `tart snapshot`), the JSON profile store, per-profile
+cookies, and the fail-closed softnet networking that enforces proxy-only (or
+no) egress from the host side.
+
 ## Limitations
 
 - RAM/CPU: a stock VM is heavy, but the RAM is a hard cap set on the host

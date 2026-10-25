@@ -15,9 +15,11 @@
 #   LOCAL_PORT   host end of the SSH tunnel (default: AGENT_PORT)
 #   SHOT         path to save a screenshot  (default: none)
 #   KEEP_VM      "1" to leave the VM running on exit (default: stop it)
-#   TART_NET     "bridged" (default; --net-bridged=$BRIDGE_IF, IP via ARP) or
-#                "shared" (Tart's default NAT; IP via the host's DHCP leases)
+#   TART_NET     "bridged" (default; --net-bridged=$BRIDGE_IF, IP via ARP),
+#                "shared" (Tart NAT), or "softnet" (fail-closed isolation)
 #   BRIDGE_IF    host interface for bridged networking (default: en0)
+#   SOFTNET_ALLOW  with TART_NET=softnet: egress-allowed CIDR(s), e.g. the proxy
+#                  (comma-separated). Empty = no egress. Needs the softnet helper.
 #   VM_MEMORY    RAM cap in MiB, applied with `tart set` (empty = image default)
 #   VM_CPU       CPU core count, applied with `tart set` (empty = image default)
 #   VM_HEADLESS  "1" = run with --no-graphics (no host window). See vm/SLIMMING.md.
@@ -92,7 +94,14 @@ SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$KNOWN_HOST
 case "$TART_NET" in
   bridged) RUN_NET_ARGS=(--net-bridged="$BRIDGE_IF"); IP_ARGS=(--resolver=arp) ;;
   shared)  RUN_NET_ARGS=(); IP_ARGS=() ;;
-  *) echo "TART_NET must be 'bridged' or 'shared' (got '$TART_NET')"; exit 2 ;;
+  # Fail-closed isolation via the softnet helper: egress only to SOFTNET_ALLOW
+  # (a CIDR, or comma-separated CIDRs) — set it to the proxy. Empty allow = no
+  # egress at all. See vm/SLIMMING.md / docs/PROFILES.md.
+  softnet)
+    RUN_NET_ARGS=(--net-softnet)
+    [[ -n "${SOFTNET_ALLOW:-}" ]] && RUN_NET_ARGS+=(--net-softnet-allow "$SOFTNET_ALLOW")
+    IP_ARGS=() ;;
+  *) echo "TART_NET must be 'bridged', 'shared' or 'softnet' (got '$TART_NET')"; exit 2 ;;
 esac
 
 ssh_vm()  { "${SSH_WRAP[@]}" ssh  "${SSH_OPTS[@]}" "$SSH_USER@$IP" "$@"; }
