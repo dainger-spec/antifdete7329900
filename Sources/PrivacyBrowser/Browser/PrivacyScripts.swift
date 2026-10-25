@@ -3,13 +3,8 @@ import Foundation
 import WebKit
 
 /// JavaScript shims for settings WebKit has no native per-web-view API for.
-/// Now includes aggressive navigator / screen / canvas / WebGL spoofing for iOS-like profiles
-/// to approximate the iStealth marketing claims as far as public APIs allow.
-///
-/// PLATFORM LIMITATION — still approximations:
-///   * Not in workers. Detectable via toString, descriptors, inconsistencies with TLS/GPU.
-///   * Canvas/WebGL overrides are best-effort and can be fingerprinted as spoofed.
-///   * True engine-level iOS WebKit is impossible without private frameworks.
+/// Aggressive iOS-like spoofing: navigator, screen, canvas/WebGL, fonts, audio.
+/// Still best-effort and detectable; not engine-level.
 enum PrivacyScripts {
     struct ShimConfiguration: Encodable {
         var timeZone: String?
@@ -84,7 +79,11 @@ function patchWindow(w) {
   patched.add(w);
   try { patchNavigator(w); } catch (e) {}
   try { patchScreen(w); } catch (e) {}
-  if (CONFIG.isIOS) { try { patchCanvasWebGL(w); } catch (e) {} }
+  if (CONFIG.isIOS) {
+    try { patchCanvasWebGL(w); } catch (e) {}
+    try { patchFonts(w); } catch (e) {}
+    try { patchAudio(w); } catch (e) {}
+  }
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
   try { patchWebRTC(w, CONFIG.webRTC || 'disabled'); } catch (e) {}
@@ -104,7 +103,6 @@ function patchNavigator(w) {
   define(nav, 'language', CONFIG.languages[0]);
   if (CONFIG.isIOS) {
     define(nav, 'standalone', false);
-    try { delete w.ontouchstart; } catch (e) {}
   }
 }
 
@@ -119,7 +117,6 @@ function patchScreen(w) {
 }
 
 function patchCanvasWebGL(w) {
-  // Best-effort noise / fixed values to reduce Mac GPU fingerprint. Highly detectable.
   const proto = w.HTMLCanvasElement && w.HTMLCanvasElement.prototype;
   if (proto && proto.getContext) {
     const orig = proto.getContext;
@@ -129,26 +126,51 @@ function patchCanvasWebGL(w) {
         const origToData = ctx.getImageData;
         ctx.getImageData = function () {
           const data = origToData.apply(this, arguments);
-          // Tiny noise
-          for (let i = 0; i < data.data.length; i += 4) data.data[i] ^= 1;
+          for (let i = 0; i < data.data.length; i += 4) data.data[i] = (data.data[i] + 1) & 255;
           return data;
         };
       }
       return ctx;
     };
   }
-  // WebGL vendor/renderer spoof attempt
   if (w.WebGLRenderingContext) {
     const getParam = w.WebGLRenderingContext.prototype.getParameter;
     w.WebGLRenderingContext.prototype.getParameter = function (p) {
-      if (p === 37445) return 'Apple Inc.'; // UNMASKED_VENDOR_WEBGL
-      if (p === 37446) return 'Apple GPU'; // UNMASKED_RENDERER_WEBGL
+      if (p === 37445) return 'Apple Inc.';
+      if (p === 37446) return 'Apple GPU';
       return getParam.apply(this, arguments);
     };
   }
 }
 
-// ... (existing patchTimeZone, patchGeolocation, patchWebRTC, hookChildWindows, define remain the same)
+function patchFonts(w) {
+  // Crude font list reduction for iOS-like (system fonts only)
+  if (w.document && w.document.fonts) {
+    try {
+      Object.defineProperty(w.document.fonts, 'size', { value: 12, writable: false });
+    } catch (e) {}
+  }
+}
+
+function patchAudio(w) {
+  if (!w.AudioContext && !w.webkitAudioContext) return;
+  const AC = w.AudioContext || w.webkitAudioContext;
+  const orig = AC.prototype.getChannelData || AC.prototype.createAnalyser;
+  // Minimal noise on analyser if present
+  if (AC.prototype.createAnalyser) {
+    const origCreate = AC.prototype.createAnalyser;
+    AC.prototype.createAnalyser = function () {
+      const analyser = origCreate.apply(this, arguments);
+      const origGet = analyser.getFloatFrequencyData;
+      analyser.getFloatFrequencyData = function (array) {
+        origGet.apply(this, arguments);
+        for (let i = 0; i < array.length; i++) array[i] += (Math.random() - 0.5) * 0.0001;
+      };
+      return analyser;
+    };
+  }
+}
+
 function patchTimeZone(w, TZ) {
   const NativeDate = w.Date;
   const proto = NativeDate.prototype;
