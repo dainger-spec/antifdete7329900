@@ -40,6 +40,9 @@ TUNNEL_PID=""
 KNOWN_HOSTS="$(mktemp)"
 
 cleanup() {
+  # Runs from the INT/TERM trap and again from EXIT; do the work only once.
+  [[ -n "${_CLEANED:-}" ]] && return
+  _CLEANED=1
   [[ -n "$TUNNEL_PID" ]] && kill "$TUNNEL_PID" 2>/dev/null || true
   if [[ -z "$KEEP_VM" && -n "$TART_PID" ]]; then
     echo "==> Stopping VM '$VM_NAME'"
@@ -55,7 +58,10 @@ for tool in tart ssh scp curl; do
 done
 
 # sshpass is only needed for password auth; key-based auth works without it.
-SSH_WRAP=()
+# Default to a no-op `env` prefix rather than an empty array: on macOS /bin/bash
+# is 3.2, where expanding an empty array as "${SSH_WRAP[@]}" under `set -u`
+# aborts with "unbound variable". `env ssh …` is a harmless passthrough.
+SSH_WRAP=(env)
 if command -v sshpass &>/dev/null; then
   SSH_WRAP=(sshpass -e)
 fi

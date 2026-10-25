@@ -37,9 +37,14 @@ final class Controller {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
         process.arguments = ["tart"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        try process.run()
+        process.environment = augmentedEnvironment()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            throw ControllerError.tartNotFound
+        }
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             throw ControllerError.tartNotFound
@@ -49,74 +54,136 @@ final class Controller {
 
     func ensureImage() throws {
         print("==> Checking for VM '\(vmName)'")
-        let list = try runTart(["list"])
-        if list.contains(vmName) {
+        let list = try runTartCapturing(["list"])
+        if vmListContains(list, name: vmName) {
             print("    VM exists")
             return
         }
         print("==> Cloning base image (this may take a while)...")
         print("    \(baseImage)")
-        _ = try runTart(["clone", baseImage, vmName])
+        // Inherit stdio so the (large, streaming) pull progress is shown and,
+        // crucially, is NOT buffered into a pipe we only drain after exit — that
+        // deadlocks once the pipe fills. See runTartCapturing for the small case.
+        try runTartStreaming(["clone", baseImage, vmName])
         print("    Done")
     }
 
+    /// True iff a `tart list` table has a row whose Name column equals `name`.
+    /// Avoids substring false positives (e.g. "safari-profile-2", the header).
+    func vmListContains(_ output: String, name: String) -> Bool {
+        for line in output.split(whereSeparator: { $0.isNewline }) {
+            let fields = line.split(whereSeparator: { $0.isWhitespace })
+            // Columns: Source Name Disk Size State → Name is index 1.
+            if fields.count >= 2 && String(fields[1]) == name {
+                return true
+            }
+        }
+        return false
+    }
+
     func launchAndNavigate(url: String) throws {
-        print("==> Launching VM")
-        let script = """
-        #!/bin/bash
-        set -e
-        tart run \(vmName) --net-bridged=en0 &
-        TART_PID=$!
-        echo "VM PID: $TART_PID"
-
-        for i in $(seq 1 60); do
-          IP=$(tart ip \(vmName) 2>/dev/null || true)
-          if [ -n "$IP" ]; then
-            echo "VM IP: $IP"
-            break
-          fi
-          sleep 2
-        done
-
-        if [ -z "${IP:-}" ]; then
-          echo "Failed to get IP"
-          exit 1
-        fi
-
-        echo "TODO: install agent and navigate to \(url)"
-        echo "VM is running. Press Ctrl+C to stop."
-        wait $TART_PID
-        """
+        // Delegate the boot → install agent → tunnel → navigate flow to the
+        // tested bash prototype rather than reimplementing it here. Stdio is
+        // inherited so progress is live and Ctrl+C reaches the script (its own
+        // trap stops the VM and tears down the tunnel).
+        let script = try locateTartScript()
+        print("==> Launching VM and opening Safari (via \(script))")
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-c", script]
+        process.arguments = [script, vmName, url]
+        process.environment = augmentedEnvironment()
         try process.run()
         process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw ControllerError.scriptFailed(Int(process.terminationStatus))
+        }
     }
 
+    /// Find vm/controller/tart-prototype.sh. Honors $PB_TART_SCRIPT, then tries
+    /// locations relative to the working directory and to this executable
+    /// (.build/<config>/VMController → ../../../controller/…).
+    func locateTartScript() throws -> String {
+        let fm = FileManager.default
+        let cwd = fm.currentDirectoryPath
+        var candidates: [String] = []
+        if let override = ProcessInfo.processInfo.environment["PB_TART_SCRIPT"], !override.isEmpty {
+            candidates.append(override)
+        }
+        candidates.append(cwd + "/vm/controller/tart-prototype.sh")
+        candidates.append(cwd + "/../controller/tart-prototype.sh")
+        let exeURL = URL(fileURLWithPath: CommandLine.arguments[0],
+                         relativeTo: URL(fileURLWithPath: cwd)).standardizedFileURL
+        candidates.append(exeURL.deletingLastPathComponent()
+            .appendingPathComponent("../../../controller/tart-prototype.sh")
+            .standardizedFileURL.path)
+
+        for path in candidates where fm.isReadableFile(atPath: path) {
+            return path
+        }
+        throw ControllerError.scriptNotFound(candidates)
+    }
+
+    /// Run `tart` and return combined stdout+stderr. For small output only
+    /// (e.g. `list`): reads to EOF before waiting, so it is safe, but a very
+    /// large stream should use runTartStreaming to avoid a pipe-buffer deadlock.
     @discardableResult
-    func runTart(_ args: [String]) throws -> String {
+    func runTartCapturing(_ args: [String]) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["tart"] + args
+        process.environment = augmentedEnvironment()
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
-        process.waitUntilExit()
+        // Drain before waiting so a filled pipe can't block the child.
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
         return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    /// Run `tart` with inherited stdio (no capture). Use for long/streaming
+    /// commands like `clone`.
+    func runTartStreaming(_ args: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["tart"] + args
+        process.environment = augmentedEnvironment()
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw ControllerError.tartCommandFailed(args.first ?? "", Int(process.terminationStatus))
+        }
+    }
+
+    /// Current environment with Homebrew bin dirs prepended to PATH, so a GUI- or
+    /// minimal-PATH launch still finds `tart` (typically /opt/homebrew/bin).
+    func augmentedEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        let existing = env["PATH"] ?? "/usr/bin:/bin"
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + existing
+        return env
     }
 }
 
 enum ControllerError: Error, CustomStringConvertible {
     case tartNotFound
+    case tartCommandFailed(String, Int)
+    case scriptNotFound([String])
+    case scriptFailed(Int)
 
     var description: String {
         switch self {
         case .tartNotFound:
             return "tart not found. Install: brew install cirruslabs/cli/tart"
+        case .tartCommandFailed(let cmd, let code):
+            return "tart \(cmd) failed (exit \(code))"
+        case .scriptNotFound(let tried):
+            return "tart-prototype.sh not found. Set $PB_TART_SCRIPT or run from the repo root. Tried:\n  "
+                + tried.joined(separator: "\n  ")
+        case .scriptFailed(let code):
+            return "tart-prototype.sh failed (exit \(code))"
         }
     }
 }

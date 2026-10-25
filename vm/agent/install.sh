@@ -65,9 +65,14 @@ chmod 0600 "$PLIST"
 
 # Reload: bootout any previous instance, then bootstrap into the GUI session.
 UID_NUM="$(id -u)"
+# Idempotent (re)load. Under `set -e` a failing bootstrap would abort before the
+# token is printed, so tolerate it and fall back to a kickstart of the service
+# that bootout should have removed.
 launchctl bootout "gui/$UID_NUM/com.privacybrowser.agent" 2>/dev/null || true
-launchctl bootstrap "gui/$UID_NUM" "$PLIST"
-launchctl enable "gui/$UID_NUM/com.privacybrowser.agent"
+if ! launchctl bootstrap "gui/$UID_NUM" "$PLIST" 2>/dev/null; then
+  launchctl kickstart -k "gui/$UID_NUM/com.privacybrowser.agent" 2>/dev/null || true
+fi
+launchctl enable "gui/$UID_NUM/com.privacybrowser.agent" 2>/dev/null || true
 
 echo "Installed. Agent listening on 127.0.0.1:$PORT inside the VM (backend=$BACKEND)." >&2
 echo "Log: $AGENT_HOME/agent.log" >&2
