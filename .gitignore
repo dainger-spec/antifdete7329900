@@ -5,3 +5,5 @@ build/
 DerivedData/
 .DS_Store
 Package.resolved
+__pycache__/
+*.pyc

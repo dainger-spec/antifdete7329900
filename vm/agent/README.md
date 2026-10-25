@@ -1,25 +1,76 @@
 # In-VM Agent
 
-Small service that runs inside each macOS VM and controls Safari.
+A small HTTP service that runs inside each macOS VM and lets the host
+controller drive the VM's real Safari.
 
 ## Responsibilities
 
-- Accept commands from the host controller (HTTP or SSH)
-- Launch / focus Safari
-- Navigate to a URL
-- Return screenshot or page status
-- Apply proxy settings if not handled at VM network level
+- Accept commands from the host controller (HTTP over an SSH tunnel)
+- Launch / focus Safari and navigate to a URL
+- Return a screenshot or page status
+- Quit Safari
 
 ## Status
 
-Not implemented. Prototype uses direct SSH for now:
+**Implemented.** `pbagent.py` — Python 3.9+ standard library only, no
+dependencies. Mirrors `server/pbsync_server.py`: `ThreadingHTTPServer`,
+bearer-token auth (constant-time compare), careful request handling, and it
+never logs headers or bodies.
+
+## Endpoints
+
+All but `/healthz` require `Authorization: Bearer <token>`.
+
+| Method | Path          | Body                      | Result                         |
+|--------|---------------|---------------------------|--------------------------------|
+| GET    | `/healthz`    | —                         | `ok` (liveness, no auth)       |
+| GET    | `/status`     | —                         | JSON: agent + Safari state     |
+| POST   | `/navigate`   | `{"url":"https://…"}`     | opens/focuses Safari at `url`  |
+| GET    | `/screenshot` | —                         | `image/png` of the screen      |
+| POST   | `/quit`       | —                         | quits Safari                   |
+
+`/navigate` accepts only `http`/`https` URLs. The URL is passed to AppleScript
+as a run-handler argument, never interpolated into the script, so it cannot be
+used for AppleScript injection.
+
+## Safari backends
+
+Safari is driven through a pluggable backend, selected with `--backend` or
+`$PB_AGENT_BACKEND`:
+
+- `mac` (default) — AppleScript via `osascript` + `screencapture`. macOS only.
+- `mock` — in-memory; lets the server be tested on any platform.
+
+## Running
 
 ```bash
-ssh admin@<vm-ip> 'open -a Safari https://example.com'
+# Inside the VM (mac backend), token from the environment:
+PB_AGENT_TOKEN=... python3 pbagent.py serve --host 127.0.0.1 --port 8777
+
+# With no token, a fresh one is generated and printed once as
+#   PB_AGENT_TOKEN=<token>
 ```
 
-## Next steps
+The agent binds to `127.0.0.1`. Reach it from the host through an SSH tunnel
+(`ssh -L`); the controller sets one up automatically.
 
-- Minimal Python HTTP server (stdlib only) listening on a VM-internal port
-- Endpoints: `/navigate`, `/screenshot`, `/status`
-- Package as a LaunchAgent so it starts with the VM
+## Install as a LaunchAgent
+
+Run `install.sh` inside the VM (the controller does this over SSH). It copies
+`pbagent.py` to `~/.pbagent/`, writes
+`~/Library/LaunchAgents/com.privacybrowser.agent.plist` from the template, and
+(re)loads it so the agent starts now and at every login. The bearer token is
+printed once on the last line as `PB_AGENT_TOKEN=<token>`.
+
+```bash
+./install.sh --port 8777 --backend mac   # token generated and printed
+```
+
+## Tests
+
+```bash
+python3 test_pbagent.py
+```
+
+Runs the real server against the `mock` backend, covering auth, routing,
+URL validation, body handling, and every endpoint — on any platform.

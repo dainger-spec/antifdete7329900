@@ -48,4 +48,17 @@ VM (one per profile)
 
 ## Status
 
-Design only. Implementation starts with a Tart-based prototype.
+Tart-based prototype in progress:
+
+- **Controller** (`vm/controller/tart-prototype.sh`) — boots a VM, installs the
+  agent over SSH, opens an SSH tunnel to the agent's loopback port, and drives
+  Safari to a URL (with an optional screenshot).
+- **In-VM agent** (`vm/agent/pbagent.py`) — **implemented**. Stdlib-only HTTP
+  service with `/healthz`, `/status`, `/navigate`, `/screenshot`, `/quit`,
+  bearer-token auth, and a pluggable Safari backend (`mac` via AppleScript /
+  `screencapture`, `mock` for testing). Packaged as a LaunchAgent by
+  `vm/agent/install.sh`. Tested on any platform via the mock backend
+  (`vm/agent/test_pbagent.py`).
+
+Agent step 4 of the flow ("request screenshots or send input") currently covers
+navigation and screenshots; richer input (clicks/typing) is future work.

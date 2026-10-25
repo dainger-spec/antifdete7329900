@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for the PrivacyBrowser in-VM agent.
+  install.sh fills in @PYTHON@, @AGENT@, @PORT@, @BACKEND@, @TOKEN@ and @HOME@
+  and installs the result at ~/Library/LaunchAgents/com.privacybrowser.agent.plist.
+  It runs in the user (Aqua) session so screencapture and AppleScript can reach
+  the logged-in Safari.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.privacybrowser.agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>@PYTHON@</string>
+        <string>@AGENT@</string>
+        <string>serve</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>@PORT@</string>
+        <string>--backend</string>
+        <string>@BACKEND@</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PB_AGENT_TOKEN</key>
+        <string>@TOKEN@</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>@HOME@/.pbagent/agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>@HOME@/.pbagent/agent.log</string>
+</dict>
+</plist>

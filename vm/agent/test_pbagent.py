@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Tests for the PrivacyBrowser in-VM agent (pbagent.py).
+
+Runs the real HTTP server with the mock Safari backend, so the whole request
+path — routing, auth, body handling, validation — is exercised on any platform.
+
+    python3 test_pbagent.py
+"""
+from __future__ import annotations
+
+import http.client
+import json
+import threading
+import unittest
+
+import pbagent
+
+TOKEN = "test-token-abc123"
+
+
+class AgentTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self.backend = pbagent.MockSafariBackend()
+        self.server = pbagent.make_server("127.0.0.1", 0, self.backend, TOKEN)
+        self.port = self.server.server_address[1]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
+
+    def request(self, method: str, path: str, *, body: bytes | None = None,
+                token: str | None = TOKEN, content_type: str | None = None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        headers: dict[str, str] = {}
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        if content_type is not None:
+            headers["Content-Type"] = content_type
+        try:
+            conn.request(method, path, body=body, headers=headers)
+            resp = conn.getresponse()
+            return resp.status, resp.read(), dict(resp.getheaders())
+        finally:
+            conn.close()
+
+    def post_json(self, path: str, obj, *, token: str | None = TOKEN):
+        return self.request("POST", path, body=json.dumps(obj).encode(),
+                            token=token, content_type="application/json")
+
+
+class HealthAndAuthTests(AgentTestCase):
+    def test_healthz_needs_no_token(self):
+        status, body, _ = self.request("GET", "/healthz", token=None)
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"ok\n")
+
+    def test_status_requires_token(self):
+        status, _, headers = self.request("GET", "/status", token=None)
+        self.assertEqual(status, 401)
+        self.assertIn("WWW-Authenticate", headers)
+
+    def test_status_rejects_wrong_token(self):
+        status, _, _ = self.request("GET", "/status", token="nope")
+        self.assertEqual(status, 401)
+
+    def test_navigate_requires_token(self):
+        status, _, _ = self.post_json("/navigate", {"url": "https://example.com"}, token=None)
+        self.assertEqual(status, 401)
+        # Unauthorized navigate must not touch Safari.
+        self.assertFalse(self.backend.running)
+
+
+class StatusTests(AgentTestCase):
+    def test_status_reports_backend_and_state(self):
+        status, body, headers = self.request("GET", "/status")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("Content-Type"), "application/json")
+        data = json.loads(body)
+        self.assertEqual(data["agent"], "pbagent")
+        self.assertEqual(data["backend"], "mock")
+        self.assertFalse(data["safari_running"])
+        self.assertIsNone(data["current_url"])
+        self.assertIn("uptime_seconds", data)
+
+    def test_status_tracks_navigation(self):
+        self.post_json("/navigate", {"url": "https://browserleaks.com/"})
+        _, body, _ = self.request("GET", "/status")
+        data = json.loads(body)
+        self.assertTrue(data["safari_running"])
+        self.assertEqual(data["current_url"], "https://browserleaks.com/")
+
+
+class NavigateTests(AgentTestCase):
+    def test_navigate_opens_url(self):
+        status, body, _ = self.post_json("/navigate", {"url": "https://example.com/path?q=1"})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["navigated_to"], "https://example.com/path?q=1")
+        self.assertEqual(self.backend.current_url, "https://example.com/path?q=1")
+
+    def test_navigate_rejects_non_http_scheme(self):
+        for bad in ("javascript:alert(1)", "file:///etc/passwd", "data:text/html,x", "ftp://h/"):
+            status, _, _ = self.post_json("/navigate", {"url": bad})
+            self.assertEqual(status, 400, bad)
+        self.assertFalse(self.backend.running)
+
+    def test_navigate_rejects_missing_or_bad_url(self):
+        self.assertEqual(self.post_json("/navigate", {})[0], 400)
+        self.assertEqual(self.post_json("/navigate", {"url": 123})[0], 400)
+        self.assertEqual(self.post_json("/navigate", {"url": "https://x\nHost: y"})[0], 400)
+
+    def test_navigate_rejects_invalid_json(self):
+        status, _, _ = self.request("POST", "/navigate", body=b"{not json",
+                                    content_type="application/json")
+        self.assertEqual(status, 400)
+
+    def test_navigate_requires_content_length(self):
+        # Chunked body -> 411.
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            conn.putrequest("POST", "/navigate")
+            conn.putheader("Authorization", f"Bearer {TOKEN}")
+            conn.putheader("Transfer-Encoding", "chunked")
+            conn.endheaders()
+            conn.send(b"0\r\n\r\n")
+            self.assertEqual(conn.getresponse().status, 411)
+        finally:
+            conn.close()
+
+
+class ScreenshotTests(AgentTestCase):
+    def test_screenshot_returns_png(self):
+        status, body, headers = self.request("GET", "/screenshot")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("Content-Type"), "image/png")
+        self.assertTrue(body.startswith(b"\x89PNG\r\n\x1a\n"))
+
+
+class QuitAndMethodTests(AgentTestCase):
+    def test_quit_stops_safari(self):
+        self.post_json("/navigate", {"url": "https://example.com"})
+        self.assertTrue(self.backend.running)
+        status, body, _ = self.request("POST", "/quit")
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["quit"])
+        self.assertFalse(self.backend.running)
+
+    def test_unknown_path_is_404(self):
+        self.assertEqual(self.request("GET", "/nope")[0], 404)
+
+    def test_wrong_method_is_405(self):
+        status, _, headers = self.request("PUT", "/status")
+        self.assertEqual(status, 405)
+        self.assertIn("Allow", headers)
+        # GET-only endpoint via POST.
+        status, _, headers = self.request("POST", "/status")
+        self.assertEqual(status, 405)
+        self.assertEqual(headers.get("Allow"), "GET")
+
+    def test_keep_alive_serves_several_requests(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            for _ in range(3):
+                conn.request("GET", "/healthz")
+                resp = conn.getresponse()
+                self.assertEqual(resp.status, 200)
+                resp.read()
+        finally:
+            conn.close()
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
