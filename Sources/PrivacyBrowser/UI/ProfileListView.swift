@@ -29,6 +29,7 @@ struct ProfileListView: View {
     @State private var passwordsFor: ProfileSummary?
     @State private var pendingDelete: ProfileSummary?
     @State private var changingPassword = false
+    @State private var showingSync = false
 
     var body: some View {
         List {
@@ -55,7 +56,10 @@ struct ProfileListView: View {
                 if model.isWorking { ProgressView().controlSize(.small) }
                 Button { editing = .new } label: { Label("New Profile", systemImage: "plus") }
                 Menu {
-                    Button("Sync with Folder…", action: chooseSyncFolder)
+                    Button("Sync…") { showingSync = true }
+                    Button("Sync Now") { Task { await model.syncNow() } }
+                        .disabled(model.syncTarget == nil)
+                    Divider()
                     Button("Change Master Password…") { changingPassword = true }
                 } label: { Label("More", systemImage: "ellipsis.circle") }
                 Button { Task { await model.lock() } } label: { Label("Lock", systemImage: "lock") }
@@ -65,6 +69,7 @@ struct ProfileListView: View {
         .sheet(item: $editing) { target in ProfileEditorView(target: target) }
         .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
         .sheet(isPresented: $changingPassword) { ChangePasswordView() }
+        .sheet(isPresented: $showingSync) { SyncSettingsView() }
         .confirmationDialog("Delete profile “\(pendingDelete?.name ?? "")”?",
                             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             presenting: pendingDelete) { profile in
@@ -74,16 +79,6 @@ struct ProfileListView: View {
         } message: { _ in
             Text("Cookies, site data, cache, settings and saved passwords of this profile are deleted.")
         }
-    }
-
-    private func chooseSyncFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.message = "Choose a folder used as the encrypted sync store (e.g. on a NAS or external disk)."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await model.sync(withFolder: url) }
     }
 }
 

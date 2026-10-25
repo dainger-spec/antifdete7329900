@@ -42,7 +42,7 @@ public final class HTTPSyncTransport: SyncTransport, @unchecked Sendable {
         self.session = session
     }
 
-    static func validate(_ url: URL, allowInsecureLocalhost: Bool) throws {
+    public static func validate(_ url: URL, allowInsecureLocalhost: Bool = false) throws {
         guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased(), !host.isEmpty else {
             throw CoreError.invalidConfiguration("sync server URL must be absolute")
         }

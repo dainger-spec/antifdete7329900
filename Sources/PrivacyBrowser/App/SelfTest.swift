@@ -41,6 +41,36 @@ final class SelfTest {
         app.run()
     }
 
+    // MARK: Container migration check (two processes)
+
+    /// `--selftest-write-vault` (run by an unsandboxed build) creates a small vault at the
+    /// default location; `--selftest-read-vault` (run by the sandboxed build of the same bundle
+    /// ID, first launch) checks that macOS moved it into the container per container-migration.plist.
+    static func migrationStep(write: Bool) -> Never {
+        setvbuf(stdout, nil, _IOLBF, 0)
+        let root = AppEnvironment.vaultDirectory
+        let password = "migration-check"
+        do {
+            if write {
+                guard !AppEnvironment.isSandboxed else { throw CoreError.invalidConfiguration("run the unsandboxed build") }
+                let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: password, iterations: 10_000))
+                try repository.create(name: "Migrated", configuration: ProfileConfiguration())
+                print("PASS wrote vault at \(root.path)")
+            } else {
+                guard AppEnvironment.isSandboxed else { throw CoreError.invalidConfiguration("run the sandboxed build") }
+                let repository = try ProfileRepository(vault: MasterVault.unlock(in: root, password: password))
+                guard repository.list().map(\.name) == ["Migrated"], root.path.contains("/Library/Containers/") else {
+                    throw CoreError.corruptData("unexpected vault contents at \(root.path)")
+                }
+                print("PASS migrated vault unlocked inside the container at \(root.path)")
+            }
+            exit(0)
+        } catch {
+            print("FAIL container migration step (\(write ? "write" : "read")): \(error)")
+            exit(1)
+        }
+    }
+
     // MARK: Reporting
 
     private func check(_ name: String, _ condition: Bool, _ detail: @autoclosure () -> String = "") {

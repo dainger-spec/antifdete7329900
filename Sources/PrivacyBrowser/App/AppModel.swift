@@ -11,6 +11,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var profiles: [ProfileSummary] = []
     @Published private(set) var isWorking = false
     @Published var errorMessage: String?
+    @Published private(set) var deviceSettings = DeviceSettings()
 
     private(set) var repository: ProfileRepository?
     private(set) var manager: ProfileManager?
@@ -57,6 +58,7 @@ final class AppModel: ObservableObject {
         managerObservation = manager.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         self.repository = repository
         self.manager = manager
+        deviceSettings = (try? DeviceSettings.load(from: vault)) ?? DeviceSettings()
         phase = .unlocked
         refresh()
         Task { await manager.recoverUnsealedProfiles() }
@@ -69,6 +71,7 @@ final class AppModel: ObservableObject {
         manager = nil
         repository = nil
         profiles = []
+        deviceSettings = DeviceSettings()
         phase = MasterVault.exists(in: root) ? .locked : .setup
     }
 
@@ -132,22 +135,88 @@ final class AppModel: ObservableObject {
 
     // MARK: Sync (optional)
 
-    /// Syncs with a folder used as a dumb blob store (see LocalDirectorySyncTransport).
+    /// Where this device syncs to; device-local, stored encrypted in `settings.bin`.
+    var syncTarget: DeviceSettings.SyncTarget? { deviceSettings.syncTarget }
+    var lastSyncStatus: DeviceSettings.SyncStatus? { deviceSettings.lastSync }
+
+    /// LOCAL-ONLY transport: a folder (NAS, external disk). Stored as a security-scoped
+    /// bookmark so the App Sandbox grants access again after relaunch.
+    func setSyncFolder(_ folder: URL) {
+        do {
+            let bookmark = try folder.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+            try updateDeviceSettings { $0.syncTarget = .folder(bookmark: bookmark, path: folder.path) }
+        } catch {
+            errorMessage = "Could not remember the sync folder: \(error.localizedDescription)"
+        }
+    }
+
+    /// SERVER-READY transport: a server implementing docs/SYNC_SERVER_API.md (none is included).
+    func setSyncServer(baseURL: String, token: String) {
+        do {
+            guard let url = URL(string: baseURL.trimmingCharacters(in: .whitespaces)) else {
+                throw CoreError.invalidConfiguration("not a URL")
+            }
+            try HTTPSyncTransport.validate(url)
+            try updateDeviceSettings { $0.syncTarget = .server(baseURL: url, token: token) }
+        } catch {
+            errorMessage = (error as? CoreError)?.description ?? error.localizedDescription
+        }
+    }
+
+    func clearSyncTarget() {
+        do {
+            try updateDeviceSettings { $0.syncTarget = nil }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Only allowed while no profile is running, because incoming changes replace files on disk.
-    func sync(withFolder folder: URL) async {
-        guard let repository, let manager else { return }
+    func syncNow() async {
+        guard let repository, let manager, let target = deviceSettings.syncTarget else { return }
         guard !manager.hasRunningProfiles else {
             errorMessage = "Stop all profiles before syncing."
             return
         }
-        await perform {
-            let engine = SyncEngine(repository: repository, transport: LocalDirectorySyncTransport(directory: folder))
-            let report = try await engine.sync()
+        isWorking = true
+        defer { isWorking = false }
+        var scopedFolder: URL?
+        defer { scopedFolder?.stopAccessingSecurityScopedResource() }
+        let status: DeviceSettings.SyncStatus
+        do {
+            let transport: SyncTransport
+            switch target {
+            case let .folder(bookmark, _):
+                var stale = false
+                let folder = try URL(resolvingBookmarkData: bookmark, options: .withSecurityScope,
+                                     relativeTo: nil, bookmarkDataIsStale: &stale)
+                if folder.startAccessingSecurityScopedResource() { scopedFolder = folder }
+                if stale { setSyncFolder(folder) }
+                transport = LocalDirectorySyncTransport(directory: folder)
+            case let .server(baseURL, token):
+                transport = try HTTPSyncTransport(configuration: .init(baseURL: baseURL, vaultID: repository.vault.vaultID,
+                                                                       bearerToken: token))
+            }
+            let report = try await SyncEngine(repository: repository, transport: transport).sync()
             for id in report.deletedProfileIDs {
                 await manager.removeWebData(for: id)
             }
-            self.refresh()
+            status = DeviceSettings.SyncStatus(report: report)
+        } catch {
+            let message = (error as? CoreError)?.description ?? error.localizedDescription
+            status = DeviceSettings.SyncStatus(error: message)
+            errorMessage = "Sync failed: \(message)"
         }
+        try? updateDeviceSettings { $0.lastSync = status }
+        refresh()
+    }
+
+    private func updateDeviceSettings(_ change: (inout DeviceSettings) -> Void) throws {
+        guard let vault = repository?.vault else { return }
+        var updated = deviceSettings
+        change(&updated)
+        try updated.save(to: vault)
+        deviceSettings = updated
     }
 
     // MARK: Helpers
