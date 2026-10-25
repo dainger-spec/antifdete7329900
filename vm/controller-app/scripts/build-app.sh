@@ -35,7 +35,8 @@ plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
 install -m 0755 "$VM_DIR/controller/tart-prototype.sh" "$RESOURCES/vm/controller/"
 install -m 0755 "$VM_DIR/agent/install.sh" "$RESOURCES/vm/agent/"
-install -m 0644 "$VM_DIR/agent/pbagent.py" "$VM_DIR/agent/com.privacybrowser.agent.plist.template" \
+install -m 0644 "$VM_DIR/agent/pbagent.py" "$VM_DIR/agent/binarycookies.py" \
+  "$VM_DIR/agent/com.privacybrowser.agent.plist.template" \
   "$RESOURCES/vm/agent/"
 
 # Hardened runtime, no App Sandbox: the app has to run tart, bash and ssh.

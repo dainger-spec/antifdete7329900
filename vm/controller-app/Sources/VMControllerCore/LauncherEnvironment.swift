@@ -61,7 +61,8 @@ public enum LauncherEnvironment {
     }
 
     /// The agent files tart-prototype.sh copies into the VM (from ../agent).
-    public static let agentFiles = ["pbagent.py", "install.sh", "com.privacybrowser.agent.plist.template"]
+    public static let agentFiles = ["pbagent.py", "binarycookies.py", "install.sh",
+                                    "com.privacybrowser.agent.plist.template"]
 
     /// Agent files missing next to `script` (empty when the layout is intact).
     public static func missingAgentFiles(forScript script: String) -> [String] {

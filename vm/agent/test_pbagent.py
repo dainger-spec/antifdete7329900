@@ -138,6 +138,57 @@ class ScreenshotTests(AgentTestCase):
         self.assertTrue(body.startswith(b"\x89PNG\r\n\x1a\n"))
 
 
+class CookieTests(AgentTestCase):
+    SAMPLE = [
+        {"domain": ".example.com", "path": "/", "name": "sid", "value": "abc",
+         "secure": True, "httpOnly": True, "expires": 2000000000},
+        {"domain": "x.com", "path": "/", "name": "t", "value": "v"},
+    ]
+
+    def test_cookies_applied_to_backend(self):
+        status, body, _ = self.post_json("/cookies", {"cookies": self.SAMPLE})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["applied"], 2)
+        self.assertEqual(self.backend.cookies, self.SAMPLE)
+
+    def test_cookies_requires_token(self):
+        status, _, _ = self.post_json("/cookies", {"cookies": self.SAMPLE}, token=None)
+        self.assertEqual(status, 401)
+        self.assertEqual(self.backend.cookies, [])
+
+    def test_cookies_rejects_bad_shape(self):
+        self.assertEqual(self.post_json("/cookies", {"cookies": "nope"})[0], 400)
+        self.assertEqual(self.post_json("/cookies", {"cookies": [{"name": "x"}]})[0], 400, "missing domain/value")
+        self.assertEqual(self.post_json("/cookies", {})[0], 400)
+        self.assertEqual(self.backend.cookies, [])
+
+    def test_empty_cookie_list_is_ok(self):
+        status, body, _ = self.post_json("/cookies", {"cookies": []})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["applied"], 0)
+
+
+class BinaryCookieEncoderTests(unittest.TestCase):
+    def test_round_trip(self):
+        import binarycookies
+        cookies = [
+            {"domain": ".example.com", "path": "/", "name": "sid", "value": "abc",
+             "secure": True, "httpOnly": True, "expires": 2000000000},
+            {"domain": "x.com", "path": "/app", "name": "t", "value": "v",
+             "secure": False, "httpOnly": False, "expires": None},
+        ]
+        blob = binarycookies.encode(cookies, now=1700000000)
+        self.assertEqual(blob[:4], b"cook")
+        decoded = binarycookies.decode(blob)
+        for original, got in zip(cookies, decoded):
+            for key in ("domain", "path", "name", "value", "secure", "httpOnly", "expires"):
+                self.assertEqual(original[key], got[key], key)
+
+    def test_empty(self):
+        import binarycookies
+        self.assertEqual(binarycookies.decode(binarycookies.encode([])), [])
+
+
 class QuitAndMethodTests(AgentTestCase):
     def test_quit_stops_safari(self):
         self.post_json("/navigate", {"url": "https://example.com"})

@@ -14,6 +14,9 @@
 #   AGENT_PORT   agent port inside the VM   (default: 8777)
 #   LOCAL_PORT   host end of the SSH tunnel (default: AGENT_PORT)
 #   SHOT         path to save a screenshot  (default: none)
+#   COOKIES_FILE path to a cookies JSON array (CookieImport output); applied to
+#                Safari via POST /cookies before navigating
+#   FORCE_INSTALL  "1" to reinstall the agent even if it is already installed
 #   KEEP_VM      "1" to leave the VM running on exit (default: stop it)
 #   TART_NET     "bridged" (default; --net-bridged=$BRIDGE_IF, IP via ARP),
 #                "shared" (Tart NAT), or "softnet" (fail-closed isolation)
@@ -156,15 +159,26 @@ done
 ssh_vm true 2>/dev/null || { echo "SSH did not come up"; exit 1; }
 
 echo "==> Installing in-VM agent"
-ssh_vm 'mkdir -p ~/pbagent-src'
-scp_vm "$AGENT_DIR/pbagent.py" "$AGENT_DIR/install.sh" \
-       "$AGENT_DIR/com.privacybrowser.agent.plist.template" \
-       "$SSH_USER@$IP:~/pbagent-src/"
-# install.sh prints PB_AGENT_TOKEN=... on its last line.
-INSTALL_OUT="$(ssh_vm "chmod +x ~/pbagent-src/install.sh && ~/pbagent-src/install.sh --port $AGENT_PORT --backend mac")"
-TOKEN="$(printf '%s\n' "$INSTALL_OUT" | sed -n 's/^PB_AGENT_TOKEN=//p' | tail -1)"
-[[ -z "$TOKEN" ]] && { echo "Could not read agent token from install output"; exit 1; }
-echo "    agent installed; token captured"
+# Install once: if the agent is already installed (its token file exists) and
+# FORCE_INSTALL is unset, reuse it instead of copying and reinstalling. The
+# LaunchAgent keeps it running across reboots, so this is the common path.
+TOKEN=""
+if [[ -z "${FORCE_INSTALL:-}" ]]; then
+  TOKEN="$(ssh_vm 'cat ~/.pbagent/token 2>/dev/null' 2>/dev/null || true)"
+fi
+if [[ -n "$TOKEN" ]]; then
+  echo "    agent already installed; reusing token"
+else
+  ssh_vm 'mkdir -p ~/pbagent-src'
+  scp_vm "$AGENT_DIR/pbagent.py" "$AGENT_DIR/binarycookies.py" "$AGENT_DIR/install.sh" \
+         "$AGENT_DIR/com.privacybrowser.agent.plist.template" \
+         "$SSH_USER@$IP:~/pbagent-src/"
+  # install.sh prints PB_AGENT_TOKEN=... on its last line.
+  INSTALL_OUT="$(ssh_vm "chmod +x ~/pbagent-src/install.sh && ~/pbagent-src/install.sh --port $AGENT_PORT --backend mac")"
+  TOKEN="$(printf '%s\n' "$INSTALL_OUT" | sed -n 's/^PB_AGENT_TOKEN=//p' | tail -1)"
+  [[ -z "$TOKEN" ]] && { echo "Could not read agent token from install output"; exit 1; }
+  echo "    agent installed; token captured"
+fi
 
 echo "==> Opening SSH tunnel localhost:$LOCAL_PORT -> VM 127.0.0.1:$AGENT_PORT"
 # ExitOnForwardFailure: if LOCAL_PORT is taken, fail instead of leaving a tunnel
@@ -180,6 +194,20 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 curl -fsS "$AGENT/healthz" >/dev/null || { echo "Agent did not respond"; exit 1; }
+
+# Apply per-profile cookies before navigating, if a cookie file was given.
+# COOKIES_FILE is the agent-shaped JSON array (CookieImport output); wrap it as
+# {"cookies": [...]} for POST /cookies.
+if [[ -n "${COOKIES_FILE:-}" ]]; then
+  if [[ -f "$COOKIES_FILE" ]]; then
+    echo "    applying cookies from $COOKIES_FILE"
+    { printf '{"cookies":'; cat "$COOKIES_FILE"; printf '}'; } | curl -fsS -X POST "$AGENT/cookies" \
+      -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @- && echo || \
+      echo "    cookie import failed (continuing)"
+  else
+    echo "    COOKIES_FILE not found: $COOKIES_FILE (skipping)"
+  fi
+fi
 
 echo "==> Navigating Safari to $TARGET_URL"
 # Escape backslashes and quotes so any URL makes valid JSON (sed behaves the

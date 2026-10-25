@@ -26,6 +26,7 @@ All but `/healthz` require `Authorization: Bearer <token>`.
 | GET    | `/healthz`    | —                         | `ok` (liveness, no auth)       |
 | GET    | `/status`     | —                         | JSON: agent + Safari state     |
 | POST   | `/navigate`   | `{"url":"https://…"}`     | opens/focuses Safari at `url`  |
+| POST   | `/cookies`    | `{"cookies":[ … ]}`       | installs cookies into Safari   |
 | GET    | `/screenshot` | —                         | `image/png` of the screen      |
 | POST   | `/quit`       | —                         | quits Safari                   |
 
@@ -47,6 +48,26 @@ dialog inside the VM and blocks until someone clicks it. So `current_url` in
 `/status` is the last URL the agent opened, not Safari's live front tab.
 `/quit` still uses AppleScript (expect the consent dialog on first use), and
 `/screenshot` needs Screen Recording permission for the agent's Python.
+
+## Cookies
+
+`POST /cookies` with `{"cookies": [ … ]}` (the normalized array from the app's
+`CookieImport`, each cookie `{domain, name, value, path?, secure?, httpOnly?,
+expires?}`) installs them into Safari. The `mac` backend quits Safari, writes
+Safari's `Cookies.binarycookies` store (`binarycookies.py` encodes the format;
+path overridable with `$PB_SAFARI_COOKIES`), so the next launch picks them up.
+The encoder round-trips in tests; whether a given Safari accepts a hand-written
+store (its sandboxed container path, permissions) is the one bit that needs a
+real Mac — see docs/PROFILES.md.
+
+## Install once, survives reboot
+
+`install.sh` saves the bearer token to `~/.pbagent/token` and loads the agent
+as a LaunchAgent (`RunAtLoad` + `KeepAlive`), so it restarts at every login —
+after a reboot, with the VM set to auto-login, it is already running. The
+controller reads `~/.pbagent/token` and **reuses an installed agent instead of
+reinstalling** (`FORCE_INSTALL=1` forces a fresh install). So the agent is
+copied and installed once per VM, not on every launch.
 
 ## Running
 

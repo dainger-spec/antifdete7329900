@@ -18,6 +18,7 @@ Endpoints (all but /healthz require `Authorization: Bearer <token>`):
     GET  /healthz     -> "ok"                 (liveness, no auth)
     GET  /status      -> JSON agent + Safari state
     POST /navigate    {"url": "https://..."}  open/focus Safari at url
+    POST /cookies     {"cookies": [ ... ]}     install cookies into Safari
     GET  /screenshot  -> image/png            screen capture
     POST /quit        -> quit Safari
 
@@ -46,6 +47,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+import binarycookies
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -55,7 +58,7 @@ AGENT_VERSION = "1"
 # item of `open -a Safari` (no shell, no script text), so it cannot inject
 # commands or AppleScript, and the scheme check keeps out file:/javascript:.
 URL_RE = re.compile(r"^https?://[^\s\x00-\x1f\x7f]{1,4000}$")
-MAX_BODY = 64 * 1024  # navigate bodies are tiny; cap well below that.
+MAX_BODY = 1024 * 1024  # navigate bodies are tiny; /cookies can carry many cookies.
 
 log = logging.getLogger("pbagent")
 
@@ -85,6 +88,10 @@ class SafariBackend:
         raise NotImplementedError
 
     def quit(self) -> None:
+        raise NotImplementedError
+
+    def apply_cookies(self, cookies: list) -> int:
+        """Install `cookies` (normalized dicts) into Safari; returns the count."""
         raise NotImplementedError
 
 
@@ -161,6 +168,27 @@ class MacSafariBackend(SafariBackend):
         self._osascript('tell application "Safari" to quit')
         self._last_url = None
 
+    # Safari keeps cookies in a sandboxed binary store. Replace it while Safari
+    # is not running, then the next launch picks the cookies up. The exact
+    # container path and whether the sandbox permits writing it is the one part
+    # that needs verifying on a real Mac (see docs/PROFILES.md).
+    DEFAULT_COOKIE_PATH = "~/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies"
+
+    def apply_cookies(self, cookies: list) -> int:
+        blob = binarycookies.encode(cookies)
+        path = os.path.expanduser(os.environ.get("PB_SAFARI_COOKIES") or self.DEFAULT_COOKIE_PATH)
+        try:
+            self.quit()  # don't fight Safari for the file
+        except SafariError:
+            pass
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as fh:
+                fh.write(blob)
+        except OSError as exc:
+            raise SafariError(f"cannot write cookie store {path}: {exc}") from exc
+        return len(cookies)
+
 
 def _make_1x1_png() -> bytes:
     """A valid 1x1 transparent PNG, built from scratch so the mock backend
@@ -189,6 +217,7 @@ class MockSafariBackend(SafariBackend):
     def __init__(self):
         self.running = False
         self.current_url: str | None = None
+        self.cookies: list = []
 
     def navigate(self, url: str) -> None:
         self.running = True
@@ -203,6 +232,10 @@ class MockSafariBackend(SafariBackend):
     def quit(self) -> None:
         self.running = False
         self.current_url = None
+
+    def apply_cookies(self, cookies: list) -> int:
+        self.cookies = list(cookies)
+        return len(self.cookies)
 
 
 def make_backend(name: str) -> SafariBackend:
@@ -328,7 +361,7 @@ class AgentHandler(BaseHTTPRequestHandler):
         path = self._path()
         # Read/validate auth before the body, but always drain the body so the
         # keep-alive connection stays usable.
-        if path not in ("/navigate", "/quit"):
+        if path not in ("/navigate", "/quit", "/cookies"):
             self._discard_body()
             if path in ("/status", "/screenshot", "/healthz"):
                 self._error(405, "method not allowed", {"Allow": "GET"})
@@ -340,6 +373,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return
         if path == "/navigate":
             self._navigate()
+        elif path == "/cookies":
+            self._cookies()
         else:
             self._discard_body()
             self._quit()
@@ -384,6 +419,26 @@ class AgentHandler(BaseHTTPRequestHandler):
             self._error(502, f"backend error: {exc}")
             return
         self._json(200, {"navigated_to": url})
+
+    def _cookies(self) -> None:
+        payload = self._read_json_body()
+        if payload is None:
+            return
+        cookies = payload.get("cookies")
+        if not isinstance(cookies, list) or not all(isinstance(c, dict) for c in cookies):
+            self._error(400, 'body must be {"cookies": [{domain,name,value,...}, ...]}')
+            return
+        for c in cookies:
+            if not (isinstance(c.get("domain"), str) and isinstance(c.get("name"), str)
+                    and isinstance(c.get("value"), str)):
+                self._error(400, "each cookie needs string domain, name and value")
+                return
+        try:
+            applied = self.backend.apply_cookies(cookies)
+        except SafariError as exc:
+            self._error(502, f"backend error: {exc}")
+            return
+        self._json(200, {"applied": applied})
 
     def _screenshot(self) -> None:
         try:

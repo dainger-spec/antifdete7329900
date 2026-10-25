@@ -87,11 +87,15 @@ normalized `[Cookie]` and serializes the JSON the agent consumes. Stored per
 profile at `…/VMLauncher/profiles/<id>/cookies.json`. Parsing, formats and
 round-trip are unit-tested.
 
-**Applying them in Safari is not done yet.** Safari keeps cookies in a binary
-store (`~/Library/Cookies/Cookies.binarycookies`) under the app sandbox, so the
-agent will apply them by writing that store (or via a small WebKit helper)
-before launch, then starting Safari. That step needs a Mac to build and verify
-and is the next cookie task.
+**Applying them:** the controller POSTs the profile's `cookies.json` to the
+agent's `/cookies` (pass `COOKIES_FILE=…` to `tart-prototype.sh`) before
+navigating. The agent (`vm/agent/binarycookies.py`) encodes Safari's
+`Cookies.binarycookies` store and writes it while Safari is stopped, so the
+next launch picks the cookies up; the encoder round-trips in tests. Writing the
+store (not `document.cookie`) preserves HttpOnly cookies, which JS can't set.
+**To verify on a Mac:** the exact sandboxed container path
+(`~/Library/Containers/com.apple.Safari/Data/Library/Cookies/`, overridable
+with `$PB_SAFARI_COOKIES`) and that the sandbox permits writing it.
 
 ## Roadmap (the rest of the backlog)
 
@@ -104,10 +108,13 @@ Done here (core, tested on Linux/macOS CI):
 - [x] `VMController profiles list|add|remove` CLI over the store
 - [x] Clipboard shared = off by default in the model
 
+- [x] Agent applies cookies (`/cookies` + binarycookies encoder); agent
+      installed once (token file) + LaunchAgent for reboot; controller reuses an
+      installed agent (`FORCE_INSTALL=1` to override). Cookie-store acceptance in
+      Safari is the remaining on-a-Mac check.
+
 Next (need macOS to build/verify the UI and guest bits):
 
-- [ ] Agent applies cookies in Safari; agent installed once + LaunchAgent
-      survives reboot (verify); controller skips reinstall when present
 - [ ] Menu-bar app: profile list, click-to-launch, running-VM count
 - [ ] Logging to a host file + "Show log" button + clear VM-crash messages
 - [ ] Export/import a profile as one archive (snapshot + settings), Mac-portable

@@ -219,6 +219,44 @@ final class ScriptIntegrationTests: XCTestCase {
         _ = await run.process.waitForExit(timeout: 15)
     }
 
+    func testReuseInstalledAgentSkipsInstall() async throws {
+        try host.markInstalled(token: "reused-tok")
+        let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "shared"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        let calls = host.calls
+        XCTAssertTrue(calls.contains { $0.contains("cat ~/.pbagent/token") }, "controller checks for an installed agent")
+        XCTAssertFalse(calls.contains { $0.contains("install.sh") }, "an installed agent is not reinstalled")
+        XCTAssertFalse(calls.contains { $0.hasPrefix("scp ") }, "nothing is copied when reusing")
+        XCTAssertTrue(calls.contains { $0.contains("/navigate") && $0.contains("Bearer reused-tok") },
+                      "the reused token is used")
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
+    func testForceInstallReinstallsEvenIfInstalled() async throws {
+        try host.markInstalled(token: "old")
+        let run = try host.launch(url: "https://example.com",
+                                  extraEnvironment: ["TART_NET": "shared", "FORCE_INSTALL": "1"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertTrue(host.calls.contains { $0.contains("install.sh") }, "FORCE_INSTALL reinstalls")
+        XCTAssertTrue(host.calls.contains { $0.contains("/navigate") && $0.contains("Bearer tok123") },
+                      "uses the freshly installed token")
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
+    func testCookiesPushedWhenFileGiven() async throws {
+        let cookiesFile = host.root.appendingPathComponent("cookies.json")
+        try #"[{"domain":"x.com","name":"a","value":"1"}]"#.write(to: cookiesFile, atomically: true, encoding: .utf8)
+        let run = try host.launch(url: "https://example.com",
+                                  extraEnvironment: ["TART_NET": "shared", "COOKIES_FILE": cookiesFile.path])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertTrue(host.calls.contains { $0.contains("/cookies") && $0.contains("Bearer") },
+                      "cookies are POSTed to the agent before navigating")
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
     func testNoSizingWhenUnset() async throws {
         let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "shared"])
         try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
@@ -303,14 +341,19 @@ final class FakeHost {
         try stub("ssh", """
         \(log)
         for arg in "$@"; do [ "$arg" = "-N" ] && exec sleep 300; done
-        case "$*" in *install.sh*) echo "Installed." >&2; echo "PB_AGENT_TOKEN=tok123" ;; esac
+        case "$*" in
+          *"cat ~/.pbagent/token"*) [ -f "$FAKE_STATE/installed-token" ] && cat "$FAKE_STATE/installed-token"; exit 0 ;;
+          *install.sh*) echo "Installed." >&2; echo "PB_AGENT_TOKEN=tok123"; exit 0 ;;
+        esac
         exit 0
         """)
         try stub("scp", log)
         try stub("curl", """
+        cat >/dev/null 2>&1 || true   # drain any --data-binary @- so the pipe never SIGPIPEs
         \(log)
         case "$*" in
           *"/navigate"*) echo '{"navigated_to":"ok"}' ;;
+          *"/cookies"*) echo '{"applied":0}' ;;
           *"/status"*) echo '{"safari_running":true}' ;;
         esac
         exit 0
@@ -326,6 +369,11 @@ final class FakeHost {
 
     func setFlag(_ name: String) throws {
         try "".write(to: state.appendingPathComponent(name), atomically: true, encoding: .utf8)
+    }
+
+    /// Make the stub VM look like it already has the agent installed, with this token.
+    func markInstalled(token: String) throws {
+        try token.write(to: state.appendingPathComponent("installed-token"), atomically: true, encoding: .utf8)
     }
 
     var calls: [String] {
