@@ -136,8 +136,13 @@ Done here (core, tested on Linux/macOS CI):
       shown; Tart macOS VMs don't share the host clipboard by default, so "off"
       is the real state — the toggle is the knob for when sharing is enabled.
 
+- [x] Export/import a profile as one portable `.tar.gz` (manifest + cookies +
+      the Tart VM directory). Import mints a fresh id and a non-clashing name
+      and drops the VM under the new name — no host binding. `ProfileBundle`
+      uses `tar`, so it's tested end-to-end on Linux with a stub VM dir; the UI
+      has Экспорт/Импорт buttons (big real VMs are the on-a-Mac check).
+
 Next (need macOS to build/verify the UI and guest bits):
-- [ ] Export/import a profile as one archive (snapshot + settings), Mac-portable
 - [ ] Base-image update: check, background download, migrate/warn
 - [ ] Resource display: RAM of running VMs, disk per profile, low-RAM warning
 - [ ] Broader System Settings-style restyle of the main window

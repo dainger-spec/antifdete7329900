@@ -60,6 +60,13 @@ public enum LauncherEnvironment {
         candidates.first { FileManager.default.isReadableFile(atPath: $0) }
     }
 
+    /// Where Tart keeps its VMs: $TART_HOME/vms, else ~/.tart/vms.
+    public static func tartVMsDirectory(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        let home = environment["TART_HOME"].map { URL(fileURLWithPath: $0) }
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".tart")
+        return home.appendingPathComponent("vms", isDirectory: true)
+    }
+
     /// The agent files tart-prototype.sh copies into the VM (from ../agent).
     public static let agentFiles = ["pbagent.py", "binarycookies.py", "install.sh",
                                     "com.privacybrowser.agent.plist.template"]

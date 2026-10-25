@@ -56,7 +56,7 @@ public struct Profile: Codable, Equatable, Identifiable, Sendable {
         "pb-\(Profile.slug(name))-\(id)"
     }
 
-    static func slug(_ text: String) -> String {
+    public static func slug(_ text: String) -> String {
         let mapped = text.lowercased().unicodeScalars.map { scalar -> Character in
             (scalar.properties.isAlphabetic && scalar.isASCII) || ("0"..."9").contains(Character(scalar))
                 ? Character(scalar) : "-"

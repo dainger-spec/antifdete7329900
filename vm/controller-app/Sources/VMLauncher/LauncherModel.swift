@@ -538,6 +538,37 @@ final class LauncherModel: ObservableObject {
         reloadProfiles()
     }
 
+    /// Export a profile (settings + cookies + its VM) to one portable .tar.gz.
+    public func exportProfile(_ profile: Profile, to url: URL) {
+        let vms = LauncherEnvironment.tartVMsDirectory()
+        appendLog("Экспорт профиля «\(profile.name)» → \(url.path)", .info)
+        Task { @MainActor in
+            do {
+                try await ProfileBundle.export(profile: profile, store: self.profileStore, vmsDirectory: vms, to: url)
+                self.appendLog("Экспорт готов: \(url.lastPathComponent)", .info)
+            } catch {
+                self.errorMessage = "Экспорт не удался: \(error)"
+                self.appendLog("Экспорт не удался: \(error)", .error)
+            }
+        }
+    }
+
+    /// Import a profile archive onto this machine (new id, non-clashing name).
+    public func importProfile(from url: URL) {
+        let vms = LauncherEnvironment.tartVMsDirectory()
+        appendLog("Импорт профиля из \(url.lastPathComponent)", .info)
+        Task { @MainActor in
+            do {
+                let profile = try await ProfileBundle.importArchive(url, store: self.profileStore, vmsDirectory: vms)
+                self.reloadProfiles()
+                self.appendLog("Импортирован профиль «\(profile.name)»", .info)
+            } catch {
+                self.errorMessage = "Импорт не удался: \(error)"
+                self.appendLog("Импорт не удался: \(error)", .error)
+            }
+        }
+    }
+
     /// Import cookies into a profile from a file the user picked.
     public func importCookies(for id: String, from url: URL) {
         do {

@@ -15,12 +15,10 @@ struct ProfilesSection: View {
             HStack {
                 Text("Профили").font(.headline)
                 Spacer()
-                Button {
-                    editing = .new
-                } label: {
-                    Label("Создать", systemImage: "plus")
-                }
-                .help("Создать профиль")
+                Button { importProfile() } label: { Label("Импорт…", systemImage: "square.and.arrow.down") }
+                    .help("Импортировать профиль из архива")
+                Button { editing = .new } label: { Label("Создать", systemImage: "plus") }
+                    .help("Создать профиль")
             }
 
             if model.profiles.isEmpty {
@@ -43,6 +41,15 @@ struct ProfilesSection: View {
             ProfileEditor(model: model, target: target)
                 .frame(width: 420)
         }
+    }
+
+    private func importProfile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Выберите экспортированный профиль (.tar.gz)"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.importProfile(from: url)
     }
 }
 
@@ -138,6 +145,14 @@ struct ProfileEditor: View {
                 }
                 Text("Netscape cookies.txt или JSON-экспорт расширения.")
                     .font(.caption).foregroundStyle(.secondary)
+                Divider()
+                HStack {
+                    Text("Профиль целиком").foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Экспорт…") { exportProfile(existing) }
+                }
+                Text("Снапшот VM и настройки в один .tar.gz — для переноса на другой Mac.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             HStack {
@@ -177,5 +192,13 @@ struct ProfileEditor: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         model.importCookies(for: profile.id, from: url)
         cookieCount = model.profiles.first { $0.id == profile.id }?.cookieCount ?? cookieCount
+    }
+
+    private func exportProfile(_ profile: Profile) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(Profile.slug(profile.name)).tar.gz"
+        panel.message = "Сохранить профиль как архив"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.exportProfile(profile, to: url)
     }
 }
