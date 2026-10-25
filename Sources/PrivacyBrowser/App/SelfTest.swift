@@ -99,6 +99,7 @@ final class SelfTest {
         do {
             let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
             try await storageIsolationAndShims(repository)
+            try await recoverySealing(repository)
             try await proxies(repository)
             try await tabsAndLibrary(repository)
             try await windowLifecycle(repository)
@@ -359,6 +360,47 @@ final class SelfTest {
         controller.selectTab(number: 1)
         check("tabs: select tab 1", controller.selectedTab?.url == one)
         controller.close()
+    }
+
+    // MARK: Crash recovery sealing (regression for the post-unlock crash)
+
+    /// Reproduces the crash path: a profile ran and left website data on disk (the process
+    /// "crashed" before sealing — here we just drop the session without sealing). Recovery must
+    /// archive and delete that data WITHOUT calling `WKWebsiteDataStore.remove(forIdentifier:)`,
+    /// which aborts for a store this process never registered, and the data must restore cleanly.
+    private func recoverySealing(_ repository: ProfileRepository) async throws {
+        let vault = WebDataStoreVault(repository: repository)
+        let layout = WebDataStoreVault.layout
+        let profile = try repository.create(name: "Recovery", configuration: ProfileConfiguration())
+        let key = try repository.profileKey(for: profile.id)
+        let token = UUID().uuidString
+        defer { Task { @MainActor in await vault.deleteData(profileID: profile.id) } }
+
+        // Run the profile and write a value, then drop the session WITHOUT sealing (simulated crash).
+        try await vault.prepareForLaunch(profileID: profile.id, key: key)
+        var session: BrowserSession? = try makeSession(repository, profile.id, key: key)
+        var web: WKWebView? = WKWebView(frame: .zero, configuration: session!.makeWebViewConfiguration())
+        try await PageLoader.load(web!, html: page, baseURL: origin)
+        _ = try await js(web!, "localStorage.setItem('pb', token); return true;", ["token": token])
+        web = nil
+        session = nil
+        check("recovery: unsealed data present after simulated crash",
+              !layout.discoverDirectories(for: profile.id).isEmpty)
+
+        // Recovery seal (activeStore: false) must not crash and must archive + delete the data.
+        let sealed = try await vault.seal(profileID: profile.id, key: key, activeStore: false)
+        check("recovery: sealed without the WebKit removal call", sealed.stats.files > 0 && sealed.attempts == 1,
+              "files=\(sealed.stats.files) attempts=\(sealed.attempts)")
+        check("recovery: plaintext removed", layout.discoverDirectories(for: profile.id).isEmpty)
+
+        // The recovered archive restores correctly on the next launch.
+        try await vault.prepareForLaunch(profileID: profile.id, key: key)
+        let session2 = try makeSession(repository, profile.id, key: key)
+        let web2 = WKWebView(frame: .zero, configuration: session2.makeWebViewConfiguration())
+        try await PageLoader.load(web2, html: page, baseURL: origin)
+        let restored = try await js(web2, "return localStorage.getItem('pb') ?? 'null';") as? String
+        check("recovery: data restored after recovery seal", restored == token, restored ?? "nil")
+        session2.shutDown()
     }
 
     // MARK: Window lifecycle (regression test for the close/quit crash)

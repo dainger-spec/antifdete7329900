@@ -164,7 +164,10 @@ final class ProfileManager: ObservableObject {
             log.notice("Re-sealing unencrypted WebKit data of \(summary.id.uuidString, privacy: .public)")
             busyProfileIDs.insert(summary.id)
             do {
-                try await webDataVault.seal(profileID: summary.id, key: repository.profileKey(for: summary.id))
+                // activeStore: false — the profile is not running in this process, so the data
+                // store was never created here; a WebKit-coordinated removal would abort.
+                try await webDataVault.seal(profileID: summary.id, key: repository.profileKey(for: summary.id),
+                                            activeStore: false)
             } catch {
                 onError?("Could not re-encrypt data of profile “\(summary.name)”: \(error.localizedDescription)")
             }

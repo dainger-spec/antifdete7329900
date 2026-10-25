@@ -94,16 +94,25 @@ final class WebDataStoreVault {
     /// `WKWebsiteDataStore.remove(forIdentifier:)`, which fails while the store is still in
     /// use. On failure the cycle is repeated with a longer wait. A write that lands between
     /// the archive and the successful removal would be lost (never leaked in plaintext).
+    ///
+    /// `activeStore` must be true only when this process created the profile's
+    /// `WKWebsiteDataStore` (i.e. the profile ran). Pass false for crash recovery at unlock:
+    /// the store was never registered in this process, so `WKWebsiteDataStore.remove(forIdentifier:)`
+    /// would hand WebKit an unknown identifier and abort on its data-store IO queue. In that
+    /// case we archive and delete the leftover directories directly, which is safe because no
+    /// live store references them.
     @discardableResult
-    func seal(profileID: UUID, key: SymmetricKey) async throws -> SealResult {
+    func seal(profileID: UUID, key: SymmetricKey, activeStore: Bool = true) async throws -> SealResult {
         let archive = repository.webDataArchiveURL(for: profileID)
         let layout = Self.layout
-        let delays: [UInt64] = [1, 2, 3, 5, 8]
+        // A live store needs settle time and a WebKit-coordinated removal, with retries.
+        // Recovered-from-disk data needs neither: archive once and delete the files.
+        let delays: [UInt64] = activeStore ? [1, 2, 3, 5, 8] : [0]
         var result = SealResult()
         var lastError: Error?
         for seconds in delays {
             result.attempts += 1
-            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            if seconds > 0 { try? await Task.sleep(nanoseconds: seconds * 1_000_000_000) }
             let directories = layout.discoverDirectories(for: profileID)
             if directories.isEmpty { return result } // nothing was ever written, or already sealed
             result.directories = directories
@@ -112,12 +121,15 @@ final class WebDataStoreVault {
                 result.stats = try await Task.detached(priority: .userInitiated) {
                     try EncryptedDirectoryArchive.seal(roots: roots, to: archive, key: key)
                 }.value
-                try await WKWebsiteDataStore.remove(forIdentifier: profileID)
-                // remove(forIdentifier:) deletes the store; sweep anything it left behind.
+                if activeStore {
+                    try await WKWebsiteDataStore.remove(forIdentifier: profileID)
+                }
+                // Sweep the directories. `remove(forIdentifier:)` usually clears them for a live
+                // store; recovered data is simply deleted here.
                 for directory in layout.discoverDirectories(for: profileID) {
                     try FileManager.default.removeItem(at: directory)
                 }
-                log.info("Sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes")
+                log.info("Sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes (activeStore=\(activeStore))")
                 return result
             } catch {
                 lastError = error
