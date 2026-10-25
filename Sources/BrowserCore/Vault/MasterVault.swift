@@ -30,7 +30,8 @@ public struct VaultHeader: Codable, Equatable, Sendable {
 ///                                               ├─HKDF "profile-index"   ▶ index key
 ///                                               ├─HKDF "profile-key-wrap"▶ wraps per-profile keys
 ///                                               ├─HKDF "sync-envelope"   ▶ sync encryption key
-///                                               └─HKDF "sync-object-id"  ▶ sync object-name MAC key
+///                                               ├─HKDF "sync-object-id"  ▶ sync object-name MAC key
+///                                               └─HKDF "device-settings" ▶ settings.bin (not synced)
 /// per-profile key (random 256-bit, stored wrapped in the index)
 ///                                               ├─ encrypts profile configuration
 ///                                               ├─HKDF "passwords"       ▶ password vault key
@@ -110,6 +111,7 @@ public final class UnlockedVault: @unchecked Sendable {
     var profileKeyWrappingKey: SymmetricKey { masterKey.derive(info: "profile-key-wrap", salt: vaultSalt) }
     var syncEnvelopeKey: SymmetricKey { masterKey.derive(info: "sync-envelope", salt: vaultSalt) }
     var syncObjectIDKey: SymmetricKey { masterKey.derive(info: "sync-object-id", salt: vaultSalt) }
+    var settingsKey: SymmetricKey { masterKey.derive(info: "device-settings", salt: vaultSalt) }
 
     private var vaultSalt: Data { withUnsafeBytes(of: header.vaultID.uuid) { Data($0) } }
 

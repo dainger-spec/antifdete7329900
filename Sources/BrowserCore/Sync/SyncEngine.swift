@@ -16,7 +16,10 @@ public struct SyncReport: Equatable, Sendable {
     public var pulled: [String] = []
     /// Objects whose compare-and-swap lost a race; retried on the next sync.
     public var deferred: [String] = []
+    /// Objects changed on both sides and resolved by `resolveConflict` (config, passwords).
     public var resolvedConflicts: [String] = []
+    /// Objects changed on both sides and merged record by record (bookmarks, history).
+    public var merged: [String] = []
     /// Profiles deleted on another device and removed locally. The app layer must also
     /// remove their WebKit data stores.
     public var deletedProfileIDs: [UUID] = []
@@ -30,6 +33,8 @@ public struct SyncReport: Equatable, Sendable {
 /// * `index`                   the profile index; merged automatically (see `ProfileIndex.merge`).
 /// * `profile/<id>/config`     the profile's encrypted `config.bin`, as-is.
 /// * `profile/<id>/passwords`  the profile's encrypted `passwords.bin`, as-is.
+/// * `profile/<id>/bookmarks`  `bookmarks.bin`; concurrent edits are merged per bookmark.
+/// * `profile/<id>/history`    `history.bin`; concurrent edits are merged per URL.
 ///
 /// Profile files are already encrypted with per-profile keys; the envelope adds a second
 /// layer that hides object names and binds blobs to their name and revision.
@@ -110,10 +115,13 @@ public final class SyncEngine: @unchecked Sendable {
         let index = repository.currentIndex()
         for entry in index.entries {
             let id = entry.summary.id
-            try await syncFile(name: "profile/\(id.uuidString)/config", url: repository.configURL(for: id),
-                               remote: remote, state: &state, report: &report)
-            try await syncFile(name: "profile/\(id.uuidString)/passwords", url: repository.passwordsURL(for: id),
-                               remote: remote, state: &state, report: &report)
+            for file in ProfileSyncFile.allCases {
+                let merge: ((Data, Data) throws -> Data)? = file.isMergeable
+                    ? { [repository] local, remote in try repository.mergeSyncedFile(file, profileID: id, local: local, remote: remote) }
+                    : nil
+                try await syncFile(name: "profile/\(id.uuidString)/\(file.rawValue)", url: repository.url(of: file, for: id),
+                                   merge: merge, remote: remote, state: &state, report: &report)
+            }
         }
 
         let profilesAfter = Set(index.entries.map(\.summary.id))
@@ -156,7 +164,9 @@ public final class SyncEngine: @unchecked Sendable {
 
     // MARK: Opaque encrypted files
 
-    private func syncFile(name: String, url: URL, remote: [String: Int],
+    /// `merge` (bookmarks, history) combines both versions record by record; files without one
+    /// (config, passwords) go through `resolveConflict`.
+    private func syncFile(name: String, url: URL, merge: ((Data, Data) throws -> Data)?, remote: [String: Int],
                           state: inout [String: ItemState], report: inout SyncReport) async throws {
         let objectID = codec.objectID(for: name)
         let localData = FileManager.default.fileExists(atPath: url.path) ? try SecureFile.read(url) : nil
@@ -174,6 +184,17 @@ public final class SyncEngine: @unchecked Sendable {
         case (false, true):
             try await pull(name: name, objectID: objectID, url: url, state: &state, report: &report)
         case (true, true):
+            if let merge, let localData {
+                guard let blob = try await transport.fetch(objectID: objectID) else { return }
+                let decoded = try codec.decode(blob)
+                guard decoded.payload.logicalName == name else { throw CoreError.corruptData("unexpected object \(decoded.payload.logicalName)") }
+                let merged = try merge(localData, decoded.payload.data)
+                try SecureFile.write(merged, to: url)
+                report.merged.append(name)
+                try await push(name: name, data: merged, revision: decoded.revision + 1,
+                               expected: decoded.revision, state: &state, report: &report)
+                return
+            }
             report.resolvedConflicts.append(name)
             switch resolveConflict(name) {
             case .keepLocal:

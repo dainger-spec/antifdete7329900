@@ -219,6 +219,32 @@ public final class ProfileRepository: @unchecked Sendable {
     func historyURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("history.bin") }
     func bookmarksURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("bookmarks.bin") }
 
+    func url(of file: ProfileSyncFile, for id: UUID) -> URL {
+        switch file {
+        case .config: return configURL(for: id)
+        case .passwords: return passwordsURL(for: id)
+        case .bookmarks: return bookmarksURL(for: id)
+        case .history: return historyURL(for: id)
+        }
+    }
+
+    /// Sync merge of two encrypted versions of a mergeable profile file. Both are decrypted with
+    /// the profile key, merged, and the result is re-encrypted.
+    func mergeSyncedFile(_ file: ProfileSyncFile, profileID id: UUID, local: Data, remote: Data) throws -> Data {
+        let key = try profileKey(for: id)
+        switch file {
+        case .bookmarks:
+            let codec = BookmarkStore.file(url: nil, profileID: id, profileKey: key)
+            return try codec.encode(BookmarkStore.merge(codec.decode(local), codec.decode(remote)))
+        case .history:
+            let codec = HistoryStore.file(url: nil, profileID: id, profileKey: key)
+            let policy = (try? loadConfiguration(id, key: key))?.historyPolicy ?? .init()
+            return try codec.encode(HistoryStore.merge(codec.decode(local), codec.decode(remote), policy: policy))
+        case .config, .passwords:
+            throw CoreError.unsupportedFormat("\(file.rawValue) is not mergeable")
+        }
+    }
+
     /// Deletes the profile's history file (e.g. when history is turned off for the profile).
     public func deleteHistoryFile(for id: UUID) throws {
         let url = historyURL(for: id)
@@ -277,6 +303,13 @@ public final class ProfileRepository: @unchecked Sendable {
         }
         return trimmed
     }
+}
+
+/// Per-profile encrypted files that are synced.
+enum ProfileSyncFile: String, CaseIterable {
+    case config, passwords, bookmarks, history
+
+    var isMergeable: Bool { self == .bookmarks || self == .history }
 }
 
 #if !canImport(Darwin)

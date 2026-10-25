@@ -23,6 +23,8 @@ public enum EncryptedDirectoryArchive {
         public var files = 0
         public var bytes: UInt64 = 0
         public var skipped: [String] = []
+
+        public init() {}
     }
 
     public static let defaultChunkSize = 1 << 20
