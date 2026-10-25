@@ -46,6 +46,31 @@ jobs:
           node-version: 22
       - run: TZ=America/New_York node scripts/test-shims.mjs
 
+  vm-tuning:
+    name: VM tuning scripts (shellcheck + dry runs)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax and shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          for f in vm/tuning/slim-macos.sh vm/tuning/cleanup-image.sh vm/tuning/measure-ram.sh \
+                   vm/controller/tart-prototype.sh vm/agent/install.sh; do
+            bash -n "$f"
+            shellcheck -S warning "$f"
+          done
+      - name: Dry runs do not touch the system
+        run: |
+          vm/tuning/slim-macos.sh --dry-run
+          HOME=/nonexistent vm/tuning/cleanup-image.sh --dry-run
+      - name: vm_stat parser (fed a captured sample off a Mac)
+        run: |
+          out=$(printf 'page size of 16384 bytes\nPages active: 30000.\nPages wired down: 25000.\nPages occupied by compressor: 10000.\n' \
+                | vm/tuning/measure-ram.sh --parse-stdin 16384)
+          echo "$out"
+          # (25000 + 30000 + 10000) pages * 16384 / 1048576 = 1015.6 -> 1016 MiB used
+          echo "$out" | grep -q 'used=1016'
+
   macos:
     name: macOS build, core tests, WebKit self-test
     runs-on: macos-15

@@ -191,6 +191,32 @@ final class ScriptIntegrationTests: XCTestCase {
         XCTAssertTrue(calls.contains("tart stop safari-profile"))
     }
 
+    func testSizingAndHeadlessEnvReachTart() async throws {
+        let run = try host.launch(url: "https://example.com",
+                                  extraEnvironment: ["TART_NET": "shared", "VM_MEMORY": "2048",
+                                                     "VM_CPU": "2", "VM_HEADLESS": "1"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        let calls = host.calls
+        XCTAssertTrue(calls.contains("tart set safari-profile --memory 2048 --cpu 2"),
+                      "RAM/CPU caps are applied with tart set while stopped")
+        XCTAssertTrue(calls.contains("tart run safari-profile --no-graphics"),
+                      "VM_HEADLESS adds --no-graphics")
+        // tart set must come before tart run (set requires a stopped VM).
+        XCTAssertLessThan(calls.firstIndex { $0.hasPrefix("tart set") } ?? .max,
+                          calls.firstIndex { $0.hasPrefix("tart run") } ?? .min)
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
+    func testNoSizingWhenUnset() async throws {
+        let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "shared"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertFalse(host.calls.contains { $0.hasPrefix("tart set") }, "no tart set without VM_MEMORY/VM_CPU")
+        XCTAssertTrue(host.calls.contains("tart run safari-profile"), "no --no-graphics without VM_HEADLESS")
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
     func testSigintToBashAloneNoLongerResumesTheScript() async throws {
         // Regression: `trap cleanup INT` used to run cleanup and then continue
         // polling for the IP for two minutes.

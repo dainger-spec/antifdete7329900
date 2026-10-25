@@ -100,6 +100,12 @@ terminal it sets:
   password prompt with `$SSHPASS`, since a GUI app has no TTY.
 - `LOCAL_PORT` — a free port for the host end of the SSH tunnel.
 
+To shrink the VM's footprint, set `VM_MEMORY` (MiB), `VM_CPU` and `VM_HEADLESS`
+when running `tart-prototype.sh` (the app does not set them). They map to
+`tart set --memory/--cpu` and `--no-graphics`. See
+[vm/tuning/README.md](../tuning/README.md) for a stable minimum and the
+in-guest service-disabling and measurement scripts.
+
 The script runs in its own **process group**: Отмена signals the group the
 way Ctrl+C does in a terminal, so the script's trap stops the VM at once
 instead of after whatever `sleep`/`ssh`/`curl` it was waiting on. If it

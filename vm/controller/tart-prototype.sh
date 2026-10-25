@@ -18,6 +18,9 @@
 #   TART_NET     "bridged" (default; --net-bridged=$BRIDGE_IF, IP via ARP) or
 #                "shared" (Tart's default NAT; IP via the host's DHCP leases)
 #   BRIDGE_IF    host interface for bridged networking (default: en0)
+#   VM_MEMORY    RAM cap in MiB, applied with `tart set` (empty = image default)
+#   VM_CPU       CPU core count, applied with `tart set` (empty = image default)
+#   VM_HEADLESS  "1" = run with --no-graphics (no host window). See vm/tuning.
 #
 # This installs vm/agent/ into the VM as a LaunchAgent, opens an SSH tunnel to
 # the agent's loopback port, then calls POST /navigate. The agent control port
@@ -36,6 +39,9 @@ SHOT="${SHOT:-}"
 KEEP_VM="${KEEP_VM:-}"
 TART_NET="${TART_NET:-bridged}"
 BRIDGE_IF="${BRIDGE_IF:-en0}"
+VM_MEMORY="${VM_MEMORY:-}"
+VM_CPU="${VM_CPU:-}"
+VM_HEADLESS="${VM_HEADLESS:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="$(cd "$SCRIPT_DIR/../agent" && pwd)"
@@ -90,14 +96,29 @@ ssh_vm()  { "${SSH_WRAP[@]}" ssh  "${SSH_OPTS[@]}" "$SSH_USER@$IP" "$@"; }
 scp_vm()  { "${SSH_WRAP[@]}" scp  "${SSH_OPTS[@]}" "$@"; }
 
 echo "==> Checking VM '$VM_NAME'"
-if ! tart list | grep -q "[[:space:]]$VM_NAME[[:space:]]" && ! tart list | grep -q "^$VM_NAME"; then
+if ! tart list | grep -q "[[:space:]]${VM_NAME}[[:space:]]" && ! tart list | grep -q "^${VM_NAME}"; then
   echo "VM not found. Create one first:"
   echo "  tart clone ghcr.io/cirruslabs/macos-sonoma-base:latest $VM_NAME"
   exit 1
 fi
 
+# Apply RAM/CPU caps while the VM is stopped (see vm/tuning for sizing advice).
+if [[ -n "$VM_MEMORY$VM_CPU" ]]; then
+  SET_ARGS=()
+  [[ -n "$VM_MEMORY" ]] && SET_ARGS+=(--memory "$VM_MEMORY")
+  [[ -n "$VM_CPU" ]] && SET_ARGS+=(--cpu "$VM_CPU")
+  echo "    sizing: tart set ${SET_ARGS[*]}"
+  tart set "$VM_NAME" "${SET_ARGS[@]}"
+fi
+
+RUN_ARGS=(${RUN_NET_ARGS[@]+"${RUN_NET_ARGS[@]}"})
+# --no-graphics drops the host window. Safari still renders on the guest's
+# virtual display; if your Tart build removes that display headless and
+# screenshots/pages break, leave VM_HEADLESS unset (see vm/tuning/README.md).
+[[ -n "$VM_HEADLESS" ]] && RUN_ARGS+=(--no-graphics)
+
 echo "==> Starting VM '$VM_NAME'"
-tart run "$VM_NAME" ${RUN_NET_ARGS[@]+"${RUN_NET_ARGS[@]}"} &
+tart run "$VM_NAME" ${RUN_ARGS[@]+"${RUN_ARGS[@]}"} &
 TART_PID=$!
 
 echo "==> Waiting for VM IP..."
