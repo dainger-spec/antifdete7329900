@@ -79,6 +79,71 @@ final class ProfileBundleTests: XCTestCase {
         XCTAssertEqual(try dstStore.list().count, 2)
     }
 
+    /// Build an archive by hand, the way an attacker could.
+    private func craftArchive(_ name: String, _ build: (URL) throws -> Void) async throws -> URL {
+        let staging = root.appendingPathComponent("craft-\(name)")
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        let manifest = ProfileManifest(from: Profile(name: name, cookieCount: 99))
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(manifest).write(to: staging.appendingPathComponent("manifest.json"))
+        try build(staging)
+        let archive = root.appendingPathComponent("\(name).tar.gz")
+        let entries = try FileManager.default.contentsOfDirectory(atPath: staging.path)
+        let tar = try await GroupProcess.run("/usr/bin/tar", ["-czf", archive.path, "-C", staging.path] + entries,
+                                             environment: ProcessInfo.processInfo.environment, timeout: 60)
+        XCTAssertEqual(tar.code, 0)
+        return archive
+    }
+
+    func testImportRefusesSymlinkedCookiesAndLeavesNothing() async throws {
+        let secret = root.appendingPathComponent("host-secret.txt")
+        try "ssh private key".write(to: secret, atomically: true, encoding: .utf8)
+        let archive = try await craftArchive("evil") { staging in
+            try FileManager.default.createSymbolicLink(at: staging.appendingPathComponent("cookies.json"),
+                                                       withDestinationURL: secret)
+        }
+        let store = ProfileStore(url: root.appendingPathComponent("e/profiles.json"))
+        do {
+            _ = try await ProfileBundle.importArchive(archive, store: store, vmsDirectory: root.appendingPathComponent("e/vms"))
+            XCTFail("a symlinked cookies.json must be refused")
+        } catch ProfileBundleError.badArchive {}
+        XCTAssertEqual(try store.list(), [], "nothing imported")
+    }
+
+    func testImportRecountsCookiesAndFindsTheVMByItsConfig() async throws {
+        let archive = try await craftArchive("counted") { staging in
+            try #"[{"domain":"a.com","name":"x","value":"1"},{"domain":"b.com","name":"y","value":"2"}]"#
+                .write(to: staging.appendingPathComponent("cookies.json"), atomically: true, encoding: .utf8)
+            try FileManager.default.createDirectory(at: staging.appendingPathComponent("aaa-not-a-vm"),
+                                                    withIntermediateDirectories: true)
+            let vm = staging.appendingPathComponent("zzz-vm")
+            try FileManager.default.createDirectory(at: vm, withIntermediateDirectories: true)
+            try "{}".write(to: vm.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+        }
+        let store = ProfileStore(url: root.appendingPathComponent("c/profiles.json"))
+        let vms = root.appendingPathComponent("c/vms")
+        let imported = try await ProfileBundle.importArchive(archive, store: store, vmsDirectory: vms)
+        XCTAssertEqual(imported.cookieCount, 2, "counted from the file, not the manifest's 99")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: vms.appendingPathComponent(imported.vmName).appendingPathComponent("config.json").path))
+    }
+
+    func testImportKeepsNetworkModeAndRegion() async throws {
+        let srcStore = ProfileStore(url: root.appendingPathComponent("n/profiles.json"))
+        let offline = try srcStore.add(Profile(name: "Offline", network: .offline,
+                                               timeZone: "Europe/Berlin", language: "de-DE"))
+        let archive = root.appendingPathComponent("offline.tar.gz")
+        try await ProfileBundle.export(profile: offline, store: srcStore,
+                                       vmsDirectory: root.appendingPathComponent("n/vms"), to: archive)
+        let dstStore = ProfileStore(url: root.appendingPathComponent("m/profiles.json"))
+        let imported = try await ProfileBundle.importArchive(archive, store: dstStore,
+                                                             vmsDirectory: root.appendingPathComponent("m/vms"))
+        XCTAssertEqual(imported.network, .offline, "must not come back as open internet")
+        XCTAssertEqual(imported.timeZone, "Europe/Berlin")
+        XCTAssertEqual(imported.language, "de-DE")
+    }
+
     func testImportRejectsNonArchive() async throws {
         let bogus = root.appendingPathComponent("bogus.tar.gz")
         try "not a tar".write(to: bogus, atomically: true, encoding: .utf8)

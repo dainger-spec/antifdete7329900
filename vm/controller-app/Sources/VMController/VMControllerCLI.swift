@@ -46,8 +46,12 @@ enum ProfilesCommand {
                 let profiles = try store.list()
                 if profiles.isEmpty { print("no profiles (\(store.url.path))") }
                 for p in profiles {
-                    let proxy = p.proxy ?? "no proxy (isolated / fail-closed)"
-                    print("\(p.id)  \(p.name)  [\(p.vmName)]  \(proxy)  cookies=\(p.cookieCount)")
+                    let network = switch p.network {
+                    case .proxy: p.proxy.map { "proxy \($0)" } ?? "proxy (none set: no internet)"
+                    case .direct: "direct (host IP)"
+                    case .offline: "offline"
+                    }
+                    print("\(p.id)  \(p.name)  [\(p.vmName)]  \(network)  cookies=\(p.cookieCount)")
                 }
             case "add":
                 guard args.count >= 2 else { print("usage: profiles add <name> [--proxy <url>]"); return 1 }
@@ -127,15 +131,42 @@ final class Controller {
             throw ControllerError.scriptNotFound(candidates)
         }
         print("==> Launching VM and opening Safari (via \(script))")
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [script, vmName, url]
-        process.environment = environment
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw ControllerError.scriptFailed(Int(process.terminationStatus))
+        let process = GroupProcess(executable: "/bin/bash", arguments: [script, vmName, url],
+                                   environment: environment) { line in
+            print(line)
+            fflush(stdout)
         }
+        try process.start()
+        // The script runs in its own process group, so the terminal's Ctrl+C
+        // never reaches it by itself: pass SIGINT/SIGTERM/SIGHUP on to the
+        // whole group, and its trap stops the VM and the tunnel.
+        let sources = [SIGINT, SIGTERM, SIGHUP].map { number -> DispatchSourceSignal in
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+            source.setEventHandler { process.signalGroup(number) }
+            source.resume()
+            return source
+        }
+        defer { sources.forEach { $0.cancel() } }
+        let code = Self.wait(for: process)
+        if code == 128 + SIGINT || code == 128 + SIGTERM {
+            print("Stopped.")
+            exit(code)
+        }
+        guard code == 0 else { throw ControllerError.scriptFailed(Int(code)) }
+    }
+
+    /// Blocks until `process` exits (main is synchronous here).
+    private static func wait(for process: GroupProcess) -> Int32 {
+        final class Box: @unchecked Sendable { var code: Int32 = -1 }
+        let box = Box()
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            box.code = await process.exitCode()
+            done.signal()
+        }
+        done.wait()
+        return box.code
     }
 
     /// Small output only (e.g. `list`): drains the pipe before waiting.

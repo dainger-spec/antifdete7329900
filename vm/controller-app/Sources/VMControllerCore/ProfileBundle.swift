@@ -4,7 +4,7 @@ import Foundation
 /// another machine, without anything host-specific (no id — import mints a new
 /// one).
 public struct ProfileManifest: Codable, Equatable, Sendable {
-    public static let currentVersion = 1
+    public static let currentVersion = 2
 
     public var version: Int
     public var name: String
@@ -13,6 +13,13 @@ public struct ProfileManifest: Codable, Equatable, Sendable {
     public var clipboardShared: Bool
     public var cookieCount: Int
     public var exportedAt: Date
+    // Version 2. Missing in older archives (decoded as nil).
+    /// Without it an `.offline` profile — or `.proxy` with no usable proxy —
+    /// would come back as `.direct`, i.e. open internet.
+    public var network: NetworkMode?
+    public var timeZone: String?
+    public var language: String?
+    public var uniqueIdentity: Bool?
 
     public init(from profile: Profile, exportedAt: Date = Date()) {
         version = Self.currentVersion
@@ -22,6 +29,10 @@ public struct ProfileManifest: Codable, Equatable, Sendable {
         clipboardShared = profile.clipboardShared
         cookieCount = profile.cookieCount
         self.exportedAt = exportedAt
+        network = profile.network
+        timeZone = profile.timeZone
+        language = profile.language
+        uniqueIdentity = profile.uniqueIdentity
     }
 }
 
@@ -91,6 +102,13 @@ public enum ProfileBundle {
 
     /// Import `archive` into `store`, placing the VM under `vmsDirectory`.
     /// Returns the new profile (with a fresh id and a non-clashing name).
+    ///
+    /// The archive is untrusted: only regular files are taken (a symlinked
+    /// cookies.json would make the launch send a host file into the VM), the
+    /// cookies are re-parsed and recounted, and the VM is the directory that
+    /// holds a config.json. On any failure nothing is left behind. The VM
+    /// keeps its source's MAC address; give it a new one before running it
+    /// next to the source (`tart set <vm> --random-mac`).
     @discardableResult
     public static func importArchive(_ archive: URL, store: ProfileStore, vmsDirectory: URL,
                                      timeout: TimeInterval = 1800) async throws -> Profile {
@@ -109,28 +127,58 @@ public enum ProfileBundle {
             throw ProfileBundleError.badArchive("missing or unreadable \(manifestName)")
         }
 
-        let profile = try addWithUniqueName(manifest, store: store)
-
-        // Cookies, if the archive carried them.
+        // Validate everything before touching the store.
         let cookiesSrc = temp.appendingPathComponent(cookiesName)
-        if fm.fileExists(atPath: cookiesSrc.path) {
-            let dir = store.directory(for: profile)
-            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-            try? fm.removeItem(at: store.cookiesURL(for: profile))
-            try fm.copyItem(at: cookiesSrc, to: store.cookiesURL(for: profile))
-            try store.update(profile.id) { $0.cookieCount = manifest.cookieCount }
+        var cookies: Data?
+        var cookieCount = 0
+        if fm.fileExists(atPath: cookiesSrc.path) || isSymlink(cookiesSrc) {
+            guard isRegularFile(cookiesSrc), let text = try? String(contentsOf: cookiesSrc, encoding: .utf8),
+                  let parsed = try? CookieImport.parse(text) else {
+                throw ProfileBundleError.badArchive("\(cookiesName) is not a regular cookie file")
+            }
+            cookies = try CookieImport.serialize(parsed)
+            cookieCount = parsed.count
         }
-
-        // The VM directory is the one extracted entry that isn't the manifest or
-        // cookies file; move it under the new profile's VM name.
         let entries = (try? fm.contentsOfDirectory(at: temp, includingPropertiesForKeys: nil)) ?? []
-        if let vmSrc = entries.first(where: { ![manifestName, cookiesName].contains($0.lastPathComponent) }) {
-            try fm.createDirectory(at: vmsDirectory, withIntermediateDirectories: true)
-            let dest = vmsDirectory.appendingPathComponent(profile.vmName)
-            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
-            try fm.moveItem(at: vmSrc, to: dest)
+        let vmCandidates = entries.filter {
+            ![manifestName, cookiesName].contains($0.lastPathComponent) && !isSymlink($0)
+                && isRegularFile($0.appendingPathComponent("config.json"))
+        }
+        guard vmCandidates.count <= 1 else { throw ProfileBundleError.badArchive("more than one VM") }
+
+        let profile = try addWithUniqueName(manifest, store: store)
+        var movedVM: URL?
+        do {
+            if let cookies {
+                try fm.createDirectory(at: store.directory(for: profile), withIntermediateDirectories: true)
+                try cookies.write(to: store.cookiesURL(for: profile), options: .atomic)
+            }
+            try store.update(profile.id) { $0.cookieCount = cookies == nil ? 0 : cookieCount }
+            if let vmSrc = vmCandidates.first {
+                try fm.createDirectory(at: vmsDirectory, withIntermediateDirectories: true)
+                let dest = vmsDirectory.appendingPathComponent(profile.vmName)
+                guard !fm.fileExists(atPath: dest.path) else {
+                    throw ProfileBundleError.badArchive("a VM named \(profile.vmName) already exists")
+                }
+                try fm.moveItem(at: vmSrc, to: dest)
+                movedVM = dest
+            }
+        } catch {
+            // Roll back: no profile without its VM, no stray files.
+            if let movedVM { try? fm.removeItem(at: movedVM) }
+            try? store.remove(profile.id)
+            throw error
         }
         return try store.get(profile.id) ?? profile
+    }
+
+    /// lstat-based: a symlink is neither a regular file nor followed.
+    static func isRegularFile(_ url: URL) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType) == .typeRegular
+    }
+
+    static func isSymlink(_ url: URL) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType) == .typeSymbolicLink
     }
 
     /// Add the manifest's profile, suffixing the name if it's already taken.
@@ -140,7 +188,9 @@ public enum ProfileBundle {
             do {
                 return try store.add(Profile(name: name, proxy: manifest.proxy,
                                              baseImage: manifest.baseImage,
-                                             clipboardShared: manifest.clipboardShared))
+                                             clipboardShared: manifest.clipboardShared,
+                                             network: manifest.network, timeZone: manifest.timeZone,
+                                             language: manifest.language, uniqueIdentity: manifest.uniqueIdentity))
             } catch ProfileError.duplicateName {
                 continue
             }

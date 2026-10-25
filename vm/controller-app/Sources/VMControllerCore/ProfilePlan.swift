@@ -16,7 +16,8 @@ public enum NetworkPolicy: Equatable, Sendable {
     case proxyOnly(allowCIDR: String)
     /// No egress at all (fail-closed, no proxy configured).
     case isolated
-    /// Tart's default NAT — open internet. Development only.
+    /// Tart's default NAT — open internet, the host's IP. A profile's "direct"
+    /// mode and the plain launch.
     case openNAT
 
     /// softnet rule letting the host (only) open connections to the VM.
@@ -91,6 +92,16 @@ public enum ProfilePlan {
         ["clone", profile.baseImage, profile.vmName]
     }
 
+    /// Give a freshly cloned profile its own machine identity: a new serial
+    /// number (VZMacMachineIdentifier) and MAC. `tart clone` keeps the base
+    /// image's identifier, so otherwise every profile is the same "Mac".
+    /// The VM must be stopped. Run before the profile's first boot: on a used
+    /// VM a new identifier can lock Safari out of passwords kept in the
+    /// "Local Items" keychain, which is bound to the machine.
+    public static func uniqueIdentity(_ profile: Profile) -> [String] {
+        ["set", profile.vmName, "--random-serial", "--random-mac"]
+    }
+
     /// Pull the latest of a base image into Tart's cache.
     public static func pullBase(_ image: String) -> [String] {
         ["pull", image]
@@ -104,7 +115,7 @@ public enum ProfilePlan {
     /// Run the profile from its persistent disk (= "from the snapshot").
     public static func run(_ profile: Profile, headless: Bool = false, extra: [String] = []) -> [String] {
         var args = ["run", profile.vmName]
-        args += NetworkPolicy.failClosed(proxy: profile.proxy).runArgs
+        args += profile.networkPolicy.runArgs
         if headless { args.append("--no-graphics") }
         args += extra
         return args

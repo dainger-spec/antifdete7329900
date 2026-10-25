@@ -161,19 +161,19 @@ act_on() {
 
 free_mib() { $SUDO df -m / 2>/dev/null | awk 'NR==2{print $4}'; }
 
+# Callers pass globs unquoted, so each argument is already one path (or the
+# literal pattern when nothing matched). Never re-split them: "Old Downloads"
+# in the Trash would otherwise become `rm -rf Downloads`.
 remove_glob() {
   local su="$1"; shift
-  local glob path
-  for glob in "$@"; do
-    # shellcheck disable=SC2086  # globs must expand
-    for path in $glob; do
-      [[ -e "$path" ]] || continue
-      if [[ "$DRY" == 1 ]]; then
-        echo "    would remove $(du -sh "$path" 2>/dev/null | cut -f1)	$path"
-      else
-        $su rm -rf "$path" 2>/dev/null && echo "  removed: $path" || echo "  kept (locked): $path"
-      fi
-    done
+  local path
+  for path in "$@"; do
+    [[ -e "$path" || -L "$path" ]] || continue
+    if [[ "$DRY" == 1 ]]; then
+      echo "    would remove $(du -sh "$path" 2>/dev/null | cut -f1)	$path"
+    else
+      $su rm -rf "$path" 2>/dev/null && echo "  removed: $path" || echo "  kept (locked): $path"
+    fi
   done
 }
 
@@ -210,19 +210,37 @@ cleanup_disk() {
   [[ "$STRIP_DEV" == 1 ]] && strip_developer
 }
 
+# The python3 the agent's LaunchAgent runs (install.sh writes it into the
+# plist), or empty when the agent isn't installed.
+agent_python() {
+  local plist="$HOME/Library/LaunchAgents/com.privacybrowser.agent.plist"
+  [[ -f "$plist" ]] || return 0
+  plutil -extract ProgramArguments.0 raw -o - "$plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "$plist" 2>/dev/null || true
+}
+
+# /usr/bin/python3 is not a symlink but a stub that runs the Command Line
+# Tools' python, so it needs /Library/Developer as much as a path inside it.
+needs_developer_dir() {
+  local py="$1" real
+  [[ -n "$py" ]] || return 1
+  [[ "$py" == /usr/bin/python3 ]] && return 0
+  real="$(readlink -f "$py" 2>/dev/null || echo "$py")"
+  [[ "$real" == *CommandLineTools* || "$real" == */Developer/* ]]
+}
+
 strip_developer() {
   echo "==> --strip-dev: /Library/Developer (Xcode / Command Line Tools)"
-  local py real
-  py="$(command -v python3 2>/dev/null || true)"
-  real="$py"
-  [[ -n "$py" ]] && real="$(readlink -f "$py" 2>/dev/null || echo "$py")"
-  if [[ -n "$py" ]] && python3 -c '' 2>/dev/null \
-     && [[ "$real" == *CommandLineTools* || "$real" == */Developer/* ]] && [[ "$FORCE" != 1 ]]; then
-    echo "  REFUSED: python3 ($real) comes from /Library/Developer, and the agent"
-    echo "           (pbagent.py) needs it. Install a standalone python3 first, or"
-    echo "           pass --force to remove it anyway (the agent will stop working)."
-    return
-  fi
+  local py
+  for py in "$(agent_python)" "$(command -v python3 2>/dev/null || true)"; do
+    if needs_developer_dir "$py" && [[ "$FORCE" != 1 ]]; then
+      echo "  REFUSED: python3 ($py) needs /Library/Developer, and the agent"
+      echo "           (pbagent.py) runs on it. Install a standalone python3 and"
+      echo "           reinstall the agent with it first, or pass --force to remove"
+      echo "           it anyway (the agent will stop working)."
+      return
+    fi
+  done
   remove_glob "$SUDO" "/Library/Developer"
 }
 
@@ -256,7 +274,7 @@ AFTER="$(free_mib)"
 
 echo "==> summary (action=$ACTION dry=$DRY)"
 if [[ "$ACTION" != "revert" ]]; then
-  echo "  services ${DRY:+would-be-}disabled: ${#DISABLED[@]}"
+  echo "  services $([[ "$DRY" == 1 ]] && echo "would-be-")disabled: ${#DISABLED[@]}"
   for d in ${DISABLED[@]+"${DISABLED[@]}"}; do echo "    - $d"; done
   if [[ -n "${BEFORE:-}" && -n "${AFTER:-}" && "$DRY" != 1 ]]; then
     echo "  free on / : ${BEFORE} MiB -> ${AFTER} MiB (+$((AFTER - BEFORE)) MiB)"

@@ -8,6 +8,7 @@
 #   ./identity.sh --print <profile-name>       # only print the values; changes
 #                                              # nothing and runs anywhere
 #   ./identity.sh --force <profile-name>       # skip the "is this a VM?" check
+#   ./identity.sh --timezone Europe/Berlin --language de-DE <profile-name>
 #
 # The controller runs it for you when IDENTITY_PROFILE is set
 # (vm/controller/tart-prototype.sh).
@@ -19,22 +20,31 @@
 #     NOT applied: the guest cannot change the MAC Virtualization.framework
 #     gives its NIC; set it on the host (see the docs).
 #
+#   - With --timezone / --language: the guest's time zone (systemsetup, root)
+#     and the admin user's language + region (defaults, no root). Safari is
+#     quit if either changed, so its next start picks them up. Match them to
+#     the proxy's region — JavaScript sees both.
+#
 # What it does not do:
 #   - hw.model, serial, board-id, kern.hv_vmm_present: fixed by
 #     Virtualization.framework, not settable from the guest
 #   - GPU renderer strings (Apple paravirtualized GPU)
 #
-# Exit status: 0 = hostname set (or --print), 1 = usage, 2 = refused (not a
-# VM), 3 = scutil/sudo failed for at least one name.
+# Exit status: 0 = applied (or --print), 1 = usage, 2 = refused (not a VM),
+# 3 = scutil/systemsetup/sudo failed for at least one setting.
 
 set -euo pipefail
 
 PRINT_ONLY=""
 FORCE=""
+TIMEZONE=""
+LANGUAGE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --print) PRINT_ONLY=1; shift ;;
     --force) FORCE=1; shift ;;
+    --timezone) TIMEZONE="${2:-}"; shift 2 || { echo "--timezone needs a value" >&2; exit 1; } ;;
+    --language) LANGUAGE="${2:-}"; shift 2 || { echo "--language needs a value" >&2; exit 1; } ;;
     --) shift; break ;;
     -*) echo "Unknown option: $1" >&2; exit 1 ;;
     *) break ;;
@@ -43,7 +53,16 @@ done
 
 PROFILE="${1:-}"
 if [[ -z "$PROFILE" ]]; then
-  echo "Usage: $0 [--print] [--force] <profile-name>" >&2
+  echo "Usage: $0 [--print] [--force] [--timezone Area/City] [--language xx-YY] <profile-name>" >&2
+  exit 1
+fi
+# Strict shapes: these end up in systemsetup/defaults/ln arguments and a path.
+if [[ -n "$TIMEZONE" ]] && ! [[ "$TIMEZONE" =~ ^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$ ]]; then
+  echo "Bad time zone: $TIMEZONE (expected e.g. Europe/Berlin)" >&2
+  exit 1
+fi
+if [[ -n "$LANGUAGE" ]] && ! [[ "$LANGUAGE" =~ ^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$ ]]; then
+  echo "Bad language: $LANGUAGE (expected e.g. de-DE)" >&2
   exit 1
 fi
 
@@ -77,9 +96,16 @@ HOSTNAME_NEW="Mac-${SAFE_NAME}"
 # bytes of the profile name's SHA-256: the same name always gives the same MAC.
 MAC="$(printf '3C:22:FB:%s:%s:%s' "${HASH:0:2}" "${HASH:2:2}" "${HASH:4:2}" | tr 'a-f' 'A-F')"
 
+# de-DE → language "de-DE", region/locale "de_DE"; a bare "de" keeps the region.
+LOCALE=""
+[[ "$LANGUAGE" == *-* ]] && LOCALE="${LANGUAGE%%-*}_$(printf '%s' "${LANGUAGE##*-}" | tr 'a-z' 'A-Z')"
+
 if [[ -n "$PRINT_ONLY" ]]; then
   echo "HOSTNAME=$HOSTNAME_NEW"
   echo "MAC=$MAC"
+  [[ -n "$TIMEZONE" ]] && echo "TIMEZONE=$TIMEZONE"
+  [[ -n "$LANGUAGE" ]] && echo "LANGUAGE=$LANGUAGE"
+  [[ -n "$LOCALE" ]] && echo "LOCALE=$LOCALE"
   exit 0
 fi
 
@@ -105,6 +131,35 @@ for key in ComputerName LocalHostName HostName; do
     FAILED=1
   fi
 done
+
+RESTART_SAFARI=""
+if [[ -n "$TIMEZONE" ]]; then
+  if [[ ! -f "/usr/share/zoneinfo/$TIMEZONE" ]]; then
+    echo "  unknown time zone: $TIMEZONE" >&2
+    FAILED=1
+  elif [[ "$(readlink /etc/localtime 2>/dev/null)" != *"/zoneinfo/$TIMEZONE" ]]; then
+    echo "Setting time zone to $TIMEZONE"
+    # systemsetup is the documented way; the symlink is what it writes.
+    if ! as_root systemsetup -settimezone "$TIMEZONE" </dev/null >/dev/null 2>&1 \
+       && ! as_root ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime </dev/null; then
+      echo "  could not set the time zone" >&2
+      FAILED=1
+    fi
+    RESTART_SAFARI=1
+  fi
+fi
+if [[ -n "$LANGUAGE" ]]; then
+  if [[ "$(defaults read -g AppleLanguages 2>/dev/null | tr -d ' \n"()' | cut -d, -f1)" != "$LANGUAGE" ]]; then
+    echo "Setting language to $LANGUAGE${LOCALE:+ ($LOCALE)}"
+    defaults write -g AppleLanguages -array "$LANGUAGE"
+    [[ -n "$LOCALE" ]] && defaults write -g AppleLocale "$LOCALE"
+    RESTART_SAFARI=1
+  fi
+fi
+# A running Safari keeps its old language and time zone until restarted.
+if [[ -n "$RESTART_SAFARI" ]] && pgrep -x Safari >/dev/null 2>&1; then
+  pkill -x Safari || true
+fi
 
 echo ""
 echo "Hostname: $HOSTNAME_NEW$([[ -n "$FAILED" ]] && echo " (NOT fully applied)")"

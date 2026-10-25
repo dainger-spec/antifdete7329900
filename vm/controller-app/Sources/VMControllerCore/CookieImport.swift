@@ -120,7 +120,8 @@ public enum CookieImport {
                 value: value,
                 secure: raw.secure ?? false,
                 httpOnly: raw.httpOnly ?? false,
-                expires: seconds.map { Int($0) }.flatMap { $0 > 0 ? $0 : nil })
+                // Int(exactly:) never traps, unlike Int(_:) on 1e20 or NaN.
+                expires: seconds.flatMap { Int(exactly: $0.rounded(.down)) }.flatMap { $0 > 0 ? $0 : nil })
         }
     }
 

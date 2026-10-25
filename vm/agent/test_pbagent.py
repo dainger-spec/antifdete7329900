@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import threading
+import time
 import unittest
 
 import pbagent
@@ -181,8 +183,31 @@ class BinaryCookieEncoderTests(unittest.TestCase):
         self.assertEqual(blob[:4], b"cook")
         decoded = binarycookies.decode(blob)
         for original, got in zip(cookies, decoded):
-            for key in ("domain", "path", "name", "value", "secure", "httpOnly", "expires"):
+            for key in ("domain", "path", "name", "value", "secure", "httpOnly"):
                 self.assertEqual(original[key], got[key], key)
+        self.assertEqual(decoded[0]["expires"], 2000000000)
+        # No expiry: 0 would mean 2001-01-01 (expired); a session cookie lives on.
+        self.assertEqual(decoded[1]["expires"], 1700000000 + binarycookies.SESSION_LIFETIME)
+
+    def test_raw_flags_survive_a_round_trip(self):
+        import binarycookies
+        blob = binarycookies.encode([{"domain": "a.com", "name": "n", "value": "v", "_flags": 0x2D}])
+        again = binarycookies.encode(binarycookies.decode(blob))
+        self.assertEqual(binarycookies.decode(again)[0]["_flags"], 0x2D)
+
+    def test_merge_keeps_in_vm_cookies(self):
+        import binarycookies
+        existing = [{"domain": "a.com", "name": "sid", "path": "/", "value": "logged-in-in-vm"},
+                    {"domain": "b.com", "name": "sid", "path": "/", "value": "old"}]
+        incoming = [{"domain": "b.com", "name": "sid", "path": "/", "value": "imported"}]
+        merged = binarycookies.merge(existing, incoming)
+        self.assertEqual({(c["domain"], c["value"]) for c in merged},
+                         {("a.com", "logged-in-in-vm"), ("b.com", "imported")})
+
+    def test_try_decode_rejects_garbage(self):
+        import binarycookies
+        self.assertIsNone(binarycookies.try_decode(b"not a store"))
+        self.assertEqual(binarycookies.try_decode(b""), [])
 
     def test_empty(self):
         import binarycookies
@@ -220,6 +245,24 @@ class QuitAndMethodTests(AgentTestCase):
                 resp.read()
         finally:
             conn.close()
+
+
+class KioskTests(AgentTestCase):
+    def test_kiosk_toggles_fill_screen(self):
+        status, body, _ = self.post_json("/kiosk", {"fill_screen": True})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"fill_screen": True})
+        self.assertTrue(self.backend.fill_screen)
+        status, body, _ = self.request("GET", "/status", token=TOKEN)
+        self.assertTrue(json.loads(body)["fill_screen"])
+        self.post_json("/kiosk", {"fill_screen": False})
+        self.assertFalse(self.backend.fill_screen)
+
+    def test_kiosk_needs_auth_and_a_bool(self):
+        self.assertEqual(self.post_json("/kiosk", {"fill_screen": True}, token=None)[0], 401)
+        self.assertEqual(self.post_json("/kiosk", {"fill_screen": "yes"})[0], 400)
+        self.assertEqual(self.post_json("/kiosk", {})[0], 400)
+        self.assertFalse(self.backend.fill_screen)
 
 
 class MacBackendCommandTests(unittest.TestCase):
@@ -274,6 +317,115 @@ class MacBackendCommandTests(unittest.TestCase):
         with self.assertRaises(pbagent.SafariError):
             self.backend.navigate("https://example.com")
         self.assertEqual(self.backend.status()["running"], False)
+
+
+class MacApplyCookiesTests(unittest.TestCase):
+    """apply_cookies against a real file: merges, never wipes in-VM cookies."""
+
+    def setUp(self) -> None:
+        import tempfile as _tempfile
+        self.dir = _tempfile.mkdtemp()
+        self.store = os.path.join(self.dir, "Cookies", "Cookies.binarycookies")
+        self.env = os.environ.get("PB_SAFARI_COOKIES")
+        os.environ["PB_SAFARI_COOKIES"] = self.store
+        self.safari = ["running"]
+        self.calls: list[list[str]] = []
+        self.original_run = pbagent.subprocess.run
+
+        def fake_run(argv, **kwargs):
+            self.calls.append(list(argv))
+            if argv[0] == "pgrep":
+                return pbagent.subprocess.CompletedProcess(argv, 0 if self.safari else 1, "", "")
+            if argv[0] == "pkill":
+                self.safari.clear()
+            return pbagent.subprocess.CompletedProcess(argv, 0, "", "")
+
+        pbagent.subprocess.run = fake_run
+        self.backend = pbagent.MacSafariBackend()
+
+    def tearDown(self) -> None:
+        import shutil
+        pbagent.subprocess.run = self.original_run
+        if self.env is None:
+            os.environ.pop("PB_SAFARI_COOKIES", None)
+        else:
+            os.environ["PB_SAFARI_COOKIES"] = self.env
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_merges_and_quits_safari_without_apple_events(self):
+        import binarycookies
+        os.makedirs(os.path.dirname(self.store))
+        with open(self.store, "wb") as fh:
+            fh.write(binarycookies.encode([{"domain": "mail.com", "name": "sid", "value": "made-in-vm"}]))
+        applied = self.backend.apply_cookies([{"domain": "shop.com", "name": "sid", "value": "imported"}])
+        self.assertEqual(applied, 1)
+        with open(self.store, "rb") as fh:
+            values = {c["domain"]: c["value"] for c in binarycookies.decode(fh.read())}
+        self.assertEqual(values, {"mail.com": "made-in-vm", "shop.com": "imported"})
+        self.assertIn(["pkill", "-x", "Safari"], self.calls)
+        self.assertFalse(any(argv[0] == "osascript" for argv in self.calls))
+        self.assertEqual(os.listdir(os.path.dirname(self.store)), ["Cookies.binarycookies"], "no temp left")
+
+    def test_unreadable_store_is_kept_aside(self):
+        os.makedirs(os.path.dirname(self.store))
+        with open(self.store, "wb") as fh:
+            fh.write(b"garbage")
+        self.backend.apply_cookies([{"domain": "a.com", "name": "n", "value": "v"}])
+        names = os.listdir(os.path.dirname(self.store))
+        self.assertTrue(any(n.startswith("Cookies.binarycookies.unreadable-") for n in names))
+
+
+class MacFillScreenTests(unittest.TestCase):
+    """The fill loop with subprocess.run replaced: AppleScript via stdin, only
+    while Safari runs, and it stops when switched off."""
+
+    def setUp(self) -> None:
+        self.calls: list[list[str]] = []
+        self.safari_running = True
+        self.original_run = pbagent.subprocess.run
+
+        def fake_run(argv, **kwargs):
+            self.calls.append(list(argv))
+            if argv[0] == "pgrep":
+                return pbagent.subprocess.CompletedProcess(argv, 0 if self.safari_running else 1, "", "")
+            self.scripts.append(kwargs.get("input", ""))
+            return pbagent.subprocess.CompletedProcess(argv, 0, "1280x800\n", "")
+
+        self.scripts: list[str] = []
+        pbagent.subprocess.run = fake_run
+        self.backend = pbagent.MacSafariBackend()
+        self.backend.FILL_INTERVAL = 0.01
+
+    def tearDown(self) -> None:
+        self.backend.set_fill_screen(False)
+        pbagent.subprocess.run = self.original_run
+
+    def _wait_for(self, predicate, timeout=5.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.01)
+        return False
+
+    def test_fills_while_safari_runs_and_stops_when_off(self):
+        self.assertTrue(self.backend.set_fill_screen(True))
+        self.assertTrue(self._wait_for(lambda: len(self.scripts) >= 2))
+        self.assertIn('tell application "Safari"', self.scripts[0])
+        self.assertIn("NSScreen's mainScreen()", self.scripts[0])
+        self.assertTrue(all(argv[:2] == ["osascript", "-"] for argv in self.calls if argv[0] == "osascript"),
+                        "script text goes over stdin, nothing in argv")
+        self.backend.set_fill_screen(False)
+        time.sleep(0.1)
+        settled = len(self.scripts)
+        time.sleep(0.1)
+        self.assertEqual(len(self.scripts), settled, "no more passes once off")
+
+    def test_no_apple_events_while_safari_is_not_running(self):
+        self.safari_running = False
+        self.backend.set_fill_screen(True)
+        self.assertTrue(self._wait_for(lambda: len(self.calls) >= 3))
+        self.assertEqual(self.scripts, [])
 
 
 if __name__ == "__main__":

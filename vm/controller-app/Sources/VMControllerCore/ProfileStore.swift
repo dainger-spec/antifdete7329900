@@ -84,40 +84,73 @@ public final class ProfileStore {
         try load().profiles.first { $0.id == id }
     }
 
-    /// Adds a profile. Throws if the name is blank or already taken.
+    /// Adds a profile. Throws if the name is blank or already taken. The VM
+    /// name is fixed here, so renaming later never loses the VM.
     @discardableResult
     public func add(_ profile: Profile) throws -> Profile {
         try mutate { document in
-            let name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty else { throw ProfileError.invalidName }
-            guard !document.profiles.contains(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
-                throw ProfileError.duplicateName(name)
-            }
+            let name = try Self.validName(profile.name, among: document.profiles, except: nil)
             var stored = profile
             stored.name = name
+            stored.vm = stored.vm ?? Profile.vmName(name: name, id: stored.id)
             document.profiles.append(stored)
             return stored
         }
     }
 
     /// Applies `change` to the profile with `id` (updating `updatedAt`).
+    /// Throws, changing nothing, if the change leaves a blank or duplicate name.
     @discardableResult
     public func update(_ id: String, _ change: (inout Profile) -> Void) throws -> Profile {
         try mutate { document in
             guard let index = document.profiles.firstIndex(where: { $0.id == id }) else {
                 throw ProfileError.notFound(id)
             }
-            change(&document.profiles[index])
-            document.profiles[index].updatedAt = Date()
-            return document.profiles[index]
+            var profile = document.profiles[index]
+            let vmBefore = profile.vmName
+            change(&profile)
+            profile.name = try Self.validName(profile.name, among: document.profiles, except: id)
+            // Older profiles derived the VM name from the profile name: pin
+            // it before a rename can point the profile at a VM that isn't there.
+            if profile.vm == nil { profile.vm = vmBefore }
+            profile.updatedAt = Date()
+            document.profiles[index] = profile
+            return profile
         }
     }
 
+    /// Removes the profile and its files here (cookies). The VM is the
+    /// caller's to delete (`tart delete <vmName>`).
     public func remove(_ id: String) throws {
-        try mutate { document in
-            guard document.profiles.contains(where: { $0.id == id }) else { throw ProfileError.notFound(id) }
+        let removed: Profile = try mutate { document in
+            guard let profile = document.profiles.first(where: { $0.id == id }) else { throw ProfileError.notFound(id) }
             document.profiles.removeAll { $0.id == id }
+            return profile
         }
+        try? FileManager.default.removeItem(at: directory(for: removed))
+    }
+
+    /// A profile renamed before VM names were pinned points at a VM that
+    /// doesn't exist; its real VM is the one ending in its id. Adopts that VM
+    /// and returns the updated profile (or the profile unchanged).
+    @discardableResult
+    public func adoptOrphanedVM(_ id: String, vmsDirectory: URL) throws -> Profile {
+        guard let profile = try get(id) else { throw ProfileError.notFound(id) }
+        let files = FileManager.default
+        guard !files.fileExists(atPath: vmsDirectory.appendingPathComponent(profile.vmName).path) else { return profile }
+        let names = (try? files.contentsOfDirectory(atPath: vmsDirectory.path)) ?? []
+        let candidates = names.filter { $0.hasPrefix("pb-") && $0.hasSuffix("-\(id)") }
+        guard candidates.count == 1, let found = candidates.first else { return profile }
+        return try update(id) { $0.vm = found }
+    }
+
+    static func validName(_ raw: String, among profiles: [Profile], except id: String?) throws -> String {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw ProfileError.invalidName }
+        guard !profiles.contains(where: { $0.id != id && $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
+            throw ProfileError.duplicateName(name)
+        }
+        return name
     }
 
     /// Import cookies for a profile: parse the file (Netscape or JSON, detected),
@@ -132,7 +165,10 @@ public final class ProfileStore {
         let directory = directory(for: profile)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try data.write(to: cookiesURL(for: profile), options: .atomic)
-        try update(id) { $0.cookieCount = cookies.count }
+        try update(id) {
+            $0.cookieCount = cookies.count
+            $0.cookiesImportedAt = Date()
+        }
         return cookies.count
     }
 

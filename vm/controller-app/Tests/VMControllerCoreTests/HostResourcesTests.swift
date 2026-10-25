@@ -26,9 +26,27 @@ final class HostResourcesTests: XCTestCase {
         let p1 = Profile(id: "a", name: "one")
         let p2 = Profile(id: "b", name: "two")
         try FileManager.default.createDirectory(at: vms.appendingPathComponent(p1.vmName), withIntermediateDirectories: true)
-        try Data(count: 500).write(to: vms.appendingPathComponent(p1.vmName).appendingPathComponent("d"))
-        // p2 has no VM dir yet → contributes 0.
-        XCTAssertEqual(HostResources.profilesDiskBytes([p1, p2], vmsDirectory: vms), 500)
+        try Data(repeating: 1, count: 500).write(to: vms.appendingPathComponent(p1.vmName).appendingPathComponent("d"))
+        // p2 has no VM dir yet → contributes 0. Allocation rounds up to blocks.
+        let used = HostResources.profilesDiskBytes([p1, p2], vmsDirectory: vms)
+        XCTAssertGreaterThanOrEqual(used, 500)
+        XCTAssertLessThan(used, 1 << 20)
+    }
+
+    /// A sparse 1 GiB disk image takes almost nothing until written: count
+    /// what is allocated, not the logical size.
+    func testSparseDiskCountsWhatIsAllocated() throws {
+        let vms = dir.appendingPathComponent("vms")
+        let profile = Profile(id: "s", name: "sparse")
+        let vmDir = vms.appendingPathComponent(profile.vmName)
+        try FileManager.default.createDirectory(at: vmDir, withIntermediateDirectories: true)
+        let disk = vmDir.appendingPathComponent("disk.img")
+        FileManager.default.createFile(atPath: disk.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: disk)
+        try handle.truncate(atOffset: 1 << 30)
+        try handle.close()
+        XCTAssertEqual(HostResources.directorySize(at: vmDir), 1 << 30, "logical size")
+        XCTAssertLessThan(HostResources.profilesDiskBytes([profile], vmsDirectory: vms), 1 << 20)
     }
 
     func testParseFreeRAM() {

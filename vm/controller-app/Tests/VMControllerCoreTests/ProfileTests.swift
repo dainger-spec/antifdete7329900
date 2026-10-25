@@ -129,10 +129,12 @@ final class ProfilePlanTests: XCTestCase {
         XCTAssertEqual(ProfilePlan.run(proxied, headless: true),
                        ["run", "pb-n-i", "--net-softnet", "--net-softnet-block", "0.0.0.0/0",
                         "--net-softnet-allow", "10.0.0.9/32,in @host", "--no-graphics"])
-        let noProxy = Profile(id: "i", name: "n")
-        XCTAssertEqual(ProfilePlan.run(noProxy),
+        let offline = Profile(id: "i", name: "n", network: .offline)
+        XCTAssertEqual(ProfilePlan.run(offline),
                        ["run", "pb-n-i", "--net-softnet", "--net-softnet-block", "0.0.0.0/0",
                         "--net-softnet-allow", "in @host"])
+        let direct = Profile(id: "i", name: "n")
+        XCTAssertEqual(ProfilePlan.run(direct), ["run", "pb-n-i"], "no proxy: direct NAT, chosen explicitly in the editor")
     }
 
     func testSizeDeleteBackup() {
@@ -196,3 +198,95 @@ final class CookieImportTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode([Cookie].self, from: data), cookies)
     }
 }
+
+final class ProfileStoreIntegrityTests: XCTestCase {
+    var root: URL!
+    var store: ProfileStore!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("store-\(UUID().uuidString)")
+        store = ProfileStore(url: root.appendingPathComponent("profiles.json"))
+    }
+
+    override func tearDown() { try? FileManager.default.removeItem(at: root) }
+
+    func testRenameKeepsTheVM() throws {
+        let profile = try store.add(Profile(id: "abc", name: "Work"))
+        XCTAssertEqual(profile.vmName, "pb-work-abc")
+        let renamed = try store.update("abc") { $0.name = "Work 2" }
+        XCTAssertEqual(renamed.vmName, "pb-work-abc", "the VM name is fixed at creation")
+    }
+
+    func testLegacyProfileIsPinnedBeforeItsFirstRename() throws {
+        // A profile saved before VM names were stored: no "vm" key.
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let legacy = """
+        {"version":1,"profiles":[{"id":"abc","name":"Work","baseImage":"b","clipboardShared":false,
+        "cookieCount":0,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]}
+        """
+        try legacy.write(to: store.url, atomically: true, encoding: .utf8)
+        let renamed = try store.update("abc") { $0.name = "Personal" }
+        XCTAssertEqual(renamed.vmName, "pb-work-abc")
+        XCTAssertEqual(try store.get("abc")?.vmName, "pb-work-abc")
+    }
+
+    func testAdoptsTheVMOfAProfileRenamedBeforePinning() throws {
+        let vms = root.appendingPathComponent("vms")
+        try FileManager.default.createDirectory(at: vms.appendingPathComponent("pb-old-name-abc"),
+                                                withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: vms.appendingPathComponent("pb-other-xyz"),
+                                                withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let legacy = """
+        {"version":1,"profiles":[{"id":"abc","name":"New name","baseImage":"b","clipboardShared":false,
+        "cookieCount":0,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]}
+        """
+        try legacy.write(to: store.url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try store.get("abc")?.vmName, "pb-new-name-abc", "points at nothing")
+        XCTAssertEqual(try store.adoptOrphanedVM("abc", vmsDirectory: vms).vmName, "pb-old-name-abc")
+    }
+
+    func testUpdateRefusesBlankAndDuplicateNames() throws {
+        _ = try store.add(Profile(id: "a", name: "Work"))
+        _ = try store.add(Profile(id: "b", name: "Home"))
+        XCTAssertThrowsError(try store.update("b") { $0.name = "  work " }) {
+            XCTAssertEqual($0 as? ProfileError, .duplicateName("work"))
+        }
+        XCTAssertThrowsError(try store.update("b") { $0.name = "   " })
+        XCTAssertEqual(try store.get("b")?.name, "Home", "nothing changed")
+        XCTAssertEqual(try store.update("b") { $0.name = " Home 2 " }.name, "Home 2", "trimmed")
+        XCTAssertEqual(try store.update("a") { $0.name = "work" }.name, "work", "own name, other case")
+    }
+
+    func testRemoveDeletesTheProfilesFiles() throws {
+        let profile = try store.add(Profile(id: "a", name: "Work"))
+        let cookies = root.appendingPathComponent("c.json")
+        try #"[{"domain":"x.com","name":"s","value":"1"}]"#.write(to: cookies, atomically: true, encoding: .utf8)
+        try store.importCookies(for: "a", from: cookies)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.cookiesURL(for: profile).path))
+        try store.remove("a")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.directory(for: profile).path),
+                       "session cookies don't outlive the profile")
+    }
+
+    func testCookiesAreSentOncePerImport() throws {
+        _ = try store.add(Profile(id: "a", name: "Work"))
+        XCTAssertFalse(try store.get("a")!.needsCookieApply, "nothing imported")
+        let file = root.appendingPathComponent("c.json")
+        try #"[{"domain":"x.com","name":"s","value":"1"}]"#.write(to: file, atomically: true, encoding: .utf8)
+        try store.importCookies(for: "a", from: file)
+        XCTAssertTrue(try store.get("a")!.needsCookieApply)
+        try store.update("a") { $0.cookiesAppliedAt = Date().addingTimeInterval(10) }
+        XCTAssertFalse(try store.get("a")!.needsCookieApply, "applied: the VM's own cookies win from now on")
+        try store.update("a") { $0.cookiesAppliedAt = Date().addingTimeInterval(-10) }
+        try store.importCookies(for: "a", from: file)
+        XCTAssertTrue(try store.get("a")!.needsCookieApply, "a newer import is sent again")
+    }
+
+    func testHugeCookieExpiryDoesNotCrash() throws {
+        let cookies = try CookieImport.parse(#"[{"domain":"x.com","name":"a","value":"1","expirationDate":1e20}]"#)
+        XCTAssertEqual(cookies.count, 1)
+        XCTAssertNil(cookies[0].expires)
+    }
+}
+

@@ -312,13 +312,71 @@ final class ScriptIntegrationTests: XCTestCase {
         try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
         XCTAssertTrue(run.events.contains(.stage(.vm, detail: "Настройка имени хоста VM…")))
         let calls = host.calls
-        let identity = calls.firstIndex { $0.hasPrefix("ssh ") && $0.contains(#"bash -s -- my\ work"#) }
+        let identity = calls.firstIndex { $0.hasPrefix("ssh ") && $0.hasSuffix(#"bash -s -- -- my\ work"#) }
         XCTAssertNotNil(identity, "the profile name reaches the guest as one quoted argument")
         XCTAssertLessThan(identity ?? .max, calls.firstIndex { $0.contains("cat ~/.pbagent/token") } ?? .min,
                           "identity is set before the agent step")
         let sent = try String(contentsOf: host.state.appendingPathComponent("identity-stdin"), encoding: .utf8)
         let script = try String(contentsOf: TestPaths.identityScript, encoding: .utf8)
         XCTAssertEqual(sent, script, "vm/identity.sh is piped to bash -s")
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
+    func testIdentityCarriesTimeZoneAndLanguage() async throws {
+        let run = try host.launch(url: "https://example.com",
+                                  extraEnvironment: ["TART_NET": "shared", "IDENTITY_PROFILE": "abc12345",
+                                                     "IDENTITY_TIMEZONE": "Europe/Berlin", "IDENTITY_LANGUAGE": "de-DE"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertTrue(host.calls.contains {
+            $0.hasSuffix("bash -s -- --timezone Europe/Berlin --language de-DE -- abc12345")
+        })
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
+    /// The app runs the VM in its own window: the script must neither start
+    /// nor stop it, and must keep the tunnel up until interrupted.
+    func testExternalVMIsNeitherStartedNorStopped() async throws {
+        let run = try host.launch(url: "https://example.com",
+                                  extraEnvironment: ["TART_NET": "softnet", "SOFTNET_ALLOW": "10.0.0.9/32",
+                                                     "VM_EXTERNAL": "1", "VM_MEMORY": "2048"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertFalse(run.process.hasExited, "stays up holding the tunnel")
+        let calls = host.calls
+        XCTAssertFalse(calls.contains { $0.hasPrefix("tart run") || $0.hasPrefix("tart set") },
+                       "no tart run/set (not even the softnet --help probe)")
+        XCTAssertTrue(calls.contains("tart ip safari-profile"))
+        XCTAssertTrue(calls.contains { $0.hasPrefix("ssh ") && $0.hasSuffix(" bash -s") }, "proxy step still runs")
+        run.process.signalGroup(SIGINT)
+        let code = await run.process.waitForExit(timeout: 15)
+        XCTAssertEqual(code, 130)
+        XCTAssertFalse(host.calls.contains("tart stop safari-profile"), "the owner stops its VM")
+    }
+
+    func testKioskPreparesTheGuestAndKeepsSafariFullSize() async throws {
+        let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "shared", "KIOSK": "1"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertTrue(run.events.contains(.stage(.vm, detail: "Подготовка окна браузера…")))
+        let sent = try String(contentsOf: host.state.appendingPathComponent("kiosk-stdin"), encoding: .utf8)
+        let script = try String(contentsOf: TestPaths.vmDirectory.appendingPathComponent("guest-kiosk.sh"), encoding: .utf8)
+        XCTAssertEqual(sent, script)
+        let calls = host.calls
+        let navigate = calls.firstIndex { $0.contains("/navigate") } ?? .max
+        let kiosk = calls.firstIndex { $0.contains("/kiosk") && $0.contains(#""fill_screen":true"#) }
+        XCTAssertNotNil(kiosk)
+        XCTAssertLessThan(navigate, kiosk ?? .min, "fill the screen once Safari is open")
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
+    func testOutdatedInstalledAgentIsUpdatedKeepingItsToken() async throws {
+        try host.markInstalled(token: "old")
+        try host.setFlag("stale-agent")
+        let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "shared"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertTrue(host.calls.contains { $0.contains("install.sh") }, "a changed agent is reinstalled")
         run.process.signalGroup(SIGINT)
         _ = await run.process.waitForExit(timeout: 15)
     }
@@ -486,7 +544,16 @@ final class FakeHost {
         for arg in "$@"; do [ "$arg" = "-N" ] && exec sleep 300; done
         case "$*" in
           *"bash -s --"*) cat > "$FAKE_STATE/identity-stdin"; exit 0 ;;
-          *"bash -s") cat > "$FAKE_STATE/proxy-stdin"; [ -f "$FAKE_STATE/proxy-fails" ] && exit 3; exit 0 ;;
+          *"bash -s")
+            cat > "$FAKE_STATE/stdin.tmp"
+            if [ "$(head -c 7 "$FAKE_STATE/stdin.tmp")" = "set -- " ]; then
+              mv "$FAKE_STATE/stdin.tmp" "$FAKE_STATE/proxy-stdin"
+              [ -f "$FAKE_STATE/proxy-fails" ] && exit 3
+            else
+              mv "$FAKE_STATE/stdin.tmp" "$FAKE_STATE/kiosk-stdin"
+            fi
+            exit 0 ;;
+          *cksum*) [ -f "$FAKE_STATE/stale-agent" ] && echo "1 2 pbagent.py"; exit 0 ;;
           *"cat ~/.pbagent/token"*) [ -f "$FAKE_STATE/installed-token" ] && cat "$FAKE_STATE/installed-token"; exit 0 ;;
           *install.sh*) echo "Installed." >&2; echo "PB_AGENT_TOKEN=tok123"; exit 0 ;;
         esac

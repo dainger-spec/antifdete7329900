@@ -55,7 +55,7 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           for f in vm/slim.sh vm/measure-ram.sh vm/identity.sh vm/test-identity.sh \
-                   vm/guest-proxy.sh vm/test-guest-proxy.sh \
+                   vm/guest-proxy.sh vm/test-guest-proxy.sh vm/guest-kiosk.sh vm/test-slim.sh \
                    vm/controller/tart-prototype.sh vm/agent/install.sh; do
             bash -n "$f"
             shellcheck -S warning "$f"
@@ -69,6 +69,10 @@ jobs:
         run: bash vm/test-identity.sh
       - name: Guest proxy setup (networksetup calls, --print only)
         run: bash vm/test-guest-proxy.sh
+      - name: Kiosk settings and slim helpers
+        run: |
+          bash vm/guest-kiosk.sh --print | grep -q 'com.apple.dock autohide -bool true'
+          bash vm/test-slim.sh
       - name: vm_stat parser (fed a captured sample off a Mac)
         run: |
           out=$(printf 'page size of 16384 bytes\nPages active: 30000.\nPages wired down: 25000.\nPages occupied by compressor: 10000.\n' \

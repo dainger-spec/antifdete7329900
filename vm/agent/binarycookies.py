@@ -23,6 +23,9 @@ PAGE_SIGNATURE = b"\x00\x00\x01\x00"
 FLAG_SECURE = 0x1
 FLAG_HTTPONLY = 0x4
 RECORD_HEADER_SIZE = 56
+# The format has no "session cookie" marker: expiry 0 means 2001-01-01, i.e.
+# already expired. A cookie imported without an expiry gets this lifetime.
+SESSION_LIFETIME = 30 * 24 * 3600
 
 
 def _cstr(text: str) -> bytes:
@@ -34,6 +37,7 @@ def _cocoa(unix_seconds: float | None) -> float:
 
 
 def encode_record(cookie: dict, now: float | None = None) -> bytes:
+    now = time.time() if now is None else now
     domain = _cstr(cookie["domain"])
     name = _cstr(cookie["name"])
     path = _cstr(cookie.get("path") or "/")
@@ -45,14 +49,18 @@ def encode_record(cookie: dict, now: float | None = None) -> bytes:
     value_off = path_off + len(path)
     size = value_off + len(value)
 
-    flags = 0
-    if cookie.get("secure"):
-        flags |= FLAG_SECURE
-    if cookie.get("httpOnly"):
-        flags |= FLAG_HTTPONLY
+    # A cookie read back from Safari's own store keeps its raw flags (they
+    # carry more than secure/httpOnly, e.g. SameSite on newer macOS).
+    flags = cookie.get("_flags")
+    if not isinstance(flags, int):
+        flags = 0
+        if cookie.get("secure"):
+            flags |= FLAG_SECURE
+        if cookie.get("httpOnly"):
+            flags |= FLAG_HTTPONLY
 
-    expiration = _cocoa(cookie.get("expires"))
-    creation = _cocoa(now if now is not None else time.time())
+    expiration = _cocoa(cookie.get("expires") or now + SESSION_LIFETIME)
+    creation = _cocoa(now)
 
     record = struct.pack("<IIII", size, 0, flags, 0)
     record += struct.pack("<IIII", domain_off, name_off, path_off, value_off)
@@ -122,5 +130,24 @@ def decode(data: bytes) -> list[dict]:
                 "secure": bool(flags & FLAG_SECURE),
                 "httpOnly": bool(flags & FLAG_HTTPONLY),
                 "expires": int(expiration + MAC_EPOCH) if expiration else None,
+                "_flags": flags,
             })
     return cookies
+
+
+def try_decode(data: bytes) -> list[dict] | None:
+    """decode(), or None for a store this decoder can't read."""
+    try:
+        return decode(data) if data else []
+    except (ValueError, IndexError, struct.error, UnicodeDecodeError):
+        return None
+
+
+def merge(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    """`existing` with `incoming` laid over it: an imported cookie replaces
+    the one with the same (domain, name, path); every other cookie stays."""
+    def key(cookie: dict) -> tuple:
+        return (cookie["domain"], cookie["name"], cookie.get("path") or "/")
+
+    replaced = {key(c) for c in incoming}
+    return [c for c in existing if key(c) not in replaced] + list(incoming)

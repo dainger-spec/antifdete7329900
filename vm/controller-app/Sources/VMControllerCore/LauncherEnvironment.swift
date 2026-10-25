@@ -125,6 +125,25 @@ public enum LauncherEnvironment {
         return url
     }
 
+    /// What tart-prototype.sh sets inside the guest for a profile.
+    public struct GuestIdentity: Equatable, Sendable {
+        /// Seeds the hostname (identity.sh); the profile id, not its name, so
+        /// nothing personal shows up on the network.
+        public var seed: String
+        public var timeZone: String?
+        public var language: String?
+
+        public init(seed: String, timeZone: String? = nil, language: String? = nil) {
+            self.seed = seed
+            self.timeZone = timeZone
+            self.language = language
+        }
+
+        public init(profile: Profile) {
+            self.init(seed: profile.id, timeZone: profile.timeZone, language: profile.language)
+        }
+    }
+
     /// Environment for running tart-prototype.sh without a terminal.
     ///
     /// `network` picks TART_NET/SOFTNET_ALLOW: a profile with a proxy runs
@@ -132,11 +151,14 @@ public enum LauncherEnvironment {
     /// `tart ip` resolves and the host can reach the VM. `cookiesFile`, when
     /// set, is POSTed to the agent's /cookies before navigating. `showWindow`
     /// false (the default) runs the VM headless, so the guest desktop never
-    /// pops up on the host.
+    /// pops up on the host. `externalVM`: the app already runs the VM in its
+    /// own window (VM_EXTERNAL=1). `kiosk`: hide the guest's desktop around
+    /// Safari. `identity`: hostname / time zone / language for the guest.
     public static func scriptEnvironment(base: [String: String], tartPath: String, askPass: URL,
                                          localPort: UInt16?, network: NetworkPolicy? = nil,
                                          cookiesFile: String? = nil, showWindow: Bool = false,
-                                         proxyURL: String? = nil) -> [String: String] {
+                                         proxyURL: String? = nil, identity: GuestIdentity? = nil,
+                                         kiosk: Bool = false, externalVM: Bool = false) -> [String: String] {
         var environment = base
         let tartDirectory = URL(fileURLWithPath: tartPath).deletingLastPathComponent().path
         environment["PATH"] = searchPath(base["PATH"], prepending: [tartDirectory])
@@ -152,6 +174,11 @@ public enum LauncherEnvironment {
         // fail-closed VM reaches nothing. Never inherited from the app's env.
         environment["PROXY_URL"] = proxyURL
         environment["SOFTNET_FAIL_CLOSED"] = nil
+        environment["IDENTITY_PROFILE"] = identity?.seed
+        environment["IDENTITY_TIMEZONE"] = identity?.timeZone
+        environment["IDENTITY_LANGUAGE"] = identity?.language
+        environment["KIOSK"] = kiosk ? "1" : nil
+        environment["VM_EXTERNAL"] = externalVM ? "1" : nil
         // These only make sense for a terminal user.
         environment["KEEP_VM"] = nil
         environment["SHOT"] = nil

@@ -30,9 +30,27 @@ public enum HostResources {
         return total
     }
 
-    /// Combined size of all the profiles' VM directories under `vmsDirectory`.
+    /// Bytes actually allocated on disk under `url`. Tart's disk images are
+    /// sparse (and APFS clones), so their logical size overstates real use.
+    public static func allocatedSize(at url: URL) -> Int64 {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey]
+        guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: keys,
+                                                              options: [], errorHandler: nil) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            let values = try? fileURL.resourceValues(forKeys: Set(keys))
+            if values?.isRegularFile == true, let size = values?.totalFileAllocatedSize ?? values?.fileAllocatedSize {
+                total += Int64(size)
+            }
+        }
+        return total
+    }
+
+    /// Disk the profiles' VM directories under `vmsDirectory` really take.
     public static func profilesDiskBytes(_ profiles: [Profile], vmsDirectory: URL) -> Int64 {
-        profiles.reduce(0) { $0 + directorySize(at: vmsDirectory.appendingPathComponent($1.vmName)) }
+        profiles.reduce(0) { $0 + allocatedSize(at: vmsDirectory.appendingPathComponent($1.vmName)) }
     }
 
     /// Parse `vm_stat` output into bytes of available RAM (free + inactive +

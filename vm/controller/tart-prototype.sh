@@ -42,6 +42,15 @@
 #   IDENTITY_PROFILE  profile name: once SSH is up, run vm/identity.sh in the
 #                guest to set a stable hostname for it (empty = skip). Failure
 #                is reported and the launch continues. See docs/HARDWARE_IDENTITY.md.
+#   IDENTITY_TIMEZONE / IDENTITY_LANGUAGE  with IDENTITY_PROFILE: guest time
+#                zone (e.g. Europe/Berlin) and language (e.g. de-DE).
+#   KIOSK        "1" = make the guest look like just Safari: vm/guest-kiosk.sh
+#                (no Dock, menu bar, desktop icons) and the agent keeps Safari's
+#                window filling the screen.
+#   VM_EXTERNAL  "1" = the VM is already running, started by someone else (the
+#                app runs it in its own window): no `tart set`/`tart run`, the
+#                VM is not stopped on exit, and the script waits after setup
+#                until it is interrupted. Network checks are the caller's job.
 #
 # This installs vm/agent/ into the VM as a LaunchAgent, opens an SSH tunnel to
 # the agent's loopback port, then calls POST /navigate. The agent control port
@@ -68,6 +77,10 @@ VM_HEADLESS="${VM_HEADLESS-1}"
 IP_TIMEOUT="${IP_TIMEOUT:-120}"
 VM_RUN_ARGS="${VM_RUN_ARGS:-}"
 IDENTITY_PROFILE="${IDENTITY_PROFILE:-}"
+IDENTITY_TIMEZONE="${IDENTITY_TIMEZONE:-}"
+IDENTITY_LANGUAGE="${IDENTITY_LANGUAGE:-}"
+KIOSK="${KIOSK:-}"
+VM_EXTERNAL="${VM_EXTERNAL:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="$(cd "$SCRIPT_DIR/../agent" && pwd)"
@@ -101,7 +114,8 @@ done
 # Tart starts the softnet helper itself; without it `tart run --net-softnet`
 # dies at once and the VM never gets an address.
 SOFTNET_FAIL_CLOSED="${SOFTNET_FAIL_CLOSED:-1}"
-if [[ "$TART_NET" == "softnet" ]]; then
+# An external VM's network (softnet included) was set up by whoever runs it.
+if [[ "$TART_NET" == "softnet" && -z "$VM_EXTERNAL" ]]; then
   if ! command -v softnet &>/dev/null; then
     echo "softnet not found (TART_NET=softnet needs it: brew install cirruslabs/cli/softnet)"
     exit 1
@@ -176,7 +190,7 @@ if ! tart list | grep -q "[[:space:]]${VM_NAME}[[:space:]]" && ! tart list | gre
 fi
 
 # Apply RAM/CPU caps while the VM is stopped (see vm/SLIMMING.md for sizing).
-if [[ -n "$VM_MEMORY$VM_CPU" ]]; then
+if [[ -n "$VM_MEMORY$VM_CPU" && -z "$VM_EXTERNAL" ]]; then
   SET_ARGS=()
   [[ -n "$VM_MEMORY" ]] && SET_ARGS+=(--memory "$VM_MEMORY")
   [[ -n "$VM_CPU" ]] && SET_ARGS+=(--cpu "$VM_CPU")
@@ -195,9 +209,11 @@ if [[ -n "$VM_RUN_ARGS" ]]; then
   RUN_ARGS+=("${_EXTRA_RUN_ARGS[@]}")
 fi
 
-echo "==> Starting VM '$VM_NAME'"
-tart run "$VM_NAME" ${RUN_ARGS[@]+"${RUN_ARGS[@]}"} &
-TART_PID=$!
+if [[ -z "$VM_EXTERNAL" ]]; then
+  echo "==> Starting VM '$VM_NAME'"
+  tart run "$VM_NAME" ${RUN_ARGS[@]+"${RUN_ARGS[@]}"} &
+  TART_PID=$!
+fi
 
 # Two VMs with one MAC (e.g. a profile imported next to its source) get the
 # same DHCP lease: `tart ip` then finds the other VM's address, or none.
@@ -219,14 +235,14 @@ while (( WAITED < IP_TIMEOUT )); do
   # tart run failing at once (VM already running, Apple's limit of two macOS
   # VMs, softnet refusing to start) used to look like a slow boot. Checked
   # before `tart ip`: a VM someone else already runs has an IP, but not ours.
-  if ! kill -0 "$TART_PID" 2>/dev/null; then
+  if [[ -z "$VM_EXTERNAL" ]] && ! kill -0 "$TART_PID" 2>/dev/null; then
     rc=0; wait "$TART_PID" || rc=$?
     TART_PID="" # nothing of ours to stop; don't `tart stop` someone else's VM
     echo "tart run exited before the VM got an IP (code $rc, TART_NET=$TART_NET); its error is above"
     exit 1
   fi
   IP="$(tart ip ${IP_ARGS[@]+"${IP_ARGS[@]}"} "$VM_NAME" 2>/dev/null || true)"
-  [[ -n "$IP" ]] && kill -0 "$TART_PID" 2>/dev/null && break
+  [[ -n "$IP" ]] && { [[ -n "$VM_EXTERNAL" ]] || kill -0 "$TART_PID" 2>/dev/null; } && break
   IP=""
   sleep 2
   WAITED=$((WAITED + 2))
@@ -257,10 +273,18 @@ if [[ -n "$IDENTITY_PROFILE" ]]; then
     echo "    identity.sh not found next to the controller (skipping)"
   # The script goes over stdin; %q keeps any profile name one argument for the
   # guest's login shell (zsh understands bash's quoting, $'…' included).
-  elif ssh_vm "bash -s -- $(printf '%q' "$IDENTITY_PROFILE")" < "$IDENTITY_SH"; then
-    echo "    hardware identity applied"
   else
-    echo "    hardware identity not fully applied (continuing)"
+    IDENTITY_ARGS=()
+    [[ -n "$IDENTITY_TIMEZONE" ]] && IDENTITY_ARGS+=(--timezone "$IDENTITY_TIMEZONE")
+    [[ -n "$IDENTITY_LANGUAGE" ]] && IDENTITY_ARGS+=(--language "$IDENTITY_LANGUAGE")
+    IDENTITY_ARGS+=(-- "$IDENTITY_PROFILE")
+    IDENTITY_CMD="bash -s --"
+    for arg in "${IDENTITY_ARGS[@]}"; do IDENTITY_CMD+=" $(printf '%q' "$arg")"; done
+    if ssh_vm "$IDENTITY_CMD" < "$IDENTITY_SH"; then
+      echo "    hardware identity applied"
+    else
+      echo "    hardware identity not fully applied (continuing)"
+    fi
   fi
 fi
 
@@ -280,6 +304,16 @@ if [[ -n "$PROXY_URL" || "$TART_NET" == "softnet" ]]; then
   fi
 fi
 
+if [[ -n "$KIOSK" ]]; then
+  echo "==> Preparing the browser window"
+  KIOSK_SH="$SCRIPT_DIR/../guest-kiosk.sh"
+  if [[ -r "$KIOSK_SH" ]] && ssh_vm 'bash -s' < "$KIOSK_SH"; then
+    :
+  else
+    echo "    kiosk settings not applied (continuing; the macOS desktop may show)"
+  fi
+fi
+
 echo "==> Installing in-VM agent"
 # Install once: if the agent is already installed (its token file exists) and
 # FORCE_INSTALL is unset, reuse it instead of copying and reinstalling. The
@@ -287,6 +321,17 @@ echo "==> Installing in-VM agent"
 TOKEN=""
 if [[ -z "${FORCE_INSTALL:-}" ]]; then
   TOKEN="$(ssh_vm 'cat ~/.pbagent/token 2>/dev/null' 2>/dev/null || true)"
+fi
+# A reused agent must be this version: compare checksums of its files (an
+# empty answer means "can't tell" and keeps it). install.sh keeps the token.
+if [[ -n "$TOKEN" ]]; then
+  LOCAL_SUM="$(cd "$AGENT_DIR" && cksum pbagent.py binarycookies.py | awk '{print $1, $2}')"
+  REMOTE_SUM="$(ssh_vm 'cd ~/.pbagent 2>/dev/null && cksum pbagent.py binarycookies.py 2>/dev/null' 2>/dev/null \
+                | awk '{print $1, $2}' || true)"
+  if [[ -n "$REMOTE_SUM" && "$REMOTE_SUM" != "$LOCAL_SUM" ]]; then
+    echo "    installed agent is outdated; updating it"
+    TOKEN=""
+  fi
 fi
 if [[ -n "$TOKEN" ]]; then
   echo "    agent already installed; reusing token"
@@ -341,6 +386,14 @@ curl -fsS -X POST "$AGENT/navigate" \
   -d "{\"url\":\"$URL_JSON\"}"
 echo
 
+if [[ -n "$KIOSK" ]]; then
+  # Keep Safari's window the size of the (resizable) screen. Older agents
+  # don't know /kiosk; the page still opens.
+  curl -fsS -X POST "$AGENT/kiosk" -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" -d '{"fill_screen":true}' >/dev/null 2>&1 \
+    || echo "    agent could not keep Safari full-size (continuing)"
+fi
+
 echo "==> Status:"
 curl -fsS "$AGENT/status" -H "Authorization: Bearer $TOKEN"; echo
 
@@ -351,5 +404,10 @@ fi
 
 echo
 echo "VM is up at $IP, Safari pointed at the target."
+if [[ -n "$VM_EXTERNAL" ]]; then
+  echo "Press Ctrl+C to stop the tunnel (the VM keeps running)."
+  # The tunnel lives as long as this script; whoever runs the VM stops both.
+  while :; do sleep 3600 & wait $!; done
+fi
 echo "Press Ctrl+C to stop the tunnel$([[ -z "$KEEP_VM" ]] && echo " and the VM")."
 wait "$TART_PID"

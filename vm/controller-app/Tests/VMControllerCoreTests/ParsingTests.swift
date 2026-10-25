@@ -205,6 +205,25 @@ final class LauncherEnvironmentTests: XCTestCase {
         XCTAssertEqual(environment["VM_HEADLESS"], "1", "no VM window unless asked")
     }
 
+    func testScriptEnvironmentProfileExtras() {
+        let profile = Profile(id: "abc12345", name: "Работа", timeZone: "Europe/Berlin", language: "de-DE")
+        let environment = LauncherEnvironment.scriptEnvironment(
+            base: ["KIOSK": "1", "VM_EXTERNAL": "1", "IDENTITY_PROFILE": "stale"], tartPath: "/bin/tart",
+            askPass: URL(fileURLWithPath: "/tmp/a.sh"), localPort: nil,
+            identity: .init(profile: profile), kiosk: true, externalVM: true)
+        XCTAssertEqual(environment["IDENTITY_PROFILE"], "abc12345", "the id, not the (personal) name")
+        XCTAssertEqual(environment["IDENTITY_TIMEZONE"], "Europe/Berlin")
+        XCTAssertEqual(environment["IDENTITY_LANGUAGE"], "de-DE")
+        XCTAssertEqual(environment["KIOSK"], "1")
+        XCTAssertEqual(environment["VM_EXTERNAL"], "1")
+        let plain = LauncherEnvironment.scriptEnvironment(
+            base: ["KIOSK": "1", "VM_EXTERNAL": "1", "IDENTITY_PROFILE": "stale"], tartPath: "/bin/tart",
+            askPass: URL(fileURLWithPath: "/tmp/a.sh"), localPort: nil)
+        XCTAssertNil(plain["KIOSK"])
+        XCTAssertNil(plain["VM_EXTERNAL"])
+        XCTAssertNil(plain["IDENTITY_PROFILE"], "never inherited from the app's environment")
+    }
+
     func testScriptEnvironmentShowWindow() {
         let environment = LauncherEnvironment.scriptEnvironment(
             base: ["VM_HEADLESS": "1"], tartPath: "/bin/tart", askPass: URL(fileURLWithPath: "/tmp/a.sh"),

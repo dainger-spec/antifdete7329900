@@ -21,6 +21,9 @@ Endpoints (all but /healthz require `Authorization: Bearer <token>`):
     POST /cookies     {"cookies": [ ... ]}     install cookies into Safari
     GET  /screenshot  -> image/png            screen capture
     POST /quit        -> quit Safari
+    POST /kiosk       {"fill_screen": true}   keep Safari's windows filling the
+                                              screen (also after the display is
+                                              resized), or stop doing so
 
 Safari is driven through a pluggable backend so the server logic can be unit
 tested off a Mac:
@@ -46,6 +49,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 import binarycookies
@@ -94,6 +98,42 @@ class SafariBackend:
         """Install `cookies` (normalized dicts) into Safari; returns the count."""
         raise NotImplementedError
 
+    def set_fill_screen(self, enabled: bool) -> bool:
+        """Start/stop keeping Safari's windows screen-sized; returns the new state."""
+        raise NotImplementedError
+
+    @property
+    def fill_screen(self) -> bool:
+        return False
+
+
+# Fills the screen with every Safari window. Screen size comes from AppKit via
+# AppleScriptObjC (no Apple Event, no consent needed); setting Safari's bounds
+# is an Apple Event: the first one shows the VM's one-time Automation consent
+# dialog, which the user answers in the app's browser window. `is running`
+# doesn't launch Safari. NSRect comes back as {{x, y}, {w, h}} on current
+# macOS and as a record on old ones.
+FILL_SCREEN_SCRIPT = """
+use framework "AppKit"
+use scripting additions
+set f to current application's NSScreen's mainScreen()'s frame()
+try
+    set w to (item 1 of item 2 of f) as integer
+    set h to (item 2 of item 2 of f) as integer
+on error
+    set w to (width of |size| of f) as integer
+    set h to (height of |size| of f) as integer
+end try
+if application "Safari" is running then
+    tell application "Safari"
+        repeat with win in windows
+            if bounds of win is not {0, 0, w, h} then set bounds of win to {0, 0, w, h}
+        end repeat
+    end tell
+end if
+return (w as text) & "x" & (h as text)
+"""
+
 
 class MacSafariBackend(SafariBackend):
     """Drives the real Safari. macOS only.
@@ -109,9 +149,41 @@ class MacSafariBackend(SafariBackend):
 
     name = "mac"
 
+    FILL_INTERVAL = 2.0     # seconds between fill passes
+    FILL_BACKOFF = 30.0     # after a failure (e.g. the consent dialog is still open)
+
     def __init__(self, timeout: float = 20.0):
         self.timeout = timeout
         self._last_url: str | None = None
+        self._fill = threading.Event()
+        self._filler: threading.Thread | None = None
+        self._filler_lock = threading.Lock()
+
+    @property
+    def fill_screen(self) -> bool:
+        return self._fill.is_set()
+
+    def set_fill_screen(self, enabled: bool) -> bool:
+        with self._filler_lock:
+            if not enabled:
+                self._fill.clear()
+                return False
+            self._fill.set()
+            if self._filler is None or not self._filler.is_alive():
+                self._filler = threading.Thread(target=self._fill_loop, name="fill-screen", daemon=True)
+                self._filler.start()
+            return True
+
+    def _fill_loop(self) -> None:
+        while self._fill.is_set():
+            delay = self.FILL_INTERVAL
+            if self._is_running():
+                try:
+                    self._osascript(FILL_SCREEN_SCRIPT)
+                except SafariError as exc:
+                    log.info("fill screen: %s", exc)
+                    delay = self.FILL_BACKOFF
+            time.sleep(delay)
 
     def _run(self, argv: list[str], what: str, **kwargs) -> subprocess.CompletedProcess:
         try:
@@ -174,18 +246,53 @@ class MacSafariBackend(SafariBackend):
     # that needs verifying on a real Mac (see docs/PROFILES.md).
     DEFAULT_COOKIE_PATH = "~/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies"
 
+    def _stop_safari(self, wait: float = 10.0) -> None:
+        """Quit Safari without Apple Events (no consent dialog) and wait for it."""
+        if not self._is_running():
+            return
+        self._run(["pkill", "-x", "Safari"], "pkill")
+        deadline = time.time() + wait
+        while self._is_running() and time.time() < deadline:
+            time.sleep(0.2)
+        if self._is_running():
+            raise SafariError("Safari did not quit; cookies not written")
+
     def apply_cookies(self, cookies: list) -> int:
-        blob = binarycookies.encode(cookies)
+        """Merge `cookies` into Safari's store: imported ones replace the same
+        (domain, name, path); every cookie made inside the VM stays. Written
+        to a temp file and renamed, so a crash never leaves a truncated store."""
         path = os.path.expanduser(os.environ.get("PB_SAFARI_COOKIES") or self.DEFAULT_COOKIE_PATH)
+        self._stop_safari()  # Safari rewrites the store from memory when it quits
+        existing: list = []
         try:
-            self.quit()  # don't fight Safari for the file
-        except SafariError:
+            with open(path, "rb") as fh:
+                data = fh.read()
+            decoded = binarycookies.try_decode(data)
+            if decoded is None:
+                # Keep what we can't read instead of silently dropping it.
+                backup = f"{path}.unreadable-{int(time.time())}"
+                os.replace(path, backup)
+                log.warning("cookie store not readable; moved to %s", backup)
+            else:
+                existing = decoded
+        except FileNotFoundError:
             pass
+        except OSError as exc:
+            raise SafariError(f"cannot read cookie store {path}: {exc}") from exc
+        blob = binarycookies.encode(binarycookies.merge(existing, cookies))
+        temp = f"{path}.pbagent-tmp"
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "wb") as fh:
+            with open(temp, "wb") as fh:
                 fh.write(blob)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(temp, path)
         except OSError as exc:
+            try:
+                os.unlink(temp)
+            except OSError:
+                pass
             raise SafariError(f"cannot write cookie store {path}: {exc}") from exc
         return len(cookies)
 
@@ -218,6 +325,15 @@ class MockSafariBackend(SafariBackend):
         self.running = False
         self.current_url: str | None = None
         self.cookies: list = []
+        self._fill_screen = False
+
+    @property
+    def fill_screen(self) -> bool:
+        return self._fill_screen
+
+    def set_fill_screen(self, enabled: bool) -> bool:
+        self._fill_screen = enabled
+        return enabled
 
     def navigate(self, url: str) -> None:
         self.running = True
@@ -361,7 +477,7 @@ class AgentHandler(BaseHTTPRequestHandler):
         path = self._path()
         # Read/validate auth before the body, but always drain the body so the
         # keep-alive connection stays usable.
-        if path not in ("/navigate", "/quit", "/cookies"):
+        if path not in ("/navigate", "/quit", "/cookies", "/kiosk"):
             self._discard_body()
             if path in ("/status", "/screenshot", "/healthz"):
                 self._error(405, "method not allowed", {"Allow": "GET"})
@@ -375,6 +491,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             self._navigate()
         elif path == "/cookies":
             self._cookies()
+        elif path == "/kiosk":
+            self._kiosk()
         else:
             self._discard_body()
             self._quit()
@@ -403,6 +521,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             "uptime_seconds": round(time.time() - server.started_at, 1),
             "safari_running": state["running"],
             "current_url": state["current_url"],
+            "fill_screen": self.backend.fill_screen,
         })
 
     def _navigate(self) -> None:
@@ -439,6 +558,21 @@ class AgentHandler(BaseHTTPRequestHandler):
             self._error(502, f"backend error: {exc}")
             return
         self._json(200, {"applied": applied})
+
+    def _kiosk(self) -> None:
+        payload = self._read_json_body()
+        if payload is None:
+            return
+        enabled = payload.get("fill_screen")
+        if not isinstance(enabled, bool):
+            self._error(400, 'body must be {"fill_screen": true|false}')
+            return
+        try:
+            state = self.backend.set_fill_screen(enabled)
+        except SafariError as exc:
+            self._error(502, f"backend error: {exc}")
+            return
+        self._json(200, {"fill_screen": state})
 
     def _screenshot(self) -> None:
         try:

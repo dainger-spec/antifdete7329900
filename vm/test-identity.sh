@@ -28,8 +28,18 @@ check "non-ASCII name gets a stable hash tag" "$(grep -cE '^Mac-[0-9a-f]{8}$' <<
 check "non-ASCII names stay distinct" "$([[ "$CYR" != "$(field HOSTNAME 'Дом')" ]] && echo yes)" "yes"
 check "name '-e' after -- is hashed, not dropped" "$(field MAC -e | grep -cE '^3C:22:FB')" "1"
 
+# Time zone and language (printed only; applied inside the guest).
+TZL="$(bash "$ID" --print --timezone Europe/Berlin --language de-DE -- work)"
+check "time zone passed through" "$(sed -n 's/^TIMEZONE=//p' <<< "$TZL")" "Europe/Berlin"
+check "language → locale" "$(sed -n 's/^LOCALE=//p' <<< "$TZL")" "de_DE"
+check "bare language keeps region" "$(bash "$ID" --print --language pt -- w | grep -c '^LOCALE=' || true)" "0"
+
 # Usage errors.
 set +e
+bash "$ID" --print --timezone ../../etc/passwd w >/dev/null 2>&1; check "path-like time zone refused" "$?" "1"
+bash "$ID" --print --timezone 'Europe/Berlin;id' w >/dev/null 2>&1; check "shell-ish time zone refused" "$?" "1"
+bash "$ID" --print --language 'de;rm' w >/dev/null 2>&1; check "shell-ish language refused" "$?" "1"
+bash "$ID" --print --timezone >/dev/null 2>&1; check "--timezone without value refused" "$?" "1"
 bash "$ID" >/dev/null 2>&1; check "no name → exit 1" "$?" "1"
 # Off a Mac there is no kern.hv_vmm_present, so it must refuse before scutil.
 # Not run on macOS: a CI runner or dev Mac may itself be a VM and get renamed.
