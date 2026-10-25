@@ -148,11 +148,15 @@ struct ProfileEditorView: View {
 
     private static let timeZones = TimeZone.knownTimeZoneIdentifiers.sorted()
 
-    /// The generation the draft currently points at.
     private var selectedGeneration: DeviceGeneration { DeviceGenerations.resolved(id: draft.deviceGenerationID) }
 
     private var availableModels: [DeviceModel] {
         DeviceModels.forPlatform(selectedGeneration.platform)
+    }
+
+    private var effectiveModel: DeviceModel? {
+        DeviceModels.model(id: draft.deviceModelID, platform: selectedGeneration.platform)
+            ?? DeviceModels.defaultModel(for: selectedGeneration.platform)
     }
 
     var body: some View {
@@ -173,9 +177,8 @@ struct ProfileEditorView: View {
             }
             .formStyle(.grouped)
         }
-        .frame(width: 540, height: 720)
+        .frame(width: 540, height: 760)
         .onChange(of: draft.deviceGenerationID) { _, _ in
-            // A model belongs to one platform; drop it when the generation moves elsewhere.
             if DeviceModels.model(id: draft.deviceModelID, platform: selectedGeneration.platform) == nil {
                 draft.deviceModelID = nil
             }
@@ -207,6 +210,13 @@ struct ProfileEditorView: View {
                     Text(L("editor.deviceModel.default")).tag(String?.none)
                     ForEach(availableModels) { model in
                         Text(model.name).tag(Optional(model.id))
+                    }
+                }
+                if let m = effectiveModel {
+                    LabeledContent(L("editor.deviceModel.effective")) {
+                        Text("\(m.screenWidth)×\(m.screenHeight) @ \(m.devicePixelRatio)x · \(m.hardwareConcurrency) cores · touch \(m.maxTouchPoints)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
