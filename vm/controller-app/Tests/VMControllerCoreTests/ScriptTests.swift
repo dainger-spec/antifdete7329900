@@ -114,17 +114,15 @@ final class GroupProcessTests: XCTestCase {
             executable: "/bin/bash",
             arguments: ["-c", "trap 'echo got-int; exit 7' INT; echo ready; while :; do sleep 0.1; done"],
             environment: ["PATH": "/usr/bin:/bin"]) { lines.append($0) }
-        let spawned = DispatchSemaphore(value: 0)
         let thread = Thread {
             var blocked = sigset_t()
             sigemptyset(&blocked)
             sigaddset(&blocked, SIGINT)
             pthread_sigmask(SIG_BLOCK, &blocked, nil)
             try? process.start()
-            spawned.signal()
         }
         thread.start()
-        spawned.wait()
+        // "ready" proves the spawn from the blocking thread succeeded.
         try await waitUntil { lines.lines.contains("ready") }
         process.signalGroup(SIGINT)
         let code = await process.waitForExit(timeout: 10)
