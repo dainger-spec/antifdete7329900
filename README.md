@@ -8,6 +8,8 @@ a key derived from a master password. That covers profile list, settings, passwo
 history, bookmarks and sync settings. A profile's WebKit website data is decrypted only
 while that profile is running.
 
+The UI is in **Russian by default** (English fallback) and uses a clean **light theme**.
+
 This is a prototype. The core has unit tests, and the app is checked end-to-end against
 real WebKit in CI. It has not had a security review, and some features are
 approximations limited by what WebKit exposes. The tables below say which parts are which.
@@ -49,11 +51,16 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: �
   and select the `PrivacyBrowser` scheme. That scheme runs unsandboxed.
 - `PRIVACYBROWSER_VAULT_DIR=/path` uses a different vault, for development. In the sandbox
   the path must be inside the container.
+- **Language:** the UI starts in Russian. `PRIVACYBROWSER_LANG=en` switches it to English.
+  The strings tables (`Resources/{ru,en}.lproj`) are copied into the bundle by
+  `build-app.sh`, so `swift run` and the Xcode SwiftPM scheme show raw keys instead.
+- **Appearance:** the app always uses the light (Aqua) appearance, whatever the system
+  setting.
 
 ### Tests
 
 ```bash
-swift test                                        # core: 35 tests (also run on Linux in CI)
+swift test                                        # core: 36 tests (also run on Linux in CI)
 TZ=America/New_York node scripts/test-shims.mjs   # JS shim logic (Node 18+)
 
 # End-to-end against the real WebKit of this Mac (headless, temporary vault, cleans up):
@@ -64,10 +71,10 @@ PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 38 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 43 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, HTTP CONNECT and SOCKS5 proxies, fail-closed, tabs,
-  history and bookmarks;
+  history, bookmarks, and the window-lifecycle (close/quit crash) regression;
 - a container-migration check.
 
 ## Using it
@@ -77,7 +84,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    geolocation, WebRTC policy, history recording and retention, and whether it is
    ephemeral. Changes apply at the next launch.
 3. **Launch** opens a window for the profile. Profiles run side by side, and every window
-   and tab is labelled with its profile.
+   and tab is labelled with its profile. Closing a profile's last window stops that profile
+   and returns you to the Profiles window; the app stays open.
 4. **Tabs:**
    - ⌘T opens a new tab, ⌘W closes one, ⇧⌘T reopens the last closed tab.
    - ⌃⇥ and ⌃⇧⇥ move between tabs, ⌘1–⌘9 jump to one.
@@ -90,7 +98,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 6. **Passwords:** 🔑 fills a saved login and the save button stores what you typed. Saved
    passwords also answer HTTP Basic/Digest. Manage them under **⋯ → Passwords…**.
 7. **Stop**, or closing the last window, saves history and encrypts the profile's website
-   data. **Lock** stops every profile and forgets the keys. Quitting does the same.
+   data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
+   and waits until every profile is sealed.
 8. **Sync (optional):** **More → Sync…** offers a folder (local-only) or a server (client
    for the documented API; no server is included). Stop all profiles before syncing.
 
@@ -107,7 +116,9 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Per-profile history | Encrypted `HistoryStore`: coalesced per URL, search, clear ranges, retention, cap; records committed and same-document navigations; credentials and fragments stripped |
 | Per-profile bookmarks | Encrypted `BookmarkStore`: folders, ordering, edit; star toggle, bookmarks menu, Library window |
 | Per-profile proxy (SOCKS5, HTTP CONNECT, HTTPS-to-proxy, auth, bypass list) | `WKWebsiteDataStore.proxyConfigurations`, `allowFailover = false`. **CONNECT tunnelling, SOCKS5 remote DNS and fail-closed verified by the self-test** |
-| Per-profile user agent | `WKWebView.customUserAgent` |
+| Per-profile user agent | `WKWebView.customUserAgent`, with a **Device** picker: *Safari on macOS* (matches the engine, recommended) and *Safari on iPhone/iPad* (UA string only, flagged as inconsistent) |
+| Russian / English UI | `Localizable.strings` (ru default, en fallback), deterministic bundle lookup |
+| Stable window lifecycle | closing a profile window never quits or crashes the app (use-after-free fixed); verified by the self-test |
 | Encryption at rest of everything the app writes | AES-256-GCM; PBKDF2-HMAC-SHA256 (600k) → vault key → HKDF per purpose |
 | Password storage under a key derived from the user's password | Per-profile vault; explicit fill/save; HTTP auth |
 | App Sandbox | Default build; entitlements in `Resources/PrivacyBrowser.entitlements` (documented in the limitations doc, §9); container migration. **Sandbox enforcement and migration verified in CI** |
@@ -125,10 +136,14 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 
 ### Not implemented / limited
 
-- **Fingerprinting:** canvas, WebGL, audio, fonts, screen, hardware values, languages and
-  the TLS fingerprint are identical across profiles, because WKWebView offers no public
-  API to change them. Sites that fingerprint the device can link profiles. See §2 of the
-  limitations doc.
+- **Fingerprinting / device emulation:**
+  - Canvas, WebGL, audio, fonts, screen, hardware values, touch behaviour, languages and the
+    TLS fingerprint are identical across profiles, because WKWebView offers no public API to
+    change them. Sites that fingerprint the device can link profiles.
+  - A profile is genuinely Safari on a Mac. It **cannot** look like a real iPhone: the iPhone
+    presets change the UA string only, and every other signal still says "Mac".
+  - Injected JavaScript spoofing of these signals is deliberately not attempted.
+  - See §2 of the limitations doc for exactly what can and can't be achieved with public APIs.
 - Per-profile `Accept-Language` / `navigator.language` (no WKWebView API).
 - Sync server (only the client and its API spec), syncing of WebKit website data, and
   per-entry merging of passwords (concurrent edits keep the remote version plus a

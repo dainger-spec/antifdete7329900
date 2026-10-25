@@ -51,7 +51,6 @@ struct SetupView: View {
             .keyboardShortcut(.defaultAction)
             .disabled(problem != nil || model.isWorking)
         }
-        .padding(28)
         .frame(width: 420)
         .card(padding: 28)
         .padding(40)
@@ -89,7 +88,6 @@ struct UnlockView: View {
             .keyboardShortcut(.defaultAction)
             .disabled(password.isEmpty || model.isWorking)
         }
-        .padding(28)
         .frame(width: 380)
         .card(padding: 28)
         .padding(40)

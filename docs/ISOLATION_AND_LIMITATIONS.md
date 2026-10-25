@@ -8,7 +8,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 15 runner) for both the sandboxed and the unsandboxed build, with a local
-test proxy (`scripts/selftest_proxy.py`). Last observed results (macOS 15.7, 38/38 checks
+test proxy (`scripts/selftest_proxy.py`). Last observed results (macOS 15.7, 43/43 checks
 in both builds):
 
 | Claim | Self-test result |
@@ -22,6 +22,7 @@ in both builds):
 | SOCKS5 proxy | the hostname is sent to the proxy (`ATYP=3`, remote DNS) |
 | Fail-closed | with the proxy unreachable, loads fail ("Could not connect to the server") instead of going direct |
 | Tabs, history, bookmarks | tab open/close/reopen/select, visits and titles recorded, bookmark toggle persisted encrypted |
+| Window lifecycle (crash fix) | closing one of two windows keeps the profile running; closing the last reports "all closed" once, on a later run-loop turn; `shutDown()` twice is safe |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
 
 Run it yourself: `build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test`. For the
@@ -53,31 +54,63 @@ Background tabs keep running. WebKit may throttle timers in views that aren't in
 | Device fingerprint | see §2 | Profiles can be linked by fingerprinting |
 | Downloads folder | Downloads go to `~/Downloads` in plaintext | Outside the encrypted storage |
 
-## 2. Fingerprinting (not addressed)
+## 2. Fingerprinting and "Apple device" consistency
 
-FINGERPRINTING LIMITATION: WKWebView has no public API to change what the rendering engine
-and the hardware reveal, and this project doesn't use private API or attempt to spoof
-these. Every profile therefore presents the same device to a site that measures it:
+**Short answer:** every profile runs on the macOS system WebKit, so to a site it *is* Safari-on-a-Mac.
+That is genuine, not emulated. What a profile can change is the small set of attributes
+the profile *declares*. What it cannot change is what the engine and the hardware *measure*.
+This project does not make a Mac look like an iPhone, and doesn't claim to.
 
-| Surface | Same in all profiles because |
+### What the public WKWebView / WebKit APIs let a profile control
+
+| Attribute | Mechanism | Reach |
+|---|---|---|
+| Storage (cookies, localStorage, IndexedDB, cache, service workers) | `WKWebsiteDataStore(forIdentifier:)` | native, complete |
+| Egress IP and DNS | `proxyConfigurations` (SOCKS5 remote DNS, fail-closed) | native, verified |
+| User-Agent string (HTTP header + `navigator.userAgent`) | `customUserAgent` | native; changes the string only |
+| Time zone | JS shim (`Intl`, `Date` getters, offsets) | approximation; not in workers |
+| Geolocation | JS shim (deny / fixed coordinates) | approximation |
+| WebRTC exposure | JS shim (removed / relay-only) | approximation |
+
+The **Device** picker in the profile editor offers user-agent presets (`UserAgentPresets.swift`):
+
+- **Safari on macOS** *matches the engine*. Every other signal (features, rendering, TLS)
+  agrees with it, so it is the recommended and least distinctive choice.
+- **Safari on iPhone / iPad** are labelled *UA only* and show a warning in the editor. They
+  change the declared string, and nothing else. The real engine, hardware and network stack
+  still say "Mac", so the combination is internally inconsistent and easy to detect. They
+  exist for sites that only look at the UA string, for example to request a mobile layout.
+
+Keep the declared attributes consistent with each other: a Safari UA, plus a time zone and
+geolocation that match the proxy's exit location. An inconsistent combination, such as a
+Chrome UA on WebKit or a Tokyo time zone behind a Paris exit, is itself distinctive.
+
+### What remains impossible with public APIs
+
+FINGERPRINTING LIMITATION. Each of the following would require private WebKit API, a
+modified WebKit, or different hardware. None is attempted:
+
+| Signal | Why a profile can't change it |
 |---|---|
-| Canvas 2D / WebGL rendering, WebGL renderer and vendor strings, supported extensions | GPU and driver of the Mac; WebKit exposes them as is |
-| AudioContext output | audio stack of the Mac |
-| Installed fonts (measured via text metrics) | system fonts; WebKit restricts the list somewhat, but uniformly |
-| Screen size, colour depth, device pixel ratio | the real display |
-| `navigator.hardwareConcurrency`, `deviceMemory`, `platform`, `vendor`, `maxTouchPoints` | engine and hardware; `customUserAgent` changes only the UA string |
-| Languages (`navigator.languages`, `Accept-Language`) | system language settings; no per-view API |
-| Supported JS/CSS features, media codecs | the installed WebKit version |
-| TLS ClientHello, HTTP/2 settings, header order | Apple's network stack (Network.framework) |
+| Canvas 2D / WebGL pixels, WebGL renderer and vendor strings, extensions, limits | produced by the Mac's GPU and driver; WebKit exposes them as is |
+| AudioContext output | the Mac's audio stack |
+| Fonts (measured via text metrics) | macOS system fonts; iOS has a different font set |
+| Screen size, colour depth, device pixel ratio, `matchMedia` results | the real display; no per-view override |
+| `navigator.platform`, `vendor`, `hardwareConcurrency`, `deviceMemory`, `maxTouchPoints` | engine and hardware; `customUserAgent` changes only the UA string |
+| Touch and pointer behaviour, `ontouchstart`, orientation and motion events | macOS WebKit is a desktop engine; there is no touch-input emulation API |
+| `navigator.languages`, `Accept-Language` | follow the app's language list; WKWebView has no per-view API |
+| Supported JS/CSS features, media codecs, WebKit version quirks | the installed macOS WebKit, which differs from iOS WebKit |
+| TLS ClientHello, HTTP/2 settings, header order | Apple's macOS network stack |
 
-What *is* per profile: storage, IP (proxy), user-agent string, time zone (JS-level), geolocation
-(JS-level), WebRTC exposure (JS-level). Choose these consistently: a Safari UA, plus a time
-zone and geolocation that match the proxy's location. An inconsistent combination, such as
-a Chrome UA on WebKit, or a Tokyo time zone behind a Paris exit, is itself distinctive.
-
-Mitigations that are possible but not implemented: a separate macOS user account per
-identity (OS-level separation), or a different machine or VM per identity (different
-hardware fingerprint).
+**Why this project doesn't paper over these with JavaScript:** injected overrides for canvas,
+WebGL, fonts, navigator properties or `Function.prototype.toString` are unreliable. They
+don't reach workers, don't change server-side TLS or HTTP signals, and leave measurable
+inconsistencies. They also mainly serve to defeat fraud and abuse detection, which is not a
+goal here. The honest options for real separation between identities are outside the
+browser:
+- a separate macOS user account per identity (OS-level separation);
+- a different Mac or VM per identity (different hardware fingerprint);
+- for a genuine iPhone fingerprint, Safari on an actual iPhone.
 
 ## 3. Encryption at rest
 
@@ -182,7 +215,7 @@ the script into it can expose an unpatched constructor; `contentWindow`,
 
 | Setting | Implementation | Native? | Gaps |
 |---|---|---|---|
-| User agent | `WKWebView.customUserAgent` | yes | `navigator.platform`, vendor, feature set and TLS fingerprint still identify WebKit on macOS (§2). Use a Safari UA |
+| User agent | `WKWebView.customUserAgent`, with presets in the editor | yes (string only) | `navigator.platform`, vendor, feature set and TLS fingerprint still identify WebKit on macOS (§2). Use the *Safari on macOS* preset; iPhone/iPad presets are UA-only and inconsistent |
 | Time zone | JS: `Intl.DateTimeFormat` default `timeZone`, `Date` local getters, `getTimezoneOffset`, `toString`, `toDateString`, `toTimeString`, `toLocale*String` | no | Workers use the host zone. `new Date(y, m, d, …)`, local setters (`setHours` …) and `Date.parse` of strings without an offset use the host zone. Detectable |
 | Geolocation | JS: `navigator.geolocation` returns PERMISSION_DENIED, or fixed coordinates; `permissions.query({name:'geolocation'})` agrees | no | Detectable. The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed |
 | Language | not implemented | — | WKWebView has no per-view `Accept-Language` / `navigator.languages` API |
@@ -279,3 +312,38 @@ locations.
   characteristics (§2).
 - Offline guessing of a weak master password by anyone holding `vault.json`.
 - A sync server rolling back to an older complete snapshot (no signed manifest).
+
+## 11. App lifecycle, appearance and language
+
+**Window lifecycle.**
+- Closing a profile's last window stops that profile and seals its website data. The app
+  stays open, and the Profiles window comes back to the front.
+- Only ⌘Q or **Lock** stops everything. Quitting with profiles running waits until every
+  profile is sealed (`applicationShouldTerminate` → `.terminateLater`). A second ⌘Q during
+  that wait doesn't start a second shutdown.
+- Clicking the Dock icon with no window open shows the Profiles window again.
+
+**Crash fix.** Earlier builds released a browser window's controller from inside
+`windowWillClose`. That could free the `NSWindow` while AppKit was still closing it (a
+use-after-free), and the resulting crash took the whole app down, so it looked as if closing a
+profile window quit the app. The callback now runs on the next run-loop turn, and
+`BrowserSession.shutDown()` is idempotent. The self-test's `lifecycle:` checks cover this.
+
+**Appearance.** The app forces the light (Aqua) appearance, regardless of the system setting:
+`NSApp.appearance` plus `.preferredColorScheme(.light)`. Web content is not restyled; pages
+render as their sites define them.
+
+**Language.**
+- The UI defaults to Russian, with English as the fallback. Strings live in
+  `Resources/{ru,en}.lproj/Localizable.strings` (206 keys, both languages complete), which
+  `build-app.sh` copies into the app bundle.
+- Lookups go through an explicitly chosen bundle (`Localization.swift`), so the language is
+  deterministic within a launch. Setting `AppleLanguages` makes AppKit's own menus and
+  panels follow too.
+- `PRIVACYBROWSER_LANG=en` switches the UI to English.
+- Run outside the app bundle (`swift run`, or Xcode's SwiftPM scheme), the strings tables
+  are missing and keys are shown instead.
+- Pluralisation is simplified ("Профилей: 3"); there is no `.stringsdict` yet.
+- The UI language does **not** change what web pages see: `navigator.language` and
+  `Accept-Language` follow the app's language list, and there is no per-profile override (§2).
+

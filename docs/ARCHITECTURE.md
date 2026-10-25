@@ -22,6 +22,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 ```
 ┌──────────────────────────────── PrivacyBrowser (macOS app) ────────────────────────────────┐
 │  main.swift ── app, or --self-test (headless WebKit checks) / migration check modes         │
+│  Localization (ru default, en fallback) · Theme (forced light appearance)                   │
 │  SwiftUI: Setup / Unlock / ProfileList / ProfileEditor / Passwords / SyncSettings / Library │
 │        │                                                                                   │
 │  AppModel ── lock state, vault, DeviceSettings (sync target), errors                       │
@@ -178,11 +179,24 @@ windows be merged and needs one `NSWindow` per tab.
 
 | Layer | How | Where it runs |
 |---|---|---|
-| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sync, HTTP transport) | XCTest, 35 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sync, HTTP transport, UA presets) | XCTest, 36 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
 | JS shims (logic) | Node + ICU (`scripts/test-shims.mjs`) | Linux, every push |
 | App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 15 runner, every push |
 | App Sandbox container migration | `--selftest-write-vault` / `--selftest-read-vault` | macOS 15 runner, every push |
 | Interactive UI (tab strip drawing, menus, sheets) | manual | — |
+
+## Window lifecycle
+
+- Closing a profile's last browser window → `BrowserSession.onAllWindowsClosed` →
+  `ProfileManager` brings the Profiles window forward (`AppModel.activateProfilesWindow`) and
+  stops and seals the profile in the background.
+- `windowWillClose` never drops the last reference to its own controller synchronously. The
+  session callback is posted to the next main run-loop turn, because releasing an
+  `NSWindow` while AppKit is still closing it is a use-after-free (the earlier crash on close
+  and quit).
+- `BrowserSession.shutDown()` is idempotent, and `applicationShouldTerminate` ignores a second
+  ⌘Q while sealing is in progress. `applicationShouldTerminateAfterLastWindowClosed`
+  returns `false`.
 
 ## Concurrency
 
