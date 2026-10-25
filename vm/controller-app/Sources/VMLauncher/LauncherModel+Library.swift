@@ -139,7 +139,7 @@ extension LauncherModel {
             let result = try? await GroupProcess.run(tart, ProfilePlan.uniqueIdentity(profile),
                                                      environment: baseEnvironment, timeout: 60)
             if result?.code == 0 {
-                try? profileStore.update(profile.id) { $0.uniqueIdentity = true }
+                _ = try? profileStore.update(profile.id) { $0.uniqueIdentity = true }
                 reloadProfiles()
                 appendLog("Профилю «\(profile.name)» выдан собственный серийный номер и MAC", .info)
             } else {
