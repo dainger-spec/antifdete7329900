@@ -7,9 +7,10 @@ import os
 ///
 /// Lifecycle of a persistent profile:
 /// ```
-/// launch: unwrap profile key → decrypt config → decrypt WebKit data (webdata.pbsa → WebKit dirs)
+/// launch: unwrap profile key → decrypt config, passwords, history, bookmarks
+///         → decrypt WebKit data (webdata.pbsa → WebKit dirs)
 ///         → create WKWebsiteDataStore(forIdentifier:) + proxy → open window(s)
-/// stop:   close windows → release data store → archive + encrypt WebKit dirs
+/// stop:   close windows/tabs → flush history → release data store → archive + encrypt WebKit dirs
 ///         → WKWebsiteDataStore.remove(forIdentifier:) → drop profile key
 /// ```
 /// Any number of profiles can run at once; each has its own data store and proxy.
@@ -52,14 +53,20 @@ final class ProfileManager: ObservableObject {
         let key = try repository.profileKey(for: id)
         let configuration = try repository.loadConfiguration(id, key: key)
         let passwords = try repository.passwordVault(for: id)
+        // Ephemeral profiles keep history in memory only; bookmarks are explicit user data and persist.
+        let history = try repository.historyStore(for: id, key: key, policy: configuration.historyPolicy,
+                                                  persistent: !configuration.ephemeral)
+        let library = ProfileLibrary(history: history, bookmarks: try repository.bookmarkStore(for: id, key: key),
+                                     recordsHistory: configuration.historyEnabled)
+        library.onError = { [weak self] message in self?.onError?(message) }
 
         if !configuration.ephemeral {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
             try await webDataVault.prepareForLaunch(profileID: id, key: key)
         }
 
-        let session = BrowserSession(profileID: id, profileName: summary.name,
-                                     configuration: configuration, passwordVault: passwords)
+        let session = BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
+                                     passwordVault: passwords, library: library)
         session.onAllWindowsClosed = { [weak self] in
             Task { @MainActor in await self?.stopReportingErrors(id) }
         }
@@ -73,6 +80,10 @@ final class ProfileManager: ObservableObject {
     /// Opens another window in an already running profile.
     func openNewWindow(_ id: UUID) {
         sessions[id]?.openWindow(url: nil)
+    }
+
+    func showLibrary(_ id: UUID, section: LibraryView.Section) {
+        sessions[id]?.showLibrary(section)
     }
 
     // MARK: Stop

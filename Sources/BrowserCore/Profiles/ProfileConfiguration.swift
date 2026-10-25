@@ -36,6 +36,13 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// are made by WebKit outside the per-profile proxy, so default is off.
     public var safeBrowsingEnabled: Bool
 
+    /// Record visited pages in the profile's encrypted history. Ephemeral profiles keep
+    /// history in memory only, regardless of this flag.
+    public var historyEnabled: Bool
+
+    /// History entries older than this are pruned. `nil` = keep forever.
+    public var historyRetentionDays: Int?
+
     public init(startURL: URL? = nil,
                 userAgent: String? = nil,
                 proxy: ProxySettings? = nil,
@@ -43,7 +50,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 timeZoneIdentifier: String? = nil,
                 webRTCPolicy: WebRTCPolicy = .disabled,
                 ephemeral: Bool = false,
-                safeBrowsingEnabled: Bool = false) {
+                safeBrowsingEnabled: Bool = false,
+                historyEnabled: Bool = true,
+                historyRetentionDays: Int? = 90) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -52,6 +61,52 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.webRTCPolicy = webRTCPolicy
         self.ephemeral = ephemeral
         self.safeBrowsingEnabled = safeBrowsingEnabled
+        self.historyEnabled = historyEnabled
+        self.historyRetentionDays = historyRetentionDays
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
+             safeBrowsingEnabled, historyEnabled, historyRetentionDays
+    }
+
+    /// Tolerant decoding: fields added in later versions fall back to their defaults, so
+    /// configurations written by older builds keep decrypting and decoding.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = ProfileConfiguration()
+        startURL = try c.decodeIfPresent(URL.self, forKey: .startURL)
+        userAgent = try c.decodeIfPresent(String.self, forKey: .userAgent)
+        proxy = try c.decodeIfPresent(ProxySettings.self, forKey: .proxy)
+        geolocation = try c.decodeIfPresent(GeolocationSetting.self, forKey: .geolocation) ?? defaults.geolocation
+        timeZoneIdentifier = try c.decodeIfPresent(String.self, forKey: .timeZoneIdentifier)
+        webRTCPolicy = try c.decodeIfPresent(WebRTCPolicy.self, forKey: .webRTCPolicy) ?? defaults.webRTCPolicy
+        ephemeral = try c.decodeIfPresent(Bool.self, forKey: .ephemeral) ?? defaults.ephemeral
+        safeBrowsingEnabled = try c.decodeIfPresent(Bool.self, forKey: .safeBrowsingEnabled) ?? defaults.safeBrowsingEnabled
+        historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? defaults.historyEnabled
+        historyRetentionDays = c.contains(.historyRetentionDays)
+            ? try c.decodeIfPresent(Int.self, forKey: .historyRetentionDays)
+            : defaults.historyRetentionDays
+    }
+
+    /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
+    /// and not confused with "field absent" (→ default) when decoding.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(startURL, forKey: .startURL)
+        try c.encodeIfPresent(userAgent, forKey: .userAgent)
+        try c.encodeIfPresent(proxy, forKey: .proxy)
+        try c.encode(geolocation, forKey: .geolocation)
+        try c.encodeIfPresent(timeZoneIdentifier, forKey: .timeZoneIdentifier)
+        try c.encode(webRTCPolicy, forKey: .webRTCPolicy)
+        try c.encode(ephemeral, forKey: .ephemeral)
+        try c.encode(safeBrowsingEnabled, forKey: .safeBrowsingEnabled)
+        try c.encode(historyEnabled, forKey: .historyEnabled)
+        try c.encode(historyRetentionDays, forKey: .historyRetentionDays)
+    }
+
+    public var historyPolicy: HistoryStore.Policy {
+        HistoryStore.Policy(retentionDays: historyRetentionDays)
     }
 
     public func validate() throws {
@@ -70,6 +125,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             guard TimeZone(identifier: timeZoneIdentifier) != nil else {
                 throw CoreError.invalidConfiguration("unknown time zone \(timeZoneIdentifier)")
             }
+        }
+        if let historyRetentionDays, !(1...3650).contains(historyRetentionDays) {
+            throw CoreError.invalidConfiguration("history retention must be 1–3650 days")
         }
         try proxy?.validate()
         try geolocation.validate()

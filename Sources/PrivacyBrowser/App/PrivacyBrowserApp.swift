@@ -13,7 +13,12 @@ struct PrivacyBrowserApp: App {
                 .onAppear { appDelegate.model = model }
         }
         .commands {
-            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .newItem) {
+                Button("New Tab") { keyBrowserWindow?.newTab() }
+                    .keyboardShortcut("t")
+                Button("Reopen Closed Tab") { keyBrowserWindow?.reopenClosedTab() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+            }
             CommandMenu("Browser") {
                 Button("Open Location") { keyBrowserWindow?.focusAddressBar() }
                     .keyboardShortcut("l")
@@ -23,6 +28,23 @@ struct PrivacyBrowserApp: App {
                     .keyboardShortcut("[")
                 Button("Forward") { keyBrowserWindow?.goForward() }
                     .keyboardShortcut("]")
+                Divider()
+                Button("Show Next Tab") { keyBrowserWindow?.selectNextTab() }
+                    .keyboardShortcut(.tab, modifiers: .control)
+                Button("Show Previous Tab") { keyBrowserWindow?.selectPreviousTab() }
+                    .keyboardShortcut(.tab, modifiers: [.control, .shift])
+                ForEach(1...9, id: \.self) { number in
+                    Button(number == 9 ? "Select Last Tab" : "Select Tab \(number)") { keyBrowserWindow?.selectTab(number: number) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(number)")))
+                }
+            }
+            CommandMenu("Bookmarks") {
+                Button("Bookmark This Page") { keyBrowserWindow?.toggleBookmark() }
+                    .keyboardShortcut("d")
+                Button("Show All Bookmarks") { keyBrowserWindow?.showBookmarks() }
+                    .keyboardShortcut("b", modifiers: [.command, .option])
+                Button("Show History") { keyBrowserWindow?.showHistory() }
+                    .keyboardShortcut("y")
             }
         }
     }

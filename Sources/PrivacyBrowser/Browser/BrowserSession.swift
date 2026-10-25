@@ -2,7 +2,8 @@ import AppKit
 import BrowserCore
 import WebKit
 
-/// One running profile: its isolated `WKWebsiteDataStore` and all of its windows.
+/// One running profile: its isolated `WKWebsiteDataStore`, its decrypted library (history,
+/// bookmarks), and all of its windows and tabs.
 ///
 /// ISOLATION MODEL (native WebKit, macOS 14+):
 ///   * Persistent profiles use `WKWebsiteDataStore(forIdentifier: profileID)`. WebKit keeps
@@ -10,34 +11,39 @@ import WebKit
 ///     disk cache, HSTS state, and credentials for that store separately from every other
 ///     store, and serves it through a separate network *session*.
 ///   * Ephemeral profiles use `WKWebsiteDataStore.nonPersistent()` (in-memory only).
-///   * Every web view created for this profile — including `window.open` popups, which
-///     WebKit creates from the opener's configuration — uses this data store.
+///   * Every web view of this profile — every tab of every window, and `window.open` popups,
+///     which WebKit creates from the opener's configuration — uses this data store.
 ///
 /// PLATFORM LIMITATIONS:
-///   * Process separation is per *site* and per data store for web content processes, but
-///     all profiles share one WebKit networking process (separate sessions inside it). This
+///   * All profiles share one WebKit networking process (separate sessions inside it). This
 ///     is session isolation, not OS-level process/user isolation.
-///   * The host machine's fingerprintable surface (fonts, screen, GPU/WebGL renderer,
-///     canvas rasterisation, audio stack, hardware concurrency, languages) is identical
-///     across profiles. No public WKWebView API changes it.
+///   * FINGERPRINTING: the host machine's fingerprintable surface (fonts, screen size and
+///     colour depth, GPU / WebGL renderer and parameters, canvas and audio rasterisation,
+///     `hardwareConcurrency`, languages, TLS/HTTP2 fingerprint) is identical across all
+///     profiles, because WKWebView has no public API to change it. A site that fingerprints
+///     the device can link profiles to each other even though their storage and IP differ.
 @MainActor
 final class BrowserSession {
     let profileID: UUID
     let profileName: String
     let configuration: ProfileConfiguration
     let passwordVault: PasswordVault
+    let library: ProfileLibrary
     var onAllWindowsClosed: (() -> Void)?
 
     private(set) var dataStore: WKWebsiteDataStore?
     private let userContentController: WKUserContentController
     private var windows: [BrowserWindowController] = []
+    private var libraryWindow: LibraryWindowController?
     private var isClosing = false
 
-    init(profileID: UUID, profileName: String, configuration: ProfileConfiguration, passwordVault: PasswordVault) {
+    init(profileID: UUID, profileName: String, configuration: ProfileConfiguration,
+         passwordVault: PasswordVault, library: ProfileLibrary) {
         self.profileID = profileID
         self.profileName = profileName
         self.configuration = configuration
         self.passwordVault = passwordVault
+        self.library = library
 
         let store: WKWebsiteDataStore = configuration.ephemeral
             ? .nonPersistent()
@@ -50,6 +56,11 @@ final class BrowserSession {
 
     var windowCount: Int { windows.count }
 
+    var tabContext: BrowserTabContext {
+        BrowserTabContext(profileName: profileName, userAgent: configuration.userAgent,
+                          passwordVault: passwordVault, library: library)
+    }
+
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let webConfiguration = WKWebViewConfiguration()
         if let dataStore { webConfiguration.websiteDataStore = dataStore }
@@ -61,26 +72,30 @@ final class BrowserSession {
         return webConfiguration
     }
 
+    // MARK: Windows
+
     @discardableResult
     func openWindow(url: URL?) -> BrowserWindowController {
-        let controller = BrowserWindowController(session: self, configuration: makeWebViewConfiguration())
+        let controller = BrowserWindowController(session: self)
         windows.append(controller)
         controller.showWindow(nil)
-        if let url {
-            controller.load(url)
-        } else {
-            controller.focusAddressBar()
-        }
+        controller.addTab(url: url)
         return controller
     }
 
-    /// For `window.open` / `target=_blank`. WebKit requires that the returned web view is
-    /// created with the configuration it supplies (it inherits our data store and scripts).
-    func openPopup(configuration webConfiguration: WKWebViewConfiguration) -> WKWebView {
-        let controller = BrowserWindowController(session: self, configuration: webConfiguration)
-        windows.append(controller)
-        controller.showWindow(nil)
-        return controller.webView
+    /// Opens `url` in a new tab of this profile's frontmost window (or a new window).
+    func openInNewTab(_ url: URL) {
+        if let controller = frontmostWindow {
+            controller.addTab(url: url)
+            controller.window?.makeKeyAndOrderFront(nil)
+        } else {
+            openWindow(url: url)
+        }
+    }
+
+    private var frontmostWindow: BrowserWindowController? {
+        let ordered = NSApp.orderedWindows.compactMap { $0.windowController as? BrowserWindowController }
+        return ordered.first { controller in windows.contains { $0 === controller } } ?? windows.last
     }
 
     func windowDidClose(_ controller: BrowserWindowController) {
@@ -91,19 +106,38 @@ final class BrowserSession {
     }
 
     func bringToFront() {
-        windows.last?.window?.makeKeyAndOrderFront(nil)
+        frontmostWindow?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Closes every window and drops this session's reference to the data store, so that
-    /// WebKit can release the store's network session (precondition for sealing it).
+    // MARK: Library window
+
+    func showLibrary(_ section: LibraryView.Section, from controller: BrowserWindowController? = nil) {
+        if libraryWindow == nil {
+            libraryWindow = LibraryWindowController(session: self) { [weak self] url in
+                self?.openInNewTab(url)
+            } onClose: { [weak self] in
+                self?.libraryWindow = nil
+            }
+        }
+        libraryWindow?.show(section)
+    }
+
+    // MARK: Shutdown
+
+    /// Closes every window, writes pending history, and drops this session's reference to the
+    /// data store so that WebKit can release the store's network session (precondition for
+    /// sealing it).
     func shutDown() {
         isClosing = true
+        libraryWindow?.close()
+        libraryWindow = nil
         for controller in windows {
             controller.tearDown()
             controller.close()
         }
         windows.removeAll()
+        library.flush()
         userContentController.removeAllUserScripts()
         dataStore = nil
     }

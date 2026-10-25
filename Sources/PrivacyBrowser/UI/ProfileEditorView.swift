@@ -29,6 +29,20 @@ struct ProfileDraft {
     var webRTC: WebRTCPolicy = .disabled
     var ephemeral = false
     var safeBrowsing = false
+    var historyEnabled = true
+    /// 0 = keep forever.
+    var historyRetentionDays = 90
+
+    struct RetentionChoice: Hashable {
+        var days: Int
+        var label: String
+    }
+
+    static let retentionChoices = [
+        RetentionChoice(days: 7, label: "1 week"), RetentionChoice(days: 30, label: "1 month"),
+        RetentionChoice(days: 90, label: "3 months"), RetentionChoice(days: 365, label: "1 year"),
+        RetentionChoice(days: 0, label: "Forever"),
+    ]
 
     init() {}
 
@@ -58,6 +72,8 @@ struct ProfileDraft {
         webRTC = c.webRTCPolicy
         ephemeral = c.ephemeral
         safeBrowsing = c.safeBrowsingEnabled
+        historyEnabled = c.historyEnabled
+        historyRetentionDays = c.historyRetentionDays ?? 0
     }
 
     func makeConfiguration() throws -> ProfileConfiguration {
@@ -95,6 +111,8 @@ struct ProfileDraft {
         configuration.webRTCPolicy = webRTC
         configuration.ephemeral = ephemeral
         configuration.safeBrowsingEnabled = safeBrowsing
+        configuration.historyEnabled = historyEnabled
+        configuration.historyRetentionDays = historyRetentionDays == 0 ? nil : historyRetentionDays
         try configuration.validate()
         return configuration
     }
@@ -126,7 +144,17 @@ struct ProfileEditorView: View {
             Section("General") {
                 TextField("Name", text: $draft.name)
                 TextField("Start URL", text: $draft.startURL, prompt: Text("https://example.com"))
-                Toggle("Ephemeral (nothing written to disk)", isOn: $draft.ephemeral)
+                Toggle("Ephemeral (no website data or history written to disk)", isOn: $draft.ephemeral)
+            }
+            Section {
+                Toggle("Record history", isOn: $draft.historyEnabled)
+                if draft.historyEnabled {
+                    Picker("Keep history for", selection: $draft.historyRetentionDays) {
+                        ForEach(ProfileDraft.retentionChoices, id: \.days) { Text($0.label).tag($0.days) }
+                    }
+                }
+            } header: { Text("History") } footer: {
+                Text("History and bookmarks are encrypted with the profile key. Ephemeral profiles keep history in memory only; bookmarks are always saved.")
             }
             Section {
                 Toggle("Custom user agent", isOn: $draft.customUserAgent)

@@ -1,61 +1,87 @@
 import AppKit
 import BrowserCore
+import Combine
 import os
 import WebKit
 
-/// A browser window bound to one profile session.
+/// Window subclass so that File ▸ Close (⌘W) closes the current tab while the window's
+/// close button still closes the whole window.
+final class BrowserWindow: NSWindow {
+    override func performClose(_ sender: Any?) {
+        if sender is NSMenuItem, let controller = windowController as? BrowserWindowController, controller.tabCount > 1 {
+            controller.closeSelectedTab()
+            return
+        }
+        super.performClose(sender)
+    }
+}
+
+/// A browser window of one profile: tab strip, toolbar, and the selected tab's web view.
 @MainActor
 final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
-    let webView: WKWebView
     private weak var session: BrowserSession?
     private let profileName: String
     private let passwordVault: PasswordVault
+    private let library: ProfileLibrary
+
+    private(set) var tabs: [BrowserTab] = []
+    private var selectedIndex = 0
+    /// URLs of recently closed tabs, most recent last (⇧⌘T).
+    private var recentlyClosed: [URL] = []
+
+    private let tabStrip = TabStripView()
+    private let webContainer = NSView()
     private let addressField = NSTextField()
     private var backButton: NSButton!
     private var forwardButton: NSButton!
-    private var observations: [NSKeyValueObservation] = []
-    private var tornDown = false
+    private var reloadButton: NSButton!
+    private var bookmarkButton: NSButton!
+    private var libraryObservation: AnyCancellable?
+    private var isClosing = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserWindow")
 
     /// Search used for address-bar input that is not a URL. Queries go through the profile's proxy.
     static let searchURLTemplate = "https://duckduckgo.com/?q="
 
-    init(session: BrowserSession, configuration: WKWebViewConfiguration) {
+    init(session: BrowserSession) {
         self.session = session
         self.profileName = session.profileName
         self.passwordVault = session.passwordVault
-        self.webView = WKWebView(frame: .zero, configuration: configuration)
-        // NATIVE: sets the User-Agent header and navigator.userAgent for this view.
-        // LIMITATION: navigator.platform/vendor, feature detection and the TLS/HTTP2
-        // fingerprint still identify WebKit on macOS; a non-WebKit UA string is inconsistent.
-        webView.customUserAgent = session.configuration.userAgent
-        webView.allowsBackForwardNavigationGestures = true
-        webView.allowsMagnification = true
+        self.library = session.library
 
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                              backing: .buffered, defer: false)
+        let window = BrowserWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
+                                   styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                                   backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.title = "[\(session.profileName)]"
+        // Our own tab strip replaces AppKit window tabbing (which would allow merging windows
+        // and needs one NSWindow per tab).
         window.tabbingMode = .disallowed
         super.init(window: window)
         window.delegate = self
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
         buildInterface(in: window)
-        observeWebView()
         window.center()
+        // @Published emits before the value changes; read the store on the next main-actor turn.
+        libraryObservation = library.$bookmarks.sink { [weak self] _ in
+            Task { @MainActor in self?.updateBookmarkButton() }
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
 
+    var tabCount: Int { tabs.count }
+    var selectedTab: BrowserTab? { tabs.indices.contains(selectedIndex) ? tabs[selectedIndex] : nil }
+
     // MARK: Interface
 
     private func buildInterface(in window: NSWindow) {
-        backButton = toolbarButton("chevron.left", "Back", #selector(goBack))
-        forwardButton = toolbarButton("chevron.right", "Forward", #selector(goForward))
-        let reloadButton = toolbarButton("arrow.clockwise", "Reload", #selector(reload))
+        backButton = toolbarButton("chevron.left", "Back (⌘[)", #selector(goBack))
+        forwardButton = toolbarButton("chevron.right", "Forward (⌘])", #selector(goForward))
+        reloadButton = toolbarButton("arrow.clockwise", "Reload (⌘R)", #selector(reload))
+        bookmarkButton = toolbarButton("star", "Bookmark this page (⌘D)", #selector(toggleBookmark))
+        let bookmarksMenuButton = toolbarButton("book", "Bookmarks", #selector(showBookmarksMenu(_:)))
+        let historyButton = toolbarButton("clock.arrow.circlepath", "History (⌘Y)", #selector(showHistory))
         let fillButton = toolbarButton("key.fill", "Fill saved password", #selector(fillPassword(_:)))
         let saveButton = toolbarButton("key.viewfinder", "Save password from this page", #selector(savePassword))
 
@@ -71,28 +97,33 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         badge.textColor = .secondaryLabelColor
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let bar = NSStackView(views: [backButton, forwardButton, reloadButton, addressField, fillButton, saveButton, badge])
+        let bar = NSStackView(views: [backButton, forwardButton, reloadButton, addressField, bookmarkButton,
+                                      bookmarksMenuButton, historyButton, fillButton, saveButton, badge])
         bar.orientation = .horizontal
         bar.spacing = 6
         bar.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 10)
         addressField.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
+        tabStrip.delegate = self
         let container = NSView()
-        for view in [bar, webView] as [NSView] {
+        for view in [tabStrip, bar, webContainer] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: container.topAnchor),
+            tabStrip.topAnchor.constraint(equalTo: container.topAnchor),
+            tabStrip.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            tabStrip.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            tabStrip.heightAnchor.constraint(equalToConstant: TabStripView.height),
+            bar.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
             bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            webView.topAnchor.constraint(equalTo: bar.bottomAnchor),
-            webView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            webContainer.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            webContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            webContainer.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            webContainer.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
         window.contentView = container
-        updateNavigationButtons()
     }
 
     private func toolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
@@ -103,55 +134,146 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         return button
     }
 
-    private func observeWebView() {
-        observations = [
-            webView.observe(\.title, options: [.new]) { [weak self] webView, _ in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    let title = webView.title.flatMap { $0.isEmpty ? nil : $0 } ?? "New Window"
-                    self.window?.title = "[\(self.profileName)] \(title)"
-                }
-            },
-            webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
-                MainActor.assumeIsolated {
-                    // Don't overwrite what the user is typing.
-                    guard let self, self.addressField.currentEditor() == nil else { return }
-                    self.addressField.stringValue = webView.url?.absoluteString ?? ""
-                }
-            },
-            webView.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.updateNavigationButtons() }
-            },
-            webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.updateNavigationButtons() }
-            },
-        ]
+    // MARK: Tabs
+
+    /// Adds a tab. `configuration` is only passed for popups (WebKit supplies it); otherwise the
+    /// session's standard configuration is used.
+    @discardableResult
+    func addTab(url: URL?, configuration: WKWebViewConfiguration? = nil, select: Bool = true,
+                afterSelected: Bool = true) -> BrowserTab? {
+        guard let session else { return nil }
+        let tab = BrowserTab(configuration: configuration ?? session.makeWebViewConfiguration(),
+                             context: session.tabContext)
+        tab.host = self
+        let index = afterSelected && !tabs.isEmpty ? selectedIndex + 1 : tabs.count
+        tabs.insert(tab, at: index)
+        if !select && index <= selectedIndex { selectedIndex += 1 }
+        if let url { tab.load(url) }
+        if select || tabs.count == 1 {
+            selectTab(at: index)
+            if url == nil && configuration == nil { focusAddressBar() }
+        } else {
+            refreshChrome()
+        }
+        return tab
     }
 
-    private func updateNavigationButtons() {
-        backButton?.isEnabled = webView.canGoBack
-        forwardButton?.isEnabled = webView.canGoForward
+    func selectTab(at index: Int) {
+        guard tabs.indices.contains(index) else { return }
+        selectedIndex = index
+        let webView = tabs[index].webView
+        if webView.superview !== webContainer {
+            webContainer.subviews.forEach { $0.removeFromSuperview() }
+            webView.translatesAutoresizingMaskIntoConstraints = false
+            webContainer.addSubview(webView)
+            NSLayoutConstraint.activate([
+                webView.topAnchor.constraint(equalTo: webContainer.topAnchor),
+                webView.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+                webView.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+                webView.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
+            ])
+        }
+        refreshChrome()
+        if webView.url != nil { window?.makeFirstResponder(webView) }
+    }
+
+    func closeTab(at index: Int) {
+        guard tabs.indices.contains(index) else { return }
+        if tabs.count == 1 {
+            close() // windowWillClose tears everything down
+            return
+        }
+        let tab = tabs.remove(at: index)
+        if let url = tab.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            recentlyClosed.append(url)
+            if recentlyClosed.count > 25 { recentlyClosed.removeFirst() }
+        }
+        tab.tearDown()
+        if index < selectedIndex || selectedIndex >= tabs.count {
+            selectedIndex = max(0, selectedIndex - 1)
+        }
+        selectTab(at: selectedIndex)
+    }
+
+    func closeSelectedTab() { closeTab(at: selectedIndex) }
+
+    @objc func newTab() { addTab(url: nil) }
+
+    func reopenClosedTab() {
+        guard let url = recentlyClosed.popLast() else { return }
+        addTab(url: url)
+    }
+
+    func selectNextTab() {
+        guard !tabs.isEmpty else { return }
+        selectTab(at: (selectedIndex + 1) % tabs.count)
+    }
+
+    func selectPreviousTab() {
+        guard !tabs.isEmpty else { return }
+        selectTab(at: (selectedIndex - 1 + tabs.count) % tabs.count)
+    }
+
+    /// ⌘1…⌘8 select that tab, ⌘9 the last one (Safari/Chrome convention).
+    func selectTab(number: Int) {
+        guard !tabs.isEmpty else { return }
+        selectTab(at: number >= 9 ? tabs.count - 1 : min(number - 1, tabs.count - 1))
+    }
+
+    /// Updates tab strip, address bar, buttons and window title from the selected tab.
+    private func refreshChrome() {
+        tabStrip.update(items: tabs.map { tab in
+            TabStripView.Item(title: tab.displayTitle,
+                              toolTip: [tab.webView.title, tab.url?.absoluteString].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"),
+                              isLoading: tab.isLoading)
+        }, selectedIndex: selectedIndex)
+        guard let tab = selectedTab else { return }
+        window?.title = "[\(profileName)] \(tab.displayTitle)"
+        if addressField.currentEditor() == nil { // don't overwrite what the user is typing
+            addressField.stringValue = tab.url?.absoluteString ?? ""
+        }
+        backButton.isEnabled = tab.webView.canGoBack
+        forwardButton.isEnabled = tab.webView.canGoForward
+        reloadButton.image = NSImage(systemSymbolName: tab.isLoading ? "xmark" : "arrow.clockwise",
+                                     accessibilityDescription: tab.isLoading ? "Stop" : "Reload")
+        updateBookmarkButton()
     }
 
     // MARK: Navigation
 
     func load(_ url: URL) {
+        guard let tab = selectedTab else {
+            addTab(url: url)
+            return
+        }
         addressField.stringValue = url.absoluteString
-        webView.load(URLRequest(url: url))
+        tab.load(url)
     }
 
     func focusAddressBar() {
         window?.makeFirstResponder(addressField)
     }
 
-    @objc func goBack() { webView.goBack() }
-    @objc func goForward() { webView.goForward() }
-    @objc func reload() { webView.reload() }
+    @objc func goBack() { selectedTab?.webView.goBack() }
+    @objc func goForward() { selectedTab?.webView.goForward() }
+
+    @objc func reload() {
+        guard let webView = selectedTab?.webView else { return }
+        if webView.isLoading { webView.stopLoading() } else { webView.reload() }
+    }
 
     @objc private func addressEntered() {
         guard let url = Self.url(fromAddressBarInput: addressField.stringValue) else { return }
         load(url)
-        window?.makeFirstResponder(webView)
+        if let webView = selectedTab?.webView { window?.makeFirstResponder(webView) }
+    }
+
+    /// Escape in the address bar restores the current URL.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === addressField, commandSelector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        addressField.stringValue = selectedTab?.url?.absoluteString ?? ""
+        if let webView = selectedTab?.webView { window?.makeFirstResponder(webView) }
+        return true
     }
 
     static func url(fromAddressBarInput input: String) -> URL? {
@@ -167,50 +289,80 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         return URL(string: searchURLTemplate + query)
     }
 
+    // MARK: Bookmarks and history
+
+    private func updateBookmarkButton() {
+        let bookmarked = library.bookmark(for: selectedTab?.url) != nil
+        bookmarkButton?.image = NSImage(systemSymbolName: bookmarked ? "star.fill" : "star",
+                                        accessibilityDescription: bookmarked ? "Remove bookmark" : "Bookmark this page")
+        bookmarkButton?.isEnabled = selectedTab?.url.flatMap { HistoryStore.normalizedURL($0) } != nil
+    }
+
+    /// Adds the current page, or removes its bookmark if it already has one.
+    @objc func toggleBookmark() {
+        guard let tab = selectedTab, let url = tab.url else { return }
+        if let existing = library.bookmark(for: url) {
+            library.removeBookmark(id: existing.id)
+        } else {
+            library.addBookmark(title: tab.webView.title ?? "", url: url)
+        }
+        updateBookmarkButton()
+    }
+
+    @objc private func showBookmarksMenu(_ sender: NSButton) {
+        let menu = NSMenu()
+        let bookmarks = library.bookmarks
+        if bookmarks.isEmpty {
+            let empty = NSMenuItem(title: "No bookmarks", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+        }
+        var folderMenus: [String: NSMenu] = [:]
+        for bookmark in bookmarks {
+            let item = NSMenuItem(title: bookmark.title, action: #selector(openBookmarkFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = bookmark.url
+            item.toolTip = bookmark.url
+            if let folder = bookmark.folder {
+                if folderMenus[folder] == nil {
+                    let submenu = NSMenu(title: folder)
+                    let folderItem = NSMenuItem(title: folder, action: nil, keyEquivalent: "")
+                    folderItem.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+                    folderItem.submenu = submenu
+                    menu.addItem(folderItem)
+                    folderMenus[folder] = submenu
+                }
+                folderMenus[folder]?.addItem(item)
+            } else {
+                menu.addItem(item)
+            }
+        }
+        menu.addItem(.separator())
+        let manage = NSMenuItem(title: "Show All Bookmarks…", action: #selector(showBookmarks), keyEquivalent: "")
+        manage.target = self
+        menu.addItem(manage)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+    }
+
+    @objc private func openBookmarkFromMenu(_ item: NSMenuItem) {
+        guard let string = item.representedObject as? String, let url = URL(string: string) else { return }
+        // ⌘ held → new tab, as for links.
+        if NSEvent.modifierFlags.contains(.command) { addTab(url: url) } else { load(url) }
+    }
+
+    @objc func showHistory() { session?.showLibrary(.history, from: self) }
+    @objc func showBookmarks() { session?.showLibrary(.bookmarks, from: self) }
+
     // MARK: Passwords
-    //
-    // LIMITATION: WKWebView exposes no autofill hooks. Filling/saving is explicit and runs in
-    // the isolated `.defaultClient` content world, so page scripts cannot intercept the
-    // function or the DOM prototypes it uses. Main frame only.
-
-    private static let fillScript = """
-    if (location.origin !== expectedOrigin) return false;
-    const visible = (e) => !e.disabled && !e.readOnly && e.getClientRects().length > 0;
-    const passwords = Array.from(document.querySelectorAll('input[type=password]')).filter(visible);
-    const pw = passwords[0];
-    if (!pw) return false;
-    const scope = pw.form || document;
-    const users = Array.from(scope.querySelectorAll('input[type=email], input[type=text], input[type=tel], input:not([type])'))
-      .filter(visible)
-      .filter((e) => e.compareDocumentPosition(pw) & Node.DOCUMENT_POSITION_FOLLOWING);
-    const setValue = (el, value) => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, value);
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-    const user = users[users.length - 1];
-    if (user && username) setValue(user, username);
-    setValue(pw, password);
-    return true;
-    """
-
-    private static let captureScript = """
-    const pw = Array.from(document.querySelectorAll('input[type=password]')).find((e) => e.value);
-    if (!pw) return null;
-    const scope = pw.form || document;
-    const users = Array.from(scope.querySelectorAll('input[type=email], input[type=text], input[type=tel], input:not([type])'))
-      .filter((e) => e.value && (e.compareDocumentPosition(pw) & Node.DOCUMENT_POSITION_FOLLOWING));
-    return { username: users.length ? users[users.length - 1].value : '', password: pw.value, origin: location.origin };
-    """
 
     @objc private func fillPassword(_ sender: NSButton) {
-        guard let url = webView.url, let origin = PasswordEntry.normalizedOrigin(for: url) else { return }
+        guard let tab = selectedTab, let url = tab.url, let origin = PasswordEntry.normalizedOrigin(for: url) else { return }
         let entries = passwordVault.entries(for: url)
         switch entries.count {
         case 0:
-            showMessage("No saved password for \(origin).")
+            tab.showMessage("No saved password for \(origin).")
         case 1:
-            fill(entries[0], origin: origin)
+            fill(entries[0], origin: origin, in: tab)
         default:
             let menu = NSMenu()
             for entry in entries {
@@ -225,54 +377,42 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     @objc private func fillFromMenu(_ item: NSMenuItem) {
-        guard let id = item.representedObject as? UUID, let url = webView.url,
+        guard let tab = selectedTab, let id = item.representedObject as? UUID, let url = tab.url,
               let origin = PasswordEntry.normalizedOrigin(for: url),
               let entry = passwordVault.entries(for: url).first(where: { $0.id == id }) else { return }
-        fill(entry, origin: origin)
+        fill(entry, origin: origin, in: tab)
     }
 
-    private func fill(_ entry: PasswordEntry, origin: String) {
-        webView.callAsyncJavaScript(Self.fillScript,
-                                    arguments: ["username": entry.username, "password": entry.password, "expectedOrigin": origin],
-                                    in: nil, in: .defaultClient) { [weak self] result in
-            if case .success(let value) = result, (value as? Bool) == true { return }
-            self?.showMessage("No suitable password field found on this page.")
+    private func fill(_ entry: PasswordEntry, origin: String, in tab: BrowserTab) {
+        PasswordAutofill.fill(entry, origin: origin, in: tab.webView) { [weak tab] filled in
+            if !filled { tab?.showMessage("No suitable password field found on this page.") }
         }
     }
 
     @objc private func savePassword() {
-        guard let url = webView.url, let origin = PasswordEntry.normalizedOrigin(for: url) else { return }
-        webView.callAsyncJavaScript(Self.captureScript, arguments: [:], in: nil, in: .defaultClient) { [weak self] result in
-            guard let self else { return }
-            guard case .success(let value) = result, let fields = value as? [String: Any],
-                  let password = fields["password"] as? String, !password.isEmpty,
-                  fields["origin"] as? String == origin else {
-                self.showMessage("Type the username and password into the page first, then press Save.")
+        guard let tab = selectedTab, let url = tab.url, let origin = PasswordEntry.normalizedOrigin(for: url) else { return }
+        PasswordAutofill.capture(origin: origin, in: tab.webView) { [weak self, weak tab] captured in
+            guard let self, let tab else { return }
+            guard let captured else {
+                tab.showMessage("Type the username and password into the page first, then press Save.")
                 return
             }
-            let username = fields["username"] as? String ?? ""
             let alert = NSAlert()
-            alert.messageText = "Save password for \(origin)?"
-            alert.informativeText = username.isEmpty ? "No username detected." : "Username: \(username)"
+            alert.messageText = "Save password for \(captured.origin)?"
+            alert.informativeText = captured.username.isEmpty ? "No username detected." : "Username: \(captured.username)"
             alert.addButton(withTitle: "Save")
             alert.addButton(withTitle: "Cancel")
             guard let window = self.window else { return }
             alert.beginSheetModal(for: window) { response in
                 guard response == .alertFirstButtonReturn else { return }
                 do {
-                    try self.passwordVault.upsert(PasswordEntry(origin: origin, username: username, password: password))
+                    try self.passwordVault.upsert(PasswordEntry(origin: captured.origin, username: captured.username,
+                                                                password: captured.password))
                 } catch {
-                    self.showMessage("Could not save: \(error)")
+                    tab.showMessage("Could not save: \(error.localizedDescription)")
                 }
             }
         }
-    }
-
-    private func showMessage(_ text: String) {
-        guard let window else { return }
-        let alert = NSAlert()
-        alert.messageText = text
-        alert.beginSheetModal(for: window)
     }
 
     // MARK: Lifecycle
@@ -282,217 +422,52 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         session?.windowDidClose(self)
     }
 
-    /// Breaks every reference cycle and stops all activity so the web view (and with it the
-    /// profile's data store) can be deallocated promptly.
+    /// Tears down every tab so the web views (and with them the profile's data store) can be
+    /// deallocated promptly.
     func tearDown() {
-        guard !tornDown else { return }
-        tornDown = true
-        observations.forEach { $0.invalidate() }
-        observations.removeAll()
-        webView.stopLoading()
-        webView.navigationDelegate = nil
-        webView.uiDelegate = nil
-        webView.removeFromSuperview()
+        guard !isClosing else { return }
+        isClosing = true
+        libraryObservation = nil
+        tabs.forEach { $0.tearDown() }
+        tabs.removeAll()
         window?.delegate = nil
     }
 }
 
-// MARK: - WKNavigationDelegate
+// MARK: - BrowserTabHost
 
-extension BrowserWindowController: WKNavigationDelegate {
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        let scheme = navigationAction.request.url?.scheme?.lowercased() ?? ""
-        if navigationAction.shouldPerformDownload {
-            decisionHandler(.download)
-        } else if ["http", "https", "about", "blob", "data"].contains(scheme) {
-            decisionHandler(.allow)
-        } else {
-            // mailto:, tel:, custom app schemes: handing them to other apps would leave the
-            // profile (and its proxy). Blocked; the user can copy the link instead.
-            log.info("Blocked navigation to scheme \(scheme, privacy: .public)")
-            decisionHandler(.cancel)
-        }
+extension BrowserWindowController: BrowserTabHost {
+    var hostWindow: NSWindow? { window }
+
+    func tabDidChange(_ tab: BrowserTab) {
+        guard !isClosing else { return }
+        refreshChrome()
     }
 
-    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
-                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        decisionHandler(navigationResponse.canShowMIMEType ? .allow : .download)
+    func tab(_ tab: BrowserTab, createTabWith configuration: WKWebViewConfiguration) -> WKWebView? {
+        // The configuration WebKit passes in carries the opener's data store and user scripts.
+        addTab(url: nil, configuration: configuration, select: true)?.webView
     }
 
-    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
-        download.delegate = self
+    func tab(_ tab: BrowserTab, openInBackground request: URLRequest) {
+        guard let url = request.url else { return }
+        addTab(url: url, select: false)
     }
 
-    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
-        download.delegate = self
+    func tabDidRequestClose(_ tab: BrowserTab) {
+        if let index = tabs.firstIndex(where: { $0 === tab }) { closeTab(at: index) }
     }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        let nsError = error as NSError
-        guard nsError.code != NSURLErrorCancelled else { return }
-        // With a proxy configured and failover disabled, an unreachable proxy surfaces here.
-        let message = "\(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))"
-        let escaped = message
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-        let html = """
-        <html><body style="font: 14px -apple-system; padding: 40px; color: #444">
-        <h2>Page could not be loaded</h2><p>\(escaped)</p></body></html>
-        """
-        webView.loadHTMLString(html, baseURL: nil)
-    }
-
-    func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
-                 completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        let space = challenge.protectionSpace
-        let httpAuth = [NSURLAuthenticationMethodHTTPBasic, NSURLAuthenticationMethodHTTPDigest].contains(space.authenticationMethod)
-        guard httpAuth, !space.isProxy(), let scheme = space.protocol,
-              let url = URL(string: "\(scheme)://\(space.host):\(space.port)") else {
-            // Server trust, client certificates, proxy auth (handled by ProxyConfiguration): system default.
-            completionHandler(.performDefaultHandling, nil)
-            return
-        }
-        if challenge.previousFailureCount == 0, let entry = passwordVault.entries(for: url).first {
-            completionHandler(.useCredential, URLCredential(user: entry.username, password: entry.password, persistence: .forSession))
-            return
-        }
-        promptForHTTPCredentials(host: space.host, realm: space.realm) { credential in
-            if let credential {
-                completionHandler(.useCredential, credential)
-            } else {
-                completionHandler(.cancelAuthenticationChallenge, nil)
-            }
-        }
-    }
-
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        log.error("Web content process terminated; reloading")
-        webView.reload()
-    }
-
-    private func promptForHTTPCredentials(host: String, realm: String?, completion: @escaping (URLCredential?) -> Void) {
-        guard let window else { completion(nil); return }
-        let alert = NSAlert()
-        alert.messageText = "Log in to \(host)"
-        alert.informativeText = realm.map { "Realm: \($0)" } ?? ""
-        let user = NSTextField(frame: NSRect(x: 0, y: 30, width: 260, height: 24))
-        user.placeholderString = "Username"
-        let pass = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        pass.placeholderString = "Password"
-        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
-        accessory.addSubview(user)
-        accessory.addSubview(pass)
-        alert.accessoryView = accessory
-        alert.addButton(withTitle: "Log In")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { response in
-            completion(response == .alertFirstButtonReturn
-                       ? URLCredential(user: user.stringValue, password: pass.stringValue, persistence: .forSession)
-                       : nil)
-        }
+    func tabNeedsAttention(_ tab: BrowserTab) {
+        if let index = tabs.firstIndex(where: { $0 === tab }), index != selectedIndex { selectTab(at: index) }
+        window?.makeKeyAndOrderFront(nil)
     }
 }
 
-// MARK: - WKUIDelegate
+// MARK: - TabStripViewDelegate
 
-extension BrowserWindowController: WKUIDelegate {
-    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
-                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        session?.openPopup(configuration: configuration)
-    }
-
-    func webViewDidClose(_ webView: WKWebView) {
-        close()
-    }
-
-    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
-                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
-        guard let window else { completionHandler(); return }
-        let alert = NSAlert()
-        alert.messageText = frame.securityOrigin.host
-        alert.informativeText = message
-        alert.beginSheetModal(for: window) { _ in completionHandler() }
-    }
-
-    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
-                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
-        guard let window else { completionHandler(false); return }
-        let alert = NSAlert()
-        alert.messageText = frame.securityOrigin.host
-        alert.informativeText = message
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { completionHandler($0 == .alertFirstButtonReturn) }
-    }
-
-    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
-                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
-        guard let window else { completionHandler(nil); return }
-        let alert = NSAlert()
-        alert.messageText = frame.securityOrigin.host
-        alert.informativeText = prompt
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.stringValue = defaultText ?? ""
-        alert.accessoryView = field
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { completionHandler($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
-    }
-
-    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
-                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
-        panel.canChooseDirectories = parameters.allowsDirectories
-        panel.canChooseFiles = true
-        guard let window else { completionHandler(nil); return }
-        panel.beginSheetModal(for: window) { completionHandler($0 == .OK ? panel.urls : nil) }
-    }
-
-    /// Camera / microphone: ask every time (WebKit forwards the request only after the page called getUserMedia).
-    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
-                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
-                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        guard let window else { decisionHandler(.deny); return }
-        let what: String
-        switch type {
-        case .camera: what = "camera"
-        case .microphone: what = "microphone"
-        case .cameraAndMicrophone: what = "camera and microphone"
-        @unknown default: what = "media devices"
-        }
-        let alert = NSAlert()
-        alert.messageText = "Allow \(origin.host) to use your \(what)?"
-        alert.informativeText = "Profile: \(profileName). Media streams are not routed through the profile proxy."
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Deny")
-        alert.beginSheetModal(for: window) { decisionHandler($0 == .alertFirstButtonReturn ? .grant : .deny) }
-    }
-}
-
-// MARK: - WKDownloadDelegate
-
-extension BrowserWindowController: WKDownloadDelegate {
-    /// LIMITATION: downloaded files are written to ~/Downloads unencrypted; they are outside the
-    /// profile's encrypted storage.
-    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
-                  suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let safeName = suggestedFilename.replacingOccurrences(of: "/", with: "_")
-        var destination = downloads.appendingPathComponent(safeName.isEmpty ? "download" : safeName)
-        var counter = 1
-        let base = destination.deletingPathExtension().lastPathComponent
-        let ext = destination.pathExtension
-        while FileManager.default.fileExists(atPath: destination.path) {
-            destination = downloads.appendingPathComponent(ext.isEmpty ? "\(base) (\(counter))" : "\(base) (\(counter)).\(ext)")
-            counter += 1
-        }
-        completionHandler(destination)
-    }
-
-    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        showMessage("Download failed: \(error.localizedDescription)")
-    }
+extension BrowserWindowController: TabStripViewDelegate {
+    func tabStrip(_ strip: TabStripView, didSelect index: Int) { selectTab(at: index) }
+    func tabStrip(_ strip: TabStripView, didClose index: Int) { closeTab(at: index) }
+    func tabStripDidRequestNewTab(_ strip: TabStripView) { newTab() }
 }

@@ -54,6 +54,8 @@ struct ProfileIndex: Codable, Equatable {
 /// index.bin                        AEAD(indexKey, ProfileIndex JSON)
 /// profiles/<uuid>/config.bin       AEAD(profileKey, ProfileConfiguration JSON)
 /// profiles/<uuid>/passwords.bin    AEAD(passwordKey, [PasswordEntry] JSON)
+/// profiles/<uuid>/history.bin      AEAD(historyKey, HistoryDocument JSON)
+/// profiles/<uuid>/bookmarks.bin    AEAD(bookmarksKey, BookmarkDocument JSON)
 /// profiles/<uuid>/webdata.pbsa     encrypted archive of the WebKit data store (app layer)
 /// ```
 /// Profile names are only readable after unlock. Profile configurations are only
@@ -187,6 +189,18 @@ public final class ProfileRepository: @unchecked Sendable {
                           profileID: id, profileKey: profileKey(for: id))
     }
 
+    /// Opens the profile's encrypted history. `persistent: false` gives a memory-only store
+    /// (ephemeral profiles, or history disabled) that never touches disk.
+    public func historyStore(for id: UUID, key: SymmetricKey, policy: HistoryStore.Policy = .init(),
+                             persistent: Bool = true) throws -> HistoryStore {
+        try HistoryStore(file: HistoryStore.file(url: persistent ? historyURL(for: id) : nil, profileID: id, profileKey: key),
+                         policy: policy)
+    }
+
+    public func bookmarkStore(for id: UUID, key: SymmetricKey) throws -> BookmarkStore {
+        try BookmarkStore(file: BookmarkStore.file(url: bookmarksURL(for: id), profileID: id, profileKey: key))
+    }
+
     // MARK: Sync support (raw encrypted files; see SyncEngine)
 
     func currentIndex() -> ProfileIndex {
@@ -201,8 +215,15 @@ public final class ProfileRepository: @unchecked Sendable {
         }
     }
 
-    var passwordsFileName: String { "passwords.bin" }
-    func passwordsURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent(passwordsFileName) }
+    func passwordsURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("passwords.bin") }
+    func historyURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("history.bin") }
+    func bookmarksURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("bookmarks.bin") }
+
+    /// Deletes the profile's history file (e.g. when history is turned off for the profile).
+    public func deleteHistoryFile(for id: UUID) throws {
+        let url = historyURL(for: id)
+        if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+    }
 
     // MARK: Private
 

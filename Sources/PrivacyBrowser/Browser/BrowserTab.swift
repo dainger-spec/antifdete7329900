@@ -1,0 +1,366 @@
+import AppKit
+import BrowserCore
+import os
+import WebKit
+
+/// What a tab needs from its window.
+@MainActor
+protocol BrowserTabHost: AnyObject {
+    var hostWindow: NSWindow? { get }
+    /// Title, URL, loading or back/forward state changed.
+    func tabDidChange(_ tab: BrowserTab)
+    /// `window.open` / `target=_blank`: WebKit requires a web view built from `configuration`.
+    func tab(_ tab: BrowserTab, createTabWith configuration: WKWebViewConfiguration) -> WKWebView?
+    /// ⌘-click / middle-click: open `request` in a new background tab.
+    func tab(_ tab: BrowserTab, openInBackground request: URLRequest)
+    func tabDidRequestClose(_ tab: BrowserTab)
+    /// A dialog (alert/confirm/auth/permission) is about to be shown for this tab.
+    func tabNeedsAttention(_ tab: BrowserTab)
+}
+
+/// Per-profile services every tab of a session shares.
+@MainActor
+struct BrowserTabContext {
+    let profileName: String
+    let userAgent: String?
+    let passwordVault: PasswordVault
+    let library: ProfileLibrary
+}
+
+/// One tab: a `WKWebView` and its navigation, UI and download delegates.
+///
+/// All tabs of all windows of a profile share the profile's `WKWebsiteDataStore` (through the
+/// configuration created by `BrowserSession`), so they share cookies and storage — exactly
+/// like tabs of one browser profile. Tabs of different profiles never share anything.
+@MainActor
+final class BrowserTab: NSObject {
+    let id = UUID()
+    let webView: WKWebView
+    weak var host: BrowserTabHost?
+
+    private let context: BrowserTabContext
+    private var observations: [NSKeyValueObservation] = []
+    private var lastRecordedURL: URL?
+    private var tornDown = false
+    private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserTab")
+
+    init(configuration: WKWebViewConfiguration, context: BrowserTabContext) {
+        self.context = context
+        self.webView = WKWebView(frame: .zero, configuration: configuration)
+        super.init()
+        // NATIVE: sets the User-Agent header and navigator.userAgent for this view.
+        // FINGERPRINTING LIMITATION: navigator.platform/vendor, the supported feature set and the
+        // TLS/HTTP2 fingerprint still identify WebKit on macOS; a non-WebKit UA is inconsistent.
+        webView.customUserAgent = context.userAgent
+        webView.allowsBackForwardNavigationGestures = true
+        webView.allowsMagnification = true
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+        observe()
+    }
+
+    // MARK: State
+
+    var displayTitle: String {
+        if let title = webView.title, !title.isEmpty { return title }
+        if let host = webView.url?.host { return host }
+        return "New Tab"
+    }
+
+    var url: URL? { webView.url }
+    var isLoading: Bool { webView.isLoading }
+
+    func load(_ url: URL) {
+        webView.load(URLRequest(url: url))
+    }
+
+    private func observe() {
+        observations = [
+            webView.observe(\.title, options: [.new]) { [weak self] webView, _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if let url = webView.url { self.context.library.updateTitle(url: url, title: webView.title) }
+                    self.notifyChanged()
+                }
+            },
+            webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    // Full loads are recorded in didCommit. This catches same-document navigations
+                    // (history.pushState, fragments): their URL is already the back/forward list's
+                    // current item, whereas a provisional (not yet committed) URL is not.
+                    if let url = webView.url, webView.backForwardList.currentItem?.url == url {
+                        self.recordVisit(url)
+                    }
+                    self.notifyChanged()
+                }
+            },
+            webView.observe(\.isLoading, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.notifyChanged() }
+            },
+            webView.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.notifyChanged() }
+            },
+            webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.notifyChanged() }
+            },
+        ]
+    }
+
+    private func notifyChanged() {
+        host?.tabDidChange(self)
+    }
+
+    private func recordVisit(_ url: URL) {
+        guard url != lastRecordedURL else { return }
+        lastRecordedURL = url
+        context.library.recordVisit(url: url, title: webView.title)
+    }
+
+    /// Stops all activity and breaks reference cycles so the web view — and with it the
+    /// profile's data store — can be deallocated.
+    func tearDown() {
+        guard !tornDown else { return }
+        tornDown = true
+        observations.forEach { $0.invalidate() }
+        observations.removeAll()
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        webView.removeFromSuperview()
+        host = nil
+    }
+
+    // MARK: Dialog helpers
+
+    private func presentAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        host?.tabNeedsAttention(self)
+        guard let window = host?.hostWindow else {
+            completion(.cancel)
+            return
+        }
+        alert.beginSheetModal(for: window, completionHandler: completion)
+    }
+
+    func showMessage(_ text: String) {
+        let alert = NSAlert()
+        alert.messageText = text
+        presentAlert(alert) { _ in }
+    }
+}
+
+// MARK: - WKNavigationDelegate
+
+extension BrowserTab: WKNavigationDelegate {
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        let scheme = navigationAction.request.url?.scheme?.lowercased() ?? ""
+        let flags = navigationAction.modifierFlags
+        if navigationAction.shouldPerformDownload {
+            decisionHandler(.download)
+        } else if navigationAction.navigationType == .linkActivated,
+                  flags.contains(.command) || navigationAction.buttonNumber == 2,
+                  ["http", "https"].contains(scheme) {
+            host?.tab(self, openInBackground: navigationAction.request)
+            decisionHandler(.cancel)
+        } else if ["http", "https", "about", "blob", "data"].contains(scheme) {
+            decisionHandler(.allow)
+        } else {
+            // mailto:, tel:, custom app schemes: handing them to other apps would leave the
+            // profile (and its proxy). Blocked; the user can copy the link instead.
+            log.info("Blocked navigation to scheme \(scheme, privacy: .public)")
+            decisionHandler(.cancel)
+        }
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        decisionHandler(navigationResponse.canShowMIMEType ? .allow : .download)
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        if let url = webView.url { recordVisit(url) }
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        let nsError = error as NSError
+        guard nsError.code != NSURLErrorCancelled else { return }
+        // With a proxy configured and failover disabled, an unreachable proxy surfaces here.
+        let message = "\(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))"
+        let escaped = message
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+        let html = """
+        <html><head><title>Page could not be loaded</title></head>
+        <body style="font: 14px -apple-system; padding: 40px; color: #444">
+        <h2>Page could not be loaded</h2><p>\(escaped)</p></body></html>
+        """
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+
+    func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
+                 completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let space = challenge.protectionSpace
+        let httpAuth = [NSURLAuthenticationMethodHTTPBasic, NSURLAuthenticationMethodHTTPDigest].contains(space.authenticationMethod)
+        guard httpAuth, !space.isProxy(), let scheme = space.protocol,
+              let url = URL(string: "\(scheme)://\(space.host):\(space.port)") else {
+            // Server trust, client certificates, proxy auth (handled by ProxyConfiguration): system default.
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        if challenge.previousFailureCount == 0, let entry = context.passwordVault.entries(for: url).first {
+            completionHandler(.useCredential, URLCredential(user: entry.username, password: entry.password, persistence: .forSession))
+            return
+        }
+        promptForHTTPCredentials(host: space.host, realm: space.realm) { credential in
+            if let credential {
+                completionHandler(.useCredential, credential)
+            } else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+            }
+        }
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        log.error("Web content process terminated; reloading")
+        webView.reload()
+    }
+
+    private func promptForHTTPCredentials(host: String, realm: String?, completion: @escaping (URLCredential?) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Log in to \(host)"
+        alert.informativeText = realm.map { "Realm: \($0)" } ?? ""
+        let user = NSTextField(frame: NSRect(x: 0, y: 30, width: 260, height: 24))
+        user.placeholderString = "Username"
+        let pass = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        pass.placeholderString = "Password"
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
+        accessory.addSubview(user)
+        accessory.addSubview(pass)
+        alert.accessoryView = accessory
+        alert.addButton(withTitle: "Log In")
+        alert.addButton(withTitle: "Cancel")
+        presentAlert(alert) { response in
+            completion(response == .alertFirstButtonReturn
+                       ? URLCredential(user: user.stringValue, password: pass.stringValue, persistence: .forSession)
+                       : nil)
+        }
+    }
+}
+
+// MARK: - WKUIDelegate
+
+extension BrowserTab: WKUIDelegate {
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        host?.tab(self, createTabWith: configuration)
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        host?.tabDidRequestClose(self)
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = frame.securityOrigin.host
+        alert.informativeText = message
+        presentAlert(alert) { _ in completionHandler() }
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = frame.securityOrigin.host
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        presentAlert(alert) { completionHandler($0 == .alertFirstButtonReturn) }
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = frame.securityOrigin.host
+        alert.informativeText = prompt
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = defaultText ?? ""
+        alert.accessoryView = field
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        presentAlert(alert) { completionHandler($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
+    }
+
+    /// File inputs. In the App Sandbox the open panel grants read access to the chosen files
+    /// (entitlement `com.apple.security.files.user-selected.read-write`).
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        host?.tabNeedsAttention(self)
+        guard let window = host?.hostWindow else { completionHandler(nil); return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.canChooseFiles = true
+        panel.beginSheetModal(for: window) { completionHandler($0 == .OK ? panel.urls : nil) }
+    }
+
+    /// Camera / microphone: ask every time (WebKit forwards the request only after the page called getUserMedia).
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        let what: String
+        switch type {
+        case .camera: what = "camera"
+        case .microphone: what = "microphone"
+        case .cameraAndMicrophone: what = "camera and microphone"
+        @unknown default: what = "media devices"
+        }
+        let alert = NSAlert()
+        alert.messageText = "Allow \(origin.host) to use your \(what)?"
+        alert.informativeText = "Profile: \(context.profileName). Media streams are not routed through the profile proxy."
+        alert.addButton(withTitle: "Allow")
+        alert.addButton(withTitle: "Deny")
+        presentAlert(alert) { decisionHandler($0 == .alertFirstButtonReturn ? .grant : .deny) }
+    }
+}
+
+// MARK: - WKDownloadDelegate
+
+extension BrowserTab: WKDownloadDelegate {
+    /// LIMITATION: downloaded files are written to ~/Downloads unencrypted; they are outside the
+    /// profile's encrypted storage. In the App Sandbox this needs
+    /// `com.apple.security.files.downloads.read-write`.
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
+                  suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        completionHandler(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename))
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        showMessage("Download failed: \(error.localizedDescription)")
+    }
+
+    static func uniqueDownloadURL(suggestedFilename: String) -> URL {
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let safeName = suggestedFilename.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+            .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        var destination = downloads.appendingPathComponent(safeName.isEmpty ? "download" : safeName)
+        let base = destination.deletingPathExtension().lastPathComponent
+        let ext = destination.pathExtension
+        var counter = 1
+        while FileManager.default.fileExists(atPath: destination.path) {
+            destination = downloads.appendingPathComponent(ext.isEmpty ? "\(base) (\(counter))" : "\(base) (\(counter)).\(ext)")
+            counter += 1
+        }
+        return destination
+    }
+}

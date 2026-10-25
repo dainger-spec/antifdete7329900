@@ -39,6 +39,7 @@ struct ProfileListView: View {
                            onLaunch: { Task { await model.launch(profile.id) } },
                            onStop: { Task { await model.stop(profile.id) } },
                            onNewWindow: { model.manager?.openNewWindow(profile.id) },
+                           onLibrary: { model.manager?.showLibrary(profile.id, section: .bookmarks) },
                            onEdit: { editing = .existing(profile) },
                            onPasswords: { passwordsFor = profile },
                            onDelete: { pendingDelete = profile })
@@ -93,6 +94,7 @@ private struct ProfileRow: View {
     let onLaunch: () -> Void
     let onStop: () -> Void
     let onNewWindow: () -> Void
+    let onLibrary: () -> Void
     let onEdit: () -> Void
     let onPasswords: () -> Void
     let onDelete: () -> Void
@@ -115,6 +117,9 @@ private struct ProfileRow: View {
                 Button("Launch", action: onLaunch).disabled(busy)
             }
             Menu {
+                if running {
+                    Button("Bookmarks & History…", action: onLibrary)
+                }
                 Button("Edit…", action: onEdit)
                 Button("Passwords…", action: onPasswords)
                 Divider()
