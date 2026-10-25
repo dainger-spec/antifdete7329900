@@ -53,6 +53,11 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// `nil` → the platform's default model. Ignored for macOS generations.
     public var deviceModelID: String?
 
+    /// Optional base64 (or data URL) image used as a fake camera feed for iOS profiles.
+    /// When set, the JS shim intercepts getUserMedia and returns a canvas.captureStream() of this image.
+    /// Detectable (empty getSettings, no real timestamps). For simple verification flows only.
+    public var cameraImageBase64: String?
+
     public init(startURL: URL? = nil,
                 userAgent: String? = nil,
                 proxy: ProxySettings? = nil,
@@ -64,7 +69,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 historyEnabled: Bool = true,
                 historyRetentionDays: Int? = 90,
                 deviceGenerationID: String? = nil,
-                deviceModelID: String? = nil) {
+                deviceModelID: String? = nil,
+                cameraImageBase64: String? = nil) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -77,6 +83,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.historyRetentionDays = historyRetentionDays
         self.deviceGenerationID = deviceGenerationID
         self.deviceModelID = deviceModelID
+        self.cameraImageBase64 = cameraImageBase64
     }
 
     /// A new profile seeded from a generation: the generation supplies the UA (by reference,
@@ -102,7 +109,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
-             safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID, deviceModelID
+             safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID, deviceModelID,
+             cameraImageBase64
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -124,6 +132,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             : defaults.historyRetentionDays
         deviceGenerationID = try c.decodeIfPresent(String.self, forKey: .deviceGenerationID)
         deviceModelID = try c.decodeIfPresent(String.self, forKey: .deviceModelID)
+        cameraImageBase64 = try c.decodeIfPresent(String.self, forKey: .cameraImageBase64)
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -142,6 +151,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(historyRetentionDays, forKey: .historyRetentionDays)
         try c.encodeIfPresent(deviceGenerationID, forKey: .deviceGenerationID)
         try c.encodeIfPresent(deviceModelID, forKey: .deviceModelID)
+        try c.encodeIfPresent(cameraImageBase64, forKey: .cameraImageBase64)
     }
 
     public var historyPolicy: HistoryStore.Policy {
