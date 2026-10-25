@@ -8,7 +8,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 15 runner) for both the sandboxed and the unsandboxed build, with a local
-test proxy (`scripts/selftest_proxy.py`). Last observed results (macOS 15.7, 43/43 checks
+test proxy (`scripts/selftest_proxy.py`). Last observed results (macOS 15.7, 50/50 checks
 in both builds):
 
 | Claim | Self-test result |
@@ -23,6 +23,8 @@ in both builds):
 | Fail-closed | with the proxy unreachable, loads fail ("Could not connect to the server") instead of going direct |
 | Tabs, history, bookmarks | tab open/close/reopen/select, visits and titles recorded, bookmark toggle persisted encrypted |
 | Window lifecycle (crash fix) | closing one of two windows keeps the profile running; closing the last reports "all closed" once, on a later run-loop turn; `shutDown()` twice is safe |
+| Crash-recovery sealing | leftover website data from a crashed run is archived and deleted WITHOUT `WKWebsiteDataStore.remove(forIdentifier:)` (which aborted on an unknown id), then restores cleanly |
+| Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
 
 Run it yourself: `build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test`. For the

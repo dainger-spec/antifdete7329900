@@ -71,10 +71,11 @@ PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 43 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 50 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, HTTP CONNECT and SOCKS5 proxies, fail-closed, tabs,
-  history, bookmarks, and the window-lifecycle (close/quit crash) regression;
+  history, bookmarks, the device-generation UA path, crash-recovery sealing, and the
+  window-lifecycle (close/quit crash) regression;
 - a container-migration check.
 
 ## Using it

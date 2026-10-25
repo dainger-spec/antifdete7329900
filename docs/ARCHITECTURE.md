@@ -23,6 +23,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 ┌──────────────────────────────── PrivacyBrowser (macOS app) ────────────────────────────────┐
 │  main.swift ── app, or --self-test (headless WebKit checks) / migration check modes         │
 │  Localization (ru default, en fallback) · Theme (forced light appearance)                   │
+│  BehaviorSets ── device-generation → injected-script bundle (extension point)               │
 │  SwiftUI: Setup / Unlock / ProfileList / ProfileEditor / Passwords / SyncSettings / Library │
 │        │                                                                                   │
 │  AppModel ── lock state, vault, DeviceSettings (sync target), errors                       │
@@ -174,6 +175,21 @@ windows be merged and needs one `NSWindow` per tab.
   ⌘D, ⌘Y, ⌥⌘B.
 - History is recorded at `didCommit` and for same-document navigations, once WebKit has
   made the URL the current back/forward item. Titles arrive later via KVO.
+
+## Version-aware generations
+
+A profile targets an Apple OS generation (`DeviceGeneration` / `DeviceGenerations` in
+`BrowserCore`), stored as `ProfileConfiguration.deviceGenerationID` (tolerant decode; old
+configs read as the default generation).
+
+- `ProfileConfiguration.effectiveUserAgent` = explicit `userAgent` override, else the
+  generation's UA, else the WebKit default. `BrowserSession` applies it to every tab and
+  routes the injected scripts through `BehaviorSets` keyed by the generation's `behaviorSetID`.
+- `BehaviorSets` (app layer) is the extension point for future WebKit versions: today all
+  generations map to the current `PrivacyScripts` shims. Adding a new behaviour set and a new
+  generation that points at it needs no change to the profile format or call sites.
+- This is version *labelling* (self-declared UA + defaults), not core switching. Public APIs
+  cannot load a different WebKit build; see ISOLATION_AND_LIMITATIONS §2.
 
 ## Testing
 
