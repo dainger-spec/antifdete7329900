@@ -20,6 +20,7 @@
 "editor.defaultName" = "Профиль %ld";
 "editor.deviceModel" = "Модель устройства";
 "editor.deviceModel.default" = "По умолчанию";
+"editor.deviceModel.effective" = "Заявляемый экран / ядра";
 "editor.ephemeral" = "Эфемерный (данные сайтов и история не пишутся на диск)";
 "editor.error.coords" = "Широта, долгота и точность должны быть числами";
 "editor.error.decrypt" = "Не удалось расшифровать профиль: %@";
