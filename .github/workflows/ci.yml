@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core-linux:
+    name: Core tests (Linux, swift-crypto)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+      - run: swift test
+
+  shims:
+    name: JavaScript shim tests (Node)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: TZ=America/New_York node scripts/test-shims.mjs
+
+  macos:
+    name: macOS app build + core tests (CryptoKit)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: swift test
+      - run: scripts/build-app.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PrivacyBrowser.app
+          path: build/PrivacyBrowser.app
