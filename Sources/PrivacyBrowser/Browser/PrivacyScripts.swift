@@ -44,6 +44,9 @@ enum PrivacyScripts {
         /// Per-profile seed for canvas noise (`canvasSeed(for:)`), so two iOS profiles of this
         /// app don't read back identical canvas bytes. Unused by macOS profiles.
         var canvasSeed: UInt32
+        /// Optional base64 image (data URL or raw base64) used as a fake camera feed for iOS profiles.
+        /// When set, getUserMedia(video) returns a canvas.captureStream() of this image.
+        var cameraImageBase64: String?
 
         struct Geolocation: Encodable {
             var mode: String // "deny" | "fixed"
@@ -88,8 +91,6 @@ enum PrivacyScripts {
         let generation = configuration.deviceGeneration
         var device: ShimConfiguration.Device?
         if generation.platform == .iOS || generation.platform == .iPadOS {
-            // `deviceModel` is nil when the stored model belongs to another platform, so an
-            // iPad model can't leak into an iPhone profile; fall back to the platform default.
             let model = configuration.deviceModel ?? DeviceModels.defaultModel(for: generation.platform)
             device = .init(platform: generation.platform == .iPadOS ? "iPad" : "iPhone",
                            hardwareConcurrency: model.hardwareConcurrency,
@@ -104,7 +105,8 @@ enum PrivacyScripts {
                                  webRTC: configuration.webRTCPolicy.rawValue,
                                  isIOS: device != nil,
                                  device: device,
-                                 canvasSeed: canvasSeed)
+                                 canvasSeed: canvasSeed,
+                                 cameraImageBase64: configuration.cameraImageBase64)
     }
 
     static func makeUserContentController(for configuration: ProfileConfiguration, canvasSeed: UInt32 = 0) -> WKUserContentController {
@@ -117,8 +119,6 @@ enum PrivacyScripts {
     }
 
     static func source(for configuration: ProfileConfiguration, canvasSeed: UInt32 = 0) -> String {
-        // JSON is a subset of JS, so the encoded configuration is a safe literal: no string
-        // concatenation of user-provided values into code.
         let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration, canvasSeed: canvasSeed)), encoding: .utf8)) ?? "{}"
         return "(function (CONFIG) {\n" + shimBody + "\n})(" + json + ");"
     }
@@ -136,6 +136,7 @@ function patchWindow(w) {
     try { patchScreen(w, CONFIG.device); } catch (e) {}
     try { patchTouch(w); } catch (e) {}
     try { patchCanvasWebGL(w, (CONFIG.canvasSeed >>> 0) || 1); } catch (e) {}
+    if (CONFIG.cameraImageBase64) { try { patchCamera(w, CONFIG.cameraImageBase64); } catch (e) {} }
   }
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
@@ -144,9 +145,6 @@ function patchWindow(w) {
 }
 
 // ------------------------------------------------------- device (iOS/iPadOS generations)
-// Only the properties iOS Safari really exposes. `vendor` is already "Apple Computer, Inc."
-// and `standalone` already exists on macOS WebKit; `language(s)` are left native (see the
-// header comment).
 function patchNavigator(w, device) {
   const nav = w.navigator;
   if (!nav) return;
@@ -166,23 +164,54 @@ function patchScreen(w, device) {
   define(w, 'devicePixelRatio', device.devicePixelRatio);
 }
 
-// Touch presence: `'ontouchstart' in window` is true on iOS, and maxTouchPoints > 0 without it
-// would be inconsistent. Only the property is declared — no touch events are ever fired, and
-// `TouchEvent` stays undefined (macOS WebKit has none), which a careful script can notice.
-// `PointerEvent.pointerType` is deliberately NOT forced to "touch": the events come from a
-// real mouse (pressure, width/height, hover, buttons say so), and sites that branch on
-// pointerType (drag, pointer capture, scroll handling) would break for the user.
 function patchTouch(w) {
   if (!('ontouchstart' in w)) define(w, 'ontouchstart', null);
 }
 
-// Canvas: getImageData read-backs get per-pixel noise — the low bit of R/G/B is flipped where
-// a hash of (seed, absolute x, absolute y) says so. Deterministic: the same profile reads the
-// same bytes for the same pixel every time (repeated reads can't expose random noise), two
-// profiles differ, and fully transparent pixels stay untouched. toDataURL/toBlob are NOT
-// perturbed, so comparing the two paths reveals the shim; the goal is to stop passive
-// linking, not to survive an active check.
-// WebGL: only the debug vendor/renderer strings; everything the GPU measures stays real.
+// Fake camera: intercept enumerateDevices + getUserMedia and return a canvas.captureStream()
+// of the supplied image. Canvas streams are detectable (getSettings empty, no real timestamps),
+// so this is for simple verification flows only, not high-assurance KYC.
+function patchCamera(w, b64) {
+  const md = w.navigator && w.navigator.mediaDevices;
+  if (!md || !md.getUserMedia || !md.enumerateDevices) return;
+
+  const fakeDevice = {
+    deviceId: 'pb-fake-cam',
+    kind: 'videoinput',
+    label: 'iPhone Front Camera',
+    groupId: 'pb-fake-group',
+    toJSON: function () { return { deviceId: this.deviceId, kind: this.kind, label: this.label, groupId: this.groupId }; }
+  };
+
+  const origEnumerate = md.enumerateDevices.bind(md);
+  define(md, 'enumerateDevices', function () {
+    return Promise.resolve([fakeDevice]);
+  });
+
+  const origGetUserMedia = md.getUserMedia.bind(md);
+  define(md, 'getUserMedia', function (constraints) {
+    const wantsVideo = constraints && (constraints.video === true || (constraints.video && typeof constraints.video === 'object'));
+    if (!wantsVideo) return origGetUserMedia(constraints);
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = w.document.createElement('canvas');
+          canvas.width = img.width || 1280;
+          canvas.height = img.height || 720;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          const stream = canvas.captureStream(30);
+          resolve(stream);
+        } catch (e) { reject(e); }
+      };
+      img.onerror = () => reject(new Error('fake camera image failed'));
+      img.src = b64.startsWith('data:') ? b64 : 'data:image/jpeg;base64,' + b64;
+    });
+  });
+}
+
 function patchCanvasWebGL(w, seed) {
   const proto = w.HTMLCanvasElement && w.HTMLCanvasElement.prototype;
   const wrappedContexts = new WeakSet();
@@ -215,14 +244,13 @@ function patchCanvasWebGL(w, seed) {
     if (!Ctor || !Ctor.prototype || typeof Ctor.prototype.getParameter !== 'function') continue;
     const origGetParameter = Ctor.prototype.getParameter;
     define(Ctor.prototype, 'getParameter', function getParameter(p) {
-      if (p === 0x9245) return 'Apple Inc.'; // UNMASKED_VENDOR_WEBGL
-      if (p === 0x9246) return 'Apple GPU';  // UNMASKED_RENDERER_WEBGL
+      if (p === 0x9245) return 'Apple Inc.';
+      if (p === 0x9246) return 'Apple GPU';
       return origGetParameter.apply(this, arguments);
     });
   }
 }
 
-// 32-bit integer hash of (seed, x, y); `Math.imul` keeps it in 32-bit arithmetic.
 function pixelHash(seed, x, y) {
   let h = (seed ^ Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1)) >>> 0;
   h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
@@ -230,11 +258,6 @@ function pixelHash(seed, x, y) {
   return (h ^ (h >>> 16)) >>> 0;
 }
 
-// ---------------------------------------------------------------- time zone
-// Covers: Intl.DateTimeFormat default zone (and everything built on it), Date local-time
-// getters, getTimezoneOffset, toString/toDateString/toTimeString, toLocale*String.
-// Not covered: Date constructed from local components (new Date(y, m, d)), Date.parse of
-// strings without an offset, and local setters (setHours, …) — these still use the host zone.
 function patchTimeZone(w, TZ) {
   const NativeDate = w.Date;
   const proto = NativeDate.prototype;
@@ -337,7 +360,6 @@ function patchTimeZone(w, TZ) {
   define(w.Intl, 'DateTimeFormat', DateTimeFormat);
 }
 
-// -------------------------------------------------------------- geolocation
 function patchGeolocation(w, geo) {
   const nav = w.navigator;
   if (!nav || !nav.geolocation) return;
@@ -382,7 +404,6 @@ function patchGeolocation(w, geo) {
   }
 }
 
-// ------------------------------------------------------------------- WebRTC
 function patchWebRTC(w, policy) {
   if (policy === 'unrestricted') return;
   const names = ['RTCPeerConnection', 'webkitRTCPeerConnection'];
@@ -394,7 +415,6 @@ function patchWebRTC(w, policy) {
     }
     return;
   }
-  // relayOnly: no host / server-reflexive candidates are gathered.
   const Native = w.RTCPeerConnection;
   if (!Native) return;
   const forceRelay = (config) => Object.assign({}, config, { iceTransportPolicy: 'relay' });
@@ -413,7 +433,6 @@ function patchWebRTC(w, policy) {
   }
 }
 
-// ----------------------------------------------------------- child windows
 function hookChildWindows(w) {
   const hook = (Ctor, prop, toWindow) => {
     if (!Ctor) return;
@@ -423,7 +442,7 @@ function hookChildWindows(w) {
       configurable: true, enumerable: descriptor.enumerable,
       get: function () {
         const value = descriptor.get.call(this);
-        try { patchWindow(toWindow(value)); } catch (e) {} // cross-origin: inaccessible, and gets its own injection
+        try { patchWindow(toWindow(value)); } catch (e) {}
         return value;
       }
     });
@@ -448,5 +467,4 @@ function define(target, name, value) {
 
 patchWindow(window);
 """#
-    // END SHIM
 }
