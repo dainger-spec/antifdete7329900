@@ -1,135 +1,164 @@
 # PrivacyBrowser — multi-profile WebKit browser prototype for macOS
 
 A Swift/SwiftUI + AppKit browser that runs several isolated profiles at once on the
-system WebKit engine (`WKWebView`). Each profile has its own website data store, proxy,
-user agent, time zone, geolocation and WebRTC policy. Profile metadata, settings and
-passwords are encrypted at rest with a key derived from a master password, and each
-profile's WebKit data is decrypted only while that profile is running.
+system WebKit engine (`WKWebView`), with tabs, per-profile history and bookmarks, and the
+App Sandbox enabled. Each profile has its own website data store, proxy, user agent, time
+zone, geolocation and WebRTC policy. Everything the app stores is encrypted at rest with
+a key derived from a master password. That covers profile list, settings, passwords,
+history, bookmarks and sync settings. A profile's WebKit website data is decrypted only
+while that profile is running.
 
-This is a prototype: the security-critical core is tested, but the app has not had a
-security review, and parts of it are approximations limited by what WebKit exposes. The
-tables below say which parts are which.
+This is a prototype. The core has unit tests, and the app is checked end-to-end against
+real WebKit in CI. It has not had a security review, and some features are
+approximations limited by what WebKit exposes. The tables below say which parts are which.
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, key hierarchy, on-disk layout, lifecycles
-- [docs/ISOLATION_AND_LIMITATIONS.md](docs/ISOLATION_AND_LIMITATIONS.md): what is isolated, what leaks, how to verify it
-- [docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md): sync wire format and backend contract
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, key hierarchy, on-disk layout, lifecycles, tabs, testing
+- [docs/ISOLATION_AND_LIMITATIONS.md](docs/ISOLATION_AND_LIMITATIONS.md): what is isolated, what leaks, fingerprinting, App Sandbox, verified results
+- [docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md): sync wire format, merge rules, what is server-ready vs. local-only
+- [docs/SYNC_SERVER_API.md](docs/SYNC_SERVER_API.md): HTTP contract for a future sync server
 
 ## Requirements
 
-- macOS 14 Sonoma or later. Two APIs the design depends on were added in macOS 14:
-  `WKWebsiteDataStore(forIdentifier:)` (persistent per-profile stores) and
-  `WKWebsiteDataStore.proxyConfigurations` (per-profile proxies).
+- macOS 14 Sonoma or later. The design depends on two APIs added in macOS 14:
+  `WKWebsiteDataStore(forIdentifier:)` and `WKWebsiteDataStore.proxyConfigurations`.
 - Xcode 15 or later, or the matching Command Line Tools (Swift 5.9+).
 
 ## Build and run
 
 ```bash
-# Build an ad-hoc-signed .app bundle into ./build
-scripts/build-app.sh
+scripts/build-app.sh                  # sandboxed release build → build/PrivacyBrowser.app
 open build/PrivacyBrowser.app
 
-# Optional: your own bundle ID / signing identity
+SANDBOX=0 scripts/build-app.sh        # hardened runtime without App Sandbox (debugging)
+APP_DIR=build/other scripts/build-app.sh
 BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
 ```
 
-Run the app from the `.app` bundle. WebKit names its storage directories after the
-bundle identifier, and a stable identifier keeps them in a predictable place.
-`swift run PrivacyBrowser` works for quick UI checks, but WebKit then falls back to the
-process name.
+- The default build is **sandboxed**. Its data lives in
+  `~/Library/Containers/<bundle-id>/Data/`. `build-app.sh` checks the signature and fails if
+  the sandbox entitlement doesn't match `SANDBOX`.
+- **Upgrading from an earlier unsandboxed build:** on the sandboxed build's first launch,
+  macOS moves `~/Library/Application Support/PrivacyBrowser` into the container
+  (`container-migration.plist`). The move is one-way. Archives sealed by the old build
+  restore at the sandboxed locations. Quit the old build normally first, so every profile
+  is sealed.
+- Ad-hoc signing (the default) is enough to run locally. To distribute, sign with a
+  Developer ID and notarize.
+- Run the `.app`, not `swift run`. WebKit names its storage directories after the bundle
+  identifier, and the sandbox needs a signed bundle. For Xcode, run `open Package.swift`
+  and select the `PrivacyBrowser` scheme. That scheme runs unsandboxed.
+- `PRIVACYBROWSER_VAULT_DIR=/path` uses a different vault, for development. In the sandbox
+  the path must be inside the container.
 
-To work in Xcode, run `open Package.swift`, select the `PrivacyBrowser` scheme, and run it.
-
-Tests:
+### Tests
 
 ```bash
-swift test                                        # core: crypto, vault, profiles, archive, sync
-TZ=America/New_York node scripts/test-shims.mjs   # JS shims (needs Node 18+)
+swift test                                        # core: 35 tests (also run on Linux in CI)
+TZ=America/New_York node scripts/test-shims.mjs   # JS shim logic (Node 18+)
+
+# End-to-end against the real WebKit of this Mac (headless, temporary vault, cleans up):
+python3 scripts/selftest_proxy.py --http 18080 --socks 18081 &
+PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
+  build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test
 ```
 
-The core (`BrowserCore`) also builds and tests on Linux, using swift-crypto in place of
-CryptoKit. CI (`.github/workflows/ci.yml`) runs the core tests on Linux and macOS, runs
-the shim tests, and builds the `.app` on a macOS runner.
-
-To keep data out of your real vault while developing, set
-`PRIVACYBROWSER_VAULT_DIR=/tmp/pb-dev` in the scheme's environment.
+CI (`.github/workflows/ci.yml`) runs on every push:
+- the core tests on Linux and macOS, and the shim tests;
+- `--self-test` for both the sandboxed and the unsandboxed build: 38 checks, covering WebKit
+  data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
+  profiles, shims under JavaScriptCore, HTTP CONNECT and SOCKS5 proxies, fail-closed, tabs,
+  history and bookmarks;
+- a container-migration check.
 
 ## Using it
 
 1. On first launch, create a master password. It cannot be recovered.
 2. Use **＋** to create a profile and set its start URL, proxy, user agent, time zone,
-   geolocation, WebRTC policy, and whether it is ephemeral.
-3. **Launch** opens a window for the profile. Profiles can run side by side; each window
-   shows its profile's name in the title and the toolbar.
-4. **Stop**, or closing the profile's last window, encrypts its website data and removes
-   the plaintext. **Lock** stops every profile and forgets all keys. Quitting does the same.
-5. Passwords: 🔑 fills a saved login on the current page, and the save button stores what
-   you typed into the page. Saved passwords also answer HTTP Basic/Digest auth. You can
-   manage them under **⋯ → Passwords…**.
-6. Sync (optional): **More → Sync with Folder…** syncs encrypted blobs with a folder.
-   Stop all profiles first.
+   geolocation, WebRTC policy, history recording and retention, and whether it is
+   ephemeral. Changes apply at the next launch.
+3. **Launch** opens a window for the profile. Profiles run side by side, and every window
+   and tab is labelled with its profile.
+4. **Tabs:**
+   - ⌘T opens a new tab, ⌘W closes one, ⇧⌘T reopens the last closed tab.
+   - ⌃⇥ and ⌃⇧⇥ move between tabs, ⌘1–⌘9 jump to one.
+   - ⌘-click or middle-click opens a link in a background tab. Popups open as tabs.
+5. **Bookmarks and history:**
+   - ☆ or ⌘D bookmarks the page (click again to remove).
+   - The 📖 menu opens bookmarks.
+   - ⌘Y opens the Library window: searchable history grouped by day, with Clear (last hour,
+     today, all), and bookmark management (add, edit, folders, drag to reorder, delete).
+6. **Passwords:** 🔑 fills a saved login and the save button stores what you typed. Saved
+   passwords also answer HTTP Basic/Digest. Manage them under **⋯ → Passwords…**.
+7. **Stop**, or closing the last window, saves history and encrypts the profile's website
+   data. **Lock** stops every profile and forgets the keys. Quitting does the same.
+8. **Sync (optional):** **More → Sync…** offers a folder (local-only) or a server (client
+   for the documented API; no server is included). Stop all profiles before syncing.
 
-Settings changes apply the next time the profile launches.
-
-## What is implemented and how
+## What is implemented, and how
 
 ### Fully implemented with native or system APIs
 
 | Feature | How |
 |---|---|
-| Per-profile storage isolation (cookies, localStorage, IndexedDB, Cache API, service workers, HTTP cache, HSTS, credentials) | `WKWebsiteDataStore(forIdentifier: profileUUID)`; every web view and popup of a profile uses that store |
-| Ephemeral profiles | `WKWebsiteDataStore.nonPersistent()` |
-| Several profiles running at once | One `BrowserSession` (data store + windows) per running profile |
-| Create / edit / delete / launch / stop profiles | `ProfileRepository` (core) + `ProfileManager` (app) |
-| Per-profile proxy (SOCKS5, HTTP CONNECT, HTTPS-to-proxy, auth, bypass list) | `WKWebsiteDataStore.proxyConfigurations` with Network.framework `ProxyConfiguration`, `allowFailover = false` (fail-closed) |
-| Per-profile user agent | `WKWebView.customUserAgent` (HTTP header and `navigator.userAgent`) |
-| Encrypted profile metadata and settings | AES-256-GCM, keys derived from the master password via PBKDF2-HMAC-SHA256 (600k iterations) and HKDF |
-| Password storage encrypted with a key derived from the user's password | Per-profile vault, HKDF(profile key), which is reachable only through the master password |
-| Master password change without re-encrypting data | Only the wrapped vault key is re-encrypted |
-| Encrypted sync client: data format, codec, engine, and a folder-based transport | `SyncEnvelope` / `SyncCodec` / `SyncEngine` / `LocalDirectorySyncTransport` |
-| Safe Browsing off by default (its lookups bypass the proxy) | `WKPreferences.isFraudulentWebsiteWarningEnabled` |
-| Non-web URL schemes blocked (they would leave the profile) | Navigation policy |
+| Per-profile storage isolation (cookies, localStorage, IndexedDB, Cache API, service workers, HTTP cache, HSTS, credentials) | `WKWebsiteDataStore(forIdentifier: profileUUID)`, shared by every tab and popup of the profile. **Verified live by the self-test** |
+| Ephemeral profiles | `WKWebsiteDataStore.nonPersistent()`; history kept in memory only |
+| Several profiles running at once | One `BrowserSession` per running profile |
+| Multi-tab windows | `BrowserTab` (one `WKWebView` each) + custom `TabStripView`; popups and ⌘-click open tabs; standard shortcuts |
+| Per-profile history | Encrypted `HistoryStore`: coalesced per URL, search, clear ranges, retention, cap; records committed and same-document navigations; credentials and fragments stripped |
+| Per-profile bookmarks | Encrypted `BookmarkStore`: folders, ordering, edit; star toggle, bookmarks menu, Library window |
+| Per-profile proxy (SOCKS5, HTTP CONNECT, HTTPS-to-proxy, auth, bypass list) | `WKWebsiteDataStore.proxyConfigurations`, `allowFailover = false`. **CONNECT tunnelling, SOCKS5 remote DNS and fail-closed verified by the self-test** |
+| Per-profile user agent | `WKWebView.customUserAgent` |
+| Encryption at rest of everything the app writes | AES-256-GCM; PBKDF2-HMAC-SHA256 (600k) → vault key → HKDF per purpose |
+| Password storage under a key derived from the user's password | Per-profile vault; explicit fill/save; HTTP auth |
+| App Sandbox | Default build; entitlements in `Resources/PrivacyBrowser.entitlements` (documented in the limitations doc, §9); container migration. **Sandbox enforcement and migration verified in CI** |
+| Encrypted sync client | Engine with CAS writes, per-record merges for bookmarks and history, tombstones; folder transport; HTTP transport for a documented API |
 
 ### Approximated (the platform offers no native API)
 
 | Feature | How | Main gaps |
 |---|---|---|
-| WebKit data encrypted while a profile is not running | On stop: archive and encrypt WebKit's directories, then `WKWebsiteDataStore.remove(forIdentifier:)`. On launch: decrypt and restore | Plaintext on disk while the profile runs; a crash leaves plaintext until the next unlock; the directory layout is undocumented (found by UUID name); there is no "flush" API, so a write in the last moments before removal can be lost |
-| Time zone | JS shim: `Intl` default zone, `Date` getters, `getTimezoneOffset`, `toString` and `toLocale*String` | Not applied in workers; local-component `Date` constructors, setters and `Date.parse` use the host zone; detectable |
-| Geolocation | JS shim: deny, or fixed coordinates; `permissions.query` matches | Detectable; the IP address still reveals approximate location unless the proxy matches |
-| WebRTC leak reduction | JS shim: remove `RTCPeerConnection` (default), or force `iceTransportPolicy: "relay"` | WebKit has no public switch to disable WebRTC; WebRTC UDP never uses the proxy; frames reached via `window.frames[i]` may be unpatched |
-| Password autofill | Explicit fill/save buttons that run in an isolated JS content world | No automatic form detection; main frame only; WKWebView has no AutoFill integration |
+| WebKit data encrypted while a profile is not running | Archive, encrypt, then `remove(forIdentifier:)` on stop; restore on launch. Directories found by UUID (`WebKitDataLayout`), layout checked in CI | Plaintext on disk while the profile runs; a crash leaves plaintext until the next unlock; no "flush" API (last-moment writes can be lost, not leaked) |
+| Time zone | JS shim (`Intl`, `Date` getters, offsets, string forms) | Not in workers; local-component constructors, setters and `Date.parse` use the host zone; detectable |
+| Geolocation | JS shim: deny (default) or fixed coordinates | Detectable; the IP address reveals location unless the proxy matches |
+| WebRTC leak reduction | JS shim: remove `RTCPeerConnection` (default) or force relay-only | No engine switch; WebRTC UDP never uses the proxy; `window.frames[i]` gap |
+| Password autofill | Explicit buttons in an isolated JS world | No automatic form detection; main frame only |
 
-### Not implemented
+### Not implemented / limited
 
-- Sync backend server (only the interface and the folder transport), and syncing of the
-  WebKit data archives.
-- Changing hardware/rendering characteristics (canvas, WebGL, fonts, screen, audio). All
-  profiles share the host's values.
-- Per-profile `Accept-Language` / `navigator.language`. WKWebView has no public API for it.
-- Tabs, history UI, bookmarks, extensions, and content blocking (`WKContentRuleList`
-  would be the native route).
-- App Sandbox. See the limitations doc.
+- **Fingerprinting:** canvas, WebGL, audio, fonts, screen, hardware values, languages and
+  the TLS fingerprint are identical across profiles, because WKWebView offers no public
+  API to change them. Sites that fingerprint the device can link profiles. See §2 of the
+  limitations doc.
+- Per-profile `Accept-Language` / `navigator.language` (no WKWebView API).
+- Sync server (only the client and its API spec), syncing of WebKit website data, and
+  per-entry merging of passwords (concurrent edits keep the remote version plus a
+  `.conflict` copy).
+- Session restore, tab drag-and-drop between windows, find-in-page, extensions, and
+  content blocking (`WKContentRuleList` would be the native route).
 
 ## Project layout
 
 ```
 Package.swift
 Sources/
-  BrowserCore/                 platform-independent, unit-tested
-    Crypto/                    AEAD (AES-GCM), PBKDF2, HKDF helpers
-    Vault/MasterVault.swift    master password → vault key; key hierarchy
-    Profiles/                  ProfileConfiguration, ProfileRepository (encrypted index/config)
-    Passwords/                 PasswordVault
-    Archive/                   streaming encrypted chunk format + directory archiver
-    Sync/                      envelope/codec, transport protocol + folder transport, engine
-    Support/                   errors, atomic 0600 file writes
-  PrivacyBrowser/              macOS app (SwiftUI + AppKit + WebKit)
-    App/                       @main app, AppModel (lock state), AppDelegate (seal on quit)
-    Browser/                   ProfileManager, BrowserSession, BrowserWindowController,
-                               WebDataStoreVault, ProxyConfigurationFactory, PrivacyScripts
-    UI/                        setup/unlock, profile list, editor, passwords
-Tests/BrowserCoreTests/        XCTest suite for the core
-Resources/                     Info.plist template, entitlements
-scripts/                       build-app.sh, test-shims.mjs
-docs/                          architecture, isolation and limitations, sync format
+  BrowserCore/                     platform-independent, unit-tested (macOS + Linux)
+    Crypto/                        AEAD (AES-GCM), PBKDF2, HKDF helpers
+    Vault/                         MasterVault (key hierarchy), DeviceSettings
+    Profiles/                      ProfileConfiguration, ProfileRepository
+    Passwords/                     PasswordVault
+    Library/                       HistoryStore, BookmarkStore (mergeable, tombstones)
+    Archive/                       encrypted chunk stream, directory archiver, WebKitDataLayout
+    Sync/                          envelope/codec, engine, SyncTransport contract
+      Transports/                  LocalDirectorySyncTransport (local-only), HTTPSyncTransport (server-ready)
+    Support/                       errors, atomic 0600 writes, encrypted document files
+  PrivacyBrowser/                  macOS app (SwiftUI + AppKit + WebKit)
+    App/                           main.swift, PrivacyBrowserApp, AppModel, AppEnvironment, SelfTest
+    Browser/                       ProfileManager, BrowserSession, BrowserWindowController, BrowserTab,
+                                   TabStripView, ProfileLibrary, LibraryWindowController, PasswordAutofill,
+                                   WebDataStoreVault, ProxyConfigurationFactory, PrivacyScripts
+    UI/                            setup/unlock, profile list, editor, library, sync settings
+Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
+Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist
+scripts/                           build-app.sh, test-shims.mjs, selftest_proxy.py
+docs/                              architecture, isolation and limitations, sync format, sync server API
 ```

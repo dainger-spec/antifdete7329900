@@ -20,25 +20,33 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 ## Components
 
 ```
-┌──────────────────────────── PrivacyBrowser (macOS app) ────────────────────────────┐
-│  SwiftUI: SetupView / UnlockView / ProfileListView / ProfileEditorView / Passwords │
-│        │                                                                           │
-│  AppModel ── lock state, vault, errors                                             │
-│        │                                                                           │
-│  ProfileManager ── launch / stop / delete / crash recovery                         │
-│        ├── WebDataStoreVault ── seal/unseal WebKit dirs  (EncryptedDirectoryArchive)│
-│        └── BrowserSession (one per running profile)                                │
-│              ├── WKWebsiteDataStore(forIdentifier:)  + proxyConfigurations          │
-│              ├── WKUserContentController + PrivacyScripts (TZ / geo / WebRTC)      │
-│              └── BrowserWindowController × n  (WKWebView, popups, auth, downloads)  │
-└────────────────────────────────────────────────────────────────────────────────────┘
-┌──────────────────────────── BrowserCore (platform-independent) ────────────────────┐
-│  MasterVault / UnlockedVault ── PBKDF2, key hierarchy                              │
-│  ProfileRepository ── encrypted index + per-profile config                         │
-│  PasswordVault ── per-profile encrypted credentials                                │
-│  EncryptedChunkStream / EncryptedDirectoryArchive ── streaming AEAD archives       │
-│  SyncCodec / SyncEngine / SyncTransport ── encrypted sync client                   │
-└────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────── PrivacyBrowser (macOS app) ────────────────────────────────┐
+│  main.swift ── app, or --self-test (headless WebKit checks) / migration check modes         │
+│  SwiftUI: Setup / Unlock / ProfileList / ProfileEditor / Passwords / SyncSettings / Library │
+│        │                                                                                   │
+│  AppModel ── lock state, vault, DeviceSettings (sync target), errors                       │
+│        │                                                                                   │
+│  ProfileManager ── launch / stop / delete / crash recovery                                 │
+│        ├── WebDataStoreVault ── seal/unseal WebKit dirs (WebKitDataLayout + archive)       │
+│        └── BrowserSession (one per running profile)                                        │
+│              ├── WKWebsiteDataStore(forIdentifier:) + proxyConfigurations                  │
+│              ├── WKUserContentController + PrivacyScripts (TZ / geo / WebRTC)              │
+│              ├── ProfileLibrary ── HistoryStore + BookmarkStore (observable, debounced)    │
+│              ├── LibraryWindowController ── bookmarks & history UI                         │
+│              └── BrowserWindowController × n                                               │
+│                    ├── TabStripView                                                        │
+│                    └── BrowserTab × n ── WKWebView + navigation/UI/download delegates      │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────── BrowserCore (platform-independent) ────────────────────────┐
+│  MasterVault / UnlockedVault ── PBKDF2, key hierarchy;  DeviceSettings (settings.bin)      │
+│  ProfileRepository ── encrypted index + per-profile config, store factories                │
+│  PasswordVault / HistoryStore / BookmarkStore ── per-profile encrypted documents           │
+│  EncryptedChunkStream / EncryptedDirectoryArchive / WebKitDataLayout ── WebKit data seal   │
+│  SyncCodec / SyncEngine ── encrypted sync client with per-record merges                    │
+│  SyncTransport ── backend contract                                                         │
+│     ├── LocalDirectorySyncTransport  (local-only)                                          │
+│     └── HTTPSyncTransport            (server-ready client, docs/SYNC_SERVER_API.md)        │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 `BrowserCore` has no dependency on AppKit or WebKit. It builds on Linux with
@@ -57,11 +65,14 @@ VMK (vault master key, random 256-bit)
    ├─ HKDF "profile-index"     → encrypts index.bin           (profile names, wrapped profile keys)
    ├─ HKDF "profile-key-wrap"  → wraps each profile key        (AAD "profile-key:v1:<uuid>")
    ├─ HKDF "sync-envelope"     → encrypts sync envelopes + sync-state.bin
-   └─ HKDF "sync-object-id"    → HMAC key for opaque sync object IDs
+   ├─ HKDF "sync-object-id"    → HMAC key for opaque sync object IDs
+   └─ HKDF "device-settings"   → settings.bin (sync target, token, last status; never synced)
 
 profile key (random 256-bit per profile, stored only wrapped)
    ├─ directly                 → config.bin                    (AAD "profile-config:v1:<uuid>")
    ├─ HKDF "passwords"         → passwords.bin                 (AAD "passwords:v1:<uuid>")
+   ├─ HKDF "history"           → history.bin                   (AAD "history:v1:<uuid>")
+   ├─ HKDF "bookmarks"         → bookmarks.bin                 (AAD "bookmarks:v1:<uuid>")
    └─ HKDF "webdata-archive", salt = random per archive → webdata.pbsa chunk key
 ```
 
@@ -75,18 +86,24 @@ plaintext.
 
 ## On-disk layout
 
+All paths are relative to the app's Library directory: `~/Library` for the unsandboxed
+build, `~/Library/Containers/<bundle-id>/Data/Library` for the sandboxed (default) build.
+
 ```
-~/Library/Application Support/PrivacyBrowser/      (0700)
+Application Support/PrivacyBrowser/      (0700)
   vault.json                      plaintext: format, vaultID, KDF params, wrapped VMK
   index.bin                       AES-GCM(index key, ProfileIndex JSON)
-  sync-state.bin                  AES-GCM(sync key, per-object revision + hash)   [only after sync]
+  settings.bin                    AES-GCM(device-settings key, DeviceSettings JSON)   [after configuring sync]
+  sync-state.bin                  AES-GCM(sync key, per-object revision + hash)        [only after sync]
   profiles/<uuid>/
     config.bin                    AES-GCM(profile key, ProfileConfiguration JSON)
     passwords.bin                 AES-GCM(password key, [PasswordEntry] JSON)
+    history.bin                   AES-GCM(history key, HistoryDocument JSON)          [not for ephemeral profiles]
+    bookmarks.bin                 AES-GCM(bookmarks key, BookmarkDocument JSON)
     webdata.pbsa                  streaming encrypted archive of WebKit's data dirs
 
-~/Library/WebKit/<bundle-id>/WebsiteDataStore/<uuid>/            ┐ WebKit-owned; exist only
-~/Library/Caches/<bundle-id>/WebKit/WebsiteDataStore/<uuid>/     ┘ while the profile runs
+WebKit/<bundle-id>/WebsiteDataStore/<uuid>/   unsandboxed  ┐ WebKit-owned plaintext; exists only
+WebKit/WebsiteDataStore/<uuid>/               sandboxed    ┘ while the profile runs (observed layout)
 ```
 
 Every file is written with mode 0600 through a temp file and `rename(2)`, so a crash
@@ -128,10 +145,44 @@ whole archive has authenticated.
 ```
 
 Ephemeral profiles skip the seal/unseal steps because `nonPersistent()` stores write
-nothing to disk.
+nothing to disk; their history is memory-only.
+
+At launch the profile key also opens the password vault, the history and the bookmarks
+(`ProfileLibrary`). History changes are saved encrypted after a 3 s debounce, off the main
+thread; `BrowserSession.shutDown()` flushes them synchronously before the data store is
+released.
 
 The app delays termination (`applicationShouldTerminate` → `.terminateLater`) until
 every running profile is sealed.
+
+## Tabs
+
+`BrowserWindowController` owns the tab model (`[BrowserTab]`, selected index, recently closed
+URLs) and a custom `TabStripView`. AppKit window tabbing is disabled, because it would let
+windows be merged and needs one `NSWindow` per tab.
+
+- `BrowserTab` owns one `WKWebView` and is its navigation, UI and download delegate. It talks
+  to its window through the `BrowserTabHost` protocol: state changes, new-tab requests,
+  close requests, attention for dialogs.
+- The selected tab's web view is the only one in the view hierarchy; others stay alive
+  off-screen.
+- `window.open` / `target=_blank` become tabs created from the configuration WebKit supplies.
+  ⌘-click and middle-click open background tabs with the profile's standard configuration.
+- ⌘W closes the tab: `BrowserWindow.performClose` intercepts menu-initiated closes. The
+  window's close button still closes the window. Shortcuts: ⌘T, ⇧⌘T, ⌃⇥ / ⌃⇧⇥, ⌘1–⌘9, ⌘L,
+  ⌘D, ⌘Y, ⌥⌘B.
+- History is recorded at `didCommit` and for same-document navigations, once WebKit has
+  made the URL the current back/forward item. Titles arrive later via KVO.
+
+## Testing
+
+| Layer | How | Where it runs |
+|---|---|---|
+| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sync, HTTP transport) | XCTest, 35 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| JS shims (logic) | Node + ICU (`scripts/test-shims.mjs`) | Linux, every push |
+| App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 15 runner, every push |
+| App Sandbox container migration | `--selftest-write-vault` / `--selftest-read-vault` | macOS 15 runner, every push |
+| Interactive UI (tab strip drawing, menus, sheets) | manual | — |
 
 ## Concurrency
 

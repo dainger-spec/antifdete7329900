@@ -48,6 +48,7 @@ public final class HistoryStore: @unchecked Sendable {
 
     private let file: EncryptedDocumentFile<HistoryDocument>
     private let lock = NSLock()
+    private let saveLock = NSLock()
     private var document: HistoryDocument
     private var dirty = false
     public let policy: Policy
@@ -149,11 +150,16 @@ public final class HistoryStore: @unchecked Sendable {
     // MARK: Persistence
 
     /// Writes the encrypted file if there are unsaved changes. No-op for memory-only stores.
+    ///
+    /// Saves are serialised and each takes its snapshot inside `saveLock`, so a background save
+    /// racing with a final `flush` can never write an older snapshot last.
     public func save() throws {
-        let snapshot: HistoryDocument? = lock.withLock { dirty ? document : nil }
-        guard let snapshot else { return }
-        try file.save(snapshot)
-        lock.withLock { if document == snapshot { dirty = false } }
+        try saveLock.withLock {
+            let snapshot: HistoryDocument? = lock.withLock { dirty ? document : nil }
+            guard let snapshot else { return }
+            try file.save(snapshot)
+            lock.withLock { if document == snapshot { dirty = false } }
+        }
     }
 
     // MARK: Normalisation

@@ -28,8 +28,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// APPROXIMATION: JavaScript removal/wrapping of `RTCPeerConnection`.
     public var webRTCPolicy: WebRTCPolicy
 
-    /// NATIVE: use `WKWebsiteDataStore.nonPersistent()` — nothing written to disk,
-    /// everything discarded when the profile stops.
+    /// NATIVE: use `WKWebsiteDataStore.nonPersistent()` — no website data written to disk,
+    /// everything discarded when the profile stops. History is kept in memory only;
+    /// bookmarks (explicit user data) are still saved, encrypted.
     public var ephemeral: Bool
 
     /// NATIVE: `WKPreferences.isFraudulentWebsiteWarningEnabled`. Safe Browsing lookups

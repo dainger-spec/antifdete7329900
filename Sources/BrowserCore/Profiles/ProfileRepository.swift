@@ -245,11 +245,6 @@ public final class ProfileRepository: @unchecked Sendable {
         }
     }
 
-    /// Deletes the profile's history file (e.g. when history is turned off for the profile).
-    public func deleteHistoryFile(for id: UUID) throws {
-        let url = historyURL(for: id)
-        if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
-    }
 
     // MARK: Private
 
