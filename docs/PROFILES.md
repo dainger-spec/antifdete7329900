@@ -125,15 +125,22 @@ Done here (core, tested on Linux/macOS CI):
       go through `LauncherModel.start(profile:)`. Running-count and env mapping
       are unit-tested; the menu UI compiles in CI.
 
+- [x] Host logging: meaningful events (launch, errors, VM IP) go to
+      `~/Library/Application Support/VMLauncher/launcher.log` (`FileLog`, size-
+      capped), with "Открыть файл лога" in the window; crashes already surface
+      as the error banner. Streamed subprocess lines stay in the in-window log.
+- [x] Profile management in the window: a list with launch / edit / delete and
+      "+", an editor (name, proxy, **clipboard toggle**, cookie import via an
+      open panel). Cookie import writes the profile's `cookies.json`
+      (`ProfileStore.importCookies`, tested). The clipboard flag is stored and
+      shown; Tart macOS VMs don't share the host clipboard by default, so "off"
+      is the real state — the toggle is the knob for when sharing is enabled.
+
 Next (need macOS to build/verify the UI and guest bits):
-- [ ] Logging to a host file + "Show log" button + clear VM-crash messages
 - [ ] Export/import a profile as one archive (snapshot + settings), Mac-portable
 - [ ] Base-image update: check, background download, migrate/warn
 - [ ] Resource display: RAM of running VMs, disk per profile, low-RAM warning
-- [ ] Onboarding + splash: Tart/image check cached between runs, progress with
-      benefit cards, cancel; fast path when the image already exists
-- [ ] Native light macOS UI pass (System Settings style, SF Pro)
-- [ ] Per-profile clipboard toggle surfaced in the UI
+- [ ] Broader System Settings-style restyle of the main window
 
 These are tracked so the UI work builds on this foundation rather than
 re-deriving it.

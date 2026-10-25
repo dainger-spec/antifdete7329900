@@ -45,6 +45,9 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var tartHelp: TartHelp?
 
     let profileStore = ProfileStore()
+    private let fileLog = FileLog()
+    /// Saved profiles, for the window's list (the menu bar reads the store too).
+    @Published private(set) var profiles: [Profile] = []
     /// The profile being launched, or nil for the plain URL launch (dev NAT).
     private(set) var activeProfile: Profile?
     /// The VM/base the current launch targets — a profile's, or the default.
@@ -76,6 +79,7 @@ final class LauncherModel: ObservableObject {
         environment["PATH"] = LauncherEnvironment.searchPath(environment["PATH"])
         baseEnvironment = environment
         isFirstRun = statusCache.load() == nil
+        profiles = (try? profileStore.list()) ?? []
     }
 
     // MARK: - State for the view
@@ -485,6 +489,65 @@ final class LauncherModel: ObservableObject {
         log.append(LogLine(id: nextLogID, text: text, kind: kind))
         nextLogID += 1
         if log.count > 2000 { log.removeFirst(log.count - 2000) }
+        // Persist the meaningful events (launch, errors, VM IP) to the host log
+        // file — not every streamed subprocess line, which would rewrite the
+        // file on each append.
+        if kind != .output { fileLog.append(text, level: kind == .error ? "error" : "info") }
+    }
+
+    // MARK: - Profiles (window list) and host log
+
+    public var logFileURL: URL { fileLog.url }
+    public func logFileTail() -> String { fileLog.tail() }
+
+    public func reloadProfiles() {
+        profiles = (try? profileStore.list()) ?? []
+    }
+
+    /// Create a profile from the editor. Returns nil and sets errorMessage on
+    /// a bad name / duplicate.
+    @discardableResult
+    public func createProfile(name: String, proxy: String?, clipboardShared: Bool) -> Profile? {
+        do {
+            let clean = proxy?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let profile = try profileStore.add(Profile(
+                name: name,
+                proxy: (clean?.isEmpty == false) ? clean : nil,
+                clipboardShared: clipboardShared))
+            reloadProfiles()
+            appendLog("Создан профиль «\(profile.name)» [\(profile.vmName)]", .info)
+            return profile
+        } catch {
+            errorMessage = "\(error)"
+            return nil
+        }
+    }
+
+    public func updateProfile(_ id: String, name: String, proxy: String?, clipboardShared: Bool) {
+        let clean = proxy?.trimmingCharacters(in: .whitespacesAndNewlines)
+        try? profileStore.update(id) {
+            $0.name = name
+            $0.proxy = (clean?.isEmpty == false) ? clean : nil
+            $0.clipboardShared = clipboardShared
+        }
+        reloadProfiles()
+    }
+
+    public func deleteProfile(_ id: String) {
+        try? profileStore.remove(id)
+        reloadProfiles()
+    }
+
+    /// Import cookies into a profile from a file the user picked.
+    public func importCookies(for id: String, from url: URL) {
+        do {
+            let count = try profileStore.importCookies(for: id, from: url)
+            reloadProfiles()
+            appendLog("Импортировано cookies: \(count) (профиль \(id))", .info)
+        } catch {
+            errorMessage = "Не удалось импортировать cookies: \(error)"
+            appendLog("Импорт cookies не удался: \(error)", .error)
+        }
     }
 
     static func formatBytes(_ bytes: Int64) -> String {

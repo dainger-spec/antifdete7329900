@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import VMControllerCore
 
@@ -11,6 +12,7 @@ struct ContentView: View {
                 FirstRunHint()
             }
             urlRow
+            ProfilesSection(model: model)
             overall
             StageList(progress: model.progress)
             if model.phase == .needsTart, let help = model.tartHelp {
@@ -297,9 +299,12 @@ struct LogView: View {
                         if let last { proxy.scrollTo(last, anchor: .bottom) }
                     }
                 }
-                Button("Скопировать журнал") { model.copyLog() }
-                    .controlSize(.small)
-                    .disabled(model.log.isEmpty)
+                HStack {
+                    Button("Открыть файл лога") { NSWorkspace.shared.open(model.logFileURL) }
+                    Button("Скопировать журнал") { model.copyLog() }
+                        .disabled(model.log.isEmpty)
+                }
+                .controlSize(.small)
             }
         } label: {
             Text("Журнал (\(model.log.count))")

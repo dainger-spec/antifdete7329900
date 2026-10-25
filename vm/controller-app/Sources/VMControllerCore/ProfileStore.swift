@@ -119,6 +119,29 @@ public final class ProfileStore {
             document.profiles.removeAll { $0.id == id }
         }
     }
+
+    /// Import cookies for a profile: parse the file (Netscape or JSON, detected),
+    /// write the agent-shaped `cookies.json` into the profile's directory, and
+    /// record the count on the profile. Returns how many cookies were imported.
+    @discardableResult
+    public func importCookies(for id: String, from fileURL: URL) throws -> Int {
+        guard let profile = try get(id) else { throw ProfileError.notFound(id) }
+        let text = try String(contentsOf: fileURL, encoding: .utf8)
+        let cookies = try CookieImport.parse(text)
+        let data = try CookieImport.serialize(cookies)
+        let directory = directory(for: profile)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: cookiesURL(for: profile), options: .atomic)
+        try update(id) { $0.cookieCount = cookies.count }
+        return cookies.count
+    }
+
+    /// Forget a profile's imported cookies.
+    public func clearCookies(for id: String) throws {
+        guard let profile = try get(id) else { throw ProfileError.notFound(id) }
+        try? FileManager.default.removeItem(at: cookiesURL(for: profile))
+        try update(id) { $0.cookieCount = 0 }
+    }
 }
 
 public enum ProfileError: Error, Equatable, CustomStringConvertible {
