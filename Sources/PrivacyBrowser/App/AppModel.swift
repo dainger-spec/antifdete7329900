@@ -1,3 +1,4 @@
+import AppKit
 import BrowserCore
 import Combine
 import Foundation
@@ -17,6 +18,10 @@ final class AppModel: ObservableObject {
     private(set) var manager: ProfileManager?
     private var managerObservation: AnyCancellable?
 
+    /// The main Profiles window (SwiftUI `Window` scene), captured via `WindowReader`. Brought
+    /// back to the front when a profile's windows all close, and on dock reopen.
+    weak var profilesWindow: NSWindow?
+
     /// See `AppEnvironment.vaultDirectory` (inside the container when sandboxed).
     let root: URL
 
@@ -26,6 +31,14 @@ final class AppModel: ObservableObject {
     }
 
     var hasRunningProfiles: Bool { manager?.hasRunningProfiles ?? false }
+
+    /// Brings the Profiles window to the front (e.g. after closing a profile, or on dock reopen).
+    func activateProfilesWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = profilesWindow {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
 
     // MARK: Vault
 
@@ -55,6 +68,10 @@ final class AppModel: ObservableObject {
         repository.removeOrphanedDirectories()
         let manager = ProfileManager(repository: repository)
         manager.onError = { [weak self] message in self?.errorMessage = message }
+        manager.onReturnToProfiles = { [weak self] in
+            self?.activateProfilesWindow()
+            self?.refresh()
+        }
         managerObservation = manager.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         self.repository = repository
         self.manager = manager

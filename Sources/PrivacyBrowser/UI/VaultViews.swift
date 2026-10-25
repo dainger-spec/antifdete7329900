@@ -6,38 +6,57 @@ struct SetupView: View {
     @State private var confirmation = ""
 
     private var problem: String? {
-        if password.count < 10 { return "Use at least 10 characters." }
-        if password != confirmation { return "Passwords do not match." }
+        if password.count < 10 { return L("setup.rule.length") }
+        if password != confirmation { return L("setup.rule.match") }
         return nil
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Create master password").font(.title2.bold())
-            Text("""
-            The master password encrypts the profile list, every profile's settings, saved passwords, \
-            and archived website data. It cannot be recovered: if you forget it, the data is lost.
-            """)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            SecureField("Master password", text: $password)
-            SecureField("Repeat master password", text: $confirmation)
-            HStack {
-                if let problem, !password.isEmpty {
-                    Text(problem).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if model.isWorking { ProgressView().controlSize(.small) }
-                Button("Create Vault") {
-                    Task { await model.createVault(password: password) }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(problem != nil || model.isWorking)
+        VStack(spacing: 20) {
+            VStack(spacing: 10) {
+                IconBadge(symbol: "lock.shield.fill", size: 56)
+                Text(L("setup.title")).font(.title.bold())
+                Text(L("setup.subtitle"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+
+            VStack(spacing: 10) {
+                SecureField(L("setup.field.password"), text: $password)
+                SecureField(L("setup.field.repeat"), text: $confirmation)
+            }
+            .textFieldStyle(.roundedBorder)
+            .controlSize(.large)
+
+            if let problem, !password.isEmpty {
+                Label(problem, systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Button {
+                Task { await model.createVault(password: password) }
+            } label: {
+                HStack {
+                    if model.isWorking { ProgressView().controlSize(.small) }
+                    Text(L("setup.action.create"))
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+            .disabled(problem != nil || model.isWorking)
         }
-        .textFieldStyle(.roundedBorder)
-        .padding(32)
-        .frame(maxWidth: 460)
+        .padding(28)
+        .frame(width: 420)
+        .card(padding: 28)
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.pageBackground)
     }
 }
 
@@ -46,21 +65,36 @@ struct UnlockView: View {
     @State private var password = ""
 
     var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "lock.fill").font(.system(size: 34)).foregroundStyle(.secondary)
-            Text("Vault locked").font(.title2.bold())
-            SecureField("Master password", text: $password)
+        VStack(spacing: 18) {
+            IconBadge(symbol: "lock.fill", size: 56)
+            Text(L("unlock.title")).font(.title.bold())
+            Text(L("unlock.subtitle")).font(.callout).foregroundStyle(.secondary)
+            SecureField(L("setup.field.password"), text: $password)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 280)
+                .controlSize(.large)
+                .frame(width: 300)
                 .onSubmit(unlock)
-            HStack {
-                if model.isWorking { ProgressView().controlSize(.small) }
-                Button("Unlock", action: unlock)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(password.isEmpty || model.isWorking)
+            Button {
+                unlock()
+            } label: {
+                HStack {
+                    if model.isWorking { ProgressView().controlSize(.small) }
+                    Text(L("unlock.action.unlock"))
+                }
+                .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .frame(width: 300)
+            .keyboardShortcut(.defaultAction)
+            .disabled(password.isEmpty || model.isWorking)
         }
-        .padding(32)
+        .padding(28)
+        .frame(width: 380)
+        .card(padding: 28)
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.pageBackground)
     }
 
     private func unlock() {
@@ -78,19 +112,21 @@ struct ChangePasswordView: View {
     @State private var confirmation = ""
 
     var body: some View {
-        Form {
-            SecureField("Current password", text: $current)
-            SecureField("New password", text: $new)
-            SecureField("Repeat new password", text: $confirmation)
-            Text("Only the wrapped vault key is re-encrypted; profile data is unchanged.")
-                .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(L("changepw.title")).font(.title3.bold()).padding([.top, .horizontal], 20)
+            Form {
+                SecureField(L("changepw.current"), text: $current)
+                SecureField(L("changepw.new"), text: $new)
+                SecureField(L("changepw.repeat"), text: $confirmation)
+                Text(L("changepw.note")).font(.caption).foregroundStyle(.secondary)
+            }
+            .formStyle(.grouped)
         }
-        .padding()
-        .frame(width: 380)
+        .frame(width: 400)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Change") {
+                Button(L("changepw.action.change")) {
                     Task {
                         await model.changePassword(current: current, new: new)
                         if model.errorMessage == nil { dismiss() }

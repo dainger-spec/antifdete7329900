@@ -12,9 +12,9 @@ final class LibraryNavigation: ObservableObject {
 /// decrypted only then).
 struct LibraryView: View {
     enum Section: String, CaseIterable, Identifiable {
-        case bookmarks = "Bookmarks"
-        case history = "History"
+        case bookmarks, history
         var id: String { rawValue }
+        var labelKey: String { self == .bookmarks ? "library.tab.bookmarks" : "library.tab.history" }
     }
 
     @ObservedObject var library: ProfileLibrary
@@ -23,20 +23,21 @@ struct LibraryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Section", selection: $navigation.section) {
-                ForEach(Section.allCases) { Text($0.rawValue).tag($0) }
+            Picker("", selection: $navigation.section) {
+                ForEach(Section.allCases) { Text(L($0.labelKey)).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 260)
-            .padding(10)
+            .frame(width: 280)
+            .padding(12)
             Divider()
             switch navigation.section {
             case .bookmarks: BookmarksPane(library: library, open: open)
             case .history: HistoryPane(library: library, open: open)
             }
         }
-        .frame(minWidth: 560, minHeight: 420)
+        .frame(minWidth: 580, minHeight: 440)
+        .background(Theme.pageBackground)
     }
 }
 
@@ -61,7 +62,7 @@ private struct BookmarksPane: View {
             if result.last?.id == key {
                 result[result.count - 1].items.append(bookmark)
             } else {
-                result.append(BookmarkGroup(id: key, title: bookmark.folder ?? "Favorites", items: [bookmark]))
+                result.append(BookmarkGroup(id: key, title: bookmark.folder ?? L("library.favorites"), items: [bookmark]))
             }
         }
         return result
@@ -85,31 +86,30 @@ private struct BookmarksPane: View {
             }
             .contextMenu(forSelectionType: UUID.self) { ids in
                 if let id = ids.first, let bookmark = bookmark(id) {
-                    Button("Open in New Tab") { openBookmark(bookmark) }
-                    Button("Edit…") { editing = .existing(bookmark) }
+                    Button(L("library.openNewTab")) { openBookmark(bookmark) }
+                    Button(L("library.edit")) { editing = .existing(bookmark) }
                     Divider()
-                    Button("Delete", role: .destructive) { library.removeBookmark(id: id) }
+                    Button(L("common.delete"), role: .destructive) { library.removeBookmark(id: id) }
                 }
             } primaryAction: { ids in
                 if let id = ids.first, let bookmark = bookmark(id) { openBookmark(bookmark) }
             }
             .overlay {
                 if library.bookmarks.isEmpty {
-                    Text("No bookmarks. Use ☆ in the toolbar or ⌘D to bookmark a page.")
-                        .foregroundStyle(.secondary)
+                    Text(L("library.bookmarks.empty")).foregroundStyle(.secondary)
                 }
             }
             Divider()
             HStack {
-                Button { editing = .new } label: { Label("Add", systemImage: "plus") }
-                Button("Edit…") { if let bookmark = selection.flatMap(bookmark) { editing = .existing(bookmark) } }
+                Button { editing = .new } label: { Label(L("common.add"), systemImage: "plus") }
+                Button(L("library.edit")) { if let bookmark = selection.flatMap(bookmark) { editing = .existing(bookmark) } }
                     .disabled(selection == nil)
-                Button("Delete", role: .destructive) { if let selection { library.removeBookmark(id: selection) } }
+                Button(L("common.delete"), role: .destructive) { if let selection { library.removeBookmark(id: selection) } }
                     .disabled(selection == nil)
                 Spacer()
-                Text("Drag to reorder within a folder").font(.caption).foregroundStyle(.secondary)
+                Text(L("library.reorderHint")).font(.caption).foregroundStyle(.secondary)
             }
-            .padding(8)
+            .padding(10)
         }
         .sheet(item: $editing) { target in
             BookmarkEditor(target: target, folders: library.bookmarkFolders) { title, url, folder in
@@ -165,13 +165,13 @@ private struct BookmarkEditor: View {
 
     var body: some View {
         Form {
-            TextField("Title", text: $title)
-            TextField("URL", text: $urlString, prompt: Text("https://example.com"))
+            TextField(L("library.editor.title"), text: $title)
+            TextField(L("library.editor.url"), text: $urlString, prompt: Text(verbatim: "https://example.com"))
             HStack {
-                TextField("Folder", text: $folder, prompt: Text("None (Favorites)"))
+                TextField(L("library.editor.folder"), text: $folder, prompt: Text(L("library.editor.folderNone")))
                 if !folders.isEmpty {
-                    Menu("Choose") {
-                        Button("None") { folder = "" }
+                    Menu(L("library.editor.choose")) {
+                        Button(L("library.editor.none")) { folder = "" }
                         ForEach(folders, id: \.self) { name in Button(name) { folder = name } }
                     }
                     .fixedSize()
@@ -179,11 +179,11 @@ private struct BookmarkEditor: View {
             }
             if let error { Text(error).foregroundStyle(.red).font(.caption) }
         }
-        .padding()
-        .frame(width: 440)
+        .formStyle(.grouped)
+        .frame(width: 460)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-            ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
+            ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
+            ToolbarItem(placement: .confirmationAction) { Button(L("common.save"), action: save) }
         }
         .onAppear {
             if case .existing(let bookmark) = target {
@@ -197,7 +197,7 @@ private struct BookmarkEditor: View {
     private func save() {
         guard let url = URL(string: urlString.trimmingCharacters(in: .whitespaces)),
               HistoryStore.normalizedURL(url) != nil else {
-            error = "Enter an http(s) URL."
+            error = L("library.editor.error")
             return
         }
         let trimmedFolder = folder.trimmingCharacters(in: .whitespaces)
@@ -238,25 +238,25 @@ private struct HistoryPane: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                TextField("Search history", text: $query)
+                TextField(L("history.search"), text: $query)
                     .textFieldStyle(.roundedBorder)
-                Menu("Clear") {
-                    Button("Last Hour") { library.clearHistory(since: Date().addingTimeInterval(-3_600)) }
-                    Button("Today") { library.clearHistory(since: Calendar.current.startOfDay(for: Date())) }
-                    Button("Today and Yesterday") {
+                Menu(L("history.clear")) {
+                    Button(L("history.clear.hour")) { library.clearHistory(since: Date().addingTimeInterval(-3_600)) }
+                    Button(L("history.clear.today")) { library.clearHistory(since: Calendar.current.startOfDay(for: Date())) }
+                    Button(L("history.clear.twoDays")) {
                         let today = Calendar.current.startOfDay(for: Date())
                         library.clearHistory(since: Calendar.current.date(byAdding: .day, value: -1, to: today))
                     }
                     Divider()
-                    Button("All History…") { confirmClearAll = true }
+                    Button(L("history.clear.all")) { confirmClearAll = true }
                 }
                 .fixedSize()
             }
-            .padding(8)
+            .padding(10)
             if !library.recordsHistory {
-                notice("History recording is turned off for this profile.")
+                notice(L("history.notice.off"))
             } else if !library.historyIsPersistent {
-                notice("Ephemeral profile: history is kept in memory only and discarded when the profile stops.")
+                notice(L("history.notice.ephemeral"))
             }
             List(selection: $selection) {
                 ForEach(days) { day in
@@ -278,27 +278,27 @@ private struct HistoryPane: View {
             }
             .contextMenu(forSelectionType: String.self) { urls in
                 if let url = urls.first {
-                    Button("Open in New Tab") { if let target = URL(string: url) { open(target) } }
-                    Button("Copy Address") {
+                    Button(L("library.openNewTab")) { if let target = URL(string: url) { open(target) } }
+                    Button(L("history.copyAddress")) {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(url, forType: .string)
                     }
                     Divider()
-                    Button("Delete", role: .destructive) { library.removeHistoryEntry(url: url) }
+                    Button(L("common.delete"), role: .destructive) { library.removeHistoryEntry(url: url) }
                 }
             } primaryAction: { urls in
                 if let url = urls.first.flatMap(URL.init(string:)) { open(url) }
             }
             .overlay {
                 if days.isEmpty {
-                    Text(query.isEmpty ? "No history." : "No matches.").foregroundStyle(.secondary)
+                    Text(query.isEmpty ? L("history.empty") : L("history.noMatches")).foregroundStyle(.secondary)
                 }
             }
         }
-        .confirmationDialog("Clear all history of this profile?", isPresented: $confirmClearAll) {
-            Button("Clear All History", role: .destructive) { library.clearHistory(since: nil) }
+        .confirmationDialog(L("history.clearAll.title"), isPresented: $confirmClearAll) {
+            Button(L("history.clearAll.confirm"), role: .destructive) { library.clearHistory(since: nil) }
         } message: {
-            Text("Website data (cookies, caches) is not affected.")
+            Text(L("history.clearAll.message"))
         }
     }
 
@@ -307,7 +307,7 @@ private struct HistoryPane: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
             .padding(.bottom, 6)
     }
 }

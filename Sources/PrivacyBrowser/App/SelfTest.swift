@@ -101,6 +101,7 @@ final class SelfTest {
             try await storageIsolationAndShims(repository)
             try await proxies(repository)
             try await tabsAndLibrary(repository)
+            try await windowLifecycle(repository)
         } catch {
             check("self-test ran without unexpected errors", false, String(describing: error))
         }
@@ -358,6 +359,39 @@ final class SelfTest {
         controller.selectTab(number: 1)
         check("tabs: select tab 1", controller.selectedTab?.url == one)
         controller.close()
+    }
+
+    // MARK: Window lifecycle (regression test for the close/quit crash)
+
+    /// Closing a profile's last window must (a) not release the window controller while AppKit is
+    /// still inside the close (use-after-free → crash), (b) report "all windows closed" on a later
+    /// run-loop turn so the profile is stopped, and (c) leave `shutDown()` safe to call twice
+    /// (window-close stop and lock/quit can both reach it).
+    private func windowLifecycle(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Lifecycle", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        var allClosedCalls = 0
+        session.onAllWindowsClosed = { allClosedCalls += 1 }
+
+        let first = session.openWindow(url: nil)
+        let second = session.openWindow(url: nil)
+        check("lifecycle: two windows open", session.windowCount == 2, "\(session.windowCount)")
+
+        first.window?.close()
+        let firstGone = await waitUntil(timeout: 5) { session.windowCount == 1 }
+        check("lifecycle: closing one window keeps the profile running", firstGone && allClosedCalls == 0,
+              "windows=\(session.windowCount) calls=\(allClosedCalls)")
+
+        second.window?.close()
+        // The callback is deferred out of windowWillClose, so it must not have run synchronously.
+        check("lifecycle: stop callback deferred out of windowWillClose", allClosedCalls == 0)
+        let stopped = await waitUntil(timeout: 5) { allClosedCalls == 1 && session.windowCount == 0 }
+        check("lifecycle: closing the last window reports all-closed once", stopped,
+              "windows=\(session.windowCount) calls=\(allClosedCalls)")
+
+        session.shutDown()
+        session.shutDown() // idempotent; must not crash or call back
+        check("lifecycle: shutDown is idempotent", allClosedCalls == 1 && session.windowCount == 0)
     }
 
     // MARK: Helpers

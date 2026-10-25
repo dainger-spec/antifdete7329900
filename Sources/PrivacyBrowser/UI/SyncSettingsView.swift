@@ -8,10 +8,15 @@ import SwiftUI
 /// docs/SYNC_SERVER_API.md (ready for a future server; none is included).
 struct SyncSettingsView: View {
     enum Mode: String, CaseIterable, Identifiable {
-        case off = "Off"
-        case folder = "Folder (local-only)"
-        case server = "Server"
+        case off, folder, server
         var id: String { rawValue }
+        var labelKey: String {
+            switch self {
+            case .off: return "sync.mode.off"
+            case .folder: return "sync.mode.folder"
+            case .server: return "sync.mode.server"
+            }
+        }
     }
 
     @EnvironmentObject private var model: AppModel
@@ -22,53 +27,53 @@ struct SyncSettingsView: View {
     @State private var loaded = false
 
     var body: some View {
-        Form {
-            Picker("Sync to", selection: $mode) {
-                ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .onChange(of: mode) { _, newValue in
-                if newValue == .off, model.syncTarget != nil { model.clearSyncTarget() }
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            Text(L("sync.title")).font(.title3.bold()).padding([.top, .horizontal], 20)
+            Form {
+                Picker(L("sync.to"), selection: $mode) {
+                    ForEach(Mode.allCases) { Text(L($0.labelKey)).tag($0) }
+                }
+                .onChange(of: mode) { _, newValue in
+                    if newValue == .off, model.syncTarget != nil { model.clearSyncTarget() }
+                }
 
-            switch mode {
-            case .off:
-                Text("Sync is off. Nothing leaves this Mac.").foregroundStyle(.secondary)
-            case .folder:
-                LabeledContent("Folder") {
+                switch mode {
+                case .off:
+                    Text(L("sync.off.note")).foregroundStyle(.secondary)
+                case .folder:
+                    LabeledContent(L("sync.folder.label")) {
+                        HStack {
+                            Text(folderPath ?? L("sync.folder.none")).lineLimit(1).truncationMode(.middle)
+                            Button(L("sync.folder.choose"), action: chooseFolder)
+                        }
+                    }
+                    Text(L("sync.folder.note")).font(.caption).foregroundStyle(.secondary)
+                case .server:
+                    TextField(L("sync.server.url"), text: $serverURL, prompt: Text(verbatim: "https://sync.example.com"))
+                    SecureField(L("sync.server.token"), text: $token)
+                    Button(L("sync.server.save")) { model.setSyncServer(baseURL: serverURL, token: token) }
+                        .disabled(serverURL.isEmpty)
+                    Text(L("sync.server.note")).font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section(L("sync.status")) {
+                    Text(statusText).foregroundStyle(model.lastSyncStatus?.error == nil ? Color.secondary : Color.red)
                     HStack {
-                        Text(folderPath ?? "None chosen").lineLimit(1).truncationMode(.middle)
-                        Button("Choose…", action: chooseFolder)
+                        Button(L("sync.now")) { Task { await model.syncNow() } }
+                            .disabled(model.syncTarget == nil || model.isWorking || model.hasRunningProfiles)
+                        if model.isWorking { ProgressView().controlSize(.small) }
+                        if model.hasRunningProfiles {
+                            Text(L("sync.stopFirst")).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
-                Text("Encrypted blobs are written to this folder (a NAS share, an external disk). Use one folder per vault. Concurrent writes from two Macs through a file-syncing service can produce conflict copies, which are ignored.")
-                    .font(.caption).foregroundStyle(.secondary)
-            case .server:
-                TextField("Server URL", text: $serverURL, prompt: Text("https://sync.example.com"))
-                SecureField("Access token", text: $token)
-                Button("Save Server") { model.setSyncServer(baseURL: serverURL, token: token) }
-                    .disabled(serverURL.isEmpty)
-                Text("Client for the API in docs/SYNC_SERVER_API.md. No server is included in this project; HTTPS is required.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(L("sync.footer")).font(.caption).foregroundStyle(.secondary)
             }
-
-            Section("Status") {
-                Text(statusText).foregroundStyle(model.lastSyncStatus?.error == nil ? Color.secondary : Color.red)
-                HStack {
-                    Button("Sync Now") { Task { await model.syncNow() } }
-                        .disabled(model.syncTarget == nil || model.isWorking || model.hasRunningProfiles)
-                    if model.isWorking { ProgressView().controlSize(.small) }
-                    if model.hasRunningProfiles {
-                        Text("Stop all profiles first.").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            Text("Synced, end-to-end encrypted: profile list, settings, saved passwords, bookmarks, history. Not synced: website data (cookies, storage, cache). The sync location can see object counts, sizes, timing, and the vault header needed to unlock with the master password.")
-                .font(.caption).foregroundStyle(.secondary)
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
-        .frame(width: 520)
+        .frame(width: 540)
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            ToolbarItem(placement: .confirmationAction) { Button(L("common.done")) { dismiss() } }
         }
         .onAppear(perform: load)
     }
@@ -79,14 +84,15 @@ struct SyncSettingsView: View {
     }
 
     private var statusText: String {
-        guard let status = model.lastSyncStatus else { return "Never synced." }
+        guard let status = model.lastSyncStatus else { return L("sync.status.never") }
         let when = status.date.formatted(date: .abbreviated, time: .shortened)
-        if let error = status.error { return "Last attempt \(when) failed: \(error)" }
-        var parts = ["\(status.pushed) uploaded", "\(status.pulled) downloaded"]
-        if status.merged > 0 { parts.append("\(status.merged) merged") }
-        if status.conflicts > 0 { parts.append("\(status.conflicts) conflicts (remote kept, local copy saved)") }
-        if status.deferred > 0 { parts.append("\(status.deferred) deferred to next sync") }
-        return "Last sync \(when): " + parts.joined(separator: ", ")
+        if let error = status.error { return String(format: L("sync.status.failed"), when, error) }
+        var parts = [String(format: L("sync.status.uploaded"), status.pushed),
+                     String(format: L("sync.status.downloaded"), status.pulled)]
+        if status.merged > 0 { parts.append(String(format: L("sync.status.merged"), status.merged)) }
+        if status.conflicts > 0 { parts.append(String(format: L("sync.status.conflicts"), status.conflicts)) }
+        if status.deferred > 0 { parts.append(String(format: L("sync.status.deferred"), status.deferred)) }
+        return String(format: L("sync.status.ok"), when, parts.joined(separator: ", "))
     }
 
     private func load() {
@@ -107,7 +113,7 @@ struct SyncSettingsView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
-        panel.message = "Choose a folder to use as the encrypted sync store."
+        panel.message = L("sync.folder.panel")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         model.setSyncFolder(url)
     }

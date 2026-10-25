@@ -14,7 +14,7 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
         self.onClose = onClose
         let hosting = NSHostingController(rootView: LibraryView(library: session.library, navigation: navigation, open: open))
         let window = NSWindow(contentViewController: hosting)
-        window.title = "[\(session.profileName)] Library"
+        window.title = String(format: L("window.library.title"), session.profileName)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 680, height: 540))
         window.isReleasedWhenClosed = false
@@ -34,6 +34,9 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        onClose()
+        // Same use-after-free guard as BrowserWindowController: `onClose` drops the session's
+        // reference to this controller, so release it only after AppKit's close machinery returns.
+        let onClose = self.onClose
+        DispatchQueue.main.async { onClose() }
     }
 }

@@ -32,6 +32,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/PrivacyBrowser" "$APP/Contents/MacOS/PrivacyBrowser"
 sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Info.plist > "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
+
+# Localized strings into Bundle.main, where the app looks them up (see Localization.swift).
+for lang in en ru; do
+  cp -R "Resources/$lang.lproj" "$APP/Contents/Resources/$lang.lproj"
+  plutil -lint "$APP/Contents/Resources/$lang.lproj/Localizable.strings" >/dev/null
+done
 if [[ "$SANDBOX" == "1" ]]; then
   sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/container-migration.plist > "$APP/Contents/Resources/container-migration.plist"
   plutil -lint "$APP/Contents/Resources/container-migration.plist" >/dev/null

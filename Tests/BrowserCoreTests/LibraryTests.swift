@@ -200,3 +200,21 @@ final class ConfigurationCompatibilityTests: XCTestCase {
         XCTAssertNoThrow(try ProfileConfiguration(historyRetentionDays: nil).validate())
     }
 }
+
+final class UserAgentPresetTests: XCTestCase {
+    func testPresetsAndEngineConsistency() {
+        XCTAssertFalse(UserAgentPresets.all.isEmpty)
+        // The recommended preset must be engine-consistent and look like macOS Safari.
+        let mac = UserAgentPresets.preset(id: "safari-macos")
+        XCTAssertEqual(mac?.matchesEngine, true)
+        XCTAssertTrue(mac?.userAgent.contains("Macintosh") == true)
+        XCTAssertTrue(mac?.userAgent.contains("Safari") == true)
+        // Device-claim presets are honestly marked as NOT matching the engine.
+        XCTAssertEqual(UserAgentPresets.preset(id: "safari-iphone")?.matchesEngine, false)
+        XCTAssertEqual(UserAgentPresets.preset(id: "safari-ipad")?.matchesEngine, false)
+        // Round-trip lookup by UA string.
+        XCTAssertEqual(UserAgentPresets.matching(userAgent: mac?.userAgent)?.id, "safari-macos")
+        XCTAssertNil(UserAgentPresets.matching(userAgent: "Mozilla/5.0 Something Custom"))
+        XCTAssertNil(UserAgentPresets.matching(userAgent: nil))
+    }
+}

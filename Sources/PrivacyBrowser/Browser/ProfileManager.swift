@@ -21,6 +21,9 @@ final class ProfileManager: ObservableObject {
     @Published private(set) var busyProfileIDs: Set<UUID> = []
 
     var onError: ((String) -> Void)?
+    /// Called after a profile's own windows all close (not on explicit stop/lock), so the app
+    /// can bring the Profiles window back to the front.
+    var onReturnToProfiles: (() -> Void)?
 
     private let repository: ProfileRepository
     private let webDataVault: WebDataStoreVault
@@ -68,6 +71,9 @@ final class ProfileManager: ObservableObject {
         let session = BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
                                      passwordVault: passwords, library: library)
         session.onAllWindowsClosed = { [weak self] in
+            // Return to the Profiles window right away; sealing then runs in the background and
+            // flips the row to "Encrypting…" via busyProfileIDs.
+            self?.onReturnToProfiles?()
             Task { @MainActor in await self?.stopReportingErrors(id) }
         }
         sessions[id] = session

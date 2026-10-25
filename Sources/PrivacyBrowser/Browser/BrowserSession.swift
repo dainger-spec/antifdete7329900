@@ -129,14 +129,20 @@ final class BrowserSession {
     /// data store so that WebKit can release the store's network session (precondition for
     /// sealing it).
     func shutDown() {
+        guard !isClosing else { return } // idempotent: window-close stop and lock/quit can both call this
         isClosing = true
-        libraryWindow?.close()
+        let libraryWin = libraryWindow
         libraryWindow = nil
-        for controller in windows {
+        // Snapshot and clear first so any re-entrant `windowDidClose` sees an empty list.
+        // `tearDown()` nils each window's delegate, so `close()` here never calls back into us.
+        let toClose = windows
+        windows.removeAll()
+        libraryWin?.window?.delegate = nil
+        libraryWin?.close()
+        for controller in toClose {
             controller.tearDown()
             controller.close()
         }
-        windows.removeAll()
         library.flush()
         userContentController.removeAllUserScripts()
         dataStore = nil

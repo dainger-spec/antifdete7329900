@@ -13,6 +13,8 @@ MainActor.assumeIsolated {
     } else if arguments.contains("--selftest-read-vault") {
         SelfTest.migrationStep(write: false)
     } else {
+        // Russian by default (English fallback); must be set before AppKit builds its menus.
+        Localization.applyProcessLanguage()
         PrivacyBrowserApp.main()
     }
 }

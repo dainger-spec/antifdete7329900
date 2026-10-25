@@ -64,7 +64,7 @@ final class BrowserTab: NSObject {
     var displayTitle: String {
         if let title = webView.title, !title.isEmpty { return title }
         if let host = webView.url?.host { return host }
-        return "New Tab"
+        return L("tab.newTab")
     }
 
     var url: URL? { webView.url }
@@ -199,10 +199,11 @@ extension BrowserTab: WKNavigationDelegate {
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+        let heading = L("errorpage.title")
         let html = """
-        <html><head><title>Page could not be loaded</title></head>
-        <body style="font: 14px -apple-system; padding: 40px; color: #444">
-        <h2>Page could not be loaded</h2><p>\(escaped)</p></body></html>
+        <html><head><meta charset="utf-8"><title>\(heading)</title></head>
+        <body style="font: 15px -apple-system; padding: 48px; color: #333; background: #fff">
+        <h2 style="font-weight: 600">\(heading)</h2><p style="color:#666">\(escaped)</p></body></html>
         """
         webView.loadHTMLString(html, baseURL: nil)
     }
@@ -237,18 +238,18 @@ extension BrowserTab: WKNavigationDelegate {
 
     private func promptForHTTPCredentials(host: String, realm: String?, completion: @escaping (URLCredential?) -> Void) {
         let alert = NSAlert()
-        alert.messageText = "Log in to \(host)"
-        alert.informativeText = realm.map { "Realm: \($0)" } ?? ""
+        alert.messageText = String(format: L("auth.login"), host)
+        alert.informativeText = realm.map { String(format: L("auth.realm"), $0) } ?? ""
         let user = NSTextField(frame: NSRect(x: 0, y: 30, width: 260, height: 24))
-        user.placeholderString = "Username"
+        user.placeholderString = L("passwords.placeholder.username")
         let pass = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        pass.placeholderString = "Password"
+        pass.placeholderString = L("passwords.placeholder.password")
         let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
         accessory.addSubview(user)
         accessory.addSubview(pass)
         alert.accessoryView = accessory
-        alert.addButton(withTitle: "Log In")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L("auth.logIn"))
+        alert.addButton(withTitle: L("common.cancel"))
         presentAlert(alert) { response in
             completion(response == .alertFirstButtonReturn
                        ? URLCredential(user: user.stringValue, password: pass.stringValue, persistence: .forSession)
@@ -282,8 +283,8 @@ extension BrowserTab: WKUIDelegate {
         let alert = NSAlert()
         alert.messageText = frame.securityOrigin.host
         alert.informativeText = message
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L("common.ok"))
+        alert.addButton(withTitle: L("common.cancel"))
         presentAlert(alert) { completionHandler($0 == .alertFirstButtonReturn) }
     }
 
@@ -295,8 +296,8 @@ extension BrowserTab: WKUIDelegate {
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.stringValue = defaultText ?? ""
         alert.accessoryView = field
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L("common.ok"))
+        alert.addButton(withTitle: L("common.cancel"))
         presentAlert(alert) { completionHandler($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
     }
 
@@ -319,16 +320,16 @@ extension BrowserTab: WKUIDelegate {
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         let what: String
         switch type {
-        case .camera: what = "camera"
-        case .microphone: what = "microphone"
-        case .cameraAndMicrophone: what = "camera and microphone"
-        @unknown default: what = "media devices"
+        case .camera: what = L("media.camera")
+        case .microphone: what = L("media.microphone")
+        case .cameraAndMicrophone: what = L("media.cameraAndMic")
+        @unknown default: what = L("media.devices")
         }
         let alert = NSAlert()
-        alert.messageText = "Allow \(origin.host) to use your \(what)?"
-        alert.informativeText = "Profile: \(context.profileName). Media streams are not routed through the profile proxy."
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Deny")
+        alert.messageText = String(format: L("media.allow"), origin.host, what)
+        alert.informativeText = String(format: L("media.note"), context.profileName)
+        alert.addButton(withTitle: L("media.allowButton"))
+        alert.addButton(withTitle: L("media.denyButton"))
         presentAlert(alert) { decisionHandler($0 == .alertFirstButtonReturn ? .grant : .deny) }
     }
 }
@@ -345,7 +346,7 @@ extension BrowserTab: WKDownloadDelegate {
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        showMessage("Download failed: \(error.localizedDescription)")
+        showMessage(String(format: L("download.failed"), error.localizedDescription))
     }
 
     static func uniqueDownloadURL(suggestedFilename: String) -> URL {

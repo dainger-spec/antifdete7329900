@@ -13,10 +13,10 @@ struct RootView: View {
             case .unlocked: ProfileListView()
             }
         }
-        .frame(minWidth: 620, minHeight: 420)
-        .alert("Error", isPresented: Binding(get: { model.errorMessage != nil },
-                                             set: { if !$0 { model.errorMessage = nil } })) {
-            Button("OK", role: .cancel) {}
+        .frame(minWidth: 680, minHeight: 480)
+        .alert(L("common.error"), isPresented: Binding(get: { model.errorMessage != nil },
+                                                       set: { if !$0 { model.errorMessage = nil } })) {
+            Button(L("common.ok"), role: .cancel) {}
         } message: {
             Text(model.errorMessage ?? "")
         }
@@ -32,53 +32,98 @@ struct ProfileListView: View {
     @State private var showingSync = false
 
     var body: some View {
-        List {
-            ForEach(model.profiles) { profile in
-                ProfileRow(profile: profile,
-                           running: model.isRunning(profile.id),
-                           busy: model.isBusy(profile.id),
-                           onLaunch: { Task { await model.launch(profile.id) } },
-                           onStop: { Task { await model.stop(profile.id) } },
-                           onNewWindow: { model.manager?.openNewWindow(profile.id) },
-                           onLibrary: { model.manager?.showLibrary(profile.id, section: .bookmarks) },
-                           onEdit: { editing = .existing(profile) },
-                           onPasswords: { passwordsFor = profile },
-                           onDelete: { pendingDelete = profile })
-            }
+        VStack(spacing: 0) {
+            header
+            Divider()
+            content
         }
-        .overlay {
-            if model.profiles.isEmpty {
-                Text("No profiles yet. Create one with ＋.").foregroundStyle(.secondary)
-            }
-        }
+        .background(Theme.pageBackground)
         .toolbar {
             ToolbarItemGroup {
                 if model.isWorking { ProgressView().controlSize(.small) }
-                Button { editing = .new } label: { Label("New Profile", systemImage: "plus") }
                 Menu {
-                    Button("Sync…") { showingSync = true }
-                    Button("Sync Now") { Task { await model.syncNow() } }
+                    Button(L("profiles.menu.sync")) { showingSync = true }
+                    Button(L("profiles.menu.syncNow")) { Task { await model.syncNow() } }
                         .disabled(model.syncTarget == nil)
                     Divider()
-                    Button("Change Master Password…") { changingPassword = true }
-                } label: { Label("More", systemImage: "ellipsis.circle") }
-                Button { Task { await model.lock() } } label: { Label("Lock", systemImage: "lock") }
-                    .help("Stop all profiles, encrypt their data, and forget all keys")
+                    Button(L("profiles.menu.changePassword")) { changingPassword = true }
+                } label: { Label(L("profiles.menu.more"), systemImage: "ellipsis.circle") }
+                Button { Task { await model.lock() } } label: { Label(L("profiles.action.lock"), systemImage: "lock") }
+                    .help(L("profiles.action.lock.help"))
             }
         }
         .sheet(item: $editing) { target in ProfileEditorView(target: target) }
         .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
         .sheet(isPresented: $changingPassword) { ChangePasswordView() }
         .sheet(isPresented: $showingSync) { SyncSettingsView() }
-        .confirmationDialog("Delete profile “\(pendingDelete?.name ?? "")”?",
+        .confirmationDialog(String(format: L("profiles.delete.title"), pendingDelete?.name ?? ""),
                             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             presenting: pendingDelete) { profile in
-            Button("Delete Profile and All Its Data", role: .destructive) {
+            Button(L("profiles.delete.confirm"), role: .destructive) {
                 Task { await model.deleteProfile(profile.id) }
             }
         } message: { _ in
-            Text("Cookies, site data, cache, settings and saved passwords of this profile are deleted.")
+            Text(L("profiles.delete.message"))
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            IconBadge(symbol: "person.2.fill", size: 40)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(L("profiles.title")).font(.title2.bold())
+                Text(String(format: L("profiles.count"), model.profiles.count))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { editing = .new } label: {
+                Label(L("profiles.action.new"), systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(Theme.cardBackground)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if model.profiles.isEmpty {
+            emptyState
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(model.profiles) { profile in
+                        ProfileRow(profile: profile,
+                                   running: model.isRunning(profile.id),
+                                   busy: model.isBusy(profile.id),
+                                   onLaunch: { Task { await model.launch(profile.id) } },
+                                   onStop: { Task { await model.stop(profile.id) } },
+                                   onNewWindow: { model.manager?.openNewWindow(profile.id) },
+                                   onLibrary: { model.manager?.showLibrary(profile.id, section: .bookmarks) },
+                                   onEdit: { editing = .existing(profile) },
+                                   onPasswords: { passwordsFor = profile },
+                                   onDelete: { pendingDelete = profile })
+                    }
+                }
+                .padding(20)
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            IconBadge(symbol: "person.crop.circle.badge.plus", tint: .secondary, size: 64)
+            Text(L("profiles.empty.title")).font(.title3.weight(.semibold))
+            Text(L("profiles.empty.subtitle"))
+                .foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Button { editing = .new } label: { Label(L("profiles.action.new"), systemImage: "plus") }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -95,10 +140,16 @@ private struct ProfileRow: View {
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(running ? Color.green : Color.secondary.opacity(0.3))
-                .frame(width: 9, height: 9)
+        HStack(spacing: 14) {
+            ZStack {
+                IconBadge(symbol: "globe", tint: running ? Theme.accent : .secondary, size: 40)
+                if running {
+                    Circle().fill(Theme.runningDot)
+                        .frame(width: 11, height: 11)
+                        .overlay(Circle().stroke(Theme.cardBackground, lineWidth: 2))
+                        .offset(x: 15, y: 15)
+                }
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(profile.name).font(.headline)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
@@ -106,32 +157,42 @@ private struct ProfileRow: View {
             Spacer()
             if busy { ProgressView().controlSize(.small) }
             if running {
-                Button("New Window", action: onNewWindow)
-                Button("Stop", action: onStop).disabled(busy)
+                Button(L("profiles.row.newWindow"), action: onNewWindow).controlSize(.large)
+                Button(L("profiles.row.stop"), action: onStop).controlSize(.large).disabled(busy)
             } else {
-                Button("Launch", action: onLaunch).disabled(busy)
+                Button(L("profiles.row.launch"), action: onLaunch)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(busy)
             }
             Menu {
                 if running {
-                    Button("Bookmarks & History…", action: onLibrary)
+                    Button(L("profiles.row.library"), action: onLibrary)
                 }
-                Button("Edit…", action: onEdit)
-                Button("Passwords…", action: onPasswords)
+                Button(L("profiles.row.edit"), action: onEdit)
+                Button(L("profiles.row.passwords"), action: onPasswords)
                 Divider()
-                Button("Delete…", role: .destructive, action: onDelete)
+                Button(L("profiles.row.delete"), role: .destructive, action: onDelete)
             } label: { Image(systemName: "ellipsis") }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 .disabled(busy)
         }
-        .padding(.vertical, 4)
+        .padding(14)
+        .card(padding: 0)
+        .overlay(alignment: .leading) {
+            if running {
+                RoundedRectangle(cornerRadius: 2).fill(Theme.runningDot)
+                    .frame(width: 3, height: 28).padding(.leading, 1)
+            }
+        }
     }
 
     private var subtitle: String {
-        if busy { return running ? "Starting…" : "Encrypting data…" }
-        if running { return "Running" }
-        guard let last = profile.lastLaunchedAt else { return "Never launched" }
-        return "Last used " + last.formatted(.relative(presentation: .named))
+        if busy { return running ? L("profiles.row.starting") : L("profiles.row.encrypting") }
+        if running { return L("profiles.row.running") }
+        guard let last = profile.lastLaunchedAt else { return L("profiles.row.neverLaunched") }
+        return String(format: L("profiles.row.lastUsed"), last.formatted(.relative(presentation: .named)))
     }
 }
 
@@ -146,38 +207,44 @@ struct PasswordListView: View {
     @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Saved passwords — \(profile.name)").font(.headline)
+        VStack(alignment: .leading, spacing: 12) {
+            Text(String(format: L("passwords.title"), profile.name)).font(.title3.bold())
             List {
                 ForEach(entries) { entry in
                     HStack {
+                        IconBadge(symbol: "key.fill", size: 28)
                         VStack(alignment: .leading) {
                             Text(entry.origin)
-                            Text(entry.username.isEmpty ? "(no username)" : entry.username)
+                            Text(entry.username.isEmpty ? L("passwords.noUsername") : entry.username)
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Button(role: .destructive) { remove(entry) } label: { Image(systemName: "trash") }
                             .buttonStyle(.borderless)
                     }
+                    .padding(.vertical, 2)
                 }
             }
-            .frame(minHeight: 180)
+            .scrollContentBackground(.hidden)
+            .background(Theme.fieldBackground)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+            .frame(minHeight: 200)
             HStack {
-                TextField("https://site.example", text: $origin)
-                TextField("Username", text: $username)
-                SecureField("Password", text: $password)
-                Button("Add", action: add).disabled(password.isEmpty)
+                TextField(L("passwords.placeholder.origin"), text: $origin)
+                TextField(L("passwords.placeholder.username"), text: $username)
+                SecureField(L("passwords.placeholder.password"), text: $password)
+                Button(L("passwords.add"), action: add).disabled(password.isEmpty)
             }
             .textFieldStyle(.roundedBorder)
             if let error { Text(error).foregroundStyle(.red).font(.caption) }
             HStack {
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button(L("common.done")) { dismiss() }.keyboardShortcut(.defaultAction)
             }
         }
-        .padding()
-        .frame(width: 620, height: 420)
+        .padding(20)
+        .frame(width: 640, height: 460)
+        .background(Theme.pageBackground)
         .onAppear(perform: reload)
     }
 
@@ -192,7 +259,7 @@ struct PasswordListView: View {
     private func add() {
         guard let url = URL(string: origin.trimmingCharacters(in: .whitespaces)),
               let normalized = PasswordEntry.normalizedOrigin(for: url) else {
-            error = "Origin must be an http(s) URL"
+            error = L("passwords.error.origin")
             return
         }
         do {

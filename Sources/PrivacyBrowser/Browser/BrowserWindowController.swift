@@ -228,7 +228,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
                               isLoading: tab.isLoading)
         }, selectedIndex: selectedIndex)
         guard let tab = selectedTab else { return }
-        window?.title = "[\(profileName)] \(tab.displayTitle)"
+        window?.title = String(format: L("window.browser.title"), profileName, tab.displayTitle)
         if addressField.currentEditor() == nil { // don't overwrite what the user is typing
             addressField.stringValue = tab.url?.absoluteString ?? ""
         }
@@ -313,7 +313,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let menu = NSMenu()
         let bookmarks = library.bookmarks
         if bookmarks.isEmpty {
-            let empty = NSMenuItem(title: "No bookmarks", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: L("bookmarks.menu.empty"), action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         }
@@ -338,7 +338,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             }
         }
         menu.addItem(.separator())
-        let manage = NSMenuItem(title: "Show All Bookmarks…", action: #selector(showBookmarks), keyEquivalent: "")
+        let manage = NSMenuItem(title: L("menu.showAllBookmarks"), action: #selector(showBookmarks), keyEquivalent: "")
         manage.target = self
         menu.addItem(manage)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
@@ -360,7 +360,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let entries = passwordVault.entries(for: url)
         switch entries.count {
         case 0:
-            tab.showMessage("No saved password for \(origin).")
+            tab.showMessage(String(format: L("pw.noSaved"), origin))
         case 1:
             fill(entries[0], origin: origin, in: tab)
         default:
@@ -385,7 +385,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     private func fill(_ entry: PasswordEntry, origin: String, in tab: BrowserTab) {
         PasswordAutofill.fill(entry, origin: origin, in: tab.webView) { [weak tab] filled in
-            if !filled { tab?.showMessage("No suitable password field found on this page.") }
+            if !filled { tab?.showMessage(L("pw.noField")) }
         }
     }
 
@@ -394,14 +394,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         PasswordAutofill.capture(origin: origin, in: tab.webView) { [weak self, weak tab] captured in
             guard let self, let tab else { return }
             guard let captured else {
-                tab.showMessage("Type the username and password into the page first, then press Save.")
+                tab.showMessage(L("pw.typeFirst"))
                 return
             }
             let alert = NSAlert()
-            alert.messageText = "Save password for \(captured.origin)?"
-            alert.informativeText = captured.username.isEmpty ? "No username detected." : "Username: \(captured.username)"
-            alert.addButton(withTitle: "Save")
-            alert.addButton(withTitle: "Cancel")
+            alert.messageText = String(format: L("pw.saveTitle"), captured.origin)
+            alert.informativeText = captured.username.isEmpty ? L("pw.noUsernameDetected") : String(format: L("pw.usernameLabel"), captured.username)
+            alert.addButton(withTitle: L("common.save"))
+            alert.addButton(withTitle: L("common.cancel"))
             guard let window = self.window else { return }
             alert.beginSheetModal(for: window) { response in
                 guard response == .alertFirstButtonReturn else { return }
@@ -409,7 +409,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
                     try self.passwordVault.upsert(PasswordEntry(origin: captured.origin, username: captured.username,
                                                                 password: captured.password))
                 } catch {
-                    tab.showMessage("Could not save: \(error.localizedDescription)")
+                    tab.showMessage(String(format: L("pw.couldNotSave"), error.localizedDescription))
                 }
             }
         }
@@ -419,7 +419,15 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     func windowWillClose(_ notification: Notification) {
         tearDown()
-        session?.windowDidClose(self)
+        // CRASH FIX: `windowDidClose` removes this controller from `session.windows`, which can
+        // drop the last strong reference to it (and to its NSWindow). Releasing the window while
+        // AppKit is still executing this window's close machinery is a use-after-free. Capture
+        // `self` strongly and hand off on the next main-run-loop turn, so the window stays alive
+        // until AppKit has finished closing it; the strong capture is released when the block runs.
+        let session = self.session
+        DispatchQueue.main.async { [self] in
+            session?.windowDidClose(self)
+        }
     }
 
     /// Tears down every tab so the web views (and with them the profile's data store) can be
