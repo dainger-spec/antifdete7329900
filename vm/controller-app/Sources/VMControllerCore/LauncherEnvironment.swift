@@ -135,7 +135,8 @@ public enum LauncherEnvironment {
     /// pops up on the host.
     public static func scriptEnvironment(base: [String: String], tartPath: String, askPass: URL,
                                          localPort: UInt16?, network: NetworkPolicy? = nil,
-                                         cookiesFile: String? = nil, showWindow: Bool = false) -> [String: String] {
+                                         cookiesFile: String? = nil, showWindow: Bool = false,
+                                         proxyURL: String? = nil) -> [String: String] {
         var environment = base
         let tartDirectory = URL(fileURLWithPath: tartPath).deletingLastPathComponent().path
         environment["PATH"] = searchPath(base["PATH"], prepending: [tartDirectory])
@@ -147,6 +148,10 @@ public enum LauncherEnvironment {
         if let localPort { environment["LOCAL_PORT"] = String(localPort) }
         if let cookiesFile { environment["COOKIES_FILE"] = cookiesFile } else { environment["COOKIES_FILE"] = nil }
         environment["VM_HEADLESS"] = showWindow ? "0" : "1"
+        // Set as the guest's system proxy (vm/guest-proxy.sh); without it the
+        // fail-closed VM reaches nothing. Never inherited from the app's env.
+        environment["PROXY_URL"] = proxyURL
+        environment["SOFTNET_FAIL_CLOSED"] = nil
         // These only make sense for a terminal user.
         environment["KEEP_VM"] = nil
         environment["SHOT"] = nil

@@ -108,9 +108,12 @@ final class ProxyAndNetworkTests: XCTestCase {
     }
 
     func testPolicyRunArgs() {
+        // Default deny first: softnet alone lets the VM reach any public address.
         XCTAssertEqual(NetworkPolicy.proxyOnly(allowCIDR: "10.0.0.9/32").runArgs,
-                       ["--net-softnet", "--net-softnet-allow", "10.0.0.9/32"])
-        XCTAssertEqual(NetworkPolicy.isolated.runArgs, ["--net-softnet", "--net-softnet-allow", "127.0.0.1/32"])
+                       ["--net-softnet", "--net-softnet-block", "0.0.0.0/0",
+                        "--net-softnet-allow", "10.0.0.9/32,in @host"])
+        XCTAssertEqual(NetworkPolicy.isolated.runArgs,
+                       ["--net-softnet", "--net-softnet-block", "0.0.0.0/0", "--net-softnet-allow", "in @host"])
         XCTAssertEqual(NetworkPolicy.openNAT.runArgs, [])
     }
 }
@@ -124,10 +127,12 @@ final class ProfilePlanTests: XCTestCase {
     func testRunCarriesFailClosedNetworking() {
         let proxied = Profile(id: "i", name: "n", proxy: "socks5://10.0.0.9:1080")
         XCTAssertEqual(ProfilePlan.run(proxied, headless: true),
-                       ["run", "pb-n-i", "--net-softnet", "--net-softnet-allow", "10.0.0.9/32", "--no-graphics"])
+                       ["run", "pb-n-i", "--net-softnet", "--net-softnet-block", "0.0.0.0/0",
+                        "--net-softnet-allow", "10.0.0.9/32,in @host", "--no-graphics"])
         let noProxy = Profile(id: "i", name: "n")
         XCTAssertEqual(ProfilePlan.run(noProxy),
-                       ["run", "pb-n-i", "--net-softnet", "--net-softnet-allow", "127.0.0.1/32"])
+                       ["run", "pb-n-i", "--net-softnet", "--net-softnet-block", "0.0.0.0/0",
+                        "--net-softnet-allow", "in @host"])
     }
 
     func testSizeDeleteBackup() {

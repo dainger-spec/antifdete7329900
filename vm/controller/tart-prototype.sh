@@ -22,7 +22,15 @@
 #                "shared" (Tart NAT), or "softnet" (fail-closed isolation)
 #   BRIDGE_IF    host interface for bridged networking (default: en0)
 #   SOFTNET_ALLOW  with TART_NET=softnet: egress-allowed CIDR(s), e.g. the proxy
-#                  (comma-separated). Empty = no egress. Needs the softnet helper.
+#                  (comma-separated). Empty = no egress. Needs the softnet helper
+#                  (>= 0.22) and tart (>= 2.30): everything else is blocked with
+#                  --net-softnet-block 0.0.0.0/0; only the host may open
+#                  connections to the VM (SSH), the VM cannot open any to the host.
+#   SOFTNET_FAIL_CLOSED  "0" = old softnet defaults (any public address reachable,
+#                  NOT fail-closed; development only). Default "1".
+#   PROXY_URL    profile proxy (http:// or socks5://[user:pass@]host:port) to set
+#                as the guest's system proxy over SSH (vm/guest-proxy.sh). With
+#                TART_NET=softnet and no PROXY_URL, guest proxies are turned off.
 #   VM_MEMORY    RAM cap in MiB, applied with `tart set` (empty = image default)
 #   VM_CPU       CPU core count, applied with `tart set` (empty = image default)
 #   VM_HEADLESS  "1" (default) = run with --no-graphics: no host window with the
@@ -92,9 +100,35 @@ for tool in tart ssh scp curl; do
 done
 # Tart starts the softnet helper itself; without it `tart run --net-softnet`
 # dies at once and the VM never gets an address.
-if [[ "$TART_NET" == "softnet" ]] && ! command -v softnet &>/dev/null; then
-  echo "softnet not found (TART_NET=softnet needs it: brew install cirruslabs/cli/softnet)"
-  exit 1
+SOFTNET_FAIL_CLOSED="${SOFTNET_FAIL_CLOSED:-1}"
+if [[ "$TART_NET" == "softnet" ]]; then
+  if ! command -v softnet &>/dev/null; then
+    echo "softnet not found (TART_NET=softnet needs it: brew install cirruslabs/cli/softnet)"
+    exit 1
+  fi
+  # softnet needs root. tart asks for a sudo password on its terminal when it
+  # is neither setuid-root nor allowed by passwordless sudo; the app has no
+  # terminal, so tart run would die there. Same check as tart's own.
+  SOFTNET_BIN="$(readlink -f "$(command -v softnet)" 2>/dev/null || command -v softnet)"
+  if [[ -z "$(find "$SOFTNET_BIN" -user root -perm -4000 2>/dev/null)" ]] \
+     && ! sudo -n softnet --help >/dev/null 2>&1 </dev/null; then
+    echo "softnet needs root once; run in Terminal: sudo sh -c 'chown root \"$SOFTNET_BIN\" && chmod u+s \"$SOFTNET_BIN\"'"
+    exit 1
+  fi
+  if [[ "$SOFTNET_FAIL_CLOSED" != "0" ]]; then
+    # Without --block softnet lets the VM reach every public address; the
+    # allowlist only opens private ranges. Refuse rather than run open.
+    if ! tart run --help 2>&1 | grep -q -- '--net-softnet-block'; then
+      echo "fail-closed networking needs a newer tart (>= 2.30, --net-softnet-block): brew upgrade cirruslabs/cli/tart"
+      exit 1
+    fi
+    if ! softnet --help 2>&1 | grep -q 'in TARGET'; then
+      echo "fail-closed networking needs a newer softnet (>= 0.22, \"in @host\" rules): brew upgrade cirruslabs/cli/softnet"
+      exit 1
+    fi
+  else
+    echo "    WARNING: SOFTNET_FAIL_CLOSED=0 — the VM can reach any public address directly"
+  fi
 fi
 
 # sshpass is only needed for password auth; key-based auth works without it.
@@ -116,9 +150,17 @@ case "$TART_NET" in
   # Fail-closed isolation via the softnet helper: egress only to SOFTNET_ALLOW
   # (a CIDR, or comma-separated CIDRs) — set it to the proxy. Empty allow = no
   # egress at all. See vm/SLIMMING.md / docs/PROFILES.md.
+  # Default deny (block 0.0.0.0/0); the longest prefix wins, so the proxy's
+  # /32 is still reachable. "in @host": the host may open connections to the
+  # VM (SSH, the agent tunnel) but the VM can't open any to the host — no DNS
+  # through the host's resolver, no host services.
   softnet)
     RUN_NET_ARGS=(--net-softnet)
-    [[ -n "${SOFTNET_ALLOW:-}" ]] && RUN_NET_ARGS+=(--net-softnet-allow "$SOFTNET_ALLOW")
+    if [[ "$SOFTNET_FAIL_CLOSED" != "0" ]]; then
+      RUN_NET_ARGS+=(--net-softnet-block 0.0.0.0/0 --net-softnet-allow "${SOFTNET_ALLOW:+$SOFTNET_ALLOW,}in @host")
+    elif [[ -n "${SOFTNET_ALLOW:-}" ]]; then
+      RUN_NET_ARGS+=(--net-softnet-allow "$SOFTNET_ALLOW")
+    fi
     IP_ARGS=() ;;
   *) echo "TART_NET must be 'bridged', 'shared' or 'softnet' (got '$TART_NET')"; exit 2 ;;
 esac
@@ -219,6 +261,22 @@ if [[ -n "$IDENTITY_PROFILE" ]]; then
     echo "    hardware identity applied"
   else
     echo "    hardware identity not fully applied (continuing)"
+  fi
+fi
+
+PROXY_URL="${PROXY_URL:-}"
+if [[ -n "$PROXY_URL" || "$TART_NET" == "softnet" ]]; then
+  echo "==> Configuring proxy in the VM"
+  PROXY_SH="$SCRIPT_DIR/../guest-proxy.sh"
+  # The URL (credentials) goes over stdin as `set -- …`, never in an argv.
+  if [[ ! -r "$PROXY_SH" ]]; then
+    echo "Could not configure the proxy in the VM: guest-proxy.sh not found"
+    exit 1
+  elif ! { printf 'set -- %q\n' "${PROXY_URL:-off}"; cat "$PROXY_SH"; } | ssh_vm 'bash -s'; then
+    # Under softnet the VM can reach nothing but the proxy: without it pages
+    # can't load, so stop here with the reason instead of a dead Safari.
+    echo "Could not configure the proxy in the VM (see above)"
+    exit 1
   fi
 fi
 

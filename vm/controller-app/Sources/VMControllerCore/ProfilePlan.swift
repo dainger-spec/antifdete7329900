@@ -3,11 +3,14 @@ import Foundation
 /// How a profile's VM reaches the network.
 ///
 /// Fail-closed: the VM gets internet ONLY through its proxy. Implemented with
-/// Tart's softnet backend (`--net-softnet`) plus an egress allowlist
-/// (`--net-softnet-allow <CIDR>`) restricted to the proxy. With no proxy the
-/// allowlist is loopback-only, so the VM has no route off the host at all —
-/// it fails closed rather than open. Bridged/NAT (no allowlist) is NOT
-/// fail-closed and is only for development. See docs/PROFILES.md.
+/// Tart's softnet backend: `--net-softnet-block 0.0.0.0/0` denies everything
+/// (softnet alone allows every public address; `--net-softnet-allow` only
+/// opens private ranges), then `--net-softnet-allow` re-opens the proxy's /32
+/// (longest prefix wins) and `in @host` lets the host open connections to the
+/// VM (SSH) without the VM being able to reach the host. With no proxy only
+/// `in @host` remains: no egress at all. Needs tart >= 2.30, softnet >= 0.22.
+/// Bridged/NAT is NOT fail-closed and is only for development. See
+/// docs/PROFILES.md.
 public enum NetworkPolicy: Equatable, Sendable {
     /// Egress only to the proxy (fail-closed). `allowCIDR` is the proxy's IP/CIDR.
     case proxyOnly(allowCIDR: String)
@@ -16,20 +19,25 @@ public enum NetworkPolicy: Equatable, Sendable {
     /// Tart's default NAT — open internet. Development only.
     case openNAT
 
+    /// softnet rule letting the host (only) open connections to the VM.
+    public static let hostInbound = "in @host"
+
     /// `tart run` network flags for this policy.
     public var runArgs: [String] {
+        let denyAll = ["--net-softnet", "--net-softnet-block", "0.0.0.0/0", "--net-softnet-allow"]
         switch self {
-        case .proxyOnly(let cidr): ["--net-softnet", "--net-softnet-allow", cidr]
-        case .isolated: ["--net-softnet", "--net-softnet-allow", "127.0.0.1/32"]
-        case .openNAT: []
+        case .proxyOnly(let cidr): return denyAll + ["\(cidr),\(Self.hostInbound)"]
+        case .isolated: return denyAll + [Self.hostInbound]
+        case .openNAT: return []
         }
     }
 
     /// How tart-prototype.sh takes this policy: (TART_NET, SOFTNET_ALLOW?).
+    /// The script adds the default deny and `in @host` itself.
     public var controllerEnv: (tartNet: String, softnetAllow: String?) {
         switch self {
         case .proxyOnly(let cidr): ("softnet", cidr)
-        case .isolated: ("softnet", "127.0.0.1/32")
+        case .isolated: ("softnet", nil)
         case .openNAT: ("shared", nil)
         }
     }

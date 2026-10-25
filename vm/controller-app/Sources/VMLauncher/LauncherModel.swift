@@ -312,8 +312,11 @@ final class LauncherModel: ObservableObject {
         // the plain launch stays on dev NAT.
         var network: NetworkPolicy?
         var cookiesFile: String?
+        var proxyURL: String?
         if let profile = activeProfile {
             network = NetworkPolicy.failClosed(proxy: profile.proxy)
+            // Only a proxy softnet lets through is worth pointing the guest at.
+            if case .proxyOnly? = network { proxyURL = profile.proxy }
             let cookies = profileStore.cookiesURL(for: profile)
             if profile.cookieCount > 0 && FileManager.default.fileExists(atPath: cookies.path) {
                 cookiesFile = cookies.path
@@ -322,7 +325,7 @@ final class LauncherModel: ObservableObject {
         let environment = LauncherEnvironment.scriptEnvironment(
             base: baseEnvironment, tartPath: tart, askPass: askPass,
             localPort: LauncherEnvironment.freeLocalPort(), network: network, cookiesFile: cookiesFile,
-            showWindow: showVMWindow)
+            showWindow: showVMWindow, proxyURL: proxyURL)
         launchedWithWindow = showVMWindow
 
         scriptParser = ScriptOutputParser()

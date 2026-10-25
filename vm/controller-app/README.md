@@ -176,6 +176,9 @@ says why instead of waiting:
 |----------|---------|
 | `tart run exited before the VM got an IP (code N, …)` | `tart run` failed at start; its own error is the line above. Typical: the VM is already running, two macOS VMs already run (Apple's limit per host), softnet failed to start. |
 | `softnet not found …` | A profile runs over softnet (`TART_NET=softnet`); install it: `brew install cirruslabs/cli/softnet`. |
+| `softnet needs root once; run in Terminal: …` | softnet is neither setuid-root nor allowed by passwordless sudo; tart would ask for a password on a terminal the app doesn't have and die. Run the printed command once. |
+| `fail-closed networking needs a newer tart/softnet …` | Fail-closed needs tart ≥ 2.30 and softnet ≥ 0.22; the controller refuses to run a profile open. See [docs/PROFILES.md](../../docs/PROFILES.md#fail-closed-networking). |
+| `Could not configure the proxy in the VM …` | `vm/guest-proxy.sh` failed in the guest (output above); the profile VM can reach only its proxy, so the launch stops. |
 | `Failed to get VM IP after Ns (TART_NET=…)` | The VM runs but got no DHCP lease. Followed by a hint for the network mode and the list of running VMs. Turn on «Показывать окно VM» to see whether macOS booted. |
 | `warning: '<vm>' has the same MAC …` | Two VMs share a MAC (e.g. a profile imported next to its source): one DHCP lease for both. Fix: `tart set <vm> --random-mac`. |
 

@@ -33,6 +33,7 @@ public struct ScriptOutputParser: Sendable {
         StageRule(prefix: "Waiting for VM IP", stage: .vm) { _ in "Ожидание IP-адреса VM…" },
         StageRule(prefix: "Waiting for SSH", stage: .vm) { _ in "Ожидание SSH…" },
         StageRule(prefix: "Setting hardware identity", stage: .vm) { _ in "Настройка имени хоста VM…" },
+        StageRule(prefix: "Configuring proxy in the VM", stage: .vm) { _ in "Настройка прокси в VM…" },
         StageRule(prefix: "Installing in-VM agent", stage: .agent) { _ in "Копирование и установка агента…" },
         StageRule(prefix: "Opening SSH tunnel", stage: .agent) { _ in "Открытие SSH-туннеля…" },
         StageRule(prefix: "Waiting for agent", stage: .agent) { _ in "Ожидание ответа агента…" },
@@ -56,6 +57,14 @@ public struct ScriptOutputParser: Sendable {
         ErrorRule(prefix: "Failed to get VM IP",
                   message: "VM не получила IP-адрес за отведённое время. Подробности — в журнале; "
                       + "чтобы увидеть, загрузилась ли macOS, включите «Показывать окно VM»."),
+        ErrorRule(prefix: "softnet needs root",
+                  message: "softnet нужны права root. Один раз выполните в Терминале команду из журнала "
+                      + "(sudo sh -c 'chown root … && chmod u+s …') и запустите профиль снова."),
+        ErrorRule(prefix: "fail-closed networking needs a newer",
+                  message: "Для сети «только через прокси» нужны tart ≥ 2.30 и softnet ≥ 0.22: "
+                      + "brew upgrade cirruslabs/cli/tart cirruslabs/cli/softnet"),
+        ErrorRule(prefix: "Could not configure the proxy in the VM",
+                  message: "Не удалось настроить прокси в VM (см. журнал). Без него VM профиля не выходит в сеть."),
         ErrorRule(prefix: "softnet not found",
                   message: "Для профиля нужен softnet (сеть только через прокси): brew install cirruslabs/cli/softnet"),
         ErrorRule(prefix: "SSH did not come up",

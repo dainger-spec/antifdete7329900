@@ -211,11 +211,83 @@ final class ScriptIntegrationTests: XCTestCase {
     }
 
     func testSoftnetFailClosedNetworking() async throws {
+        let proxy = "socks5://us%40r:s3cr3t@10.0.0.9:1080"
         let run = try host.launch(url: "https://example.com",
-                                  extraEnvironment: ["TART_NET": "softnet", "SOFTNET_ALLOW": "10.0.0.9/32"])
+                                  extraEnvironment: ["TART_NET": "softnet", "SOFTNET_ALLOW": "10.0.0.9/32",
+                                                     "PROXY_URL": proxy])
         try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
-        XCTAssertTrue(host.calls.contains("tart run safari-profile --net-softnet --net-softnet-allow 10.0.0.9/32 --no-graphics"),
-                      "softnet with an allowlist restricts egress to the proxy")
+        let calls = host.calls
+        XCTAssertTrue(calls.contains("tart run safari-profile --net-softnet --net-softnet-block 0.0.0.0/0 "
+                                     + "--net-softnet-allow 10.0.0.9/32,in @host --no-graphics"),
+                      "default deny, then only the proxy out and the host in")
+        XCTAssertTrue(run.events.contains(.stage(.vm, detail: "Настройка прокси в VM…")))
+        let sent = try String(contentsOf: host.state.appendingPathComponent("proxy-stdin"), encoding: .utf8)
+        XCTAssertTrue(sent.hasPrefix("set -- socks5://us%40r:s3cr3t@10.0.0.9:1080\n"),
+                      "the proxy URL reaches the guest script over stdin")
+        let script = try String(contentsOf: TestPaths.vmDirectory.appendingPathComponent("guest-proxy.sh"), encoding: .utf8)
+        XCTAssertTrue(sent.hasSuffix(script))
+        XCTAssertFalse(calls.contains { $0.contains("s3cr3t") }, "credentials never appear in an argv")
+        let proxyStep = calls.firstIndex { $0.hasPrefix("ssh ") && $0.hasSuffix(" bash -s") } ?? .max
+        XCTAssertLessThan(proxyStep, calls.firstIndex { $0.contains("cat ~/.pbagent/token") } ?? .min,
+                          "the proxy is set before the agent and Safari")
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
+    func testSoftnetWithoutProxyIsIsolatedAndTurnsGuestProxiesOff() async throws {
+        let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "softnet"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertTrue(host.calls.contains("tart run safari-profile --net-softnet --net-softnet-block 0.0.0.0/0 "
+                                          + "--net-softnet-allow in @host --no-graphics"),
+                      "no proxy: nothing may leave the VM")
+        let sent = try String(contentsOf: host.state.appendingPathComponent("proxy-stdin"), encoding: .utf8)
+        XCTAssertTrue(sent.hasPrefix("set -- off\n"))
+        run.process.signalGroup(SIGINT)
+        _ = await run.process.waitForExit(timeout: 15)
+    }
+
+    func testProxySetupFailureStopsBeforeTheAgent() async throws {
+        try host.setFlag("proxy-fails")
+        let run = try host.launch(url: "https://example.com",
+                                  extraEnvironment: ["TART_NET": "softnet", "SOFTNET_ALLOW": "10.0.0.9/32",
+                                                     "PROXY_URL": "http://10.0.0.9:3128"])
+        let code = await run.process.waitForExit(timeout: 20)
+        XCTAssertEqual(code, 1)
+        XCTAssertTrue(run.events.contains { if case .error(let text) = $0 { return text.contains("прокси") }; return false })
+        XCTAssertFalse(host.calls.contains { $0.contains("cat ~/.pbagent/token") })
+        XCTAssertTrue(host.calls.contains("tart stop safari-profile"))
+    }
+
+    /// Refuse to run "fail-closed" on tools that can't enforce it.
+    func testOldTartOrSoftnetRefusesToRunOpen() async throws {
+        for flag in ["old-tart", "old-softnet"] {
+            let host = try FakeHost()
+            defer { host.cleanUp() }
+            try host.setFlag(flag)
+            let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "softnet"])
+            let code = await run.process.waitForExit(timeout: 20)
+            XCTAssertEqual(code, 1, flag)
+            XCTAssertTrue(run.events.contains { if case .error(let text) = $0 { return text.contains("tart ≥ 2.30") }; return false },
+                          flag)
+            XCTAssertFalse(host.calls.contains { $0.hasPrefix("tart run safari-profile") }, "\(flag): VM not started")
+        }
+    }
+
+    func testSoftnetWithoutRootIsReported() async throws {
+        try host.setFlag("no-sudo")
+        let run = try host.launch(url: "https://example.com", extraEnvironment: ["TART_NET": "softnet"])
+        let code = await run.process.waitForExit(timeout: 20)
+        XCTAssertEqual(code, 1)
+        XCTAssertTrue(run.events.contains { if case .error(let text) = $0 { return text.contains("root") }; return false })
+        XCTAssertFalse(host.calls.contains { $0.hasPrefix("tart run safari-profile") })
+    }
+
+    func testFailClosedOptOutUsesOldArgs() async throws {
+        let run = try host.launch(url: "https://example.com",
+                                  extraEnvironment: ["TART_NET": "softnet", "SOFTNET_ALLOW": "10.0.0.9/32",
+                                                     "SOFTNET_FAIL_CLOSED": "0"])
+        try await waitUntil(timeout: 20) { run.events.contains { if case .ready = $0 { return true }; return false } }
+        XCTAssertTrue(host.calls.contains("tart run safari-profile --net-softnet --net-softnet-allow 10.0.0.9/32 --no-graphics"))
         run.process.signalGroup(SIGINT)
         _ = await run.process.waitForExit(timeout: 15)
     }
@@ -402,7 +474,8 @@ final class FakeHost {
         \(log)
         case "$1" in
           list) printf 'Source Name           Disk Size State\\nlocal  safari-profile 50   24   stopped\\n' ;;
-          run)  [ -f "$FAKE_STATE/run-dies" ] && { echo "Error: VM is already running" >&2; exit 1; }
+          run)  [ "$2" = "--help" ] && { [ -f "$FAKE_STATE/old-tart" ] || echo "--net-softnet-block <rules>"; exit 0; }
+                [ -f "$FAKE_STATE/run-dies" ] && { echo "Error: VM is already running" >&2; exit 1; }
                 echo $$ > "$FAKE_STATE/run.pid"; exec sleep 300 ;;
           ip)   [ -f "$FAKE_STATE/no-ip" ] || echo 192.168.64.5 ;;
           stop) [ -f "$FAKE_STATE/run.pid" ] && kill "$(cat "$FAKE_STATE/run.pid")" 2>/dev/null; true ;;
@@ -412,7 +485,8 @@ final class FakeHost {
         \(log)
         for arg in "$@"; do [ "$arg" = "-N" ] && exec sleep 300; done
         case "$*" in
-          *"bash -s"*) cat > "$FAKE_STATE/identity-stdin"; exit 0 ;;
+          *"bash -s --"*) cat > "$FAKE_STATE/identity-stdin"; exit 0 ;;
+          *"bash -s") cat > "$FAKE_STATE/proxy-stdin"; [ -f "$FAKE_STATE/proxy-fails" ] && exit 3; exit 0 ;;
           *"cat ~/.pbagent/token"*) [ -f "$FAKE_STATE/installed-token" ] && cat "$FAKE_STATE/installed-token"; exit 0 ;;
           *install.sh*) echo "Installed." >&2; echo "PB_AGENT_TOKEN=tok123"; exit 0 ;;
         esac
@@ -430,7 +504,17 @@ final class FakeHost {
         exit 0
         """)
         try stub("sshpass", "shift; exec \"$@\"") // in case a real one is installed
-        try stub("softnet", log) // only looked up; tart (stubbed) would start it
+        // Only probed (--help); the stubbed tart would start it.
+        try stub("softnet", """
+        \(log)
+        if [ -f "$FAKE_STATE/old-softnet" ]; then echo "--allow <CIDRs>"; else echo "* in TARGET: flows initiated"; fi
+        """)
+        // softnet's root check: `sudo -n softnet --help`.
+        try stub("sudo", """
+        [ -f "$FAKE_STATE/no-sudo" ] && exit 1
+        [ "$1" = "-n" ] && shift
+        exec "$@"
+        """)
     }
 
     private func stub(_ name: String, _ body: String) throws {

@@ -225,8 +225,20 @@ final class LauncherEnvironmentTests: XCTestCase {
             base: [:], tartPath: "/bin/tart", askPass: URL(fileURLWithPath: "/tmp/a.sh"),
             localPort: nil, network: .isolated)
         XCTAssertEqual(isolated["TART_NET"], "softnet")
-        XCTAssertEqual(isolated["SOFTNET_ALLOW"], "127.0.0.1/32")
+        XCTAssertNil(isolated["SOFTNET_ALLOW"], "nothing to allow; the script adds deny-all + in @host")
         XCTAssertNil(isolated["COOKIES_FILE"])
+        XCTAssertNil(isolated["PROXY_URL"])
+
+        let proxied = LauncherEnvironment.scriptEnvironment(
+            base: ["PROXY_URL": "http://stale:1", "SOFTNET_FAIL_CLOSED": "0"], tartPath: "/bin/tart",
+            askPass: URL(fileURLWithPath: "/tmp/a.sh"), localPort: nil,
+            network: .proxyOnly(allowCIDR: "10.0.0.9/32"), proxyURL: "socks5://u:p@10.0.0.9:1080")
+        XCTAssertEqual(proxied["PROXY_URL"], "socks5://u:p@10.0.0.9:1080")
+        XCTAssertNil(proxied["SOFTNET_FAIL_CLOSED"], "the app never runs softnet open")
+        let inherited = LauncherEnvironment.scriptEnvironment(
+            base: ["PROXY_URL": "http://stale:1"], tartPath: "/bin/tart",
+            askPass: URL(fileURLWithPath: "/tmp/a.sh"), localPort: nil)
+        XCTAssertNil(inherited["PROXY_URL"])
     }
 }
 

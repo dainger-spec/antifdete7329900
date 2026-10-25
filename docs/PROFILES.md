@@ -40,44 +40,88 @@ point is an extra clone (`ProfilePlan.backup`).
 **Goal: a profile's VM reaches the internet only through its proxy; with no
 proxy it has no internet at all** — it fails closed, never open.
 
-Mechanism: Tart's **softnet** backend with an egress allowlist.
+> **Fixed 2026-10:** earlier versions passed only `--net-softnet-allow
+> <proxy>/32` (or `127.0.0.1/32`). That does **not** restrict egress: by
+> default softnet lets the VM reach every globally routable address, and
+> `--allow` only opens private ranges on top of that. The guest proxy was also
+> never configured, so profile traffic went **directly** to the internet from
+> the host's IP. Both are fixed below.
 
-- **Proxy set (an IP):** `--net-softnet --net-softnet-allow <proxy-ip>/32`.
-  The VM can open connections only to the proxy; everything else is dropped at
-  the host. All real traffic goes through the proxy.
-- **No proxy / unresolved hostname proxy:** `--net-softnet --net-softnet-allow
-  127.0.0.1/32` — loopback only, i.e. **no route off the host**. The VM boots
-  and the agent is still reachable over the SSH tunnel (that's host→guest, not
-  guest egress), but the VM itself cannot reach the internet.
+Mechanism: Tart's **softnet** backend with a default-deny policy, plus the
+proxy set as the guest's system proxy.
+
+- **Proxy set (an IP):**
+  `--net-softnet --net-softnet-block 0.0.0.0/0 --net-softnet-allow "<proxy-ip>/32,in @host"`.
+  The block denies every destination; the longest prefix wins, so the proxy's
+  `/32` stays reachable. Nothing else leaves the VM.
+- **No proxy / unresolved hostname proxy:**
+  `--net-softnet --net-softnet-block 0.0.0.0/0 --net-softnet-allow "in @host"` —
+  no egress at all.
+- **`in @host`:** the host may open connections *to* the VM (SSH, the agent's
+  tunnel, `scp`), and their replies pass. The VM cannot open connections *to*
+  the host — so it can't use the host's DNS forwarder (the gateway softnet
+  hands out by DHCP) or any service listening on the host.
+- **DHCP** is answered by softnet itself before any rule, so the VM still gets
+  its address (`tart ip` reads it from the reservation).
 
 `NetworkPolicy.failClosed(proxy:)` encodes this (tested): IP proxy →
 `proxyOnly`, everything else → `isolated`. The controller takes
-`TART_NET=softnet` + `SOFTNET_ALLOW=<cidr>`.
+`TART_NET=softnet` + `SOFTNET_ALLOW=<cidr>` and adds the deny-all and
+`in @host` itself.
+
+### The guest proxy (`vm/guest-proxy.sh`)
+
+softnet only *lets* traffic reach the proxy; macOS in the guest must also *use*
+it. Right after SSH comes up the controller runs `vm/guest-proxy.sh` in the
+guest with the profile's proxy (`PROXY_URL`): it sets the HTTP + HTTPS proxy
+(`http://`) or the SOCKS proxy (`socks5://`, `socks5h://`, `socks4://`) on every
+enabled network service, and turns PAC/WPAD and the other proxy types off.
+With no proxy it turns all proxies off. The URL — credentials included — goes
+to the guest over SSH stdin, never in an argv. If the step fails the launch
+stops with an error (the VM could reach nothing anyway).
+
+`https://` proxies (TLS to the proxy) are refused: the macOS system proxy
+cannot speak them. Hostname proxies are not yet supported under fail-closed
+(softnet's allowlist takes IPs): such a profile runs isolated.
+
+### Requirements, checked before the VM starts
+
+| Check | On failure |
+|-------|-----------|
+| `softnet` in PATH | `softnet not found …` — `brew install cirruslabs/cli/softnet` |
+| softnet setuid-root or passwordless `sudo softnet` | `softnet needs root once; run in Terminal: …` (tart would otherwise ask for a password on a terminal the app doesn't have) |
+| tart ≥ 2.30 (`--net-softnet-block`) | `fail-closed networking needs a newer tart …` |
+| softnet ≥ 0.22 (`in @host` rules) | `fail-closed networking needs a newer softnet …` |
+
+On old tools the controller **refuses** to start rather than run open.
+`SOFTNET_FAIL_CLOSED=0` restores the old (open) softnet arguments for
+development; the app never sets it.
 
 ### DNS and WebRTC leaks
 
-- **DNS:** with softnet dropping all non-allowlisted egress, the VM cannot reach
-  any DNS server directly — not even port 53 to a public resolver — so there is
-  no plaintext DNS leak around the proxy. Name resolution must happen **at the
-  proxy**: use a `socks5h://` proxy (SOCKS5 with remote DNS) or an HTTP proxy,
-  which resolve on the proxy side. A `socks5://` (local-DNS) proxy would try to
-  resolve in the VM and simply fail to connect — fail-closed, not leak.
-- **WebRTC:** WebRTC can reveal IPs via STUN/TURN. Under softnet those STUN
-  packets go nowhere unless the STUN server is the proxy, so they cannot leak
-  the host's real address past the proxy. Defense in depth (planned): the agent
-  can also disable WebRTC ICE in Safari (`defaults`/WebKit pref) per profile.
+- **DNS:** the VM can reach no DNS server — not a public resolver, not the
+  host's forwarder — so there is no plaintext DNS leak around the proxy. With
+  the system proxy set, Safari hands hostnames to the proxy (HTTP `CONNECT`,
+  SOCKS5 with domain names). Anything in the guest that tries to resolve
+  locally simply fails: fail-closed, not a leak.
+- **WebRTC:** STUN/TURN over UDP goes nowhere unless it is the proxy, so it
+  cannot reveal the host's real address. Defense in depth (planned): the agent
+  can also disable WebRTC ICE in Safari per profile.
 
 ### Why this is a guarantee, not a setting in the guest
 
-The allowlist is enforced on the **host**, by softnet, outside the guest. Even
-if something in the VM is misconfigured, it still cannot send a packet past the
-allowlist. Bridged/NAT modes (`TART_NET=bridged|shared`) are **not** fail-closed
-and are for development only.
+The policy is enforced on the **host**, by softnet, outside the guest. Even if
+the guest proxy is misconfigured or removed, the VM still cannot send a packet
+anywhere but the proxy. Bridged/NAT modes (`TART_NET=bridged|shared`) are
+**not** fail-closed and are for development only.
 
-> Requires the softnet helper (`brew install cirruslabs/cli/softnet`) and that
-> Tart build's softnet support. This has not been run end-to-end here (no Apple
-> Silicon Mac); the argv and policy are unit-tested, the live behavior is to be
-> verified on hardware.
+> The rules above follow softnet's source (`lib/proxy/vm.rs`, `host.rs`) and
+> are unit-tested as argv; they have **not** been run on an Apple Silicon Mac
+> here. To verify on hardware, inside a profile VM without a proxy:
+> `curl -m 5 https://example.com` and `curl -m 5 http://1.1.1.1` must both
+> fail, `dig @$(ipconfig getoption en0 router) example.com` must time out, and
+> SSH from the host must still work. With a proxy: pages load in Safari and
+> `curl -m 5 https://example.com` (no proxy flag) still fails.
 
 ## Cookies per profile
 
@@ -103,7 +147,8 @@ Done here (core, tested on Linux/macOS CI):
 
 - [x] Profile model + JSON store (name, proxy, lastURL, clipboard, cookies, base)
 - [x] Snapshot lifecycle → exact `tart` argv (`ProfilePlan`)
-- [x] Fail-closed network policy + `TART_NET=softnet`/`SOFTNET_ALLOW` in the controller
+- [x] Fail-closed network policy (default-deny softnet) + `TART_NET=softnet`/`SOFTNET_ALLOW` in the controller
+- [x] Profile proxy set as the guest system proxy (`vm/guest-proxy.sh`, `PROXY_URL`)
 - [x] Cookie import parser (Netscape + JSON) + per-profile storage
 - [x] `VMController profiles list|add|remove` CLI over the store
 - [x] Clipboard shared = off by default in the model
