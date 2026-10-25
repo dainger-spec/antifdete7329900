@@ -13,6 +13,7 @@ struct ContentView: View {
             }
             urlRow
             ProfilesSection(model: model)
+            ResourceBar(model: model)
             overall
             StageList(progress: model.progress)
             if model.phase == .needsTart, let help = model.tartHelp {
@@ -26,6 +27,7 @@ struct ContentView: View {
         }
         .padding(20)
         .frame(minWidth: 640, minHeight: 620, alignment: .topLeading)
+        .task { await model.refreshResources() }
         // The setup splash (carousel + progress) covers the window during the
         // long first-launch/download wait, then falls away when Safari is up.
         .overlay {
@@ -113,6 +115,41 @@ struct FirstRunHint: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
+    }
+}
+
+/// A thin row of host resource readings, with a low-RAM warning.
+struct ResourceBar: View {
+    @ObservedObject var model: LauncherModel
+
+    var body: some View {
+        if let report = model.resource {
+            HStack(spacing: 14) {
+                Label("\(report.runningVMs) VM запущено", systemImage: "play.fill")
+                Label("\(bytes(report.profilesDiskBytes)) на диске", systemImage: "internaldrive")
+                if let free = report.freeRAMBytes {
+                    Label("\(bytes(free)) RAM свободно", systemImage: "memorychip")
+                        .foregroundStyle(report.lowRAM ? Color.orange : Color.secondary)
+                }
+                Spacer()
+                if report.lowRAM {
+                    Text("Мало памяти (< 2 ГБ) — закройте часть VM")
+                        .foregroundStyle(.orange)
+                }
+                Button { Task { await model.refreshResources() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Обновить")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 2)
+        }
+    }
+
+    private func bytes(_ value: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
     }
 }
 

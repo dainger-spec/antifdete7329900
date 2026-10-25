@@ -142,9 +142,13 @@ Done here (core, tested on Linux/macOS CI):
       uses `tar`, so it's tested end-to-end on Linux with a stub VM dir; the UI
       has Экспорт/Импорт buttons (big real VMs are the on-a-Mac check).
 
+- [x] Resource display: a window row with running-VM count, total profile disk
+      use, and free RAM — with an orange warning under 2 GB (`HostResources`:
+      directory sizing + a `vm_stat` free-RAM parser, both unit-tested; the live
+      `vm_stat` read is macOS-only).
+
 Next (need macOS to build/verify the UI and guest bits):
 - [ ] Base-image update: check, background download, migrate/warn
-- [ ] Resource display: RAM of running VMs, disk per profile, low-RAM warning
 - [ ] Broader System Settings-style restyle of the main window
 
 These are tracked so the UI work builds on this foundation rather than

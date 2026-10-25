@@ -500,6 +500,31 @@ final class LauncherModel: ObservableObject {
     public var logFileURL: URL { fileLog.url }
     public func logFileTail() -> String { fileLog.tail() }
 
+    /// Host resource snapshot for the window's resource row.
+    public struct ResourceReport: Equatable, Sendable {
+        public var runningVMs: Int
+        public var profilesDiskBytes: Int64
+        public var freeRAMBytes: Int64?
+        public var lowRAM: Bool { HostResources.isLowRAM(freeRAMBytes) }
+    }
+
+    @Published private(set) var resource: ResourceReport?
+
+    /// Recount running VMs, sum the profiles' disk use, read free RAM. Cheap
+    /// enough to call on window appear and after a launch.
+    public func refreshResources() async {
+        let vms = LauncherEnvironment.tartVMsDirectory()
+        let disk = HostResources.profilesDiskBytes(profiles, vmsDirectory: vms)
+        var running = 0
+        if let tart = TartSetup.locate(searchPath: baseEnvironment["PATH"] ?? ""),
+           let result = try? await GroupProcess.run(tart, ["list"], environment: baseEnvironment, timeout: 30),
+           result.code == 0 {
+            running = TartOutput.runningVMNames(result.lines.joined(separator: "\n"), prefix: "pb-").count
+        }
+        let free = await HostResources.freeRAMBytes(environment: baseEnvironment)
+        resource = ResourceReport(runningVMs: running, profilesDiskBytes: disk, freeRAMBytes: free)
+    }
+
     public func reloadProfiles() {
         profiles = (try? profileStore.list()) ?? []
     }
