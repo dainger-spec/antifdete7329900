@@ -113,6 +113,12 @@ Done here (core, tested on Linux/macOS CI):
       installed agent (`FORCE_INSTALL=1` to override). Cookie-store acceptance in
       Safari is the remaining on-a-Mac check.
 
+- [x] Onboarding + splash: a light SF Pro setup screen with an auto-advancing
+      carousel of benefit cards, stage/percent progress and Cancel, shown during
+      the first-launch/download wait; a first-run hint and a cached environment
+      check (`SetupStatusCache`) so repeat launches don't re-probe. Logic is
+      unit-tested; the visuals compile in CI and get a final look on a Mac.
+
 Next (need macOS to build/verify the UI and guest bits):
 
 - [ ] Menu-bar app: profile list, click-to-launch, running-VM count

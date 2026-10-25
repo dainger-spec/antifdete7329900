@@ -7,6 +7,9 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
+            if model.isFirstRun && model.phase == .idle {
+                FirstRunHint()
+            }
             urlRow
             overall
             StageList(progress: model.progress)
@@ -21,6 +24,15 @@ struct ContentView: View {
         }
         .padding(20)
         .frame(minWidth: 640, minHeight: 620, alignment: .topLeading)
+        // The setup splash (carousel + progress) covers the window during the
+        // long first-launch/download wait, then falls away when Safari is up.
+        .overlay {
+            if model.showsSplash {
+                SplashView(model: model)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: model.showsSplash)
     }
 
     private var header: some View {
@@ -77,6 +89,28 @@ struct ContentView: View {
                 .progressViewStyle(.linear)
                 .animation(.easeOut(duration: 0.3), value: model.progress.fraction)
         }
+    }
+}
+
+/// Shown once, on a first run, above the URL field.
+struct FirstRunHint: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Добро пожаловать")
+                    .font(.headline)
+                Text("Введите адрес и нажмите «Запустить». В первый раз нужно установить Tart и скачать "
+                    + "образ macOS — это долго, дальше будет быстрее.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
     }
 }
 

@@ -19,6 +19,12 @@ Safari is open the VM keeps running; **Остановить VM** (or quitting th
 shuts it down. Errors appear in the window, with the full output in the
 **Журнал** section below it (it expands on error and can be copied).
 
+During the long first-launch/download wait a full-window **setup splash** takes
+over: a light SF Pro screen with an auto-advancing carousel of benefit cards,
+the current stage, a thin progress bar and **Отмена**, so the wait reads as
+progress. The environment check is cached (`SetupStatusCache`), so repeat
+launches don't re-probe Tart/the image and start faster.
+
 ## Requirements
 
 - A Mac with **Apple Silicon** (Tart runs macOS guests only there), macOS 14+.

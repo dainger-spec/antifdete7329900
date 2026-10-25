@@ -48,10 +48,12 @@ final class LauncherModel: ObservableObject {
     let baseImage = LauncherDefaults.baseImage
 
     private let baseEnvironment: [String: String]
+    private let statusCache = SetupStatusCache()
     private var pipeline: Task<Void, Never>?
     private var activeProcess: GroupProcess?
     private var downloader: TartDownloader?
     private var tartPath: String?
+    private var tartVersion: String?
     private var targetURL: String?
     private var cancelRequested = false
     private var scriptParser = ScriptOutputParser()
@@ -60,12 +62,16 @@ final class LauncherModel: ObservableObject {
     private var lastOutputLine: String?
     private var nextLogID = 0
 
+    /// No cached environment check yet → treat as a first run (show onboarding).
+    let isFirstRun: Bool
+
     init() {
         urlText = UserDefaults.standard.string(forKey: "lastURL") ?? "https://browserleaks.com"
         var environment = ProcessInfo.processInfo.environment
         // A Finder-launched app has PATH=/usr/bin:/bin:/usr/sbin:/sbin; Homebrew's tart lives elsewhere.
         environment["PATH"] = LauncherEnvironment.searchPath(environment["PATH"])
         baseEnvironment = environment
+        isFirstRun = statusCache.load() == nil
     }
 
     // MARK: - State for the view
@@ -75,6 +81,14 @@ final class LauncherModel: ObservableObject {
     var canCancel: Bool { phase == .running }
     var hasActiveWork: Bool { isBusy || phase == .ready }
     var logText: String { log.map(\.text).joined(separator: "\n") }
+
+    /// The benefit cards shown on the setup splash.
+    var benefitCards: [BenefitCard] { CarouselDeck.cards }
+
+    /// Show the full-window setup splash (carousel + progress) while the VM is
+    /// coming up and Safari isn't open yet — i.e. the long first-launch/download
+    /// wait. The Tart-missing panel and errors stay in the main window.
+    var showsSplash: Bool { (phase == .running || phase == .stopping) && !progress[.done].isDone }
 
     // MARK: - Actions
 
@@ -192,9 +206,17 @@ final class LauncherModel: ObservableObject {
         }
         tartPath = path
         let versionText = version.lines.last ?? "?"
+        tartVersion = versionText
         progress.finish(.tart, detail: "tart \(versionText) · \(path)")
         appendLog("tart \(versionText): \(path)", .info)
         return path
+    }
+
+    /// Remember the environment check so the next launch can show "ready" fast
+    /// (SetupStatusCache); it's only a hint — the next launch revalidates.
+    private func saveSetupStatus(imagePresent: Bool) {
+        statusCache.save(SetupStatus(tartPath: tartPath, tartVersion: tartVersion,
+                                     baseImage: baseImage, baseImagePresent: imagePresent))
     }
 
     private func ensureImage(tart: String) async throws {
@@ -207,6 +229,7 @@ final class LauncherModel: ObservableObject {
         }
         if TartOutput.vmListContains(list.lines.joined(separator: "\n"), name: vmName) {
             progress.finish(.image, detail: "VM «\(vmName)» уже есть")
+            saveSetupStatus(imagePresent: true)
             return
         }
 
@@ -225,6 +248,7 @@ final class LauncherModel: ObservableObject {
             throw LaunchFailure.failed("Не удалось скачать образ: \(lastOutputLine ?? "tart clone завершился с кодом \(code)")")
         }
         progress.finish(.image, detail: "Образ скачан, VM «\(vmName)» создана")
+        saveSetupStatus(imagePresent: true)
     }
 
     private func handleCloneLine(_ line: String) {
