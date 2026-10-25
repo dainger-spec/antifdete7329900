@@ -25,6 +25,15 @@ public enum NetworkPolicy: Equatable, Sendable {
         }
     }
 
+    /// How tart-prototype.sh takes this policy: (TART_NET, SOFTNET_ALLOW?).
+    public var controllerEnv: (tartNet: String, softnetAllow: String?) {
+        switch self {
+        case .proxyOnly(let cidr): ("softnet", cidr)
+        case .isolated: ("softnet", "127.0.0.1/32")
+        case .openNAT: ("shared", nil)
+        }
+    }
+
     /// The fail-closed policy for a profile's proxy string. A proxy given as an
     /// IP becomes a /32 allow; a hostname can't go in softnet's IP allowlist, so
     /// callers must resolve it first (ProxyEndpoint.allowCIDR is nil then).

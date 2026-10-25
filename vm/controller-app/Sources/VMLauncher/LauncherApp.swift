@@ -20,17 +20,26 @@ struct LauncherApp: App {
     var body: some Scene {
         Window("Safari в VM", id: "launcher") {
             ContentView(model: appDelegate.model)
+                .task { await appDelegate.menuBar.refresh() }
         }
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
+
+        MenuBarExtra {
+            MenuBarContent(launcher: appDelegate.model, menu: appDelegate.menuBar)
+        } label: {
+            MenuBarLabel(menu: appDelegate.menuBar)
+        }
+        .menuBarExtraStyle(.menu)
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = LauncherModel()
+    let menuBar = MenuBarModel()
     private var terminating = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {

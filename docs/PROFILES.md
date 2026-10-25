@@ -119,9 +119,13 @@ Done here (core, tested on Linux/macOS CI):
       check (`SetupStatusCache`) so repeat launches don't re-probe. Logic is
       unit-tested; the visuals compile in CI and get a final look on a Mac.
 
-Next (need macOS to build/verify the UI and guest bits):
+- [x] Menu-bar app (`MenuBarExtra`): a quick list of profiles (click launches
+      that profile — its own VM, fail-closed proxy, cookies, last URL), a
+      running-VM count (parsed from `tart list`), and open-window/quit. Launches
+      go through `LauncherModel.start(profile:)`. Running-count and env mapping
+      are unit-tested; the menu UI compiles in CI.
 
-- [ ] Menu-bar app: profile list, click-to-launch, running-VM count
+Next (need macOS to build/verify the UI and guest bits):
 - [ ] Logging to a host file + "Show log" button + clear VM-crash messages
 - [ ] Export/import a profile as one archive (snapshot + settings), Mac-portable
 - [ ] Base-image update: check, background download, migrate/warn

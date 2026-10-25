@@ -119,16 +119,24 @@ public enum LauncherEnvironment {
     }
 
     /// Environment for running tart-prototype.sh without a terminal.
+    ///
+    /// `network` picks TART_NET/SOFTNET_ALLOW: a profile with a proxy runs
+    /// fail-closed over softnet; the plain dev launch (nil) uses shared NAT so
+    /// `tart ip` resolves and the host can reach the VM. `cookiesFile`, when
+    /// set, is POSTed to the agent's /cookies before navigating.
     public static func scriptEnvironment(base: [String: String], tartPath: String, askPass: URL,
-                                         localPort: UInt16?) -> [String: String] {
+                                         localPort: UInt16?, network: NetworkPolicy? = nil,
+                                         cookiesFile: String? = nil) -> [String: String] {
         var environment = base
         let tartDirectory = URL(fileURLWithPath: tartPath).deletingLastPathComponent().path
         environment["PATH"] = searchPath(base["PATH"], prepending: [tartDirectory])
-        // NAT: `tart ip` resolves it reliably and the VM is reachable from the host.
-        environment["TART_NET"] = environment["TART_NET"] ?? "shared"
+        let (tartNet, softnetAllow) = (network ?? .openNAT).controllerEnv
+        environment["TART_NET"] = tartNet
+        if let softnetAllow { environment["SOFTNET_ALLOW"] = softnetAllow } else { environment["SOFTNET_ALLOW"] = nil }
         environment["SSH_ASKPASS"] = askPass.path
         environment["SSH_ASKPASS_REQUIRE"] = "force"
         if let localPort { environment["LOCAL_PORT"] = String(localPort) }
+        if let cookiesFile { environment["COOKIES_FILE"] = cookiesFile } else { environment["COOKIES_FILE"] = nil }
         // These only make sense for a terminal user.
         environment["KEEP_VM"] = nil
         environment["SHOT"] = nil

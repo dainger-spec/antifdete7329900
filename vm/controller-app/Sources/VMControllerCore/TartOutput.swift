@@ -14,6 +14,19 @@ public enum TartOutput {
         return false
     }
 
+    /// Names of VMs whose State column is "running", from `tart list` output.
+    /// Pass `prefix` to count only this app's profile VMs (e.g. "pb-").
+    public static func runningVMNames(_ output: String, prefix: String = "") -> [String] {
+        var names: [String] = []
+        for line in output.split(whereSeparator: { $0.isNewline }) {
+            let fields = line.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+            // Source Name Disk Size State → need Name (1) and State (last).
+            guard fields.count >= 3, fields[0] != "Source", fields.last == "running" else { continue }
+            if prefix.isEmpty || fields[1].hasPrefix(prefix) { names.append(fields[1]) }
+        }
+        return names
+    }
+
     // "42%", "42.5%", "(42%)", "42 %"; not the tail of "1000%" or "v1.42%".
     private static let percentPattern = try! NSRegularExpression(pattern: #"(?<![\w.])(\d{1,3}(?:\.\d+)?)\s?%"#)
 

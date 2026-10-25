@@ -19,6 +19,11 @@ Safari is open the VM keeps running; **Остановить VM** (or quitting th
 shuts it down. Errors appear in the window, with the full output in the
 **Журнал** section below it (it expands on error and can be copied).
 
+A **menu-bar item** lists saved profiles — click one to launch it (its own VM,
+fail-closed proxy, cookies, last URL) — shows how many profile VMs are running
+(from `tart list`), and reopens the window. Profiles live in the JSON store
+(`VMController profiles …` on the command line edits the same file).
+
 During the long first-launch/download wait a full-window **setup splash** takes
 over: a light SF Pro screen with an auto-advancing carousel of benefit cards,
 the current stage, a thin progress bar and **Отмена**, so the wait reads as

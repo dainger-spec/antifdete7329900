@@ -68,6 +68,19 @@ final class TartOutputTests: XCTestCase {
         XCTAssertNil(TartOutput.label(in: "57%"))
         XCTAssertEqual(TartOutput.label(in: "pulling manifest..."), "pulling manifest...")
     }
+
+    func testRunningVMNames() {
+        let out = """
+        Source Name            Disk Size State
+        local  pb-work-a1       50   24   running
+        local  pb-home-b2       50   24   stopped
+        local  other-vm         50   24   running
+        oci    ghcr.io/x:latest 50   24   stopped
+        """
+        XCTAssertEqual(TartOutput.runningVMNames(out), ["pb-work-a1", "other-vm"])
+        XCTAssertEqual(TartOutput.runningVMNames(out, prefix: "pb-"), ["pb-work-a1"])
+        XCTAssertEqual(TartOutput.runningVMNames("Source Name Disk Size State\n", prefix: "pb-"), [])
+    }
 }
 
 final class URLInputTests: XCTestCase {
@@ -189,6 +202,23 @@ final class LauncherEnvironmentTests: XCTestCase {
         XCTAssertEqual(environment["LOCAL_PORT"], "50123")
         XCTAssertNil(environment["KEEP_VM"])
         XCTAssertEqual(environment["HOME"], "/Users/me")
+    }
+
+    func testScriptEnvironmentFailClosedAndCookies() {
+        let environment = LauncherEnvironment.scriptEnvironment(
+            base: ["PATH": "/usr/bin"], tartPath: "/bin/tart",
+            askPass: URL(fileURLWithPath: "/tmp/a.sh"), localPort: nil,
+            network: .proxyOnly(allowCIDR: "10.0.0.9/32"), cookiesFile: "/tmp/cookies.json")
+        XCTAssertEqual(environment["TART_NET"], "softnet")
+        XCTAssertEqual(environment["SOFTNET_ALLOW"], "10.0.0.9/32")
+        XCTAssertEqual(environment["COOKIES_FILE"], "/tmp/cookies.json")
+
+        let isolated = LauncherEnvironment.scriptEnvironment(
+            base: [:], tartPath: "/bin/tart", askPass: URL(fileURLWithPath: "/tmp/a.sh"),
+            localPort: nil, network: .isolated)
+        XCTAssertEqual(isolated["TART_NET"], "softnet")
+        XCTAssertEqual(isolated["SOFTNET_ALLOW"], "127.0.0.1/32")
+        XCTAssertNil(isolated["COOKIES_FILE"])
     }
 }
 

@@ -44,8 +44,12 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var log: [LogLine] = []
     @Published private(set) var tartHelp: TartHelp?
 
-    let vmName = LauncherDefaults.vmName
-    let baseImage = LauncherDefaults.baseImage
+    let profileStore = ProfileStore()
+    /// The profile being launched, or nil for the plain URL launch (dev NAT).
+    private(set) var activeProfile: Profile?
+    /// The VM/base the current launch targets — a profile's, or the default.
+    var vmName: String { activeProfile?.vmName ?? LauncherDefaults.vmName }
+    var baseImage: String { activeProfile?.baseImage ?? LauncherDefaults.baseImage }
 
     private let baseEnvironment: [String: String]
     private let statusCache = SetupStatusCache()
@@ -98,6 +102,7 @@ final class LauncherModel: ObservableObject {
             urlError = "Нужен адрес вида https://example.com"
             return
         }
+        activeProfile = nil
         urlError = nil
         urlText = url
         UserDefaults.standard.set(url, forKey: "lastURL")
@@ -105,6 +110,21 @@ final class LauncherModel: ObservableObject {
         progress = LaunchProgress()
         tartHelp = nil
         appendLog("Запуск: \(url)", .info)
+        run { try await self.launch(url: url, knownTart: nil) }
+    }
+
+    /// Launch a saved profile: its own VM (cloned from its base), fail-closed
+    /// proxy networking, its cookies, opening its last URL.
+    func start(profile: Profile) {
+        guard canStart else { return }
+        activeProfile = profile
+        let url = URLInput.normalize(profile.lastURL ?? urlText) ?? "https://browserleaks.com"
+        urlError = nil
+        urlText = url
+        targetURL = url
+        progress = LaunchProgress()
+        tartHelp = nil
+        appendLog("Запуск профиля «\(profile.name)» [\(profile.vmName)]: \(url)", .info)
         run { try await self.launch(url: url, knownTart: nil) }
     }
 
@@ -277,9 +297,20 @@ final class LauncherModel: ObservableObject {
             throw LaunchFailure.failed("Рядом со скриптом нет файлов агента: \(missing.joined(separator: ", "))")
         }
         let askPass = try LauncherEnvironment.writeAskPass(in: TartSetup.supportDirectory)
+        // A profile runs fail-closed through its proxy and applies its cookies;
+        // the plain launch stays on dev NAT.
+        var network: NetworkPolicy?
+        var cookiesFile: String?
+        if let profile = activeProfile {
+            network = NetworkPolicy.failClosed(proxy: profile.proxy)
+            let cookies = profileStore.cookiesURL(for: profile)
+            if profile.cookieCount > 0 && FileManager.default.fileExists(atPath: cookies.path) {
+                cookiesFile = cookies.path
+            }
+        }
         let environment = LauncherEnvironment.scriptEnvironment(
             base: baseEnvironment, tartPath: tart, askPass: askPass,
-            localPort: LauncherEnvironment.freeLocalPort())
+            localPort: LauncherEnvironment.freeLocalPort(), network: network, cookiesFile: cookiesFile)
 
         scriptParser = ScriptOutputParser()
         scriptError = nil
@@ -315,6 +346,10 @@ final class LauncherModel: ObservableObject {
             if phase == .running {
                 phase = .ready
                 setStatus("Готово — Safari открыт в окне VM")
+                // Remember the profile's last URL for next time.
+                if let profile = activeProfile, let url = targetURL {
+                    try? profileStore.update(profile.id) { $0.lastURL = url }
+                }
             }
         case .stopping:
             if phase == .stopping { setStatus("Остановка VM…") }
