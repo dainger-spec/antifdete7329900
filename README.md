@@ -14,6 +14,7 @@ Each profile runs in a separate macOS VM with genuine Safari.
 - In-VM agent: `vm/agent/` (implemented — stdlib HTTP service that drives Safari)
 - Slimming the VM (RAM/CPU caps, service disabling, measurement): `vm/slim.sh`, [vm/SLIMMING.md](vm/SLIMMING.md)
 - Profiles on snapshots, cookies, fail-closed networking: [docs/PROFILES.md](docs/PROFILES.md)
+- Hardware identity (hostname, MAC, platform limits): [docs/HARDWARE_IDENTITY.md](docs/HARDWARE_IDENTITY.md)
 
 ### Quick start (app)
 
