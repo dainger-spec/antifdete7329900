@@ -541,6 +541,9 @@ final class SelfTest {
         }
         let plainConfiguration = WKWebViewConfiguration()
         plainConfiguration.websiteDataStore = .nonPersistent()
+        // The one engine preference a profile sets (as Safari has it), so the engine is compared
+        // like for like.
+        plainConfiguration.preferences.isElementFullscreenEnabled = true
         let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
         try await PageLoader.load(plain, html: page, baseURL: origin)
         let reference = Self.flatten(try await js(plain, probe) as? [String: Any] ?? [:])
@@ -562,7 +565,8 @@ final class SelfTest {
         let engineKeys = reference.keys.filter { key in
             ["plugins", "mimeTypes", "pdfViewerEnabled", "language", "languages", "deviceMemory", "ownNavigator", "ownScreen",
              "navigatorProtoCount", "colorDepth", "canvas.colors", "canvas.urlLength", "canvas.url", "canvasText", "fonts",
-             "webkitObject", "webdriver", "doNotTrack"].contains(key) || key.hasPrefix("webgl.") || key.hasPrefix("features.")
+             "webkitObject", "webdriver", "doNotTrack"].contains(key) || key.hasPrefix("webgl.")
+                || (key.hasPrefix("features.") && key != "features.safari") // window.safari is added on purpose (macOS)
         }.sorted()
         for generationID in [DeviceGenerations.defaultID, "ios-26"] {
             // WebRTC left as the engine has it: its removal (the default policy) is checked by the
@@ -590,6 +594,9 @@ final class SelfTest {
                   !renderingNatives.isEmpty && renderingNatives.values.allSatisfy { $0.hasPrefix("native-text") || $0 == "absent" },
                   renderingNatives.map { "\($0.key)=\($0.value)" }.joined(separator: "; "))
             check("surface (\(name)): one language, as WebKit exposes", string(probed, "languages") == string(probed, "language"))
+            // Safari the app exposes window.safari on the Mac and not on iOS.
+            check("surface (\(name)): window.safari \(name == "macOS" ? "present, as in Safari" : "absent, as on iOS")",
+                  string(probed, "features.safari") == (name == "macOS" ? "object" : "undefined"), string(probed, "safariShape"))
             if name == "macOS" {
                 for key in ["ua", "platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
                             "timeZone", "tzOffset", "dateString"] where key != "ua" {
