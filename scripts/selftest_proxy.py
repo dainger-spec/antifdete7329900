@@ -10,9 +10,13 @@ itself with a page that reports how the request arrived, e.g.
 `atyp=3` means the browser sent the *hostname* to the proxy (remote DNS resolution); an
 `.invalid` hostname can only load at all if it was not resolved locally.
 
-    python3 scripts/selftest_proxy.py --http 18080 --socks 18081
+    python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082
+
+`--http-auth` is an HTTP CONNECT proxy that answers 407 until the request carries
+`Proxy-Authorization: Basic pb-user:pb-pass`, then reports `via=connect-auth`.
 """
 import argparse
+import base64
 import socket
 import struct
 import threading
@@ -71,6 +75,27 @@ def handle_http(conn: socket.socket) -> None:
             print(f"[selftest-proxy] served via=forward target={target}", flush=True)
 
 
+AUTH_EXPECTED = "Basic " + base64.b64encode(b"pb-user:pb-pass").decode()
+
+
+def handle_http_auth(conn: socket.socket) -> None:
+    with conn:
+        head = read_until_blank_line(conn).decode("latin-1", "replace")
+        lines = head.split("\r\n")
+        method, _, rest = lines[0].partition(" ")
+        target = rest.split(" ", 1)[0]
+        credentials = next((line.split(":", 1)[1].strip() for line in lines[1:]
+                            if line.lower().startswith("proxy-authorization:")), None)
+        if method.upper() != "CONNECT" or credentials != AUTH_EXPECTED:
+            conn.sendall(b"HTTP/1.1 407 Proxy Authentication Required\r\n"
+                         b"Proxy-Authenticate: Basic realm=\"pb-selftest\"\r\n"
+                         b"Content-Length: 0\r\nConnection: close\r\n\r\n")
+            print(f"[selftest-proxy] 407 for {target} (credentials={'wrong' if credentials else 'none'})", flush=True)
+            return
+        conn.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        respond_with_page(conn, f"via=connect-auth target={target}")
+
+
 def recv_exact(conn: socket.socket, n: int) -> bytes:
     data = b""
     while len(data) < n:
@@ -127,8 +152,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--http", type=int, default=18080)
     parser.add_argument("--socks", type=int, default=18081)
+    parser.add_argument("--http-auth", type=int, default=None)
     args = parser.parse_args()
     threading.Thread(target=serve, args=(args.http, handle_http), daemon=True).start()
+    if args.http_auth:
+        threading.Thread(target=serve, args=(args.http_auth, handle_http_auth), daemon=True).start()
     serve(args.socks, handle_socks)
 
 

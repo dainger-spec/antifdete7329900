@@ -73,7 +73,7 @@ public final class SyncEngine: @unchecked Sendable {
         guard let blob = try await transport.fetch(objectID: vaultHeaderObjectID) else { throw CoreError.vaultNotFound }
         let header = try JSONCoding.decoder.decode(VaultHeader.self, from: blob)
         let vault = try MasterVault.unlock(header: header, root: root, password: password)
-        try MasterVault.writeHeader(header, in: root)
+        try MasterVault.createHeader(header, in: root)
         return vault
     }
 

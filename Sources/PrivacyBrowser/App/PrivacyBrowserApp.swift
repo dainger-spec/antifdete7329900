@@ -86,7 +86,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Running profiles must be sealed (WebKit data encrypted) before the process exits.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let model, model.hasRunningProfiles else { return .terminateNow }
+        // Also while a profile is still launching or sealing, or a Lock is under way: quitting
+        // then would leave its WebKit data decrypted on disk.
+        guard let model, model.hasActivity else { return .terminateNow }
         guard !isTerminating else { return .terminateLater } // ⌘Q pressed twice: don't start a second lock
         isTerminating = true
         Task { @MainActor in

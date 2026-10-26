@@ -93,17 +93,44 @@ struct ProfileDraft {
             configuration.userAgent = userAgent.trimmingCharacters(in: .whitespaces)
         }
         if proxyEnabled {
-            guard let port = Int(proxyPort.trimmingCharacters(in: .whitespaces)) else {
+            // The Host field often holds a pasted proxy string (socks5://user:pass@host:port,
+            // host:port, host:port:user:pass): split it into its parts; reject what is not a host.
+            let field: ProxyHostField
+            do {
+                field = try ProxyHostField.parse(proxyHost)
+            } catch {
+                throw CoreError.invalidConfiguration(String(format: L("editor.error.proxyHost"),
+                                                            proxyHost.trimmingCharacters(in: .whitespacesAndNewlines)))
+            }
+            var portText = proxyPort.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let pastedPort = field.port {
+                guard portText.isEmpty || Int(portText) == pastedPort else {
+                    throw CoreError.invalidConfiguration(L("editor.error.proxyPortConflict"))
+                }
+                portText = String(pastedPort)
+            }
+            guard let port = Int(portText), (1...65535).contains(port) else {
                 throw CoreError.invalidConfiguration(L("editor.error.port"))
             }
-            let user = proxyUsername.trimmingCharacters(in: .whitespaces)
+            var user = proxyUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+            var password = proxyPassword
+            if let pastedUser = field.username {
+                guard user.isEmpty || user == pastedUser else {
+                    throw CoreError.invalidConfiguration(L("editor.error.proxyUserConflict"))
+                }
+                user = pastedUser
+                password = field.password ?? ""
+            }
+            // A scheme in the pasted string is more specific than the picker.
+            let kind = field.kind ?? proxyKind
             configuration.proxy = ProxySettings(
-                kind: proxyKind,
-                host: proxyHost.trimmingCharacters(in: .whitespaces),
+                kind: kind,
+                host: field.host,
                 port: port,
                 username: user.isEmpty ? nil : user,
-                password: user.isEmpty ? nil : proxyPassword,
-                tlsToProxy: proxyTLS,
+                password: user.isEmpty ? nil : password,
+                // The TLS toggle is shown for HTTP CONNECT only; its hidden value must not leak into SOCKS5.
+                tlsToProxy: kind == .httpConnect && (field.tlsToProxy ?? proxyTLS),
                 excludedDomains: proxyExcludedDomains.split(separator: ",")
                     .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
         }

@@ -37,8 +37,11 @@ final class BrowserSession {
     private var libraryWindow: LibraryWindowController?
     private var isClosing = false
 
+    /// Throws when the profile's proxy cannot be applied — before any data store exists, so a
+    /// profile with a broken proxy never starts on a direct connection (fail-closed).
     init(profileID: UUID, profileName: String, configuration: ProfileConfiguration,
-         passwordVault: PasswordVault, library: ProfileLibrary) {
+         passwordVault: PasswordVault, library: ProfileLibrary) throws {
+        let proxies = try ProxyConfigurationFactory.make(configuration.proxy)
         self.profileID = profileID
         self.profileName = profileName
         self.configuration = configuration
@@ -51,8 +54,8 @@ final class BrowserSession {
         let store: WKWebsiteDataStore = configuration.ephemeral
             ? .nonPersistent()
             : WebDataStoreVault.makeStore(for: profileID)
-        // Applies to all network loads of this data store. An empty array = direct connection.
-        store.proxyConfigurations = ProxyConfigurationFactory.make(configuration.proxy)
+        // Applies to all network loads of this data store. Empty only when no proxy is configured.
+        store.proxyConfigurations = proxies
         self.dataStore = store
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
         self.userContentController = BehaviorSets.makeUserContentController(for: configuration)
@@ -62,7 +65,10 @@ final class BrowserSession {
 
     var tabContext: BrowserTabContext {
         BrowserTabContext(profileName: profileName, userAgent: configuration.effectiveUserAgent,
-                          passwordVault: passwordVault, library: library)
+                          passwordVault: passwordVault, library: library,
+                          proxyCredential: configuration.proxy.flatMap { proxy in
+                              proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
+                          })
     }
 
     func makeWebViewConfiguration() -> WKWebViewConfiguration {

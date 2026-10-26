@@ -25,6 +25,8 @@ struct BrowserTabContext {
     let userAgent: String?
     let passwordVault: PasswordVault
     let library: ProfileLibrary
+    /// The profile proxy's user name and password, answered to the proxy's own auth challenges.
+    let proxyCredential: URLCredential?
 }
 
 /// One tab: a `WKWebView` and its navigation, UI and download delegates.
@@ -42,7 +44,19 @@ final class BrowserTab: NSObject {
     private var observations: [NSKeyValueObservation] = []
     private var lastRecordedURL: URL?
     private var tornDown = false
+    /// Sheets whose result a WebKit completion handler is waiting for (see `presentSheet`).
+    private var pendingSheets: [UUID: PendingSheet] = [:]
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserTab")
+
+    private struct PendingSheet {
+        let parent: NSWindow
+        let sheet: NSWindow
+        /// Answers the waiting WebKit completion handler with "cancel" (no-op once answered).
+        let cancel: () -> Void
+    }
+
+    /// A dialog of this tab is waiting for the user (self-test hook).
+    var hasPendingSheet: Bool { !pendingSheets.isEmpty }
 
     init(configuration: WKWebViewConfiguration, context: BrowserTabContext) {
         self.context = context
@@ -122,6 +136,7 @@ final class BrowserTab: NSObject {
     func tearDown() {
         guard !tornDown else { return }
         tornDown = true
+        dismissPendingSheets()
         observations.forEach { $0.invalidate() }
         observations.removeAll()
         webView.stopLoading()
@@ -134,12 +149,44 @@ final class BrowserTab: NSObject {
     // MARK: Dialog helpers
 
     private func presentAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        presentSheet(alert.window, begin: { alert.beginSheetModal(for: $0, completionHandler: $1) }, respond: completion)
+    }
+
+    /// Shows a sheet whose result a WebKit completion handler is waiting for, and guarantees
+    /// `respond` runs exactly once: with the sheet's return code, or with `.cancel` when the tab
+    /// is torn down first (Stop, Lock, Quit, delete, closing the tab). WebKit raises
+    /// NSInternalInconsistencyException when such a handler is released without being called,
+    /// and closing a window does not end its sheets or call their completions.
+    private func presentSheet(_ sheet: NSWindow,
+                              begin: (NSWindow, @escaping (NSApplication.ModalResponse) -> Void) -> Void,
+                              respond: @escaping (NSApplication.ModalResponse) -> Void) {
         host?.tabNeedsAttention(self)
-        guard let window = host?.hostWindow else {
-            completion(.cancel)
+        guard !tornDown, let window = host?.hostWindow else {
+            respond(.cancel)
             return
         }
-        alert.beginSheetModal(for: window, completionHandler: completion)
+        let token = UUID()
+        var answered = false
+        let answer: (NSApplication.ModalResponse) -> Void = { [weak self] code in
+            guard !answered else { return }
+            answered = true
+            self?.pendingSheets[token] = nil
+            respond(code)
+        }
+        pendingSheets[token] = PendingSheet(parent: window, sheet: sheet, cancel: { answer(.cancel) })
+        begin(window, answer)
+    }
+
+    /// Answers every waiting WebKit completion handler with "cancel" and closes its sheet.
+    private func dismissPendingSheets() {
+        let pending = Array(pendingSheets.values)
+        pendingSheets.removeAll()
+        for item in pending {
+            item.cancel() // first: ending the sheet below calls the same, then no-op, answer
+            if item.sheet.sheetParent === item.parent {
+                item.parent.endSheet(item.sheet, returnCode: .cancel)
+            }
+        }
     }
 
     func showMessage(_ text: String) {
@@ -211,10 +258,25 @@ extension BrowserTab: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
                  completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         let space = challenge.protectionSpace
+        // The profile's proxy asks for its credentials (HTTP 407 / SOCKS auth). With
+        // proxyConfigurations set, WebKit hands these to the app instead of answering them itself,
+        // so the system default would never send the profile's user name and password. Without
+        // credentials, or after they were rejected once, cancel: the load fails (fail-closed)
+        // instead of retrying forever. TLS trust of an HTTPS proxy stays with the system.
+        if space.isProxy(), space.authenticationMethod != NSURLAuthenticationMethodServerTrust,
+           space.authenticationMethod != NSURLAuthenticationMethodClientCertificate {
+            if challenge.previousFailureCount == 0, let credential = context.proxyCredential {
+                completionHandler(.useCredential, credential)
+            } else {
+                log.error("Proxy authentication \(challenge.previousFailureCount == 0 ? "requested, no credentials set" : "rejected", privacy: .public)")
+                completionHandler(.cancelAuthenticationChallenge, nil)
+            }
+            return
+        }
         let httpAuth = [NSURLAuthenticationMethodHTTPBasic, NSURLAuthenticationMethodHTTPDigest].contains(space.authenticationMethod)
-        guard httpAuth, !space.isProxy(), let scheme = space.protocol,
+        guard httpAuth, let scheme = space.protocol,
               let url = URL(string: "\(scheme)://\(space.host):\(space.port)") else {
-            // Server trust, client certificates, proxy auth (handled by ProxyConfiguration): system default.
+            // Server trust, client certificates: system default.
             completionHandler(.performDefaultHandling, nil)
             return
         }
@@ -305,13 +367,12 @@ extension BrowserTab: WKUIDelegate {
     /// (entitlement `com.apple.security.files.user-selected.read-write`).
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
-        host?.tabNeedsAttention(self)
-        guard let window = host?.hostWindow else { completionHandler(nil); return }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
         panel.canChooseDirectories = parameters.allowsDirectories
         panel.canChooseFiles = true
-        panel.beginSheetModal(for: window) { completionHandler($0 == .OK ? panel.urls : nil) }
+        presentSheet(panel, begin: { panel.beginSheetModal(for: $0, completionHandler: $1) },
+                     respond: { completionHandler($0 == .OK ? panel.urls : nil) })
     }
 
     /// Camera / microphone: ask every time (WebKit forwards the request only after the page called getUserMedia).

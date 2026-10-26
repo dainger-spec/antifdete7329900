@@ -56,7 +56,10 @@ public enum MasterVault {
         let wrapped = try AEAD.seal(vmk.rawBytes, key: kek, aad: VaultHeader.aad(for: vaultID))
         let header = VaultHeader(format: VaultHeader.currentFormat, vaultID: vaultID, kdf: kdf,
                                  wrappedMasterKey: wrapped, createdAt: Date())
-        try writeHeader(header, in: root)
+        // The check above is only a fast path: two creates (a double click, two app instances)
+        // can both pass it. The exclusive write is the real guard — exactly one header lands,
+        // and the loser gets an error instead of keeping a vault that no longer matches the disk.
+        try createHeader(header, in: root)
         return UnlockedVault(root: root, header: header, masterKey: vmk)
     }
 
@@ -108,6 +111,15 @@ public enum MasterVault {
         return backup
     }
 
+    /// Writes a new vault's header; fails with `vaultAlreadyExists` if one is already there.
+    static func createHeader(_ header: VaultHeader, in root: URL) throws {
+        try SecureFile.ensureDirectory(root)
+        guard try SecureFile.createNew(JSONCoding.encoder.encode(header), at: headerURL(in: root)) else {
+            throw CoreError.vaultAlreadyExists
+        }
+    }
+
+    /// Replaces the header of an existing vault (master-password change).
     static func writeHeader(_ header: VaultHeader, in root: URL) throws {
         try SecureFile.ensureDirectory(root)
         try SecureFile.write(JSONCoding.encoder.encode(header), to: headerURL(in: root))

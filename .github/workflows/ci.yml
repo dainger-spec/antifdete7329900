@@ -38,10 +38,10 @@ jobs:
         run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: Self-test against real WebKit (sandboxed and unsandboxed)
         run: |
-          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 &
+          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 &
           PROXY_PID=$!
           sleep 1
-          export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081
+          export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082
           status=0
           for variant in sandboxed unsandboxed; do
             echo "::group::self-test ($variant)"

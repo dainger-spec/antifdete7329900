@@ -22,6 +22,7 @@ final class AppModel: ObservableObject {
     private(set) var repository: ProfileRepository?
     private(set) var manager: ProfileManager?
     private var managerObservation: AnyCancellable?
+    private var lockTask: Task<Void, Never>?
 
     /// The main Profiles window (SwiftUI `Window` scene), captured via `WindowReader`. Brought
     /// back to the front when a profile's windows all close, and on dock reopen.
@@ -142,9 +143,25 @@ final class AppModel: ObservableObject {
         Task { await manager.recoverUnsealedProfiles() }
     }
 
-    /// Stops (and seals) every running profile, then forgets all keys.
+    /// Lock (and Quit): waits for launches and seals under way, then stops and seals every
+    /// running profile. A second call — Lock clicked twice, or ⌘Q during Lock — waits for the
+    /// same lock instead of starting another or returning before the data is sealed.
     func lock() async {
-        await manager?.stopAll()
+        if let lockTask {
+            await lockTask.value
+            return
+        }
+        let task = Task { @MainActor in await self.performLock() }
+        lockTask = task
+        await task.value
+        lockTask = nil
+    }
+
+    /// Lock or Quit must wait: a lock is under way, or a profile is running, launching or sealing.
+    var hasActivity: Bool { lockTask != nil || (manager?.hasActivity ?? false) }
+
+    private func performLock() async {
+        await manager?.shutDown()
         managerObservation = nil
         manager = nil
         repository = nil

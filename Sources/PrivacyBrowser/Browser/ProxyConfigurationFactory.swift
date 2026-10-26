@@ -22,8 +22,14 @@ import Network
 ///   * DNS prefetching of link hostnames before navigation (WebKit may resolve via the system
 ///     resolver). There is no public switch to disable DNS prefetch in WKWebView.
 enum ProxyConfigurationFactory {
-    static func make(_ settings: ProxySettings?) -> [ProxyConfiguration] {
-        guard let settings, let port = NWEndpoint.Port(rawValue: UInt16(clamping: settings.port)) else { return [] }
+    /// `[]` only for "no proxy configured". A configured proxy that cannot be applied throws:
+    /// returning `[]` would mean a direct connection, i.e. fail-open.
+    static func make(_ settings: ProxySettings?) throws -> [ProxyConfiguration] {
+        guard let settings else { return [] }
+        try settings.validate() // a bare host name or IP, port 1–65535, consistent credentials
+        guard let port = NWEndpoint.Port(rawValue: UInt16(settings.port)) else {
+            throw CoreError.invalidConfiguration("proxy port \(settings.port)")
+        }
         let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(settings.host), port: port)
 
         var configuration: ProxyConfiguration
@@ -35,6 +41,7 @@ enum ProxyConfigurationFactory {
             configuration = ProxyConfiguration(socksv5Proxy: endpoint)
         }
         if let username = settings.username, let password = settings.password {
+            // Also answered by BrowserTab when WebKit forwards the proxy's auth challenge.
             configuration.applyCredential(username: username, password: password)
         }
         configuration.allowFailover = false

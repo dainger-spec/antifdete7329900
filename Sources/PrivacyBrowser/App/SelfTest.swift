@@ -112,6 +112,8 @@ final class SelfTest {
             try await proxies(repository)
             try await tabsAndLibrary(repository)
             try await windowLifecycle(repository)
+            try await dialogTeardown(repository)
+            try await lockDuringLaunch(repository)
         } catch {
             check("self-test ran without unexpected errors", false, String(describing: error))
         }
@@ -286,6 +288,17 @@ final class SelfTest {
     // MARK: Proxies
 
     private func proxies(_ repository: ProfileRepository) async throws {
+        // A pasted "host:port" (or any non-host) must never reach NWEndpoint.Host, and a proxy that
+        // cannot be applied must never become a direct connection.
+        let pasted = ProxySettings(kind: .socks5, host: "127.0.0.1:1080", port: 1080)
+        check("proxy: a host with a port is refused when saving",
+              (try? repository.create(name: "Bad proxy", configuration: ProfileConfiguration(proxy: pasted, ephemeral: true))) == nil)
+        check("proxy: an unusable proxy never becomes a direct connection", (try? ProxyConfigurationFactory.make(pasted)) == nil)
+        let field = try? ProxyHostField.parse(" socks5://u:p@127.0.0.1:1080\n")
+        check("proxy: a pasted proxy string is split into host, port and credentials",
+              field == ProxyHostField(host: "127.0.0.1", port: 1080, username: "u", password: "p", kind: .socks5),
+              String(describing: field))
+
         let environment = ProcessInfo.processInfo.environment
         guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init),
               let socksPort = environment["PB_SELFTEST_SOCKS_PROXY_PORT"].flatMap(Int.init) else {
@@ -306,6 +319,40 @@ final class SelfTest {
         let direct = try await loadThroughProxy(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9),
                                                 url: URL(string: "http://example.com/")!)
         check("proxy: fail-closed when the proxy is unreachable", direct == nil, "page loaded: \(direct ?? "")")
+
+        // A proxy that answers 407: the profile's credentials are sent, wrong ones fail closed.
+        // Loaded in a BrowserTab, whose navigation delegate answers the proxy's challenge.
+        if let authPort = environment["PB_SELFTEST_HTTP_AUTH_PROXY_PORT"].flatMap(Int.init) {
+            let good = try await titleThroughProxyTab(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: authPort,
+                                                                                username: "pb-user", password: "pb-pass"), url: target)
+            check("proxy: 407 is answered with the profile's credentials", good?.hasPrefix("PB proxied") == true, good ?? "nil")
+            let wrong = try await titleThroughProxyTab(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: authPort,
+                                                                                 username: "pb-user", password: "wrong"), url: target)
+            check("proxy: rejected credentials fail closed", wrong?.hasPrefix("PB proxied") != true, wrong ?? "nil")
+            let none = try await titleThroughProxyTab(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: authPort),
+                                                      url: target)
+            check("proxy: 407 without credentials fails closed", none?.hasPrefix("PB proxied") != true, none ?? "nil")
+        } else {
+            info("proxy auth checks skipped (PB_SELFTEST_HTTP_AUTH_PROXY_PORT not set)")
+        }
+    }
+
+    /// Loads `url` in a `BrowserTab` (the app's own navigation delegate, including its auth
+    /// handling) of an ephemeral profile using `proxy`; returns the title once the page or the
+    /// error page has loaded.
+    private func titleThroughProxyTab(_ repository: ProfileRepository, _ proxy: ProxySettings, url: URL) async throws -> String? {
+        let profile = try repository.create(name: "Proxy tab", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+        defer { tab.tearDown() }
+        tab.load(url)
+        let errorTitle = L("errorpage.title")
+        _ = await waitUntil(timeout: 20) {
+            !tab.webView.isLoading && ((tab.webView.title ?? "").hasPrefix("PB proxied") || tab.webView.title == errorTitle)
+        }
+        info("proxy tab \(proxy.username ?? "-"):\(proxy.password == nil ? "-" : "***") -> \(tab.webView.title ?? "nil")")
+        return tab.webView.title
     }
 
     /// Loads `url` in an ephemeral profile using `proxy`. Returns the page text, or nil if the load failed.
@@ -543,6 +590,71 @@ final class SelfTest {
         check("lifecycle: shutDown is idempotent", allClosedCalls == 1 && session.windowCount == 0)
     }
 
+    // MARK: Dialogs (regression for the teardown crash)
+
+    /// A page waits on confirm() when the profile stops. Its sheet must be ended and WebKit's
+    /// completion handler answered ("cancel" → false); a handler released uncalled raises
+    /// NSInternalInconsistencyException and kills the app.
+    private func dialogTeardown(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Dialogs", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let controller = session.openWindow(url: nil)
+        guard let tab = controller.selectedTab else {
+            check("dialogs: a tab to test with", false)
+            session.shutDown()
+            return
+        }
+        let webView = tab.webView
+        try await PageLoader.load(webView, html: """
+            <html><head><title>waiting</title><script>
+            function ask() { var answer = confirm('self-test'); document.title = 'answered:' + answer; }
+            </script></head><body>dialog</body></html>
+            """, baseURL: origin)
+        _ = try? await webView.evaluateJavaScript("setTimeout(ask, 0); true")
+        let asked = await waitUntil(timeout: 5) { tab.hasPendingSheet }
+        check("dialogs: confirm() is shown as a sheet", asked)
+        session.shutDown() // Stop / Lock / Quit path: tears the window and its tabs down
+        let answered = await waitUntil(timeout: 5) { webView.title == "answered:false" }
+        check("dialogs: stopping answers the pending confirm() with cancel", answered && !tab.hasPendingSheet,
+              "title=\(webView.title ?? "nil")")
+    }
+
+    // MARK: Lock during launch (regression for orphaned sessions)
+
+    /// Lock / Quit while a profile is still decrypting its data: no window may be left without a
+    /// manager, nothing may stay decrypted, and the manager must report no activity afterwards.
+    private func lockDuringLaunch(_ repository: ProfileRepository) async throws {
+        let vault = WebDataStoreVault(repository: repository)
+        let layout = WebDataStoreVault.layout
+        let profile = try repository.create(name: "Lock during launch", configuration: ProfileConfiguration())
+        let key = try repository.profileKey(for: profile.id)
+        // Give the profile an archive so that launching has data to decrypt (an await to land in).
+        try await vault.prepareForLaunch(profileID: profile.id, key: key)
+        var session: BrowserSession? = try makeSession(repository, profile.id, key: key)
+        var web: WKWebView? = WKWebView(frame: .zero, configuration: session!.makeWebViewConfiguration())
+        try await PageLoader.load(web!, html: page, baseURL: origin)
+        _ = try await js(web!, "localStorage.setItem('pb', 'x'); return true;", [:])
+        web = nil
+        session?.shutDown()
+        session = nil
+        try await vault.seal(profileID: profile.id, key: key)
+
+        let manager = ProfileManager(repository: repository)
+        let launch = Task { @MainActor in try await manager.launch(profile.id) }
+        _ = await waitUntil(timeout: 5) { manager.busyProfileIDs.contains(profile.id) || manager.isRunning(profile.id) }
+        await manager.shutDown()
+        _ = try? await launch.value
+        check("lock during launch: no profile left running", !manager.isRunning(profile.id) && !manager.hasActivity)
+        check("lock during launch: nothing left decrypted", layout.discoverDirectories(for: profile.id).isEmpty,
+              layout.discoverDirectories(for: profile.id).map(\.path).joined(separator: ", "))
+        check("lock during launch: the data is still in the archive",
+              FileManager.default.fileExists(atPath: repository.webDataArchiveURL(for: profile.id).path))
+        try? await manager.launch(profile.id)
+        check("lock during launch: no launch after shutdown", !manager.isRunning(profile.id))
+        await vault.deleteData(profileID: profile.id)
+        try repository.delete(profile.id)
+    }
+
     // MARK: Helpers
 
     private func makeSession(_ repository: ProfileRepository, _ id: UUID, key: SymmetricKey) throws -> BrowserSession {
@@ -551,7 +663,7 @@ final class SelfTest {
             history: try repository.historyStore(for: id, key: key, policy: configuration.historyPolicy, persistent: !configuration.ephemeral),
             bookmarks: try repository.bookmarkStore(for: id, key: key),
             recordsHistory: configuration.historyEnabled)
-        return BrowserSession(profileID: id, profileName: try repository.summary(for: id).name, configuration: configuration,
+        return try BrowserSession(profileID: id, profileName: try repository.summary(for: id).name, configuration: configuration,
                               passwordVault: try repository.passwordVault(for: id), library: library)
     }
 

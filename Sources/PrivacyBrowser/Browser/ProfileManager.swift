@@ -30,7 +30,20 @@ final class ProfileManager: ObservableObject {
     private var sessions: [UUID: BrowserSession] = [:]
     /// Profile keys are held only while the profile runs (needed to seal on stop).
     private var keys: [UUID: SymmetricKey] = [:]
+    /// Set by `shutDown()` (Lock / Quit): no launch starts, and a launch suspended in an await
+    /// seals what it decrypted instead of opening a window that would outlive this manager.
+    private(set) var isShuttingDown = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ProfileManager")
+
+    /// Why a launch was refused before anything was decrypted (shown to the user).
+    enum LaunchError: LocalizedError {
+        case invalidProxy(host: String)
+        var errorDescription: String? {
+            switch self {
+            case .invalidProxy(let host): return String(format: L("launch.error.proxyInvalid"), host)
+            }
+        }
+    }
 
     init(repository: ProfileRepository) {
         self.repository = repository
@@ -39,11 +52,15 @@ final class ProfileManager: ObservableObject {
 
     var hasRunningProfiles: Bool { !sessions.isEmpty }
 
+    /// A profile is running, launching or being sealed: Lock / Quit must wait for it.
+    var hasActivity: Bool { !sessions.isEmpty || !busyProfileIDs.isEmpty }
+
     func isRunning(_ id: UUID) -> Bool { sessions[id] != nil }
 
     // MARK: Launch
 
     func launch(_ id: UUID) async throws {
+        guard !isShuttingDown else { return }
         if let session = sessions[id] {
             session.bringToFront()
             return
@@ -55,6 +72,11 @@ final class ProfileManager: ObservableObject {
         let summary = try repository.summary(for: id)
         let key = try repository.profileKey(for: id)
         let configuration = try repository.loadConfiguration(id, key: key)
+        // Refuse a proxy that cannot be applied before decrypting anything: the profile must not
+        // start on a direct connection, and there is then nothing to seal again.
+        if let proxy = configuration.proxy {
+            do { try proxy.validate() } catch { throw LaunchError.invalidProxy(host: proxy.host) }
+        }
         let passwords = try repository.passwordVault(for: id)
         // Ephemeral profiles keep history in memory only; bookmarks are explicit user data and persist.
         let history = try repository.historyStore(for: id, key: key, policy: configuration.historyPolicy,
@@ -68,8 +90,22 @@ final class ProfileManager: ObservableObject {
             try await webDataVault.prepareForLaunch(profileID: id, key: key)
         }
 
-        let session = BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
-                                     passwordVault: passwords, library: library)
+        // Lock or Quit began while the data was decrypted: a window opened now would have no
+        // manager and its data would stay unencrypted. No data store exists yet, so seal the
+        // decrypted directories directly (activeStore: false) and stop here.
+        if isShuttingDown {
+            if !configuration.ephemeral { try await webDataVault.seal(profileID: id, key: key, activeStore: false) }
+            return
+        }
+        let session: BrowserSession
+        do {
+            session = try BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
+                                         passwordVault: passwords, library: library)
+        } catch {
+            // Thrown before the session created its data store (see BrowserSession.init).
+            if !configuration.ephemeral { try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
+            throw error
+        }
         session.onAllWindowsClosed = { [weak self] in
             // Return to the Profiles window right away; sealing then runs in the background and
             // flips the row to "Encrypting…" via busyProfileIDs.
@@ -108,6 +144,22 @@ final class ProfileManager: ObservableObject {
         // data store reference was already dropped in shutDown().
         if !ephemeral, let key {
             try await webDataVault.seal(profileID: id, key: key)
+        }
+    }
+
+    /// Lock / Quit: refuse new launches, let launches and seals already under way finish (a
+    /// suspended launch seals again instead of opening a window), then stop and seal every
+    /// running profile. Returns when nothing is running, launching or sealing.
+    func shutDown() async {
+        isShuttingDown = true
+        await waitWhileBusy()
+        await stopAll()
+        await waitWhileBusy()
+    }
+
+    private func waitWhileBusy() async {
+        while !busyProfileIDs.isEmpty {
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
     }
 
@@ -160,6 +212,7 @@ final class ProfileManager: ObservableObject {
     /// Seals WebKit data left unencrypted by a crash or forced quit. Run after unlock.
     func recoverUnsealedProfiles() async {
         for summary in repository.list() where sessions[summary.id] == nil {
+            guard !isShuttingDown else { break }
             guard !WebDataStoreVault.discoverDirectories(for: summary.id).isEmpty else { continue }
             log.notice("Re-sealing unencrypted WebKit data of \(summary.id.uuidString, privacy: .public)")
             busyProfileIDs.insert(summary.id)

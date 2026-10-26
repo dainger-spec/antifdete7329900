@@ -189,9 +189,10 @@ public struct ProxySettings: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
-        let trimmed = host.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, trimmed == host, !host.contains("/") else {
-            throw CoreError.invalidConfiguration("proxy host must be a bare hostname or IP")
+        // Anything else (scheme, port, credentials, spaces, newlines) is not resolvable by
+        // NWEndpoint.Host and would make every load of the profile fail. See ProxyHostField.
+        guard Self.isValidHost(host) else {
+            throw CoreError.invalidConfiguration("proxy host must be a bare host name or IP address, not “\(host)”")
         }
         guard (1...65535).contains(port) else { throw CoreError.invalidConfiguration("proxy port out of range") }
         if tlsToProxy && kind == .socks5 {
