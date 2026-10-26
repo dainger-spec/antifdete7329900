@@ -61,45 +61,34 @@ final class WebDataStoreVault {
         layout.discoverDirectories(for: profileID)
     }
 
-    /// Identifiers this process has created a `WKWebsiteDataStore(forIdentifier:)` for.
-    /// `WKWebsiteDataStore.remove(forIdentifier:)` with any other identifier segfaults on
-    /// WebKit's data-store queue, so only these may be passed to it.
+    /// Identifiers whose `WKWebsiteDataStore(forIdentifier:)` this process created and has not
+    /// removed yet. Only these are passed to `WKWebsiteDataStore.remove(forIdentifier:)`; any
+    /// other profile's data is deleted by sweeping its directories.
     private static var registeredStoreIDs: Set<UUID> = []
 
-    /// Set once a `WKWebView` has been created in this process. That is what installs
-    /// WebKit's `RunLoop::main()`.
-    private static var didCreateWebView = false
+    private static var webKitInitialized = false
 
-    /// `WKWebsiteDataStore.remove(forIdentifier:)` must run on the main queue, and only after
-    /// WebKit is initialized. The completion runs on a data-store IO queue and then calls
-    /// `RunLoop::main().dispatch` inside `WebsiteDataStore::removeDataStoreWithIdentifierImpl`.
-    /// That pointer is nil until a `WKWebView` has existed, so the call is an EXC_BAD_ACCESS.
+    /// `remove(forIdentifier:)` finishes on a data-store IO queue by calling
+    /// `RunLoop::main().dispatch` (inside `WebsiteDataStore::removeDataStoreWithIdentifierImpl`).
+    /// WebKit installs `RunLoop::main()` only when it is initialized — by the first `WKWebView` —
+    /// so without one the call is an EXC_BAD_ACCESS on that queue. The throwaway view uses a
+    /// non-persistent store, so the default persistent data store is never created or touched.
+    private static func ensureWebKitInitialized() {
+        guard !webKitInitialized else { return }
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        _ = WKWebView(frame: .zero, configuration: configuration)
+        webKitInitialized = true
+    }
+
+    /// The only caller of `WKWebsiteDataStore.remove(forIdentifier:)`. Main-actor isolated (the
+    /// class is `@MainActor`), so no queue hopping is needed.
     private static func removeStore(for profileID: UUID) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let perform = {
-                MainActor.assumeIsolated {
-                    if !didCreateWebView {
-                        // Initializes WebKit, then the view is released. The run loop stays installed.
-                        var webView: WKWebView? = WKWebView(frame: .zero)
-                        webView = nil
-                        didCreateWebView = true
-                    }
-                    Task { @MainActor in
-                        do {
-                            try await WKWebsiteDataStore.remove(forIdentifier: profileID)
-                            continuation.resume()
-                        } catch {
-                            continuation.resume(throwing: error)
-                        }
-                    }
-                }
-            }
-            if Thread.isMainThread {
-                perform()
-            } else {
-                DispatchQueue.main.async(execute: perform)
-            }
-        }
+        ensureWebKitInitialized()
+        try await WKWebsiteDataStore.remove(forIdentifier: profileID)
+        // Removed: a later delete of this profile only sweeps directories. The next launch
+        // registers it again through `makeStore`.
+        registeredStoreIDs.remove(profileID)
     }
 
     /// Creates a profile's persistent data store. Always use this instead of calling
@@ -145,10 +134,9 @@ final class WebDataStoreVault {
     ///
     /// `activeStore` must be true only when this process created the profile's
     /// `WKWebsiteDataStore` (i.e. the profile ran). Pass false for crash recovery at unlock:
-    /// the store was never registered in this process, so `WKWebsiteDataStore.remove(forIdentifier:)`
-    /// would hand WebKit an unknown identifier and abort on its data-store IO queue. In that
-    /// case we archive and delete the leftover directories directly, which is safe because no
-    /// live store references them.
+    /// no live store references the leftover directories, so there is nothing for WebKit to
+    /// coordinate — we archive and delete them directly, without any WebKit API (WebKit is
+    /// usually not even initialized yet at that point; see `ensureWebKitInitialized`).
     @discardableResult
     func seal(profileID: UUID, key: SymmetricKey, activeStore: Bool = true) async throws -> SealResult {
         let archive = repository.webDataArchiveURL(for: profileID)
