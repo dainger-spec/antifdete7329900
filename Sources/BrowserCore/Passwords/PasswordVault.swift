@@ -59,7 +59,7 @@ public final class PasswordVault: @unchecked Sendable {
     init(fileURL: URL, profileID: UUID, profileKey: SymmetricKey) throws {
         self.fileURL = fileURL
         self.profileID = profileID
-        self.key = profileKey.derive(info: "passwords", salt: withUnsafeBytes(of: profileID.uuid) { Data($0) })
+        self.key = ProfileFileBinding.passwords.key(profileID: profileID, profileKey: profileKey)
         self.entries = []
         if FileManager.default.fileExists(atPath: fileURL.path) {
             let plaintext = try AEAD.open(SecureFile.read(fileURL), key: key, aad: aad)
@@ -67,7 +67,7 @@ public final class PasswordVault: @unchecked Sendable {
         }
     }
 
-    private var aad: String { "passwords:v1:\(profileID.uuidString)" }
+    private var aad: String { ProfileFileBinding.passwords.aad(profileID) }
 
     public func allEntries() -> [PasswordEntry] {
         lock.withLock { entries.sorted { ($0.origin, $0.username) < ($1.origin, $1.username) } }
