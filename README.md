@@ -77,11 +77,13 @@ PB_SELFTEST_SURFACE_OUT=build/surface \
 python3 scripts/safari_reference.py --compare build/surface/surface-macos.json
 # The same pages in Safari and in on-screen profile windows: geometry, headers, APIs, TLS/HTTP2 (unsandboxed build):
 python3 scripts/live_compare.py --app build/unsandboxed/PrivacyBrowser.app --out build/live
+# Does QUIC or WebRTC go around a profile's proxy? (forwarding proxies on this Mac; unsandboxed build):
+python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/leaks
 ```
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 125 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 126 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, the
@@ -94,6 +96,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 - the live comparison (`scripts/live_compare.py`, report only): the same pages in Safari and in
   profile windows of the same size — window geometry with one and two tabs, request header order,
   permission states and storage quota, TLS/JA3/JA4 and HTTP/2 via tls.peet.ws;
+- the leak check (`scripts/leak_check.py`): profiles behind real forwarding proxies on the
+  runner, and one without a proxy as the control. QUIC/HTTP/3 stays on the proxy (HTTP/2 through
+  it, HTTP/3 without it); WebRTC is off in proxied profiles. Fails on any request seen going
+  around a proxy;
 - a container-migration check.
 
 ## Using it
@@ -153,7 +159,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | WebKit data encrypted while a profile is not running | Archive, encrypt, then `remove(forIdentifier:)` on stop; restore on launch. Directories found by UUID (`WebKitDataLayout`), layout checked in CI | Plaintext on disk while the profile runs; a crash leaves plaintext until the next unlock; no "flush" API (last-moment writes can be lost, not leaked) |
 | Time zone | JS shim (`Intl`, `Date` getters, offsets, string forms, local constructors, setters, `Date.parse`), also in workers created from a blob; by default the proxy's exit-IP zone, looked up through the proxy at launch | Workers loaded from a URL and service workers keep the host zone; the lookup is a third-party request |
 | Geolocation | JS shim: deny (default) or fixed coordinates | Detectable; the IP address reveals location unless the proxy matches |
-| WebRTC leak reduction | JS shim: remove `RTCPeerConnection` (default) or force relay-only | No engine switch; WebRTC UDP never uses the proxy; `window.frames[i]` gap |
+| WebRTC leak reduction | Off in the engine (default, and always with a proxy) via a private `WKPreferences` property, JS removal as the fallback; or a JS shim forcing relay-only | WebKit never sends WebRTC through a proxy, so a proxied profile has none; relay-only shows the TURN server this Mac's IP |
 | Navigator / screen (iPhone/iPad profiles) | Document-start JS getters on the prototypes (blob workers too) | URL-loaded workers keep the Mac's values; GPU/TLS/fonts/canvas still the Mac's |
 | Website language (`Accept-Language`, `navigator.language`) | Set once per app run, before WebKit starts, from the first launched profile's proxy country | WebKit has one language list per process: later profiles share it |
 | Password autofill | Explicit buttons in an isolated JS world | No automatic form detection; main frame only |
@@ -192,6 +198,7 @@ Sources/
 Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
 Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist
 scripts/                           build-app.sh, test-shims.mjs, selftest_proxy.py, safari_reference.py,
-                                   live_compare.py + live_sites/ (pages measured in Safari and in profiles)
+                                   live_compare.py + live_sites/ (pages measured in Safari and in profiles),
+                                   leak_check.py (QUIC/WebRTC around a proxy)
 docs/                              architecture, isolation and limitations, sync format, sync server API
 ```

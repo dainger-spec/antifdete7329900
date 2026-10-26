@@ -13,7 +13,8 @@ import WebKit
 /// A temporary vault and ephemeral profiles are used; nothing is left behind.
 ///
 /// Spec (JSON): {"window": {"width": W, "height": H},
-///               "profiles": [{"name": "default"}, {"name": "shimmed", "timeZone": "host", "webRTC": "relayOnly"}],
+///               "profiles": [{"name": "default"}, {"name": "shimmed", "timeZone": "host", "webRTC": "relayOnly"},
+///                            {"name": "proxied", "proxy": {"kind": "socks5", "host": "127.0.0.1", "port": 1080}}],
 ///               "pages": [{"name": "…", "url": "…", "script": "<async function body>", "settleMs": 0,
 ///                          "timeoutMs": 60000, "extraTabs": 0}]}
 /// A page script is the body of an async function; its result is serialised with JSON.stringify.
@@ -28,7 +29,10 @@ final class SiteCapture {
             var timeZone: String?
             var webRTC: String?
             var geolocation: [Double]?
+            /// `ProxySettings.Kind` raw value, host and port.
+            var proxy: Proxy?
         }
+        struct Proxy: Decodable { var kind: String; var host: String; var port: Int }
         struct Page: Decodable {
             var name: String
             var url: String
@@ -98,6 +102,9 @@ final class SiteCapture {
         if let point = profile.geolocation, point.count == 3 {
             configuration.geolocation = .fixed(latitude: point[0], longitude: point[1], accuracyMeters: point[2])
         }
+        if let proxy = profile.proxy, let kind = ProxySettings.Kind(rawValue: proxy.kind) {
+            configuration.proxy = ProxySettings(kind: kind, host: proxy.host, port: proxy.port)
+        }
         return configuration
     }
 
@@ -110,6 +117,8 @@ final class SiteCapture {
             history: try repository.historyStore(for: summary.id, key: key, policy: configuration.historyPolicy, persistent: false),
             bookmarks: try repository.bookmarkStore(for: summary.id, key: key),
             recordsHistory: false)
+        // As a launch does (ProfileManager.launch): the rules a proxied profile's web views get.
+        if configuration.proxy != nil { await ContentRules.prepare() }
         let session = try BrowserSession(profileID: summary.id, profileName: summary.name, configuration: configuration,
                                          passwordVault: try repository.passwordVault(for: summary.id), library: library)
         defer { session.shutDown() }

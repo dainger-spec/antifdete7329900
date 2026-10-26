@@ -278,10 +278,16 @@ struct ProfileEditorView: View {
 
     private var privacySection: some View {
         Section {
-            Picker(L("editor.webrtc"), selection: $draft.webRTC) {
+            // With a proxy WebRTC is always off (ProfileConfiguration.effectiveWebRTCPolicy): the
+            // picker shows that, and the stored choice returns when the proxy is turned off.
+            Picker(L("editor.webrtc"), selection: draft.proxyEnabled ? .constant(WebRTCPolicy.disabled) : $draft.webRTC) {
                 Text(L("editor.webrtc.disabled")).tag(WebRTCPolicy.disabled)
                 Text(L("editor.webrtc.relay")).tag(WebRTCPolicy.relayOnly)
                 Text(L("editor.webrtc.unrestricted")).tag(WebRTCPolicy.unrestricted)
+            }
+            .disabled(draft.proxyEnabled)
+            if draft.proxyEnabled {
+                Text(L("editor.webrtc.proxyNote")).font(.caption).foregroundStyle(.secondary)
             }
             Picker(L("editor.geo"), selection: $draft.geoMode) {
                 ForEach(ProfileDraft.GeoMode.allCases) { Text(L($0.labelKey)).tag($0) }

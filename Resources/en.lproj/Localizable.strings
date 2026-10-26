@@ -39,7 +39,7 @@
 "editor.history.keep" = "Keep history for";
 "editor.history.record" = "Record history";
 "editor.name" = "Name";
-"editor.network.footer" = "Native per-profile proxy, fail-closed (no direct fallback). WebRTC UDP is not proxied.";
+"editor.network.footer" = "Native per-profile proxy, fail-closed (no direct fallback). WebRTC cannot use the proxy, so it is off when one is set.";
 "editor.privacy.footer" = "WebRTC, geolocation and time zone are JavaScript shims (not applied in workers, detectable). See docs/ISOLATION_AND_LIMITATIONS.md.";
 "editor.proxy.bypass" = "Bypass domains (comma-separated)";
 "editor.proxy.host" = "Host";
@@ -72,6 +72,7 @@
 "editor.ua.useCustom" = "Custom user agent";
 "editor.webrtc" = "WebRTC";
 "editor.webrtc.disabled" = "Disabled";
+"editor.webrtc.proxyNote" = "With a proxy WebRTC is always off: WebKit sends its traffic (STUN, TURN, media) around the proxy, from this Mac's real address.";
 "editor.webrtc.relay" = "Relay (TURN) only";
 "editor.webrtc.unrestricted" = "Unrestricted";
 "errorpage.title" = "Page could not be loaded";

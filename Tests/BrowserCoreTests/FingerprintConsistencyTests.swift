@@ -131,3 +131,32 @@ final class ProxyLocationTests: XCTestCase {
         XCTAssertNil(try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(broken.utf8)).lastProxyLocation)
     }
 }
+
+final class ProxiedWebRTCTests: XCTestCase {
+    /// WebKit's WebRTC sockets never use the data store's proxy: a proxied profile gets no WebRTC.
+    func testAProxyTurnsWebRTCOffWithoutForgettingTheChoice() throws {
+        let proxy = ProxySettings(kind: .socks5, host: "127.0.0.1", port: 1080)
+        for policy in WebRTCPolicy.allCases {
+            XCTAssertEqual(ProfileConfiguration(webRTCPolicy: policy).effectiveWebRTCPolicy, policy)
+            var proxied = ProfileConfiguration(proxy: proxy, webRTCPolicy: policy)
+            XCTAssertEqual(proxied.effectiveWebRTCPolicy, .disabled, policy.rawValue)
+            // The stored choice is kept (and saved) for when the proxy is removed.
+            let decoded = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: JSONCoding.encoder.encode(proxied))
+            XCTAssertEqual(decoded.webRTCPolicy, policy)
+            proxied.proxy = nil
+            XCTAssertEqual(proxied.effectiveWebRTCPolicy, policy)
+        }
+    }
+
+    /// Safari on iOS 26.1 and later freezes the OS token; an iPad shows desktop websites.
+    func testMobileGenerationsSendWhatSafariSends() {
+        for id in ["ios-26", "ios-27"] {
+            let ua = DeviceGenerations.generation(id: id)?.userAgent ?? ""
+            XCTAssertTrue(ua.hasPrefix("Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/"), ua)
+            XCTAssertTrue(ua.hasSuffix(" Mobile/15E148 Safari/604.1"), ua)
+        }
+        let iPad = DeviceGenerations.generation(id: "ipados-26")?.userAgent ?? ""
+        XCTAssertTrue(iPad.hasPrefix("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26."), iPad)
+        XCTAssertTrue(iPad.hasSuffix(" Safari/605.1.15"), iPad)
+    }
+}

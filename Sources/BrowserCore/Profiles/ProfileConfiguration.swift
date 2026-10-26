@@ -114,6 +114,13 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         return deviceGeneration.userAgent(hostSafariVersion: hostSafariVersion)
     }
 
+    /// The WebRTC policy pages get: `.disabled` whenever a proxy is set. WebKit opens WebRTC's
+    /// sockets (STUN, TURN over UDP or TCP, media) outside the data store's proxy, so with any
+    /// other policy a page's ICE traffic leaves from this Mac's own address — STUN shows it to
+    /// the page, a TURN server (relay-only) to whoever runs it. The stored choice comes back when
+    /// the proxy is removed.
+    public var effectiveWebRTCPolicy: WebRTCPolicy { proxy == nil ? webRTCPolicy : .disabled }
+
     /// Launching looks up where the proxy exits (`matchProxyLocation`).
     public var needsProxyLocation: Bool { matchProxyLocation && proxy != nil }
 
@@ -277,7 +284,9 @@ public enum WebRTCPolicy: String, Codable, CaseIterable, Sendable {
     /// Remove RTCPeerConnection & friends from the page. Strongest option. Breaks WebRTC sites.
     case disabled
     /// Force `iceTransportPolicy: "relay"`: no host/srflx candidates are gathered, so the
-    /// local and STUN-discovered public IP are not exposed. Requires the site to provide TURN.
+    /// local and STUN-discovered public IP are not exposed to the page. Requires the site to
+    /// provide TURN, and the TURN server sees this Mac's address (WebKit never sends WebRTC
+    /// through a proxy, so a proxied profile gets `.disabled`: `effectiveWebRTCPolicy`).
     case relayOnly
     /// WebKit default (host candidates are mDNS-obfuscated by WebKit, but STUN
     /// requests go out over UDP *outside* the proxy and reveal the real public IP).

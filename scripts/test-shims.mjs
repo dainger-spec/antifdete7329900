@@ -55,6 +55,7 @@ function makeWindow(config, parentContext) {
     globalThis.RTCPeerConnection = class RTCPeerConnection { constructor(c) { this.config = c; } setConfiguration(c) { illegal(this, RTCPeerConnection); this.config = c; } };
     globalThis.webkitRTCPeerConnection = globalThis.RTCPeerConnection;
     globalThis.RTCDataChannel = function () {};
+    globalThis.RTCIceTransport = function () {};
     Object.defineProperty(globalThis, 'open', { value: function open() { if (this !== globalThis) throw new TypeError('illegal invocation'); return null; },
                                                 writable: true, enumerable: true, configurable: true });
     class HTMLCanvasElement { getContext() { return null; } toDataURL() { return 'data:'; } }
@@ -319,6 +320,14 @@ test('iPhone profile: device values, as getters on the prototypes', () => {
   assert.throws(() => run(w, `Screen.prototype.width`), (e) => e.name === 'TypeError');
 });
 
+test('iPad profile: the Mac platform (desktop websites), the iPad touch points and screen', () => {
+  const iPad = { maxTouchPoints: 5, hardwareConcurrency: 8, screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2 };
+  const w = makeWindow({ ...base, device: iPad });
+  assert.equal(run(w, surface), JSON.stringify(['MacIntel', 5, 8, 'en-US', ['en-US'], 'undefined', 820, 1180, 820, 1180, 2, 820, 1180]));
+  // navigator.platform is not replaced at all: still the harness's own getter.
+  assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.toString().includes("illegal(this, Navigator)")`), true);
+});
+
 test('no rendering patches: canvas, audio and fonts stay native', () => {
   for (const config of [base, { ...base, device: iPhone }]) {
     const w = makeWindow(config);
@@ -378,6 +387,8 @@ test('WebRTC disabled: removed without a trace', () => {
   assert.equal(run(w, `typeof RTCPeerConnection`), 'undefined');
   assert.equal(run(w, `typeof webkitRTCPeerConnection`), 'undefined');
   assert.equal(run(w, `'RTCPeerConnection' in window`), false);
+  // Every RTC interface, not only the constructors a page would call first.
+  assert.equal(run(w, `Object.getOwnPropertyNames(window).filter((n) => /^(webkit)?RTC/.test(n)).join()`), '');
 });
 
 test('WebRTC relayOnly', () => {

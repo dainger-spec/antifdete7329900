@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 125/125 checks in both builds):
+(macOS 26, 126/126 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -18,6 +18,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Seal → restore of website data | cookies, localStorage and IndexedDB survive; the archive holds no plaintext; plaintext is gone after seal; WebKit released the store after 1 s |
 | Two running profiles isolated | localStorage, IndexedDB and cookies of A are invisible to B, for the same origin, at the same time |
 | JS shims under JavaScriptCore | time zone (offset, `Intl`, local getters), fixed geolocation, WebRTC removed, WebRTC relay-only |
+| WebRTC off (default) | switched off in the engine (`_peerConnectionEnabled` is false): the window has no `RTC*` interface at all |
 | HTTP CONNECT proxy | `http://` is tunnelled via `CONNECT`; an `.invalid` host loads, so it was resolved by the proxy |
 | SOCKS5 proxy | the hostname is sent to the proxy (`ATYP=3`, remote DNS) |
 | Fail-closed | with the proxy unreachable, loads fail ("Could not connect to the server") instead of going direct |
@@ -29,6 +30,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks; an iPhone profile reports its device class's navigator and screen values; user-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
 | Shims in workers and frames | a worker made from a blob runs in the profile's zone, stays strict and keeps its line numbers; a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
 | Proxy: IPv6, unresolvable host | an HTTP proxy on `[::1]` tunnels the load; a proxy whose host does not resolve fails closed |
+| Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel`: a proxy turns WebRTC off (§5) |
 | Proxy: dns-prefetch leak | an `<a ping>` (the load type WebKit gives dns-prefetch) reaches neither the proxy nor the network; a fetch to the same origin does |
 | Proxy: 407 without credentials | the launch is refused ("needs credentials") and the data is sealed again; nothing opens, directly or otherwise |
 | Proxy: `Accept-Language` | the header the proxy sees is the language the app decided at its first launch (`de-DE,de;q=0.9` in the self-test) |
@@ -81,7 +83,7 @@ This project does not make a Mac look like an iPhone, and doesn't claim to.
 | User-Agent string (HTTP header + `navigator.userAgent`) | `customUserAgent` | native; changes the string only |
 | Time zone | JS shim (`Intl`, `Date` getters, offsets) | approximation; blob workers covered, URL-loaded and service workers not |
 | Geolocation | JS shim (deny / fixed coordinates) | approximation |
-| WebRTC exposure | JS shim (removed / relay-only) | approximation |
+| WebRTC exposure | off in the engine (private `WKPreferences` property, as Lockdown Mode) or a JS shim (relay-only) | native when off; approximation for relay-only |
 
 Keep the declared attributes consistent with each other: a Safari UA, plus a time zone and
 geolocation that match the proxy's exit location. An inconsistent combination, such as a
@@ -98,7 +100,13 @@ stored in the profile (`deviceGenerationID`, encrypted like the rest).
 
 What a generation actually does, and only this:
 
-- supplies the self-declared `User-Agent` for that version (overridable with a custom UA);
+- supplies the self-declared `User-Agent` for that version (overridable with a custom UA): the
+  string Safari sends there. Safari on iOS 26.1 and later freezes the OS token at `18_7` (as
+  macOS Safari freezes `10_15_7`; WebKit bug 298260), so an iPhone profile sends
+  `iPhone OS 18_7 … Version/26.6` (iOS 26) or `Version/27.0` (iOS 27); `iPhone OS 26_0`
+  is a string no Safari sends. iPadOS Safari shows desktop websites by default, so the
+  iPadOS profile sends the Mac's UA and `navigator.platform` "MacIntel", with the iPad's
+  touch points and screen (which is how a page tells such an iPad from a Mac);
 - seeds per-profile defaults (e.g. WebRTC policy) when a new profile picks it;
 - names a **behaviour set** (`behaviorSetID`) — the injected-script bundle. This is an
   extension point (`BehaviorSets` in the app layer). Today every generation resolves to the
@@ -207,8 +215,8 @@ What still differs, and why it cannot be changed from the app:
   cannot work (and that WebKit disables anyway once a page has user scripts) would be worse.
   `Object.getOwnPropertyNames(window).length` follows (1044 in Safari, 1029 in a profile with
   WebRTC on, 1022 with the default policy that removes it).
-- **WebRTC** is removed by the default policy (a privacy choice of the profile; `relayOnly` and
-  `unrestricted` keep it).
+- **WebRTC** is switched off by the default policy, and always with a proxy (a privacy choice of
+  the profile; without a proxy `relayOnly` and `unrestricted` keep it).
 - **The replacement `Date` and `Intl.DateTimeFormat`** (only with a time zone set) list `length`
   and `name` before their statics: JavaScriptCore orders a script function's own properties that
   way whatever the definition order.
@@ -292,6 +300,12 @@ CONNECT, optionally TLS to the proxy, with or without username/password, plus a
 per-profile bypass list. The CONNECT tunnelling, remote DNS for SOCKS5, and fail-closed
 behaviour are verified by the self-test (§0).
 
+**QUIC / HTTP/3 stays on the proxy.** With a data store proxy, WebKit's network stack does not
+use HTTP/3: measured on every push by `scripts/leak_check.py`, which runs real forwarding
+proxies on the CI Mac. cloudflare-quic.com answers a profile without a proxy over HTTP/3 and the
+same requests through an HTTP CONNECT or SOCKS5 proxy over HTTP/2, each one seen by the proxy;
+the SOCKS5 proxy was never asked for UDP. So QUIC needs no tunnel. WebRTC does (below).
+
 **App Transport Security:** `NSAllowsArbitraryLoadsInWebContent` lets the browser load
 `http://` pages. The app's own URLSession traffic (HTTP sync) remains HTTPS-only.
 
@@ -299,7 +313,7 @@ behaviour are verified by the self-test (§0).
 
 | Path | Status | Mitigation |
 |---|---|---|
-| WebRTC UDP (STUN/TURN, media) | Never proxied; STUN reveals the real public IP | WebRTC policy (see §5); the default is **disabled** |
+| WebRTC (STUN, TURN over UDP or TCP, media) | Never proxied: WebKit opens these sockets itself, without the data store's proxy. STUN reveals the real public IP to the page (seen by the CI leak check); a TURN server sees it too | A profile with a proxy always runs with WebRTC **off**, whatever its setting (§5) |
 | DNS prefetch | `<link rel="dns-prefetch">` (also as a `Link:` header) makes the network process resolve the host through the system resolver — WebKit skips it only for a *system-wide* proxy, not for a data store's `proxyConfigurations` | A content rule list blocking `ping`-type loads is added to every proxied profile (`ContentRules`): WebKit runs dns-prefetch through it as a ping. It also blocks `<a ping>` click trackers; beacons are fetches and unaffected. Verified by the self-test with an `<a ping>` |
 | Safe Browsing lookups | Made outside the data store's network session | Off by default (`safeBrowsingEnabled`) |
 | `mailto:`, `tel:`, custom schemes | Would hand the URL to another app, outside the profile | Blocked by the navigation policy |
@@ -320,23 +334,32 @@ reload: the page must fail, not show your own IP.
 
 ## 5. WebRTC
 
-WebKit offers no public preference to disable WebRTC or set an IP-handling policy. Its
-default already hides local IPs behind mDNS host candidates, but STUN still discovers the
-public IP over UDP, outside the proxy. WKWebView on macOS 15 and 26 exposes a native
-`RTCPeerConnection` (observed by the self-test).
+WebKit offers no public preference to disable WebRTC or set an IP-handling policy, and its
+WebRTC sockets — STUN, TURN over UDP or TCP, media — never use a data store's proxy (WebKit's
+network process opens them with plain Network.framework parameters). Its default hides local
+IPs behind mDNS host candidates, but STUN still discovers the public IP. WKWebView on macOS 15
+and 26 exposes a native `RTCPeerConnection` (observed by the self-test).
 
-The profile setting is enforced by a document-start user script in every frame:
+**With a proxy, WebRTC is always off** (`ProfileConfiguration.effectiveWebRTCPolicy`), whatever
+the profile's setting: any other policy sends the page's ICE traffic from this Mac's own
+address. The editor shows the setting as off while a proxy is set and keeps the stored choice
+for when the proxy is removed. WebRTC through the proxy's exit would need a packet tunnel (a
+Network Extension, which only a build signed with Apple's packet-tunnel entitlement can load),
+and even then only a SOCKS5 exit carries UDP.
 
-- `disabled` (default) deletes `RTCPeerConnection`, `webkitRTCPeerConnection`,
-  `RTCDataChannel` and related constructors from the window, as in an engine built
-  without WebRTC (`'RTCPeerConnection' in window` is false; no property is left behind).
+The profile setting:
+
+- `disabled` (default) switches WebRTC off in the engine (`WKPreferences._setPeerConnectionEnabled:`,
+  a private property; Lockdown Mode turns off the same setting): no `RTC*` interface exists
+  in any frame. Where WebKit lacks that property, the document-start user script removes
+  every `RTC*` interface from the window instead, as in an engine built without WebRTC.
 - `relayOnly` wraps the constructor and `setConfiguration` to force
   `iceTransportPolicy: "relay"`. No host or srflx candidates are gathered, so peers see
-  only the TURN server's address. The TURN server still sees your real IP, because TURN
-  over UDP isn't proxied.
-- `unrestricted` uses the WebKit default.
+  only the TURN server's address. The TURN server still sees your real IP; never applied
+  with a proxy.
+- `unrestricted` uses the WebKit default; never applied with a proxy.
 
-**Limits of the shim:** it isn't applied in workers, which have no RTCPeerConnection
+**Limits of the shim (relay-only, and the fallback removal):** it isn't applied in workers, which have no RTCPeerConnection
 anyway. The script runs in every same-origin frame when its document starts, so a frame
 created by the page (`window.frames[i]`, `window[i]`) is already patched when the page
 reaches it; `contentWindow`, `contentDocument` and `window.open` are hooked as well for a

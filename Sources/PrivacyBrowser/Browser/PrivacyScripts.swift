@@ -51,7 +51,8 @@ enum PrivacyScripts {
 
         /// What the declared device's Safari reports where it differs from this Mac.
         struct Device: Encodable {
-            var platform: String
+            /// nil: the Mac's own ("MacIntel"), which an iPad showing desktop websites reports too.
+            var platform: String?
             var maxTouchPoints: Int
             /// WebKit reports 4 below 8 cores (every iPhone) and 8 from 8 cores on.
             var hardwareConcurrency: Int
@@ -77,12 +78,13 @@ enum PrivacyScripts {
             device = .init(platform: "iPhone", maxTouchPoints: 5, hardwareConcurrency: 4,
                            screenWidth: 390, screenHeight: 844, devicePixelRatio: 3)
         case .iPadOS:
-            // The generation's UA is iPad Safari's mobile one ("iPad; CPU OS …"), which reports "iPad".
-            device = .init(platform: "iPad", maxTouchPoints: 5, hardwareConcurrency: 8,
+            // iPad Safari shows desktop websites by default: the Mac's UA and platform, with the
+            // iPad's touch points and screen (how a page tells an iPad from a Mac).
+            device = .init(platform: nil, maxTouchPoints: 5, hardwareConcurrency: 8,
                            screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2)
         }
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, geolocation: geolocation,
-                                 webRTC: configuration.webRTCPolicy.rawValue, device: device,
+                                 webRTC: configuration.effectiveWebRTCPolicy.rawValue, device: device,
                                  safariObject: configuration.deviceGeneration.platform == .macOS,
                                  storageQuota: safariStorageQuota(for: configuration.deviceGeneration.platform))
     }
@@ -244,12 +246,12 @@ function patchDevice(w, device) {
   const nav = w.navigator;
   if (IS_WORKER) {
     // WorkerNavigator has platform and hardwareConcurrency, nothing else of the device.
-    if (nav && 'platform' in nav) overrideGetter(w, nav, 'platform', device.platform);
+    if (nav && 'platform' in nav && device.platform) overrideGetter(w, nav, 'platform', device.platform);
     if (nav && 'hardwareConcurrency' in nav) overrideGetter(w, nav, 'hardwareConcurrency', device.hardwareConcurrency);
     return;
   }
   if (nav) {
-    overrideGetter(w, nav, 'platform', device.platform);
+    if (device.platform) overrideGetter(w, nav, 'platform', device.platform);
     overrideGetter(w, nav, 'maxTouchPoints', device.maxTouchPoints);
     overrideGetter(w, nav, 'hardwareConcurrency', device.hardwareConcurrency);
     overrideGetter(w, nav, 'standalone', false); // iOS Safari only: false in a browser tab
@@ -658,9 +660,9 @@ function patchWebRTC(w, policy) {
   if (policy === 'unrestricted') return;
   const names = ['RTCPeerConnection', 'webkitRTCPeerConnection'];
   if (policy === 'disabled') {
-    // Removed outright, as in an engine built without WebRTC: no trace of a property remains.
-    for (const name of names.concat(['RTCDataChannel', 'RTCIceCandidate', 'RTCSessionDescription',
-                                     'RTCRtpSender', 'RTCRtpReceiver', 'RTCRtpTransceiver'])) {
+    // The engine has WebRTC switched off already (BrowserSession); where it could not be, every
+    // RTC interface is removed, as in an engine built without WebRTC: no property remains.
+    for (const name of Object.getOwnPropertyNames(w).filter((n) => /^(webkit)?RTC[A-Z]/.test(n))) {
       try { delete w[name]; } catch (e) {}
       if (Object.prototype.hasOwnProperty.call(w, name)) {
         try { Object.defineProperty(w, name, { value: undefined, writable: false, configurable: false }); } catch (e) {}

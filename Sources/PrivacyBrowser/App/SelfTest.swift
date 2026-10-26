@@ -203,8 +203,11 @@ final class SelfTest {
             """) as? String
         check("shim: a blob worker runs in the profile's zone, strict and with its own line numbers",
               worker == "Asia/Tokyo,-540,true|error line 3|true", worker ?? "nil")
-        check("shim: WebRTC disabled",
-              try await js(webA!, "return typeof RTCPeerConnection;") as? String == "undefined")
+        // Off in the engine (as in Lockdown Mode): no RTC interface at all, not only the constructors.
+        let rtcNames = try await js(webA!, "return Object.getOwnPropertyNames(window).filter((n) => /^(webkit)?RTC/.test(n)).join();") as? String
+        check("WebRTC disabled: off in the engine, no RTC interface left",
+              rtcNames == "" && WebKitPreferences.bool(webA!.configuration.preferences, "_peerConnectionEnabled") == false,
+              rtcNames ?? "nil")
         // WebKit says 'prompt' until the page asks (Geolocation::hasBeenRequested); the status is the
         // engine's own PermissionStatus (a fake one threw on its onchange setter before).
         let permission = "return await navigator.permissions.query({ name: 'geolocation' }).then((s) => [s.state, s instanceof PermissionStatus, Object.getOwnPropertyNames(s).length].join());"
@@ -264,6 +267,7 @@ final class SelfTest {
         check("isolation: cookies not shared", !cookiesB.contains { $0.name == "pb" })
         check("isolation: profile B keeps host time zone",
               try await js(webB!, "return Intl.DateTimeFormat().resolvedOptions().timeZone;") as? String != "Asia/Tokyo")
+        info("RTC interfaces with WebRTC on: " + ((try await js(webB!, "return Object.getOwnPropertyNames(window).filter((n) => /^(webkit)?RTC/.test(n)).sort().join();") as? String) ?? "nil"))
         let nativeRTC = try await js(webB!, "return typeof RTCPeerConnection;") as? String
         if nativeRTC == "function" {
             let policy = try await js(webB!, "return new RTCPeerConnection({ iceTransportPolicy: 'all' }).getConfiguration().iceTransportPolicy;") as? String
@@ -369,6 +373,13 @@ final class SelfTest {
         check("language: Accept-Language carries the language WebKit was given",
               acceptLanguage.hasPrefix(WebContentLanguage.decided?.first ?? "?"), acceptLanguage)
 
+        // WebKit opens WebRTC's sockets outside the data store's proxy: a proxied profile gets no
+        // WebRTC, whatever its stored setting (ProfileConfiguration.effectiveWebRTCPolicy).
+        let rtc = try await loadThroughProxy(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), url: target,
+                                             webRTCPolicy: .unrestricted,
+                                             script: "return typeof RTCPeerConnection + ',' + typeof RTCDataChannel;")
+        check("proxy: WebRTC is off in a proxied profile, whatever its setting", rtc == "undefined,undefined", rtc ?? "load failed")
+
         let socksBody = try await loadThroughProxy(repository, ProxySettings(kind: .socks5, host: "127.0.0.1", port: socksPort), url: target)
         check("proxy: SOCKS5 carries the request", socksBody?.contains("PB-PROXY-OK via=socks5") == true, socksBody ?? "load failed")
         check("proxy: SOCKS5 receives the hostname (remote DNS)", socksBody?.contains("atyp=3") == true, socksBody ?? "nil")
@@ -472,9 +483,11 @@ final class SelfTest {
     }
 
     /// Loads `url` in an ephemeral profile using `proxy`. Returns the page text, or nil if the load failed.
-    private func loadThroughProxy(_ repository: ProfileRepository, _ proxy: ProxySettings, url: URL) async throws -> String? {
+    private func loadThroughProxy(_ repository: ProfileRepository, _ proxy: ProxySettings, url: URL,
+                                  webRTCPolicy: WebRTCPolicy = .disabled,
+                                  script: String = "return document.body ? document.body.innerText : '';") async throws -> String? {
         let profile = try repository.create(name: "Proxy \(proxy.kind.rawValue)",
-                                            configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
+                                            configuration: ProfileConfiguration(proxy: proxy, webRTCPolicy: webRTCPolicy, ephemeral: true))
         let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
         defer { session.shutDown() }
         let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
@@ -484,7 +497,7 @@ final class SelfTest {
             info("load of \(url.absoluteString) via \(proxy.kind.rawValue) :\(proxy.port) failed: \(error.localizedDescription)")
             return nil
         }
-        return try await js(webView, "return document.body ? document.body.innerText : '';") as? String
+        return try await js(webView, script) as? String
     }
 
     // MARK: Tabs, history, bookmarks
@@ -551,7 +564,7 @@ final class SelfTest {
 
         let iosUA = try await userAgent(for: .forGeneration(DeviceGenerations.resolved(id: "ios-26")))
         check("generation: iOS 26 UA reaches navigator.userAgent",
-              iosUA?.contains("iPhone OS 26") == true, iosUA ?? "nil")
+              iosUA?.contains("iPhone OS 18_7") == true && iosUA?.contains("Version/26.") == true, iosUA ?? "nil")
 
         let macUA = try await userAgent(for: .forGeneration(DeviceGenerations.resolved(id: DeviceGenerations.defaultID)))
         check("generation: macOS UA names this Mac's Safari (\(HostSafari.version))",

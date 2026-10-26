@@ -225,7 +225,9 @@ final class DeviceGenerationTests: XCTestCase {
         // Generation supplies the UA when there is no explicit override.
         let ios = ProfileConfiguration(deviceGenerationID: "ios-26")
         XCTAssertEqual(ios.effectiveUserAgent, DeviceGenerations.generation(id: "ios-26")?.userAgent)
-        XCTAssertTrue(ios.effectiveUserAgent?.contains("iPhone OS 26") == true)
+        // Safari on iOS 26.1+ freezes the OS token at 18_7; only Version/ names the release.
+        XCTAssertTrue(ios.effectiveUserAgent?.contains("iPhone OS 18_7 like Mac OS X") == true)
+        XCTAssertTrue(ios.effectiveUserAgent?.contains("Version/26.") == true)
         // An explicit user agent overrides the generation.
         let custom = ProfileConfiguration(userAgent: "Custom/1.0", deviceGenerationID: "ios-26")
         XCTAssertEqual(custom.effectiveUserAgent, "Custom/1.0")

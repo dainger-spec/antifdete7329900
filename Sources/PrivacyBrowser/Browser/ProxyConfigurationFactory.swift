@@ -13,9 +13,13 @@ import Network
 ///     with SOCKS5 Network.framework sends the hostname (remote resolution). Verify on
 ///     your setup with a packet capture (`sudo tcpdump -i any port 53`), as Apple does not
 ///     document this explicitly.
+///   * QUIC: with a proxy WebKit's loads stay on HTTP/2 through it; HTTP/3 is not used
+///     (measured by `scripts/leak_check.py` against a site that offers HTTP/3).
 ///
 /// What it does NOT cover (platform limitations):
-///   * WebRTC UDP (STUN/TURN, media). See `PrivacyScripts` for the JS-level mitigation.
+///   * WebRTC (STUN, TURN over UDP or TCP, media): WebKit opens those sockets itself, without
+///     the proxy. A proxied profile therefore runs with WebRTC off
+///     (`ProfileConfiguration.effectiveWebRTCPolicy`).
 ///   * Traffic the app process itself makes outside WebKit (none in this prototype besides sync).
 ///   * WebKit's Safe Browsing lookups (made by the system outside the data store); this is
 ///     why `safeBrowsingEnabled` defaults to false.

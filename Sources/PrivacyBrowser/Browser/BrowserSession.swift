@@ -100,6 +100,13 @@ final class BrowserSession {
         // public switch; this is the WKPreferences property Safari turns off, set only when this
         // WebKit has it.
         WebKitPreferences.setBool(webConfiguration.preferences, "_setShouldAllowUserInstalledFonts:", false)
+        // WebRTC off (the default, and always with a proxy: `effectiveWebRTCPolicy`) is switched off
+        // in the engine, as Lockdown Mode does: no RTC interface in any frame, nothing for a page to
+        // reach before the shim runs. The shim's removal stays as the fallback for a WebKit without
+        // this WKPreferences property.
+        if configuration.effectiveWebRTCPolicy == .disabled {
+            WebKitPreferences.setBool(webConfiguration.preferences, "_setPeerConnectionEnabled:", false)
+        }
         return webConfiguration
     }
 
@@ -180,7 +187,7 @@ final class BrowserSession {
     }
 }
 
-/// WebKit preferences Safari sets that have no public API (`WKPreferencesPrivate.h`). Each is applied
+/// WebKit preferences with no public API (`WKPreferencesPrivate.h`). Each is applied
 /// only when this WebKit implements the selector, so a WebKit without it is left as it is.
 enum WebKitPreferences {
     @discardableResult

@@ -207,6 +207,7 @@ configs read as the default generation).
 | App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 26 runner, every push |
 | Measured surface of a macOS profile vs. the runner's real Safari | `scripts/safari_reference.py` (safaridriver) with `Resources/fingerprint_probe.js` | macOS 26 runner, every push |
 | The same pages in Safari and in on-screen profile windows of the same size: probe, window geometry (1 and 2 tabs), request header order, permissions/quota/devices, TLS + HTTP/2 (tls.peet.ws) | `scripts/live_compare.py` + `PrivacyBrowser --capture-sites` (`SiteCapture.swift`, pages in `scripts/live_sites/`) | macOS 26 runner, every push (report only: third-party sites change) |
+| Nothing goes around a profile's proxy: QUIC/HTTP/3 (cloudflare-quic.com) and WebRTC (public STUN) behind real HTTP CONNECT and SOCKS5 forwarding proxies, a profile without a proxy as the control | `scripts/leak_check.py` + `--capture-sites` | macOS 26 runner, every push (fails only on a request seen going around a proxy) |
 | App Sandbox container migration | `--selftest-write-vault` / `--selftest-read-vault` | macOS 26 runner, every push |
 | Interactive UI (tab strip drawing, menus, sheets) | manual | — |
 

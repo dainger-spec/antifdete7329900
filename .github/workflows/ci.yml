@@ -68,6 +68,13 @@ jobs:
           code=$?
           if [ "$code" = "2" ]; then echo "::warning::Safari could not be driven on this runner; surface not compared"; exit 0; fi
           exit $code
+      - name: Leak check — does QUIC or WebRTC go around a profile's proxy?
+        # Real forwarding proxies on this runner and a profile without one as the control; see
+        # scripts/leak_check.py. Fails only on traffic seen going around a proxy (a site that is
+        # down makes it inconclusive, not red).
+        if: always()
+        timeout-minutes: 10
+        run: python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/leaks
       - name: Live fingerprinting pages in Safari and in profiles (report, never fails the build)
         # The same pages and scripts in this Mac's Safari and in on-screen profile windows of the
         # same size: probe, window geometry, request header order, TLS/HTTP2 (tls.peet.ws),
@@ -85,6 +92,7 @@ jobs:
             build/surface-unsandboxed
             build/safari-surface.json
             build/live
+            build/leaks
           if-no-files-found: ignore
       - name: App Sandbox container migration (unsandboxed data → sandboxed first launch)
         run: |

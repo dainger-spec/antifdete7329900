@@ -39,7 +39,7 @@
 "editor.history.keep" = "Хранить историю";
 "editor.history.record" = "Записывать историю";
 "editor.name" = "Название";
-"editor.network.footer" = "Нативный прокси для профиля, с жёстким запретом прямого соединения. WebRTC по UDP не проксируется.";
+"editor.network.footer" = "Нативный прокси для профиля, с жёстким запретом прямого соединения. WebRTC через прокси не ходит, поэтому с прокси он отключён.";
 "editor.privacy.footer" = "WebRTC, геолокация и часовой пояс реализованы JavaScript-обёртками (не действуют в worker’ах, обнаруживаются). См. docs/ISOLATION_AND_LIMITATIONS.md.";
 "editor.proxy.bypass" = "Домены в обход (через запятую)";
 "editor.proxy.host" = "Хост";
@@ -72,6 +72,7 @@
 "editor.ua.useCustom" = "Свой User-Agent";
 "editor.webrtc" = "WebRTC";
 "editor.webrtc.disabled" = "Отключён";
+"editor.webrtc.proxyNote" = "С прокси WebRTC всегда отключён: WebKit отправляет его трафик (STUN, TURN, медиа) мимо прокси, с реального адреса этого Mac.";
 "editor.webrtc.relay" = "Только через ретранслятор (TURN)";
 "editor.webrtc.unrestricted" = "Без ограничений";
 "errorpage.title" = "Не удалось загрузить страницу";

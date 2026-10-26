@@ -18,8 +18,12 @@ import Foundation
 ///     feature set, touch behaviour, TLS) still says "desktop Mac" — detectable, not emulation.
 ///   * The macOS generation declares the host's own Safari version at runtime
 ///     (`userAgent(hostSafariVersion:)`); its catalog string below is only the fallback. Mobile
-///     UA strings are illustrative and go stale as Apple ships new versions. Keep them current,
-///     or type a custom UA copied from the real device/version you want to resemble.
+///     UA strings are the ones Safari sends on that OS: from iOS 26.1 on, Safari freezes the OS
+///     token at "18_7" (as macOS Safari freezes "10_15_7"; WebKit bug 298260) and only
+///     "Version/" names the release, so "iPhone OS 26_0" is a string no Safari sends. iPadOS
+///     Safari asks for desktop websites by default and then sends the Mac's UA. The Version
+///     tokens go stale as Apple ships updates: keep them current, or type a custom UA copied
+///     from the real device you want to resemble.
 ///
 /// The `behaviorSetID` field is the forward-looking extension point: when Apple ships a new
 /// WebKit version with behaviours worth matching, a new behaviour set can be registered and
@@ -93,15 +97,16 @@ public enum DeviceGenerations {
             matchesEngine: true, defaultWebRTCPolicy: .disabled, behaviorSetID: desktopBehavior),
         DeviceGeneration(
             id: "ios-27", nameKey: "gen.ios27", platform: .iOS, osVersionLabel: "27",
-            userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1",
+            userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1",
             matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior),
         DeviceGeneration(
             id: "ios-26", nameKey: "gen.ios26", platform: .iOS, osVersionLabel: "26",
-            userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+            userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1",
             matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior),
         DeviceGeneration(
             id: "ipados-26", nameKey: "gen.ipados26", platform: .iPadOS, osVersionLabel: "26",
-            userAgent: "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+            // Safari's default on an iPad: the desktop website, with the Mac's UA.
+            userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15",
             matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior),
     ]
 
