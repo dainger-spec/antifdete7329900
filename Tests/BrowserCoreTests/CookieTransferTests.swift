@@ -203,6 +203,75 @@ final class CookieTransferTests: XCTestCase {
         XCTAssertEqual(parsed.skipped, 0)
     }
 
+    func testNetscapeEmptyExpiryIsASessionCookie() throws {
+        // Python's http.cookiejar.MozillaCookieJar and yt-dlp write session cookies with an
+        // empty expiry field; those are typically the login cookies and must not be dropped.
+        let python = [
+            "# Netscape HTTP Cookie File",
+            ".example.com\tTRUE\t/\tTRUE\t\tsid\tabc",
+            "www.example.com\tFALSE\t/\tFALSE\t \tpref\tdark",
+            ".example.com\tTRUE\t/\tFALSE\t1893456000\tlong\tlived",
+        ].joined(separator: "\n")
+        let result = try CookieTransfer.parse(Data(python.utf8))
+        XCTAssertEqual(result.skipped, 0)
+        XCTAssertEqual(result.cookies, [
+            CookieRecord(domain: ".example.com", name: "sid", value: "abc", secure: true),
+            CookieRecord(domain: "www.example.com", name: "pref", value: "dark"),
+            CookieRecord(domain: ".example.com", name: "long", value: "lived", expires: jan2030),
+        ])
+        XCTAssertTrue(result.cookies[0].isSession)
+    }
+
+    func testEpochExpiryStaysExpiredInEveryFormat() throws {
+        // 0 is the session marker in both formats: an expiry inside the first second of 1970
+        // must not be written as 0 and come back as a live session cookie.
+        let expired = cookie("old", domain: "example.com", expires: Date(timeIntervalSince1970: 0.5))
+        let normalized = try XCTUnwrap(expired.normalized())
+        XCTAssertEqual(normalized.expires, Date(timeIntervalSince1970: 1))
+
+        let viaJSON = try CookieTransfer.parse(CookieTransfer.exportJSON([expired])).cookies
+        XCTAssertEqual(viaJSON, [normalized])
+        XCTAssertFalse(viaJSON[0].isSession)
+        XCTAssertTrue(viaJSON[0].isExpired(at: jan2030))
+
+        let viaNetscape = try CookieTransfer.parse(Data(CookieTransfer.exportNetscape([expired]).utf8)).cookies
+        XCTAssertEqual(viaNetscape, [normalized])
+
+        let fromFile = try CookieTransfer.parse(Data(#"[{"name":"f","value":"1","domain":"x.test","expirationDate":0.25}]"#.utf8))
+        XCTAssertEqual(fromFile.cookies.first?.expires, Date(timeIntervalSince1970: 1))
+
+        let foreign = try XCTUnwrap(cookie("h", domain: "x.test", expires: Date(timeIntervalSince1970: 1)).httpCookie)
+        XCTAssertEqual(CookieRecord(foreign)?.expires, Date(timeIntervalSince1970: 1))
+    }
+
+    func testOversizedRecordsAreSkipped() throws {
+        // RFC 6265bis limits: name + value <= 4096 bytes, path <= 1024 bytes.
+        let atLimit = cookie("n", value: String(repeating: "v", count: 4095))
+        let overLimit = cookie("n", value: String(repeating: "v", count: 4096))
+        let multibyte = cookie("n", value: String(repeating: "é", count: 2048)) // 4096 bytes + 1
+        XCTAssertTrue(atLimit.isValid)
+        XCTAssertFalse(overLimit.isValid)
+        XCTAssertFalse(multibyte.isValid, "the limit counts UTF-8 bytes, not characters")
+        XCTAssertTrue(cookie("p", path: "/" + String(repeating: "a", count: 1023)).isValid)
+        XCTAssertFalse(cookie("p", path: "/" + String(repeating: "a", count: 1024)).isValid)
+        XCTAssertNil(overLimit.httpCookie)
+
+        let text = [
+            ".example.com\tTRUE\t/\tFALSE\t0\tok\tv",
+            ".example.com\tTRUE\t/\tFALSE\t0\tbig\t" + String(repeating: "x", count: 5000),
+            // A hostile line: the value is a megabyte of tabs. Parsed in bounded memory, skipped.
+            ".example.com\tTRUE\t/\tFALSE\t0\ttabs\t" + String(repeating: "\t", count: 1_000_000),
+        ].joined(separator: "\n")
+        let netscape = try CookieTransfer.parse(Data(text.utf8))
+        XCTAssertEqual(netscape.cookies.map(\.name), ["ok"])
+        XCTAssertEqual(netscape.skipped, 2)
+
+        let json = try CookieTransfer.exportJSON([atLimit, overLimit])
+        XCTAssertEqual(try CookieTransfer.parse(json).cookies, [atLimit], "export leaves invalid records out")
+        let hostileJSON = #"[{"name":"n","domain":"x.test","value":""# + String(repeating: "x", count: 10_000) + #""}]"#
+        XCTAssertEqual(try CookieTransfer.parse(Data(hostileJSON.utf8)), CookieParseResult(cookies: [], skipped: 1))
+    }
+
     func testNetscapeLatin1Fallback() throws {
         var data = Data(".a.test\tTRUE\t/\tFALSE\t0\tname\tcaf".utf8)
         data.append(0xE9) // 'é' in Latin-1, invalid as UTF-8

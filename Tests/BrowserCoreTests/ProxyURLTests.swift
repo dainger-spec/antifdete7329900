@@ -88,6 +88,51 @@ final class ProxyURLTests: XCTestCase {
                                      username: "alice", password: "pw%41"))
     }
 
+    func testShorthandPasswordMayContainSchemeSeparator() throws {
+        // "://" is only a scheme separator after a valid scheme name; in shorthand it is
+        // part of a literal password.
+        XCTAssertEqual(try parse("203.0.113.5:8000:alice:secret://x"),
+                       ProxySettings(kind: .httpConnect, host: "203.0.113.5", port: 8000,
+                                     username: "alice", password: "secret://x"))
+        XCTAssertEqual(try parse("alice:pa://ss@proxy.example:8000"),
+                       ProxySettings(kind: .httpConnect, host: "proxy.example", port: 8000,
+                                     username: "alice", password: "pa://ss"))
+    }
+
+    func testErrorMessagesDoNotEchoPasswordsOrLongInput() {
+        let cases: [(input: String, secret: String?)] = [
+            ("203.0.113.5:80000:alice:topsecret://x", "topsecret"),  // bad port, "://" in the password
+            ("proxy.example:http:alice:topsecret", "topsecret"),
+            ("socks5://alice:topsecret@bad!host:1080", "topsecret"),
+            ("http://alice:topsecret@[zz::1]:80", "topsecret"),
+            (String(repeating: "a", count: 1500) + "!:80", nil),
+            (String(repeating: "a", count: 1500) + "://proxy.example:80", nil),
+            ("http://[" + String(repeating: "1:", count: 22) + ":1]:80", nil),
+        ]
+        for (input, secret) in cases {
+            XCTAssertThrowsError(try ProxySettings(parsing: input), input) { error in
+                let message = "\(error)"
+                XCTAssertLessThan(message.count, 200, message)
+                if let secret {
+                    XCTAssertFalse(message.contains(secret), message)
+                }
+            }
+        }
+    }
+
+    func testIPv6LiteralsMustBeWellFormed() throws {
+        for valid in ["::1", "::", "2001:db8::1", "1:2:3:4:5:6:7:8", "::ffff:203.0.113.5", "fe80::abcd:ef01"] {
+            XCTAssertEqual(try parse("socks5://[\(valid)]:1080").host, valid)
+        }
+        for invalid in [":", ":::", "1:2:3:4:5:6:7:8:9", "1.2.3.4:", "12345::1", "1::2::3", "::ffff:203.0.113", "1:2:3:4:5:6:7"] {
+            XCTAssertThrowsError(try ProxySettings(parsing: "socks5://[\(invalid)]:1080"), invalid) { error in
+                guard case CoreError.invalidConfiguration = error else {
+                    return XCTFail("\(invalid): expected invalidConfiguration, got \(error)")
+                }
+            }
+        }
+    }
+
     func testTrimmingAndTrailingSlash() throws {
         XCTAssertEqual(try parse("  socks5://proxy.example:1080/\n"),
                        ProxySettings(kind: .socks5, host: "proxy.example", port: 1080))
