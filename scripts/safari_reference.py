@@ -30,7 +30,11 @@ PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Resource
 # Differ by design between the self-test (which gives WebKit a fixed language, uses a hidden
 # window) and a Safari window: reported, never fatal.
 INFO_KEYS = {"language", "languages", "intlLocale", "innerSize", "outerSize", "windowOwnCount", "errorStack",
-             "orientation", "safari", "audio", "cookieEnabled",
+             "orientation", "audio", "cookieEnabled",
+             # Date#toString names the zone in the default locale, which the self-test overrides.
+             "dateString",
+             # Safari under safaridriver reports navigator.webdriver = true; a profile reports false.
+             "webdriver",
              # The WebRTC policy removes these on purpose in a default profile.
              "features.RTCPeerConnection", "features.webkitRTCPeerConnection", "features.RTCDataChannel",
              "features.window.webkitRTCPeerConnection", "natives.RTCPeerConnection"}
@@ -38,7 +42,7 @@ INFO_KEYS = {"language", "languages", "intlLocale", "innerSize", "outerSize", "w
 MUST_MATCH = {"ua", "appVersion", "vendor", "platform", "hardwareConcurrency", "deviceMemory", "maxTouchPoints",
               "pdfViewerEnabled", "plugins", "mimeTypes", "webdriver", "standalone", "doNotTrack", "ownNavigator",
               "ownScreen", "navigatorProtoCount", "screen", "colorDepth", "pointer", "touch", "timeZone", "tzOffset",
-              "dateString", "canvas.colors", "canvas.urlLength", "canvas.url", "canvasText", "fonts", "webkitObject"}
+              "canvas.colors", "canvas.urlLength", "canvas.url", "canvasText", "fonts", "webkitObject", "safari"}
 MUST_MATCH_PREFIXES = ("webgl.", "natives.")
 
 
@@ -137,13 +141,22 @@ def run_in_safari(probe_source, port):
             driver_process.kill()
 
 
+def text(value):
+    """Values as JavaScript prints them (the self-test writes every value as a string)."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def compare(safari, ours):
     safari_flat, ours_flat = flat(safari), flat(ours)
     failures, diffs, same = [], [], 0
     for key in sorted(set(safari_flat) | set(ours_flat)):
         if key.startswith("_"):
             continue
-        a, b = safari_flat.get(key, "<missing>"), ours_flat.get(key, "<missing>")
+        a, b = text(safari_flat.get(key, "<missing>")), text(ours_flat.get(key, "<missing>"))
         if a == b:
             same += 1
             continue

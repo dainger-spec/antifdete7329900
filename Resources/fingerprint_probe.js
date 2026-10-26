@@ -217,6 +217,17 @@ safe('features', () => {
 safe('safari', () => typeof window.safari === 'undefined' ? 'undefined'
   : Object.prototype.toString.call(window.safari) + '|' + Object.getOwnPropertyNames(window.safari).join(',')
     + '|' + (window.safari.pushNotification ? String(window.safari.pushNotification) : 'no pushNotification'));
+safe('safariShape', () => {
+  if (typeof window.safari === 'undefined') return 'undefined';
+  const d = Object.getOwnPropertyDescriptor(window, 'safari');
+  const push = window.safari.pushNotification;
+  const proto = push ? Object.getPrototypeOf(push) : null;
+  return [d ? ['w', d.writable, 'e', d.enumerable, 'c', d.configurable].join('') : 'inherited',
+          proto ? Object.getOwnPropertyNames(proto).join('+') : 'no-proto',
+          proto ? String(Object.getPrototypeOf(proto) === Object.prototype) : '-',
+          push ? Object.getOwnPropertyNames(push).join('+') : '-',
+          push && typeof push.permission === 'function' ? JSON.stringify(push.permission('web.example.test')) : '-'].join('|');
+});
 safe('webkitObject', () => typeof window.webkit);
 safe('windowOwnCount', () => Object.getOwnPropertyNames(window).length);
 

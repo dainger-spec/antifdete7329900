@@ -236,14 +236,20 @@ test('constructor-shaped wrappers keep the native shape', () => {
   const w = makeWindow(everything);
   assert.equal(run(w, 'Date.toString()'), nativeText('Date'));
   assert.equal(run(w, 'Date.length + Date.name'), '7Date');
-  assert.equal(run(w, 'Object.getOwnPropertyNames(Date).sort().join()'), 'UTC,length,name,now,parse,prototype');
+  // Own properties in the engine's own order (Safari: statics, then length, name, prototype).
+  assert.equal(run(w, 'Object.getOwnPropertyNames(Date).join()'), 'parse,UTC,now,length,name,prototype');
+  assert.equal(run(w, 'Object.getOwnPropertyNames(Intl.DateTimeFormat).join()'), 'supportedLocalesOf,length,name,prototype');
+  assert.equal(run(w, 'Object.getOwnPropertyNames(Date.prototype.getHours).join()'), 'length,name');
+  assert.equal(run(w, 'Object.getOwnPropertyNames(Object.getOwnPropertyDescriptor(Screen.prototype, "width").get).join()'), 'length,name');
+  assert.equal(run(w, 'Object.getPrototypeOf(Date) === Function.prototype && typeof Date === "function"'), true);
   assert.equal(run(w, 'Object.getOwnPropertyDescriptor(Date, "prototype").writable'), false);
   assert.equal(run(w, 'Date.prototype.constructor === Date && new Date() instanceof Date && Object.getPrototypeOf(new Date()) === Date.prototype'), true);
   assert.equal(run(w, 'class D extends Date {}; new D(2024, 0, 1) instanceof D && new D(2024, 0, 1).getFullYear() === 2024'), true);
   assert.equal(run(w, 'new Date() == Date()'), true);
   assert.equal(run(w, 'Intl.DateTimeFormat.toString()'), nativeText('DateTimeFormat'));
   assert.equal(run(w, 'Intl.DateTimeFormat.name + Intl.DateTimeFormat.length'), 'DateTimeFormat0');
-  assert.equal(run(w, 'Object.getOwnPropertyNames(Intl.DateTimeFormat).sort().join()'), 'length,name,prototype,supportedLocalesOf');
+  assert.equal(run(w, 'new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).resolvedOptions().timeZone'), 'UTC');
+  assert.equal(run(w, 'class F extends Intl.DateTimeFormat {}; new F() instanceof F && new F().resolvedOptions().timeZone === "Europe/Berlin"'), true);
   assert.equal(run(w, 'RTCPeerConnection.toString()'), nativeText('RTCPeerConnection'));
   assert.equal(run(w, 'RTCPeerConnection.name + RTCPeerConnection.length'), 'RTCPeerConnection0');
   assert.equal(run(w, 'new RTCPeerConnection() instanceof RTCPeerConnection && RTCPeerConnection.prototype.constructor === RTCPeerConnection'), true);
@@ -276,6 +282,9 @@ test('iPhone profile: device values, as getters on the prototypes', () => {
   const w = makeWindow({ ...base, device: iPhone });
   assert.equal(run(w, surface), JSON.stringify(['iPhone', 5, 4, 'en-US', ['en-US'], 'undefined', 390, 844, 390, 844, 3, 390, 844]));
   assert.equal(run(w, `navigator.standalone`), false);
+  // Printed as JavaScriptCore prints a DOM accessor: without the "get " prefix.
+  assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.toString()`), nativeText('platform'));
+  assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.name`), 'get platform');
   assert.throws(() => run(w, `Navigator.prototype.standalone`), (e) => e.name === 'TypeError');
   assert.throws(() => run(w, `Screen.prototype.width`), (e) => e.name === 'TypeError');
 });
@@ -287,6 +296,16 @@ test('no rendering patches: canvas, audio and fonts stay native', () => {
     assert.equal(run(w, `AudioContext.prototype.createAnalyser.toString().includes('return {}')`), true);
   }
   assert.doesNotMatch(body, /getImageData|createAnalyser|document\.fonts|deviceMemory/);
+});
+
+test('window.safari for the macOS generation only', () => {
+  const w = makeWindow({ ...base, safariObject: true });
+  assert.equal(run(w, `typeof safari + '|' + Object.prototype.toString.call(safari) + '|' + Object.getOwnPropertyNames(safari).join()`), 'object|[object Object]|pushNotification');
+  assert.equal(run(w, `String(safari.pushNotification)`), '[object SafariRemoteNotification]');
+  assert.equal(run(w, `safari.pushNotification.permission('web.example').permission`), 'default');
+  assert.equal(run(w, `safari.pushNotification.permission.toString()`), nativeText('permission'));
+  const mobile = makeWindow({ ...base, device: iPhone });
+  assert.equal(run(mobile, `'safari' in window`), false);
 });
 
 // ---- Geolocation, WebRTC ---------------------------------------------------------------------

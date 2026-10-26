@@ -34,6 +34,9 @@ enum PrivacyScripts {
         var webRTC: String
         /// Mobile generations only; nil for macOS (see above).
         var device: Device?
+        /// macOS generation: Safari the app exposes `window.safari` (`pushNotification`), a
+        /// WKWebView does not; a page that checks it is told the same as by Safari.
+        var safariObject: Bool
 
         struct Geolocation: Encodable {
             var mode: String
@@ -75,7 +78,8 @@ enum PrivacyScripts {
                            screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2)
         }
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, geolocation: geolocation,
-                                 webRTC: configuration.webRTCPolicy.rawValue, device: device)
+                                 webRTC: configuration.webRTCPolicy.rawValue, device: device,
+                                 safariObject: configuration.deviceGeneration.platform == .macOS)
     }
 
     /// The declared device's screen in points for a mobile generation (the browser window is
@@ -126,6 +130,7 @@ function patchWindow(w) {
   patched.add(w);
   try { patchToString(w); } catch (e) {}
   if (CONFIG.device) { try { patchDevice(w, CONFIG.device); } catch (e) {} }
+  if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
   try { patchWebRTC(w, CONFIG.webRTC || 'disabled'); } catch (e) {}
@@ -138,7 +143,30 @@ function patchWindow(w) {
 // Function.prototype.toString (patched per realm, one registry per page) prints it as native.
 
 function asNative(fn) {
-  registry.set(fn, NATIVE_TEMPLATE.replace('%NAME%', fn.name));
+  // Native functions list `length` before `name`; a method made with a computed key does not.
+  const length = Object.getOwnPropertyDescriptor(fn, 'length');
+  const name = Object.getOwnPropertyDescriptor(fn, 'name');
+  delete fn.length;
+  delete fn.name;
+  Object.defineProperty(fn, 'length', length);
+  Object.defineProperty(fn, 'name', name);
+  // The engine prints an accessor without its "get " / "set " prefix.
+  registry.set(fn, NATIVE_TEMPLATE.replace('%NAME%', fn.name.replace(/^[gs]et /, '')));
+  return fn;
+}
+
+// A constructor shaped like a native one: `target` does the work (its new.target is the real
+// one), the bound function in front of it has no `prototype` of its own, so the own properties
+// can be laid out as the engine lays them out: statics, length, name, prototype.
+function constructor(name, length, target, statics, prototype) {
+  const fn = Function.prototype.bind.call(target, null);
+  delete fn.length;
+  delete fn.name;
+  for (const key of Object.keys(statics)) define(fn, key, statics[key]);
+  Object.defineProperty(fn, 'length', { value: length, writable: false, enumerable: false, configurable: true });
+  Object.defineProperty(fn, 'name', { value: name, writable: false, enumerable: false, configurable: true });
+  Object.defineProperty(fn, 'prototype', { value: prototype, writable: false, enumerable: false, configurable: false });
+  registry.set(fn, NATIVE_TEMPLATE.replace('%NAME%', name));
   return fn;
 }
 
@@ -304,16 +332,12 @@ function patchTimeZone(w, TZ) {
                                 numbers[4] || 0, numbers[5] || 0, numbers[6] || 0);
     return Reflect.construct(NativeDate, [isNaN(wall) ? NaN : fromWall(wall)], target);
   }
-  const DateShim = function Date(...args) {
+  const target = function (...args) {
     if (new.target === undefined) return String(new DateShim());
     return construct(new.target, args);
   };
-  Object.defineProperty(DateShim, 'length', { value: 7 });
-  Object.defineProperty(DateShim, 'prototype', { value: proto, writable: false, enumerable: false, configurable: false });
-  define(DateShim, 'now', NativeDate.now);
-  define(DateShim, 'UTC', NativeDate.UTC);
-  define(DateShim, 'parse', method('parse', 1, parse));
-  asNative(DateShim);
+  target.prototype = proto; // what `new DateShim()` constructs with (new.target is then `target`)
+  const DateShim = constructor('Date', 7, target, { parse: method('parse', 1, parse), UTC: NativeDate.UTC, now: NativeDate.now }, proto);
   define(proto, 'constructor', DateShim);
   define(w, 'Date', DateShim);
 
@@ -403,15 +427,29 @@ function patchTimeZone(w, TZ) {
     define(proto, name, method(name, 0, function (locales, options) { return original.call(this, locales, withZone(options)); }));
   }
 
-  const DateTimeFormat = function DateTimeFormat(locales, options) {
-    return Reflect.construct(NativeDTF, [locales, withZone(options)], new.target || DateTimeFormat);
+  const dtfTarget = function (locales, options) {
+    return Reflect.construct(NativeDTF, [locales, withZone(options)], new.target === undefined ? dtfTarget : new.target);
   };
-  Object.defineProperty(DateTimeFormat, 'length', { value: 0 });
-  Object.defineProperty(DateTimeFormat, 'prototype', { value: NativeDTF.prototype, writable: false, enumerable: false, configurable: false });
-  define(DateTimeFormat, 'supportedLocalesOf', NativeDTF.supportedLocalesOf);
-  asNative(DateTimeFormat);
+  dtfTarget.prototype = NativeDTF.prototype; // instanceof goes through the bound target
+  const DateTimeFormat = constructor('DateTimeFormat', 0, dtfTarget, { supportedLocalesOf: NativeDTF.supportedLocalesOf }, NativeDTF.prototype);
   define(NativeDTF.prototype, 'constructor', DateTimeFormat);
   define(w.Intl, 'DateTimeFormat', DateTimeFormat);
+}
+
+// ---- Safari the app -----------------------------------------------------------------------------
+// Safari exposes window.safari, a plain object holding a SafariRemoteNotification (website push
+// permission API); a page that looks for it to recognise Safari finds what Safari would give it.
+function patchSafariObject(w) {
+  if ('safari' in w) return;
+  const proto = {};
+  Object.defineProperty(proto, Symbol.toStringTag, { value: 'SafariRemoteNotification', writable: false, enumerable: false, configurable: true });
+  define(proto, 'permission', method('permission', 1, function () { return { deviceToken: null, permission: 'default' }; }));
+  define(proto, 'requestPermission', method('requestPermission', 4, function (websiteURL, websitePushID, userInfo, callback) {
+    if (typeof callback === 'function') w.setTimeout(() => callback({ deviceToken: null, permission: 'denied' }), 0);
+  }));
+  const safari = {};
+  Object.defineProperty(safari, 'pushNotification', { value: Object.create(proto), writable: true, enumerable: true, configurable: true });
+  Object.defineProperty(w, 'safari', { value: safari, writable: true, enumerable: true, configurable: true });
 }
 
 // ---- Geolocation ------------------------------------------------------------------------------
@@ -488,13 +526,12 @@ function patchWebRTC(w, policy) {
   const Native = w.RTCPeerConnection;
   if (!Native) return;
   const forceRelay = (config) => Object.assign({}, config, { iceTransportPolicy: 'relay' });
-  const RTCPeerConnection = function RTCPeerConnection(config, ...rest) {
-    return Reflect.construct(Native, [forceRelay(config), ...rest], new.target || RTCPeerConnection);
+  const rtcTarget = function (config, ...rest) {
+    return Reflect.construct(Native, [forceRelay(config), ...rest], new.target === undefined ? rtcTarget : new.target);
   };
-  Object.defineProperty(RTCPeerConnection, 'length', { value: 0 });
-  Object.defineProperty(RTCPeerConnection, 'prototype', { value: Native.prototype, writable: false, enumerable: false, configurable: false });
-  if (Native.generateCertificate) define(RTCPeerConnection, 'generateCertificate', Native.generateCertificate);
-  asNative(RTCPeerConnection);
+  rtcTarget.prototype = Native.prototype; // instanceof goes through the bound target
+  const statics = Native.generateCertificate ? { generateCertificate: Native.generateCertificate } : {};
+  const RTCPeerConnection = constructor('RTCPeerConnection', 0, rtcTarget, statics, Native.prototype);
   const nativeSetConfiguration = Native.prototype.setConfiguration;
   if (nativeSetConfiguration) {
     define(Native.prototype, 'setConfiguration', method('setConfiguration', 0, function (config) {

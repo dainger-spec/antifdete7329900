@@ -45,7 +45,9 @@ jobs:
           status=0
           for variant in sandboxed unsandboxed; do
             echo "::group::self-test ($variant)"
-            PB_SELFTEST_SURFACE_OUT="$PWD/build/surface-$variant" build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test || status=1
+            # The surface dump goes to the repository folder, which only the unsandboxed build may write.
+            if [ "$variant" = unsandboxed ]; then export PB_SELFTEST_SURFACE_OUT="$PWD/build/surface-$variant"; fi
+            build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test || status=1
             echo "::endgroup::"
           done
           kill $PROXY_PID || true

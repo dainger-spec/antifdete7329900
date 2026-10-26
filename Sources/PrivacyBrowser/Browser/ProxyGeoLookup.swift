@@ -96,7 +96,7 @@ private final class ProxyChallengeObserver: NSObject, URLSessionTaskDelegate, @u
     var proxyRequiredCredentials: Bool { lock.withLock { _proxyRequiredCredentials } }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
-                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+                    completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         let space = challenge.protectionSpace
         guard space.isProxy(), space.authenticationMethod != NSURLAuthenticationMethodServerTrust else {
             completionHandler(.performDefaultHandling, nil)

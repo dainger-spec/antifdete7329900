@@ -109,7 +109,7 @@ final class ProfileManager: ObservableObject {
         // A proxy that wants credentials the profile does not have: WebKit would leave every page
         // loading forever (it never shows the proxy's challenge). Refuse the launch instead.
         if lookup.proxyRequiresCredentials, let proxy = stored.proxy {
-            if !stored.ephemeral { try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
+            if !stored.ephemeral { _ = try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
             throw LaunchError.proxyNeedsCredentials(host: proxy.host)
         }
         rememberProxyLocation(location, for: id, in: stored)

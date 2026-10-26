@@ -92,6 +92,9 @@ final class BrowserSession {
         webConfiguration.preferences.isFraudulentWebsiteWarningEnabled = configuration.safeBrowsingEnabled
         // Popups only in response to a user gesture.
         webConfiguration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // As Safari: the Fullscreen API is available (a WKWebView has it off by default, which a
+        // page sees as document.fullscreenEnabled === undefined).
+        webConfiguration.preferences.isElementFullscreenEnabled = true
         return webConfiguration
     }
 
