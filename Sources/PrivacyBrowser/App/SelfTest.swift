@@ -13,7 +13,7 @@ import WebKit
 ///   * that the JavaScript shims behave under JavaScriptCore,
 ///   * per-profile proxies (HTTP CONNECT, SOCKS5 with remote DNS) and fail-closed behaviour,
 ///   * several SOCKS5 profiles launched and loading at once, each through its own proxy,
-///   * launches that do not wait on the lookup through the proxy, and the exit-IP warning,
+///   * launches that wait only briefly on the lookup through the proxy, and the exit-IP warning,
 ///   * the tab model with history recording and bookmarks.
 ///
 /// Proxy checks need `scripts/selftest_proxy.py` and the env vars
@@ -908,23 +908,33 @@ final class SelfTest {
         check("SOCKS5 side by side: after one profile stops the others still load through their own proxies",
               !manager.isRunning(runs[1].id) && remaining.allSatisfy { carried($0, second[$0.name], round: 2) }, String(describing: second))
         for run in remaining { try await manager.stop(run.id) }
+
+        // The launch lookups ran at the same time too, each through its profile's proxy (the geo
+        // host only resolves there; b's needs its credentials): each remembers the answer.
+        func zones() -> [String?] {
+            runs.map { (try? repository.loadConfiguration($0.id))?.rememberedProxyLocation?.timeZoneIdentifier }
+        }
+        let remembered = await waitUntil(timeout: 10) { zones().allSatisfy { $0 == "Europe/Berlin" } }
+        check("SOCKS5 side by side: each profile's launch lookup went through its own proxy (time zone remembered)",
+              remembered, String(describing: zones()))
         for run in runs { try repository.delete(run.id) }
 
-        // Wrong or missing SOCKS5 credentials: the load fails, nothing goes direct.
-        let target = URL(string: "http://auth.selftest.invalid/socks-credentials")!
+        // Wrong or missing SOCKS5 credentials: the load fails, nothing goes direct (a real host,
+        // which a direct connection would reach).
+        let target = URL(string: "http://example.com/")!
         let wrong = try await loadThroughProxy(repository, ProxySettings(kind: .socks5, host: "127.0.0.1", port: authPort,
                                                                          username: "pb-user2", password: "wrong"), url: target)
         let none = try await loadThroughProxy(repository, ProxySettings(kind: .socks5, host: "127.0.0.1", port: authPort), url: target)
         check("SOCKS5 side by side: wrong or missing SOCKS5 credentials fail closed",
-              wrong?.contains("PB-PROXY-OK") != true && none?.contains("PB-PROXY-OK") != true,
-              "wrong: \(wrong ?? "nil"), none: \(none ?? "nil")")
+              wrong == nil && none == nil, "wrong: \(wrong ?? "nil"), none: \(none ?? "nil")")
     }
 
     // MARK: Launch speed and the proxy's exit IP
 
-    /// A launch does not wait for the lookup through the proxy when a location is remembered for
-    /// that proxy: the lookup finishes in the background, and a new time zone is remembered and
-    /// noted for the next launch. Without one it waits at most `ProfileManager.firstLookupWait`.
+    /// With a location remembered for the proxy, a launch waits for the lookup through it at most
+    /// `ProfileManager.rememberedLookupWait`: the lookup finishes in the background, and a new time
+    /// zone is remembered and noted for the next launch. Without one it waits at most
+    /// `ProfileManager.firstLookupWait`.
     /// With `warnOnProxyIPChange` (off by default) a changed exit IP is reported, and only then.
     private func proxyLookupAndExitIP(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
@@ -954,7 +964,7 @@ final class SelfTest {
         }
         func lookupsDone() async -> Bool { await waitUntil(timeout: 15) { !manager.hasProxyLookupsInFlight } }
 
-        // A location remembered for the proxy: the launch does not wait for a slow lookup.
+        // A location remembered for the proxy: a slow lookup holds the launch at most rememberedLookupWait.
         let remembered = try repository.create(name: "Fast launch", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
         geo("ip=203.0.113.7")
         _ = try await launch(remembered.id)
@@ -964,8 +974,8 @@ final class SelfTest {
         messages.removeAll()
         let fast = try await launch(remembered.id)
         info(String(format: "launch with a remembered location and a 4 s lookup took %.2f s", fast.seconds))
-        check("launch: with a remembered location it does not wait for the lookup through the proxy",
-              fast.seconds < 2.5 && fast.zone == "Europe/Berlin", String(format: "%.2f s, zone %@", fast.seconds, fast.zone ?? "nil"))
+        check("launch: with a remembered location it waits for the lookup through the proxy at most \(Int(ProfileManager.rememberedLookupWait)) s",
+              fast.seconds < ProfileManager.rememberedLookupWait + 1.5 && fast.zone == "Europe/Berlin", String(format: "%.2f s, zone %@", fast.seconds, fast.zone ?? "nil"))
         let finished = await lookupsDone()
         let updated = try repository.loadConfiguration(remembered.id).lastProxyLocation
         check("launch: that lookup finishes in the background; its new time zone is remembered and noted for the next launch",
@@ -1010,8 +1020,12 @@ final class SelfTest {
               watchedIP == "198.51.100.4", watchedIP ?? "nil")
         _ = try await run(unwatched.id, ip: "203.0.113.7")
         let quiet = try await run(unwatched.id, ip: "198.51.100.4")
-        let optionOff = try !repository.loadConfiguration(unwatched.id).warnOnProxyIPChange
-        check("exit IP: off by default, a changed proxy IP is not reported", quiet.isEmpty && optionOff, "\(quiet)")
+        let unwatchedStored = try repository.loadConfiguration(unwatched.id)
+        let optionOff = !unwatchedStored.warnOnProxyIPChange
+        // Its time zone is remembered, its exit IP is not.
+        let ipKept = unwatchedStored.lastProxyLocation.map { $0.exitIP != nil } ?? true
+        check("exit IP: off by default, a changed proxy IP is not reported, nor stored",
+              quiet.isEmpty && optionOff && !ipKept, "\(quiet) | \(String(describing: unwatchedStored.lastProxyLocation))")
         try repository.delete(watched.id)
         try repository.delete(unwatched.id)
     }

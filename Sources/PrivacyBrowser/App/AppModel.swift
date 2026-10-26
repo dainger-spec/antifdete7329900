@@ -141,7 +141,12 @@ final class AppModel: ObservableObject {
         let repository = try ProfileRepository(vault: vault)
         repository.removeOrphanedDirectories()
         let manager = ProfileManager(repository: repository)
-        manager.onError = { [weak self] message in self?.errorMessage = message }
+        // A launch can report several things at once (an exit-IP change and a new time zone, a
+        // language note): they are shown together, none replaces another.
+        manager.onError = { [weak self] message in
+            guard let self else { return }
+            self.errorMessage = self.errorMessage.map { $0 + "\n\n" + message } ?? message
+        }
         manager.onReturnToProfiles = { [weak self] in
             self?.activateProfilesWindow()
             self?.refresh()
@@ -220,6 +225,12 @@ final class AppModel: ObservableObject {
     /// Changes take effect the next time the profile is launched.
     func updateProfile(_ id: UUID, name: String, configuration: ProfileConfiguration) throws {
         guard let repository else { return }
+        // The proxy location is the launch's cache, not an edit: a lookup may have stored a newer
+        // one while the editor was open. (A location of another proxy is ignored at launch.)
+        var configuration = configuration
+        if let current = try? repository.loadConfiguration(id) {
+            configuration.lastProxyLocation = current.lastProxyLocation
+        }
         try repository.saveConfiguration(configuration, for: id)
         if try repository.summary(for: id).name != name {
             try repository.rename(id, to: name)

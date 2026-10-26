@@ -85,11 +85,13 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 129 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 140 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
-  HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, the
-  ping-load blocker, the proxy-location time zone, tabs, history, bookmarks, the
+  HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
+  profiles launched and loading at once, the ping-load blocker, the proxy-location time zone,
+  launches that wait only briefly on the lookup through the proxy, the exit-IP warning, tabs,
+  history, bookmarks, the
   device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
 - the surface comparison with the runner's real Safari (`scripts/safari_reference.py`): every
@@ -109,9 +111,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 ## Using it
 
 1. On first launch, create a master password. It cannot be recovered.
-2. Use **＋** to create a profile and set its device/version, start URL, proxy, user agent,
-   time zone, geolocation, WebRTC policy, history recording and retention, and whether it is
-   ephemeral. Changes apply at the next launch. The **Device / version** picker tags the
+2. Use **＋** to create a profile and set its device/version, start URL, proxy (optionally
+   with a warning when the proxy's exit IP changes between launches), user agent, time zone,
+   geolocation, WebRTC policy, history recording and retention, and whether it is ephemeral.
+   Changes apply at the next launch. The **Device / version** picker tags the
    profile with a target Apple OS version (macOS 26, iOS 26/27, iPadOS 26); iOS profiles also
    get their device class's navigator/screen values (see note above).
 3. **Launch** opens a window for the profile. Profiles run side by side, and every window
@@ -146,7 +149,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Multi-tab windows | `BrowserTab` (one `WKWebView` each) + custom `TabStripView`; popups and ⌘-click open tabs; standard shortcuts |
 | Per-profile history | Encrypted `HistoryStore`: coalesced per URL, search, clear ranges, retention, cap; records committed and same-document navigations; credentials and fragments stripped |
 | Per-profile bookmarks | Encrypted `BookmarkStore`: folders, ordering, edit; star toggle, bookmarks menu, Library window |
-| Per-profile proxy (SOCKS5, HTTP CONNECT, HTTPS-to-proxy, auth, bypass list) | `WKWebsiteDataStore.proxyConfigurations`, `allowFailover = false`. **CONNECT tunnelling, SOCKS5 remote DNS and fail-closed verified by the self-test** |
+| Per-profile proxy (SOCKS5, HTTP CONNECT, HTTPS-to-proxy, auth, bypass list) | `WKWebsiteDataStore.proxyConfigurations`, `allowFailover = false`. **CONNECT tunnelling, SOCKS5 remote DNS, SOCKS5 and HTTP proxy authentication, and fail-closed verified by the self-test** |
+| Several proxied profiles at once | Each profile's data store has its own proxy and credentials. **Three SOCKS5 profiles (one with authentication) launched together and loading at once, each through its own proxy, verified by the self-test** |
+| Fast launch with a proxy | The lookup through the proxy (time zone, exit IP) holds a launch at most 1 s when a location is remembered for that proxy (the lookup finishes in the background), at most 3 s with nothing remembered. **Verified by the self-test** |
+| Proxy exit-IP warning | Per profile, off by default: a warning when the proxy's exit IP differs from the previous launch's (same proxy host and port) |
 | Version-aware profiles | **Device / version** picker (`DeviceGeneration`): macOS 26 / iOS 26 / iOS 27 / iPadOS 26. Sets the self-declared `User-Agent` and defaults, and names a behaviour set. The macOS UA names the host's Safari version; iOS profiles additionally get navigator/screen values. Does **not** switch the real WebKit core. |
 | Per-profile user agent | `WKWebView.customUserAgent` (an explicit UA overrides the generation) |
 | Russian / English UI | `Localizable.strings` (ru default, en fallback), deterministic bundle lookup |

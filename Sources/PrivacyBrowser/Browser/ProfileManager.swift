@@ -49,10 +49,13 @@ final class ProfileManager: ObservableObject {
     var hasProxyLookupsInFlight: Bool { !lookupsInFlight.isEmpty }
 
     /// How long a launch waits for the lookup through the proxy when nothing is remembered for
-    /// that proxy yet. With a remembered location it does not wait at all. A lookup still under
-    /// way then finishes in the background (`proxyLookupFinishedLate`). The lookup itself gives up
-    /// after 6 s.
+    /// that proxy yet. A lookup still under way then finishes in the background
+    /// (`proxyLookupFinishedLate`). The lookup itself gives up after 6 s.
     static var firstLookupWait: TimeInterval = 3
+    /// The same with a location remembered for the proxy: a quick answer still sets this run's
+    /// time zone and language (a rotating proxy is not one launch behind), a slow one does not
+    /// hold the launch.
+    static var rememberedLookupWait: TimeInterval = 1
 
     /// Why a launch was refused before anything was decrypted (shown to the user).
     enum LaunchError: LocalizedError, Equatable {
@@ -125,12 +128,13 @@ final class ProfileManager: ObservableObject {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
             try await webDataVault.prepareForLaunch(profileID: id, key: key)
         }
-        // A location remembered for this proxy is used at once, and a lookup made only for the
-        // exit IP is not waited for. Otherwise the launch waits a little: the time zone a page sees
-        // should be the proxy's from its first load.
+        // The proxy's time zone and language should apply from the first page: the launch waits
+        // a little for the lookup (briefly when a location is remembered for this proxy, which is
+        // used if the lookup is slower). A lookup made only for the exit IP is not waited for.
         var lookup: ProxyGeoLookup.Result?
         if let lookupTask {
-            let wait = stored.needsProxyLocation && stored.rememberedProxyLocation == nil ? Self.firstLookupWait : 0
+            let wait = !stored.needsProxyLocation ? 0
+                : stored.rememberedProxyLocation == nil ? Self.firstLookupWait : min(Self.firstLookupWait, Self.rememberedLookupWait)
             lookup = await Self.value(of: lookupTask, within: wait)
         }
         let location = stored.proxyLocation(lookedUp: lookup?.location)
@@ -178,9 +182,13 @@ final class ProfileManager: ObservableObject {
         try? repository.markLaunched(id)
         if lookup == nil, let lookupTask {
             let runningZone = configuration.timeZoneIdentifier
+            // In flight until its answer has been acted on, not only received.
+            let pending = UUID()
+            lookupsInFlight.insert(pending)
             Task { [weak self] in
                 let result = await lookupTask.value
                 self?.proxyLookupFinishedLate(result, for: id, name: summary.name, token: token, stored: stored, runningZone: runningZone)
+                self?.lookupsInFlight.remove(pending)
             }
         }
     }
@@ -232,11 +240,13 @@ final class ProfileManager: ObservableObject {
     /// What a finished lookup tells: the exit IP compared with the previous launch's (when the
     /// profile asks for that), and the location to remember for the next launch.
     private func proxyLookupFinished(_ result: ProxyGeoLookup.Result, for id: UUID, name: String, stored: ProfileConfiguration) {
-        guard let found = result.location else { return }
+        guard var found = result.location else { return }
         if stored.warnOnProxyIPChange, let change = found.exitIPChange(since: stored.lastProxyLocation) {
             log.notice("The proxy of \(id.uuidString, privacy: .public) exits from another IP than at the previous launch")
             onError?(String(format: L("launch.proxyIPChanged"), name, change.old, change.new))
         }
+        // The exit IP is kept only for the warning that asks for it.
+        if !stored.warnOnProxyIPChange { found.exitIP = nil }
         rememberProxyLocation(found, for: id)
     }
 
@@ -246,7 +256,8 @@ final class ProfileManager: ObservableObject {
     /// theirs).
     private func proxyLookupFinishedLate(_ result: ProxyGeoLookup.Result, for id: UUID, name: String, token: UUID,
                                          stored: ProfileConfiguration, runningZone: String?) {
-        guard latestLaunch[id] == token else { return }
+        // Lock or Quit under way: nothing is written, and nothing is shown over the lock screen.
+        guard latestLaunch[id] == token, !isShuttingDown else { return }
         let running = sessions[id] != nil && launchTokens[id] == token
         if result.proxyRequiresCredentials, running, let proxy = stored.proxy {
             onError?(String(format: L("launch.proxyNeedsCredentialsStopped"), proxy.host))
@@ -257,6 +268,11 @@ final class ProfileManager: ObservableObject {
         if running, stored.needsProxyLocation, stored.timeZoneIdentifier == nil,
            let zone = result.location?.timeZoneIdentifier, zone != runningZone {
             onError?(String(format: L("launch.proxyZoneChanged"), name, zone))
+        }
+        // The run's language was decided without this answer (the first profile of a run that got
+        // none in time leaves websites the user's own languages): say so.
+        if running, stored.needsProxyLocation {
+            noteLanguageMismatch(for: id, wanted: result.location?.webLanguage)
         }
     }
 
