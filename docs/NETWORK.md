@@ -56,7 +56,7 @@ longer drops everything. What it does, per protocol:
 | **TCP** | SOCKS5 `CONNECT` per flow (user/password auth if set) | SOCKS5 `CONNECT` over TLS, or HTTP `CONNECT` (Basic auth if set, TLS to the proxy for `https`) | direct TCP from the provider |
 | **UDP** | SOCKS5 `UDP ASSOCIATE`, one per app socket | **dropped** | direct UDP per 5-tuple |
 | **DNS** to 10.111.0.1 | answered by the relay: forwarded as DNS-over-TCP to 1.1.1.1:53 **through the exit** | same | same (direct to 1.1.1.1) |
-| IPv6, ICMP, IP fragments, multicast/broadcast | dropped | dropped | dropped |
+| IPv6 (captured by the tunnel's IPv6 default route), ICMP, IP fragments, multicast/broadcast | dropped | dropped | dropped |
 
 How it works:
 
@@ -83,7 +83,8 @@ How it works:
   (UDP); nothing is ever re-sent outside the exit. The provider's own connections to the proxy are
   not routed into its tunnel (system behaviour for a packet-tunnel provider).
 
-Known limits: IPv4 only (the tunnel installs no IPv6 route — see the checklist), no IP fragment
+Known limits: IPv4 only — the tunnel also claims the IPv6 default route (`fd00::2/128`), so IPv6,
+including IPv6 literals, is captured and dropped rather than leaked; no IP fragment
 reassembly (large UDP datagrams that the app fragments are dropped), and no SOCKS5 UDP
 fragmentation. The relay logs through `os.Logger` (subsystem `PrivacyBrowser.PacketTunnel`)
 without credentials or destination addresses in public form.
@@ -157,5 +158,4 @@ do: `log stream --predicate 'subsystem == "PrivacyBrowser.PacketTunnel"'`.
 12. Direct exit (no proxy, tunnel on): pages load, `browserleaks.com/webrtc` shows this Mac's IP,
     and QUIC sites load over HTTP/3.
 13. IPv6: on a network with IPv6, `https://test-ipv6.com/` shows no IPv6 connectivity for the
-    profile. (The tunnel is IPv4-only and the relay answers AAAA with no data; IPv6 literals are
-    not captured by the tunnel — report it if a page reaches one.)
+    profile, and `sudo tcpdump -n -i en0 ip6` shows none of the profile's traffic.

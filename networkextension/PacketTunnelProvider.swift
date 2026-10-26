@@ -34,13 +34,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let udpDropped = config[Key.udp] == "dropped"
         log.notice("startTunnel exit=\(exitKind, privacy: .public) udpDropped=\(udpDropped, privacy: .public)")
 
-        // A point-to-point IPv4 tunnel that claims the default route, so every flow of the app is
+        // A point-to-point tunnel that claims the IPv4 and IPv6 default routes, so every flow of the app is
         // handed to us. The DNS server 10.111.0.1 is answered by `Relay`, which forwards each query
         // over TCP through the exit (the proxy for a proxy exit), so no plaintext DNS escapes around it.
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         let ipv4 = NEIPv4Settings(addresses: ["10.111.0.2"], subnetMasks: ["255.255.255.255"])
         ipv4.includedRoutes = [NEIPv4Route.default()]
         settings.ipv4Settings = ipv4
+        // IPv6 is captured too, so IPv6 literals cannot bypass the tunnel; Relay drops it (IPv4-only datapath).
+        let ipv6 = NEIPv6Settings(addresses: ["fd00::2"], networkPrefixLengths: [128])
+        ipv6.includedRoutes = [NEIPv6Route.default()]
+        settings.ipv6Settings = ipv6
         settings.mtu = 1400
         settings.dnsSettings = NEDNSSettings(servers: ["10.111.0.1"])
 
