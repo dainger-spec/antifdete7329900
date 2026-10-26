@@ -24,7 +24,20 @@ else
   ENTITLEMENTS=Resources/PrivacyBrowser-NoSandbox.entitlements
 fi
 
-swift build -c "$CONFIG" --product PrivacyBrowser
+# Optional per-profile packet-tunnel Network Extension (NE=1). Off by default: it needs a
+# provisioning profile with the packet-tunnel-provider entitlement, which ad-hoc signing cannot
+# grant, so CI and the ordinary build never touch it. See networkextension/README.md.
+NE="${NE:-0}"
+APP_FLAGS=()
+if [[ "$NE" == "1" ]]; then
+  : "${TEAM_ID:?NE=1 needs TEAM_ID (your 10-char Apple Developer Team ID)}"
+  TUNNEL_BUNDLE_ID="${TUNNEL_BUNDLE_ID:-$BUNDLE_ID.PacketTunnel}"
+  APP_GROUP="${APP_GROUP:-group.$BUNDLE_ID}"
+  # Compile the app with the tunnel UI enabled.
+  APP_FLAGS=(-Xswiftc -DPB_NETWORK_EXTENSION)
+fi
+
+swift build -c "$CONFIG" --product PrivacyBrowser "${APP_FLAGS[@]}"
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 
 rm -rf "$APP"
@@ -41,6 +54,26 @@ done
 if [[ "$SANDBOX" == "1" ]]; then
   sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/container-migration.plist > "$APP/Contents/Resources/container-migration.plist"
   plutil -lint "$APP/Contents/Resources/container-migration.plist" >/dev/null
+fi
+
+# Build, embed and sign the packet-tunnel extension before the app is signed (NE=1 only).
+if [[ "$NE" == "1" ]]; then
+  APPEX="$APP/Contents/PlugIns/PacketTunnel.appex"
+  mkdir -p "$APPEX/Contents/MacOS" "$APPEX/Contents/Resources"
+  # The provider is not an SPM target; compile its sources straight into the appex binary.
+  SDK="$(xcrun --sdk macosx --show-sdk-path)"
+  xcrun -sdk macosx swiftc -O -target arm64-apple-macos14.0 -sdk "$SDK" \
+    -module-name PacketTunnel -parse-as-library \
+    networkextension/PacketTunnelProvider.swift networkextension/Relay.swift \
+    -framework NetworkExtension -o "$APPEX/Contents/MacOS/PacketTunnel"
+  sed -e "s/\$(TUNNEL_BUNDLE_ID)/$TUNNEL_BUNDLE_ID/g" -e "s/\$(PRODUCT_MODULE_NAME)/PacketTunnel/g" \
+    networkextension/Info.plist > "$APPEX/Contents/Info.plist"
+  plutil -lint "$APPEX/Contents/Info.plist" >/dev/null
+  NE_ENTITLEMENTS="$(mktemp)"
+  sed "s/\$(APP_GROUP)/$APP_GROUP/g" networkextension/PacketTunnel.entitlements > "$NE_ENTITLEMENTS"
+  codesign --force --options runtime --timestamp=none \
+    --entitlements "$NE_ENTITLEMENTS" --sign "$SIGN_IDENTITY" "$APPEX"
+  echo "Embedded $APPEX (tunnel bundle id $TUNNEL_BUNDLE_ID)"
 fi
 
 codesign --force --options runtime --timestamp=none \

@@ -74,6 +74,7 @@
 "detail.storage.encrypted" = "On disk, encrypted";
 "detail.storage.ephemeral" = "Temporary: erased when closed";
 "detail.timeZone" = "Time zone";
+"detail.tunnel" = "Single TCP/UDP exit";
 "detail.userAgent" = "User agent";
 "downloads.cancel" = "Cancel";
 "downloads.cancelled" = "Cancelled";
@@ -136,6 +137,10 @@
 "editor.startURL" = "Start page";
 "editor.title.edit" = "Profile Settings";
 "editor.title.new" = "New Profile";
+"editor.tunnel" = "Single exit for TCP and UDP (tunnel)";
+"editor.tunnel.footer" = "All of the profile's traffic (including QUIC/HTTP3 and WebRTC) uses one exit. Without the tunnel the plain proxy does not cover UDP: QUIC and WebRTC bypass it and reveal your IP — so keep WebRTC off. If the tunnel is on but can't start, the profile gets no network (never a direct connection). See docs/NETWORK.md.";
+"editor.tunnel.udpWarning" = "Without the tunnel, UDP (QUIC, WebRTC) can bypass the proxy.";
+"editor.tunnel.unavailable" = "Not available in this build: it needs the Network Extension (a signed NE=1 build).";
 "editor.tz" = "Time zone";
 "editor.ua.effective" = "Sent as";
 "editor.ua.field" = "Custom user agent";
@@ -440,6 +445,18 @@
 "sync.title" = "Sync";
 "sync.to" = "Sync to";
 "tab.newTab" = "New Tab";
+"tunnel.config.name" = "PrivacyBrowser — profile single exit";
+"tunnel.error.another" = "Another profile is already using the single exit. The tunnel serves one profile at a time.";
+"tunnel.error.failClosed" = "The single exit is on but the tunnel is unavailable, so the profile gets no network (fail-closed). Turn the single exit off, or build the app with the Network Extension.";
+"tunnel.error.notStarted" = "The tunnel did not start.";
+"tunnel.error.start" = "The tunnel could not start: %@";
+"tunnel.error.timeout" = "The tunnel did not come up in time.";
+"tunnel.error.unavailable" = "The single exit needs the Network Extension, which this build does not include.";
+"tunnel.state.connecting" = "Starting…";
+"tunnel.state.down" = "Off";
+"tunnel.state.failed" = "Tunnel failed";
+"tunnel.state.unavailable" = "Not available in this build";
+"tunnel.state.up" = "Up";
 "ua.mode.custom" = "Custom";
 "ua.mode.iPad" = "Safari for iPad — user agent only";
 "ua.mode.iPhone" = "Safari for iPhone — user agent only";

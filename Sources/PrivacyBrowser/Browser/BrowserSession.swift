@@ -38,6 +38,9 @@ final class BrowserSession {
     weak var proxyCenter: ProxyStatusCenter?
 
     private(set) var dataStore: WKWebsiteDataStore?
+    /// The single-exit tunnel for this profile, if it was launched with the tunnel on. Owned by
+    /// `ProfileManager`, which starts it before this session exists and stops it after shutDown.
+    var tunnelController: ProfileTunnelController?
     private let userContentController: WKUserContentController
     private let userAgent: UserAgentResolution
     private let sessionStore: SessionStore?

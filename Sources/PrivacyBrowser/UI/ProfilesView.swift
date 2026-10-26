@@ -393,11 +393,35 @@ struct ProfileDetailView: View {
                 Button(L("proxy.check")) { Task { await model.checkProxy(profileID) } }
                     .disabled(status == .checking)
             }
+            if configuration?.unifiedTunnel == true {
+                LabeledContent(L("detail.tunnel")) {
+                    Text(L(tunnelStateKey))
+                        .foregroundStyle(tunnelStateColor)
+                }
+            }
         } header: {
             Text(L("detail.section.network"))
         } footer: {
             Text(configuration?.proxy == nil ? L("detail.network.direct.footer") : L("detail.network.proxy.footer"))
                 .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var tunnelStateKey: String {
+        guard ProfileTunnelController.isAvailable else { return "tunnel.state.unavailable" }
+        switch model.manager?.session(for: profileID)?.tunnelController?.state {
+        case .up: return "tunnel.state.up"
+        case .connecting: return "tunnel.state.connecting"
+        case .failed: return "tunnel.state.failed"
+        default: return model.isRunning(profileID) ? "tunnel.state.down" : "tunnel.state.down"
+        }
+    }
+
+    private var tunnelStateColor: Color {
+        switch model.manager?.session(for: profileID)?.tunnelController?.state {
+        case .up: return .green
+        case .failed: return .red
+        default: return .secondary
         }
     }
 

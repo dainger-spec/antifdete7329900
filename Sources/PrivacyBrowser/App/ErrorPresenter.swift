@@ -31,6 +31,11 @@ enum ErrorPresenter {
         }
         let ns = error as NSError
         if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled { return nil }
+        // Errors the app authors (e.g. the fail-closed tunnel message) carry a ready
+        // user-facing description; show it instead of the generic text.
+        if let localized = error as? LocalizedError, let description = localized.errorDescription, !description.isEmpty {
+            return AppAlert(title: L(titleKey ?? "error.generic.title"), message: description)
+        }
         return AppAlert(title: L(titleKey ?? "error.generic.title"), message: L("error.generic.message"),
                         details: Log.describe(error))
     }

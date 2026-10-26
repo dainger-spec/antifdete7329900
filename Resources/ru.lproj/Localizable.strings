@@ -74,6 +74,7 @@
 "detail.storage.encrypted" = "На диске, зашифровано";
 "detail.storage.ephemeral" = "Временный: всё стирается при закрытии";
 "detail.timeZone" = "Часовой пояс";
+"detail.tunnel" = "Единый выход TCP/UDP";
 "detail.userAgent" = "User-Agent";
 "downloads.cancel" = "Отменить";
 "downloads.cancelled" = "Отменено";
@@ -136,6 +137,10 @@
 "editor.startURL" = "Стартовая страница";
 "editor.title.edit" = "Настройки профиля";
 "editor.title.new" = "Новый профиль";
+"editor.tunnel" = "Единый выход для TCP и UDP (туннель)";
+"editor.tunnel.footer" = "Весь трафик профиля (включая QUIC/HTTP3 и WebRTC) идёт через один выход. Без туннеля обычный прокси не закрывает UDP: QUIC и WebRTC идут мимо и раскрывают ваш IP — поэтому держите WebRTC выключенным. Если туннель включён, но не поднялся, профиль остаётся без сети (не выходит напрямую). См. docs/NETWORK.md.";
+"editor.tunnel.udpWarning" = "Без туннеля UDP (QUIC, WebRTC) может идти мимо прокси.";
+"editor.tunnel.unavailable" = "Недоступно в этой сборке: нужен Network Extension (подписанная сборка NE=1).";
 "editor.tz" = "Часовой пояс";
 "editor.ua.effective" = "Отправляется";
 "editor.ua.field" = "Свой User-Agent";
@@ -440,6 +445,18 @@
 "sync.title" = "Синхронизация";
 "sync.to" = "Куда синхронизировать";
 "tab.newTab" = "Новая вкладка";
+"tunnel.config.name" = "PrivacyBrowser — единый выход профиля";
+"tunnel.error.another" = "Единый выход уже использует другой профиль. Туннель работает для одного профиля за раз.";
+"tunnel.error.failClosed" = "Единый выход включён, но туннель недоступен, поэтому профиль не выходит в сеть (fail-closed). Отключите «Единый выход» или соберите приложение с Network Extension.";
+"tunnel.error.notStarted" = "Туннель не запустился.";
+"tunnel.error.start" = "Не удалось поднять туннель: %@";
+"tunnel.error.timeout" = "Туннель не поднялся за отведённое время.";
+"tunnel.error.unavailable" = "Единый выход требует Network Extension — в этой сборке он недоступен.";
+"tunnel.state.connecting" = "Поднимается…";
+"tunnel.state.down" = "Выключен";
+"tunnel.state.failed" = "Ошибка туннеля";
+"tunnel.state.unavailable" = "Недоступен в этой сборке";
+"tunnel.state.up" = "Поднят";
 "ua.mode.custom" = "Свой";
 "ua.mode.iPad" = "Safari для iPad — только User-Agent";
 "ua.mode.iPhone" = "Safari для iPhone — только User-Agent";

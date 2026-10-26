@@ -521,12 +521,16 @@ final class SelfTest {
         let copyKey = try repository.profileKey(for: copy.id)
         check("duplicate: same settings", try repository.loadConfiguration(copy.id).locale == "fr-FR")
         try await vault.prepareForLaunch(profileID: copy.id, key: copyKey)
-        let copySession = try makeSession(repository, copy.id, key: copyKey)
-        let copyWeb = WKWebView(frame: .zero, configuration: copySession.makeWebViewConfiguration())
-        try await PageLoader.load(copyWeb, html: page, baseURL: origin)
-        let copyValue = try await js(copyWeb, "return localStorage.getItem('pb') ?? 'null';") as? String
+        var copySession: BrowserSession? = try makeSession(repository, copy.id, key: copyKey)
+        var copyWeb: WKWebView? = WKWebView(frame: .zero, configuration: copySession!.makeWebViewConfiguration())
+        try await PageLoader.load(copyWeb!, html: page, baseURL: origin)
+        let copyValue = try await js(copyWeb!, "return localStorage.getItem('pb') ?? 'null';") as? String
         check("duplicate: starts with empty site data", copyValue == "null", copyValue ?? "nil")
-        copySession.shutDown()
+        // Drop the web view (and with it its data-store reference) before sealing, or WebKit still
+        // holds the store and the seal fails with storeStillInUse.
+        copyWeb = nil
+        copySession?.shutDown()
+        copySession = nil
         try await vault.seal(profileID: copy.id, key: copyKey)
 
         // Export → import as a copy (new id, re-encrypted, WebKit data relabelled) → data is there.
@@ -540,12 +544,14 @@ final class SelfTest {
         check("backup: restored as a new profile", restored.id != source.id)
         let restoredKey = try repository.profileKey(for: restored.id)
         try await vault.prepareForLaunch(profileID: restored.id, key: restoredKey)
-        let restoredSession = try makeSession(repository, restored.id, key: restoredKey)
-        let restoredWeb = WKWebView(frame: .zero, configuration: restoredSession.makeWebViewConfiguration())
-        try await PageLoader.load(restoredWeb, html: page, baseURL: origin)
-        let restoredValue = try await js(restoredWeb, "return localStorage.getItem('pb') ?? 'null';") as? String
+        var restoredSession: BrowserSession? = try makeSession(repository, restored.id, key: restoredKey)
+        var restoredWeb: WKWebView? = WKWebView(frame: .zero, configuration: restoredSession!.makeWebViewConfiguration())
+        try await PageLoader.load(restoredWeb!, html: page, baseURL: origin)
+        let restoredValue = try await js(restoredWeb!, "return localStorage.getItem('pb') ?? 'null';") as? String
         check("backup: site data restored into the imported profile", restoredValue == token, restoredValue ?? "nil")
-        restoredSession.shutDown()
+        restoredWeb = nil
+        restoredSession?.shutDown()
+        restoredSession = nil
         try await vault.seal(profileID: restored.id, key: restoredKey)
         let wrong = (try? ProfileBackup.restore(from: file, password: "wrong", into: repository, mode: .copy)) == nil
         check("backup: wrong password is refused", wrong)

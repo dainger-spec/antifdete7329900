@@ -21,6 +21,7 @@ struct ProfileDraft: Equatable {
     var proxyUsername = ""
     var proxyPassword = ""
     var proxyExcludedDomains = ""
+    var unifiedTunnel = false
     var userAgentMode: UserAgentMode = .safariMac
     var customUserAgent = ""
     /// nil = the Mac's language.
@@ -73,6 +74,7 @@ struct ProfileDraft: Equatable {
             proxyPassword = proxy.password ?? ""
             proxyExcludedDomains = proxy.excludedDomains.joined(separator: ", ")
         }
+        unifiedTunnel = c.unifiedTunnel
         userAgentMode = c.userAgentMode
         customUserAgent = c.userAgent ?? ""
         locale = c.locale
@@ -132,6 +134,7 @@ struct ProfileDraft: Equatable {
         configuration.ephemeral = ephemeral
         configuration.restoreTabs = restoreTabs
         configuration.proxy = try proxySettings()
+        configuration.unifiedTunnel = unifiedTunnel
         configuration.userAgentMode = userAgentMode
         if userAgentMode == .custom {
             let ua = customUserAgent.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -271,11 +274,24 @@ struct ProfileEditorView: View {
                               prompt: Text(verbatim: "intranet.example.com, *.local"))
                 }
             }
+            Toggle(L("editor.tunnel"), isOn: $draft.unifiedTunnel)
+                .disabled(!ProfileTunnelController.isAvailable)
+            if draft.unifiedTunnel && !ProfileTunnelController.isAvailable {
+                Label(L("editor.tunnel.unavailable"), systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            if draft.proxyEnabled && !draft.unifiedTunnel {
+                Label(L("editor.tunnel.udpWarning"), systemImage: "exclamationmark.bubble")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         } header: {
             Text(L("editor.section.network"))
         } footer: {
-            Text(draft.proxyEnabled ? L("editor.network.proxy.footer") : L("editor.network.direct.footer"))
-                .font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(draft.proxyEnabled ? L("editor.network.proxy.footer") : L("editor.network.direct.footer"))
+                Text(L("editor.tunnel.footer"))
+            }
+            .font(.caption).foregroundStyle(.secondary)
         }
     }
 

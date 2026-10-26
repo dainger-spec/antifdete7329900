@@ -32,7 +32,21 @@ final class ProfileManager: ObservableObject {
     private var sessions: [UUID: BrowserSession] = [:]
     /// Profile keys are held only while the profile runs (needed to seal on stop).
     private var keys: [UUID: SymmetricKey] = [:]
+    /// Which profile (if any) holds the app-wide single-exit tunnel. Only one at a time.
+    private var tunnelCoordinator = TunnelCoordinator()
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ProfileManager")
+
+    /// Why a launch was refused before any window opened (shown to the user).
+    enum LaunchBlock: LocalizedError {
+        case tunnelUnavailable
+        case tunnelBusy
+        var errorDescription: String? {
+            switch self {
+            case .tunnelUnavailable: return L("tunnel.error.failClosed")
+            case .tunnelBusy: return L("tunnel.error.another")
+            }
+        }
+    }
 
     init(repository: ProfileRepository, proxyCenter: ProxyStatusCenter) {
         self.repository = repository
@@ -80,6 +94,27 @@ final class ProfileManager: ObservableObject {
             try await webDataVault.prepareForLaunch(profileID: id, key: key)
         }
 
+        // Single-exit tunnel (opt-in). Bring it up BEFORE any web view exists, and fail closed:
+        // if it is requested but can't run, the profile gets no network at all.
+        var tunnelController: ProfileTunnelController?
+        if configuration.unifiedTunnel {
+            guard let egress = configuration.network.egress(tunnelAvailable: ProfileTunnelController.isAvailable),
+                  case .tunnel = egress,
+                  let tunnelConfig = TunnelConfiguration(egress: egress, profileID: id) else {
+                throw LaunchBlock.tunnelUnavailable
+            }
+            if tunnelCoordinator.canStart(id) != nil { throw LaunchBlock.tunnelBusy }
+            let controller = ProfileTunnelController()
+            do {
+                try await controller.start(tunnelConfig, proxyPassword: configuration.proxy?.password)
+            } catch {
+                throw error // fail-closed: no fallback to proxy-only or direct
+            }
+            tunnelCoordinator.started(id)
+            tunnelController = controller
+            Log.info("tunnel", "up for \(Log.id(id)): \(tunnelConfig.summary)")
+        }
+
         // Open tabs are device-local and saved only for persistent profiles that restore tabs.
         let sessionStore = try repository.sessionStore(for: id, key: key, persistent: !configuration.ephemeral)
         let savedState = configuration.restoreTabs ? (try? sessionStore.load()) ?? nil : nil
@@ -87,6 +122,7 @@ final class ProfileManager: ObservableObject {
         let session = BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
                                      passwordVault: passwords, library: library, sessionStore: sessionStore)
         session.proxyCenter = proxyCenter
+        session.tunnelController = tunnelController
         if configuration.proxy != nil {
             session.onLoadFinished = { [weak proxyCenter] in proxyCenter?.reportLoadSucceeded(id) }
             session.onLoadFailed = { [weak proxyCenter] message in proxyCenter?.reportLoadFailed(id, message: message) }
@@ -129,6 +165,11 @@ final class ProfileManager: ObservableObject {
 
         session.onAllWindowsClosed = nil
         let ephemeral = session.configuration.ephemeral
+        if let tunnel = session.tunnelController {
+            await tunnel.stop()
+            tunnelCoordinator.stopped(id)
+            Log.info("tunnel", "down for \(Log.id(id))")
+        }
         session.shutDown()
         // `session` is now the last reference; it is released when this scope ends, but its
         // data store reference was already dropped in shutDown().
