@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 142/142 checks in both builds):
+(macOS 26, 143/143 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -39,7 +39,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Time zone from the proxy | a profile with a proxy and *Time zone of the proxy's location* runs in the time zone the lookup through the proxy returned, cached per profile |
 | Several SOCKS5 profiles at once | three profiles behind three SOCKS5 proxies, one with username/password authentication, are launched together through the app's launch path and load at the same time: each page arrives through its own proxy, by name, with its own credentials; after one stops the others keep loading through theirs; wrong or missing SOCKS5 credentials fail closed |
 | Launch speed | with a location remembered for the proxy, a launch waits at most 1 s for a 4 s lookup (the lookup finishes in the background, and its new time zone is remembered and noted for the next launch); with nothing remembered it waits at most 3 s |
-| Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy and credentials) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported or stored, and turning it off while a lookup is under way leaves no IP stored and nothing reported |
+| Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy and credentials) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported or stored, and turning it off, or replacing the proxy, while a lookup is under way leaves no new IP stored and nothing reported |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
@@ -385,7 +385,8 @@ the lookup sees it, with the one seen at the previous launch through the same pr
 credentials, and warns when it changed (a rotating or reassigned proxy). It needs the lookup,
 which then runs even without the time-zone matching. The last IP is stored, encrypted with the
 profile, only while the option is on: turning it off (or removing the proxy) deletes it when the
-profile is saved, and a lookup still under way then neither stores an IP nor warns.
+profile is saved. A lookup still under way when the option is turned off, or the proxy removed
+or replaced, neither stores an IP nor warns.
 
 **Verify the proxy by hand:** set a SOCKS5 proxy, for example `ssh -D 1080 host`, open
 `https://ifconfig.me`, and confirm it shows the proxy's IP. Then stop the proxy and

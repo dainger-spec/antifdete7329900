@@ -241,9 +241,11 @@ final class ProfileManager: ObservableObject {
     /// profile asks for that), and the location to remember for the next launch.
     private func proxyLookupFinished(_ result: ProxyGeoLookup.Result, for id: UUID, name: String, stored: ProfileConfiguration) {
         guard let found = result.location else { return }
-        // Not when the warning was turned off since the launch (a late answer).
+        // Not when, since the launch, the warning was turned off or the proxy removed or replaced
+        // (a late answer): it is about a proxy the profile no longer asks about.
         let current = try? repository.loadConfiguration(id)
-        if stored.warnOnProxyIPChange, current?.warnOnProxyIPChange != false, let change = found.exitIPChange(since: stored.lastProxyLocation) {
+        let stillAsked = current.map { $0.warnOnProxyIPChange && $0.proxy.map(ProxyLocation.endpoint(of:)) == found.proxyEndpoint } ?? true
+        if stored.warnOnProxyIPChange, stillAsked, let change = found.exitIPChange(since: stored.lastProxyLocation) {
             log.notice("The proxy of \(id.uuidString, privacy: .public) exits from another IP than at the previous launch")
             onError?(String(format: L("launch.proxyIPChanged"), name, change.old, change.new))
         }

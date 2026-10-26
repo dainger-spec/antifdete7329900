@@ -39,8 +39,10 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     public var lastProxyLocation: ProxyLocation?
 
     /// Warn when the proxy's exit IP differs from the one seen at the previous launch (the same
-    /// proxy host and port, e.g. a provider that rotates or reassigned the address). Needs the
-    /// lookup through the proxy, which then runs even without `matchProxyLocation`. Default off.
+    /// proxy and credentials, `ProxyLocation.endpoint(of:)`, e.g. a provider that rotates or
+    /// reassigned the address). Needs the lookup through the proxy, which then runs even without
+    /// `matchProxyLocation`. The exit IP is stored only while this is on
+    /// (`keepingProxyLocation(of:)`). Default off.
     public var warnOnProxyIPChange: Bool
 
     /// APPROXIMATION: JavaScript removal/wrapping of `RTCPeerConnection`.

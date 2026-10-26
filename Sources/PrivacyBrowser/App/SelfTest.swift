@@ -1032,6 +1032,24 @@ final class SelfTest {
         check("exit IP: turned off while a lookup is under way, no IP is kept and nothing is reported",
               settled && afterOff != nil && afterOff?.exitIP == nil && !messages.contains { $0.contains("192.0.2.44") },
               "\(String(describing: afterOff)) | \(messages)")
+        // The proxy replaced while a lookup is under way (the warning still on): the answer is
+        // about the old proxy, so it neither warns nor is remembered.
+        var watchedAgain = try repository.loadConfiguration(watched.id)
+        watchedAgain.warnOnProxyIPChange = true
+        try repository.saveConfiguration(watchedAgain, for: watched.id)
+        _ = try await run(watched.id, ip: "203.0.113.7")
+        geo("ip=198.51.100.4&delay=2")
+        messages.removeAll()
+        try await manager.launch(watched.id)
+        var replaced = try repository.loadConfiguration(watched.id)
+        replaced.proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9)
+        try repository.saveConfiguration(replaced.keepingProxyLocation(of: repository.loadConfiguration(watched.id)), for: watched.id)
+        let replacedSettled = await lookupsDone()
+        try await manager.stop(watched.id)
+        let afterReplace = try repository.loadConfiguration(watched.id).lastProxyLocation
+        check("exit IP: the proxy replaced while a lookup is under way, its answer neither warns nor is remembered",
+              replacedSettled && afterReplace?.exitIP == "203.0.113.7" && !messages.contains { $0.contains("198.51.100.4") },
+              "\(String(describing: afterReplace)) | \(messages)")
         _ = try await run(unwatched.id, ip: "203.0.113.7")
         let quiet = try await run(unwatched.id, ip: "198.51.100.4")
         let unwatchedStored = try repository.loadConfiguration(unwatched.id)
