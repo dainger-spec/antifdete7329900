@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 128/128 checks in both builds):
+(macOS 26, 129/129 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -31,7 +31,8 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks; an iPhone profile reports its device class's navigator and screen values; user-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
 | Shims in workers and frames | a worker made from a blob runs in the profile's zone, stays strict and keeps its line numbers; a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
 | Proxy: IPv6, unresolvable host | an HTTP proxy on `[::1]` tunnels the load; a proxy whose host does not resolve fails closed |
-| Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel`: a proxy turns WebRTC off (§5) |
+| Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the packet tunnel cannot carry it (§5) |
+| Packet tunnel | a build without the network extension reports it (the tunnel sheet says what a signed build needs), and proxied profiles keep WebRTC off. The tunnel's TURN server and SOCKS5 relay are measured by the leak check instead ([TUNNEL.md](TUNNEL.md)) |
 | Proxy: dns-prefetch leak | an `<a ping>` (the load type WebKit gives dns-prefetch) reaches neither the proxy nor the network; a fetch to the same origin does |
 | Proxy: 407 without credentials | the launch is refused ("needs credentials") and the data is sealed again; nothing opens, directly or otherwise |
 | Proxy: `Accept-Language` | the header the proxy sees is the language the app decided at its first launch (`de-DE,de;q=0.9` in the self-test) |
@@ -314,7 +315,8 @@ behaviour are verified by the self-test (§0).
 use HTTP/3: measured on every push by `scripts/leak_check.py`, which runs real forwarding
 proxies on the CI Mac. cloudflare-quic.com answers a profile without a proxy over HTTP/3 and the
 same requests through an HTTP CONNECT or SOCKS5 proxy over HTTP/2, each one seen by the proxy;
-the SOCKS5 proxy was never asked for UDP. So QUIC needs no tunnel. WebRTC does (below).
+the SOCKS5 proxy was never asked for UDP. So QUIC needs no tunnel. WebRTC does: the packet
+tunnel ([TUNNEL.md](TUNNEL.md)), below.
 
 **App Transport Security:** `NSAllowsArbitraryLoadsInWebContent` lets the browser load
 `http://` pages. The app's own URLSession traffic (HTTP sync) remains HTTPS-only.
@@ -323,7 +325,7 @@ the SOCKS5 proxy was never asked for UDP. So QUIC needs no tunnel. WebRTC does (
 
 | Path | Status | Mitigation |
 |---|---|---|
-| WebRTC (STUN, TURN over UDP or TCP, media) | Never proxied: WebKit opens these sockets itself, without the data store's proxy. STUN reveals the real public IP to the page (seen by the CI leak check); a TURN server sees it too | A profile with a proxy always runs with WebRTC **off**, whatever its setting (§5) |
+| WebRTC (STUN, TURN over UDP or TCP, media) | Never proxied by WebKit: it opens these sockets itself, without the data store's proxy. STUN reveals the real public IP to the page (seen by the CI leak check); a TURN server sees it too | With a SOCKS5 proxy and the packet tunnel on: through the proxy's UDP ASSOCIATE, via a per-profile TURN relay ([TUNNEL.md](TUNNEL.md)). Otherwise WebRTC is **off** in a proxied profile, whatever its setting (§5) |
 | DNS prefetch | `<link rel="dns-prefetch">` (also as a `Link:` header) makes the network process resolve the host through the system resolver — WebKit skips it only for a *system-wide* proxy, not for a data store's `proxyConfigurations` | A content rule list blocking `ping`-type loads is added to every proxied profile (`ContentRules`): WebKit runs dns-prefetch through it as a ping. It also blocks `<a ping>` click trackers; beacons are fetches and unaffected. Verified by the self-test with an `<a ping>` |
 | Safe Browsing lookups | Made outside the data store's network session | Off by default (`safeBrowsingEnabled`) |
 | `mailto:`, `tel:`, custom schemes | Would hand the URL to another app, outside the profile | Blocked by the navigation policy |
@@ -350,12 +352,22 @@ network process opens them with plain Network.framework parameters). Its default
 IPs behind mDNS host candidates, but STUN still discovers the public IP. WKWebView on macOS 15
 and 26 exposes a native `RTCPeerConnection` (observed by the self-test).
 
-**With a proxy, WebRTC is always off** (`ProfileConfiguration.effectiveWebRTCPolicy`), whatever
-the profile's setting: any other policy sends the page's ICE traffic from this Mac's own
-address. The editor shows the setting as off while a proxy is set and keeps the stored choice
-for when the proxy is removed. WebRTC through the proxy's exit would need a packet tunnel (a
-Network Extension, which only a build signed with Apple's packet-tunnel entitlement can load),
-and even then only a SOCKS5 exit carries UDP.
+**With a proxy, WebRTC goes through the proxy or is off** (`ProfileConfiguration.webRTCRouting`),
+whatever the profile's setting, because any other policy sends the page's ICE traffic from this
+Mac's own address:
+
+- **SOCKS5 proxy, packet tunnel on**: the page's only ICE server is a TURN relay on a virtual
+  address that the tunnel routes to the extension, under `iceTransportPolicy: "relay"`. The
+  relay sends everything through the proxy's UDP ASSOCIATE, so the page, STUN servers and
+  peers see the proxy's address. The page keeps seeing its own configuration. Its STUN servers
+  are not contacted, and the urls that would name the relay (ICE events, `getStats()`) name
+  the page's own server. Design, limits and signing: [TUNNEL.md](TUNNEL.md).
+- **HTTP CONNECT proxy**: off. CONNECT cannot carry UDP.
+- **Tunnel not built, not allowed, or not connected**: off, and both the profile editor and the
+  launch say why. Without the tunnel, UDP would leave from this Mac's real IP.
+
+The editor shows the setting as off (or "through the network extension") while a proxy is set,
+and keeps the stored choice for when the proxy is removed.
 
 The profile setting:
 
@@ -365,8 +377,8 @@ The profile setting:
   every `RTC*` interface from the window instead, as in an engine built without WebRTC.
 - `relayOnly` wraps the constructor and `setConfiguration` to force
   `iceTransportPolicy: "relay"`. No host or srflx candidates are gathered, so peers see
-  only the TURN server's address. The TURN server still sees your real IP; never applied
-  with a proxy.
+  only the TURN server's address. The TURN server still sees your real IP. With a proxy,
+  only the tunnel's relay is used.
 - `unrestricted` uses the WebKit default; never applied with a proxy.
 
 **Limits of the shim (relay-only, and the fallback removal):** it isn't applied in workers, which have no RTCPeerConnection

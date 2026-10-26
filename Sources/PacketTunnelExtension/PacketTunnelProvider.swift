@@ -8,7 +8,7 @@ import TunnelTransport
 /// SOCKS5 proxy, so a page's WebRTC (STUN, TURN, media) leaves through that profile's proxy
 /// instead of being switched off.
 ///
-/// It routes only a virtual subnet (198.18.0.0/24 and a unique-local /64, `TunnelAddressing`):
+/// It routes only a virtual subnet (192.0.2.0/24 and a unique-local /64, `TunnelAddressing`):
 /// the pages are pointed at a TURN server on a virtual address of that subnet, one per profile,
 /// and nothing else on the Mac — other apps, DNS, the profiles' own TCP to their proxies — is
 /// routed into the tunnel. Each profile's allocations relay through its own SOCKS5 UDP
@@ -16,7 +16,9 @@ import TunnelTransport
 ///
 /// The app registers a route per profile launch with `TunnelControlMessage` over
 /// `sendProviderMessage`, and registers them again whenever the tunnel (re)connects.
-@objc(PacketTunnelProvider)
+///
+/// Info.plist names it module-qualified (`PacketTunnelExtension.PacketTunnelProvider`), as Apple
+/// documents; NetworkExtension instantiates it after `startSystemExtensionMode()` (main.swift).
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     private let queue = DispatchQueue(label: "PrivacyBrowser.PacketTunnel")
     private let logger = Logger(subsystem: "PrivacyBrowser.PacketTunnel", category: "tunnel")

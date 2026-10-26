@@ -2,6 +2,7 @@ import AppKit
 import BrowserCore
 import NetworkExtension
 import os
+import ServiceManagement
 import SystemExtensions
 import TunnelCore
 
@@ -33,7 +34,9 @@ final class TunnelManager: NSObject, ObservableObject {
         case failed(String)
     }
 
-    @Published private(set) var state: State = .checking
+    @Published private(set) var state: State = .checking {
+        didSet { if state != .checking { resumeStatusWaiters() } }
+    }
 
     /// The extension's bundle identifier, written into the app's Info.plist by `NE=1 scripts/build-app.sh`.
     let extensionIdentifier: String?
@@ -42,7 +45,12 @@ final class TunnelManager: NSObject, ObservableObject {
     private var routes: [UUID: TunnelRoute] = [:]
     private var statusObserver: NSObjectProtocol?
     private var pendingRequest: OSSystemExtensionRequest?
+    /// The pending request asks for activation (Enable), not just the properties (a refresh).
+    private var pendingIsActivation = false
     private var connectWaiters: [CheckedContinuation<Bool, Never>] = []
+    private var statusWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Launches between reserving a route and the extension's answer: the tunnel is not stopped meanwhile.
+    private var registering = 0
 
     override init() {
         let identifier = Bundle.main.object(forInfoDictionaryKey: "PBTunnelExtensionBundleIdentifier") as? String
@@ -51,6 +59,8 @@ final class TunnelManager: NSObject, ObservableObject {
         extensionIdentifier = bundled.map { FileManager.default.fileExists(atPath: $0.path) } == true ? identifier : nil
         super.init()
         state = extensionIdentifier == nil ? .notBuilt : .checking
+        // Read at once, so the editor and the first launch know whether the tunnel can carry WebRTC.
+        if extensionIdentifier != nil { DispatchQueue.main.async { self.refresh() } }
     }
 
     /// The tunnel can carry a profile's WebRTC now (it is started on demand).
@@ -60,11 +70,31 @@ final class TunnelManager: NSObject, ObservableObject {
 
     /// Reads where activation and the VPN configuration stand (no prompts).
     func refresh() {
-        guard let identifier = extensionIdentifier else { return }
+        guard let identifier = extensionIdentifier, !(pendingIsActivation && pendingRequest != nil) else { return }
         let request = OSSystemExtensionRequest.propertiesRequest(forExtensionWithIdentifier: identifier, queue: .main)
         request.delegate = self
         pendingRequest = request
+        pendingIsActivation = false
         OSSystemExtensionManager.shared.submitRequest(request)
+    }
+
+    /// Waits (at most 5 s) until the state is known.
+    private func knownState() async -> State {
+        guard state == .checking else { return state }
+        await withCheckedContinuation { continuation in
+            statusWaiters.append(continuation)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                self.resumeStatusWaiters()
+            }
+        }
+        return state
+    }
+
+    private func resumeStatusWaiters() {
+        let waiters = statusWaiters
+        statusWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 
     private func extensionProperties(_ properties: [OSSystemExtensionProperties]) {
@@ -86,18 +116,24 @@ final class TunnelManager: NSObject, ObservableObject {
         let request = OSSystemExtensionRequest.activationRequest(forExtensionWithIdentifier: identifier, queue: .main)
         request.delegate = self
         pendingRequest = request
+        pendingIsActivation = true
         state = .checking
         OSSystemExtensionManager.shared.submitRequest(request)
     }
 
-    /// Opens System Settings where network extensions are allowed (macOS 15+: General → Login
-    /// Items & Extensions → Network Extensions; older: Privacy & Security).
+    /// Opens System Settings where network extensions are allowed: on macOS 15+ General → Login
+    /// Items & Extensions (Network Extensions is in that pane), through the documented API; on
+    /// macOS 14 Privacy & Security, through its (undocumented) URL.
     func openSystemSettings() {
-        for candidate in ["x-apple.systempreferences:com.apple.LoginItems-Settings.extension",
-                          "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+        if #available(macOS 15, *) {
+            SMAppService.openSystemSettingsLoginItems()
+            return
+        }
+        for candidate in ["x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
                           "x-apple.systempreferences:com.apple.preference.security"] {
             if let url = URL(string: candidate), NSWorkspace.shared.open(url) { return }
         }
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
     }
 
     /// Loads (and with `install`, creates and saves — the "add VPN configurations" prompt) the
@@ -177,20 +213,26 @@ final class TunnelManager: NSObject, ObservableObject {
     /// proxy: the relay its pages are given. Nil when the tunnel cannot carry it — the profile
     /// then runs with WebRTC off.
     func register(profile id: UUID, proxy: ProxySettings) async -> WebRTCRelay? {
-        guard proxy.kind == .socks5, canCarryWebRTC, let port = UInt16(exactly: proxy.port) else { return nil }
+        guard proxy.kind == .socks5, let port = UInt16(exactly: proxy.port), !Self.isInsideTunnel(proxy.host) else { return nil }
+        registering += 1
+        defer { registering -= 1 }
+        let current = await knownState()
+        guard current == .ready || current == .connected else { return nil }
         unregister(profile: id)
+        // The slot is taken before anything is awaited: profiles launched together get different ones.
         let used = Set(routes.values.map(\.relayIPv4))
         guard let slot = TunnelAddressing.slots.first(where: { !used.contains(TunnelAddressing.relayIPv4(slot: $0)) }) else { return nil }
         let route = TunnelRoute(id: UUID().uuidString, relayIPv4: TunnelAddressing.relayIPv4(slot: slot),
                                 relayIPv6: TunnelAddressing.relayIPv6(slot: slot),
                                 username: Self.randomToken(8), password: Self.randomToken(16),
                                 proxy: SOCKSProxy(host: proxy.host, port: port, username: proxy.username, password: proxy.password))
-        guard await connect() else {
-            log.notice("tunnel did not connect; WebRTC stays off for this profile")
+        routes[id] = route
+        let connected = await connect()
+        if !connected { log.notice("tunnel did not connect; WebRTC stays off for this profile") }
+        guard connected, await send(.register(route)), routes[id] == route else {
+            if routes[id] == route { routes[id] = nil }
             return nil
         }
-        guard await send(.register(route)) else { return nil }
-        routes[id] = route
         return WebRTCRelay(urls: route.turnURLs, username: route.username, credential: route.password)
     }
 
@@ -199,7 +241,7 @@ final class TunnelManager: NSObject, ObservableObject {
         Task {
             _ = await send(.unregister(id: route.id))
             // Nothing left to relay: stop the tunnel (and the VPN indicator) until it is needed.
-            if routes.isEmpty, manager?.connection.status == .connected { manager?.connection.stopVPNTunnel() }
+            if routes.isEmpty, registering == 0, manager?.connection.status == .connected { manager?.connection.stopVPNTunnel() }
         }
     }
 
@@ -235,6 +277,13 @@ final class TunnelManager: NSObject, ObservableObject {
         }
     }
 
+    /// A proxy on the tunnel's own subnets could never be reached through it.
+    private static func isInsideTunnel(_ host: String) -> Bool {
+        guard let ip = IPAddr(host) else { return false }
+        return ip.isIn(TunnelAddressing.ipv4Network, length: TunnelAddressing.ipv4PrefixLength)
+            || ip.isIn(TunnelAddressing.ipv6Network, length: TunnelAddressing.ipv6PrefixLength)
+    }
+
     private static func randomToken(_ bytes: Int) -> String {
         var generator = SystemRandomNumberGenerator()
         return (0..<bytes).map { _ in String(format: "%02x", UInt8.random(in: 0...255, using: &generator)) }.joined()
@@ -255,6 +304,8 @@ extension TunnelManager: OSSystemExtensionRequestDelegate {
 
     nonisolated func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
         MainActor.assumeIsolated {
+            pendingRequest = nil
+            pendingIsActivation = false
             switch result {
             case .completed:
                 Task { await loadConfiguration(install: true) }
@@ -269,11 +320,30 @@ extension TunnelManager: OSSystemExtensionRequestDelegate {
     nonisolated func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
         MainActor.assumeIsolated {
             log.error("system extension request: \(error.localizedDescription, privacy: .public)")
-            state = .failed(error.localizedDescription)
+            let activation = pendingIsActivation
+            pendingRequest = nil
+            pendingIsActivation = false
+            // A refresh that fails (an extension never activated) just means it is off.
+            guard activation else {
+                state = .off
+                return
+            }
+            switch (error as? OSSystemExtensionError)?.code {
+            case .requestCanceled?: state = .off
+            case .unsupportedParentBundleLocation?: state = .failed(L("tunnel.error.location"))
+            case .missingEntitlement?, .codeSignatureInvalid?, .validationFailed?, .extensionNotFound?, .extensionMissingIdentifier?:
+                state = .failed(L("tunnel.error.signing"))
+            case .authorizationRequired?: state = .failed(L("tunnel.error.authorization"))
+            case .forbiddenBySystemPolicy?: state = .failed(L("tunnel.error.policy"))
+            default: state = .failed(error.localizedDescription)
+            }
         }
     }
 
     nonisolated func request(_ request: OSSystemExtensionRequest, foundProperties properties: [OSSystemExtensionProperties]) {
-        MainActor.assumeIsolated { extensionProperties(properties) }
+        MainActor.assumeIsolated {
+            pendingRequest = nil
+            extensionProperties(properties)
+        }
     }
 }

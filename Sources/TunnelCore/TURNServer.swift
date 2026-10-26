@@ -451,10 +451,11 @@ public final class TURNServer {
         respond(to: message, tuple: tuple, attributes: [])
     }
 
-    /// Peers the relay will not send to: this Mac's own and private networks would be reached
-    /// from the proxy's side, and the relays themselves. Everything else is the proxy's business.
+    /// Peers the relay sends to: Internet addresses only. A private or loopback peer would be
+    /// reached on the proxy's side — its host and its networks — and the relays and this Mac's
+    /// own networks are no peers. libwebrtc drops just that peer's pair on a 403.
     private func isAllowedPeer(_ peer: SocketAddress) -> Bool {
-        !peer.ip.isUnspecified && peer.port != 0 && !route.endpoints.contains { $0.ip == peer.ip }
+        peer.port != 0 && peer.ip.isGlobalUnicast && !route.endpoints.contains { $0.ip == peer.ip }
     }
 
     // MARK: Data

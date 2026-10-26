@@ -20,20 +20,31 @@ profile without a proxy as the control:
   Network Extension itself). Its pages must get relay candidates only, at the proxy's public
   address, and the proxy must see their UDP (UDP ASSOCIATE). Two peer connections in the page
   then open a data channel to each other through the relay and the proxy (the test proxy plays
-  the NAT hairpin a real proxy's public address would need).
+  the NAT hairpin a real proxy's public address would need). The server urls the page is told
+  (ICE events, `getStats()`) must be its own: the relay's address here is this Mac's.
+* WebRTC through a utun interface: where passwordless sudo works (CI), `PrivacyBrowser
+  --utun-relay` opens a utun interface as root, routes the tunnel's subnets into it and serves
+  two routes with the extension's own PacketRouter, each through its own UDP-capable proxy. One
+  profile uses WebKit's default network selection (sockets bound to the physical interface's
+  address, which ordinary routes do not redirect; the extension relies on enforced routes for
+  that), one has libwebrtc gather on every interface (`PBTunnelAllInterfaces`). Report only.
 
 Both proxies run on this machine, so the address a site sees is the same either way; what counts
 is whether the traffic passed through the proxy. Measured on macOS 26 (CI): HTTP/3 without a
 proxy, HTTP/2 through either proxy (CFNetwork does not use QUIC with a data store's proxy), and a
 STUN request around the proxy while WebRTC was allowed. Exit code 1 only if a proxied profile
-leaked: a site or STUN server being down makes the result inconclusive (a warning), never a leak.
+leaked (or a page was shown the relay's address): a site or STUN server being down makes the
+result inconclusive (a warning), never a leak.
 """
 import argparse
+import ipaddress
 import json
 import os
+import secrets
 import select
 import socket
 import struct
+import subprocess
 import sys
 import threading
 
@@ -67,15 +78,20 @@ return {
 
 WEBRTC_SCRIPT = r"""
 if (typeof RTCPeerConnection !== 'function') return { available: false };
-const pc = new RTCPeerConnection({ iceServers: [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }] });
-const candidates = [];
-pc.onicecandidate = (event) => { if (event.candidate && event.candidate.candidate) candidates.push(event.candidate.candidate); };
+const pageURLs = ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'];
+const pc = new RTCPeerConnection({ iceServers: [{ urls: pageURLs }] });
+const candidates = [], urls = [];
+pc.onicecandidate = (event) => {
+  if (event.candidate && event.candidate.candidate) { candidates.push(event.candidate.candidate); urls.push(event.url); }
+};
 pc.createDataChannel('probe');
 await pc.setLocalDescription(await pc.createOffer());
 await new Promise((resolve) => {
   const timer = setTimeout(resolve, 8000);
   pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') { clearTimeout(timer); resolve(); } };
 });
+// The servers a page is told its candidates came from: its own, never a relay it was not given.
+try { (await pc.getStats()).forEach((s) => { if (s.type === 'local-candidate') urls.push(s.url); }); } catch (e) {}
 pc.close();
 let traceIP = null;
 try { traceIP = (/^ip=(.*)$/m.exec(await (await fetch('/cdn-cgi/trace', { cache: 'no-store' })).text()) || [])[1]; } catch (e) {}
@@ -89,6 +105,8 @@ return {
   host: candidates.filter((c) => / typ host/.test(c)).length,
   relay: relayAddresses.length,
   relayIsProxyAddress: relayAddresses.length > 0 && relayAddresses.every((a) => a === traceIP),
+  serverURLs: [...new Set(urls.filter((u) => typeof u === 'string' && u !== ''))].sort(),
+  foreignServerURLs: urls.filter((u) => typeof u === 'string' && u !== '' && !pageURLs.includes(u)).length,
 };
 """
 
@@ -370,6 +388,54 @@ class UDPAssociation:
         self.deliver(payload, (address[0], address[1]))
 
 
+def utun_route(slot, proxy_port):
+    """A TunnelRoute (TunnelCore, JSON) at relay slot `slot` (TunnelAddressing: host 10+slot)."""
+    return {"id": f"leak-check-{slot}", "port": 3478, "realm": "privacybrowser.relay",
+            "relayIPv4": str(ipaddress.ip_address("192.0.2.0") + 10 + slot),
+            "relayIPv6": str(ipaddress.ip_address("fd6b:3a1c:94e2:1::") + 10 + slot),
+            "username": secrets.token_hex(4), "password": secrets.token_hex(8),
+            "proxy": {"host": "127.0.0.1", "port": proxy_port},
+            "stunServers": ["stun.cloudflare.com:3478", "stun.l.google.com:19302"],
+            "stunServersIPv6": ["[2606:4700:49::]:3478", "[2001:4860:4864:5:8000::1]:19302"]}
+
+
+def start_utun_relay(app, routes, out):
+    """`sudo -n PrivacyBrowser --utun-relay`: the extension's router on a utun interface. The
+    process once it is routed, or None where it cannot run (no passwordless sudo, no utun)."""
+    if sys.platform != "darwin":
+        return None
+    path = os.path.join(out, "utun-routes.json")
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(routes, handle)
+    binary = os.path.join(app, "Contents", "MacOS", "PrivacyBrowser")
+    try:
+        process = subprocess.Popen(["sudo", "-n", binary, "--utun-relay", path], stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True, bufsize=1)
+    except OSError as error:
+        print(f"utun relay: {error}")
+        return None
+    ready = threading.Event()
+
+    def pump():
+        for line in process.stdout:
+            print(line.rstrip(), flush=True)
+            if line.startswith("UTUN READY"):
+                ready.set()
+    threading.Thread(target=pump, daemon=True).start()
+    if ready.wait(20):
+        return process
+    stop_utun_relay(process)
+    return None
+
+
+def stop_utun_relay(process):
+    process.terminate()  # sudo passes SIGTERM on to the relay
+    try:
+        process.wait(10)
+    except subprocess.TimeoutExpired:
+        subprocess.run(["sudo", "-n", "pkill", "-f", "--", "--utun-relay"], check=False)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--app", required=True, help="the unsandboxed PrivacyBrowser.app")
@@ -389,6 +455,22 @@ def main():
         {"name": "socks-relay", "webRTC": "unrestricted", "relay": "harness",
          "proxy": {"kind": "socks5", "host": "127.0.0.1", "port": proxies["socks-relay"].socks_port}},
     ]
+    # The extension's data path on a utun interface: two routes, each through its own proxy.
+    utun_profiles = [("socks-utun", False), ("socks-utun-all", True)]
+    routes = []
+    for slot, (name, _) in enumerate(utun_profiles):
+        proxies[name] = ForwardingProxy(udp=True)
+        routes.append(utun_route(slot, proxies[name].socks_port))
+    utun = start_utun_relay(os.path.abspath(args.app), routes, args.out)
+    if utun:
+        for (name, all_interfaces), route in zip(utun_profiles, routes):
+            profiles.append({"name": name, "webRTC": "unrestricted", "relay": "utun", "route": route,
+                             "allInterfaces": all_interfaces, "scopingProbe": not all_interfaces,
+                             "proxy": {"kind": "socks5", "host": "127.0.0.1", "port": proxies[name].socks_port}})
+    else:
+        print("::warning::leak check: the utun relay could not run here (it needs passwordless sudo on macOS)")
+        for name, _ in utun_profiles:
+            del proxies[name]
     pages = [
         {"name": "quic", "url": QUIC_SITE, "script": QUIC_SCRIPT, "settleMs": 500, "timeoutMs": 60000},
         {"name": "quic-again", "url": QUIC_SITE, "script": QUIC_SCRIPT, "settleMs": 500, "timeoutMs": 60000},
@@ -396,7 +478,11 @@ def main():
         {"name": "webrtc-loop", "url": QUIC_SITE, "script": LOOP_SCRIPT, "timeoutMs": 45000},
     ]
     spec = {"window": {"width": 1000, "height": 600}, "profiles": profiles, "pages": pages}
-    results = run_app(os.path.abspath(args.app), spec, os.path.abspath(os.path.join(args.out, "profiles")))
+    try:
+        results = run_app(os.path.abspath(args.app), spec, os.path.abspath(os.path.join(args.out, "profiles")))
+    finally:
+        if utun:
+            stop_utun_relay(utun)
     if not results:
         print("::warning::leak check: nothing measured")
         return 0
@@ -430,10 +516,13 @@ def main():
         # this Mac's address, host means WebKit gathered on its own interfaces.
         stun_bypass = proxied and ((webrtc.get("srflx") or 0) > 0 or (webrtc.get("host") or 0) > 0
                                    or any(t in ("srflx", "host", "prflx") for t in loop.get("candidateTypes") or []))
+        # The relay's own address (this Mac's, for the harness) named to the page as a server url.
+        relay_url_shown = bool(profile.get("relay")) and (webrtc.get("foreignServerURLs") or 0) > 0
         report[name] = {"proxied": proxied, "protocols": seen, "webrtc": webrtc, "loop": loop,
                         "proxyRequestsToSite": through_proxy, "proxyUdpAssociations": udp_associations,
                         "proxyUdpDatagrams": proxy.udp_datagrams if proxy else 0,
-                        "proxyLog": log, "quicBypassesProxy": quic_bypass, "stunBypassesProxy": stun_bypass}
+                        "proxyLog": log, "quicBypassesProxy": quic_bypass, "stunBypassesProxy": stun_bypass,
+                        "relayURLShown": relay_url_shown}
         print(f"::group::[{name}] protocols {seen}, WebRTC {webrtc}, loop {loop}, proxy saw {through_proxy} request(s) to the site")
         for request in log:
             print(f"  {request['proxy']} {request['command']} {request['target']}")
@@ -453,12 +542,16 @@ def main():
         elif (webrtc.get("relay") or 0) > 0:
             rtc = (f"relay candidates only ({webrtc.get('relay')}), "
                    f"{'at the proxy address' if webrtc.get('relayIsProxyAddress') else 'NOT at the proxy address'}; "
+                   f"server urls the page sees {webrtc.get('serverURLs')}; "
                    f"{udp_associations} UDP association(s); data channel "
                    f"{'delivered through the proxy' if loop.get('delivered') else 'not delivered (' + str(loop.get('ice')) + ')'}")
             if not webrtc.get("relayIsProxyAddress"):
                 warnings.append(f"{name}: relay candidates are not at the proxy's address")
             if not loop.get("delivered"):
                 warnings.append(f"{name}: the data channel through the relay did not deliver ({loop})")
+        elif profile.get("scopingProbe"):
+            rtc = ("no candidates: WebKit's TURN socket, bound to the physical interface's address, did not "
+                   "follow the ordinary utun route (the extension sets enforced routes for this)")
         else:
             rtc = "no candidates"
             if profile.get("relay"):
@@ -471,6 +564,10 @@ def main():
     leaked = [name for name, r in report.items() if r["quicBypassesProxy"] or r["stunBypassesProxy"]]
     if leaked:
         print(f"::error::traffic went around the proxy in: {', '.join(leaked)}")
+        return 1
+    shown = [name for name, r in report.items() if r["relayURLShown"]]
+    if shown:
+        print(f"::error::a page was shown the relay's address as a server url in: {', '.join(shown)}")
         return 1
     return 0
 

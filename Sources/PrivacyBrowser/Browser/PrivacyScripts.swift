@@ -743,8 +743,8 @@ function patchWebRTC(w, policy, relay) {
     }));
   }
   // Where libwebrtc names the server a candidate came from — an ICE event's url, a candidate's
-  // url in getStats() — it names the relay ('turn:198.18.0.10:3478?transport=udp', and for what
-  // the relay answered as a STUN server 'stun:198.18.0.10:3478'). The page is shown its own server
+  // url in getStats() — it names the relay ('turn:192.0.2.10:3478?transport=udp', and for what
+  // the relay answered as a STUN server 'stun:192.0.2.10:3478'). The page is shown its own server
   // instead, in libwebrtc's form, or nothing when it configured none of that kind.
   if (viaTunnel) {
     const relayHosts = viaTunnel.urls.map((url) => (iceURLParts(url) || {}).host).filter(Boolean);

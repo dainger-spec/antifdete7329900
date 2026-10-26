@@ -50,6 +50,37 @@ public struct IPAddr: Hashable, Sendable, Codable, CustomStringConvertible {
 
     public var isUnspecified: Bool { bytes.allSatisfy { $0 == 0 } }
 
+    /// Whether the first `length` bits are those of `prefix` (an address of the same family).
+    public func isIn(_ prefix: IPAddr, length: Int) -> Bool {
+        guard prefix.bytes.count == bytes.count, length >= 0, length <= bytes.count * 8 else { return false }
+        for bit in 0..<length where (bytes[bit / 8] ^ prefix.bytes[bit / 8]) & (0x80 >> UInt8(bit % 8)) != 0 { return false }
+        return true
+    }
+
+    /// Whether a relay may send to this address from the proxy's side (RFC 8656 §21.3–4): an
+    /// Internet unicast address, not one of the proxy's own host or networks (unspecified,
+    /// loopback, link-local, private, shared, multicast, reserved, the tunnel's relays), nor an
+    /// IPv6 address that stands for an IPv4 one (mapped, 6to4, Teredo).
+    public var isGlobalUnicast: Bool {
+        let blocked = family == .v4 ? Self.nonGlobalIPv4 : Self.nonGlobalIPv6
+        if blocked.contains(where: { isIn($0.prefix, length: $0.length) }) { return false }
+        // NAT64 (RFC 6052): as global as the IPv4 address it carries.
+        if isIn(Self.nat64.prefix, length: Self.nat64.length) { return IPAddr(bytes: Array(bytes[12..<16]))!.isGlobalUnicast }
+        return true
+    }
+
+    private static func block(_ literal: String, _ length: Int) -> (prefix: IPAddr, length: Int) { (IPAddr(literal)!, length) }
+    private static let nonGlobalIPv4 = [
+        block("0.0.0.0", 8), block("10.0.0.0", 8), block("100.64.0.0", 10), block("127.0.0.0", 8),
+        block("169.254.0.0", 16), block("172.16.0.0", 12), block("192.0.0.0", 24), block("192.0.2.0", 24),
+        block("192.168.0.0", 16), block("198.18.0.0", 15), block("224.0.0.0", 4), block("240.0.0.0", 4),
+    ]
+    private static let nonGlobalIPv6 = [
+        block("::", 128), block("::1", 128), block("::ffff:0:0", 96), block("2001::", 32), block("2002::", 16),
+        block("fc00::", 7), block("fe80::", 10), block("ff00::", 8),
+    ]
+    private static let nat64 = block("64:ff9b::", 96)
+
     public init(from decoder: Decoder) throws {
         let text = try decoder.singleValueContainer().decode(String.self)
         guard let address = IPAddr(text) else {

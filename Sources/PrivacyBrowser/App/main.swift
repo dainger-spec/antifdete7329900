@@ -12,6 +12,9 @@ MainActor.assumeIsolated {
         SelfTest.migrationStep(write: true)
     } else if arguments.contains("--selftest-read-vault") {
         SelfTest.migrationStep(write: false)
+    } else if arguments.contains("--utun-relay") {
+        // The packet tunnel's data path on a utun interface, for CI (root; UTunRelayHarness.swift).
+        UTunRelayHarness.start(arguments: arguments)
     } else if arguments.contains("--capture-sites") {
         // The app's own start-up, as far as web content can tell: its UI language is set, and the
         // first profile (no proxy) decides the language websites see.

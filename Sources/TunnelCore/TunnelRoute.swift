@@ -73,12 +73,14 @@ public struct SOCKSProxy: Codable, Equatable, Sendable {
 /// the pages' TURN traffic to their virtual relays — every other app, and the profiles' own
 /// TCP (which goes to their proxies directly), stays on the normal network.
 public enum TunnelAddressing {
-    /// RFC 2544 benchmarking space: never routed on the Internet, rarely used on LANs.
-    public static let ipv4Network = IPAddr("198.18.0.0")!
+    /// TEST-NET-1 (RFC 5737): never routed on the Internet, never handed out on a LAN. Not the
+    /// benchmarking range 198.18.0.0/15, which sing-box, Clash and Surge use for their fake IPs:
+    /// a more specific route of ours there would take traffic of theirs.
+    public static let ipv4Network = IPAddr("192.0.2.0")!
     public static let ipv4PrefixLength = 24
     public static let ipv4Mask = "255.255.255.0"
     /// The tunnel interface's own address (not a relay).
-    public static let ipv4Interface = IPAddr("198.18.0.1")!
+    public static let ipv4Interface = IPAddr("192.0.2.1")!
     /// A unique-local IPv6 /64 (RFC 4193, random global ID).
     public static let ipv6Network = IPAddr("fd6b:3a1c:94e2:1::")!
     public static let ipv6PrefixLength = 64

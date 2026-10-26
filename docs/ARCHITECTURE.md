@@ -29,6 +29,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │  AppModel ── lock state, vault, DeviceSettings (sync target), errors                       │
 │        │                                                                                   │
 │  ProfileManager ── launch / stop / delete / crash recovery                                 │
+│        ├── TunnelManager ── packet tunnel: activation, VPN configuration, per-profile routes│
 │        ├── WebDataStoreVault ── seal/unseal WebKit dirs (WebKitDataLayout + archive)       │
 │        └── BrowserSession (one per running profile)                                        │
 │              ├── WKWebsiteDataStore(forIdentifier:) + proxyConfigurations                  │
@@ -49,10 +50,17 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │     ├── LocalDirectorySyncTransport  (local-only)                                          │
 │     └── HTTPSyncTransport            (server-ready client, docs/SYNC_SERVER_API.md)        │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────── PacketTunnelExtension (system extension, NE=1 builds; docs/TUNNEL.md) ─────────┐
+│  PacketTunnelProvider ── split tunnel (192.0.2.0/24 + a ULA /64), packets ↔ PacketRouter   │
+│  TunnelTransport (macOS) ── SOCKS5UDPRelay (Network.framework), TURNUDPHost (CI harness)   │
+│  TunnelCore (platform-independent) ── IPv4/IPv6 UDP packets, STUN/TURN codec, TURNServer,  │
+│        SOCKS5 framing, PacketRouter (one TURN server per profile route), control messages  │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 `BrowserCore` has no dependency on AppKit or WebKit. It builds on Linux with
-swift-crypto, which lets CI run the crypto and storage tests without a Mac.
+swift-crypto, which lets CI run the crypto and storage tests without a Mac. `TunnelCore`, the
+tunnel's protocol code, builds there as well.
 
 ## Key hierarchy
 
@@ -203,12 +211,14 @@ configs read as the default generation).
 
 | Layer | How | Where it runs |
 |---|---|---|
-| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sync, HTTP transport, UA presets, proxy location) | XCTest, 54 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sync, HTTP transport, UA presets, proxy location) | XCTest, 63 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| Tunnel protocols (STUN/TURN against RFC 5769 vectors, IPv4/IPv6 UDP packets, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy, several profiles through one router) | XCTest, 30 tests | Linux and macOS, every push |
+| Packet-tunnel extension | builds against the macOS SDK and is laid out as a system extension, plists linted, provider class checked (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner | macOS 26 runner, every push |
 | JS shims (logic, CreepJS-style shape checks) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages) | Linux, every push |
 | App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 26 runner, every push |
 | Measured surface of a macOS profile vs. the runner's real Safari | `scripts/safari_reference.py` (safaridriver) with `Resources/fingerprint_probe.js` | macOS 26 runner, every push |
 | The same pages in Safari and in on-screen profile windows of the same size: probe, window geometry (1 and 2 tabs), request header order, permissions/quota/devices, TLS + HTTP/2 (tls.peet.ws) | `scripts/live_compare.py` + `PrivacyBrowser --capture-sites` (`SiteCapture.swift`, pages in `scripts/live_sites/`) | macOS 26 runner, every push (report only: third-party sites change) |
-| Nothing goes around a profile's proxy: QUIC/HTTP/3 (cloudflare-quic.com) and WebRTC (public STUN) behind real HTTP CONNECT and SOCKS5 forwarding proxies, a profile without a proxy as the control | `scripts/leak_check.py` + `--capture-sites` | macOS 26 runner, every push (fails only on a request seen going around a proxy) |
+| Nothing goes around a profile's proxy: QUIC/HTTP/3 (cloudflare-quic.com) and WebRTC (public STUN) behind real HTTP CONNECT and SOCKS5 forwarding proxies, a profile without a proxy as the control; WebRTC through the tunnel's TURN server and SOCKS5 relay (run on a UDP socket of the runner) to a proxy with UDP ASSOCIATE: relay candidates at the proxy's address, a data channel delivered through it, no relay address shown to the page | `scripts/leak_check.py` + `--capture-sites` | macOS 26 runner, every push (fails on a request seen going around a proxy, or the relay's address shown to a page) |
 | App Sandbox container migration | `--selftest-write-vault` / `--selftest-read-vault` | macOS 26 runner, every push |
 | Interactive UI (tab strip drawing, menus, sheets) | manual | — |
 

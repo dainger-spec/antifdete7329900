@@ -274,6 +274,31 @@ final class TURNServerTests: XCTestCase {
         XCTAssertEqual(mismatch.attribute(STUNMessage.Attribute.errorCode).flatMap(STUNMessage.decodeErrorCode), 443)
     }
 
+    /// The relay sends to Internet addresses only: nothing on the proxy's own host or networks.
+    func testPeersOnTheProxysOwnNetworksAreForbidden() throws {
+        try allocate()
+        for literal in ["10.0.0.5", "127.0.0.1", "100.64.1.1", "169.254.1.1", "192.168.1.1", "224.0.0.251", TunnelAddressing.relayIPv4(slot: 0).description] {
+            let transaction = TURNTestClient.transaction()
+            let refused = try exchange(turn.request(.createPermission, [(STUNMessage.Attribute.xorPeerAddress,
+                STUNMessage.xorAddress(SocketAddress(ip: IPAddr(literal)!, port: 9), transactionID: transaction))], transaction: transaction))
+            XCTAssertEqual(refused.attribute(STUNMessage.Attribute.errorCode).flatMap(STUNMessage.decodeErrorCode), 403, literal)
+        }
+        let transaction = TURNTestClient.transaction()
+        let allowed = try exchange(turn.request(.createPermission, [(STUNMessage.Attribute.xorPeerAddress,
+            STUNMessage.xorAddress(peer, transactionID: transaction))], transaction: transaction))
+        XCTAssertEqual(allowed.messageClass, .success)
+    }
+
+    func testGlobalUnicast() {
+        for global in ["8.8.8.8", "198.51.100.7", "2606:4700:49::", "64:ff9b::808:808"] {
+            XCTAssertTrue(IPAddr(global)!.isGlobalUnicast, global)
+        }
+        for local in ["0.0.0.0", "172.31.255.255", "198.19.0.1", "255.255.255.255", "::1", "::ffff:8.8.8.8", "2002:808:808::1",
+                      "2001:0:4136:e378::1", "fd6b:3a1c:94e2:1::a", "fe80::1", "ff02::fb", "64:ff9b::a00:1"] {
+            XCTAssertFalse(IPAddr(local)!.isGlobalUnicast, local)
+        }
+    }
+
     func testRefreshZeroDeallocatesAndExpiryCloses() throws {
         try allocate()
         let refreshed = try exchange(turn.request(.refresh, [(STUNMessage.Attribute.lifetime, STUNMessage.uint32(1200))]))
@@ -432,8 +457,13 @@ final class PacketRouterTests: XCTestCase {
         XCTAssertEqual(refused.attribute(STUNMessage.Attribute.errorCode).flatMap(STUNMessage.decodeErrorCode), 401)
 
         // Anything not addressed to a relay is dropped.
-        router.handlePacket(try XCTUnwrap(IPPacket.buildUDP(UDPDatagram(source: browser4, destination: SocketAddress(ip: IPAddr("198.18.0.99")!, port: 3478), payload: [0]))))
+        router.handlePacket(try XCTUnwrap(IPPacket.buildUDP(UDPDatagram(source: browser4, destination: SocketAddress(ip: IPAddr("192.0.2.99")!, port: 3478), payload: [0]))))
         XCTAssertEqual(router.droppedPackets, 1)
+
+        // Registering a route again (as the app does on every reconnect) keeps its allocations.
+        router.register(a)
+        XCTAssertEqual(router.allocationCount, 2)
+        XCTAssertFalse(relays.relays[0].closed)
 
         router.unregister(id: "a")
         XCTAssertTrue(relays.relays[0].closed)
@@ -447,7 +477,7 @@ final class PacketRouterTests: XCTestCase {
         for message in [TunnelControlMessage.register(route), .unregister(id: "x"), .status] {
             XCTAssertEqual(try TunnelControlMessage.decode(message.encoded()), message)
         }
-        XCTAssertEqual(route.turnURLs, ["turn:198.18.0.15:3478?transport=udp", "turn:[fd6b:3a1c:94e2:1::f]:3478?transport=udp"])
-        XCTAssertEqual(TunnelAddressing.relayIPv4(slot: 0).description, "198.18.0.10")
+        XCTAssertEqual(route.turnURLs, ["turn:192.0.2.15:3478?transport=udp", "turn:[fd6b:3a1c:94e2:1::f]:3478?transport=udp"])
+        XCTAssertEqual(TunnelAddressing.relayIPv4(slot: 0).description, "192.0.2.10")
     }
 }

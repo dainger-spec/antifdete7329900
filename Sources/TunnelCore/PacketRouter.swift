@@ -32,6 +32,9 @@ public final class PacketRouter {
 
     /// Adds `route`, replacing one with the same id or the same addresses.
     public func register(_ route: TunnelRoute) {
+        // The app registers every route again whenever the tunnel connects: the same route keeps
+        // its server and allocations.
+        if servers[route.id]?.route == route { return }
         unregister(id: route.id)
         for endpoint in route.endpoints {
             if let other = serverByEndpoint[endpoint] { unregister(id: other.route.id) }

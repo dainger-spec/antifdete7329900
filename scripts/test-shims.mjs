@@ -429,7 +429,7 @@ test('WebRTC relayOnly', () => {
 });
 
 test('WebRTC through the tunnel: the relay is the only ICE server, the page sees its own configuration', () => {
-  const relay = { urls: ['turn:198.18.0.10:3478?transport=udp', 'turn:[fd6b:3a1c:94e2:1::a]:3478?transport=udp'], username: 'u1', credential: 'c1' };
+  const relay = { urls: ['turn:192.0.2.10:3478?transport=udp', 'turn:[fd6b:3a1c:94e2:1::a]:3478?transport=udp'], username: 'u1', credential: 'c1' };
   const w = makeWindow({ ...base, webRTC: 'tunnel', webRTCRelay: relay });
   run(w, `var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example:3478' }], iceTransportPolicy: 'all' })`);
   // What the engine got: relay-only through the tunnel's TURN server.
@@ -462,11 +462,11 @@ test('WebRTC through the tunnel: the relay is the only ICE server, the page sees
 });
 
 test('WebRTC through the tunnel: getStats() names the page\'s servers, never the relay', async () => {
-  const relay = { urls: ['turn:198.18.0.10:3478?transport=udp', 'turn:[fd6b:3a1c:94e2:1::a]:3478?transport=udp'], username: 'u1', credential: 'c1' };
+  const relay = { urls: ['turn:192.0.2.10:3478?transport=udp', 'turn:[fd6b:3a1c:94e2:1::a]:3478?transport=udp'], username: 'u1', credential: 'c1' };
   const w = makeWindow({ ...base, webRTC: 'tunnel', webRTCRelay: relay });
   run(w, `var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example' }] });
-          pc.stats = [['R', { type: 'local-candidate', candidateType: 'relay', address: '203.0.113.9', url: 'turn:198.18.0.10:3478?transport=udp' }],
-                      ['S', { type: 'local-candidate', candidateType: 'srflx', address: '203.0.113.9', url: 'stun:198.18.0.10:3478' }],
+          pc.stats = [['R', { type: 'local-candidate', candidateType: 'relay', address: '203.0.113.9', url: 'turn:192.0.2.10:3478?transport=udp' }],
+                      ['S', { type: 'local-candidate', candidateType: 'srflx', address: '203.0.113.9', url: 'stun:192.0.2.10:3478' }],
                       ['S6', { type: 'local-candidate', candidateType: 'srflx', url: 'stun:fd6b:3a1c:94e2:1::a:3478' }],
                       ['H', { type: 'local-candidate', candidateType: 'host', address: '', url: 'stun:stun.example:3478' }],
                       ['P', { type: 'candidate-pair', state: 'succeeded' }]];`);

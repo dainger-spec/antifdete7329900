@@ -1,0 +1,248 @@
+# WebRTC through a profile's proxy: the packet tunnel
+
+WebKit sends a data store's HTTP(S), WebSocket and media loads through the store's proxy, but
+opens its WebRTC sockets (STUN, TURN, media) itself, from this Mac's own address. Without help,
+a proxied profile therefore has to run with WebRTC off (ISOLATION_AND_LIMITATIONS §5). The
+packet tunnel, a Network Extension, is that help. With it, the WebRTC of a profile with a SOCKS5
+proxy leaves through that proxy's UDP ASSOCIATE, so sites, STUN servers and peers see the proxy's
+address.
+
+| Traffic of a proxied profile | Path | How it is known |
+|---|---|---|
+| HTTP(S), WebSocket, fetch, media loads (TCP) | the data store's proxy (`proxyConfigurations`, fail-closed) | self-test, leak check |
+| QUIC / HTTP/3 | not used: with a store proxy WebKit sends these requests as HTTP/2 through the proxy | leak check (cloudflare-quic.com) |
+| DNS | resolved by the proxy (SOCKS5 remote DNS, CONNECT host names) | self-test |
+| WebRTC: STUN, TURN, media, data channels (UDP) | **the tunnel**: a TURN relay on a virtual address, which relays through the profile's SOCKS5 UDP association | unit tests, leak check (relay harness), hardware checklist below |
+| WebRTC with an HTTP CONNECT proxy | off: CONNECT cannot carry UDP | self-test |
+| WebRTC with the tunnel off or not built | off, with a warning (UDP would leave from this Mac's address) | self-test |
+
+A page cannot send other UDP: WebRTC is the only UDP a web page can start.
+
+## Architecture
+
+```
+ page (profile A, SOCKS5 proxy PA)                    PacketTunnelExtension (system extension)
+ ─────────────────────────────────                    ────────────────────────────────────────
+ RTCPeerConnection                                     NEPacketTunnelProvider
+   iceServers := [turn:192.0.2.10:3478,                  routes: 192.0.2.0/24, fd6b:3a1c:94e2:1::/64
+                  turn:[fd6b:3a1c:94e2:1::a]:3478]       (enforced; nothing else, no DNS)
+   iceTransportPolicy := relay                           │
+        │  (user script; the page sees its own config)   PacketRouter ── by destination address
+        ▼                                                 ├─ 192.0.2.10 / …::a → TURNServer(route A)
+ WebKit networking process (libwebrtc)                    │                       └─ allocation → SOCKS5 UDP ASSOCIATE @ PA
+   TURN client, socket bound to en0's address            └─ 192.0.2.11 / …::b → TURNServer(route B)
+        │                                                                         └─ allocation → SOCKS5 UDP ASSOCIATE @ PB
+        ▼  enforced route
+ utun ──── IP packets ────────────────────────────────▶ readPackets / writePackets
+```
+
+- **Why a relay and not "route the profile through the tunnel".** All WKWebView profiles share
+  one WebKit networking process, so a packet cannot be traced back to a profile by its source.
+  Per-app VPN would not help either: it works per app, and WebKit's processes serve every
+  profile. So the tunnel routes only a virtual subnet. Each running profile gets its own TURN
+  server address there (slot *n* → `192.0.2.(10+n)` and `fd6b:3a1c:94e2:1::(10+n)`) with its
+  own random credentials. Its pages are given that relay as their only ICE server, with
+  `iceTransportPolicy: "relay"`. Every packet that reaches a relay address therefore belongs to
+  one profile, and leaves through that profile's proxy.
+- **Several profiles at once.** Each route has its own TURN server, credentials and proxy.
+  Every allocation opens its own SOCKS5 UDP association (a TCP control connection plus a UDP
+  flow), so profiles behind different proxies relay side by side (`PacketRouterTests`). Up to
+  240 routes; 64 allocations per route.
+- **The tunnel carries nothing else.** The routes are the TEST-NET-1 /24 (RFC 5737, never
+  routed on the Internet) and a random unique-local /64. There are no DNS settings and no
+  default route, so other apps, DNS, and the profiles' own TCP to their proxies stay on the
+  normal network. It is not 198.18.0.0/15: sing-box, Clash and Surge hand out fake IPs from
+  that range, and a more specific route of ours would take some of their traffic.
+- **Enforced routes.** WebKit binds libwebrtc's sockets to the address of the default
+  interface. On its own, macOS would then send them out of that interface whatever the routing
+  table says; Apple DTS confirmed this for WKWebView WebRTC with a split tunnel.
+  `NEVPNProtocol.enforceRoutes = true` makes the included routes win over that scoping, and
+  only for these two subnets (`includeAllNetworks` stays off).
+- **TURN for libwebrtc** (`TunnelCore/TURNServer.swift`, RFC 8656 subset). It speaks UDP
+  allocations, long-term credentials (HMAC-SHA1, MD5 key) and stateless nonces. Allocate is
+  idempotent per 5-tuple. It also handles Refresh, CreatePermission and ChannelBind, Send and
+  Data indications, and ChannelData. These behaviours of WebKit's libwebrtc decide the details:
+  - The first Allocate goes out without credentials and needs a 401 carrying REALM and NONCE.
+  - A 401 or 438 on the authenticated Allocate is fatal.
+  - Every authenticated success must carry MESSAGE-INTEGRITY.
+  - An Allocate success needs XOR-RELAYED-ADDRESS, XOR-MAPPED-ADDRESS and LIFETIME.
+  - REQUESTED-ADDRESS-FAMILY is never sent. An allocation therefore takes the family of the
+    relay address it was sent to.
+  - The TURN server is also asked as a STUN server, from the port that holds the host candidates
+    (Bindings for about 45 s, until libwebrtc drops that port under the relay policy). Left
+    unanswered, gathering would not complete for about 40 s. The Binding and the Allocate's
+    mapped address are answered with **the proxy's egress, never the client's own address**.
+    Under the relay policy, libwebrtc prints a relay candidate's related address as
+    `0.0.0.0 0`. If the policy were ever widened, the related address and srflx candidates
+    would show the egress, not this Mac's address.
+- **The proxy's egress** is found with a STUN Binding sent through the association to public
+  STUN servers. Their names are resolved by the proxy. For IPv6 the servers are IPv6 literals, so
+  the answer is an IPv6 egress. The first Binding of a family opens a short-lived probe
+  association. Until it answers, Bindings go unanswered and the client retransmits. A failed
+  probe makes Bindings answer 500 for 30 s, so gathering does not hang for 40 s.
+- **Peers are Internet addresses only.** CreatePermission and ChannelBind are refused (403)
+  for loopback, link-local, private, shared (CGNAT), multicast and reserved addresses, the
+  relays themselves, and IPv6 forms of IPv4 addresses. Those would be reached on the proxy's
+  side. libwebrtc drops only that peer's candidate pair.
+- **IPv4 and IPv6.** Packets of both families are parsed and built (`IPPacket`; the IPv4
+  header checksum and the mandatory IPv6 UDP checksum are checked). There is a relay address
+  and an allocation per family, and the SOCKS5 framing covers both. A proxy without IPv6 egress
+  fails only the IPv6 allocation (440); the IPv4 relay keeps working.
+- **Control.** The app registers a route per profile launch over `sendProviderMessage` (JSON,
+  `TunnelControlMessage`). Only the app that owns the VPN configuration can send these. It
+  registers again whenever the tunnel reconnects, and unregisters on stop. The tunnel starts on
+  demand and stops when no route is left. Apple DTS recommends XPC through `NEMachServiceName`
+  for richer app↔system-extension traffic. Provider messages are enough here, because routes
+  only need to reach a connected tunnel.
+- **The proxy connections bypass the tunnel.** NECP keeps the provider process's own sockets
+  out of its tunnel, and the proxies are not in the routed subnets anyway. A proxy configured
+  inside them is refused.
+
+### What a page sees
+
+- `getConfiguration()` returns the page's own `iceServers` and policy. The engine still
+  validates them and throws its own errors.
+- Candidates are of type `relay` only, at the proxy's egress address. libwebrtc prints their
+  related address as `0.0.0.0 0` under the relay policy.
+- `RTCPeerConnectionIceEvent.url` and the `url` of candidate entries in `getStats()` would name
+  the virtual relay. The user script replaces it with the page's own server, in libwebrtc's form
+  (`turn:host:3478?transport=udp`, `stun:host:3478`). With no such server configured, it returns
+  `null` or leaves the field out.
+- STUN servers the page configured are not contacted: libwebrtc would reach them from the
+  physical interface even under the relay policy, so they are dropped from the engine's
+  configuration.
+- This differs from Safari without a proxy, which would show mDNS host and srflx candidates.
+  A page can tell that the profile uses a relay-only policy, as with any TURN-only setup.
+
+## Requirements and real limitations
+
+- **A paid Apple Developer Program team.** The packet-tunnel and system-extension-install
+  entitlements are restricted: provisioning profiles must allow them for the app and for the
+  extension. Developer ID profiles support both. The free tier supports neither, and ad-hoc
+  signing cannot load the extension. Apple needs no separate request. A default build
+  (`scripts/build-app.sh`) claims none of these entitlements and has no extension. The tunnel
+  sheet says so, and proxied profiles keep WebRTC off.
+- **User approval, twice, by an administrator.** The first approval is for the system
+  extension: System Settings → General → Login Items & Extensions → Network Extensions (ⓘ) →
+  on. On macOS 14 it is Privacy & Security → Allow. The second is the "add VPN configurations"
+  prompt. **Open System Settings** uses `SMAppService.openSystemSettingsLoginItems()` on
+  macOS 15+, and the Privacy & Security URL on 14. Installing a system extension needs an
+  administrator, and the app must run from /Applications. CI runners cannot approve extensions
+  (that needs user-approved MDM), so CI compiles and lays out the extension but does not load
+  it.
+- **Per-app VPN.** Apple's routing documentation describes per-app VPN on macOS for
+  MDM-managed apps (`com.apple.vpn.managed.applayer`). TN3134 (2025) lists a managed-device
+  requirement only for iOS and visionOS, and DTS has shown `NETunnelProviderManager.forPerAppVPN()`
+  with `NEAppRule` on macOS. None of this is tested here. It would not separate profiles in any
+  case: the rule matches an app, and WebKit's processes serve every profile.
+  `NEPacket.metadata` is filled in only in per-app mode. Hence the destination-address design
+  above.
+- **The tunnel is system-wide.** Any process of any user on the Mac that sends to
+  192.0.2.0/24 or fd6b:3a1c:94e2:1::/64 enters the tunnel. Only the relay addresses answer, and
+  only with the per-launch credentials that the app gives its own pages. Anything else gets a
+  401 and cannot use the relay as an open UDP relay through the proxy. While the tunnel runs,
+  macOS shows a VPN.
+- **One packet-tunnel VPN at a time.** WireGuard, Tailscale and most VPN apps are packet
+  tunnels as well. Starting this tunnel (on the first launch of a proxied profile) disconnects
+  theirs, and starting theirs stops this one. A personal VPN (IKEv2 via NEVPNManager) can run
+  alongside. When the tunnel stops under a running profile, its relay becomes unreachable and
+  WebRTC fails. It does not fall back to this Mac's address (relay-only; the relay addresses
+  are not routed anywhere else).
+- **The proxy must relay UDP.** SOCKS5 without TLS, with UDP ASSOCIATE. Many SOCKS5 services,
+  and `ssh -D`, do not support it. The allocation then fails (508) and the page gets no
+  candidates. An HTTP CONNECT proxy cannot carry UDP at all. The advertised relay port assumes
+  the proxy maps an association to one external port for every destination
+  (endpoint-independent). If it does not, ICE still connects through peer-reflexive
+  candidates.
+- **Apple does not support this use.** TN3120 lists a packet tunnel without a VPN server, and
+  proxying selected traffic out of another interface, as unsupported. Developer ID needs no
+  App Review, so nothing blocks shipping it, but OS updates may change behaviour without notice.
+  The transparent-proxy provider (`NETransparentProxyProvider`) is the supported way to claim
+  flows by destination. Apple DTS observed it running alongside a packet-tunnel VPN. It is the
+  route to take if VPN coexistence matters more.
+- **What still needs a real Mac.** The enforced routes catching WebKit's interface-bound
+  sockets are documented by Apple but not observed here (see the checklist). If they do not,
+  `defaults write <bundle id> PBTunnelAllInterfaces -bool YES` has libwebrtc gather on every
+  interface, the tunnel's own included (WebKit's `_enumeratingAllNetworkInterfacesEnabled`,
+  only for profiles whose WebRTC goes through the tunnel). This opens more allocations.
+
+## Building it
+
+1. In the developer account, create two App IDs:
+   - the app (`$BUNDLE_ID`): Network Extensions, System Extension and App Groups;
+   - the extension (`$BUNDLE_ID.PacketTunnel`): Network Extensions and App Groups.
+
+   Both use the app group `$TEAM_ID.$BUNDLE_ID`.
+2. Create a Developer ID provisioning profile for each, for the Developer ID Application
+   certificate. For testing on a registered Mac, use Development profiles and an Apple
+   Development identity with `NE_SIGNING=development`; the entitlement value is then
+   `packet-tunnel-provider` instead of `packet-tunnel-provider-systemextension`.
+3. Build:
+   ```sh
+   NE=1 TEAM_ID=ABCDE12345 BUNDLE_ID=com.example.PrivacyBrowser \
+     SIGN_IDENTITY="Developer ID Application: Name (ABCDE12345)" \
+     APP_PROFILE=app.provisionprofile EXTENSION_PROFILE=tunnel.provisionprofile \
+     scripts/build-app.sh
+   ```
+   This builds the `PacketTunnelExtension` product and lays it out as
+   `Contents/Library/SystemExtensions/$BUNDLE_ID.PacketTunnel.systemextension` (Info.plist with
+   `NSSystemExtensionUsageDescription`, `NEMachServiceName` under the app group,
+   `NEProviderClasses` → `PacketTunnelExtension.PacketTunnelProvider`, and a new
+   `CFBundleVersion` per build). It embeds both profiles, signs the extension, then signs the app
+   with the extra entitlements (hardened runtime, secure timestamp).
+4. Notarize and staple:
+   ```sh
+   ditto -c -k --keepParent build/PrivacyBrowser.app PrivacyBrowser.zip
+   xcrun notarytool submit PrivacyBrowser.zip --keychain-profile <profile> --wait
+   xcrun stapler staple build/PrivacyBrowser.app
+   ```
+5. Copy the app to /Applications and open it. In the Profiles window, choose More (⋯) →
+   WebRTC through proxies (network extension)…, press **Enable**, and approve both prompts.
+   **Open System Settings** goes to the page where the extension is switched on.
+
+`NE=check scripts/build-app.sh` is what CI runs. It builds the extension unsigned beside the
+app, lints its plists and checks that the class named in `NEProviderClasses` is in the binary.
+
+## What CI verifies
+
+- `TunnelCore` (every push, Linux and macOS):
+  - the STUN codec against RFC 5769's vectors (integrity, fingerprint, XOR addresses), and the
+    IPv4/IPv6 UDP packets against independent vectors;
+  - SOCKS5 framing;
+  - the TURN flows as libwebrtc drives them: 401 challenge, idempotent Allocate, egress in
+    Allocate and Binding, slow and failing proxies, permissions and channels (unpadded
+    ChannelData), refresh and expiry, the peer policy, the IPv6 family;
+  - two profiles with different proxies through one router.
+- The extension and the app compile against the macOS SDK, and the bundle layout is checked
+  (`NE=check`).
+- `scripts/leak_check.py` runs a profile behind a real SOCKS5 proxy with UDP ASSOCIATE (the
+  script's own) through the same `TURNServer` and `SOCKS5UDPRelay` code as the extension. The
+  TURN server listens on a UDP socket of the runner instead of a virtual address
+  (`TURNUDPHost`, `--capture-sites` profile option `"relay": "harness"`). It checks that the
+  page's candidates are relays at the proxy's address, that no srflx or host candidate appears,
+  that the proxy saw the UDP, and that a data channel between two connections carries a
+  message.
+- The shim tests: the page's configuration, ICE event urls and `getStats()` urls.
+
+## Hardware checklist (a signed build on a real Mac)
+
+1. Enable the tunnel. The sheet shows "On". `systemextensionsctl list` shows the extension
+   activated and enabled.
+2. Run a SOCKS5 proxy with UDP on another host (Dante, sing-box, or 3proxy with UDP enabled).
+   Then launch a profile behind it. The tunnel connects (VPN icon) and
+   `log stream --predicate 'subsystem == "PrivacyBrowser.PacketTunnel"'` shows the route.
+3. Run `sudo tcpdump -ni en0 'udp and not port 53'` and `sudo tcpdump -ni utunN`. Open a
+   WebRTC leak test page (browserleaks.com/webrtc). Check that:
+   - no UDP from WebKit leaves en0, except to the proxy's UDP relay port;
+   - utun shows the TURN exchange with 192.0.2.10:3478;
+   - the page shows relay candidates at the proxy's address only.
+4. If TURN packets show on en0 toward 192.0.2.x instead, the enforced routes did not catch
+   WebKit's bound sockets. Try `PBTunnelAllInterfaces` (above) and repeat.
+5. IPv6: with an IPv6 default route and a proxy with IPv6 egress, a second relay candidate
+   with the proxy's IPv6 address appears.
+6. Two profiles behind different proxies at once. Each page shows its own proxy's addresses.
+   A call between them connects.
+7. Start another VPN app: this tunnel stops, and WebRTC in the running profile fails without
+   showing this Mac's address. Launch the profile again: the tunnel takes over.
+8. Turn the extension off in System Settings. The sheet shows the warning, and a proxied
+   profile launches with WebRTC off.

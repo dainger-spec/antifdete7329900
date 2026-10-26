@@ -151,7 +151,7 @@ final class ProxiedWebRTCTests: XCTestCase {
     /// With the packet tunnel's relay, a SOCKS5 profile's WebRTC goes through it (relay-only);
     /// an HTTP proxy cannot carry UDP, and "disabled" stays disabled. The relay is never stored.
     func testRoutingThroughTheTunnelRelay() throws {
-        let relay = WebRTCRelay(urls: ["turn:198.18.0.10:3478?transport=udp"], username: "u", credential: "c")
+        let relay = WebRTCRelay(urls: ["turn:192.0.2.10:3478?transport=udp"], username: "u", credential: "c")
         var socks = ProfileConfiguration(proxy: ProxySettings(kind: .socks5, host: "127.0.0.1", port: 1080), webRTCPolicy: .unrestricted)
         XCTAssertEqual(socks.webRTCRouting, .off)
         socks.webRTCRelay = relay

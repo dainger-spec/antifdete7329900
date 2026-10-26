@@ -20,12 +20,15 @@
 	<string>SYSX</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1</string>
+	<!-- A new one each build: activating an extension of the same version keeps the installed copy. -->
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(EXTENSION_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
+	<key>NSSystemExtensionUsageDescription</key>
+	<string>Sends the WebRTC of PrivacyBrowser profiles that have a SOCKS5 proxy through that proxy, so sites and peers see the proxy's address instead of this Mac's.</string>
 	<key>NetworkExtension</key>
 	<dict>
 		<!-- Must start with an app group both the app and the extension are entitled to. -->
@@ -34,7 +37,8 @@
 		<key>NEProviderClasses</key>
 		<dict>
 			<key>com.apple.networkextension.packet-tunnel</key>
-			<string>PacketTunnelProvider</string>
+			<!-- Module-qualified: the Swift module is the executable target, PacketTunnelExtension. -->
+			<string>PacketTunnelExtension.PacketTunnelProvider</string>
 		</dict>
 	</dict>
 </dict>

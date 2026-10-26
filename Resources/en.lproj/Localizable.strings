@@ -64,9 +64,9 @@
 "editor.title.edit" = "Edit Profile";
 "editor.title.new" = "New Profile";
 "editor.tz" = "Time zone";
-"editor.tz.override" = "Override time zone";
 "editor.tz.fromProxy" = "Time zone of the proxy's location";
 "editor.tz.fromProxy.note" = "At launch the proxy's exit IP is looked up through the proxy (ipinfo.io, geojs.io or ipwho.is) and the profile runs in its time zone. The first profile launched also sets the language websites see (Accept-Language) for the whole app until it quits.";
+"editor.tz.override" = "Override time zone";
 "editor.ua.effective" = "User agent";
 "editor.ua.field" = "User agent";
 "editor.ua.useCustom" = "Custom user agent";
@@ -78,9 +78,9 @@
 "editor.webrtc.tunnelSettings" = "Network extension…";
 "editor.webrtc.unrestricted" = "Unrestricted";
 "editor.webrtc.viaTunnel" = "With a proxy, WebRTC goes through the network extension: relay only, the proxy's address.";
-"errorpage.title" = "Page could not be loaded";
 "errorpage.proxy.noCredentials" = "The profile’s proxy requires a user name and password. Add them in the profile settings.";
 "errorpage.proxy.rejected" = "The proxy rejected the profile’s user name and password.";
+"errorpage.title" = "Page could not be loaded";
 "gen.ios26" = "Safari on iOS 26 (UA only)";
 "gen.ios27" = "Safari on iOS 27 (UA only)";
 "gen.ipados26" = "Safari on iPadOS 26 (UA only)";
@@ -220,9 +220,13 @@
 "tab.newTab" = "New Tab";
 "tunnel.configurationName" = "PrivacyBrowser — WebRTC through proxies";
 "tunnel.enable" = "Enable";
-"tunnel.instructions" = "If it did not turn on: System Settings → General → Login Items & Extensions → Network Extensions → turn on PrivacyBrowser. Then allow adding the VPN configuration.";
+"tunnel.error.authorization" = "macOS needs an administrator to allow the extension";
+"tunnel.error.location" = "move PrivacyBrowser to /Applications and press Enable again";
+"tunnel.error.policy" = "this Mac's management profile (MDM) does not allow the extension";
+"tunnel.error.signing" = "this build is not signed for the network extension (docs/TUNNEL.md)";
+"tunnel.instructions" = "If it did not turn on: System Settings → General → Login Items & Extensions → Network Extensions (ⓘ) → turn on PrivacyBrowser → Done. On macOS 14: System Settings → Privacy & Security → Allow. Then allow adding the VPN configuration. The app must be in /Applications.";
 "tunnel.intro" = "PrivacyBrowser's network extension sends the WebRTC of profiles with a SOCKS5 proxy through that proxy: pages get a relay (TURN) on a virtual address, which sends their UDP through the proxy's UDP ASSOCIATE. Sites and peers see the proxy's address, not this Mac's. The extension leaves the rest of the Mac's traffic alone.";
-"tunnel.limits" = "Only the WebRTC of profiles with a SOCKS5 proxy without TLS goes through the extension (an HTTP proxy cannot carry UDP); the proxy must support UDP ASSOCIATE. Pages get relay candidates only. While the tunnel is connected macOS shows a VPN; only one VPN configuration can be active at a time.";
+"tunnel.limits" = "Only the WebRTC of profiles with a SOCKS5 proxy without TLS goes through the extension (an HTTP proxy cannot carry UDP); the proxy must support UDP ASSOCIATE. Pages get relay candidates only. While the tunnel is connected macOS shows a VPN, and it runs one such VPN at a time: starting this tunnel disconnects another VPN app's tunnel (WireGuard, Tailscale, …), and when that one starts, this one stops — WebRTC in proxied profiles then fails, it does not fall back to this Mac's address.";
 "tunnel.notBuilt.note" = "This build has no network extension. It needs a signed build (NE=1 scripts/build-app.sh): a paid Apple Developer account, the packet-tunnel entitlement for the app and the extension, and the app in /Applications.";
 "tunnel.openSettings" = "Open System Settings";
 "tunnel.refresh" = "Check again";

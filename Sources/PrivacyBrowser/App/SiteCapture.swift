@@ -17,7 +17,9 @@ import WebKit
 /// Spec (JSON): {"window": {"width": W, "height": H},
 ///               "profiles": [{"name": "default"}, {"name": "shimmed", "timeZone": "host", "webRTC": "relayOnly"},
 ///                            {"name": "proxied", "proxy": {"kind": "socks5", "host": "127.0.0.1", "port": 1080}},
-///                            {"name": "relayed", "proxy": {…socks5…}, "webRTC": "unrestricted", "relay": "harness"}],
+///                            {"name": "relayed", "proxy": {…socks5…}, "webRTC": "unrestricted", "relay": "harness"},
+///                            {"name": "tunnelled", "proxy": {…socks5…}, "webRTC": "unrestricted", "relay": "utun",
+///                             "route": {…TunnelRoute…}, "allInterfaces": false}],
 ///               "pages": [{"name": "…", "url": "…", "script": "<async function body>", "settleMs": 0,
 ///                          "timeoutMs": 60000, "extraTabs": 0}]}
 /// A page script is the body of an async function; its result is serialised with JSON.stringify.
@@ -36,7 +38,12 @@ final class SiteCapture {
             var proxy: Proxy?
             /// "harness": WebRTC through the packet tunnel's TURN server and SOCKS5 relay, run on a
             /// UDP socket of this Mac instead of in the extension (`TURNUDPHost`) — what CI can run.
+            /// "utun": through `route`'s virtual relay addresses, which `PrivacyBrowser --utun-relay`
+            /// (run as root, `UTunRelayHarness`) serves on a utun interface with the extension's router.
             var relay: String?
+            var route: TunnelRoute?
+            /// libwebrtc gathers on every interface (`PBTunnelAllInterfaces`, BrowserSession).
+            var allInterfaces: Bool?
         }
         struct Proxy: Decodable { var kind: String; var host: String; var port: Int }
         struct Page: Decodable {
@@ -129,8 +136,13 @@ final class SiteCapture {
         if profileSpec.relay == "harness" {
             relayHost = try startRelayHarness(for: configuration)
             configuration.webRTCRelay = relayHost.map { WebRTCRelay(urls: [$0.turnURL], username: $0.route.username, credential: $0.route.password) }
+        } else if profileSpec.relay == "utun" {
+            guard let route = profileSpec.route else { throw Failure("a utun relay needs its route") }
+            configuration.webRTCRelay = WebRTCRelay(urls: route.turnURLs, username: route.username, credential: route.password)
         }
         defer { relayHost?.stop() }
+        UserDefaults.standard.set(profileSpec.allInterfaces ?? false, forKey: "PBTunnelAllInterfaces")
+        defer { UserDefaults.standard.removeObject(forKey: "PBTunnelAllInterfaces") }
         let session = try BrowserSession(profileID: summary.id, profileName: summary.name, configuration: configuration,
                                          passwordVault: try repository.passwordVault(for: summary.id), library: library)
         defer { session.shutDown() }
