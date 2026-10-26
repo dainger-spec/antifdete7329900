@@ -610,7 +610,7 @@ final class SelfTest {
                 // JSONSerialization hands booleans over as NSNumber too; keep "true"/"false".
                 out[prefix + key] = CFGetTypeID(number) == CFBooleanGetTypeID() ? (number.boolValue ? "true" : "false") : number.stringValue
             } else {
-                out[prefix + key] = item.map { "\($0)" } ?? "null"
+                out[prefix + key] = item is NSNull ? "null" : "\(item)"
             }
         }
         return out
