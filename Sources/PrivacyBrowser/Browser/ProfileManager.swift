@@ -111,7 +111,7 @@ final class ProfileManager: ObservableObject {
                                          passwordVault: passwords, library: library)
         } catch {
             // Thrown before the session created its data store (see BrowserSession.init).
-            if !configuration.ephemeral { try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
+            if !configuration.ephemeral { _ = try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
             throw error
         }
         session.onAllWindowsClosed = { [weak self] in

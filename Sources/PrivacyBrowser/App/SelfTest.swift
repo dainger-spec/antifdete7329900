@@ -477,8 +477,11 @@ final class SelfTest {
 
         let colors = reference["canvasColors"] as? Int ?? -1
         let urlLength = reference["canvasURLLength"] as? Int ?? -1
-        let verdict = colors == 5 && [150, 158, 142, 186].contains(urlLength) ? "Allowed" : "Spoofed (by WebKit itself)"
-        info("plain WKWebView: canvas \(colors) colours, PNG \(urlLength) chars → deviceinfo.me verdict \(verdict)")
+        // deviceinfo.me wants exactly 5 colours AND a data URL of 150, 158, 142 or 186 characters.
+        let verdict = colors != 5 ? "Spoofed: the pixels differ (noise)"
+            : [150, 158, 142, 186].contains(urlLength) ? "Allowed"
+            : "Spoofed, only because this WebKit's PNG encoding is not on the page's list (pixels exact)"
+        info("plain WKWebView: canvas \(colors) colours, PNG \(urlLength) chars → deviceinfo.me verdict: \(verdict)")
         info("plain WKWebView: plugins \(string(reference, "plugins")), languages \(string(reference, "languages"))")
         check("language: navigator.language is the language WebKit was given",
               string(reference, "language") == WebContentLanguage.decided?.first, string(reference, "language"))
@@ -985,7 +988,7 @@ final class SelfTest {
         session = nil
         vault.forceSealWhenStoreStaysInUse = false
         vault.retryDelays = [1, 2, 3, 5, 8]
-        try? await vault.seal(profileID: profile.id, key: key)
+        _ = try? await vault.seal(profileID: profile.id, key: key)
         await vault.deleteData(profileID: profile.id)
         try repository.delete(profile.id)
     }
