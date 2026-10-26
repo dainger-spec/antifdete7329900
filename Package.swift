@@ -8,6 +8,13 @@
 //                   Builds on macOS (CryptoKit + CommonCrypto) and on Linux
 //                   (swift-crypto) so the security-critical code can be unit
 //                   tested in CI without a Mac.
+//   TunnelCore      Platform-independent WebRTC relay logic for the packet tunnel: IPv4/IPv6
+//                   UDP packets, STUN/TURN server, SOCKS5 UDP codec, profile routes. Tested on
+//                   Linux and macOS like BrowserCore.
+//   TunnelTransport macOS only: the relay's network side (SOCKS5 over Network.framework) and
+//                   a UDP host for the TURN server outside the tunnel (CI harness).
+//   PacketTunnelExtension  macOS only: the NEPacketTunnelProvider system extension's executable.
+//                   Packaged and signed into the app only by `NE=1 scripts/build-app.sh`.
 //   PrivacyBrowser  macOS app (SwiftUI + AppKit + WebKit). macOS only.
 //
 import PackageDescription
@@ -32,21 +39,43 @@ var targets: [Target] = [
         dependencies: ["BrowserCore"],
         path: "Tests/BrowserCoreTests"
     ),
+    .target(
+        name: "TunnelCore",
+        dependencies: coreDependencies,
+        path: "Sources/TunnelCore"
+    ),
+    .testTarget(
+        name: "TunnelCoreTests",
+        dependencies: ["TunnelCore"],
+        path: "Tests/TunnelCoreTests"
+    ),
 ]
 
 var products: [Product] = [
     .library(name: "BrowserCore", targets: ["BrowserCore"]),
+    .library(name: "TunnelCore", targets: ["TunnelCore"]),
 ]
 
 #if os(macOS)
-targets.append(
+targets.append(contentsOf: [
+    .target(
+        name: "TunnelTransport",
+        dependencies: ["TunnelCore"],
+        path: "Sources/TunnelTransport"
+    ),
+    .executableTarget(
+        name: "PacketTunnelExtension",
+        dependencies: ["TunnelCore", "TunnelTransport"],
+        path: "Sources/PacketTunnelExtension"
+    ),
     .executableTarget(
         name: "PrivacyBrowser",
-        dependencies: ["BrowserCore"],
+        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport"],
         path: "Sources/PrivacyBrowser"
-    )
-)
+    ),
+])
 products.append(.executable(name: "PrivacyBrowser", targets: ["PrivacyBrowser"]))
+products.append(.executable(name: "PacketTunnelExtension", targets: ["PacketTunnelExtension"]))
 #endif
 
 let package = Package(

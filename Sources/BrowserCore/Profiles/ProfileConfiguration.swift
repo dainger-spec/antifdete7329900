@@ -60,6 +60,10 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// and the behaviour set, unless `userAgent` overrides the UA. `nil` → the default generation.
     public var deviceGenerationID: String?
 
+    /// Set by the app for one launch, never stored: the relay in the packet tunnel that carries
+    /// this profile's WebRTC through its SOCKS5 proxy. Nil when the tunnel is not available.
+    public var webRTCRelay: WebRTCRelay?
+
     public init(startURL: URL? = nil,
                 userAgent: String? = nil,
                 proxy: ProxySettings? = nil,
@@ -114,12 +118,28 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         return deviceGeneration.userAgent(hostSafariVersion: hostSafariVersion)
     }
 
-    /// The WebRTC policy pages get: `.disabled` whenever a proxy is set. WebKit opens WebRTC's
-    /// sockets (STUN, TURN over UDP or TCP, media) outside the data store's proxy, so with any
-    /// other policy a page's ICE traffic leaves from this Mac's own address — STUN shows it to
-    /// the page, a TURN server (relay-only) to whoever runs it. The stored choice comes back when
-    /// the proxy is removed.
-    public var effectiveWebRTCPolicy: WebRTCPolicy { proxy == nil ? webRTCPolicy : .disabled }
+    /// How this launch's pages do WebRTC. WebKit opens WebRTC's sockets (STUN, TURN over UDP or
+    /// TCP, media) outside the data store's proxy, so with a proxy a page's ICE traffic would
+    /// leave from this Mac's own address — STUN shows it to the page, a TURN server to whoever
+    /// runs it. A proxied profile therefore gets WebRTC only through the packet tunnel's relay
+    /// (`webRTCRelay`, set at launch when the tunnel is on and the proxy is SOCKS5, the kind that
+    /// carries UDP); otherwise it is switched off. The stored choice is kept either way.
+    public var webRTCRouting: WebRTCRouting {
+        if webRTCPolicy == .disabled { return .off }
+        guard let proxy else { return .native(webRTCPolicy) }
+        if proxy.kind == .socks5, let webRTCRelay { return .relay(webRTCRelay) }
+        return .off
+    }
+
+    /// The policy the routing amounts to: `.disabled` when WebRTC is off, `.relayOnly` through the
+    /// tunnel's relay, the stored policy without a proxy.
+    public var effectiveWebRTCPolicy: WebRTCPolicy {
+        switch webRTCRouting {
+        case .off: return .disabled
+        case let .native(policy): return policy
+        case .relay: return .relayOnly
+        }
+    }
 
     /// Launching looks up where the proxy exits (`matchProxyLocation`).
     public var needsProxyLocation: Bool { matchProxyLocation && proxy != nil }
@@ -280,13 +300,35 @@ public enum GeolocationSetting: Codable, Equatable, Sendable {
     }
 }
 
+/// A TURN relay a profile's pages are given as their only ICE server (the packet tunnel's).
+public struct WebRTCRelay: Equatable, Sendable {
+    public var urls: [String]
+    public var username: String
+    public var credential: String
+
+    public init(urls: [String], username: String, credential: String) {
+        self.urls = urls
+        self.username = username
+        self.credential = credential
+    }
+}
+
+public enum WebRTCRouting: Equatable, Sendable {
+    /// No proxy: WebKit's own WebRTC as the stored policy says.
+    case native(WebRTCPolicy)
+    /// Switched off in the engine.
+    case off
+    /// Relay-only through the packet tunnel's TURN server and the profile's SOCKS5 proxy.
+    case relay(WebRTCRelay)
+}
+
 public enum WebRTCPolicy: String, Codable, CaseIterable, Sendable {
     /// Remove RTCPeerConnection & friends from the page. Strongest option. Breaks WebRTC sites.
     case disabled
     /// Force `iceTransportPolicy: "relay"`: no host/srflx candidates are gathered, so the
     /// local and STUN-discovered public IP are not exposed to the page. Requires the site to
-    /// provide TURN, and the TURN server sees this Mac's address (WebKit never sends WebRTC
-    /// through a proxy, so a proxied profile gets `.disabled`: `effectiveWebRTCPolicy`).
+    /// provide TURN, and the TURN server sees this Mac's address. With a proxy, WebRTC instead
+    /// goes through the packet tunnel's relay, or is off (`webRTCRouting`).
     case relayOnly
     /// WebKit default (host candidates are mDNS-obfuscated by WebKit, but STUN
     /// requests go out over UDP *outside* the proxy and reveal the real public IP).

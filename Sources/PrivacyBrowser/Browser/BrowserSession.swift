@@ -107,6 +107,13 @@ final class BrowserSession {
         if configuration.effectiveWebRTCPolicy == .disabled {
             WebKitPreferences.setBool(webConfiguration.preferences, "_setPeerConnectionEnabled:", false)
         }
+        // WebRTC through the packet tunnel: WebKit binds its sockets to the physical interface's
+        // address, and the tunnel's enforced routes carry them in anyway (TunnelManager). For the
+        // hardware checks in docs/TUNNEL.md, libwebrtc can also be made to gather on every
+        // interface, the tunnel's own included: `defaults write <bundle id> PBTunnelAllInterfaces -bool YES`.
+        if case .relay = configuration.webRTCRouting, UserDefaults.standard.bool(forKey: "PBTunnelAllInterfaces") {
+            WebKitPreferences.setBool(webConfiguration.preferences, "_setEnumeratingAllNetworkInterfacesEnabled:", true)
+        }
         return webConfiguration
     }
 

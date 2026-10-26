@@ -27,6 +27,8 @@ final class ProfileManager: ObservableObject {
 
     private let repository: ProfileRepository
     private let webDataVault: WebDataStoreVault
+    /// The packet tunnel that carries proxied profiles' WebRTC (when it is on).
+    private let tunnel = TunnelManager.shared
     private var sessions: [UUID: BrowserSession] = [:]
     /// Profile keys are held only while the profile runs (needed to seal on stop).
     private var keys: [UUID: SymmetricKey] = [:]
@@ -113,7 +115,8 @@ final class ProfileManager: ObservableObject {
             throw LaunchError.proxyNeedsCredentials(host: proxy.host)
         }
         rememberProxyLocation(location, for: id, in: stored)
-        let configuration = stored.applying(location)
+        var configuration = stored.applying(location)
+        configuration.webRTCRelay = await webRTCRelay(for: id, configuration)
         // Before the first web view of the run: WebKit reads its language list only once.
         WebContentLanguage.decide(location?.webLanguage)
         noteLanguageMismatch(for: id, wanted: location?.webLanguage)
@@ -122,6 +125,7 @@ final class ProfileManager: ObservableObject {
             session = try BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
                                          passwordVault: passwords, library: library)
         } catch {
+            tunnel.unregister(profile: id)
             // Thrown before the session created its data store (see BrowserSession.init).
             if !configuration.ephemeral { _ = try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
             throw error
@@ -182,10 +186,26 @@ final class ProfileManager: ObservableObject {
         sessions[id]?.showLibrary(section)
     }
 
+    /// The packet tunnel's relay for a profile that wants WebRTC behind a SOCKS5 proxy, or nil:
+    /// the profile then runs with WebRTC off, and the user is told why once per run.
+    private func webRTCRelay(for id: UUID, _ configuration: ProfileConfiguration) async -> WebRTCRelay? {
+        guard let proxy = configuration.proxy, configuration.webRTCPolicy != .disabled else { return nil }
+        if let relay = await tunnel.register(profile: id, proxy: proxy) { return relay }
+        if !webRTCOffNoted.contains(id) {
+            webRTCOffNoted.insert(id)
+            onError?(proxy.kind == .socks5 ? L("launch.webrtcOff.noTunnel") : L("launch.webrtcOff.httpProxy"))
+        }
+        return nil
+    }
+
+    /// Profiles already told, once per run, that their WebRTC is off.
+    private var webRTCOffNoted: Set<UUID> = []
+
     // MARK: Stop
 
     func stop(_ id: UUID) async throws {
         guard let session = sessions.removeValue(forKey: id) else { return }
+        tunnel.unregister(profile: id)
         let key = keys.removeValue(forKey: id)
         runningProfileIDs.remove(id)
         busyProfileIDs.insert(id)

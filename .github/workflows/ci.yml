@@ -43,8 +43,10 @@ jobs:
       - run: swift test
       - name: Build sandboxed app (default)
         run: APP_DIR=build/sandboxed scripts/build-app.sh
-      - name: Build unsandboxed app
-        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Build unsandboxed app, and the packet-tunnel extension (unsigned, NE=check)
+        # The extension needs a provisioned team to be signed and loaded (NE=1); CI compiles it
+        # against this SDK and lays out its bundle so its plists are checked.
+        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: Self-test against real WebKit (sandboxed and unsandboxed)
         run: |
           python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 &

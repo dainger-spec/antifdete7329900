@@ -176,6 +176,13 @@ struct ProfileEditorView: View {
     @State private var draft = ProfileDraft()
     @State private var error: String?
     @State private var loaded = false
+    @State private var showingTunnel = false
+    @ObservedObject private var tunnel = TunnelManager.shared
+
+    /// With a proxy, WebRTC can only be on through the network extension's relay, and only for SOCKS5.
+    private var webRTCLocked: Bool {
+        draft.proxyEnabled && !(draft.proxyKind == .socks5 && tunnel.canCarryWebRTC)
+    }
 
     private static let timeZones = TimeZone.knownTimeZoneIdentifiers.sorted()
 
@@ -206,6 +213,7 @@ struct ProfileEditorView: View {
             ToolbarItem(placement: .confirmationAction) { Button(L("common.save"), action: save) }
         }
         .onAppear(perform: load)
+        .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
     }
 
     private var generalSection: some View {
@@ -278,16 +286,24 @@ struct ProfileEditorView: View {
 
     private var privacySection: some View {
         Section {
-            // With a proxy WebRTC is always off (ProfileConfiguration.effectiveWebRTCPolicy): the
-            // picker shows that, and the stored choice returns when the proxy is turned off.
-            Picker(L("editor.webrtc"), selection: draft.proxyEnabled ? .constant(WebRTCPolicy.disabled) : $draft.webRTC) {
+            // With a proxy, WebRTC goes through the network extension's relay (SOCKS5 only) or is off
+            // (ProfileConfiguration.webRTCRouting); the stored choice is kept either way.
+            Picker(L("editor.webrtc"), selection: webRTCLocked ? .constant(WebRTCPolicy.disabled) : $draft.webRTC) {
                 Text(L("editor.webrtc.disabled")).tag(WebRTCPolicy.disabled)
                 Text(L("editor.webrtc.relay")).tag(WebRTCPolicy.relayOnly)
                 Text(L("editor.webrtc.unrestricted")).tag(WebRTCPolicy.unrestricted)
             }
-            .disabled(draft.proxyEnabled)
+            .disabled(webRTCLocked)
             if draft.proxyEnabled {
-                Text(L("editor.webrtc.proxyNote")).font(.caption).foregroundStyle(.secondary)
+                if draft.proxyKind != .socks5 {
+                    Text(L("editor.webrtc.httpProxy")).font(.caption).foregroundStyle(.secondary)
+                } else if tunnel.canCarryWebRTC {
+                    Text(L("editor.webrtc.viaTunnel")).font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Label(L("editor.webrtc.tunnelOff"), systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                    Button(L("editor.webrtc.tunnelSettings")) { showingTunnel = true }
+                }
             }
             Picker(L("editor.geo"), selection: $draft.geoMode) {
                 ForEach(ProfileDraft.GeoMode.allCases) { Text(L($0.labelKey)).tag($0) }

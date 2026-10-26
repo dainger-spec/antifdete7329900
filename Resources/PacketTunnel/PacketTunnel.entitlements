@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- A packet tunnel delivered as a system extension (Developer ID). Needs a provisioning
+	     profile of a paid Apple Developer team that has the Network Extensions capability. -->
+	<key>com.apple.developer.networking.networkextension</key>
+	<array>
+		<string>packet-tunnel-provider-systemextension</string>
+	</array>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(APP_GROUP)</string>
+	</array>
+	<key>com.apple.application-identifier</key>
+	<string>$(TEAM_ID).$(EXTENSION_ID)</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>$(TEAM_ID)</string>
+	<!-- Network extensions run sandboxed; the relay connects out to the profiles' proxies. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>

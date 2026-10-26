@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The packet-tunnel system extension (Contents/Library/SystemExtensions/$(EXTENSION_ID).systemextension).
+	     Filled in by NE=1 scripts/build-app.sh; see docs/TUNNEL.md. -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>PrivacyBrowser WebRTC relay</string>
+	<key>CFBundleExecutable</key>
+	<string>PacketTunnelExtension</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(EXTENSION_ID)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>PrivacyBrowserTunnel</string>
+	<key>CFBundlePackageType</key>
+	<string>SYSX</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHumanReadableCopyright</key>
+	<string></string>
+	<key>NetworkExtension</key>
+	<dict>
+		<!-- Must start with an app group both the app and the extension are entitled to. -->
+		<key>NEMachServiceName</key>
+		<string>$(APP_GROUP).tunnel</string>
+		<key>NEProviderClasses</key>
+		<dict>
+			<key>com.apple.networkextension.packet-tunnel</key>
+			<string>PacketTunnelProvider</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

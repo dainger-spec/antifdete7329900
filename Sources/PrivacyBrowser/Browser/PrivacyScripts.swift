@@ -33,7 +33,10 @@ enum PrivacyScripts {
     struct ShimConfiguration: Encodable {
         var timeZone: String?
         var geolocation: Geolocation
+        /// "disabled", "relayOnly", "unrestricted", or "tunnel" (with `webRTCRelay`).
         var webRTC: String
+        /// The packet tunnel's TURN relay for this launch (`ProfileConfiguration.webRTCRouting`).
+        var webRTCRelay: Relay?
         /// Mobile generations only; nil for macOS (see above).
         var device: Device?
         /// macOS generation: Safari the app exposes `window.safari` (`pushNotification`), a
@@ -41,6 +44,12 @@ enum PrivacyScripts {
         var safariObject: Bool
         /// The per-origin storage quota Safari reports (`safariStorageQuota`), before rounding.
         var storageQuota: Double?
+
+        struct Relay: Encodable {
+            var urls: [String]
+            var username: String
+            var credential: String
+        }
 
         struct Geolocation: Encodable {
             var mode: String
@@ -63,6 +72,15 @@ enum PrivacyScripts {
     }
 
     static func shimConfiguration(for configuration: ProfileConfiguration) -> ShimConfiguration {
+        let webRTC: String
+        var relay: ShimConfiguration.Relay?
+        switch configuration.webRTCRouting {
+        case .off: webRTC = WebRTCPolicy.disabled.rawValue
+        case let .native(policy): webRTC = policy.rawValue
+        case let .relay(tunnel):
+            webRTC = "tunnel"
+            relay = .init(urls: tunnel.urls, username: tunnel.username, credential: tunnel.credential)
+        }
         let geolocation: ShimConfiguration.Geolocation
         switch configuration.geolocation {
         case .deny:
@@ -84,7 +102,7 @@ enum PrivacyScripts {
                            screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2)
         }
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, geolocation: geolocation,
-                                 webRTC: configuration.effectiveWebRTCPolicy.rawValue, device: device,
+                                 webRTC: webRTC, webRTCRelay: relay, device: device,
                                  safariObject: configuration.deviceGeneration.platform == .macOS,
                                  storageQuota: safariStorageQuota(for: configuration.deviceGeneration.platform))
     }
@@ -159,7 +177,7 @@ function patchWindow(w) {
   if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
   if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
-  try { patchWebRTC(w, CONFIG.webRTC || 'disabled'); } catch (e) {}
+  try { patchWebRTC(w, CONFIG.webRTC || 'disabled', CONFIG.webRTCRelay); } catch (e) {}
   try { hookChildWindows(w); } catch (e) {}
 }
 
@@ -656,7 +674,7 @@ function patchGeolocation(w, geo) {
 }
 
 // ---- WebRTC -----------------------------------------------------------------------------------
-function patchWebRTC(w, policy) {
+function patchWebRTC(w, policy, relay) {
   if (policy === 'unrestricted') return;
   const names = ['RTCPeerConnection', 'webkitRTCPeerConnection'];
   if (policy === 'disabled') {
@@ -672,9 +690,32 @@ function patchWebRTC(w, policy) {
   }
   const Native = w.RTCPeerConnection;
   if (!Native) return;
-  const forceRelay = (config) => Object.assign({}, config, { iceTransportPolicy: 'relay' });
+  // 'tunnel': the packet tunnel's TURN relay is the only ICE server, so every candidate is a
+  // relay through the profile's proxy. The page keeps seeing its own configuration.
+  const viaTunnel = policy === 'tunnel' && relay ? relay : null;
+  const forceRelay = (config) => {
+    const next = Object.assign({}, config, { iceTransportPolicy: 'relay' });
+    if (viaTunnel) next.iceServers = [{ urls: viaTunnel.urls.slice(), username: viaTunnel.username, credential: viaTunnel.credential }];
+    return next;
+  };
+  // The page's own iceServers and policy per connection, as the engine normalised them.
+  const pageView = new WeakMap();
+  const snapshot = (config, rest) => {
+    // A closed peer connection made from the page's configuration: the engine validates it (and
+    // throws its own errors for a bad one) and says how it would report it.
+    const shadow = Reflect.construct(Native, [config, ...rest]);
+    const view = shadow.getConfiguration();
+    shadow.close();
+    return { iceServers: view.iceServers, iceTransportPolicy: view.iceTransportPolicy };
+  };
+  // The latest connection's view, for stats asked of a sender or receiver (they do not say
+  // which connection they belong to; a page's connections normally share one configuration).
+  let latestView = null;
   const rtcTarget = function (config, ...rest) {
-    return Reflect.construct(Native, [forceRelay(config), ...rest], new.target === undefined ? rtcTarget : new.target);
+    const view = viaTunnel ? snapshot(config, rest) : null;
+    const pc = Reflect.construct(Native, [forceRelay(config), ...rest], new.target === undefined ? rtcTarget : new.target);
+    if (view) { pageView.set(pc, view); latestView = view; }
+    return pc;
   };
   rtcTarget.prototype = Native.prototype; // instanceof goes through the bound target
   const statics = Native.generateCertificate ? { generateCertificate: Native.generateCertificate } : {};
@@ -682,8 +723,87 @@ function patchWebRTC(w, policy) {
   const nativeSetConfiguration = Native.prototype.setConfiguration;
   if (nativeSetConfiguration) {
     define(Native.prototype, 'setConfiguration', method('setConfiguration', 0, function (config) {
-      return nativeSetConfiguration.call(this, forceRelay(config));
+      const view = viaTunnel && pageView.has(this) ? snapshot(config, []) : null;
+      const result = nativeSetConfiguration.call(this, forceRelay(config));
+      if (view) { pageView.set(this, view); latestView = view; }
+      return result;
     }));
+  }
+  const nativeGetConfiguration = Native.prototype.getConfiguration;
+  if (viaTunnel && nativeGetConfiguration) {
+    const copy = (servers) => servers.map((server) => Object.assign({}, server, Array.isArray(server.urls) ? { urls: server.urls.slice() } : {}));
+    define(Native.prototype, 'getConfiguration', method('getConfiguration', 0, function () {
+      const result = nativeGetConfiguration.call(this); // the engine's receiver check
+      const view = pageView.get(this);
+      if (view) {
+        result.iceServers = copy(view.iceServers);
+        result.iceTransportPolicy = view.iceTransportPolicy;
+      }
+      return result;
+    }));
+  }
+  // Where libwebrtc names the server a candidate came from — an ICE event's url, a candidate's
+  // url in getStats() — it names the relay ('turn:198.18.0.10:3478?transport=udp', and for what
+  // the relay answered as a STUN server 'stun:198.18.0.10:3478'). The page is shown its own server
+  // instead, in libwebrtc's form, or nothing when it configured none of that kind.
+  if (viaTunnel) {
+    const relayHosts = viaTunnel.urls.map((url) => (iceURLParts(url) || {}).host).filter(Boolean);
+    const isRelayURL = (url) => {
+      const parts = typeof url === 'string' ? iceURLParts(url) : null;
+      return !!parts && relayHosts.includes(parts.host);
+    };
+    const pageURL = (view, turn) => {
+      const urls = [];
+      for (const server of (view && view.iceServers) || []) urls.push(...[].concat(server.urls));
+      // A relay candidate came from a TURN server; a Binding answer from a STUN server, or from a
+      // TURN server over UDP, which libwebrtc asks as a STUN server too.
+      const candidates = turn ? urls.filter((url) => /^turns?:/i.test(url))
+                              : urls.filter((url) => /^stuns?:/i.test(url)).concat(urls.filter((url) => /^turn:/i.test(url)));
+      for (const url of candidates) {
+        const parts = iceURLParts(url);
+        if (!parts || !parts.host) continue;
+        const secure = /s$/.test(parts.scheme);
+        const port = parts.port || (secure ? '5349' : '3478');
+        if (!turn) return 'stun:' + parts.host + ':' + port;
+        const host = parts.host.includes(':') ? '[' + parts.host + ']' : parts.host;
+        return parts.scheme + ':' + host + ':' + port + '?transport=' + (parts.transport || (secure ? 'tcp' : 'udp'));
+      }
+      return null;
+    };
+    const maskURL = (url, view) => (isRelayURL(url) ? pageURL(view, /^turns?:/i.test(url)) : url);
+
+    const IceEvent = w.RTCPeerConnectionIceEvent;
+    const urlAccessor = IceEvent && Object.getOwnPropertyDescriptor(IceEvent.prototype, 'url');
+    if (urlAccessor && urlAccessor.get) {
+      Object.defineProperty(IceEvent.prototype, 'url', {
+        configurable: true, enumerable: urlAccessor.enumerable, set: urlAccessor.set,
+        get: getter('url', function () {
+          const value = urlAccessor.get.call(this);
+          return isRelayURL(value) ? maskURL(value, pageView.get(this.target)) : value;
+        })
+      });
+    }
+    // Stats entries are the report's own objects: masked in place, a later get() reads the same.
+    const sanitize = (report, view) => {
+      try {
+        report.forEach((entry) => {
+          if (!entry || !isRelayURL(entry.url)) return;
+          const url = maskURL(entry.url, view);
+          if (url === null) delete entry.url; else entry.url = url;
+        });
+      } catch (e) {}
+      return report;
+    };
+    const statsOwners = [Native.prototype, w.RTCRtpSender && w.RTCRtpSender.prototype, w.RTCRtpReceiver && w.RTCRtpReceiver.prototype];
+    for (const proto of statsOwners) {
+      const nativeGetStats = proto && proto.getStats;
+      if (typeof nativeGetStats !== 'function') continue;
+      define(proto, 'getStats', method('getStats', 0, function () {
+        const view = pageView.get(this) || latestView;
+        const result = nativeGetStats.apply(this, arguments); // the engine's receiver check and errors
+        return result && typeof result.then === 'function' ? result.then((report) => sanitize(report, view)) : result;
+      }));
+    }
   }
   define(Native.prototype, 'constructor', RTCPeerConnection);
   // Only the names this engine has (Safari 26 has no webkitRTCPeerConnection any more).
@@ -691,6 +811,25 @@ function patchWebRTC(w, policy) {
     if (!Object.prototype.hasOwnProperty.call(w, name)) continue;
     try { Object.defineProperty(w, name, { value: RTCPeerConnection, writable: true, enumerable: false, configurable: true }); } catch (e) {}
   }
+}
+
+// 'turn:host:port?transport=udp', 'stun:[v6]:port', or libwebrtc's 'stun:v6:port' (its STUN urls
+// carry IPv6 without brackets) → scheme, host (lowercase, no brackets), port, transport.
+function iceURLParts(url) {
+  const match = /^(stuns?|turns?):([^?]*)(?:\?(.*))?$/i.exec(String(url));
+  if (!match) return null;
+  const rest = match[2];
+  let host = rest, port = '';
+  const bracketed = /^\[([^\]]*)\](?::(\d*))?$/.exec(rest);
+  if (bracketed) {
+    host = bracketed[1];
+    port = bracketed[2] || '';
+  } else {
+    const colon = rest.lastIndexOf(':');
+    if (colon >= 0 && /^\d+$/.test(rest.slice(colon + 1))) { host = rest.slice(0, colon); port = rest.slice(colon + 1); }
+  }
+  const transport = /(?:^|&)transport=([^&]*)/i.exec(match[3] || '');
+  return { scheme: match[1].toLowerCase(), host: host.toLowerCase(), port, transport: transport ? transport[1].toLowerCase() : '' };
 }
 
 // ---- Child windows ----------------------------------------------------------------------------

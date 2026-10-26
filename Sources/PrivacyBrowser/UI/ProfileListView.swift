@@ -30,6 +30,7 @@ struct ProfileListView: View {
     @State private var pendingDelete: ProfileSummary?
     @State private var changingPassword = false
     @State private var showingSync = false
+    @State private var showingTunnel = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,6 +47,8 @@ struct ProfileListView: View {
                     Button(L("profiles.menu.syncNow")) { Task { await model.syncNow() } }
                         .disabled(model.syncTarget == nil)
                     Divider()
+                    Button(L("profiles.menu.tunnel")) { showingTunnel = true }
+                    Divider()
                     Button(L("profiles.menu.changePassword")) { changingPassword = true }
                 } label: { Label(L("profiles.menu.more"), systemImage: "ellipsis.circle") }
                 Button { Task { await model.lock() } } label: { Label(L("profiles.action.lock"), systemImage: "lock") }
@@ -56,6 +59,7 @@ struct ProfileListView: View {
         .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
         .sheet(isPresented: $changingPassword) { ChangePasswordView() }
         .sheet(isPresented: $showingSync) { SyncSettingsView() }
+        .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
         .confirmationDialog(String(format: L("profiles.delete.title"), pendingDelete?.name ?? ""),
                             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             presenting: pendingDelete) { profile in

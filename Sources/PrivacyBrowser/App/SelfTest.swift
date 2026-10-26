@@ -101,6 +101,11 @@ final class SelfTest {
         info("macOS \(ProcessInfo.processInfo.operatingSystemVersionString), Safari \(HostSafari.version)")
         environmentChecks()
         vaultKeyDerivation()
+        // Without the packet tunnel (any build but a signed NE=1 one) proxied profiles keep WebRTC
+        // off; the proxy checks below verify that, scripts/leak_check.py the relay itself.
+        let tunnel = TunnelManager.shared
+        check("tunnel: a build without the network extension says so (proxied profiles keep WebRTC off)",
+              tunnel.extensionIdentifier != nil || (tunnel.state == .notBuilt && !tunnel.canCarryWebRTC), "\(tunnel.state)")
         // As the first launch of a profile with a German proxy would, before WebKit starts any
         // process; checked by fingerprintSurface (navigator) and proxies (Accept-Language header).
         WebContentLanguage.decide("de-DE")

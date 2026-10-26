@@ -52,7 +52,35 @@ function makeWindow(config, parentContext) {
     Object.defineProperty(globalThis, 'outerWidth', { get() { return 1200; }, set(v) {}, enumerable: true, configurable: true });
     Object.defineProperty(globalThis, 'outerHeight', { get() { return 820; }, set(v) {}, enumerable: true, configurable: true });
     var setTimeout = (f) => Promise.resolve().then(f);
-    globalThis.RTCPeerConnection = class RTCPeerConnection { constructor(c) { this.config = c; } setConfiguration(c) { illegal(this, RTCPeerConnection); this.config = c; } };
+    // As WebKit: iceServers are validated (TypeError without urls, SyntaxError for a URL that is not
+    // stun/turn) and reported back by getConfiguration() as fresh objects.
+    const checkConfig = (c) => {
+      for (const server of (c && c.iceServers) || []) {
+        if (server.urls === undefined) throw new TypeError('Member RTCIceServer.urls is required');
+        for (const url of [].concat(server.urls)) { if (!/^(stun|stuns|turn|turns):/.test(url)) throw new SyntaxError('Bad URL'); }
+      }
+    };
+    globalThis.RTCPeerConnection = class RTCPeerConnection {
+      constructor(c) { checkConfig(c); this.config = c; this.closed = false; }
+      setConfiguration(c) { illegal(this, RTCPeerConnection); checkConfig(c); this.config = c; }
+      getConfiguration() {
+        illegal(this, RTCPeerConnection);
+        const c = this.config || {};
+        return { iceServers: (c.iceServers || []).map((s) => Object.assign({}, s, Array.isArray(s.urls) ? { urls: s.urls.slice() } : {})),
+                 iceTransportPolicy: c.iceTransportPolicy || 'all', bundlePolicy: 'balanced', rtcpMuxPolicy: 'require', certificates: [] };
+      }
+      close() { illegal(this, RTCPeerConnection); this.closed = true; }
+      // As WebKit: a promise of a new maplike report each call, its entries plain objects.
+      getStats() { illegal(this, RTCPeerConnection); return Promise.resolve(report(this.stats)); }
+    };
+    const report = (stats) => new Map((stats || []).map(([id, entry]) => [id, Object.assign({}, entry)]));
+    globalThis.RTCRtpSender = class RTCRtpSender {
+      getStats() { illegal(this, RTCRtpSender); return Promise.resolve(report(this.stats)); }
+    };
+    globalThis.RTCPeerConnectionIceEvent = class RTCPeerConnectionIceEvent {
+      constructor(type, init) { this.type = type; this._url = init.url; this.target = init.target; }
+      get url() { illegal(this, RTCPeerConnectionIceEvent); return this._url; }
+    };
     globalThis.webkitRTCPeerConnection = globalThis.RTCPeerConnection;
     globalThis.RTCDataChannel = function () {};
     globalThis.RTCIceTransport = function () {};
@@ -398,6 +426,67 @@ test('WebRTC relayOnly', () => {
   assert.equal(run(w, `(() => { const p = new RTCPeerConnection(); p.setConfiguration({ iceTransportPolicy: 'all' }); return p.config.iceTransportPolicy; })()`), 'relay');
   assert.equal(run(w, `new webkitRTCPeerConnection({}).config.iceTransportPolicy`), 'relay');
   assert.equal(run(w, `new RTCPeerConnection() instanceof RTCPeerConnection`), true);
+});
+
+test('WebRTC through the tunnel: the relay is the only ICE server, the page sees its own configuration', () => {
+  const relay = { urls: ['turn:198.18.0.10:3478?transport=udp', 'turn:[fd6b:3a1c:94e2:1::a]:3478?transport=udp'], username: 'u1', credential: 'c1' };
+  const w = makeWindow({ ...base, webRTC: 'tunnel', webRTCRelay: relay });
+  run(w, `var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example:3478' }], iceTransportPolicy: 'all' })`);
+  // What the engine got: relay-only through the tunnel's TURN server.
+  assert.equal(run(w, `JSON.stringify(pc.config)`), JSON.stringify({ iceServers: [{ urls: relay.urls, username: 'u1', credential: 'c1' }], iceTransportPolicy: 'relay' }));
+  // What the page reads back: its own servers and policy, fresh objects each time.
+  assert.equal(run(w, `JSON.stringify(pc.getConfiguration().iceServers)`), JSON.stringify([{ urls: 'stun:stun.example:3478' }]));
+  assert.equal(run(w, `pc.getConfiguration().iceTransportPolicy`), 'all');
+  assert.equal(run(w, `pc.getConfiguration().iceServers !== pc.getConfiguration().iceServers`), true);
+  assert.equal(run(w, `pc.getConfiguration().bundlePolicy`), 'balanced');
+  run(w, `pc.setConfiguration({ iceServers: [{ urls: ['turn:turn.example:3478'], username: 'a', credential: 'b' }] })`);
+  assert.equal(run(w, `pc.config.iceServers[0].username`), 'u1');
+  assert.equal(run(w, `pc.getConfiguration().iceServers[0].urls[0]`), 'turn:turn.example:3478');
+  // The engine's own validation of the page's configuration still applies.
+  assert.throws(() => run(w, `new RTCPeerConnection({ iceServers: [{ urls: 'http://bad' }] })`), (e) => e.name === 'SyntaxError');
+  assert.throws(() => run(w, `new RTCPeerConnection({ iceServers: [{}] })`), (e) => e.name === 'TypeError');
+  assert.throws(() => run(w, `RTCPeerConnection.prototype.getConfiguration.call({})`), (e) => e.name === 'TypeError');
+  // An ICE event names the page's TURN server, not the relay; others pass through.
+  assert.equal(run(w, `new RTCPeerConnectionIceEvent('icecandidate', { url: '${relay.urls[0]}', target: pc }).url`), 'turn:turn.example:3478?transport=udp');
+  assert.equal(run(w, `new RTCPeerConnectionIceEvent('icecandidate', { url: null, target: pc }).url`), null);
+  run(w, `var plain = new RTCPeerConnection({ iceServers: [{ urls: 'stun:s.example' }] })`);
+  assert.equal(run(w, `new RTCPeerConnectionIceEvent('icecandidate', { url: '${relay.urls[0]}', target: plain }).url`), null);
+  // libwebrtc's form of the page's server: default port, transport, IPv6 in brackets.
+  run(w, `var v6 = new RTCPeerConnection({ iceServers: [{ urls: ['stun:[2001:db8::7]', 'turn:[2001:DB8::8]'], username: 'a', credential: 'b' }] })`);
+  assert.equal(run(w, `new RTCPeerConnectionIceEvent('icecandidate', { url: '${relay.urls[1]}', target: v6 }).url`), 'turn:[2001:db8::8]:3478?transport=udp');
+  assert.equal(run(w, `new RTCPeerConnectionIceEvent('icecandidate', { url: 'turn:turn.other:3478?transport=udp', target: v6 }).url`), 'turn:turn.other:3478?transport=udp');
+  // Native-looking functions.
+  assert.equal(run(w, `RTCPeerConnection.prototype.getConfiguration.toString()`), nativeText('getConfiguration'));
+  assert.equal(run(w, `RTCPeerConnection.prototype.getStats.toString()`), nativeText('getStats'));
+  assert.equal(run(w, `Object.getOwnPropertyDescriptor(RTCPeerConnectionIceEvent.prototype, 'url').get.toString()`), nativeText('url'));
+});
+
+test('WebRTC through the tunnel: getStats() names the page\'s servers, never the relay', async () => {
+  const relay = { urls: ['turn:198.18.0.10:3478?transport=udp', 'turn:[fd6b:3a1c:94e2:1::a]:3478?transport=udp'], username: 'u1', credential: 'c1' };
+  const w = makeWindow({ ...base, webRTC: 'tunnel', webRTCRelay: relay });
+  run(w, `var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example' }] });
+          pc.stats = [['R', { type: 'local-candidate', candidateType: 'relay', address: '203.0.113.9', url: 'turn:198.18.0.10:3478?transport=udp' }],
+                      ['S', { type: 'local-candidate', candidateType: 'srflx', address: '203.0.113.9', url: 'stun:198.18.0.10:3478' }],
+                      ['S6', { type: 'local-candidate', candidateType: 'srflx', url: 'stun:fd6b:3a1c:94e2:1::a:3478' }],
+                      ['H', { type: 'local-candidate', candidateType: 'host', address: '', url: 'stun:stun.example:3478' }],
+                      ['P', { type: 'candidate-pair', state: 'succeeded' }]];`);
+  const read = async (expr) => JSON.parse(await run(w, `(${expr}).then((report) => JSON.stringify([...report.values()]))`));
+  const [r, s, s6, h, p] = await read('pc.getStats()');
+  assert.equal(r.url, undefined, 'a relay candidate when the page configured no TURN server');
+  assert.equal(r.address, '203.0.113.9', 'the proxy egress stays');
+  assert.equal(s.url, 'stun:stun.example:3478');
+  assert.equal(s6.url, 'stun:stun.example:3478');
+  assert.equal(h.url, 'stun:stun.example:3478');
+  assert.deepEqual(p, { type: 'candidate-pair', state: 'succeeded' });
+  run(w, `pc.setConfiguration({ iceServers: [{ urls: 'turn:turn.example?transport=tcp', username: 'a', credential: 'b' }] })`);
+  const [r2, s2] = await read('pc.getStats()');
+  assert.equal(r2.url, 'turn:turn.example:3478?transport=tcp');
+  assert.equal(s2.url, 'stun:turn.example:3478', 'a TURN server is asked as a STUN server too');
+  // A sender's stats: the latest connection's servers.
+  run(w, `var sender = new RTCRtpSender(); sender.stats = [['R', { type: 'local-candidate', url: '${relay.urls[1]}' }]];`);
+  assert.equal((await read('sender.getStats()'))[0].url, 'turn:turn.example:3478?transport=tcp');
+  // The engine's receiver check still applies.
+  assert.throws(() => run(w, `RTCPeerConnection.prototype.getStats.call({})`), (e) => e.name === 'TypeError');
 });
 
 test('WebRTC unrestricted', () => {

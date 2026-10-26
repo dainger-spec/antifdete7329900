@@ -148,6 +148,27 @@ final class ProxiedWebRTCTests: XCTestCase {
         }
     }
 
+    /// With the packet tunnel's relay, a SOCKS5 profile's WebRTC goes through it (relay-only);
+    /// an HTTP proxy cannot carry UDP, and "disabled" stays disabled. The relay is never stored.
+    func testRoutingThroughTheTunnelRelay() throws {
+        let relay = WebRTCRelay(urls: ["turn:198.18.0.10:3478?transport=udp"], username: "u", credential: "c")
+        var socks = ProfileConfiguration(proxy: ProxySettings(kind: .socks5, host: "127.0.0.1", port: 1080), webRTCPolicy: .unrestricted)
+        XCTAssertEqual(socks.webRTCRouting, .off)
+        socks.webRTCRelay = relay
+        XCTAssertEqual(socks.webRTCRouting, .relay(relay))
+        XCTAssertEqual(socks.effectiveWebRTCPolicy, .relayOnly)
+        var http = ProfileConfiguration(proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 8080), webRTCPolicy: .relayOnly)
+        http.webRTCRelay = relay
+        XCTAssertEqual(http.webRTCRouting, .off)
+        var off = socks
+        off.webRTCPolicy = .disabled
+        XCTAssertEqual(off.webRTCRouting, .off)
+        XCTAssertEqual(ProfileConfiguration(webRTCPolicy: .unrestricted).webRTCRouting, .native(.unrestricted))
+        let json = String(decoding: try JSONCoding.encoder.encode(socks), as: UTF8.self)
+        XCTAssertFalse(json.contains("turn:"), json)
+        XCTAssertNil(try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(json.utf8)).webRTCRelay)
+    }
+
     /// Safari on iOS 26.1 and later freezes the OS token; an iPad shows desktop websites.
     func testMobileGenerationsSendWhatSafariSends() {
         for id in ["ios-26", "ios-27"] {
