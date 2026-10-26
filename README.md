@@ -83,7 +83,7 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 126 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 128 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, the
@@ -147,7 +147,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Per-profile user agent | `WKWebView.customUserAgent` (an explicit UA overrides the generation) |
 | Russian / English UI | `Localizable.strings` (ru default, en fallback), deterministic bundle lookup |
 | Stable window lifecycle | closing a profile window never quits or crashes the app (use-after-free fixed); verified by the self-test |
-| Encryption at rest of everything the app writes | AES-256-GCM; PBKDF2-HMAC-SHA256 (600k) → vault key → HKDF per purpose |
+| Encryption at rest of everything the app writes | AES-256-GCM; Argon2id (64 MiB, t=3, p=4; older PBKDF2 vaults upgraded on unlock) → vault key → HKDF per purpose |
 | Password storage under a key derived from the user's password | Per-profile vault; explicit fill/save; HTTP auth |
 | App Sandbox | Default build; entitlements in `Resources/PrivacyBrowser.entitlements` (documented in the limitations doc, §9); container migration. **Sandbox enforcement and migration verified in CI** |
 | Encrypted sync client | Engine with CAS writes, per-record merges for bookmarks and history, tombstones; folder transport; HTTP transport for a documented API |
@@ -180,7 +180,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 Package.swift
 Sources/
   BrowserCore/                     platform-independent, unit-tested (macOS + Linux)
-    Crypto/                        AEAD (AES-GCM), PBKDF2, HKDF helpers
+    Crypto/                        AEAD (AES-GCM), Argon2id + BLAKE2b, PBKDF2, HKDF helpers
     Vault/                         MasterVault (key hierarchy), DeviceSettings
     Profiles/                      ProfileConfiguration, ProfileRepository
     Passwords/                     PasswordVault

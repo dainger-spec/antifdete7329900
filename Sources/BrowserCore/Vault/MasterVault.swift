@@ -26,7 +26,8 @@ public struct VaultHeader: Codable, Equatable, Sendable {
 
 /// Key hierarchy
 /// ```
-/// master password ──PBKDF2──▶ KEK ──unwraps──▶ VMK (random 256-bit, vault master key)
+/// master password ──Argon2id──▶ KEK ──unwraps──▶ VMK (random 256-bit, vault master key)
+///                  (PBKDF2 in vaults from before Argon2id, until their next unlock)
 ///                                               ├─HKDF "profile-index"   ▶ index key
 ///                                               ├─HKDF "profile-key-wrap"▶ wraps per-profile keys
 ///                                               ├─HKDF "sync-envelope"   ▶ sync encryption key
@@ -45,15 +46,18 @@ public enum MasterVault {
         FileManager.default.fileExists(atPath: headerURL(in: root).path)
     }
 
-    public static func create(in root: URL, password: String,
-                              iterations: Int = KDFParameters.recommendedIterations) throws -> UnlockedVault {
+    /// `iterations`: PBKDF2 with that many iterations instead of Argon2id, for fast vaults in tests
+    /// and the self-test. The app passes none: Argon2id (`KDFParameters.recommended()`).
+    public static func create(in root: URL, password: String, iterations: Int? = nil) throws -> UnlockedVault {
         guard !exists(in: root) else { throw CoreError.vaultAlreadyExists }
         guard !password.isEmpty else { throw CoreError.invalidConfiguration("empty master password") }
         let vaultID = UUID()
-        let kdf = KDFParameters.generate(iterations: iterations)
+        let kdf = iterations.map { KDFParameters.generate(iterations: $0) } ?? .recommended()
         let kek = try KeyDerivation.deriveKey(password: password, parameters: kdf)
         let vmk = SymmetricKey(size: .bits256)
-        let wrapped = try AEAD.seal(vmk.rawBytes, key: kek, aad: VaultHeader.aad(for: vaultID))
+        var raw = vmk.rawBytes
+        defer { wipe(&raw) }
+        let wrapped = try AEAD.seal(raw, key: kek, aad: VaultHeader.aad(for: vaultID))
         let header = VaultHeader(format: VaultHeader.currentFormat, vaultID: vaultID, kdf: kdf,
                                  wrappedMasterKey: wrapped, createdAt: Date())
         // The check above is only a fast path: two creates (a double click, two app instances)
@@ -80,12 +84,13 @@ public enum MasterVault {
     /// Also used by sync bootstrap: a second device fetches the header blob and unlocks with it.
     public static func unlock(header: VaultHeader, root: URL, password: String) throws -> UnlockedVault {
         let kek = try KeyDerivation.deriveKey(password: password, parameters: header.kdf)
-        let raw: Data
+        var raw: Data
         do {
             raw = try AEAD.open(header.wrappedMasterKey, key: kek, aad: VaultHeader.aad(for: header.vaultID))
         } catch CoreError.authenticationFailed {
             throw CoreError.wrongPassword
         }
+        defer { wipe(&raw) }
         guard raw.count == 32 else { throw CoreError.corruptData("master key length") }
         return UnlockedVault(root: root, header: header, masterKey: SymmetricKey(data: raw))
     }
@@ -148,18 +153,35 @@ public final class UnlockedVault: @unchecked Sendable {
 
     private var vaultSalt: Data { withUnsafeBytes(of: header.vaultID.uuid) { Data($0) } }
 
-    /// Re-wraps the VMK under a key derived from `newPassword`. Data keys are unchanged.
-    public func changePassword(current: String, new newPassword: String,
-                               iterations: Int = KDFParameters.recommendedIterations) throws {
+    /// Re-wraps the VMK under a key derived from `newPassword` (Argon2id, or PBKDF2 with
+    /// `iterations` for tests). Data keys are unchanged.
+    public func changePassword(current: String, new newPassword: String, iterations: Int? = nil) throws {
         // Re-verify the current password: an unlocked session alone must not be
         // enough to change it (e.g. an unattended unlocked machine).
         _ = try MasterVault.unlock(header: header, root: root, password: current)
         guard !newPassword.isEmpty else { throw CoreError.invalidConfiguration("empty master password") }
-        let kdf = KDFParameters.generate(iterations: iterations)
-        let kek = try KeyDerivation.deriveKey(password: newPassword, parameters: kdf)
+        try rewrap(password: newPassword, kdf: iterations.map { KDFParameters.generate(iterations: $0) } ?? .recommended())
+    }
+
+    /// A vault from before Argon2id (PBKDF2): re-wraps the VMK under `kdf` (Argon2id) with the
+    /// password it was just unlocked with. That password is checked against the header again —
+    /// the VMK is never re-wrapped under a password that does not open the vault. Data keys are
+    /// unchanged. Returns whether the header was upgraded.
+    @discardableResult
+    public func upgradeKDFIfNeeded(password: String, to kdf: KDFParameters = .recommended()) throws -> Bool {
+        guard !header.kdf.isMemoryHard, kdf.isMemoryHard else { return false }
+        _ = try MasterVault.unlock(header: header, root: root, password: password)
+        try rewrap(password: password, kdf: kdf)
+        return true
+    }
+
+    private func rewrap(password: String, kdf: KDFParameters) throws {
+        let kek = try KeyDerivation.deriveKey(password: password, parameters: kdf)
+        var raw = masterKey.rawBytes
+        defer { wipe(&raw) }
         var updated = header
         updated.kdf = kdf
-        updated.wrappedMasterKey = try AEAD.seal(masterKey.rawBytes, key: kek, aad: VaultHeader.aad(for: header.vaultID))
+        updated.wrappedMasterKey = try AEAD.seal(raw, key: kek, aad: VaultHeader.aad(for: header.vaultID))
         try MasterVault.writeHeader(updated, in: root)
         header = updated
     }

@@ -100,6 +100,7 @@ final class SelfTest {
         info("sandboxed=\(AppEnvironment.isSandboxed) bundle=\(layout.bundleID) library=\(layout.library.path)")
         info("macOS \(ProcessInfo.processInfo.operatingSystemVersionString), Safari \(HostSafari.version)")
         environmentChecks()
+        vaultKeyDerivation()
         // As the first launch of a profile with a German proxy would, before WebKit starts any
         // process; checked by fingerprintSurface (navigator) and proxies (Accept-Language header).
         WebContentLanguage.decide("de-DE")
@@ -125,6 +126,29 @@ final class SelfTest {
             try await forcedSealAtQuit(repository)
         } catch {
             check("self-test ran without unexpected errors", false, String(describing: error))
+        }
+    }
+
+    // MARK: Vault key derivation
+
+    /// The app's key derivation in this (release) build: a vault from before Argon2id is re-wrapped
+    /// under the recommended Argon2id (64 MiB, 3 passes, 4 lanes) and opens again.
+    private func vaultKeyDerivation() {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-kdf-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        do {
+            let vault = try MasterVault.create(in: root, password: "kdf", iterations: 10_000)
+            let start = Date()
+            let upgraded = try vault.upgradeKDFIfNeeded(password: "kdf")
+            let seconds = Date().timeIntervalSince(start)
+            let kdf = try MasterVault.unlock(in: root, password: "kdf").header.kdf
+            check("vault: a PBKDF2 vault is re-wrapped under Argon2id (64 MiB, t=3, p=4) and opens again",
+                  upgraded && kdf.algorithm == KDFParameters.argon2id && kdf.memoryKiB == 65_536
+                      && kdf.iterations == 3 && kdf.parallelism == 4, "\(kdf)")
+            info(String(format: "Argon2id (64 MiB, t=3, p=4) upgrade took %.2f s", seconds))
+            check("vault: Argon2id at the recommended cost takes under 10 s here", seconds < 10, String(format: "%.2f s", seconds))
+        } catch {
+            check("vault: Argon2id upgrade ran", false, String(describing: error))
         }
     }
 

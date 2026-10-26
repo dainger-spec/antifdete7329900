@@ -41,7 +41,7 @@ public struct PasswordEntry: Codable, Equatable, Identifiable, Sendable {
 /// Per-profile credential store.
 ///
 /// Key: HKDF(profileKey, "passwords") — the profile key is itself only reachable via the
-/// vault master key, which is only reachable via the user's master password (PBKDF2).
+/// vault master key, which is only reachable via the user's master password (Argon2id).
 /// The file is one AEAD blob; it is decrypted into memory when the vault is opened
 /// and re-encrypted on every change.
 ///

@@ -2,6 +2,7 @@ import AppKit
 import BrowserCore
 import Combine
 import Foundation
+import os
 
 /// App-level state: vault lock state, profile list, and the profile manager.
 @MainActor
@@ -52,7 +53,7 @@ final class AppModel: ObservableObject {
         guard !isWorking else { return }
         let root = root
         await perform {
-            // PBKDF2 with 600k iterations takes ~0.5 s; keep it off the main thread.
+            // Argon2id (64 MiB, 3 passes) takes a fraction of a second; keep it off the main thread.
             let vault = try await Task.detached(priority: .userInitiated) {
                 try MasterVault.create(in: root, password: password)
             }.value
@@ -70,7 +71,18 @@ final class AppModel: ObservableObject {
             let vault: UnlockedVault
             do {
                 vault = try await Task.detached(priority: .userInitiated) {
-                    try MasterVault.unlock(in: root, password: password)
+                    let vault = try MasterVault.unlock(in: root, password: password)
+                    // A vault from before Argon2id gets it now, with the password that just opened
+                    // it. A failure leaves the old header in place (the write is atomic).
+                    let log = Logger(subsystem: "PrivacyBrowser", category: "Vault")
+                    do {
+                        if try vault.upgradeKDFIfNeeded(password: password) {
+                            log.notice("Vault key derivation upgraded from PBKDF2 to Argon2id")
+                        }
+                    } catch {
+                        log.error("Vault key derivation upgrade failed: \(String(describing: error), privacy: .public)")
+                    }
+                    return vault
                 }.value
             } catch CoreError.wrongPassword {
                 self.unlockFailed = true
@@ -95,12 +107,12 @@ final class AppModel: ObservableObject {
         Self.displayPath(root)
     }
 
-    /// True when the vault was not created in the app: the app always uses
-    /// `KDFParameters.recommendedIterations`, the self-test and the CI migration check use far
-    /// fewer (`--selftest-write-vault` creates one with the password "migration-check").
+    /// True when the vault was not created in the app: the app uses Argon2id (or, before it,
+    /// `KDFParameters.recommendedIterations` of PBKDF2); the self-test and the CI migration check use
+    /// PBKDF2 with far fewer (`--selftest-write-vault` creates one with the password "migration-check").
     var vaultLooksLikeTestVault: Bool {
         guard let header = try? MasterVault.readHeader(in: root) else { return false }
-        return header.kdf.iterations < KDFParameters.recommendedIterations
+        return !header.kdf.isMemoryHard && header.kdf.iterations < KDFParameters.recommendedIterations
     }
 
     /// The way out when the master password is unknown: the current vault folder is moved aside

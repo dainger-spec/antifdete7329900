@@ -40,7 +40,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │                    └── BrowserTab × n ── WKWebView + navigation/UI/download delegates      │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────── BrowserCore (platform-independent) ────────────────────────┐
-│  MasterVault / UnlockedVault ── PBKDF2, key hierarchy;  DeviceSettings (settings.bin)      │
+│  MasterVault / UnlockedVault ── Argon2id, key hierarchy; DeviceSettings (settings.bin)     │
 │  ProfileRepository ── encrypted index + per-profile config, store factories                │
 │  PasswordVault / HistoryStore / BookmarkStore ── per-profile encrypted documents           │
 │  EncryptedChunkStream / EncryptedDirectoryArchive / WebKitDataLayout ── WebKit data seal   │
@@ -58,7 +58,8 @@ swift-crypto, which lets CI run the crypto and storage tests without a Mac.
 
 ```
 master password
-   │ PBKDF2-HMAC-SHA256, 600 000 iterations, 16-byte random salt
+   │ Argon2id (RFC 9106): 64 MiB, 3 passes, 4 lanes, 16-byte random salt
+   │ (vaults from before it: PBKDF2-HMAC-SHA256, 600 000 iterations, until their next unlock)
    ▼
 KEK (key-encryption key, never stored)
    │ AES-256-GCM unwrap  (vault.json: wrappedMasterKey, AAD "vault-master-key:v1:<vaultID>")
@@ -229,7 +230,7 @@ configs read as the default generation).
 
 - UI, `ProfileManager`, `BrowserSession`, window controllers and `WebDataStoreVault` are
   `@MainActor`. That matches WebKit's main-thread requirement.
-- PBKDF2 and archive I/O run on detached tasks, so the UI stays responsive.
+- Key derivation (Argon2id) and archive I/O run on detached tasks, so the UI stays responsive.
 - `ProfileRepository` and `PasswordVault` serialise mutations with a lock. While a profile
   runs, the manager hands out that session's `PasswordVault` instance, so each file has
   only one writer.

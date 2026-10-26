@@ -9,10 +9,11 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 126/126 checks in both builds):
+(macOS 26, 128/128 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
+| Vault key derivation | a PBKDF2 vault is re-wrapped under Argon2id (64 MiB, 3 passes, 4 lanes) in the release build and opens again; the time is logged |
 | Sandbox active; vault inside the container | writes outside the container are denied; vault at `~/Library/Containers/<id>/Data/Library/Application Support/PrivacyBrowser` |
 | WebKit data location (undocumented) | sandboxed: `Container/Data/Library/WebKit/WebsiteDataStore/<uuid>`; unsandboxed: `~/Library/WebKit/<bundle-id>/WebsiteDataStore/<uuid>`. One directory per store; no separate cache directory was observed |
 | Seal → restore of website data | cookies, localStorage and IndexedDB survive; the archive holds no plaintext; plaintext is gone after seal; WebKit released the store after 1 s |
@@ -285,11 +286,20 @@ restore it on launch. `WebDataStoreVault` does this.
    real protection for deleted blocks; enable it.
 5. *Memory.* Swift and CryptoKit offer no guaranteed zeroisation. Keys of an unlocked
    vault live in process memory, and anyone who can read process memory (root, a
-   debugger, a core dump) can recover them.
+   debugger, a core dump) can recover them. What the app's own code holds is overwritten
+   with `memset_s` once used — the password's bytes, derived keys, the unwrapped vault key
+   and Argon2's 64 MiB of working memory — but copies inside `String`, `Data` and CryptoKit
+   are out of its reach.
 
-**KDF.** PBKDF2-HMAC-SHA256 with 600 000 iterations is the strongest password KDF in the
-macOS SDK. A memory-hard KDF such as Argon2id would resist GPU attacks better; it can be
-added behind `KDFParameters.algorithm` using libsodium without changing the file formats.
+**KDF.** Argon2id (RFC 9106, version 1.3) with 64 MiB, 3 passes and 4 lanes — the RFC's second
+recommended option — derives the key that unwraps the vault key. It is memory-hard: a GPU tries
+far fewer guesses per second than against PBKDF2. CryptoKit and the macOS SDK have no Argon2, so
+it is implemented in Swift in the core (`Argon2.swift`, no C dependency) and checked against the
+RFC's test vector and the reference implementation's. A vault created before (PBKDF2-HMAC-SHA256,
+600 000 iterations) is re-wrapped under Argon2id the next time the app unlocks it, with the
+password that opened it; only the header (`vault.json`) changes, atomically. A header's Argon2id
+costs are capped (2 GiB, 10 passes, 16 lanes), so a header fetched for sync cannot make the app
+allocate without bound.
 
 ## 4. Network and proxy
 
