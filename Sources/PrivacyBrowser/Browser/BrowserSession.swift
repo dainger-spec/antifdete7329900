@@ -47,7 +47,7 @@ final class BrowserSession {
 
         let store: WKWebsiteDataStore = configuration.ephemeral
             ? .nonPersistent()
-            : WKWebsiteDataStore(forIdentifier: profileID)
+            : WebDataStoreVault.makeStore(for: profileID)
         // Applies to all network loads of this data store. An empty array = direct connection.
         store.proxyConfigurations = ProxyConfigurationFactory.make(configuration.proxy)
         self.dataStore = store

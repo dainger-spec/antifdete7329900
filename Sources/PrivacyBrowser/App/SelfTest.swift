@@ -101,6 +101,7 @@ final class SelfTest {
             try await storageIsolationAndShims(repository)
             try await deviceGenerations(repository)
             try await recoverySealing(repository)
+            try await deleteProfiles(repository)
             try await proxies(repository)
             try await tabsAndLibrary(repository)
             try await windowLifecycle(repository)
@@ -391,6 +392,39 @@ final class SelfTest {
         let overrideUA = try await userAgent(for: override)
         check("generation: explicit user agent overrides the generation",
               overrideUA == "PrivacyBrowserSelfTest/UA-Override", overrideUA ?? "nil")
+    }
+
+    // MARK: Profile deletion (regression for the delete crash)
+
+    /// Reproduces the "create a profile, delete it" crash: deleting a profile whose
+    /// `WKWebsiteDataStore` was never created in this process must not call
+    /// `WKWebsiteDataStore.remove(forIdentifier:)`, which segfaults on WebKit's data-store queue.
+    /// Also covers deleting a profile that ran and was already sealed (its store was removed).
+    private func deleteProfiles(_ repository: ProfileRepository) async throws {
+        let vault = WebDataStoreVault(repository: repository)
+        let layout = WebDataStoreVault.layout
+
+        let fresh = try repository.create(name: "Delete fresh", configuration: ProfileConfiguration())
+        await vault.deleteData(profileID: fresh.id)
+        try repository.delete(fresh.id)
+        check("delete: never-launched profile deleted without crashing",
+              (try? repository.summary(for: fresh.id)) == nil)
+
+        let ran = try repository.create(name: "Delete ran", configuration: ProfileConfiguration())
+        let key = try repository.profileKey(for: ran.id)
+        try await vault.prepareForLaunch(profileID: ran.id, key: key)
+        var session: BrowserSession? = try makeSession(repository, ran.id, key: key)
+        var web: WKWebView? = WKWebView(frame: .zero, configuration: session!.makeWebViewConfiguration())
+        try await PageLoader.load(web!, html: page, baseURL: origin)
+        _ = try await js(web!, "localStorage.setItem('pb', 'x'); return true;", [:])
+        web = nil
+        session?.shutDown()
+        session = nil
+        try await vault.seal(profileID: ran.id, key: key)
+        await vault.deleteData(profileID: ran.id)
+        try repository.delete(ran.id)
+        check("delete: stopped profile deleted without crashing",
+              layout.discoverDirectories(for: ran.id).isEmpty && (try? repository.summary(for: ran.id)) == nil)
     }
 
     // MARK: Crash recovery sealing (regression for the post-unlock crash)

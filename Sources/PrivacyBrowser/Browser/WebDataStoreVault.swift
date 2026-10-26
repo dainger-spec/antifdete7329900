@@ -61,6 +61,54 @@ final class WebDataStoreVault {
         layout.discoverDirectories(for: profileID)
     }
 
+    /// Identifiers this process has created a `WKWebsiteDataStore(forIdentifier:)` for.
+    /// `WKWebsiteDataStore.remove(forIdentifier:)` with any other identifier segfaults on
+    /// WebKit's data-store queue, so only these may be passed to it.
+    private static var registeredStoreIDs: Set<UUID> = []
+
+    /// Set once a `WKWebView` has been created in this process. That is what installs
+    /// WebKit's `RunLoop::main()`.
+    private static var didCreateWebView = false
+
+    /// `WKWebsiteDataStore.remove(forIdentifier:)` must run on the main queue, and only after
+    /// WebKit is initialized. The completion runs on a data-store IO queue and then calls
+    /// `RunLoop::main().dispatch` inside `WebsiteDataStore::removeDataStoreWithIdentifierImpl`.
+    /// That pointer is nil until a `WKWebView` has existed, so the call is an EXC_BAD_ACCESS.
+    private static func removeStore(for profileID: UUID) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let perform = {
+                MainActor.assumeIsolated {
+                    if !didCreateWebView {
+                        // Initializes WebKit, then the view is released. The run loop stays installed.
+                        var webView: WKWebView? = WKWebView(frame: .zero)
+                        webView = nil
+                        didCreateWebView = true
+                    }
+                    Task { @MainActor in
+                        do {
+                            try await WKWebsiteDataStore.remove(forIdentifier: profileID)
+                            continuation.resume()
+                        } catch {
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                }
+            }
+            if Thread.isMainThread {
+                perform()
+            } else {
+                DispatchQueue.main.async(execute: perform)
+            }
+        }
+    }
+
+    /// Creates a profile's persistent data store. Always use this instead of calling
+    /// `WKWebsiteDataStore(forIdentifier:)` directly, so `deleteData` knows it may remove it.
+    static func makeStore(for profileID: UUID) -> WKWebsiteDataStore {
+        registeredStoreIDs.insert(profileID)
+        return WKWebsiteDataStore(forIdentifier: profileID)
+    }
+
     // MARK: Launch
 
     /// Decrypts the profile's archived WebKit data into WebKit's directories.
@@ -122,7 +170,7 @@ final class WebDataStoreVault {
                     try EncryptedDirectoryArchive.seal(roots: roots, to: archive, key: key)
                 }.value
                 if activeStore {
-                    try await WKWebsiteDataStore.remove(forIdentifier: profileID)
+                    try await Self.removeStore(for: profileID)
                 }
                 // Sweep the directories. `remove(forIdentifier:)` usually clears them for a live
                 // store; recovered data is simply deleted here.
@@ -142,11 +190,16 @@ final class WebDataStoreVault {
 
     // MARK: Delete
 
+    /// Removes the profile's WebKit data. For a profile that never ran in this process (just
+    /// created, or deleted via sync) WebKit has no store to remove, and calling
+    /// `remove(forIdentifier:)` would crash; deleting the leftover directories is enough.
     func deleteData(profileID: UUID) async {
-        do {
-            try await WKWebsiteDataStore.remove(forIdentifier: profileID)
-        } catch {
-            log.notice("remove(forIdentifier:) for \(profileID.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+        if Self.registeredStoreIDs.contains(profileID) {
+            do {
+                try await Self.removeStore(for: profileID)
+            } catch {
+                log.notice("remove(forIdentifier:) for \(profileID.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
         }
         for directory in Self.discoverDirectories(for: profileID) {
             try? FileManager.default.removeItem(at: directory)
