@@ -131,11 +131,17 @@ modified WebKit, or different hardware. None is attempted:
 | TLS ClientHello, HTTP/2 settings, header order | Apple's macOS network stack |
 
 **Why this project doesn't paper over these with JavaScript:** injected overrides for canvas,
-WebGL, fonts, navigator properties or `Function.prototype.toString` are unreliable. They
-don't reach workers, don't change server-side TLS or HTTP signals, and leave measurable
-inconsistencies. They also mainly serve to defeat fraud and abuse detection, which is not a
-goal here. The honest options for real separation between identities are outside the
-browser:
+WebGL, audio or fonts are unreliable. They don't reach workers, don't change server-side TLS
+or HTTP signals, and leave measurable inconsistencies — fingerprinting pages flag the noise
+itself ("Canvas: Spoofed", "Fingerprinting Resistance: Detected"). They also mainly serve
+to defeat fraud and abuse detection, which is not a goal here. What the shims *do* replace
+(time zone, geolocation, WebRTC, and the navigator/screen values of a mobile generation) is
+replaced the way the engine defines it — accessors on the prototypes, strict methods with
+only `length` and `name`, the native receiver errors, and a `Function.prototype.toString`
+that prints them as native code even from a fresh iframe — so the replacement itself is not
+the thing a page notices; the inconsistencies listed above still are. CI compares a macOS
+profile's whole measured surface with this Mac's real Safari (`scripts/safari_reference.py`).
+The honest options for real separation between identities are outside the browser:
 - a separate macOS user account per identity (OS-level separation);
 - a different Mac or VM per identity (different hardware fingerprint);
 - for a genuine iPhone fingerprint, Safari on an actual iPhone.
@@ -207,7 +213,7 @@ behaviour are verified by the self-test (§0).
 | Path | Status | Mitigation |
 |---|---|---|
 | WebRTC UDP (STUN/TURN, media) | Never proxied; STUN reveals the real public IP | WebRTC policy (see §5); the default is **disabled** |
-| DNS prefetch | WebKit may resolve link hostnames via the system resolver before navigation; WKWebView has no public switch to disable it | Verify with `sudo tcpdump -n -i any port 53` while browsing through a proxy |
+| DNS prefetch | `<link rel="dns-prefetch">` (also as a `Link:` header) makes the network process resolve the host through the system resolver — WebKit skips it only for a *system-wide* proxy, not for a data store's `proxyConfigurations` | A content rule list blocking `ping`-type loads is added to every proxied profile (`ContentRules`): WebKit runs dns-prefetch through it as a ping. It also blocks `<a ping>` click trackers; beacons are fetches and unaffected. Verified by the self-test with an `<a ping>` |
 | Safe Browsing lookups | Made outside the data store's network session | Off by default (`safeBrowsingEnabled`) |
 | `mailto:`, `tel:`, custom schemes | Would hand the URL to another app, outside the profile | Blocked by the navigation policy |
 | Camera and microphone streams | Local capture; WebRTC transport isn't proxied | Asks the user every time |
@@ -226,8 +232,9 @@ public IP over UDP, outside the proxy. WKWebView on macOS 15 exposes a native
 
 The profile setting is enforced by a document-start user script in every frame:
 
-- `disabled` (default) removes `RTCPeerConnection`, `webkitRTCPeerConnection`,
-  `RTCDataChannel` and related constructors, and makes them non-configurable.
+- `disabled` (default) deletes `RTCPeerConnection`, `webkitRTCPeerConnection`,
+  `RTCDataChannel` and related constructors from the window, as in an engine built
+  without WebRTC (`'RTCPeerConnection' in window` is false; no property is left behind).
 - `relayOnly` wraps the constructor and `setConfiguration` to force
   `iceTransportPolicy: "relay"`. No host or srflx candidates are gathered, so peers see
   only the TURN server's address. The TURN server still sees your real IP, because TURN
@@ -235,23 +242,33 @@ The profile setting is enforced by a document-start user script in every frame:
 - `unrestricted` uses the WebKit default.
 
 **Limits of the shim:** it isn't applied in workers, which have no RTCPeerConnection
-anyway. A frame reached through `window.frames[i]` or `window[i]` before WebKit injects
-the script into it can expose an unpatched constructor; `contentWindow`,
-`contentDocument` and `window.open` are hooked. It is also detectable.
+anyway. The script runs in every same-origin frame when its document starts, so a frame
+created by the page (`window.frames[i]`, `window[i]`) is already patched when the page
+reaches it; `contentWindow`, `contentDocument` and `window.open` are hooked as well for a
+window reached before its own copy ran. A cross-origin frame is patched by its own copy and
+cannot be inspected from the page anyway.
 
 ## 6. Time zone, geolocation, user agent
 
 | Setting | Implementation | Native? | Gaps |
 |---|---|---|---|
 | User agent | `WKWebView.customUserAgent`, with presets in the editor | yes (string only) | `navigator.platform`, vendor, feature set and TLS fingerprint still identify WebKit on macOS (§2). Use the *Safari on macOS* preset; iPhone/iPad presets are UA-only and inconsistent |
-| Time zone | JS: `Intl.DateTimeFormat` default `timeZone`, `Date` local getters, `getTimezoneOffset`, `toString`, `toDateString`, `toTimeString`, `toLocale*String` | no | Workers use the host zone. `new Date(y, m, d, …)`, local setters (`setHours` …) and `Date.parse` of strings without an offset use the host zone. Detectable |
-| Geolocation | JS: `navigator.geolocation` returns PERMISSION_DENIED, or fixed coordinates; `permissions.query({name:'geolocation'})` agrees | no | Detectable. The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed |
+| Time zone | JS: `Intl.DateTimeFormat` default `timeZone`; `Date` local getters and setters, `getTimezoneOffset` (with the sub-minute offsets of historical dates), the local constructor forms `new Date(y, m, d, …)`, `Date.parse` and `new Date(string)` for strings without an offset, `toString`, `toDateString`, `toTimeString`, `toLocale*String`, `getYear`/`setYear` | no | Workers use the host zone (`Intl` and `Date` in a worker reveal it). `Intl.DateTimeFormat().format()` without an explicit zone follows the shim; other `Intl` constructors carry no zone |
+| Geolocation | JS: `navigator.geolocation` returns PERMISSION_DENIED, or fixed coordinates; `permissions.query({name:'geolocation'})` agrees | no | The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed |
 | Time zone from the proxy | At launch, a geolocation service (ipinfo.io, then geojs.io, ipwho.is) is asked *through the profile's proxy* where it exits; the profile runs in that zone. The last answer per proxy is kept for when a lookup fails | — | A third-party request per launch (HTTPS, via the proxy only, no cookies). Off per profile, or set a zone explicitly. Without any answer the host zone is used |
 | Language | Process-wide: set before WebKit's first process from the first launched profile's proxy country (`WebContentLanguage`) | partly | WKWebView has no per-view `Accept-Language` / `navigator.languages` API; later profiles of the same run share the first one's language |
 
 The shim logic is tested under Node (`scripts/test-shims.mjs`) against ICU, across
-fixed-offset zones, DST transitions and 30-minute shifts. The key cases are also checked
-under JavaScriptCore by the self-test.
+fixed-offset zones, DST transitions, 30-minute shifts and pre-1900 offsets, together with
+the function-shape checks CreepJS runs (toString from the window and from a frame, own
+keys, receiver errors). The key cases are also checked under JavaScriptCore by the self-test,
+whose surface checks compare a macOS profile with a plain WKWebView key by key.
+
+**Mobile generations (iPhone, iPad):** the browser window is the declared device's screen
+(content size and maximum size), `outerWidth`/`outerHeight` report it, and the
+navigator/screen values are accessors on the prototypes. CSS media queries
+(`device-width`), touch events, fonts, GPU and TLS still say "Mac"; CreepJS also compares
+the page's `navigator` with a worker's, which a user script cannot reach.
 
 ## 7. History and bookmarks
 

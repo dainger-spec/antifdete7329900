@@ -62,22 +62,30 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: â€
 ### Tests
 
 ```bash
-swift test                                        # core: 36 tests (also run on Linux in CI)
-TZ=America/New_York node scripts/test-shims.mjs   # JS shim logic (Node 18+)
+swift test                                        # core tests (also run on Linux in CI)
+TZ=America/New_York node scripts/test-shims.mjs   # JS shim logic and CreepJS-style shape checks (Node 18+)
 
 # End-to-end against the real WebKit of this Mac (headless, temporary vault, cleans up):
-python3 scripts/selftest_proxy.py --http 18080 --socks 18081 &
+python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 &
 PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
+PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083 \
+PB_SELFTEST_SURFACE_OUT=build/surface \
   build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test
+
+# What a page measures in a macOS profile vs. this Mac's real Safari (needs `sudo safaridriver --enable` once):
+python3 scripts/safari_reference.py --compare build/surface/surface-macos.json
 ```
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 50 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: ~120 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
-  profiles, shims under JavaScriptCore, HTTP CONNECT and SOCKS5 proxies, fail-closed, tabs,
-  history, bookmarks, the device-generation UA path, crash-recovery sealing, and the
-  window-lifecycle (close/quit crash) regression;
+  profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
+  HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, the
+  ping-load blocker, the proxy-location time zone, tabs, history, bookmarks, the
+  device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, âŒ˜Q and
+  the forced seal, and the window-lifecycle regression;
+- the surface comparison with the runner's real Safari (`scripts/safari_reference.py`);
 - a container-migration check.
 
 ## Using it
