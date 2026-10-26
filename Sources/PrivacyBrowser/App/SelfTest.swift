@@ -12,10 +12,14 @@ import WebKit
 ///   * that two running profiles do not see each other's data,
 ///   * that the JavaScript shims behave under JavaScriptCore,
 ///   * per-profile proxies (HTTP CONNECT, SOCKS5 with remote DNS) and fail-closed behaviour,
+///   * several SOCKS5 profiles launched and loading at once, each through its own proxy,
+///   * launches that do not wait on the lookup through the proxy, and the exit-IP warning,
 ///   * the tab model with history recording and bookmarks.
 ///
 /// Proxy checks need `scripts/selftest_proxy.py` and the env vars
-/// `PB_SELFTEST_HTTP_PROXY_PORT` / `PB_SELFTEST_SOCKS_PROXY_PORT`; they are skipped otherwise.
+/// `PB_SELFTEST_HTTP_PROXY_PORT` / `PB_SELFTEST_SOCKS_PROXY_PORT` (and for the concurrent SOCKS5
+/// checks `PB_SELFTEST_SOCKS2_PROXY_PORT` / `PB_SELFTEST_SOCKS_AUTH_PROXY_PORT`); they are
+/// skipped otherwise.
 /// Everything is created in a temporary vault and removed afterwards.
 @MainActor
 final class SelfTest {
@@ -123,6 +127,8 @@ final class SelfTest {
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await proxyLocationAtLaunch(repository)
+            try await socksProfilesSideBySide(repository)
+            try await proxyLookupAndExitIP(repository)
             try await tabsAndLibrary(repository)
             try await windowLifecycle(repository)
             try await dialogTeardown(repository)
@@ -811,6 +817,203 @@ final class SelfTest {
         let tokyo = try await launchedTimeZone()
         check("proxy location: an explicit time zone wins", tokyo == "Asia/Tokyo", tokyo ?? "nil")
         try repository.delete(profile.id)
+    }
+
+    // MARK: Several SOCKS5 profiles at once
+
+    /// Three profiles behind three SOCKS5 proxies, one wanting username/password authentication,
+    /// launched together through the app's launch path (with its lookup through each proxy) and
+    /// loading at the same time. Each page arrives through its own proxy, by name (remote DNS),
+    /// with its own credentials. Stopping one leaves the others loading through theirs, and wrong
+    /// or missing SOCKS5 credentials fail closed.
+    private func socksProfilesSideBySide(_ repository: ProfileRepository) async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let socksPort = environment["PB_SELFTEST_SOCKS_PROXY_PORT"].flatMap(Int.init),
+              let socks2Port = environment["PB_SELFTEST_SOCKS2_PROXY_PORT"].flatMap(Int.init),
+              let authPort = environment["PB_SELFTEST_SOCKS_AUTH_PROXY_PORT"].flatMap(Int.init) else {
+            info("concurrent SOCKS5 checks skipped (PB_SELFTEST_SOCKS2_PROXY_PORT / PB_SELFTEST_SOCKS_AUTH_PROXY_PORT not set)")
+            return
+        }
+        let services = ProxyGeoLookup.services
+        ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json")!,
+                                         timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        defer { ProxyGeoLookup.services = services }
+        struct Run { let name: String; let port: Int; let via: String; let id: UUID }
+        let proxies: [(name: String, proxy: ProxySettings, via: String)] = [
+            ("a", ProxySettings(kind: .socks5, host: "127.0.0.1", port: socksPort), "via=socks5 "),
+            ("b", ProxySettings(kind: .socks5, host: "127.0.0.1", port: authPort, username: "pb-user2", password: "pb-pass2"), "via=socks5-auth "),
+            ("c", ProxySettings(kind: .socks5, host: "127.0.0.1", port: socks2Port), "via=socks5 "),
+        ]
+        var runs: [Run] = []
+        for entry in proxies {
+            let profile = try repository.create(name: "SOCKS5 \(entry.name)",
+                                                configuration: ProfileConfiguration(proxy: entry.proxy, ephemeral: true))
+            runs.append(Run(name: entry.name, port: entry.proxy.port, via: entry.via, id: profile.id))
+        }
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        // Launched together: the launches interleave at every await (rules, lookups, windows).
+        let started = Date()
+        await withTaskGroup(of: String?.self) { group in
+            for run in runs {
+                group.addTask { @MainActor in
+                    do { try await manager.launch(run.id) } catch { return "\(run.name): \(error)" }
+                    return nil
+                }
+            }
+            for await failure in group { if let failure { messages.append(failure) } }
+        }
+        info(String(format: "three SOCKS5 profiles launched together in %.2f s", Date().timeIntervalSince(started)))
+        check("SOCKS5 side by side: three profiles launched together all run",
+              runs.allSatisfy { manager.isRunning($0.id) }, messages.joined(separator: " | "))
+
+        // Every running profile loads its own host at the same time; the page says which proxy
+        // (listener port, authentication) carried it and which host name it was asked for.
+        func loadTogether(_ subset: [Run], round: Int) async -> [String: String] {
+            var bodies: [String: String] = [:]
+            await withTaskGroup(of: (String, String).self) { group in
+                for run in subset {
+                    guard let webView = manager.session(for: run.id)?.windowControllers.first?.selectedTab?.webView else { continue }
+                    group.addTask { @MainActor in
+                        let url = URL(string: "http://\(run.name)-\(round).selftest.invalid/side-by-side")!
+                        do {
+                            try await PageLoader.load(webView, url: url)
+                            let body = try await self.js(webView, "return document.body ? document.body.innerText : '';") as? String
+                            return (run.name, body ?? "")
+                        } catch {
+                            return (run.name, "load failed: \(error.localizedDescription)")
+                        }
+                    }
+                }
+                for await (name, body) in group { bodies[name] = body }
+            }
+            return bodies
+        }
+        func carried(_ run: Run, _ body: String?, round: Int) -> Bool {
+            guard let body else { return false }
+            return body.contains(run.via) && body.contains("atyp=3") && body.contains("target=\(run.name)-\(round).selftest.invalid:80")
+                && body.contains("listener=\(run.port) ")
+        }
+        let first = await loadTogether(runs, round: 1)
+        check("SOCKS5 side by side: each profile's page came through its own proxy, by name, at the same time",
+              runs.allSatisfy { carried($0, first[$0.name], round: 1) }, String(describing: first))
+        check("SOCKS5 side by side: the profile with SOCKS5 credentials authenticated with its own",
+              first["b"]?.contains("via=socks5-auth ") == true, first["b"] ?? "nil")
+
+        // One stops; the others keep loading through their own proxies.
+        try await manager.stop(runs[1].id)
+        let remaining = [runs[0], runs[2]]
+        let second = await loadTogether(remaining, round: 2)
+        check("SOCKS5 side by side: after one profile stops the others still load through their own proxies",
+              !manager.isRunning(runs[1].id) && remaining.allSatisfy { carried($0, second[$0.name], round: 2) }, String(describing: second))
+        for run in remaining { try await manager.stop(run.id) }
+        for run in runs { try repository.delete(run.id) }
+
+        // Wrong or missing SOCKS5 credentials: the load fails, nothing goes direct.
+        let target = URL(string: "http://auth.selftest.invalid/socks-credentials")!
+        let wrong = try await loadThroughProxy(repository, ProxySettings(kind: .socks5, host: "127.0.0.1", port: authPort,
+                                                                         username: "pb-user2", password: "wrong"), url: target)
+        let none = try await loadThroughProxy(repository, ProxySettings(kind: .socks5, host: "127.0.0.1", port: authPort), url: target)
+        check("SOCKS5 side by side: wrong or missing SOCKS5 credentials fail closed",
+              wrong?.contains("PB-PROXY-OK") != true && none?.contains("PB-PROXY-OK") != true,
+              "wrong: \(wrong ?? "nil"), none: \(none ?? "nil")")
+    }
+
+    // MARK: Launch speed and the proxy's exit IP
+
+    /// A launch does not wait for the lookup through the proxy when a location is remembered for
+    /// that proxy: the lookup finishes in the background, and a new time zone is remembered and
+    /// noted for the next launch. Without one it waits at most `ProfileManager.firstLookupWait`.
+    /// With `warnOnProxyIPChange` (off by default) a changed exit IP is reported, and only then.
+    private func proxyLookupAndExitIP(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("proxy lookup timing and exit IP checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let services = ProxyGeoLookup.services
+        defer { ProxyGeoLookup.services = services }
+        func geo(_ query: String) {
+            ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json?\(query)")!,
+                                             timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        func launch(_ id: UUID) async throws -> (seconds: TimeInterval, zone: String?) {
+            let start = Date()
+            try await manager.launch(id)
+            let seconds = Date().timeIntervalSince(start)
+            var zone: String?
+            if let webView = manager.session(for: id)?.windowControllers.first?.selectedTab?.webView {
+                try await PageLoader.load(webView, html: page, baseURL: origin)
+                zone = try await js(webView, "return Intl.DateTimeFormat().resolvedOptions().timeZone;") as? String
+            }
+            return (seconds, zone)
+        }
+        func lookupsDone() async -> Bool { await waitUntil(timeout: 15) { !manager.hasProxyLookupsInFlight } }
+
+        // A location remembered for the proxy: the launch does not wait for a slow lookup.
+        let remembered = try repository.create(name: "Fast launch", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
+        geo("ip=203.0.113.7")
+        _ = try await launch(remembered.id)
+        _ = await lookupsDone()
+        try await manager.stop(remembered.id)
+        geo("ip=203.0.113.7&tz=Asia/Tokyo&delay=4")
+        messages.removeAll()
+        let fast = try await launch(remembered.id)
+        info(String(format: "launch with a remembered location and a 4 s lookup took %.2f s", fast.seconds))
+        check("launch: with a remembered location it does not wait for the lookup through the proxy",
+              fast.seconds < 2.5 && fast.zone == "Europe/Berlin", String(format: "%.2f s, zone %@", fast.seconds, fast.zone ?? "nil"))
+        let finished = await lookupsDone()
+        let updated = try repository.loadConfiguration(remembered.id).lastProxyLocation
+        check("launch: that lookup finishes in the background; its new time zone is remembered and noted for the next launch",
+              finished && updated?.timeZoneIdentifier == "Asia/Tokyo" && messages.contains { $0.contains("Asia/Tokyo") },
+              "\(String(describing: updated)) | \(messages)")
+        try await manager.stop(remembered.id)
+        try repository.delete(remembered.id)
+
+        // Nothing remembered: it waits for the lookup, at most firstLookupWait.
+        let fresh = try repository.create(name: "Slow lookup", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
+        geo("delay=8")
+        let capped = try await launch(fresh.id)
+        info(String(format: "launch with nothing remembered and an 8 s lookup took %.2f s", capped.seconds))
+        check("launch: with nothing remembered it waits for the lookup at most \(Int(ProfileManager.firstLookupWait)) s",
+              capped.seconds < ProfileManager.firstLookupWait + 1.5, String(format: "%.2f s", capped.seconds))
+        try await manager.stop(fresh.id)
+        _ = await lookupsDone()
+        try repository.delete(fresh.id)
+
+        // The exit IP: reported when it changed, with the option on (here without the time-zone
+        // matching, which the lookup then runs for alone); never with the option off.
+        let watched = try repository.create(name: "IP watched", configuration: ProfileConfiguration(
+            proxy: proxy, ephemeral: true, matchProxyLocation: false, warnOnProxyIPChange: true))
+        let unwatched = try repository.create(name: "IP not watched", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
+        func run(_ id: UUID, ip: String) async throws -> [String] {
+            geo("ip=\(ip)")
+            messages.removeAll()
+            _ = try await launch(id)
+            _ = await lookupsDone()
+            try await manager.stop(id)
+            return messages.filter { $0.contains("203.0.113.7") || $0.contains("198.51.100.4") }
+        }
+        let firstRun = try await run(watched.id, ip: "203.0.113.7")
+        let sameIP = try await run(watched.id, ip: "203.0.113.7")
+        let changed = try await run(watched.id, ip: "198.51.100.4")
+        check("exit IP: with the option on a changed proxy IP is reported (and not the first launch or an unchanged IP)",
+              firstRun.isEmpty && sameIP.isEmpty && changed.count == 1
+                  && changed[0].contains("203.0.113.7") && changed[0].contains("198.51.100.4") && changed[0].contains("IP watched"),
+              "first \(firstRun) same \(sameIP) changed \(changed)")
+        let watchedIP = try repository.loadConfiguration(watched.id).lastProxyLocation?.exitIP
+        check("exit IP: the lookup runs for the option alone, and remembers the new address",
+              watchedIP == "198.51.100.4", watchedIP ?? "nil")
+        _ = try await run(unwatched.id, ip: "203.0.113.7")
+        let quiet = try await run(unwatched.id, ip: "198.51.100.4")
+        let optionOff = try !repository.loadConfiguration(unwatched.id).warnOnProxyIPChange
+        check("exit IP: off by default, a changed proxy IP is not reported", quiet.isEmpty && optionOff, "\(quiet)")
+        try repository.delete(watched.id)
+        try repository.delete(unwatched.id)
     }
 
     // MARK: Profile deletion (regression for the delete crash)

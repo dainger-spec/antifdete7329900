@@ -33,9 +33,15 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// language list per process). Default on; older configurations decode as on.
     public var matchProxyLocation: Bool
 
-    /// The last location looked up for `proxy` (`matchProxyLocation`): used when a later lookup
-    /// fails, as long as the proxy is the same.
+    /// The last location looked up for `proxy`: the time zone used without waiting for a new
+    /// lookup, or when it fails, as long as the proxy is the same; and the exit IP the next
+    /// launch compares with (`warnOnProxyIPChange`).
     public var lastProxyLocation: ProxyLocation?
+
+    /// Warn when the proxy's exit IP differs from the one seen at the previous launch (the same
+    /// proxy host and port, e.g. a provider that rotates or reassigned the address). Needs the
+    /// lookup through the proxy, which then runs even without `matchProxyLocation`. Default off.
+    public var warnOnProxyIPChange: Bool
 
     /// APPROXIMATION: JavaScript removal/wrapping of `RTCPeerConnection`.
     public var webRTCPolicy: WebRTCPolicy
@@ -76,7 +82,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 historyRetentionDays: Int? = 90,
                 deviceGenerationID: String? = nil,
                 matchProxyLocation: Bool = true,
-                lastProxyLocation: ProxyLocation? = nil) {
+                lastProxyLocation: ProxyLocation? = nil,
+                warnOnProxyIPChange: Bool = false) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -90,6 +97,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.deviceGenerationID = deviceGenerationID
         self.matchProxyLocation = matchProxyLocation
         self.lastProxyLocation = lastProxyLocation
+        self.warnOnProxyIPChange = warnOnProxyIPChange
     }
 
     /// A new profile seeded from a generation: the generation supplies the UA (by reference,
@@ -141,8 +149,18 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         }
     }
 
-    /// Launching looks up where the proxy exits (`matchProxyLocation`).
+    /// The profile runs in its proxy's time zone (`matchProxyLocation`).
     public var needsProxyLocation: Bool { matchProxyLocation && proxy != nil }
+
+    /// Launching asks a geolocation service through the proxy: for its time zone, or for its exit
+    /// IP (`warnOnProxyIPChange`). The same request also finds a proxy that wants credentials.
+    public var needsProxyLookup: Bool { proxy != nil && (matchProxyLocation || warnOnProxyIPChange) }
+
+    /// The location remembered for the current proxy, if any.
+    public var rememberedProxyLocation: ProxyLocation? {
+        guard let proxy, let cached = lastProxyLocation, cached.proxyEndpoint == ProxyLocation.endpoint(of: proxy) else { return nil }
+        return cached
+    }
 
     /// This launch's lookup, or else the last location found for the same proxy.
     public func proxyLocation(lookedUp: ProxyLocation?) -> ProxyLocation? {
@@ -165,7 +183,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
-             matchProxyLocation, lastProxyLocation
+             matchProxyLocation, lastProxyLocation, warnOnProxyIPChange
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -189,6 +207,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         matchProxyLocation = try c.decodeIfPresent(Bool.self, forKey: .matchProxyLocation) ?? defaults.matchProxyLocation
         // A cache: one that no longer decodes is dropped, never a reason to fail the profile.
         lastProxyLocation = (try? c.decodeIfPresent(ProxyLocation.self, forKey: .lastProxyLocation)) ?? nil
+        warnOnProxyIPChange = try c.decodeIfPresent(Bool.self, forKey: .warnOnProxyIPChange) ?? defaults.warnOnProxyIPChange
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -208,6 +227,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encodeIfPresent(deviceGenerationID, forKey: .deviceGenerationID)
         try c.encode(matchProxyLocation, forKey: .matchProxyLocation)
         try c.encodeIfPresent(lastProxyLocation, forKey: .lastProxyLocation)
+        try c.encode(warnOnProxyIPChange, forKey: .warnOnProxyIPChange)
     }
 
     public var historyPolicy: HistoryStore.Policy {

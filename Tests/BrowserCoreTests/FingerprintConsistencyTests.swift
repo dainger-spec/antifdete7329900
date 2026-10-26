@@ -112,17 +112,65 @@ final class ProxyLocationTests: XCTestCase {
         XCTAssertNil(ProfileConfiguration(proxy: proxy, matchProxyLocation: false).applying(berlin).timeZoneIdentifier)
     }
 
+    func testExitIPIsReadAndChangesAreSeenForTheSameProxyOnly() {
+        let ipinfo = #"{"ip":"203.0.113.7","country":"DE","timezone":"Europe/Berlin"}"#
+        let ipwho = #"{"ip":"2001:db8::7","country_code":"DE","timezone":{"id":"Europe/Berlin"}}"#
+        let bogus = #"{"ip":"not an address","country":"DE","timezone":"Europe/Berlin"}"#
+        XCTAssertEqual(ProxyLocation.parse(Data(ipinfo.utf8), timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"],
+                                           proxyEndpoint: endpoint)?.exitIP, "203.0.113.7")
+        XCTAssertEqual(ProxyLocation.parse(Data(ipwho.utf8), timeZoneKeyPath: ["timezone", "id"], countryKeyPath: ["country_code"],
+                                           proxyEndpoint: endpoint)?.exitIP, "2001:db8::7")
+        let noIP = ProxyLocation.parse(Data(bogus.utf8), timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"], proxyEndpoint: endpoint)
+        XCTAssertEqual(noIP?.timeZoneIdentifier, "Europe/Berlin")
+        XCTAssertNil(noIP?.exitIP)
+
+        func at(_ ip: String?, _ proxy: String = endpoint) -> ProxyLocation {
+            ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: proxy, exitIP: ip)
+        }
+        let change = at("198.51.100.4").exitIPChange(since: at("203.0.113.7"))
+        XCTAssertEqual(change?.old, "203.0.113.7")
+        XCTAssertEqual(change?.new, "198.51.100.4")
+        XCTAssertNil(at("203.0.113.7").exitIPChange(since: at("203.0.113.7")), "same address")
+        XCTAssertNil(at("198.51.100.4").exitIPChange(since: nil), "first launch")
+        XCTAssertNil(at("198.51.100.4").exitIPChange(since: at(nil)), "stored by an older build")
+        XCTAssertNil(at(nil).exitIPChange(since: at("203.0.113.7")), "the service did not say")
+        XCTAssertNil(at("198.51.100.4").exitIPChange(since: at("203.0.113.7", "socks5://other:1080")), "another proxy")
+        // A new address is a new location to remember, even in the same place.
+        XCTAssertFalse(at("198.51.100.4").isSameLocation(as: at("203.0.113.7")))
+    }
+
+    func testLookupIsNeededForTheTimeZoneOrTheIPCheck() {
+        let proxy = ProxySettings(kind: .socks5, host: "203.0.113.7", port: 1080)
+        XCTAssertTrue(ProfileConfiguration(proxy: proxy).needsProxyLookup)
+        XCTAssertFalse(ProfileConfiguration(proxy: proxy, matchProxyLocation: false).needsProxyLookup)
+        XCTAssertTrue(ProfileConfiguration(proxy: proxy, matchProxyLocation: false, warnOnProxyIPChange: true).needsProxyLookup)
+        XCTAssertFalse(ProfileConfiguration(warnOnProxyIPChange: true).needsProxyLookup, "no proxy")
+        let remembered = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: ProxyLocation.endpoint(of: proxy))
+        var config = ProfileConfiguration(proxy: proxy, lastProxyLocation: remembered)
+        XCTAssertEqual(config.rememberedProxyLocation, remembered)
+        config.proxy = ProxySettings(kind: .socks5, host: "198.51.100.1", port: 1080)
+        XCTAssertNil(config.rememberedProxyLocation, "remembered for another proxy")
+    }
+
     func testProxyLocationFieldsRoundTripAndDefaultOnForOldConfigs() throws {
         let legacy = #"{"ephemeral":false,"geolocation":{"deny":{}},"safeBrowsingEnabled":false,"webRTCPolicy":"disabled"}"#
         let old = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(legacy.utf8))
         XCTAssertTrue(old.matchProxyLocation)
         XCTAssertNil(old.lastProxyLocation)
+        XCTAssertFalse(old.warnOnProxyIPChange)
+        // A location stored before the exit IP was kept decodes without one.
+        let olderLocation = #"{"geolocation":{"deny":{}},"webRTCPolicy":"disabled","lastProxyLocation":{"timeZoneIdentifier":"Europe/Paris","countryCode":"FR","proxyEndpoint":"socks5://p:1080","resolvedAt":"2026-10-01T10:00:00Z"}}"#
+        let withOlderLocation = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(olderLocation.utf8))
+        XCTAssertEqual(withOlderLocation.lastProxyLocation?.timeZoneIdentifier, "Europe/Paris")
+        XCTAssertNil(withOlderLocation.lastProxyLocation?.exitIP)
 
         let proxy = ProxySettings(kind: .httpConnect, host: "proxy.example", port: 3128)
         let config = ProfileConfiguration(proxy: proxy, matchProxyLocation: false,
                                           lastProxyLocation: ProxyLocation(timeZoneIdentifier: "Europe/Paris", countryCode: "FR",
                                                                            proxyEndpoint: ProxyLocation.endpoint(of: proxy),
-                                                                           resolvedAt: Date(timeIntervalSince1970: 1_800_000_000)))
+                                                                           resolvedAt: Date(timeIntervalSince1970: 1_800_000_000),
+                                                                           exitIP: "198.51.100.9"),
+                                          warnOnProxyIPChange: true)
         let decoded = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: JSONCoding.encoder.encode(config))
         XCTAssertEqual(decoded, config)
 

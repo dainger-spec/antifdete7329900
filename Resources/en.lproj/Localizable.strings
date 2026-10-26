@@ -49,6 +49,8 @@
 "editor.proxy.type" = "Type";
 "editor.proxy.use" = "Use proxy";
 "editor.proxy.username" = "Username (optional)";
+"editor.proxy.warnIPChange" = "Warn when the proxy's IP changes";
+"editor.proxy.warnIPChange.note" = "At each launch the proxy's exit IP is looked up through the proxy (as for its time zone) and compared with the previous launch of this profile. Proxies that rotate addresses change it every time.";
 "editor.retain.forever" = "Forever";
 "editor.retain.month" = "1 month";
 "editor.retain.quarter" = "3 months";
@@ -102,6 +104,9 @@
 "launch.error.proxyInvalid" = "The profile's proxy is misconfigured (address “%@”). The profile was not started, so no site opens directly. Fix the proxy address in the profile settings.";
 "launch.error.proxyNeedsCredentials" = "The proxy at “%@” requires a user name and password. The profile was not started, so no site opens directly. Add them in the profile settings.";
 "launch.languageFixed" = "Websites see the language “%1$@” (set for this run by the first profile launched). For this profile’s proxy they would expect “%2$@”: quit the app and launch this profile first.";
+"launch.proxyIPChanged" = "Profile “%1$@”: its proxy now exits from %3$@ (at the previous launch: %2$@).";
+"launch.proxyNeedsCredentialsStopped" = "The proxy at “%@” now requires a user name and password. The profile was stopped, so no site opens directly. Add them in the profile settings.";
+"launch.proxyZoneChanged" = "Profile “%1$@”: its proxy now exits in the time zone %2$@. The profile uses it from its next launch; pages open now keep the current one.";
 "launch.webrtcOff.httpProxy" = "WebRTC is off in this profile: an HTTP proxy cannot carry UDP. WebRTC through a proxy needs SOCKS5.";
 "launch.webrtcOff.noTunnel" = "WebRTC is off in this profile: without the network extension its UDP would go around the proxy from the real IP. Turn the extension on under “WebRTC through proxies”.";
 "library.bookmarks.empty" = "No bookmarks. Use ☆ in the toolbar or ⌘D to bookmark a page.";

@@ -1,7 +1,12 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Where a profile's proxy exits to the web, as a geolocation service saw it when asked through
-/// that proxy: the exit IP's time zone and country. A site compares the same IP against the
+/// that proxy: the exit IP, its time zone and country. A site compares the same IP against the
 /// time zone and language the browser reports (e.g. "Local Time Zone" vs "System Time Zone").
 public struct ProxyLocation: Codable, Equatable, Sendable {
     /// IANA identifier, e.g. "Europe/Berlin".
@@ -11,29 +16,43 @@ public struct ProxyLocation: Codable, Equatable, Sendable {
     /// The proxy this was resolved for (`endpoint(of:)`): a stored location applies to it only.
     public var proxyEndpoint: String
     public var resolvedAt: Date
+    /// The address the service saw the request come from: the proxy's exit IP. Nil for a
+    /// location stored by an older build, or a service that did not say.
+    public var exitIP: String?
 
-    public init(timeZoneIdentifier: String, countryCode: String?, proxyEndpoint: String, resolvedAt: Date = Date()) {
+    public init(timeZoneIdentifier: String, countryCode: String?, proxyEndpoint: String, resolvedAt: Date = Date(),
+                exitIP: String? = nil) {
         self.timeZoneIdentifier = timeZoneIdentifier
         self.countryCode = countryCode
         self.proxyEndpoint = proxyEndpoint
         self.resolvedAt = resolvedAt
+        self.exitIP = exitIP
     }
 
     public static func endpoint(of proxy: ProxySettings) -> String {
         "\(proxy.kind.rawValue)://\(proxy.host):\(proxy.port)"
     }
 
-    /// Same place for the same proxy (the lookup time aside).
+    /// Same place, from the same exit IP, for the same proxy (the lookup time aside).
     public func isSameLocation(as other: ProxyLocation?) -> Bool {
         guard let other else { return false }
         return timeZoneIdentifier == other.timeZoneIdentifier && countryCode == other.countryCode
-            && proxyEndpoint == other.proxyEndpoint
+            && proxyEndpoint == other.proxyEndpoint && exitIP == other.exitIP
+    }
+
+    /// The exit IP changed since `previous`, for the same proxy: the old and new address. Nil
+    /// when either is unknown, or `previous` was looked up for another proxy (the user changed it).
+    public func exitIPChange(since previous: ProxyLocation?) -> (old: String, new: String)? {
+        guard let previous, previous.proxyEndpoint == proxyEndpoint,
+              let old = previous.exitIP, let new = exitIP, old != new else { return nil }
+        return (old, new)
     }
 
     /// Reads a geolocation service's JSON answer: the time zone at `timeZoneKeyPath`, the country
-    /// at `countryKeyPath` (e.g. `["timezone", "id"]` for `{"timezone": {"id": "Europe/Berlin"}}`).
-    /// nil unless the time zone is a known IANA identifier.
-    public static func parse(_ data: Data, timeZoneKeyPath: [String], countryKeyPath: [String],
+    /// at `countryKeyPath` (e.g. `["timezone", "id"]` for `{"timezone": {"id": "Europe/Berlin"}}`),
+    /// the exit IP at `ipKeyPath`. nil unless the time zone is a known IANA identifier; the IP is
+    /// kept only when it is an IPv4 or IPv6 literal.
+    public static func parse(_ data: Data, timeZoneKeyPath: [String], countryKeyPath: [String], ipKeyPath: [String] = ["ip"],
                              proxyEndpoint: String, resolvedAt: Date = Date()) -> ProxyLocation? {
         guard let object = try? JSONSerialization.jsonObject(with: data) else { return nil }
         func value(at path: [String]) -> String? {
@@ -44,7 +63,14 @@ public struct ProxyLocation: Codable, Equatable, Sendable {
         guard let zone = value(at: timeZoneKeyPath), zone.contains("/"), TimeZone(identifier: zone) != nil else { return nil }
         let country = value(at: countryKeyPath).map { $0.uppercased() }
             .flatMap { code in code.count == 2 && code.unicodeScalars.allSatisfy { ("A"..."Z").contains($0) } ? code : nil }
-        return ProxyLocation(timeZoneIdentifier: zone, countryCode: country, proxyEndpoint: proxyEndpoint, resolvedAt: resolvedAt)
+        let ip = value(at: ipKeyPath).flatMap { isIPLiteral($0) ? $0 : nil }
+        return ProxyLocation(timeZoneIdentifier: zone, countryCode: country, proxyEndpoint: proxyEndpoint,
+                             resolvedAt: resolvedAt, exitIP: ip)
+    }
+
+    static func isIPLiteral(_ text: String) -> Bool {
+        var v4 = in_addr(), v6 = in6_addr()
+        return text.withCString { inet_pton(AF_INET, $0, &v4) == 1 || inet_pton(AF_INET6, $0, &v6) == 1 }
     }
 
     /// The language websites would expect from a Safari user in this country (a BCP 47 tag such

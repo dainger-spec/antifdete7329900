@@ -67,9 +67,11 @@ TZ=America/New_York node scripts/test-shims.mjs   # JS shim logic and CreepJS-st
 TZ=America/New_York bun scripts/test-shims.mjs    # the same under JavaScriptCore, Safari's engine
 
 # End-to-end against the real WebKit of this Mac (headless, temporary vault, cleans up):
-python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 &
+python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 \
+  --socks2 18084 --socks-auth 18085 &
 PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083 \
+PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085 \
 PB_SELFTEST_SURFACE_OUT=build/surface \
   build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test
 

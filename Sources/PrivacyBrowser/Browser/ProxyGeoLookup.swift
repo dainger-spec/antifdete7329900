@@ -4,18 +4,21 @@ import Network
 import os
 
 /// Where a profile's proxy exits: a geolocation service asked THROUGH the proxy sees the
-/// proxy's exit IP and answers with its time zone and country (`ProxyLocation`).
+/// proxy's exit IP and answers with it, its time zone and country (`ProxyLocation`).
 ///
 /// PRIVACY: the query goes to a third-party service (below), over HTTPS, only through the
 /// profile's proxy — never direct: `ProxyConfigurationFactory` sets `allowFailover = false` —
 /// with the profile's User-Agent, no cookies and no cache. It runs when a profile with a proxy
-/// and `matchProxyLocation` launches.
+/// launches with `matchProxyLocation` or `warnOnProxyIPChange` (`needsProxyLookup`). Each lookup
+/// has its own URLSession with that profile's proxy: lookups of profiles launched together do
+/// not share connections or credentials.
 @MainActor
 enum ProxyGeoLookup {
     struct Service {
         let url: URL
         let timeZoneKeyPath: [String]
         let countryKeyPath: [String]
+        var ipKeyPath: [String] = ["ip"]
     }
 
     /// HTTPS services that need no API key, tried in order until one answers. Replaced by the
@@ -28,7 +31,7 @@ enum ProxyGeoLookup {
 
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "ProxyGeoLookup")
 
-    struct Result {
+    struct Result: Sendable {
         /// nil when no service answered within the timeout (proxy down, services blocked or rate-limited).
         var location: ProxyLocation?
         /// The proxy answered 407 and the profile has no credentials for it. Only this lookup sees
@@ -63,7 +66,7 @@ enum ProxyGeoLookup {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 if status == 200, let location = ProxyLocation.parse(data, timeZoneKeyPath: service.timeZoneKeyPath,
                                                                      countryKeyPath: service.countryKeyPath,
-                                                                     proxyEndpoint: endpoint) {
+                                                                     ipKeyPath: service.ipKeyPath, proxyEndpoint: endpoint) {
                     log.info("Proxy \(endpoint, privacy: .private) exits in \(location.timeZoneIdentifier, privacy: .public) (\(location.countryCode ?? "?", privacy: .public)) per \(service.url.host ?? "?", privacy: .public)")
                     result.location = location
                     return result

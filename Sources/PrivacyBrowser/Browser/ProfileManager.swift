@@ -36,6 +36,23 @@ final class ProfileManager: ObservableObject {
     /// seals what it decrypted instead of opening a window that would outlive this manager.
     private(set) var isShuttingDown = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ProfileManager")
+    /// The run each running profile belongs to: a lookup that finishes after its profile stopped
+    /// (and maybe launched again) does not act on another run.
+    private var launchTokens: [UUID: UUID] = [:]
+    /// Each profile's latest launch: only its lookup is acted on, so an earlier run's late answer
+    /// never replaces what a later one found.
+    private var latestLaunch: [UUID: UUID] = [:]
+    /// Launches whose lookup through the proxy has not finished yet.
+    private var lookupsInFlight: Set<UUID> = []
+
+    /// A lookup through a profile's proxy is still running (self-test hook).
+    var hasProxyLookupsInFlight: Bool { !lookupsInFlight.isEmpty }
+
+    /// How long a launch waits for the lookup through the proxy when nothing is remembered for
+    /// that proxy yet. With a remembered location it does not wait at all. A lookup still under
+    /// way then finishes in the background (`proxyLookupFinishedLate`). The lookup itself gives up
+    /// after 6 s.
+    static var firstLookupWait: TimeInterval = 3
 
     /// Why a launch was refused before anything was decrypted (shown to the user).
     enum LaunchError: LocalizedError, Equatable {
@@ -90,16 +107,33 @@ final class ProfileManager: ObservableObject {
                                      recordsHistory: stored.historyEnabled)
         library.onError = { [weak self] message in self?.onError?(message) }
 
-        // Where the proxy exits (time zone, country), asked through the proxy while the web data
-        // decrypts. See ProfileConfiguration.matchProxyLocation.
-        async let lookedUp = lookUpProxyLocation(stored)
+        // Where the proxy exits (time zone, country, exit IP), asked through the proxy while the
+        // web data decrypts. See ProfileConfiguration.needsProxyLookup.
+        let token = UUID()
+        latestLaunch[id] = token
+        var lookupTask: Task<ProxyGeoLookup.Result, Never>?
+        if stored.needsProxyLookup {
+            lookupsInFlight.insert(token)
+            lookupTask = Task {
+                let result = await self.lookUpProxyLocation(stored)
+                self.lookupsInFlight.remove(token)
+                return result
+            }
+        }
         if stored.proxy != nil { await ContentRules.prepare() }
         if !stored.ephemeral {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
             try await webDataVault.prepareForLaunch(profileID: id, key: key)
         }
-        let lookup = await lookedUp
-        let location = stored.proxyLocation(lookedUp: lookup.location)
+        // A location remembered for this proxy is used at once, and a lookup made only for the
+        // exit IP is not waited for. Otherwise the launch waits a little: the time zone a page sees
+        // should be the proxy's from its first load.
+        var lookup: ProxyGeoLookup.Result?
+        if let lookupTask {
+            let wait = stored.needsProxyLocation && stored.rememberedProxyLocation == nil ? Self.firstLookupWait : 0
+            lookup = await Self.value(of: lookupTask, within: wait)
+        }
+        let location = stored.proxyLocation(lookedUp: lookup?.location)
 
         // Lock or Quit began while the data was decrypted: a window opened now would have no
         // manager and its data would stay unencrypted. No data store exists yet, so seal the
@@ -110,11 +144,11 @@ final class ProfileManager: ObservableObject {
         }
         // A proxy that wants credentials the profile does not have: WebKit would leave every page
         // loading forever (it never shows the proxy's challenge). Refuse the launch instead.
-        if lookup.proxyRequiresCredentials, let proxy = stored.proxy {
+        if lookup?.proxyRequiresCredentials == true, let proxy = stored.proxy {
             if !stored.ephemeral { _ = try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
             throw LaunchError.proxyNeedsCredentials(host: proxy.host)
         }
-        rememberProxyLocation(location, for: id, in: stored)
+        if let lookup { proxyLookupFinished(lookup, for: id, name: summary.name, stored: stored) }
         var configuration = stored.applying(location)
         configuration.webRTCRelay = await webRTCRelay(for: id, configuration)
         // Before the first web view of the run: WebKit reads its language list only once.
@@ -138,13 +172,44 @@ final class ProfileManager: ObservableObject {
         }
         sessions[id] = session
         keys[id] = key
+        launchTokens[id] = token
         runningProfileIDs.insert(id)
         session.openWindow(url: configuration.startURL)
         try? repository.markLaunched(id)
+        if lookup == nil, let lookupTask {
+            let runningZone = configuration.timeZoneIdentifier
+            Task { [weak self] in
+                let result = await lookupTask.value
+                self?.proxyLookupFinishedLate(result, for: id, name: summary.name, token: token, stored: stored, runningZone: runningZone)
+            }
+        }
+    }
+
+    /// The task's value if it finishes within `seconds`, else nil; the task keeps running.
+    private static func value<T: Sendable>(of task: Task<T, Never>, within seconds: TimeInterval) async -> T? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<T?, Never>) in
+            let race = FirstAnswer()
+            Task { @MainActor in
+                let value = await task.value
+                if race.claim() { continuation.resume(returning: value) }
+            }
+            Task { @MainActor in
+                if seconds > 0 { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+                if race.claim() { continuation.resume(returning: nil) }
+            }
+        }
+    }
+
+    @MainActor private final class FirstAnswer {
+        private var claimed = false
+        func claim() -> Bool {
+            defer { claimed = true }
+            return !claimed
+        }
     }
 
     private func lookUpProxyLocation(_ configuration: ProfileConfiguration) async -> ProxyGeoLookup.Result {
-        guard configuration.needsProxyLocation, let proxy = configuration.proxy else { return ProxyGeoLookup.Result() }
+        guard configuration.needsProxyLookup, let proxy = configuration.proxy else { return ProxyGeoLookup.Result() }
         let result = await ProxyGeoLookup.lookUp(proxy: proxy,
                                                  userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version))
         if result.location == nil {
@@ -164,14 +229,47 @@ final class ProfileManager: ObservableObject {
         onError?(String(format: L("launch.languageFixed"), decided, wanted))
     }
 
-    /// Keeps a newly found proxy location in the profile's configuration, as the fallback for a
-    /// later failed lookup. Written only when it changed.
-    private func rememberProxyLocation(_ location: ProxyLocation?, for id: UUID, in stored: ProfileConfiguration) {
-        guard let location, !location.isSameLocation(as: stored.lastProxyLocation) else { return }
-        var updated = stored
-        updated.lastProxyLocation = location
+    /// What a finished lookup tells: the exit IP compared with the previous launch's (when the
+    /// profile asks for that), and the location to remember for the next launch.
+    private func proxyLookupFinished(_ result: ProxyGeoLookup.Result, for id: UUID, name: String, stored: ProfileConfiguration) {
+        guard let found = result.location else { return }
+        if stored.warnOnProxyIPChange, let change = found.exitIPChange(since: stored.lastProxyLocation) {
+            log.notice("The proxy of \(id.uuidString, privacy: .public) exits from another IP than at the previous launch")
+            onError?(String(format: L("launch.proxyIPChanged"), name, change.old, change.new))
+        }
+        rememberProxyLocation(found, for: id)
+    }
+
+    /// A lookup that finished after the profile opened: a proxy that turned out to want
+    /// credentials stops it (as a launch would have been refused), and a time zone other than the
+    /// one the profile runs in is noted (it applies at the next launch: pages already loaded keep
+    /// theirs).
+    private func proxyLookupFinishedLate(_ result: ProxyGeoLookup.Result, for id: UUID, name: String, token: UUID,
+                                         stored: ProfileConfiguration, runningZone: String?) {
+        guard latestLaunch[id] == token else { return }
+        let running = sessions[id] != nil && launchTokens[id] == token
+        if result.proxyRequiresCredentials, running, let proxy = stored.proxy {
+            onError?(String(format: L("launch.proxyNeedsCredentialsStopped"), proxy.host))
+            Task { await stopReportingErrors(id) }
+            return
+        }
+        proxyLookupFinished(result, for: id, name: name, stored: stored)
+        if running, stored.needsProxyLocation, stored.timeZoneIdentifier == nil,
+           let zone = result.location?.timeZoneIdentifier, zone != runningZone {
+            onError?(String(format: L("launch.proxyZoneChanged"), name, zone))
+        }
+    }
+
+    /// Keeps a newly found proxy location (and exit IP) in the profile's configuration, for the
+    /// next launch. Read again first: the user may have edited the profile meanwhile, and an
+    /// answer about a proxy they replaced is not kept. Written only when it changed.
+    private func rememberProxyLocation(_ found: ProxyLocation, for id: UUID) {
         do {
-            try repository.saveConfiguration(updated, for: id)
+            var current = try repository.loadConfiguration(id)
+            guard current.proxy.map(ProxyLocation.endpoint(of:)) == found.proxyEndpoint,
+                  !found.isSameLocation(as: current.lastProxyLocation) else { return }
+            current.lastProxyLocation = found
+            try repository.saveConfiguration(current, for: id)
         } catch {
             log.error("Could not store the proxy location of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
         }
@@ -205,6 +303,7 @@ final class ProfileManager: ObservableObject {
 
     func stop(_ id: UUID) async throws {
         guard let session = sessions.removeValue(forKey: id) else { return }
+        launchTokens[id] = nil
         tunnel.unregister(profile: id)
         let key = keys.removeValue(forKey: id)
         runningProfileIDs.remove(id)

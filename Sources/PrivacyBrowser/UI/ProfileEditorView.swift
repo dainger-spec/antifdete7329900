@@ -31,6 +31,7 @@ struct ProfileDraft {
     var matchProxyLocation = true
     /// Carried through unchanged (a cache for launching; see ProfileConfiguration).
     var lastProxyLocation: ProxyLocation?
+    var warnOnProxyIPChange = false
     var webRTC: WebRTCPolicy = .disabled
     var ephemeral = false
     var safeBrowsing = false
@@ -79,6 +80,7 @@ struct ProfileDraft {
         timeZone = c.timeZoneIdentifier ?? TimeZone.current.identifier
         matchProxyLocation = c.matchProxyLocation
         lastProxyLocation = c.lastProxyLocation
+        warnOnProxyIPChange = c.warnOnProxyIPChange
         webRTC = c.webRTCPolicy
         ephemeral = c.ephemeral
         safeBrowsing = c.safeBrowsingEnabled
@@ -148,6 +150,7 @@ struct ProfileDraft {
         configuration.timeZoneIdentifier = overrideTimeZone ? timeZone : nil
         configuration.matchProxyLocation = matchProxyLocation
         configuration.lastProxyLocation = lastProxyLocation
+        configuration.warnOnProxyIPChange = warnOnProxyIPChange
         configuration.webRTCPolicy = webRTC
         configuration.ephemeral = ephemeral
         configuration.safeBrowsingEnabled = safeBrowsing
@@ -278,6 +281,11 @@ struct ProfileEditorView: View {
                     Toggle(L("editor.proxy.tls"), isOn: $draft.proxyTLS)
                 }
                 TextField(L("editor.proxy.bypass"), text: $draft.proxyExcludedDomains)
+                Toggle(L("editor.proxy.warnIPChange"), isOn: $draft.warnOnProxyIPChange)
+                if draft.warnOnProxyIPChange {
+                    Text(L("editor.proxy.warnIPChange.note")).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         } header: { Text(L("editor.section.network")) } footer: {
             Text(L("editor.network.footer"))

@@ -10,24 +10,32 @@ itself with a page that reports how the request arrived, e.g.
 `atyp=3` means the browser sent the *hostname* to the proxy (remote DNS resolution); an
 `.invalid` hostname can only load at all if it was not resolved locally.
 
-    python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083
+    python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 \
+        --socks2 18084 --socks-auth 18085
 
 `--http-auth` is an HTTP CONNECT proxy that answers 407 until the request carries
 `Proxy-Authorization: Basic pb-user:pb-pass`, then reports `via=connect-auth`.
 `--http6` is the plain HTTP CONNECT proxy listening on the IPv6 loopback `::1`
 (a profile whose proxy host is an IPv6 literal); it reports `via=connect6`.
+`--socks2` is a second SOCKS5 proxy, and `--socks-auth` one that accepts only username/password
+authentication (RFC 1929) with pb-user2:pb-pass2: several profiles behind different SOCKS5
+proxies at once. Every page names the port of the listener that served it (`listener=...`).
 
 Pages also report the request's `Accept-Language` header (`accept-language=...`), the path
-`/pb-geo.json` answers like a geolocation service (`{"timezone": "Europe/Berlin", "country": "DE"}`)
-for the proxy-location check, and `/pb-served.json` lists the paths served so far (so the
-self-test can tell which requests reached the proxy, e.g. that a beacon did not).
+`/pb-geo.json` answers like a geolocation service (`{"ip": "203.0.113.7", "timezone":
+"Europe/Berlin", "country": "DE"}`; `?ip=`, `?tz=` and `?delay=<seconds>` change the answer) for
+the proxy-location checks, and `/pb-served.json` lists the paths served so far (so the self-test
+can tell which requests reached the proxy, e.g. that a beacon did not).
 """
 import argparse
 import base64
+import functools
 import json
 import socket
 import struct
 import threading
+import time
+from urllib.parse import parse_qs
 
 
 def read_until_blank_line(conn: socket.socket) -> bytes:
@@ -51,13 +59,18 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
     """Answers the (tunnelled or forwarded) HTTP request `request` for `path`."""
     accept_language = next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
                             if line.lower().startswith("accept-language:")), "-")
-    plain_path = path.split("?", 1)[0]
+    plain_path, _, query = path.partition("?")
     with SERVED_LOCK:
         if plain_path != "/pb-served.json":
             SERVED.append(plain_path)
         served = list(SERVED)
     if plain_path == "/pb-geo.json":
-        body, content_type = GEO_ANSWER, "application/json"
+        params = {key: values[0] for key, values in parse_qs(query).items()}
+        answer_json = json.loads(GEO_ANSWER)
+        answer_json["ip"] = params.get("ip", answer_json["ip"])
+        answer_json["timezone"] = params.get("tz", answer_json["timezone"])
+        time.sleep(min(float(params.get("delay", "0")), 30))
+        body, content_type = json.dumps(answer_json).encode(), "application/json"
     elif plain_path == "/pb-served.json":
         body, content_type = json.dumps(served).encode(), "application/json"
     else:
@@ -132,13 +145,33 @@ def recv_exact(conn: socket.socket, n: int) -> bytes:
     return data
 
 
-def handle_socks(conn: socket.socket) -> None:
+SOCKS_AUTH = (b"pb-user2", b"pb-pass2")
+
+
+def handle_socks(conn: socket.socket, listener: int = 0, auth: bool = False) -> None:
     with conn:
         version, nmethods = recv_exact(conn, 2)
-        recv_exact(conn, nmethods)
+        methods = recv_exact(conn, nmethods)
         if version != 5:
             return
-        conn.sendall(b"\x05\x00")  # no authentication
+        if auth:
+            # Username/password only (RFC 1929): a client without credentials gets "no acceptable method".
+            if 2 not in methods:
+                conn.sendall(b"\x05\xff")
+                print(f"[selftest-proxy] socks-auth :{listener}: no credentials offered", flush=True)
+                return
+            conn.sendall(b"\x05\x02")
+            _, ulen = recv_exact(conn, 2)
+            user = recv_exact(conn, ulen)
+            plen = recv_exact(conn, 1)[0]
+            password = recv_exact(conn, plen)
+            if (user, password) != SOCKS_AUTH:
+                conn.sendall(b"\x01\x01")
+                print(f"[selftest-proxy] socks-auth :{listener}: wrong credentials", flush=True)
+                return
+            conn.sendall(b"\x01\x00")
+        else:
+            conn.sendall(b"\x05\x00")  # no authentication
         _, cmd, _, atyp = recv_exact(conn, 4)
         if atyp == 1:
             host = socket.inet_ntoa(recv_exact(conn, 4))
@@ -153,7 +186,12 @@ def handle_socks(conn: socket.socket) -> None:
             conn.sendall(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00")
             return
         conn.sendall(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")
-        respond_with_page(conn, f"via=socks5 atyp={atyp} target={host}:{port}")
+        via = "socks5-auth" if auth else "socks5"
+        respond_with_page(conn, f"via={via} atyp={atyp} target={host}:{port} listener={listener}")
+
+
+def handler_name(handler) -> str:
+    return getattr(handler, "__name__", None) or handler.func.__name__  # a functools.partial
 
 
 def serve(port: int, handler, host: str = "127.0.0.1") -> None:
@@ -164,9 +202,9 @@ def serve(port: int, handler, host: str = "127.0.0.1") -> None:
         server.bind((host, port))
         server.listen(16)
     except OSError as exc:  # e.g. no IPv6 on this host: the other listeners keep serving
-        print(f"[selftest-proxy] {handler.__name__} cannot listen on {host}:{port}: {exc}", flush=True)
+        print(f"[selftest-proxy] {handler_name(handler)} cannot listen on {host}:{port}: {exc}", flush=True)
         return
-    print(f"[selftest-proxy] {handler.__name__} listening on {host}:{port}", flush=True)
+    print(f"[selftest-proxy] {handler_name(handler)} listening on {host}:{port}", flush=True)
     while True:
         conn, _ = server.accept()
         threading.Thread(target=lambda c=conn: _safe(handler, c), daemon=True).start()
@@ -176,7 +214,7 @@ def _safe(handler, conn) -> None:
     try:
         handler(conn)
     except Exception as exc:  # noqa: BLE001 - test helper, keep serving
-        print(f"[selftest-proxy] {handler.__name__} error: {exc}", flush=True)
+        print(f"[selftest-proxy] {handler_name(handler)} error: {exc}", flush=True)
 
 
 def main() -> None:
@@ -185,13 +223,21 @@ def main() -> None:
     parser.add_argument("--socks", type=int, default=18081)
     parser.add_argument("--http-auth", type=int, default=None)
     parser.add_argument("--http6", type=int, default=None)
+    parser.add_argument("--socks2", type=int, default=None)
+    parser.add_argument("--socks-auth", type=int, default=None)
     args = parser.parse_args()
     threading.Thread(target=serve, args=(args.http, handle_http), daemon=True).start()
     if args.http_auth:
         threading.Thread(target=serve, args=(args.http_auth, handle_http_auth), daemon=True).start()
     if args.http6:
         threading.Thread(target=serve, args=(args.http6, handle_http6, "::1"), daemon=True).start()
-    serve(args.socks, handle_socks)
+    if args.socks2:
+        threading.Thread(target=serve, args=(args.socks2, functools.partial(handle_socks, listener=args.socks2)),
+                         daemon=True).start()
+    if args.socks_auth:
+        threading.Thread(target=serve, args=(args.socks_auth, functools.partial(handle_socks, listener=args.socks_auth, auth=True)),
+                         daemon=True).start()
+    serve(args.socks, functools.partial(handle_socks, listener=args.socks))
 
 
 if __name__ == "__main__":
