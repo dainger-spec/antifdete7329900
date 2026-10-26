@@ -40,6 +40,15 @@ public enum SecureFile {
         }
     }
 
+    /// rename(2) that, unlike `replace`, never deletes `source` on failure: for moving a
+    /// directory that may be a profile's only copy (backup restore, crash recovery).
+    static func move(_ source: URL, to destination: URL) throws {
+        guard rename(source.path, destination.path) == 0 else {
+            let code = errno
+            throw CoreError.io("rename \(source.lastPathComponent) to \(destination.lastPathComponent) failed: errno \(code)")
+        }
+    }
+
     /// Creates a directory (and parents) with mode 0700.
     public static func ensureDirectory(_ url: URL) throws {
         var isDirectory: ObjCBool = false

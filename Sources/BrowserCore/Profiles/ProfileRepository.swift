@@ -133,10 +133,11 @@ public final class ProfileRepository: @unchecked Sendable {
         let configuration = try loadConfiguration(id, key: sourceKey)
         var bookmarks: BookmarkDocument?
         if copyBookmarks,
-           let document = try BookmarkStore.file(url: bookmarksURL(for: id), profileID: id, profileKey: sourceKey).load() {
+           var document = try BookmarkStore.file(url: bookmarksURL(for: id), profileID: id, profileKey: sourceKey).load() {
             // Live bookmarks only: the source's deletion tombstones (kept for sync) mean nothing
-            // to a profile that never had those bookmarks.
-            bookmarks = BookmarkDocument(bookmarks: document.bookmarks)
+            // to a profile that never had those bookmarks. Every other field is kept as it is.
+            document.deleted = [:]
+            bookmarks = document
         }
 
         let newID = UUID()
@@ -198,26 +199,60 @@ public final class ProfileRepository: @unchecked Sendable {
     /// Deletes profile directories that are not referenced by the index, and cleans up after a
     /// backup restore that a crash interrupted (`ProfileBackup.restore`): staging directories
     /// are deleted, and a profile directory that was moved aside to be replaced is moved back
-    /// if its replacement never arrived. Call it when no restore is running (e.g. at unlock).
+    /// unless its replacement arrived and works. Call it when no restore is running (e.g. at unlock).
     public func removeOrphanedDirectories() {
         let known = Set(list().map { $0.id.uuidString })
         let contents = (try? FileManager.default.contentsOfDirectory(atPath: profilesDirectory.path)) ?? []
         for name in contents {
             let url = profilesDirectory.appendingPathComponent(name)
             if name.hasPrefix(Self.replacedDirectoryPrefix) {
-                let idString = String(name.dropFirst(Self.replacedDirectoryPrefix.count).prefix(36))
-                if let id = UUID(uuidString: idString), known.contains(id.uuidString),
-                   !FileManager.default.fileExists(atPath: directory(for: id).path),
-                   (try? FileManager.default.moveItem(at: url, to: directory(for: id))) != nil {
-                    continue
-                }
-                try? FileManager.default.removeItem(at: url)
+                recoverReplacedDirectory(url, name: name, known: known)
             } else if name.hasPrefix(Self.restoreStagingPrefix) {
                 try? FileManager.default.removeItem(at: url)
             } else if !known.contains(name) && UUID(uuidString: name) != nil {
                 try? FileManager.default.removeItem(at: url)
             }
         }
+    }
+
+    /// A directory that a replacing restore moved aside and a crash (or a rollback whose rename
+    /// failed) left behind. It is the profile's previous data, so it is deleted only when the
+    /// live directory is a working profile — its configuration opens with the key in the index
+    /// (the replacement arrived) — or when the profile no longer exists. Otherwise it goes back
+    /// into place: the live directory may be missing, or something else (e.g. a store's write)
+    /// may have recreated it without a configuration.
+    private func recoverReplacedDirectory(_ aside: URL, name: String, known: Set<String>) {
+        let idString = String(name.dropFirst(Self.replacedDirectoryPrefix.count).prefix(36))
+        guard let id = UUID(uuidString: idString), known.contains(id.uuidString) else {
+            try? FileManager.default.removeItem(at: aside)
+            return
+        }
+        let live = directory(for: id)
+        guard FileManager.default.fileExists(atPath: live.path) else {
+            try? SecureFile.move(aside, to: live)
+            return
+        }
+        if configurationOpens(in: live, id: id) {
+            try? FileManager.default.removeItem(at: aside)
+            return
+        }
+        guard configurationOpens(in: aside, id: id) else { return } // neither works: keep both
+        let discarded = profilesDirectory.appendingPathComponent(Self.restoreStagingPrefix + UUID().uuidString,
+                                                                 isDirectory: true)
+        guard (try? SecureFile.move(live, to: discarded)) != nil else { return }
+        if (try? SecureFile.move(aside, to: live)) != nil {
+            try? FileManager.default.removeItem(at: discarded)
+        } else {
+            try? SecureFile.move(discarded, to: live) // keep the aside for the next attempt
+        }
+    }
+
+    private func configurationOpens(in directory: URL, id: UUID) -> Bool {
+        guard let key = try? profileKey(for: id),
+              let sealed = try? SecureFile.read(directory.appendingPathComponent(ProfileFileBinding.config.fileName)) else {
+            return false
+        }
+        return (try? ProfileFileBinding.config.open(sealed, profileID: id, profileKey: key)) != nil
     }
 
     // MARK: Keys and configuration

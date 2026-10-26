@@ -94,6 +94,9 @@ public enum ProfileBackup {
     /// Each file is opened before anything is written and copied from that handle. The stores
     /// replace their files with rename(2), so every file in the backup is a consistent version
     /// even if the profile is running (its website data is then the state of its last stop).
+    ///
+    /// `iterations` must be 1…10 000 000 (readers refuse more). A directory at `destination` is
+    /// refused rather than deleted.
     @discardableResult
     public static func export(profile id: UUID, from repository: ProfileRepository, to destination: URL, password: String,
                               iterations: Int = KDFParameters.recommendedIterations) throws -> ProfileBackupInfo {
@@ -138,6 +141,17 @@ public enum ProfileBackup {
                       iterations: Int) throws {
         precondition(sources.count == manifest.files.count)
         guard !password.isEmpty else { throw CoreError.invalidConfiguration("empty backup password") }
+        // `open` refuses more than `maxIterations` (the count is read before it can be
+        // authenticated), so a backup written with more could never be restored.
+        guard iterations >= 1, iterations <= maxIterations else {
+            throw CoreError.invalidConfiguration("backup KDF iterations must be 1–\(maxIterations)")
+        }
+        // The destination is replaced, not merged into: never recursively delete a directory
+        // that a caller passed by mistake.
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: destination.path, isDirectory: &isDirectory), isDirectory.boolValue {
+            throw CoreError.io("\(destination.lastPathComponent) is a directory")
+        }
         let kdf = KDFParameters.generate(iterations: iterations)
         let kek = try KeyDerivation.deriveKey(password: password, parameters: kdf)
         let kdfJSON = try JSONCoding.encoder.encode(kdf)
@@ -281,18 +295,22 @@ public enum ProfileBackup {
         let hasDirectory = FileManager.default.fileExists(atPath: destination.path)
         let keepAside = existing != nil && hasDirectory
         if keepAside {
-            try move(destination, to: aside)
+            try SecureFile.move(destination, to: aside)
         } else if hasDirectory {
             try FileManager.default.removeItem(at: destination) // leftovers of a profile no longer in the index
         }
         var movedIn = false
         do {
-            try move(staging, to: destination)
+            try SecureFile.move(staging, to: destination)
             movedIn = true
             try repository.installProfile(summary, key: key)
         } catch {
-            if movedIn { try? FileManager.default.removeItem(at: destination) }
-            if keepAside { try? move(aside, to: destination) }
+            // Undo with renames only: the replacement goes back to the staging path (removed by
+            // the `defer`), then the old directory returns. A recursive delete of `destination`
+            // could fail halfway and leave the old directory unable to move back. If a rename
+            // fails, the aside directory stays and `removeOrphanedDirectories()` recovers it.
+            if movedIn { try? SecureFile.move(destination, to: staging) }
+            if keepAside { try? SecureFile.move(aside, to: destination) }
             throw error
         }
         if keepAside { try? FileManager.default.removeItem(at: aside) }
@@ -407,15 +425,6 @@ public enum ProfileBackup {
             try EncryptedDirectoryArchive.reseal(from: webData, key: old.key, to: webData, newKey: new.key) {
                 try WebKitDataLayout.relabel($0, from: old.id, to: new.id)
             }
-        }
-    }
-
-    /// rename(2) that, unlike `SecureFile.replace`, never deletes `source` on failure: here the
-    /// source can be a profile's only copy.
-    private static func move(_ source: URL, to destination: URL) throws {
-        guard rename(source.path, destination.path) == 0 else {
-            let code = errno
-            throw CoreError.io("rename \(source.lastPathComponent) to \(destination.lastPathComponent) failed: errno \(code)")
         }
     }
 }

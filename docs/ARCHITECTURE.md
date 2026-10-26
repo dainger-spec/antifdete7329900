@@ -114,7 +114,7 @@ Application Support/PrivacyBrowser/      (0700)
     passwords.bin                 AES-GCM(password key, [PasswordEntry] JSON)
     history.bin                   AES-GCM(history key, HistoryDocument JSON)          [not for ephemeral profiles]
     bookmarks.bin                 AES-GCM(bookmarks key, BookmarkDocument JSON)
-    session.bin                   AES-GCM(session key, SessionDocument JSON)          [device-local, never synced]
+    session.bin                   AES-GCM(session key, open tabs)                      [device-local, never synced]
     webdata.pbsa                  streaming encrypted archive of WebKit's data dirs
 
 WebKit/<bundle-id>/WebsiteDataStore/<uuid>/   unsandboxed  ┐ WebKit-owned plaintext; exists only
@@ -158,7 +158,9 @@ any vault with only the backup password. Restoring unpacks into a staging direct
 the vault only after the whole file has authenticated.
 
 - Restored in place (same ID: a vault without that profile, or "replace"): same ID and key.
-  A replace moves the old directory aside and moves it back on failure or after a crash.
+  A replace moves the old directory aside and moves it back on failure (renames only). After a
+  crash, `removeOrphanedDirectories()` (at unlock) deletes the aside copy only if the live
+  directory's configuration opens with the key in the index; otherwise it moves the old one back.
 - Restored as a copy (`.copy`, or the original still exists or was deleted): a new ID and a
   new random profile key. Every file is re-encrypted for them, including `webdata.pbsa`, whose
   root labels are renamed to the new UUID.
