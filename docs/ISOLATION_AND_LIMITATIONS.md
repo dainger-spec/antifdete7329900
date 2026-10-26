@@ -219,6 +219,14 @@ behaviour are verified by the self-test (§0).
 | Camera and microphone streams | Local capture; WebRTC transport isn't proxied | Asks the user every time |
 | Sync traffic | Goes from the app process through the system network, not the profile proxy | Folder transport makes no network requests; HTTP sync is HTTPS and carries only encrypted blobs |
 
+**Proxy authentication:** credentials go into the data store's `ProxyConfiguration`
+(`applyCredential`), which Network.framework sends when the proxy answers 407. WebKit does not
+show the proxy's challenge to the app (it keeps it to itself; with no credentials to send the
+page simply loads forever), so a profile without credentials cannot find out from a page that
+its proxy wants them. The launch-time lookup through the proxy (§6, time zone from the proxy)
+does see the 407: the launch is then refused with a message, and nothing opens directly. With
+that lookup switched off, a proxy that wants credentials shows as pages that never load.
+
 **Verify the proxy by hand:** set a SOCKS5 proxy, for example `ssh -D 1080 host`, open
 `https://ifconfig.me`, and confirm it shows the proxy's IP. Then stop the proxy and
 reload: the page must fail, not show your own IP.
