@@ -128,3 +128,33 @@ final class EgressPolicyTests: XCTestCase {
         XCTAssertEqual(config.network.egress(tunnelAvailable: true), .proxyTCPOnly(socks))
     }
 }
+
+final class TunnelCoordinatorTests: XCTestCase {
+    func testFirstProfileMayStart() {
+        var c = TunnelCoordinator()
+        let a = UUID()
+        XCTAssertNil(c.canStart(a))
+        c.started(a)
+        XCTAssertEqual(c.activeProfile, a)
+    }
+
+    func testSecondTunnelIsRefusedWhileFirstIsUp() {
+        var c = TunnelCoordinator()
+        let a = UUID(), b = UUID()
+        c.started(a)
+        XCTAssertEqual(c.canStart(b), .anotherTunnelActive(a))
+        // The same profile re-starting (e.g. relaunch) is fine.
+        XCTAssertNil(c.canStart(a))
+    }
+
+    func testStoppingFreesTheTunnel() {
+        var c = TunnelCoordinator()
+        let a = UUID(), b = UUID()
+        c.started(a)
+        c.stopped(b) // not the active one: no effect
+        XCTAssertEqual(c.activeProfile, a)
+        c.stopped(a)
+        XCTAssertNil(c.activeProfile)
+        XCTAssertNil(c.canStart(b))
+    }
+}

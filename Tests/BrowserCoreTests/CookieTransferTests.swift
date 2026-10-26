@@ -531,7 +531,15 @@ final class CookieTransferTests: XCTestCase {
             XCTAssertEqual(httpCookie.isSecure, record.secure)
             XCTAssertEqual(httpCookie.isHTTPOnly, record.httpOnly)
             XCTAssertEqual(httpCookie.isSessionOnly, record.expires == nil)
-            XCTAssertEqual(httpCookie.expiresDate, record.expires)
+            // Apple's HTTPCookie can hand expiresDate back with sub-second drift (it stores the
+            // expiry in its own form); cookie expiry is whole-second, so compare within a second.
+            if let expected = record.expires {
+                let actual = try XCTUnwrap(httpCookie.expiresDate)
+                XCTAssertEqual(actual.timeIntervalSince1970, expected.timeIntervalSince1970, accuracy: 1)
+            } else {
+                XCTAssertNil(httpCookie.expiresDate)
+            }
+            // The contract we rely on: the record survives the round trip through HTTPCookie.
             XCTAssertEqual(CookieRecord(httpCookie), record)
         }
 

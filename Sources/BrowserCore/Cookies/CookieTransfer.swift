@@ -166,7 +166,12 @@ extension CookieRecord {
         if !cookie.isSessionOnly, let date = cookie.expiresDate {
             let seconds = date.timeIntervalSince1970
             guard seconds.isFinite else { return nil }
-            expires = seconds > Self.maxExpiry ? Date(timeIntervalSince1970: Self.maxExpiry) : date
+            // Cookie expiry is whole-second (RFC 6265); Apple's HTTPCookie round-trips expiresDate
+            // through its own representation and can come back with sub-second drift that
+            // swift-corelibs-foundation doesn't have. Floor to the second so the value is
+            // deterministic across platforms.
+            let clamped = min(seconds, Self.maxExpiry).rounded()
+            expires = Date(timeIntervalSince1970: clamped)
         }
         var sameSite: SameSite?
         #if canImport(Darwin)
