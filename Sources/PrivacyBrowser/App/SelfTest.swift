@@ -98,7 +98,7 @@ final class SelfTest {
         defer { try? FileManager.default.removeItem(at: root) }
         do {
             let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
-            try await deleteBeforeWebKitInit(repository) // must run before any WKWebView exists
+            try await firstWebKitUse(repository) // must run before anything else touches WebKit
             try await storageIsolationAndShims(repository)
             try await deviceGenerations(repository)
             try await recoverySealing(repository)
@@ -397,24 +397,36 @@ final class SelfTest {
 
     // MARK: Profile deletion (regression for the delete crash)
 
-    /// The original crash needs a process in which WebKit is not initialized yet (no `WKWebView`
-    /// so far), i.e. "unlock, then delete a profile" — `remove(forIdentifier:)` then completes via
-    /// a nil `RunLoop::main()` and segfaults on WebKit's data-store queue. Must run before any
-    /// other check creates a `WKWebView`.
-    private func deleteBeforeWebKitInit(_ repository: ProfileRepository) async throws {
+    /// `remove(forIdentifier:)` and `WKWebsiteDataStore.nonPersistent()` crash (EXC_BAD_ACCESS on a
+    /// nil `RunLoop::main()`) when they are the first WebKit use in the process — e.g. "unlock,
+    /// then delete a profile" or "unlock, then open an ephemeral profile". Must run before anything
+    /// else touches WebKit.
+    private func firstWebKitUse(_ repository: ProfileRepository) async throws {
         let vault = WebDataStoreVault(repository: repository)
-        let fresh = try repository.create(name: "Delete first", configuration: ProfileConfiguration())
-        await vault.deleteData(profileID: fresh.id) // never ran here: directory sweep only
-        try repository.delete(fresh.id)
-        check("delete before WebKit init: never-launched profile", (try? repository.summary(for: fresh.id)) == nil)
+        let removalsBefore = WebDataStoreVault.removeCallCount
 
-        // A store created in this process but no web view yet: removal must initialize WebKit first.
+        // The reported crash: deleting a profile that never ran must not call WebKit at all.
+        let fresh = try repository.create(name: "Delete first", configuration: ProfileConfiguration())
+        await vault.deleteData(profileID: fresh.id)
+        try repository.delete(fresh.id)
+        check("first WebKit use: deleting a never-launched profile does not call remove(forIdentifier:)",
+              WebDataStoreVault.removeCallCount == removalsBefore && (try? repository.summary(for: fresh.id)) == nil)
+
+        // An ephemeral profile as the first WebKit use: its non-persistent store needs WebKit initialized.
+        let ephemeral = try repository.create(name: "Ephemeral first", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, ephemeral.id, key: repository.profileKey(for: ephemeral.id))
+        check("first WebKit use: ephemeral profile starts without crashing", session.dataStore != nil)
+        session.shutDown()
+        try repository.delete(ephemeral.id)
+
+        // A registered store that never had a web view: removed once, then unregistered.
         let created = try repository.create(name: "Delete store only", configuration: ProfileConfiguration())
         _ = WebDataStoreVault.makeStore(for: created.id)
-        await vault.deleteData(profileID: created.id) // crashes here without ensureWebKitInitialized()
+        await vault.deleteData(profileID: created.id)
         try repository.delete(created.id)
-        check("delete before WebKit init: registered store removed without crashing",
-              WebDataStoreVault.discoverDirectories(for: created.id).isEmpty)
+        check("delete: registered store without a web view is removed and unregistered",
+              WebDataStoreVault.removeCallCount == removalsBefore + 1 && !WebDataStoreVault.isRegistered(created.id),
+              "removals=\(WebDataStoreVault.removeCallCount - removalsBefore) registered=\(WebDataStoreVault.isRegistered(created.id))")
     }
 
     /// Deleting with WebKit already initialized: a never-launched profile (directory sweep only)
@@ -441,10 +453,13 @@ final class SelfTest {
         session?.shutDown()
         session = nil
         try await vault.seal(profileID: ran.id, key: key)
+        let removalsAfterSeal = WebDataStoreVault.removeCallCount
         await vault.deleteData(profileID: ran.id)
         try repository.delete(ran.id)
         check("delete: stopped profile deleted without crashing",
               layout.discoverDirectories(for: ran.id).isEmpty && (try? repository.summary(for: ran.id)) == nil)
+        check("delete: a store removed by the seal is not removed again",
+              !WebDataStoreVault.isRegistered(ran.id) && WebDataStoreVault.removeCallCount == removalsAfterSeal)
     }
 
     // MARK: Crash recovery sealing (regression for the post-unlock crash)

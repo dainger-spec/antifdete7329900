@@ -45,6 +45,9 @@ final class BrowserSession {
         self.passwordVault = passwordVault
         self.library = library
 
+        // `.nonPersistent()` needs WebKit initialized but does not initialize it, and an ephemeral
+        // profile can be the first WebKit use after unlock (see `ensureWebKitInitialized`).
+        WebDataStoreVault.ensureWebKitInitialized()
         let store: WKWebsiteDataStore = configuration.ephemeral
             ? .nonPersistent()
             : WebDataStoreVault.makeStore(for: profileID)

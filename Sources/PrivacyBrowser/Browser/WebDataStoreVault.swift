@@ -63,28 +63,45 @@ final class WebDataStoreVault {
 
     /// Identifiers whose `WKWebsiteDataStore(forIdentifier:)` this process created and has not
     /// removed yet. Only these are passed to `WKWebsiteDataStore.remove(forIdentifier:)`; any
-    /// other profile's data is deleted by sweeping its directories.
+    /// other profile's data is deleted by sweeping its directories. This gate is what fixes the
+    /// delete crash: before it, deleting a profile right after unlock handed WebKit an identifier
+    /// in a process where no WebKit object existed yet (see `ensureWebKitInitialized`).
     private static var registeredStoreIDs: Set<UUID> = []
 
     private static var webKitInitialized = false
 
-    /// `remove(forIdentifier:)` finishes on a data-store IO queue by calling
-    /// `RunLoop::main().dispatch` (inside `WebsiteDataStore::removeDataStoreWithIdentifierImpl`).
-    /// WebKit installs `RunLoop::main()` only when it is initialized — by the first `WKWebView` —
-    /// so without one the call is an EXC_BAD_ACCESS on that queue. The throwaway view uses a
-    /// non-persistent store, so the default persistent data store is never created or touched.
-    private static func ensureWebKitInitialized() {
+    /// How many times this process called `remove(forIdentifier:)` (self-test hook).
+    private(set) static var removeCallCount = 0
+
+    /// Whether `deleteData` would hand this profile's identifier to WebKit (self-test hook).
+    static func isRegistered(_ profileID: UUID) -> Bool {
+        registeredStoreIDs.contains(profileID)
+    }
+
+    /// Initializes WebKit (`InitializeWebKit2`, which installs `RunLoop::main()`).
+    ///
+    /// `WKWebsiteDataStore.nonPersistent()` and `remove(forIdentifier:)` do not initialize WebKit
+    /// themselves, yet both use `RunLoop::main()`: the non-persistent store's constructor builds a
+    /// timer on it (`AuthenticatorManager`), and `remove` completes through it from its IO queue.
+    /// As the first WebKit use in the process (e.g. right after unlock) either one is an
+    /// EXC_BAD_ACCESS. `WKWebsiteDataStore(forIdentifier:)`, `.default()` and `WKWebView` do
+    /// initialize WebKit.
+    ///
+    /// Creates neither a data store nor a web view: it creates a configuration's process pool,
+    /// which initializes WebKit on every macOS version (macOS 14's `WKWebViewConfiguration.init`
+    /// already does it; newer WebKit does it when the pool is created).
+    static func ensureWebKitInitialized() {
         guard !webKitInitialized else { return }
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        _ = WKWebView(frame: .zero, configuration: configuration)
+        (ProcessPoolInitializer() as WebKitInitializing).initializeWebKit()
         webKitInitialized = true
     }
 
     /// The only caller of `WKWebsiteDataStore.remove(forIdentifier:)`. Main-actor isolated (the
     /// class is `@MainActor`), so no queue hopping is needed.
     private static func removeStore(for profileID: UUID) async throws {
+        // Defensive: a registered identifier implies `makeStore` already initialized WebKit.
         ensureWebKitInitialized()
+        removeCallCount += 1
         try await WKWebsiteDataStore.remove(forIdentifier: profileID)
         // Removed: a later delete of this profile only sweeps directories. The next launch
         // registers it again through `makeStore`.
@@ -178,9 +195,10 @@ final class WebDataStoreVault {
 
     // MARK: Delete
 
-    /// Removes the profile's WebKit data. For a profile that never ran in this process (just
-    /// created, or deleted via sync) WebKit has no store to remove, and calling
-    /// `remove(forIdentifier:)` would crash; deleting the leftover directories is enough.
+    /// Removes the profile's WebKit data. For a profile whose store this process did not create
+    /// (just created, never launched since unlock, or deleted via sync) WebKit has no store to
+    /// remove — and right after unlock no WebKit object exists, so `remove(forIdentifier:)` would
+    /// crash; deleting the leftover directories is enough.
     func deleteData(profileID: UUID) async {
         if Self.registeredStoreIDs.contains(profileID) {
             do {
@@ -192,5 +210,21 @@ final class WebDataStoreVault {
         for directory in Self.discoverDirectories(for: profileID) {
             try? FileManager.default.removeItem(at: directory)
         }
+    }
+}
+
+/// `WKWebViewConfiguration.processPool` is deprecated (separate pools no longer have an effect),
+/// not removed, and creating the pool is the store-free way to initialize WebKit. Calling the
+/// deprecated getter from a deprecated witness through a protocol keeps the build warning-free.
+@MainActor
+private protocol WebKitInitializing {
+    func initializeWebKit()
+}
+
+@MainActor
+private struct ProcessPoolInitializer: WebKitInitializing {
+    @available(macOS, deprecated: 12.0)
+    func initializeWebKit() {
+        _ = WKWebViewConfiguration().processPool
     }
 }
