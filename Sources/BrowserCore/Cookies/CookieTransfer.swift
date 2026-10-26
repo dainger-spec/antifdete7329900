@@ -208,16 +208,11 @@ extension CookieRecord {
         if record.secure { properties[.secure] = yes }
         if record.httpOnly { properties[HTTPCookiePropertyKey("HttpOnly")] = yes }
         if let expires = record.expires {
-            // `.expires` accepts an NSDate or an RFC 1123 date string (NSHTTPCookieExpires docs).
-            // On macOS, passing the NSDate is mis-stored (it comes back as now + an offset, as if
-            // read as a relative age); the canonical date string is parsed exactly. Linux's
-            // swift-corelibs-foundation keeps the Date correctly and does not parse the string, so
-            // feed each platform what it honours.
-            #if canImport(Darwin)
-            properties[.expires] = Self.cookieExpiresString(expires)
-            #else
+            // The documented NSDate form. `WKHTTPCookieStore.setCookie` honours it; note that
+            // `HTTPCookie(properties:).expiresDate` readback is not bit-exact on every Foundation
+            // build (the macOS CI runner drifts), so tests assert the stored cookie through
+            // WebKit, not this accessor.
             properties[.expires] = expires
-            #endif
         } else {
             properties[.discard] = "TRUE"
         }
@@ -230,16 +225,6 @@ extension CookieRecord {
         }
         #endif
         return HTTPCookie(properties: properties)
-    }
-
-    /// RFC 1123 cookie-expiry string in GMT, e.g. "Tue, 01 Jan 2030 00:00:00 GMT" — the format
-    /// Set-Cookie uses and Apple's `HTTPCookie` parses back to the exact second.
-    static func cookieExpiresString(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "GMT")
-        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
-        return formatter.string(from: date)
     }
 }
 

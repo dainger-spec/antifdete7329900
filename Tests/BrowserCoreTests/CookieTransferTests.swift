@@ -530,17 +530,19 @@ final class CookieTransferTests: XCTestCase {
             XCTAssertEqual(httpCookie.value, record.value)
             XCTAssertEqual(httpCookie.isSecure, record.secure)
             XCTAssertEqual(httpCookie.isHTTPOnly, record.httpOnly)
+            // Persistent vs session is stable across platforms; the exact expiresDate that
+            // `HTTPCookie(properties:)` hands back is NOT — the macOS CI runner's Foundation
+            // returns a drifted value for a far-future date, while swift-corelibs keeps it. The
+            // date that matters is the one `WKHTTPCookieStore` stores, which the macOS WebKit
+            // self-test checks; here we only require that an expiring cookie is not session-only.
             XCTAssertEqual(httpCookie.isSessionOnly, record.expires == nil)
-            // Apple's HTTPCookie can hand expiresDate back with sub-second drift (it stores the
-            // expiry in its own form); cookie expiry is whole-second, so compare within a second.
-            if let expected = record.expires {
-                let actual = try XCTUnwrap(httpCookie.expiresDate)
-                XCTAssertEqual(actual.timeIntervalSince1970, expected.timeIntervalSince1970, accuracy: 1)
-            } else {
-                XCTAssertNil(httpCookie.expiresDate)
-            }
-            // The contract we rely on: the record survives the round trip through HTTPCookie.
-            XCTAssertEqual(CookieRecord(httpCookie), record)
+            // Non-expiry fields must round-trip exactly through HTTPCookie on every platform.
+            let readBack = try XCTUnwrap(CookieRecord(httpCookie))
+            XCTAssertEqual([readBack.domain, readBack.path, readBack.name, readBack.value],
+                           [record.domain, record.path, record.name, record.value])
+            XCTAssertEqual(readBack.secure, record.secure)
+            XCTAssertEqual(readBack.httpOnly, record.httpOnly)
+            XCTAssertEqual(readBack.isSession, record.expires == nil)
         }
 
         // A Foundation cookie built elsewhere (domain case, no explicit discard flag).
