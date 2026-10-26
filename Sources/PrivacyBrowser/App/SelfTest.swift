@@ -53,6 +53,12 @@ final class SelfTest {
         do {
             if write {
                 guard !AppEnvironment.isSandboxed else { throw CoreError.invalidConfiguration("run the unsandboxed build") }
+                // This writes a REAL vault (password "migration-check") into the real unsandboxed
+                // vault folder, which every unsandboxed build shares and which a sandboxed build's
+                // first launch moves into its container. Only CI may do that, on a throwaway runner.
+                guard ProcessInfo.processInfo.environment["PB_SELFTEST_MIGRATION"] == "1" else {
+                    throw CoreError.invalidConfiguration("--selftest-write-vault creates a real vault at \(root.path); it runs only in CI with PB_SELFTEST_MIGRATION=1")
+                }
                 let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: password, iterations: 10_000))
                 try repository.create(name: "Migrated", configuration: ProfileConfiguration())
                 print("PASS wrote vault at \(root.path)")

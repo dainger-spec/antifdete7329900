@@ -21,6 +21,15 @@ struct SetupView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                if let moved = model.movedAsideVaultPath {
+                    // After "forgot password": the previous vault was moved, not deleted.
+                    Text(String(format: L("setup.movedAside"), moved))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
             }
 
             VStack(spacing: 10) {
@@ -62,6 +71,7 @@ struct SetupView: View {
 struct UnlockView: View {
     @EnvironmentObject private var model: AppModel
     @State private var password = ""
+    @State private var confirmingReset = false
 
     var body: some View {
         VStack(spacing: 18) {
@@ -97,7 +107,23 @@ struct UnlockView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .frame(width: 300)
+                if model.vaultLooksLikeTestVault {
+                    Label(L("unlock.vault.test"), systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(width: 300)
+                }
+                Button(L("unlock.reset.action")) { confirmingReset = true }
+                    .buttonStyle(.link)
+                    .disabled(model.isWorking)
             }
+        }
+        .confirmationDialog(L("unlock.reset.title"), isPresented: $confirmingReset, titleVisibility: .visible) {
+            Button(L("unlock.reset.confirm"), role: .destructive) { model.startOver() }
+            Button(L("common.cancel"), role: .cancel) {}
+        } message: {
+            Text(L("unlock.reset.message"))
         }
         .frame(width: 380)
         .card(padding: 28)

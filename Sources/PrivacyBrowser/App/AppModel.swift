@@ -15,6 +15,8 @@ final class AppModel: ObservableObject {
     /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
     /// vault it tried).
     @Published private(set) var unlockFailed = false
+    /// Where `startOver()` moved the previous vault (shown on the setup screen).
+    @Published private(set) var movedAsideVaultPath: String?
     @Published private(set) var deviceSettings = DeviceSettings()
 
     private(set) var repository: ProfileRepository?
@@ -46,6 +48,7 @@ final class AppModel: ObservableObject {
     // MARK: Vault
 
     func createVault(password: String) async {
+        guard !isWorking else { return }
         let root = root
         await perform {
             // PBKDF2 with 600k iterations takes ~0.5 s; keep it off the main thread.
@@ -88,7 +91,33 @@ final class AppModel: ObservableObject {
     /// The vault folder, with the real home directory shown as `~` (inside the App Sandbox
     /// `homeDirectoryForCurrentUser` is the container, so the passwd entry is used instead).
     var vaultPathDescription: String {
-        let path = root.path
+        Self.displayPath(root)
+    }
+
+    /// True when the vault was not created in the app: the app always uses
+    /// `KDFParameters.recommendedIterations`, the self-test and the CI migration check use far
+    /// fewer (`--selftest-write-vault` creates one with the password "migration-check").
+    var vaultLooksLikeTestVault: Bool {
+        guard let header = try? MasterVault.readHeader(in: root) else { return false }
+        return header.kdf.iterations < KDFParameters.recommendedIterations
+    }
+
+    /// The way out when the master password is unknown: the current vault folder is moved aside
+    /// (not deleted — renaming it back restores it) and the setup screen creates a new vault.
+    func startOver() {
+        guard phase == .locked, !isWorking else { return }
+        do {
+            let backup = try MasterVault.moveAside(root)
+            movedAsideVaultPath = Self.displayPath(backup)
+            unlockFailed = false
+            phase = .setup
+        } catch {
+            errorMessage = (error as? CoreError)?.description ?? error.localizedDescription
+        }
+    }
+
+    private static func displayPath(_ url: URL) -> String {
+        let path = url.path
         if let home = getpwuid(getuid())?.pointee.pw_dir.map({ String(cString: $0) }), path.hasPrefix(home + "/") {
             return "~" + String(path.dropFirst(home.count))
         }

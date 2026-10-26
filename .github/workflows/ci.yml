@@ -55,7 +55,8 @@ jobs:
           # Separate bundle ID so the sandbox container does not exist yet.
           BUNDLE_ID=dev.local.PBMigrationCheck SANDBOX=0 APP_DIR=build/migration-old scripts/build-app.sh
           BUNDLE_ID=dev.local.PBMigrationCheck APP_DIR=build/migration-new scripts/build-app.sh
-          build/migration-old/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --selftest-write-vault
+          # Writes a real vault into the runner's unsandboxed vault folder: CI only (see SelfTest.migrationStep).
+          PB_SELFTEST_MIGRATION=1 build/migration-old/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --selftest-write-vault
           build/migration-new/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --selftest-read-vault
           test ! -e "$HOME/Library/Application Support/PrivacyBrowser/vault.json" || { echo "vault was not moved"; exit 1; }
       - uses: actions/upload-artifact@v4

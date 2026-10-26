@@ -168,6 +168,7 @@
 "setup.action.create" = "Create Vault";
 "setup.field.password" = "Master password";
 "setup.field.repeat" = "Repeat master password";
+"setup.movedAside" = "The previous vault was not deleted; it was moved to:\n%@\nIf you remember its password, quit the app and rename that folder back to “PrivacyBrowser”.";
 "setup.rule.length" = "Use at least 10 characters.";
 "setup.rule.match" = "Passwords do not match.";
 "setup.subtitle" = "The master password encrypts the profile list, every profile's settings, saved passwords, history, bookmarks and archived website data. It cannot be recovered — if you forget it, the data is lost.";
@@ -201,9 +202,14 @@
 "sync.to" = "Sync to";
 "tab.newTab" = "New Tab";
 "unlock.action.unlock" = "Unlock";
+"unlock.reset.action" = "Forgot password…";
+"unlock.reset.confirm" = "Set this vault aside and create a new one";
+"unlock.reset.message" = "The current vault is not deleted: its folder is renamed to a backup next to it. Its profiles stay encrypted with the old password — if you remember it, you can move the folder back. You then create a new, empty vault.";
+"unlock.reset.title" = "Create a new vault?";
 "unlock.subtitle" = "Enter your master password to continue.";
 "unlock.title" = "Vault locked";
 "unlock.vault.info" = "Opened the vault created %1$@, in:\n%2$@\nIf you set your password in another build (from Cursor or swift run, unsandboxed, or with another bundle id), that build has its own vault with its own password.";
+"unlock.vault.test" = "This looks like a test vault: it was created by the CI migration check (password “migration-check”), not by the app.";
 "window.browser.title" = "[%@] %@";
 "window.library.title" = "[%@] Library";
 "window.profiles.title" = "Profiles";

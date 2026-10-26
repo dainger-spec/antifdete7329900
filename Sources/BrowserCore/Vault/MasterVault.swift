@@ -87,6 +87,27 @@ public enum MasterVault {
         return UnlockedVault(root: root, header: header, masterKey: SymmetricKey(data: raw))
     }
 
+    /// Moves the whole vault folder aside — nothing is deleted — so that a new vault can be created
+    /// in `root`: the way out when the master password is unknown. The backup is a sibling folder
+    /// named `<root>-backup-<yyyy-MM-dd-HHmmss>` (with a counter if that exists); renaming it back
+    /// to `root` restores the old vault. Returns the backup folder.
+    public static func moveAside(_ root: URL, date: Date = Date()) throws -> URL {
+        guard exists(in: root) else { throw CoreError.vaultNotFound }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        let parent = root.standardizedFileURL.deletingLastPathComponent()
+        let base = "\(root.standardizedFileURL.lastPathComponent)-backup-\(formatter.string(from: date))"
+        var backup = parent.appendingPathComponent(base, isDirectory: true)
+        var counter = 2
+        while FileManager.default.fileExists(atPath: backup.path) {
+            backup = parent.appendingPathComponent("\(base)-\(counter)", isDirectory: true)
+            counter += 1
+        }
+        try FileManager.default.moveItem(at: root, to: backup)
+        return backup
+    }
+
     static func writeHeader(_ header: VaultHeader, in root: URL) throws {
         try SecureFile.ensureDirectory(root)
         try SecureFile.write(JSONCoding.encoder.encode(header), to: headerURL(in: root))

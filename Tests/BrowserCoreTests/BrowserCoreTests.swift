@@ -44,6 +44,28 @@ final class VaultTests: XCTestCase {
         XCTAssertThrowsError(try MasterVault.create(in: root, password: "x", iterations: testIterations))
     }
 
+    func testMoveAsideKeepsOldVaultAndFreesTheFolder() throws {
+        let old = try MasterVault.create(in: root, password: "forgotten", iterations: testIterations)
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let backup = try MasterVault.moveAside(root, date: date)
+
+        XCTAssertFalse(MasterVault.exists(in: root), "the folder is free for a new vault")
+        XCTAssertEqual(backup.deletingLastPathComponent().path, root.standardizedFileURL.deletingLastPathComponent().path)
+        XCTAssertTrue(backup.lastPathComponent.hasPrefix(root.lastPathComponent + "-backup-"))
+        // Nothing was lost: the backup still unlocks with the old password.
+        XCTAssertEqual(try MasterVault.unlock(in: backup, password: "forgotten").vaultID, old.vaultID)
+
+        // A new vault can be created, and moving it aside at the same moment picks a new name.
+        _ = try MasterVault.create(in: root, password: "new password", iterations: testIterations)
+        let second = try MasterVault.moveAside(root, date: date)
+        XCTAssertNotEqual(second.path, backup.path)
+        XCTAssertTrue(MasterVault.exists(in: second))
+        try? FileManager.default.removeItem(at: backup)
+        try? FileManager.default.removeItem(at: second)
+
+        XCTAssertThrowsError(try MasterVault.moveAside(root)) { XCTAssertEqual($0 as? CoreError, .vaultNotFound) }
+    }
+
     func testChangePasswordKeepsData() throws {
         let vault = try MasterVault.create(in: root, password: "old", iterations: testIterations)
         let repo = try ProfileRepository(vault: vault)
