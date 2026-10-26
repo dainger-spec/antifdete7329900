@@ -11,9 +11,9 @@ import WebKit
 /// When a future Apple/WebKit version ships behaviours worth matching (and public API to do it),
 /// add a builder here and point new `DeviceGeneration`s at it via `behaviorSetID`. The profile
 /// format and the rest of the app don't change. This deliberately does NOT inject per-version
-/// spoofing of engine or hardware signals (navigator, canvas, WebGL, feature presence): that is
-/// unreliable, detectable, and its main use is evading detection — see
-/// docs/ISOLATION_AND_LIMITATIONS.md §2.
+/// spoofing of engine signals (canvas, WebGL, audio, feature presence): that is unreliable and
+/// detectable — see docs/ISOLATION_AND_LIMITATIONS.md §2. Mobile platforms only get their device
+/// class's navigator and screen values (see `PrivacyScripts`).
 @MainActor
 enum BehaviorSets {
     static func makeUserContentController(for configuration: ProfileConfiguration) -> WKUserContentController {

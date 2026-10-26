@@ -146,15 +146,24 @@ final class AppModel: ObservableObject {
     /// Lock (and Quit): waits for launches and seals under way, then stops and seals every
     /// running profile. A second call — Lock clicked twice, or ⌘Q during Lock — waits for the
     /// same lock instead of starting another or returning before the data is sealed.
-    func lock() async {
+    ///
+    /// `forQuit`: the process exits afterwards, so a profile whose data store WebKit still holds
+    /// after every seal attempt is force-sealed instead of left decrypted (also when the quit
+    /// joins a Lock already under way). See `WebDataStoreVault.forceSealWhenStoreStaysInUse`.
+    func lock(forQuit: Bool = false) async {
+        if forQuit { manager?.prepareForQuit() }
         if let lockTask {
             await lockTask.value
             return
         }
-        let task = Task { @MainActor in await self.performLock() }
+        let task = Task { @MainActor in
+            await self.performLock()
+            // Cleared by the lock itself, before anyone awaiting it resumes: a waiter that finds
+            // `hasActivity` still true would wait (or quit) again.
+            self.lockTask = nil
+        }
         lockTask = task
         await task.value
-        lockTask = nil
     }
 
     /// Lock or Quit must wait: a lock is under way, or a profile is running, launching or sealing.

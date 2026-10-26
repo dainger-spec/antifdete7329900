@@ -28,6 +28,9 @@ struct ProfileDraft {
     var accuracy = "50"
     var overrideTimeZone = false
     var timeZone = TimeZone.current.identifier
+    var matchProxyLocation = true
+    /// Carried through unchanged (a cache for launching; see ProfileConfiguration).
+    var lastProxyLocation: ProxyLocation?
     var webRTC: WebRTCPolicy = .disabled
     var ephemeral = false
     var safeBrowsing = false
@@ -74,6 +77,8 @@ struct ProfileDraft {
         }
         overrideTimeZone = c.timeZoneIdentifier != nil
         timeZone = c.timeZoneIdentifier ?? TimeZone.current.identifier
+        matchProxyLocation = c.matchProxyLocation
+        lastProxyLocation = c.lastProxyLocation
         webRTC = c.webRTCPolicy
         ephemeral = c.ephemeral
         safeBrowsing = c.safeBrowsingEnabled
@@ -141,6 +146,8 @@ struct ProfileDraft {
             configuration.geolocation = .fixed(latitude: lat, longitude: lon, accuracyMeters: acc)
         }
         configuration.timeZoneIdentifier = overrideTimeZone ? timeZone : nil
+        configuration.matchProxyLocation = matchProxyLocation
+        configuration.lastProxyLocation = lastProxyLocation
         configuration.webRTCPolicy = webRTC
         configuration.ephemeral = ephemeral
         configuration.safeBrowsingEnabled = safeBrowsing
@@ -225,7 +232,7 @@ struct ProfileEditorView: View {
                 TextField(L("editor.ua.field"), text: $draft.userAgent, axis: .vertical).lineLimit(2...4)
             } else {
                 LabeledContent(L("editor.ua.effective")) {
-                    Text(selectedGeneration.userAgent).font(.caption.monospaced())
+                    Text(selectedGeneration.userAgent(hostSafariVersion: HostSafari.version)).font(.caption.monospaced())
                         .foregroundStyle(.secondary).lineLimit(3).textSelection(.enabled)
                 }
             }
@@ -288,6 +295,11 @@ struct ProfileEditorView: View {
             if draft.overrideTimeZone {
                 Picker(L("editor.tz"), selection: $draft.timeZone) {
                     ForEach(Self.timeZones, id: \.self) { Text(verbatim: $0).tag($0) }
+                }
+            } else if draft.proxyEnabled {
+                Toggle(L("editor.tz.fromProxy"), isOn: $draft.matchProxyLocation)
+                if draft.matchProxyLocation {
+                    Text(L("editor.tz.fromProxy.note")).font(.caption).foregroundStyle(.secondary)
                 }
             }
             Toggle(L("editor.safeBrowsing"), isOn: $draft.safeBrowsing)

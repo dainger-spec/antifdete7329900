@@ -65,7 +65,12 @@ struct PrivacyBrowserApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var model: AppModel?
-    private var isTerminating = false
+    private lazy var quitCoordinator = QuitCoordinator(
+        hasActivity: { [weak self] in self?.model?.hasActivity ?? false },
+        lockForQuit: { [weak self] in await self?.model?.lock(forQuit: true) },
+        // Closing the profile windows reveals the Profiles window, whose rows show "Encrypting…".
+        willSeal: { [weak self] in self?.model?.activateProfilesWindow() },
+        terminate: { NSApp.terminate(nil) })
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when launched as a bare SwiftPM executable (`swift run`) instead of an .app bundle.
@@ -84,18 +89,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// Running profiles must be sealed (WebKit data encrypted) before the process exits.
+    /// Running profiles must be sealed (WebKit data encrypted) before the process exits — also
+    /// while a profile is still launching or sealing, or a Lock is under way. See `QuitCoordinator`
+    /// for why the seal runs after this returns instead of inside it.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // Also while a profile is still launching or sealing, or a Lock is under way: quitting
-        // then would leave its WebKit data decrypted on disk.
-        guard let model, model.hasActivity else { return .terminateNow }
-        guard !isTerminating else { return .terminateLater } // ⌘Q pressed twice: don't start a second lock
-        isTerminating = true
-        Task { @MainActor in
-            await model.lock()
-            sender.reply(toApplicationShouldTerminate: true)
-        }
-        return .terminateLater
+        quitCoordinator.shouldTerminate(sender)
     }
 }
 

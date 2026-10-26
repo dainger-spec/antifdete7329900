@@ -65,6 +65,8 @@
 "editor.title.new" = "Новый профиль";
 "editor.tz" = "Часовой пояс";
 "editor.tz.override" = "Переопределить часовой пояс";
+"editor.tz.fromProxy" = "Часовой пояс по местоположению прокси";
+"editor.tz.fromProxy.note" = "При запуске выходной IP прокси определяется через сам прокси (ipinfo.io, geojs.io или ipwho.is), и профиль работает в его часовом поясе. Первый запущенный профиль также задаёт язык для сайтов (Accept-Language) — для всего приложения до выхода из него.";
 "editor.ua.effective" = "User-Agent";
 "editor.ua.field" = "User-Agent";
 "editor.ua.useCustom" = "Свой User-Agent";

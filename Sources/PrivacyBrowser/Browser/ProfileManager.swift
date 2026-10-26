@@ -71,32 +71,40 @@ final class ProfileManager: ObservableObject {
 
         let summary = try repository.summary(for: id)
         let key = try repository.profileKey(for: id)
-        let configuration = try repository.loadConfiguration(id, key: key)
+        let stored = try repository.loadConfiguration(id, key: key)
         // Refuse a proxy that cannot be applied before decrypting anything: the profile must not
         // start on a direct connection, and there is then nothing to seal again.
-        if let proxy = configuration.proxy {
+        if let proxy = stored.proxy {
             do { try proxy.validate() } catch { throw LaunchError.invalidProxy(host: proxy.host) }
         }
         let passwords = try repository.passwordVault(for: id)
         // Ephemeral profiles keep history in memory only; bookmarks are explicit user data and persist.
-        let history = try repository.historyStore(for: id, key: key, policy: configuration.historyPolicy,
-                                                  persistent: !configuration.ephemeral)
+        let history = try repository.historyStore(for: id, key: key, policy: stored.historyPolicy,
+                                                  persistent: !stored.ephemeral)
         let library = ProfileLibrary(history: history, bookmarks: try repository.bookmarkStore(for: id, key: key),
-                                     recordsHistory: configuration.historyEnabled)
+                                     recordsHistory: stored.historyEnabled)
         library.onError = { [weak self] message in self?.onError?(message) }
 
-        if !configuration.ephemeral {
+        // Where the proxy exits (time zone, country), asked through the proxy while the web data
+        // decrypts. See ProfileConfiguration.matchProxyLocation.
+        async let lookedUp = lookUpProxyLocation(stored)
+        if !stored.ephemeral {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
             try await webDataVault.prepareForLaunch(profileID: id, key: key)
         }
+        let location = stored.proxyLocation(lookedUp: await lookedUp)
 
         // Lock or Quit began while the data was decrypted: a window opened now would have no
         // manager and its data would stay unencrypted. No data store exists yet, so seal the
         // decrypted directories directly (activeStore: false) and stop here.
         if isShuttingDown {
-            if !configuration.ephemeral { try await webDataVault.seal(profileID: id, key: key, activeStore: false) }
+            if !stored.ephemeral { try await webDataVault.seal(profileID: id, key: key, activeStore: false) }
             return
         }
+        rememberProxyLocation(location, for: id, in: stored)
+        let configuration = stored.applying(location)
+        // Before the first web view of the run: WebKit reads its language list only once.
+        WebContentLanguage.decide(location?.webLanguage)
         let session: BrowserSession
         do {
             session = try BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
@@ -117,6 +125,29 @@ final class ProfileManager: ObservableObject {
         runningProfileIDs.insert(id)
         session.openWindow(url: configuration.startURL)
         try? repository.markLaunched(id)
+    }
+
+    private func lookUpProxyLocation(_ configuration: ProfileConfiguration) async -> ProxyLocation? {
+        guard configuration.needsProxyLocation, let proxy = configuration.proxy else { return nil }
+        let location = await ProxyGeoLookup.lookUp(proxy: proxy,
+                                                   userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version))
+        if location == nil {
+            log.notice("Could not look up where the profile's proxy exits; using \(configuration.lastProxyLocation == nil ? "the system time zone" : "the last known location", privacy: .public)")
+        }
+        return location
+    }
+
+    /// Keeps a newly found proxy location in the profile's configuration, as the fallback for a
+    /// later failed lookup. Written only when it changed.
+    private func rememberProxyLocation(_ location: ProxyLocation?, for id: UUID, in stored: ProfileConfiguration) {
+        guard let location, !location.isSameLocation(as: stored.lastProxyLocation) else { return }
+        var updated = stored
+        updated.lastProxyLocation = location
+        do {
+            try repository.saveConfiguration(updated, for: id)
+        } catch {
+            log.error("Could not store the proxy location of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// Opens another window in an already running profile.
@@ -146,6 +177,16 @@ final class ProfileManager: ObservableObject {
             try await webDataVault.seal(profileID: id, key: key)
         }
     }
+
+    /// Quit: the process exits after this shutdown, so a seal whose data store WebKit still holds
+    /// after every attempt is forced rather than failed (see
+    /// `WebDataStoreVault.forceSealWhenStoreStaysInUse`). Also reaches seals already retrying.
+    func prepareForQuit() {
+        webDataVault.forceSealWhenStoreStaysInUse = true
+    }
+
+    /// The running session of a profile (self-test hook).
+    func session(for id: UUID) -> BrowserSession? { sessions[id] }
 
     /// Lock / Quit: refuse new launches, let launches and seals already under way finish (a
     /// suspended launch seals again instead of opening a window), then stop and seal every

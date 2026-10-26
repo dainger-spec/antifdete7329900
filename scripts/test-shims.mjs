@@ -16,7 +16,17 @@ function makeWindow(config, extras = {}) {
     var window = globalThis;
     class Geolocation { getCurrentPosition() { throw new Error('native called'); } watchPosition() {} clearWatch() {} }
     class Permissions { query(d) { return Promise.resolve({ state: 'prompt', name: d.name }); } }
-    var navigator = { geolocation: new Geolocation(), permissions: new Permissions() };
+    // Like WebKit on a Mac: navigator and screen values are getters on the prototypes.
+    class Navigator {
+      get platform() { return 'MacIntel'; } get maxTouchPoints() { return 0; } get hardwareConcurrency() { return 8; }
+      get language() { return 'en-US'; } get languages() { return ['en-US']; }
+    }
+    var navigator = Object.assign(Object.create(Navigator.prototype), { geolocation: new Geolocation(), permissions: new Permissions() });
+    class Screen { get width() { return 1728; } get height() { return 1117; } get availWidth() { return 1728; } get availHeight() { return 1079; } }
+    var screen = new Screen();
+    Object.defineProperty(globalThis, 'devicePixelRatio', { get() { return 2; }, set(v) {}, enumerable: true, configurable: true });
+    class HTMLCanvasElement { getContext() { return null; } toDataURL() { return 'data:'; } }
+    class AudioContext { createAnalyser() { return {}; } }
     var setTimeout = (f) => Promise.resolve().then(f);
     // Browsers expose these as configurable properties of window (not lexical bindings).
     globalThis.RTCPeerConnection = class RTCPeerConnection { constructor(c) { this.config = c; } setConfiguration(c) { this.config = c; } };
@@ -131,6 +141,42 @@ test('WebRTC relayOnly', () => {
 test('WebRTC unrestricted', () => {
   const w = makeWindow({ ...base, webRTC: 'unrestricted' });
   assert.equal(run(w, `new RTCPeerConnection({ iceTransportPolicy: 'all' }).config.iceTransportPolicy`), 'all');
+});
+
+const iPhone = { platform: 'iPhone', maxTouchPoints: 5, hardwareConcurrency: 4, screenWidth: 390, screenHeight: 844, devicePixelRatio: 3 };
+const surface = `JSON.stringify([navigator.platform, navigator.maxTouchPoints, navigator.hardwareConcurrency, navigator.language,
+  Array.from(navigator.languages), typeof navigator.deviceMemory, screen.width, screen.height, screen.availWidth, screen.availHeight,
+  devicePixelRatio])`;
+
+test('macOS profile: navigator and screen keep their native values', () => {
+  const w = makeWindow(base);
+  assert.equal(run(w, surface), JSON.stringify(['MacIntel', 0, 8, 'en-US', ['en-US'], 'undefined', 1728, 1117, 1728, 1079, 2]));
+  assert.deepEqual(Array.from(run(w, `Object.getOwnPropertyNames(navigator)`)).sort(), ['geolocation', 'permissions']);
+  assert.deepEqual(Array.from(run(w, `Object.getOwnPropertyNames(screen)`)), []);
+});
+
+test('iPhone profile: device values, as getters on the prototypes', () => {
+  const w = makeWindow({ ...base, device: iPhone });
+  assert.equal(run(w, surface), JSON.stringify(['iPhone', 5, 4, 'en-US', ['en-US'], 'undefined', 390, 844, 390, 844, 3]));
+  assert.equal(run(w, `navigator.standalone`), false);
+  // No own properties appear; the getters look like native ones.
+  assert.deepEqual(Array.from(run(w, `Object.getOwnPropertyNames(navigator)`)).sort(), ['geolocation', 'permissions']);
+  assert.deepEqual(Array.from(run(w, `Object.getOwnPropertyNames(screen)`)), []);
+  assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.name`), 'get platform');
+  const enumerable = `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').enumerable`;
+  assert.equal(run(w, enumerable), run(makeWindow(base), enumerable)); // as the engine defines it
+  assert.equal(run(w, `Object.getOwnPropertyDescriptor(Screen.prototype, 'width').get.name`), 'get width');
+  assert.equal(run(w, `typeof Object.getOwnPropertyDescriptor(window, 'devicePixelRatio').get`), 'function');
+});
+
+test('no rendering patches: canvas, audio and fonts stay native', () => {
+  for (const config of [base, { ...base, device: iPhone }]) {
+    const w = makeWindow(config);
+    assert.equal(run(w, `HTMLCanvasElement.prototype.getContext.toString().includes('return null')`), true);
+    assert.equal(run(w, `HTMLCanvasElement.prototype.toDataURL.toString().includes("'data:'")`), true);
+    assert.equal(run(w, `AudioContext.prototype.createAnalyser.toString().includes('return {}')`), true);
+  }
+  assert.doesNotMatch(body, /getImageData|createAnalyser|document\.fonts|deviceMemory\s*['",]/);
 });
 
 process.on('beforeExit', () => {

@@ -63,8 +63,11 @@ final class BrowserSession {
 
     var windowCount: Int { windows.count }
 
+    /// The profile's browser windows (self-test hook).
+    var windowControllers: [BrowserWindowController] { windows }
+
     var tabContext: BrowserTabContext {
-        BrowserTabContext(profileName: profileName, userAgent: configuration.effectiveUserAgent,
+        BrowserTabContext(profileName: profileName, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version),
                           passwordVault: passwordVault, library: library,
                           proxyCredential: configuration.proxy.flatMap { proxy in
                               proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }

@@ -53,6 +53,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
                                    styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                    backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        // Never saved as restorable state at quit: AppKit would write the title — the profile's
+        // name — to ~/Library/Saved Application State in plaintext.
+        window.isRestorable = false
         window.title = "[\(session.profileName)]"
         // Our own tab strip replaces AppKit window tabbing (which would allow merging windows
         // and needs one NSWindow per tab).

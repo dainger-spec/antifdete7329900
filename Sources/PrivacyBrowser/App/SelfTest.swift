@@ -97,8 +97,12 @@ final class SelfTest {
     private func run() async {
         let layout = WebDataStoreVault.layout
         info("sandboxed=\(AppEnvironment.isSandboxed) bundle=\(layout.bundleID) library=\(layout.library.path)")
-        info("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        info("macOS \(ProcessInfo.processInfo.operatingSystemVersionString), Safari \(HostSafari.version)")
         environmentChecks()
+        // As the first launch of a profile with a German proxy would, before WebKit starts any
+        // process; checked by fingerprintSurface (navigator) and proxies (Accept-Language header).
+        WebContentLanguage.decide("de-DE")
+        info("web content languages: \(WebContentLanguage.decided ?? [])")
 
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -107,13 +111,17 @@ final class SelfTest {
             try await firstWebKitUse(repository) // must run before anything else touches WebKit
             try await storageIsolationAndShims(repository)
             try await deviceGenerations(repository)
+            try await fingerprintSurface(repository)
             try await recoverySealing(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
+            try await proxyLocationAtLaunch(repository)
             try await tabsAndLibrary(repository)
             try await windowLifecycle(repository)
             try await dialogTeardown(repository)
             try await lockDuringLaunch(repository)
+            try await quitFromFocusedPage(repository)
+            try await forcedSealAtQuit(repository)
         } catch {
             check("self-test ran without unexpected errors", false, String(describing: error))
         }
@@ -310,6 +318,10 @@ final class SelfTest {
         let httpBody = try await loadThroughProxy(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), url: target)
         check("proxy: HTTP proxy carries the request", httpBody?.contains("PB-PROXY-OK") == true, httpBody ?? "load failed")
         info("HTTP proxy response: \(httpBody ?? "nil")")
+        // The language WebKit was given (decided at the start of the self-test) is the header too.
+        let acceptLanguage = httpBody?.components(separatedBy: "accept-language=").dropFirst().first ?? "nil"
+        check("language: Accept-Language carries the language WebKit was given",
+              acceptLanguage.hasPrefix(WebContentLanguage.decided?.first ?? "?"), acceptLanguage)
 
         let socksBody = try await loadThroughProxy(repository, ProxySettings(kind: .socks5, host: "127.0.0.1", port: socksPort), url: target)
         check("proxy: SOCKS5 carries the request", socksBody?.contains("PB-PROXY-OK via=socks5") == true, socksBody ?? "load failed")
@@ -438,14 +450,155 @@ final class SelfTest {
               iosUA?.contains("iPhone OS 26") == true, iosUA ?? "nil")
 
         let macUA = try await userAgent(for: .forGeneration(DeviceGenerations.resolved(id: DeviceGenerations.defaultID)))
-        check("generation: default macOS UA reaches navigator.userAgent",
-              macUA?.contains("Macintosh") == true, macUA ?? "nil")
+        check("generation: macOS UA names this Mac's Safari (\(HostSafari.version))",
+              macUA?.contains("Macintosh; Intel Mac OS X 10_15_7") == true
+                  && macUA?.hasSuffix("Version/\(HostSafari.version) Safari/605.1.15") == true, macUA ?? "nil")
 
         var override = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: "ios-27"))
         override.userAgent = "PrivacyBrowserSelfTest/UA-Override"
         let overrideUA = try await userAgent(for: override)
         check("generation: explicit user agent overrides the generation",
               overrideUA == "PrivacyBrowserSelfTest/UA-Override", overrideUA ?? "nil")
+    }
+
+    // MARK: Fingerprint surface (what deviceinfo.me-style pages test)
+
+    /// A macOS profile must look exactly like a plain WKWebView of this Mac (no own properties,
+    /// native navigator and screen values, untouched rendering), an iPhone profile like an
+    /// iPhone's Safari where the shim can say so, and neither may add noise or Chromium-only
+    /// properties. Compared against a web view without any profile script.
+    private func fingerprintSurface(_ repository: ProfileRepository) async throws {
+        let plainConfiguration = WKWebViewConfiguration()
+        plainConfiguration.websiteDataStore = .nonPersistent()
+        let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
+        try await PageLoader.load(plain, html: page, baseURL: origin)
+        let reference = try await js(plain, Self.surfaceProbe) as? [String: Any] ?? [:]
+        func string(_ probe: [String: Any], _ key: String) -> String { probe[key].map { "\($0)" } ?? "nil" }
+
+        let colors = reference["canvasColors"] as? Int ?? -1
+        let urlLength = reference["canvasURLLength"] as? Int ?? -1
+        let verdict = colors == 5 && [150, 158, 142, 186].contains(urlLength) ? "Allowed" : "Spoofed (by WebKit itself)"
+        info("plain WKWebView: canvas \(colors) colours, PNG \(urlLength) chars → deviceinfo.me verdict \(verdict)")
+        info("plain WKWebView: plugins \(string(reference, "plugins")), languages \(string(reference, "languages"))")
+        check("language: navigator.language is the language WebKit was given",
+              string(reference, "language") == WebContentLanguage.decided?.first, string(reference, "language"))
+
+        for generationID in [DeviceGenerations.defaultID, "ios-26"] {
+            let profile = try repository.create(name: "Surface \(generationID)", configuration: ProfileConfiguration(
+                ephemeral: true, deviceGenerationID: generationID))
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            try await PageLoader.load(tab.webView, html: page, baseURL: origin)
+            let probe = try await js(tab.webView, Self.surfaceProbe) as? [String: Any] ?? [:]
+            tab.tearDown()
+            session.shutDown()
+            try repository.delete(profile.id)
+
+            let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone"
+            for key in ["plugins", "pdfViewerEnabled", "language", "languages", "deviceMemory", "ownNavigator", "ownScreen"] {
+                check("surface (\(name)): \(key) as in a plain web view", string(probe, key) == string(reference, key),
+                      "\(string(probe, key)) vs \(string(reference, key))")
+            }
+            // The shim adds no noise: the rendering functions are the engine's own. (Pixel values
+            // are only reported: WebKit's own fingerprinting protection may vary them per session.)
+            check("surface (\(name)): canvas, WebGL and audio functions are native", probe["renderingNative"] as? Bool == true)
+            info("surface (\(name)): canvas \(string(probe, "canvasColors")) colours, PNG \(string(probe, "canvasURLLength")) chars")
+            check("surface (\(name)): one language, as WebKit exposes", string(probe, "languages") == string(probe, "language"))
+            if name == "macOS" {
+                for key in ["platform", "maxTouchPoints", "hardwareConcurrency", "screen"] {
+                    check("surface (macOS): native \(key)", string(probe, key) == string(reference, key),
+                          "\(string(probe, key)) vs \(string(reference, key))")
+                }
+            } else {
+                check("surface (iPhone): navigator", string(probe, "platform") == "iPhone" && string(probe, "maxTouchPoints") == "5"
+                      && string(probe, "hardwareConcurrency") == "4" && string(probe, "standalone") == "false",
+                      "\(string(probe, "platform")) \(string(probe, "maxTouchPoints")) \(string(probe, "hardwareConcurrency")) \(string(probe, "standalone"))")
+                check("surface (iPhone): screen", string(probe, "screen") == "390x844x390x844x3", string(probe, "screen"))
+            }
+        }
+    }
+
+    /// deviceinfo.me's canvas test (a 6×6 canvas, five greys), the properties it and similar pages
+    /// read, and whether the rendering APIs are still the engine's own functions.
+    private static let surfaceProbe = """
+        const canvas = document.createElement('canvas');
+        canvas.width = 6; canvas.height = 6;
+        const ctx = canvas.getContext('2d');
+        const greys = ['#000000', '#404040', '#808080', '#BFBFBF', '#FFFFFF'];
+        for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++) { ctx.fillStyle = greys[x]; ctx.fillRect(x, y, 1, 1); }
+        const pixels = new Uint32Array(ctx.getImageData(0, 0, 6, 6).data.buffer);
+        const isNative = (f) => typeof f === 'function' && /\\[native code\\]/.test(Function.prototype.toString.call(f));
+        return {
+          canvasColors: new Set(Array.from(pixels, (p) => p & 0xFFFFFF)).size,
+          canvasURLLength: canvas.toDataURL().length,
+          renderingNative: isNative(HTMLCanvasElement.prototype.getContext) && isNative(HTMLCanvasElement.prototype.toDataURL)
+            && isNative(CanvasRenderingContext2D.prototype.getImageData) && isNative(WebGLRenderingContext.prototype.getParameter)
+            && (typeof AudioContext === 'undefined' || isNative(AudioContext.prototype.createAnalyser)),
+          plugins: Array.from(navigator.plugins, (p) => p.name).join('|'),
+          pdfViewerEnabled: String(navigator.pdfViewerEnabled),
+          language: navigator.language,
+          languages: Array.from(navigator.languages).join(','),
+          deviceMemory: typeof navigator.deviceMemory,
+          ownNavigator: Object.getOwnPropertyNames(navigator).join(','),
+          ownScreen: Object.getOwnPropertyNames(screen).join(','),
+          platform: navigator.platform,
+          maxTouchPoints: String(navigator.maxTouchPoints),
+          hardwareConcurrency: String(navigator.hardwareConcurrency),
+          standalone: String(navigator.standalone),
+          screen: [screen.width, screen.height, screen.availWidth, screen.availHeight, devicePixelRatio].join('x'),
+        };
+        """
+
+    // MARK: Proxy location (time zone of the proxy's exit IP)
+
+    /// A profile with a proxy and no explicit time zone runs in the time zone of the proxy's exit
+    /// IP, looked up through the proxy at launch; a later failed lookup falls back to the location
+    /// remembered for that proxy, and an explicit time zone always wins. The self-test proxy
+    /// answers the lookup itself (Europe/Berlin, DE).
+    private func proxyLocationAtLaunch(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("proxy location checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let services = ProxyGeoLookup.services
+        defer { ProxyGeoLookup.services = services }
+        func lookUp(at path: String) {
+            ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid\(path)")!,
+                                             timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        }
+        let profile = try repository.create(name: "Proxy location", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), ephemeral: true))
+        let manager = ProfileManager(repository: repository)
+        func launchedTimeZone() async throws -> String? {
+            try await manager.launch(profile.id)
+            var zone: String?
+            if let webView = manager.session(for: profile.id)?.windowControllers.first?.selectedTab?.webView {
+                try await PageLoader.load(webView, html: page, baseURL: origin)
+                zone = try await js(webView, "return Intl.DateTimeFormat().resolvedOptions().timeZone;") as? String
+            }
+            try await manager.stop(profile.id)
+            return zone
+        }
+
+        lookUp(at: "/pb-geo.json")
+        let zone = try await launchedTimeZone()
+        check("proxy location: the profile runs in the proxy's time zone", zone == "Europe/Berlin", zone ?? "nil")
+        let stored = try repository.loadConfiguration(profile.id)
+        check("proxy location: remembered for this proxy",
+              stored.lastProxyLocation?.timeZoneIdentifier == "Europe/Berlin" && stored.lastProxyLocation?.webLanguage == "de-DE",
+              String(describing: stored.lastProxyLocation))
+
+        lookUp(at: "/no-location-here") // an HTML page, not a location
+        let fallback = try await launchedTimeZone()
+        check("proxy location: a failed lookup falls back to the remembered location", fallback == "Europe/Berlin", fallback ?? "nil")
+
+        var explicit = stored
+        explicit.timeZoneIdentifier = "Asia/Tokyo"
+        try repository.saveConfiguration(explicit, for: profile.id)
+        lookUp(at: "/pb-geo.json")
+        let tokyo = try await launchedTimeZone()
+        check("proxy location: an explicit time zone wins", tokyo == "Asia/Tokyo", tokyo ?? "nil")
+        try repository.delete(profile.id)
     }
 
     // MARK: Profile deletion (regression for the delete crash)
@@ -655,6 +808,188 @@ final class SelfTest {
         try repository.delete(profile.id)
     }
 
+    // MARK: Quit (regression for "WebKit did not release the data store" on ⌘Q)
+
+    /// ⌘Q in a focused page reaches `terminate:` from inside WebKit, which keeps the web view —
+    /// and with it the profile's data store — alive until `terminate:` returns. The quit must
+    /// still close and seal every profile before the exit: no error, no forced seal (WebKit
+    /// released the store), nothing left decrypted, and the data restores.
+    private func quitFromFocusedPage(_ repository: ProfileRepository) async throws {
+        let layout = WebDataStoreVault.layout
+        let vault = WebDataStoreVault(repository: repository)
+        let profile = try repository.create(name: "Quit", configuration: ProfileConfiguration())
+        let manager = ProfileManager(repository: repository)
+        var errors: [String] = []
+        manager.onError = { errors.append($0) }
+        try await manager.launch(profile.id)
+        let token = UUID().uuidString
+
+        var terminateCalls = 0
+        let coordinator = QuitCoordinator(hasActivity: { manager.hasActivity },
+                                          lockForQuit: {
+                                              manager.prepareForQuit()
+                                              await manager.shutDown()
+                                          },
+                                          terminate: { terminateCalls += 1 })
+        let delegate = QuitTestDelegate(coordinator: coordinator)
+        let previousDelegate = NSApp.delegate
+        let previousMenu = NSApp.mainMenu
+        NSApp.delegate = delegate
+        NSApp.mainMenu = Self.menuWithQuitItem()
+        defer {
+            NSApp.delegate = previousDelegate
+            NSApp.mainMenu = previousMenu
+        }
+
+        let path = try await pressCommandQ(in: manager.session(for: profile.id), token: token, delegate: delegate)
+        info("quit: ⌘Q reached terminate: \(path)")
+        check("quit: terminate: returns at once instead of sealing inside it",
+              !delegate.replies.isEmpty && delegate.replies.allSatisfy { $0 == .terminateCancel },
+              "replies=\(delegate.replies.map(\.rawValue)) (0 cancel, 1 now, 2 later)")
+        let finished = await waitUntil(timeout: 60) { terminateCalls > 0 }
+        check("quit: every profile sealed, then terminate: sent again",
+              finished && terminateCalls == 1 && !manager.hasActivity,
+              "terminate calls=\(terminateCalls) activity=\(manager.hasActivity)")
+        check("quit: the second terminate: exits", coordinator.shouldTerminate(NSApp) == .terminateNow)
+        check("quit: no seal error", errors.isEmpty, errors.joined(separator: " | "))
+        check("quit: WebKit released the store (normal seal, not forced)",
+              !FileManager.default.fileExists(atPath: vault.forcedSealMarkerURL(for: profile.id).path))
+        check("quit: nothing left decrypted", layout.discoverDirectories(for: profile.id).isEmpty,
+              layout.discoverDirectories(for: profile.id).map(\.path).joined(separator: ", "))
+        let archive = (try? Data(contentsOf: repository.webDataArchiveURL(for: profile.id))) ?? Data()
+        check("quit: archive written, token not in plaintext",
+              archive.count > 64 && archive.range(of: Data(token.utf8)) == nil, "\(archive.count) bytes")
+
+        // The sealed data restores on the next launch.
+        let key = try repository.profileKey(for: profile.id)
+        try await vault.prepareForLaunch(profileID: profile.id, key: key)
+        var session: BrowserSession? = try makeSession(repository, profile.id, key: key)
+        var web: WKWebView? = WKWebView(frame: .zero, configuration: session!.makeWebViewConfiguration())
+        try await PageLoader.load(web!, html: page, baseURL: origin)
+        let restored = try await js(web!, "return localStorage.getItem('pb') ?? 'null';") as? String
+        check("quit: the sealed data restores", restored == token, restored ?? "nil")
+        web = nil
+        session?.shutDown()
+        session = nil
+        try await vault.seal(profileID: profile.id, key: key)
+        await vault.deleteData(profileID: profile.id)
+        try repository.delete(profile.id)
+    }
+
+    /// Loads a page in the profile's tab, writes `token` to its localStorage, focuses the page
+    /// and presses ⌘Q in it. Returns how `terminate:` was reached. Holds the tab only while it
+    /// runs: afterwards nothing but WebKit itself keeps the page alive.
+    private func pressCommandQ(in session: BrowserSession?, token: String, delegate: QuitTestDelegate) async throws -> String {
+        guard let tab = session?.windowControllers.first?.selectedTab, let window = tab.webView.window else {
+            check("quit: a running profile with a window and a tab", false)
+            return "not at all"
+        }
+        let webView = tab.webView
+        try await PageLoader.load(webView, html: page, baseURL: origin)
+        _ = try await js(webView, "localStorage.setItem('pb', token); return true;", ["token": token])
+        _ = window.makeFirstResponder(webView)
+        // WebKit hands ⌘Q to the page first, then re-sends it to AppKit while it retains the web
+        // view; the Quit menu item then calls terminate: with WebKit's frames below it.
+        if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+                                        timestamp: ProcessInfo.processInfo.systemUptime,
+                                        windowNumber: window.windowNumber, context: nil,
+                                        characters: "q", charactersIgnoringModifiers: "q",
+                                        isARepeat: false, keyCode: 12) {
+            _ = window.performKeyEquivalent(with: event)
+        }
+        let reachedThroughWebKit = await waitUntil(timeout: 5) { !delegate.replies.isEmpty }
+        if reachedThroughWebKit { return "through WebKit's re-sent key event" }
+        // Not re-sent here (no key window on this runner): reproduce what matters, the web view
+        // alive on the stack below terminate:, as WebKit holds it.
+        withExtendedLifetime(webView) { NSApp.terminate(nil) }
+        return "directly, with the web view held below it (WebKit did not re-send ⌘Q on this runner)"
+    }
+
+    /// A main menu whose Quit item (⌘Q → terminate:) is what the self-test's key event hits.
+    private static func menuWithQuitItem() -> NSMenu {
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let appItem = NSMenuItem()
+        appItem.submenu = appMenu
+        let mainMenu = NSMenu()
+        mainMenu.addItem(appItem)
+        return mainMenu
+    }
+
+    /// Quit while WebKit keeps a store in use (here: a web view the test holds on to). Without
+    /// quit the seal still fails and leaves everything in place; when quitting it is forced —
+    /// archive written, plaintext deleted, marker left — and the next launch discards what WebKit
+    /// wrote after it and restores the archive.
+    private func forcedSealAtQuit(_ repository: ProfileRepository) async throws {
+        let layout = WebDataStoreVault.layout
+        let vault = WebDataStoreVault(repository: repository)
+        vault.retryDelays = [1, 1]
+        let profile = try repository.create(name: "Forced seal", configuration: ProfileConfiguration())
+        let key = try repository.profileKey(for: profile.id)
+        let marker = vault.forcedSealMarkerURL(for: profile.id)
+        let token = UUID().uuidString
+        try await vault.prepareForLaunch(profileID: profile.id, key: key)
+        var session: BrowserSession? = try makeSession(repository, profile.id, key: key)
+        var web: WKWebView? = WKWebView(frame: .zero, configuration: session!.makeWebViewConfiguration())
+        try await PageLoader.load(web!, html: page, baseURL: origin)
+        _ = try await js(web!, "localStorage.setItem('pb', token); return true;", ["token": token])
+        session?.shutDown() // the session lets go of the store; the web view still holds it
+
+        do {
+            try await vault.seal(profileID: profile.id, key: key)
+            check("forced seal: a store in use is not sealed when not quitting", false,
+                  "WebKit released a store a live web view still uses")
+        } catch {
+            check("forced seal: a store in use is not sealed when not quitting",
+                  !layout.discoverDirectories(for: profile.id).isEmpty && !FileManager.default.fileExists(atPath: marker.path))
+        }
+
+        vault.forceSealWhenStoreStaysInUse = true
+        let sealed = try await vault.seal(profileID: profile.id, key: key)
+        check("forced seal: used when WebKit keeps the store through every attempt", sealed.forced,
+              "attempts=\(sealed.attempts)")
+        check("forced seal: plaintext deleted, marker written",
+              layout.discoverDirectories(for: profile.id).isEmpty && FileManager.default.fileExists(atPath: marker.path))
+        let archive = (try? Data(contentsOf: repository.webDataArchiveURL(for: profile.id))) ?? Data()
+        check("forced seal: archive written, token not in plaintext",
+              archive.count > 64 && archive.range(of: Data(token.utf8)) == nil, "\(archive.count) bytes")
+
+        // Stands in for the process exit: release the web view and let WebKit drop the store.
+        web = nil
+        session = nil
+        var released = false
+        for _ in 0..<15 where !released {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            await vault.deleteData(profileID: profile.id) // remove(forIdentifier:) succeeds once WebKit lets go
+            released = !WebDataStoreVault.isRegistered(profile.id)
+        }
+        check("forced seal: WebKit lets go of the store once nothing holds it", released)
+
+        // What the exit can leave behind: a late WebKit write after the forced seal.
+        let lateWrite = sealed.directories.first?.appendingPathComponent("pb-late-write")
+        if let lateWrite {
+            try FileManager.default.createDirectory(at: lateWrite.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("late".utf8).write(to: lateWrite)
+        }
+        try await vault.prepareForLaunch(profileID: profile.id, key: key)
+        check("forced seal: the next launch discards later residue and the marker",
+              lateWrite.map { !FileManager.default.fileExists(atPath: $0.path) } == true
+                  && !FileManager.default.fileExists(atPath: marker.path))
+        session = try makeSession(repository, profile.id, key: key)
+        web = WKWebView(frame: .zero, configuration: session!.makeWebViewConfiguration())
+        try await PageLoader.load(web!, html: page, baseURL: origin)
+        let restored = try await js(web!, "return localStorage.getItem('pb') ?? 'null';") as? String
+        check("forced seal: the archive restores", restored == token, restored ?? "nil")
+        web = nil
+        session?.shutDown()
+        session = nil
+        vault.forceSealWhenStoreStaysInUse = false
+        vault.retryDelays = [1, 2, 3, 5, 8]
+        try? await vault.seal(profileID: profile.id, key: key)
+        await vault.deleteData(profileID: profile.id)
+        try repository.delete(profile.id)
+    }
+
     // MARK: Helpers
 
     private func makeSession(_ repository: ProfileRepository, _ id: UUID, key: SymmetricKey) throws -> BrowserSession {
@@ -697,6 +1032,23 @@ final class SelfTest {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         return condition()
+    }
+}
+
+/// Stands in for the app delegate while the self-test presses ⌘Q: hands `terminate:` to the
+/// coordinator under test, records its answers, and never lets the self-test process exit.
+@MainActor
+private final class QuitTestDelegate: NSObject, NSApplicationDelegate {
+    let coordinator: QuitCoordinator
+    private(set) var replies: [NSApplication.TerminateReply] = []
+
+    init(coordinator: QuitCoordinator) {
+        self.coordinator = coordinator
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        replies.append(coordinator.shouldTerminate(sender))
+        return .terminateCancel
     }
 }
 

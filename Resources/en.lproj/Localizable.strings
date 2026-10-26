@@ -65,6 +65,8 @@
 "editor.title.new" = "New Profile";
 "editor.tz" = "Time zone";
 "editor.tz.override" = "Override time zone";
+"editor.tz.fromProxy" = "Time zone of the proxy's location";
+"editor.tz.fromProxy.note" = "At launch the proxy's exit IP is looked up through the proxy (ipinfo.io, geojs.io or ipwho.is) and the profile runs in its time zone. The first profile launched also sets the language websites see (Accept-Language) for the whole app until it quits.";
 "editor.ua.effective" = "User agent";
 "editor.ua.field" = "User agent";
 "editor.ua.useCustom" = "Custom user agent";

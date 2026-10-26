@@ -2,24 +2,30 @@ import BrowserCore
 import Foundation
 import WebKit
 
-/// JavaScript shims for settings WebKit has no native per-web-view API for.
-/// Aggressive iOS-like spoofing: navigator, screen, canvas/WebGL, fonts, audio.
-/// Still best-effort and detectable; not engine-level.
+/// JavaScript shims for settings WebKit has no native per-web-view API for: time zone,
+/// geolocation, WebRTC, and — for mobile generations only — the navigator and screen values of
+/// the declared device. Best-effort and detectable; not engine-level.
+///
+/// What is deliberately NOT touched, because a fingerprinting test looks exactly for it:
+///   * canvas, WebGL, audio and font rendering: noise makes two readings differ ("Canvas:
+///     Spoofed", "Fingerprinting Resistance: Detected"), and the engine underneath is this Mac's
+///     WebKit either way;
+///   * navigator.plugins / mimeTypes: the HTML spec's fixed list of five PDF viewers ("PDF
+///     Viewer", "Chrome PDF Viewer", "Chromium PDF Viewer", "Microsoft Edge PDF Viewer",
+///     "WebKit built-in PDF") is what every real Safari reports, on the Mac and on iOS;
+///   * navigator.language(s): it must match the Accept-Language header, which only WebKit sets
+///     (see `WebContentLanguage`); WebKit exposes a single language, as Safari does;
+///   * navigator.deviceMemory: Safari does not implement it, so defining it marks a fake.
+/// A macOS profile overrides no navigator or screen value at all: it runs on the very engine and
+/// hardware it declares, and native values agree with everything else a page can measure
+/// (CSS media queries, window sizes), which a fixed screen size would not.
 enum PrivacyScripts {
     struct ShimConfiguration: Encodable {
         var timeZone: String?
         var geolocation: Geolocation
         var webRTC: String
-        var platform: String
-        var vendor: String
-        var hardwareConcurrency: Int
-        var deviceMemory: Double
-        var maxTouchPoints: Int
-        var languages: [String]
-        var screenWidth: Int
-        var screenHeight: Int
-        var devicePixelRatio: Double
-        var isIOS: Bool
+        /// Mobile generations only; nil for macOS (see above).
+        var device: Device?
 
         struct Geolocation: Encodable {
             var mode: String
@@ -27,11 +33,20 @@ enum PrivacyScripts {
             var longitude: Double?
             var accuracy: Double?
         }
+
+        /// What the declared device's Safari reports where it differs from this Mac.
+        struct Device: Encodable {
+            var platform: String
+            var maxTouchPoints: Int
+            /// WebKit reports 4 below 8 cores (every iPhone) and 8 from 8 cores on.
+            var hardwareConcurrency: Int
+            var screenWidth: Int
+            var screenHeight: Int
+            var devicePixelRatio: Double
+        }
     }
 
     static func shimConfiguration(for configuration: ProfileConfiguration) -> ShimConfiguration {
-        let gen = configuration.deviceGeneration
-        let isIOS = gen.platform == .iOS || gen.platform == .iPadOS
         let geolocation: ShimConfiguration.Geolocation
         switch configuration.geolocation {
         case .deny:
@@ -39,21 +54,20 @@ enum PrivacyScripts {
         case let .fixed(latitude, longitude, accuracy):
             geolocation = .init(mode: "fixed", latitude: latitude, longitude: longitude, accuracy: accuracy)
         }
-        return ShimConfiguration(
-            timeZone: configuration.timeZoneIdentifier,
-            geolocation: geolocation,
-            webRTC: configuration.webRTCPolicy.rawValue,
-            platform: isIOS ? "iPhone" : "MacIntel",
-            vendor: "Apple Computer, Inc.",
-            hardwareConcurrency: isIOS ? 6 : 8,
-            deviceMemory: isIOS ? 4 : 8,
-            maxTouchPoints: isIOS ? 5 : 0,
-            languages: ["en-US", "en"],
-            screenWidth: isIOS ? 390 : 1440,
-            screenHeight: isIOS ? 844 : 900,
-            devicePixelRatio: isIOS ? 3 : 2,
-            isIOS: isIOS
-        )
+        let device: ShimConfiguration.Device?
+        switch configuration.deviceGeneration.platform {
+        case .macOS:
+            device = nil
+        case .iOS:
+            device = .init(platform: "iPhone", maxTouchPoints: 5, hardwareConcurrency: 4,
+                           screenWidth: 390, screenHeight: 844, devicePixelRatio: 3)
+        case .iPadOS:
+            // The generation's UA is iPad Safari's mobile one ("iPad; CPU OS …"), which reports "iPad".
+            device = .init(platform: "iPad", maxTouchPoints: 5, hardwareConcurrency: 8,
+                           screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2)
+        }
+        return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, geolocation: geolocation,
+                                 webRTC: configuration.webRTCPolicy.rawValue, device: device)
     }
 
     static func makeUserContentController(for configuration: ProfileConfiguration) -> WKUserContentController {
@@ -77,98 +91,52 @@ const patched = new WeakSet();
 function patchWindow(w) {
   if (!w || patched.has(w)) return;
   patched.add(w);
-  try { patchNavigator(w); } catch (e) {}
-  try { patchScreen(w); } catch (e) {}
-  if (CONFIG.isIOS) {
-    try { patchCanvasWebGL(w); } catch (e) {}
-    try { patchFonts(w); } catch (e) {}
-    try { patchAudio(w); } catch (e) {}
-  }
+  if (CONFIG.device) { try { patchDevice(w, CONFIG.device); } catch (e) {} }
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
   try { patchWebRTC(w, CONFIG.webRTC || 'disabled'); } catch (e) {}
   try { hookChildWindows(w); } catch (e) {}
 }
 
-function patchNavigator(w) {
+// Mobile generations: the declared device's navigator and screen values. Each is a getter where
+// the engine defines it (on the prototype for navigator and screen, on window itself for
+// devicePixelRatio), shaped like the native one, so navigator, screen and window gain no own
+// property. Rendering is left alone (see PrivacyScripts).
+function patchDevice(w, device) {
   const nav = w.navigator;
-  if (!nav) return;
-  const define = (obj, prop, val) => Object.defineProperty(obj, prop, { value: val, writable: false, configurable: false });
-  define(nav, 'platform', CONFIG.platform);
-  define(nav, 'vendor', CONFIG.vendor);
-  define(nav, 'hardwareConcurrency', CONFIG.hardwareConcurrency);
-  define(nav, 'deviceMemory', CONFIG.deviceMemory);
-  define(nav, 'maxTouchPoints', CONFIG.maxTouchPoints);
-  define(nav, 'languages', Object.freeze(CONFIG.languages.slice()));
-  define(nav, 'language', CONFIG.languages[0]);
-  if (CONFIG.isIOS) {
-    define(nav, 'standalone', false);
+  if (nav) {
+    overrideGetter(nav, 'platform', device.platform);
+    overrideGetter(nav, 'maxTouchPoints', device.maxTouchPoints);
+    overrideGetter(nav, 'hardwareConcurrency', device.hardwareConcurrency);
+    overrideGetter(nav, 'standalone', false); // iOS Safari only: false in a browser tab
   }
-}
-
-function patchScreen(w) {
   const s = w.screen;
-  if (!s) return;
-  Object.defineProperty(s, 'width', { value: CONFIG.screenWidth, writable: false });
-  Object.defineProperty(s, 'height', { value: CONFIG.screenHeight, writable: false });
-  Object.defineProperty(s, 'availWidth', { value: CONFIG.screenWidth, writable: false });
-  Object.defineProperty(s, 'availHeight', { value: CONFIG.screenHeight, writable: false });
-  Object.defineProperty(w, 'devicePixelRatio', { value: CONFIG.devicePixelRatio, writable: false });
+  if (s) {
+    overrideGetter(s, 'width', device.screenWidth);
+    overrideGetter(s, 'height', device.screenHeight);
+    overrideGetter(s, 'availWidth', device.screenWidth);   // iOS has no menu bar or Dock
+    overrideGetter(s, 'availHeight', device.screenHeight);
+  }
+  overrideGetter(w, 'devicePixelRatio', device.devicePixelRatio);
 }
 
-function patchCanvasWebGL(w) {
-  const proto = w.HTMLCanvasElement && w.HTMLCanvasElement.prototype;
-  if (proto && proto.getContext) {
-    const orig = proto.getContext;
-    proto.getContext = function (type, attrs) {
-      const ctx = orig.apply(this, arguments);
-      if (type === '2d' && ctx) {
-        const origToData = ctx.getImageData;
-        ctx.getImageData = function () {
-          const data = origToData.apply(this, arguments);
-          for (let i = 0; i < data.data.length; i += 4) data.data[i] = (data.data[i] + 1) & 255;
-          return data;
-        };
-      }
-      return ctx;
-    };
+function overrideGetter(obj, name, value) {
+  let holder = obj;
+  while (holder && !Object.prototype.hasOwnProperty.call(holder, name)) holder = Object.getPrototypeOf(holder);
+  if (!holder || holder === Object.prototype) {
+    // Not defined by this engine (navigator.standalone on the Mac): on the prototype, like iOS.
+    const proto = Object.getPrototypeOf(obj);
+    holder = proto && proto !== Object.prototype ? proto : obj;
   }
-  if (w.WebGLRenderingContext) {
-    const getParam = w.WebGLRenderingContext.prototype.getParameter;
-    w.WebGLRenderingContext.prototype.getParameter = function (p) {
-      if (p === 37445) return 'Apple Inc.';
-      if (p === 37446) return 'Apple GPU';
-      return getParam.apply(this, arguments);
-    };
-  }
-}
-
-function patchFonts(w) {
-  // Crude font list reduction for iOS-like (system fonts only)
-  if (w.document && w.document.fonts) {
-    try {
-      Object.defineProperty(w.document.fonts, 'size', { value: 12, writable: false });
-    } catch (e) {}
-  }
-}
-
-function patchAudio(w) {
-  if (!w.AudioContext && !w.webkitAudioContext) return;
-  const AC = w.AudioContext || w.webkitAudioContext;
-  const orig = AC.prototype.getChannelData || AC.prototype.createAnalyser;
-  // Minimal noise on analyser if present
-  if (AC.prototype.createAnalyser) {
-    const origCreate = AC.prototype.createAnalyser;
-    AC.prototype.createAnalyser = function () {
-      const analyser = origCreate.apply(this, arguments);
-      const origGet = analyser.getFloatFrequencyData;
-      analyser.getFloatFrequencyData = function (array) {
-        origGet.apply(this, arguments);
-        for (let i = 0; i < array.length; i++) array[i] += (Math.random() - 0.5) * 0.0001;
-      };
-      return analyser;
-    };
-  }
+  const native = Object.getOwnPropertyDescriptor(holder, name);
+  // An accessor named "get <name>", like the native getter.
+  const getter = Object.getOwnPropertyDescriptor({ get [name]() { return value; } }, name).get;
+  Object.defineProperty(holder, name, {
+    get: getter,
+    set: native ? native.set : undefined,
+    enumerable: native ? native.enumerable : true,
+    configurable: true
+  });
 }
 
 function patchTimeZone(w, TZ) {
@@ -182,7 +150,8 @@ function patchTimeZone(w, TZ) {
     year: 'numeric', month: 'numeric', day: 'numeric',
     hour: 'numeric', minute: 'numeric', second: 'numeric'
   });
-  const nameFormatter = new NativeDTF('en-US', { timeZone: TZ, timeZoneName: 'long' });
+  // The page's default locale, as the native Date#toString names the zone.
+  const nameFormatter = new NativeDTF(undefined, { timeZone: TZ, timeZoneName: 'long' });
   const offsetCache = new Map();
 
   function offsetFor(t) {

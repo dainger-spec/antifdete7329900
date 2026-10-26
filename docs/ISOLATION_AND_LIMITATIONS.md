@@ -124,9 +124,9 @@ modified WebKit, or different hardware. None is attempted:
 | AudioContext output | the Mac's audio stack |
 | Fonts (measured via text metrics) | macOS system fonts; iOS has a different font set |
 | Screen size, colour depth, device pixel ratio, `matchMedia` results | the real display; no per-view override |
-| `navigator.platform`, `vendor`, `hardwareConcurrency`, `deviceMemory`, `maxTouchPoints` | engine and hardware; `customUserAgent` changes only the UA string |
+| `navigator.platform`, `vendor`, `hardwareConcurrency`, `maxTouchPoints` | engine and hardware; `customUserAgent` changes only the UA string. macOS profiles keep the native values; iPhone/iPad profiles get their device class's values from the shim (detectable, not in workers) |
 | Touch and pointer behaviour, `ontouchstart`, orientation and motion events | macOS WebKit is a desktop engine; there is no touch-input emulation API |
-| `navigator.languages`, `Accept-Language` | follow the app's language list; WKWebView has no per-view API |
+| `navigator.languages`, `Accept-Language` | one list per app run: WebKit reads it once, when its first process starts. The first profile launched picks it (its proxy's country, else the app's language); the shim never overrides `navigator.language(s)`, so header and script agree |
 | Supported JS/CSS features, media codecs, WebKit version quirks | the installed macOS WebKit, which differs from iOS WebKit |
 | TLS ClientHello, HTTP/2 settings, header order | Apple's macOS network stack |
 
@@ -246,7 +246,8 @@ the script into it can expose an unpatched constructor; `contentWindow`,
 | User agent | `WKWebView.customUserAgent`, with presets in the editor | yes (string only) | `navigator.platform`, vendor, feature set and TLS fingerprint still identify WebKit on macOS (§2). Use the *Safari on macOS* preset; iPhone/iPad presets are UA-only and inconsistent |
 | Time zone | JS: `Intl.DateTimeFormat` default `timeZone`, `Date` local getters, `getTimezoneOffset`, `toString`, `toDateString`, `toTimeString`, `toLocale*String` | no | Workers use the host zone. `new Date(y, m, d, …)`, local setters (`setHours` …) and `Date.parse` of strings without an offset use the host zone. Detectable |
 | Geolocation | JS: `navigator.geolocation` returns PERMISSION_DENIED, or fixed coordinates; `permissions.query({name:'geolocation'})` agrees | no | Detectable. The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed |
-| Language | not implemented | — | WKWebView has no per-view `Accept-Language` / `navigator.languages` API |
+| Time zone from the proxy | At launch, a geolocation service (ipinfo.io, then geojs.io, ipwho.is) is asked *through the profile's proxy* where it exits; the profile runs in that zone. The last answer per proxy is kept for when a lookup fails | — | A third-party request per launch (HTTPS, via the proxy only, no cookies). Off per profile, or set a zone explicitly. Without any answer the host zone is used |
+| Language | Process-wide: set before WebKit's first process from the first launched profile's proxy country (`WebContentLanguage`) | partly | WKWebView has no per-view `Accept-Language` / `navigator.languages` API; later profiles of the same run share the first one's language |
 
 The shim logic is tested under Node (`scripts/test-shims.mjs`) against ICU, across
 fixed-offset zones, DST transitions and 30-minute shifts. The key cases are also checked
@@ -346,9 +347,11 @@ locations.
 **Window lifecycle.**
 - Closing a profile's last window stops that profile and seals its website data. The app
   stays open, and the Profiles window comes back to the front.
-- Only ⌘Q or **Lock** stops everything. Quitting with profiles running waits until every
-  profile is sealed (`applicationShouldTerminate` → `.terminateLater`). A second ⌘Q during
-  that wait doesn't start a second shutdown.
+- Only ⌘Q or **Lock** stops everything. Quitting with profiles running closes every window
+  and seals every profile in the normal run loop, then quits (`QuitCoordinator`); sealing
+  inside `terminate:` failed on ⌘Q because WebKit still held the focused page. A second ⌘Q
+  during that wait doesn't start a second shutdown. If WebKit never lets go of a store, the
+  quit forces the seal (archive + delete, `webdata.forced` marker) and logs it.
 - Clicking the Dock icon with no window open shows the Profiles window again.
 
 **Crash fix.** Earlier builds released a browser window's controller from inside

@@ -22,8 +22,20 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     public var geolocation: GeolocationSetting
 
     /// APPROXIMATION: JavaScript override of `Intl` default time zone and `Date`
-    /// local-time accessors. `nil` → system time zone. IANA identifier, e.g. "Europe/Berlin".
+    /// local-time accessors. `nil` → the proxy's time zone (`matchProxyLocation`), else the
+    /// system time zone. IANA identifier, e.g. "Europe/Berlin".
     public var timeZoneIdentifier: String?
+
+    /// With a proxy and no `timeZoneIdentifier`: at launch the app asks a geolocation service,
+    /// through the proxy, where the proxy exits, and the profile runs in that time zone (a site
+    /// compares the time zone it is told with its own lookup of the IP). The country also picks
+    /// the language websites see when this is the first profile of the app run (WebKit has one
+    /// language list per process). Default on; older configurations decode as on.
+    public var matchProxyLocation: Bool
+
+    /// The last location looked up for `proxy` (`matchProxyLocation`): used when a later lookup
+    /// fails, as long as the proxy is the same.
+    public var lastProxyLocation: ProxyLocation?
 
     /// APPROXIMATION: JavaScript removal/wrapping of `RTCPeerConnection`.
     public var webRTCPolicy: WebRTCPolicy
@@ -58,7 +70,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 safeBrowsingEnabled: Bool = false,
                 historyEnabled: Bool = true,
                 historyRetentionDays: Int? = 90,
-                deviceGenerationID: String? = nil) {
+                deviceGenerationID: String? = nil,
+                matchProxyLocation: Bool = true,
+                lastProxyLocation: ProxyLocation? = nil) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -70,6 +84,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.historyEnabled = historyEnabled
         self.historyRetentionDays = historyRetentionDays
         self.deviceGenerationID = deviceGenerationID
+        self.matchProxyLocation = matchProxyLocation
+        self.lastProxyLocation = lastProxyLocation
     }
 
     /// A new profile seeded from a generation: the generation supplies the UA (by reference,
@@ -82,16 +98,47 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// The resolved generation (default if none/unknown is stored).
     public var deviceGeneration: DeviceGeneration { DeviceGenerations.resolved(id: deviceGenerationID) }
 
-    /// The User-Agent actually applied: an explicit `userAgent` override wins; otherwise the
-    /// selected generation's UA. `nil` means use the WebKit default.
+    /// The catalog User-Agent: an explicit `userAgent` override wins; otherwise the selected
+    /// generation's catalog UA. `nil` when neither is set. The app applies
+    /// `userAgent(hostSafariVersion:)`.
     public var effectiveUserAgent: String? {
         if let userAgent, !userAgent.isEmpty { return userAgent }
         return DeviceGenerations.generation(id: deviceGenerationID)?.userAgent
     }
 
+    /// The User-Agent applied: an explicit `userAgent` override wins; otherwise the generation's
+    /// (the default generation when none is stored), the macOS one naming the host's Safari
+    /// version. Never WebKit's bare default, which lacks the "Version/… Safari/…" every Safari sends.
+    public func userAgent(hostSafariVersion: String?) -> String {
+        if let userAgent, !userAgent.isEmpty { return userAgent }
+        return deviceGeneration.userAgent(hostSafariVersion: hostSafariVersion)
+    }
+
+    /// Launching looks up where the proxy exits (`matchProxyLocation`).
+    public var needsProxyLocation: Bool { matchProxyLocation && proxy != nil }
+
+    /// This launch's lookup, or else the last location found for the same proxy.
+    public func proxyLocation(lookedUp: ProxyLocation?) -> ProxyLocation? {
+        guard needsProxyLocation, let proxy else { return nil }
+        let endpoint = ProxyLocation.endpoint(of: proxy)
+        if let lookedUp, lookedUp.proxyEndpoint == endpoint { return lookedUp }
+        if let cached = lastProxyLocation, cached.proxyEndpoint == endpoint { return cached }
+        return nil
+    }
+
+    /// The configuration a launch runs with: the proxy's time zone unless one is set explicitly.
+    public func applying(_ location: ProxyLocation?) -> ProfileConfiguration {
+        var configuration = self
+        if timeZoneIdentifier == nil, let location, needsProxyLocation {
+            configuration.timeZoneIdentifier = location.timeZoneIdentifier
+        }
+        return configuration
+    }
+
     private enum CodingKeys: String, CodingKey {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
-             safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID
+             safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
+             matchProxyLocation, lastProxyLocation
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -112,6 +159,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             ? try c.decodeIfPresent(Int.self, forKey: .historyRetentionDays)
             : defaults.historyRetentionDays
         deviceGenerationID = try c.decodeIfPresent(String.self, forKey: .deviceGenerationID)
+        matchProxyLocation = try c.decodeIfPresent(Bool.self, forKey: .matchProxyLocation) ?? defaults.matchProxyLocation
+        // A cache: one that no longer decodes is dropped, never a reason to fail the profile.
+        lastProxyLocation = (try? c.decodeIfPresent(ProxyLocation.self, forKey: .lastProxyLocation)) ?? nil
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -129,6 +179,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(historyEnabled, forKey: .historyEnabled)
         try c.encode(historyRetentionDays, forKey: .historyRetentionDays)
         try c.encodeIfPresent(deviceGenerationID, forKey: .deviceGenerationID)
+        try c.encode(matchProxyLocation, forKey: .matchProxyLocation)
+        try c.encodeIfPresent(lastProxyLocation, forKey: .lastProxyLocation)
     }
 
     public var historyPolicy: HistoryStore.Policy {

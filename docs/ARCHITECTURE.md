@@ -154,8 +154,15 @@ At launch the profile key also opens the password vault, the history and the boo
 thread; `BrowserSession.shutDown()` flushes them synchronously before the data store is
 released.
 
-The app delays termination (`applicationShouldTerminate` → `.terminateLater`) until
-every running profile is sealed.
+Quitting with profiles running seals them all before the process exits (`QuitCoordinator`):
+the first `terminate:` is cancelled, windows close and profiles seal in the normal run loop,
+and `terminate:` is sent again once nothing is left. Sealing inside `terminate:`
+(`.terminateLater`) failed on ⌘Q: WebKit re-sends an unhandled key equivalent while it retains
+the web view, so the profile's data store stayed in use for as long as `terminate:` waited.
+Only a logout, restart or shutdown still waits inside `terminate:` (cancelling it would cancel
+the logout). If WebKit still holds a store after every attempt, the quit forces the seal and
+leaves a `webdata.forced` marker so that whatever WebKit writes before the exit is discarded at
+the next launch or unlock instead of being taken for newer data.
 
 ## Tabs
 
@@ -210,9 +217,10 @@ configs read as the default generation).
   session callback is posted to the next main run-loop turn, because releasing an
   `NSWindow` while AppKit is still closing it is a use-after-free (the earlier crash on close
   and quit).
-- `BrowserSession.shutDown()` is idempotent, and `applicationShouldTerminate` ignores a second
-  ⌘Q while sealing is in progress. `applicationShouldTerminateAfterLastWindowClosed`
-  returns `false`.
+- `BrowserSession.shutDown()` is idempotent, and a second ⌘Q while sealing joins the quit
+  under way (`QuitCoordinator`). `applicationShouldTerminateAfterLastWindowClosed` returns
+  `false`. Browser windows are not restorable, so AppKit never writes their titles (the
+  profile names) to Saved Application State.
 
 ## Concurrency
 

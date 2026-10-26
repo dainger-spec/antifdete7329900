@@ -29,6 +29,14 @@ final class WebDataStoreVault {
     private let repository: ProfileRepository
     private let log = Logger(subsystem: "PrivacyBrowser", category: "WebDataStoreVault")
 
+    /// Set when the app quits (`ProfileManager.prepareForQuit`): a live store WebKit still holds
+    /// after the last attempt is force-sealed (see `forceSeal`) instead of left decrypted. Only
+    /// right before the process exits — a running app may still use the store.
+    var forceSealWhenStoreStaysInUse = false
+
+    /// Seconds to wait before each attempt to seal a live store (self-test hook).
+    var retryDelays: [UInt64] = [1, 2, 3, 5, 8]
+
     init(repository: ProfileRepository) {
         self.repository = repository
     }
@@ -48,6 +56,14 @@ final class WebDataStoreVault {
         var directories: [URL] = []
         var stats = EncryptedDirectoryArchive.Stats()
         var attempts = 0
+        /// Sealed by `forceSeal`: WebKit kept the store in use until the end.
+        var forced = false
+    }
+
+    /// Written by `forceSeal`: the archive is the profile's data, and WebKit directories found
+    /// later were written after that seal (see `discardResidueAfterForcedSeal`).
+    func forcedSealMarkerURL(for profileID: UUID) -> URL {
+        repository.directory(for: profileID).appendingPathComponent("webdata.forced")
     }
 
     /// Layout of the running process (sandboxed or not).
@@ -121,6 +137,7 @@ final class WebDataStoreVault {
     /// Must be called before the profile's `WKWebsiteDataStore` is created.
     func prepareForLaunch(profileID: UUID, key: SymmetricKey) async throws {
         let layout = Self.layout
+        try discardResidueAfterForcedSeal(profileID: profileID)
         let residue = layout.discoverDirectories(for: profileID)
         if !residue.isEmpty {
             // Leftover plaintext from a crash. It is newer than the archive (it was produced
@@ -158,10 +175,16 @@ final class WebDataStoreVault {
     func seal(profileID: UUID, key: SymmetricKey, activeStore: Bool = true) async throws -> SealResult {
         let archive = repository.webDataArchiveURL(for: profileID)
         let layout = Self.layout
+        var result = SealResult()
+        // Recovery after a forced seal: the directories are what WebKit wrote after that seal,
+        // and the archive already holds the profile's data.
+        if !activeStore, try discardResidueAfterForcedSeal(profileID: profileID) {
+            result.attempts = 1
+            return result
+        }
         // A live store needs settle time and a WebKit-coordinated removal, with retries.
         // Recovered-from-disk data needs neither: archive once and delete the files.
-        let delays: [UInt64] = activeStore ? [1, 2, 3, 5, 8] : [0]
-        var result = SealResult()
+        let delays: [UInt64] = activeStore ? retryDelays : [0]
         var lastError: Error?
         for seconds in delays {
             result.attempts += 1
@@ -182,6 +205,8 @@ final class WebDataStoreVault {
                 for directory in layout.discoverDirectories(for: profileID) {
                     try FileManager.default.removeItem(at: directory)
                 }
+                // The archive is current again; nothing found later is post-forced-seal residue.
+                try? FileManager.default.removeItem(at: forcedSealMarkerURL(for: profileID))
                 log.info("Sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes (activeStore=\(activeStore))")
                 return result
             } catch {
@@ -189,8 +214,69 @@ final class WebDataStoreVault {
                 log.notice("Seal attempt \(result.attempts) for \(profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
             }
         }
+        if activeStore && forceSealWhenStoreStaysInUse {
+            log.error("WebKit kept the data store of \(profileID.uuidString, privacy: .public) in use through \(result.attempts) attempts (\(String(describing: lastError), privacy: .public)); forcing the seal before quitting")
+            return try await forceSeal(profileID: profileID, key: key, result: result)
+        }
         log.error("Giving up sealing \(profileID.uuidString, privacy: .public): \(String(describing: lastError), privacy: .public)")
         throw VaultError.storeStillInUse(profileID)
+    }
+
+    /// Quitting, and WebKit still holds the store after every attempt (it lets go only when the
+    /// process exits): archive what is on disk now and delete the plaintext without WebKit.
+    /// Nothing in this process uses the store again. Whatever WebKit writes between this and the
+    /// exit is residue: the marker, written before the deletion, makes the next launch or unlock
+    /// discard it instead of preferring it over this archive as it would crash leftovers.
+    private func forceSeal(profileID: UUID, key: SymmetricKey, result: SealResult) async throws -> SealResult {
+        let archive = repository.webDataArchiveURL(for: profileID)
+        let marker = forcedSealMarkerURL(for: profileID)
+        let layout = Self.layout
+        var result = result
+        // Two tries: a file WebKit replaces while it is being read fails one archive pass.
+        for _ in 0..<2 {
+            result.attempts += 1
+            let directories = layout.discoverDirectories(for: profileID)
+            if directories.isEmpty { return result } // WebKit removed them after all
+            result.directories = directories
+            do {
+                let roots = Dictionary(uniqueKeysWithValues: try directories.map { (try layout.label(for: $0), $0) })
+                result.stats = try await Task.detached(priority: .userInitiated) {
+                    try EncryptedDirectoryArchive.seal(roots: roots, to: archive, key: key)
+                }.value
+                // Without the marker, residue would later be taken for newer data: never delete first.
+                try Data().write(to: marker, options: .atomic)
+                for directory in directories {
+                    do {
+                        try FileManager.default.removeItem(at: directory)
+                    } catch {
+                        // Left for the next launch or unlock to discard (the marker is in place).
+                        log.error("Forced seal of \(profileID.uuidString, privacy: .public) could not delete \(directory.path, privacy: .public): \(String(describing: error), privacy: .public)")
+                    }
+                }
+                result.forced = true
+                log.error("Force-sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes")
+                return result
+            } catch {
+                log.error("Forced seal attempt for \(profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+        throw VaultError.storeStillInUse(profileID)
+    }
+
+    /// After a forced seal, the profile's WebKit directories hold only what WebKit wrote between
+    /// that seal and the process exit, and the archive holds the profile's data: deletes the
+    /// directories, then the marker. Returns false when there is no marker. Throws (keeping the
+    /// marker) when residue cannot be deleted, so it is never mistaken for the profile's data.
+    @discardableResult
+    func discardResidueAfterForcedSeal(profileID: UUID) throws -> Bool {
+        let marker = forcedSealMarkerURL(for: profileID)
+        guard FileManager.default.fileExists(atPath: marker.path) else { return false }
+        for directory in Self.discoverDirectories(for: profileID) {
+            log.notice("Discarding WebKit data written after the forced seal of \(profileID.uuidString, privacy: .public): \(directory.path, privacy: .public)")
+            try FileManager.default.removeItem(at: directory)
+        }
+        try FileManager.default.removeItem(at: marker)
+        return true
     }
 
     // MARK: Delete

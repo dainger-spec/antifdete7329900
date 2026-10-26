@@ -14,6 +14,10 @@ itself with a page that reports how the request arrived, e.g.
 
 `--http-auth` is an HTTP CONNECT proxy that answers 407 until the request carries
 `Proxy-Authorization: Basic pb-user:pb-pass`, then reports `via=connect-auth`.
+
+Pages also report the request's `Accept-Language` header (`accept-language=...`), and the path
+`/pb-geo.json` answers like a geolocation service (`{"timezone": "Europe/Berlin", "country": "DE"}`)
+for the proxy-location check.
 """
 import argparse
 import base64
@@ -34,21 +38,35 @@ def read_until_blank_line(conn: socket.socket) -> bytes:
     return data
 
 
+GEO_ANSWER = b'{"ip":"203.0.113.7","country":"DE","timezone":"Europe/Berlin"}'
+
+
+def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
+    """Answers the (tunnelled or forwarded) HTTP request `request` for `path`."""
+    accept_language = next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
+                            if line.lower().startswith("accept-language:")), "-")
+    if path.split("?", 1)[0] == "/pb-geo.json":
+        body, content_type = GEO_ANSWER, "application/json"
+    else:
+        body = (
+            f"<html><head><title>PB proxied {path}</title></head>"
+            f"<body>PB-PROXY-OK {via} path={path} accept-language={accept_language}</body></html>"
+        ).encode()
+        content_type = "text/html; charset=utf-8"
+    conn.sendall(
+        f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n".encode()
+        + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+        + body
+    )
+    print(f"[selftest-proxy] served {via} path={path} accept-language={accept_language}", flush=True)
+
+
 def respond_with_page(conn: socket.socket, via: str) -> None:
     request = read_until_blank_line(conn).decode("latin-1", "replace")
     request_line = request.split("\r\n", 1)[0]
     parts = request_line.split(" ")
     path = parts[1] if len(parts) > 1 else "?"
-    body = (
-        f"<html><head><title>PB proxied {path}</title></head>"
-        f"<body>PB-PROXY-OK {via} path={path}</body></html>"
-    ).encode()
-    conn.sendall(
-        b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
-        + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
-        + body
-    )
-    print(f"[selftest-proxy] served {via} path={path}", flush=True)
+    answer(conn, via, path, request)
 
 
 def handle_http(conn: socket.socket) -> None:
@@ -63,16 +81,7 @@ def handle_http(conn: socket.socket) -> None:
         else:
             # Absolute-form request (plain forward proxy); answer directly.
             path = "/" + target.split("://", 1)[-1].split("/", 1)[-1] if "/" in target.split("://", 1)[-1] else "/"
-            body = (
-                f"<html><head><title>PB proxied {path}</title></head>"
-                f"<body>PB-PROXY-OK via=forward target={target} path={path}</body></html>"
-            ).encode()
-            conn.sendall(
-                b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
-                + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
-                + body
-            )
-            print(f"[selftest-proxy] served via=forward target={target}", flush=True)
+            answer(conn, f"via=forward target={target}", path, head)
 
 
 AUTH_EXPECTED = "Basic " + base64.b64encode(b"pb-user:pb-pass").decode()

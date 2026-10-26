@@ -14,7 +14,7 @@ This is a prototype. The core has unit tests, and the app is checked end-to-end 
 real WebKit in CI. It has not had a security review, and some features are
 approximations limited by what WebKit exposes. The tables below say which parts are which.
 
-**Fingerprint spoofing note (2026-10-25):** iOS/iPadOS DeviceGeneration profiles now apply aggressive JS shims for navigator properties, screen geometry, canvas/WebGL noise, basic font and AudioContext noise. This is the practical maximum on public WKWebView. It does **not** achieve true iStealth-style engine-level iOS fidelity (TLS, real GPU, fonts, touch remain partially Mac and detectable).
+**Fingerprint note (2026-10-26):** no canvas, WebGL, audio or font noise any more — noise is exactly what fingerprinting tests detect ("Canvas: Spoofed", "Fingerprinting Resistance: Detected"). macOS profiles override no navigator or screen value and declare this Mac's real Safari version; iPhone/iPad profiles only get their device class's navigator/screen values. A profile with a proxy runs in the time zone of the proxy's exit IP, and the first profile launched sets the language websites see. iOS fidelity remains UA-level (TLS, GPU, fonts, touch are the Mac's).
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, key hierarchy, on-disk layout, lifecycles, tabs, testing
 - [docs/ISOLATION_AND_LIMITATIONS.md](docs/ISOLATION_AND_LIMITATIONS.md): what is isolated, what leaks, fingerprinting, App Sandbox, verified results
@@ -86,8 +86,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 2. Use **＋** to create a profile and set its device/version, start URL, proxy, user agent,
    time zone, geolocation, WebRTC policy, history recording and retention, and whether it is
    ephemeral. Changes apply at the next launch. The **Device / version** picker tags the
-   profile with a target Apple OS version (macOS 26, iOS 26/27, iPadOS 26); iOS profiles now
-   also apply JS navigator/screen/canvas/WebGL/font/audio shims (see note above).
+   profile with a target Apple OS version (macOS 26, iOS 26/27, iPadOS 26); iOS profiles also
+   get their device class's navigator/screen values (see note above).
 3. **Launch** opens a window for the profile. Profiles run side by side, and every window
    and tab is labelled with its profile. Closing a profile's last window stops that profile
    and returns you to the Profiles window; the app stays open.
@@ -121,7 +121,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Per-profile history | Encrypted `HistoryStore`: coalesced per URL, search, clear ranges, retention, cap; records committed and same-document navigations; credentials and fragments stripped |
 | Per-profile bookmarks | Encrypted `BookmarkStore`: folders, ordering, edit; star toggle, bookmarks menu, Library window |
 | Per-profile proxy (SOCKS5, HTTP CONNECT, HTTPS-to-proxy, auth, bypass list) | `WKWebsiteDataStore.proxyConfigurations`, `allowFailover = false`. **CONNECT tunnelling, SOCKS5 remote DNS and fail-closed verified by the self-test** |
-| Version-aware profiles | **Device / version** picker (`DeviceGeneration`): macOS 26 / iOS 26 / iOS 27 / iPadOS 26. Sets the self-declared `User-Agent` and defaults, and names a behaviour set. iOS profiles additionally inject navigator/screen/canvas/WebGL/font/audio shims. Does **not** switch the real WebKit core. |
+| Version-aware profiles | **Device / version** picker (`DeviceGeneration`): macOS 26 / iOS 26 / iOS 27 / iPadOS 26. Sets the self-declared `User-Agent` and defaults, and names a behaviour set. The macOS UA names the host's Safari version; iOS profiles additionally get navigator/screen values. Does **not** switch the real WebKit core. |
 | Per-profile user agent | `WKWebView.customUserAgent` (an explicit UA overrides the generation) |
 | Russian / English UI | `Localizable.strings` (ru default, en fallback), deterministic bundle lookup |
 | Stable window lifecycle | closing a profile window never quits or crashes the app (use-after-free fixed); verified by the self-test |
@@ -135,10 +135,11 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Feature | How | Main gaps |
 |---|---|---|
 | WebKit data encrypted while a profile is not running | Archive, encrypt, then `remove(forIdentifier:)` on stop; restore on launch. Directories found by UUID (`WebKitDataLayout`), layout checked in CI | Plaintext on disk while the profile runs; a crash leaves plaintext until the next unlock; no "flush" API (last-moment writes can be lost, not leaked) |
-| Time zone | JS shim (`Intl`, `Date` getters, offsets, string forms) | Not in workers; local-component constructors, setters and `Date.parse` use the host zone; detectable |
+| Time zone | JS shim (`Intl`, `Date` getters, offsets, string forms); by default the proxy's exit-IP zone, looked up through the proxy at launch | Not in workers; local-component constructors, setters and `Date.parse` use the host zone; detectable; the lookup is a third-party request |
 | Geolocation | JS shim: deny (default) or fixed coordinates | Detectable; the IP address reveals location unless the proxy matches |
 | WebRTC leak reduction | JS shim: remove `RTCPeerConnection` (default) or force relay-only | No engine switch; WebRTC UDP never uses the proxy; `window.frames[i]` gap |
-| Navigator / screen / canvas / WebGL / fonts / audio (iOS profiles) | Document-start JS shims | Not in workers; detectable; GPU/TLS/fonts still partially Mac |
+| Navigator / screen (iPhone/iPad profiles) | Document-start JS getters on the prototypes | Not in workers; detectable; GPU/TLS/fonts/canvas still the Mac's |
+| Website language (`Accept-Language`, `navigator.language`) | Set once per app run, before WebKit starts, from the first launched profile's proxy country | WebKit has one language list per process: later profiles share it |
 | Password autofill | Explicit buttons in an isolated JS world | No automatic form detection; main frame only |
 
 ### Not implemented / limited

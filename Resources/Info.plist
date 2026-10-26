@@ -45,6 +45,18 @@
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<true/>
+		<!-- The self-test's stand-in geolocation service, answered by scripts/selftest_proxy.py
+		     over plain HTTP. ".invalid" never resolves on a real network (RFC 6761). -->
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>selftest.invalid</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
 	</dict>
 	<!-- Deliberately no NSLocationUsageDescription: the app never uses CoreLocation.
 	     Geolocation is answered by the per-profile JavaScript shim (deny or fixed coordinates). -->
