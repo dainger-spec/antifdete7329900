@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import NetworkExtension
+import Security
 import os
 
 /// The packet datapath of the tunnel: reads captured IPv4 packets from the `NEPacketTunnelFlow`,
@@ -9,15 +10,21 @@ import os
 ///
 /// - TCP: each 5-tuple gets its own upstream connection — SOCKS5 CONNECT or HTTP CONNECT through
 ///   the profile's proxy (optionally TLS to the proxy), or a direct TCP connection for the
-///   `directInterface` exit — and bytes are relayed both ways.
+///   `directInterface` exit — and bytes are relayed both ways. A flow addressed to the exit proxy
+///   itself (WebKit's own proxied TCP: the app keeps `proxyConfigurations` with the tunnel on) is
+///   passed through raw, one hop, instead of being nested inside a second CONNECT to the proxy.
 /// - UDP: SOCKS5 (no TLS) → SOCKS5 UDP ASSOCIATE per app socket; `directInterface` → a direct UDP
 ///   `NWConnection` per flow; HTTP CONNECT / SOCKS over TLS / `udp=dropped` → dropped.
 /// - DNS: the tunnel's resolver address (10.111.0.1, set by PacketTunnelProvider) is answered here.
 ///   Queries are forwarded as DNS-over-TCP to `Relay.dnsResolver` *through the exit*, so DNS works
 ///   for every exit kind (HTTP CONNECT too) and no plaintext DNS leaves through the real interface.
+///   The proxy's own hostname is answered locally with the addresses the provider resolved before
+///   the tunnel came up (the system resolver points at this tunnel once it is up).
+/// - IPv6 is captured by the tunnel (so it cannot bypass it) but not carried: TCP SYNs get a RST so
+///   connections to IPv6 literals fail fast; the rest is dropped.
 ///
 /// Fail-closed is unchanged: a flow whose upstream did not come up is reset (TCP) or dropped (UDP);
-/// nothing is ever re-sent in the clear. IPv6, fragments, ICMP, multicast and anything that is not
+/// nothing is ever re-sent in the clear. Fragments, ICMP, multicast and anything that is not
 /// carried by the exit are dropped.
 ///
 /// It cannot run in CI (no Network Extension entitlement there). Before trusting it on real
@@ -25,8 +32,36 @@ import os
 /// It has no dependency on BrowserCore.
 final class Relay {
     enum Exit {
-        case proxy(host: String, port: Int, socks: Bool, tls: Bool, username: String?, password: String?)
+        case proxy(Proxy)
         case directInterface
+    }
+
+    /// The exit proxy, with its address already resolved by PacketTunnelProvider (before the tunnel
+    /// took over DNS). Connections go to `address`; `host` is kept for the TLS server name.
+    struct Proxy {
+        let host: String
+        /// Resolved IPv4 addresses, host order; `addresses[0]` is dialled, all are recognised as
+        /// "the proxy" for pass-through and answered for DNS queries of `host`.
+        let addresses: [UInt32]
+        let port: UInt16
+        let socks: Bool
+        let tls: Bool
+        let username: String?
+        let password: String?
+
+        var address: UInt32 { addresses[0] }
+
+        /// Whether `host` is a name rather than an IP literal (then it is the TLS server name and
+        /// the relay's DNS answers it with `addresses`).
+        var hostIsName: Bool {
+            if host.contains(":") { return false }
+            let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+            return !(parts.count == 4 && parts.allSatisfy { UInt8($0) != nil })
+        }
+
+        func matches(_ address: UInt32, port: UInt16) -> Bool {
+            port == self.port && addresses.contains(address)
+        }
     }
 
     /// The tunnel's DNS server address configured by PacketTunnelProvider (`NEDNSSettings`).
@@ -52,6 +87,7 @@ final class Relay {
     private var running = false
     private var timer: DispatchSourceTimer?
     private var outbox: [Data] = []
+    private var outboxFamilies: [NSNumber] = []
 
     private var tcpFlows: [FlowKey: TCPFlow] = [:]
     private var directUDP: [FlowKey: DirectUDPFlow] = [:]
@@ -68,8 +104,8 @@ final class Relay {
         switch exit {
         case .directInterface:
             forwardUDP = !dropUDP
-        case let .proxy(_, _, socks, tls, _, _):
-            forwardUDP = !dropUDP && socks && !tls
+        case .proxy(let proxy):
+            forwardUDP = !dropUDP && proxy.socks && !proxy.tls
         }
     }
 
@@ -100,6 +136,7 @@ final class Relay {
             directUDP.removeAll()
             socksUDP.removeAll()
             outbox.removeAll()
+            outboxFamilies.removeAll()
             log.notice("relay stopped \(self.stats.summary, privacy: .public)")
         }
     }
@@ -120,13 +157,29 @@ final class Relay {
     }
 
     private func handle(_ packet: Data, family: Int32) {
-        // The tunnel is IPv4-only; anything else is dropped, never forwarded.
+        if family == AF_INET6 { refuseIPv6(packet); return }
+        // The datapath is IPv4-only; anything else is dropped, never forwarded.
         guard family == AF_INET, let ip = IPv4Packet(packet) else { stats.dropped += 1; return }
         switch ip.proto {
         case 6: handleTCP(ip)
         case 17: handleUDP(ip)
         default: stats.dropped += 1 // ICMP and the rest: not carried by the exit
         }
+    }
+
+    /// IPv6 enters the tunnel (its default route is claimed so nothing bypasses) but is not carried.
+    /// A TCP SYN is answered with a RST so a connection to an IPv6 literal fails at once instead of
+    /// hanging until the app's connect timeout; everything else is silently dropped.
+    private func refuseIPv6(_ packet: Data) {
+        stats.dropped += 1
+        let b = [UInt8](packet)
+        // 40-byte fixed header, next header TCP (no extension headers), at least a TCP header.
+        guard b.count >= 60, b[0] >> 4 == 6, b[6] == 6, Int(be16(b, 4)) >= 20, 40 + Int(be16(b, 4)) <= b.count else { return }
+        let flags = b[40 + 13]
+        guard flags & TCPFlag.syn != 0, flags & (TCPFlag.ack | TCPFlag.rst) == 0 else { return }
+        emit(PacketBuilder.tcpReset6(src: Array(b[24..<40]), dst: Array(b[8..<24]),
+                                     srcPort: be16(b, 42), dstPort: be16(b, 40), ack: be32(b, 44) &+ 1),
+             family: AF_INET6)
     }
 
     // MARK: TCP
@@ -146,16 +199,22 @@ final class Relay {
         // DNS-over-TCP to the tunnel resolver (clients fall back to it on a truncated UDP answer)
         // goes to the real resolver through the exit, like UDP DNS.
         var target = (address: ip.dst, port: seg.dstPort)
+        var via = exit
         if ip.dst == Self.gatewayAddress {
             guard seg.dstPort == 53 else { refuse(ip, seg); return }
             target = Self.dnsResolver
+        } else if case .proxy(let proxy) = exit, proxy.matches(ip.dst, port: seg.dstPort) {
+            // The app talking to the exit proxy itself (WebKit's proxied TCP): pass it through raw,
+            // so it is one hop through the proxy exactly as in proxy-only mode, not a CONNECT to
+            // the proxy nested in another CONNECT to the proxy (which most proxies refuse).
+            via = .directInterface
         }
         guard Self.isForwardable(target.address), target.port != 0, tcpFlows.count < Self.maxTCPFlows else {
             stats.dropped += 1
             refuse(ip, seg)
             return
         }
-        let upstream = Upstream(exit: exit, command: .connect, address: target.address, port: target.port,
+        let upstream = Upstream(exit: via, command: .connect, address: target.address, port: target.port,
                                 queue: queue)
         let flow = TCPFlow(key: key, syn: seg, relay: self, upstream: upstream)
         tcpFlows[key] = flow
@@ -212,14 +271,14 @@ final class Relay {
             } else {
                 stats.udpDropped += 1
             }
-        case let .proxy(host, _, _, _, _, _):
+        case .proxy:
             // One association per app socket, so one socket talking to many peers (WebRTC/ICE)
             // keeps one exit mapping, as it would with a real NAT.
             let endpoint = Endpoint(address: ip.src, port: srcPort)
             if let session = socksUDP[endpoint] {
                 session.send(to: ip.dst, port: dstPort, payload: payload)
             } else if socksUDP.count < Self.maxUDPFlows {
-                let session = SocksUDPSession(app: endpoint, proxyHost: host, relay: self)
+                let session = SocksUDPSession(app: endpoint, relay: self)
                 socksUDP[endpoint] = session
                 session.start()
                 session.send(to: ip.dst, port: dstPort, payload: payload)
@@ -243,8 +302,17 @@ final class Relay {
                                          payload: answer))
         }
         // The tunnel carries IPv4 only: answer AAAA with "no data" so clients do not try IPv6.
-        if DNS.qtype(query, questionEnd) == 28 {
+        let qtype = DNS.qtype(query, questionEnd)
+        if qtype == 28 {
             reply(DNS.response(to: query, questionEnd: questionEnd, rcode: 0, truncated: false))
+            return
+        }
+        // The exit proxy's own name: answer with the addresses resolved before the tunnel came up,
+        // so WebKit's proxied TCP reaches the proxy we pass through to (and the proxy is never
+        // asked to resolve itself).
+        if qtype == 1, case .proxy(let proxy) = exit, proxy.hostIsName,
+           DNS.name(query) == proxy.host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")) {
+            reply(DNS.answer(to: query, questionEnd: questionEnd, ipv4: proxy.addresses))
             return
         }
         guard dnsInFlight < Self.maxDNSInFlight else { stats.dropped += 1; return }
@@ -292,9 +360,10 @@ final class Relay {
 
     // MARK: Output and housekeeping
 
-    func emit(_ packet: Data) {
+    func emit(_ packet: Data, family: Int32 = AF_INET) {
         guard running else { return }
         outbox.append(packet)
+        outboxFamilies.append(NSNumber(value: family))
         if outbox.count == 1 {
             queue.async { [weak self] in self?.flush() } // batch everything written in this turn
         }
@@ -302,8 +371,9 @@ final class Relay {
 
     private func flush() {
         guard running, !outbox.isEmpty else { return }
-        packetFlow.writePackets(outbox, withProtocols: Array(repeating: NSNumber(value: AF_INET), count: outbox.count))
+        _ = packetFlow.writePackets(outbox, withProtocols: outboxFamilies)
         outbox.removeAll(keepingCapacity: true)
+        outboxFamilies.removeAll(keepingCapacity: true)
     }
 
     private func tick() {
@@ -382,10 +452,18 @@ final class Upstream {
         tcp.noDelay = true
         tcp.connectionTimeout = 10
         switch exit {
-        case let .proxy(host, proxyPort, _, tls, _, _):
-            let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(host),
-                                               port: NWEndpoint.Port(rawValue: UInt16(clamping: proxyPort)) ?? .any)
-            connection = NWConnection(to: endpoint, using: NWParameters(tls: tls ? NWProtocolTLS.Options() : nil, tcp: tcp))
+        case .proxy(let proxy):
+            // Dial the address resolved before the tunnel came up (the system resolver now points
+            // at the tunnel itself); the configured name is still what the TLS certificate must match.
+            var tls: NWProtocolTLS.Options?
+            if proxy.tls {
+                let options = NWProtocolTLS.Options()
+                if proxy.hostIsName { sec_protocol_options_set_tls_server_name(options.securityProtocolOptions, proxy.host) }
+                tls = options
+            }
+            let endpoint = NWEndpoint.hostPort(host: .ipv4(IPv4Address(Data(bytes32(proxy.address)))!),
+                                               port: NWEndpoint.Port(rawValue: proxy.port) ?? .any)
+            connection = NWConnection(to: endpoint, using: NWParameters(tls: tls, tcp: tcp))
         case .directInterface:
             let endpoint = NWEndpoint.hostPort(host: .ipv4(IPv4Address(Data(bytes32(address)))!),
                                                port: NWEndpoint.Port(rawValue: port) ?? .any)
@@ -460,11 +538,11 @@ final class Upstream {
         switch exit {
         case .directInterface:
             if command == .connect { finish(nil) } else { fail("UDP ASSOCIATE needs a SOCKS5 exit") }
-        case let .proxy(_, _, socks, _, username, password):
-            if socks {
-                socksGreeting(username: username, password: password)
+        case .proxy(let proxy):
+            if proxy.socks {
+                socksGreeting(username: proxy.username, password: proxy.password)
             } else if command == .connect {
-                httpConnect(username: username, password: password)
+                httpConnect(username: proxy.username, password: proxy.password)
             } else {
                 fail("UDP ASSOCIATE needs a SOCKS5 exit")
             }
@@ -517,8 +595,8 @@ final class Upstream {
     private func bound(_ host: NWEndpoint.Host, port: UInt16) {
         var host = host
         // "0.0.0.0" means "the address you already talk to": the proxy itself.
-        if case .ipv4(let v4) = host, v4.rawValue == Data([0, 0, 0, 0]), case let .proxy(proxyHost, _, _, _, _, _) = exit {
-            host = NWEndpoint.Host(proxyHost)
+        if case .ipv4(let v4) = host, v4.rawValue == Data([0, 0, 0, 0]), case .proxy(let proxy) = exit {
+            host = .ipv4(IPv4Address(Data(bytes32(proxy.address)))!)
         }
         if let port = NWEndpoint.Port(rawValue: port) {
             boundEndpoint = .hostPort(host: host, port: port)
@@ -633,6 +711,7 @@ final class TCPFlow {
 
     private var rto = TCPFlow.initialRTO
     private var retries = 0
+    private var probeInFlight = false
     private var rtoDeadline: UInt64?
     private var lastTransmit: UInt64 = 0
     private var lastActivity = Clock.now()
@@ -715,6 +794,10 @@ final class TCPFlow {
             if carriesSequence { sendAck() } // a gap: re-ACK so the app retransmits in order
             return
         }
+        if offset > seg.payload.count {
+            sendAck() // entirely old (a retransmission, or a keepalive at rcvNxt-1): just re-ACK
+            return
+        }
         if offset < seg.payload.count && !appFIN {
             let data = seg.payload.dropFirst(offset)
             rcvNxt &+= UInt32(data.count)
@@ -734,9 +817,16 @@ final class TCPFlow {
         let acked = Int(Int32(bitPattern: ack &- sndUna))
         let outstanding = Int(Int32(bitPattern: sndMax &- sndUna))
         guard acked > 0, acked <= outstanding else {
+            if probeInFlight, acked == 0, window > 0 {
+                // The window opened but the probe byte was not taken: resend from it right away
+                // instead of waiting for the RTO.
+                probeInFlight = false
+                sndNxt = sndUna
+            }
             trySend()
             return
         }
+        probeInFlight = false
         var dataAcked = acked
         if let finSeq, Int32(bitPattern: ack &- finSeq) > 0 {
             finAcked = true
@@ -844,8 +934,14 @@ final class TCPFlow {
         case .established:
             if Clock.elapsed(now, since: lastActivity) >= Self.idleTimeout { return reset(failed: false) }
             if let deadline = rtoDeadline, now >= deadline {
-                retries += 1
-                guard retries <= Self.maxRetries else { return reset(failed: true) }
+                // A peer that keeps its window closed is alive (its ACKs refresh `lastActivity`),
+                // so probes back off but are not counted as lost retransmissions.
+                if peerWindow == 0 {
+                    probeInFlight = false
+                } else {
+                    retries += 1
+                    guard retries <= Self.maxRetries else { return reset(failed: true) }
+                }
                 rto = min(rto * 2, Self.maxRTO)
                 rtoDeadline = nil
                 sndNxt = sndUna // go back N
@@ -853,6 +949,7 @@ final class TCPFlow {
                 trySend()
             } else if peerWindow == 0, sndNxt == sndUna, sendBuffer.count > bufferHead, Clock.elapsed(now, since: lastTransmit) >= rto {
                 // Zero-window probe: one byte past the window so the app reports when it opens.
+                probeInFlight = true
                 transmit(seq: sndNxt, payload: sendBuffer[bufferHead..<(bufferHead + 1)])
                 sndNxt &+= 1
                 if Int32(bitPattern: sndNxt &- sndMax) > 0 { sndMax = sndNxt }
@@ -987,7 +1084,6 @@ final class SocksUDPSession {
 
     let app: Endpoint
     private weak var relay: Relay?
-    private let proxyHost: String
     private var control: Upstream?
     private var relayConnection: NWConnection?
     private var state = State.connecting
@@ -995,9 +1091,8 @@ final class SocksUDPSession {
     private var lastActivity = Clock.now()
     private var failedAt: UInt64 = 0
 
-    init(app: Endpoint, proxyHost: String, relay: Relay) {
+    init(app: Endpoint, relay: Relay) {
         self.app = app
-        self.proxyHost = proxyHost
         self.relay = relay
     }
 
@@ -1184,6 +1279,30 @@ enum PacketBuilder {
         return ipv4(src: src, dst: dst, proto: 17, transport: u, checksumOffset: 6)
     }
 
+    /// RST+ACK answering an IPv6 SYN (the only IPv6 the relay ever emits).
+    static func tcpReset6(src: [UInt8], dst: [UInt8], srcPort: UInt16, dstPort: UInt16, ack: UInt32) -> Data {
+        var t = [UInt8](repeating: 0, count: 20)
+        put16(&t, 0, srcPort)
+        put16(&t, 2, dstPort)
+        put32(&t, 8, ack)
+        t[12] = 5 << 4
+        t[13] = TCPFlag.rst | TCPFlag.ack
+        var sum: UInt32 = UInt32(t.count) + 6 // pseudo-header: addresses, upper-layer length, next header
+        add(src, to: &sum)
+        add(dst, to: &sum)
+        add(t, to: &sum)
+        put16(&t, 16, fold(sum))
+
+        var h = [UInt8](repeating: 0, count: 40)
+        h[0] = 0x60
+        put16(&h, 4, UInt16(t.count))
+        h[6] = 6
+        h[7] = 64
+        h.replaceSubrange(8..<24, with: src)
+        h.replaceSubrange(24..<40, with: dst)
+        return Data(h + t)
+    }
+
     private static func ipv4(src: UInt32, dst: UInt32, proto: UInt8, transport: [UInt8], checksumOffset: Int) -> Data {
         var t = transport
         var sum = (src >> 16) + (src & 0xffff) + (dst >> 16) + (dst & 0xffff) + UInt32(proto) + UInt32(t.count)
@@ -1241,6 +1360,28 @@ enum DNS {
     }
 
     static func qtype(_ m: [UInt8], _ questionEnd: Int) -> UInt16 { be16(m, questionEnd - 4) }
+
+    /// The question name, lowercased, without the trailing dot. Only valid after `questionEnd`.
+    static func name(_ m: [UInt8]) -> String {
+        var labels: [String] = []
+        var i = 12
+        while i < m.count, m[i] != 0 {
+            let length = Int(m[i])
+            labels.append(String(decoding: m[(i + 1)..<min(i + 1 + length, m.count)], as: UTF8.self).lowercased())
+            i += 1 + length
+        }
+        return labels.joined(separator: ".")
+    }
+
+    /// An authoritative-looking A answer for the question in `query` (used for the proxy's own name).
+    static func answer(to query: [UInt8], questionEnd: Int, ipv4 addresses: [UInt32]) -> [UInt8] {
+        var r = response(to: query, questionEnd: questionEnd, rcode: 0, truncated: false)
+        put16(&r, 6, UInt16(addresses.count))
+        for address in addresses {
+            r += [0xC0, 0x0C, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4] + bytes32(address) // ptr to qname, A, IN, TTL 60
+        }
+        return r
+    }
 
     /// The largest answer the client accepts over UDP: its EDNS(0) size (capped by our MTU), else 512.
     static func udpLimit(_ m: [UInt8], questionEnd q: Int) -> Int {
