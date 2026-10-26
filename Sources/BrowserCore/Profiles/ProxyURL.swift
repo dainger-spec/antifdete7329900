@@ -16,7 +16,9 @@ import Foundation
 ///     user:pass@host:port           URL without a scheme, HTTP
 ///
 /// Percent-decoding applies only to the URL form with a scheme; the shorthand forms are
-/// taken literally, because providers hand out raw passwords that may contain `%`.
+/// taken literally, because providers hand out raw passwords that may contain `%` (or even
+/// `://`: the text is a URL only if what precedes the first `://` is a valid scheme name).
+/// Error messages quote at most 40 characters of the input and never the password field.
 ///
 /// `socks5` vs `socks5h`: in curl the `h` means "let the proxy resolve hostnames". The app
 /// has no choice to make here: Network.framework's SOCKS5 client always sends the hostname
@@ -49,15 +51,17 @@ extension ProxySettings {
         let kind: Kind
         let tlsToProxy: Bool
         let parsed: Authority
-        if let separator = input.range(of: "://") {
+        // "://" marks a scheme only when the text before it can be one. Otherwise it is part of
+        // a shorthand's literal password ("host:port:user:pa://ss"): that must parse, and the
+        // text before "://" (host, user, part of the password) must not be echoed as a "type".
+        if let separator = input.range(of: "://"), Self.isSchemeName(input[..<separator.lowerBound]) {
             let scheme = input[..<separator.lowerBound].lowercased()
             let defaultPort: Int
             switch scheme {
             case "http": (kind, tlsToProxy, defaultPort) = (.httpConnect, false, Self.defaultHTTPPort)
             case "https": (kind, tlsToProxy, defaultPort) = (.httpConnect, true, Self.defaultHTTPSPort)
             case "socks5", "socks5h": (kind, tlsToProxy, defaultPort) = (.socks5, false, Self.defaultSOCKSPort)
-            case "": throw Self.invalid("proxy address has no type before ://")
-            default: throw Self.invalid("unsupported proxy type \"\(scheme)\" (use http, https, socks5 or socks5h)")
+            default: throw Self.invalid("unsupported proxy type \(Self.quoted(scheme)) (use http, https, socks5 or socks5h)")
             }
             var rest = input[separator.upperBound...]
             if rest.hasSuffix("/") { rest = rest.dropLast() }
@@ -65,6 +69,8 @@ extension ProxySettings {
                 throw Self.invalid("proxy address must not contain a path or query")
             }
             parsed = try Self.parseAuthority(rest, percentDecode: true, defaultPort: defaultPort)
+        } else if input.hasPrefix("://") {
+            throw Self.invalid("proxy address has no type before ://")
         } else {
             (kind, tlsToProxy) = (.httpConnect, false)
             parsed = try Self.parseShorthand(Substring(input))
@@ -121,6 +127,22 @@ extension ProxySettings {
 
     private static func invalid(_ message: String) -> CoreError {
         .invalidConfiguration(message)
+    }
+
+    /// User text quoted in an error message, cut to 40 characters: the message stays short
+    /// enough for an alert, and a long paste is not repeated back into the UI or the log.
+    private static func quoted<S: StringProtocol>(_ text: S) -> String {
+        let limit = 40
+        return text.count <= limit ? "\"\(text)\"" : "\"\(text.prefix(limit))…\""
+    }
+
+    /// RFC 3986 scheme: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ), here at most 16 characters.
+    private static func isSchemeName(_ text: Substring) -> Bool {
+        guard let first = text.unicodeScalars.first, text.unicodeScalars.count <= 16,
+              first.isASCII, CharacterSet.letters.contains(first) else { return false }
+        return text.unicodeScalars.allSatisfy {
+            $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "+-.".unicodeScalars.contains($0))
+        }
     }
 
     /// `host:port`, `host:port:user:pass`, `user:pass@host:port` or `[v6]:port`, no scheme.
@@ -205,17 +227,21 @@ extension ProxySettings {
         guard text.utf8.count <= 253,
               text.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "-_.".unicodeScalars.contains($0)) }),
               !text.hasPrefix("."), !text.contains("..") else {
-            throw invalid("proxy host \"\(text)\" is not a valid hostname or IP address")
+            throw invalid("proxy host \(quoted(text)) is not a valid hostname or IP address")
         }
         return text.lowercased()
     }
 
-    /// Bracket contents: hex digits and ':' (plus '.' for an embedded IPv4). Zone IDs
-    /// (`%en0`) are rejected: a proxy is never link-local in practice.
+    /// Bracket contents: hex digits and ':' (plus '.' for an embedded IPv4), and a well-formed
+    /// address per inet_pton(3), so "[:]" or "[1:2:3:4:5:6:7:8:9]" fail here rather than
+    /// later as an unreachable proxy. Zone IDs (`%en0`) are rejected: a proxy is never
+    /// link-local in practice.
     private static func ipv6(_ text: Substring) throws -> String {
+        var address = [UInt8](repeating: 0, count: 16)
         guard text.contains(":"), text.utf8.count <= 45,
-              text.unicodeScalars.allSatisfy({ $0.properties.isASCIIHexDigit || $0 == ":" || $0 == "." }) else {
-            throw invalid("\"[\(text)]\" is not a valid IPv6 address")
+              text.unicodeScalars.allSatisfy({ $0.properties.isASCIIHexDigit || $0 == ":" || $0 == "." }),
+              inet_pton(AF_INET6, String(text), &address) == 1 else {
+            throw invalid("[\(quoted(text))] is not a valid IPv6 address")
         }
         return text.lowercased()
     }

@@ -63,7 +63,8 @@ public struct CookieRecord: Codable, Equatable, Sendable {
     }
 
     /// Whether the record can be imported or exported, after the normalization the parsers
-    /// apply (domain lowercased, empty path → "/", expiry truncated to whole seconds).
+    /// apply (domain lowercased, empty path → "/", expiry truncated to whole seconds, at
+    /// least 1). Also false for name + value over 4096 bytes or a path over 1024 bytes.
     public var isValid: Bool { normalized() != nil }
 
     private enum CodingKeys: String, CodingKey {
@@ -92,6 +93,13 @@ extension CookieRecord {
     /// cannot be told apart reliably) and the record is skipped.
     static let maxExpiry: TimeInterval = 253_402_300_799
 
+    /// RFC 6265bis has browsers ignore a cookie whose name plus value exceed 4096 bytes and a
+    /// path attribute over 1024 bytes, so no real cookie store holds a larger one.
+    /// `WKHTTPCookieStore.setCookie` does not apply Set-Cookie parsing limits, so without this
+    /// check an imported file could plant multi-megabyte cookies that every request then carries.
+    static let maxNameValueBytes = 4096
+    static let maxPathBytes = 1024
+
     /// The canonical form, or `nil` if the record is unusable. Parsers and exporters both
     /// pass every record through here, so a file this module writes always re-imports.
     func normalized() -> CookieRecord? {
@@ -103,7 +111,9 @@ extension CookieRecord {
             guard seconds.isFinite, seconds >= 0, seconds <= Self.maxExpiry else { return nil }
             // Whole seconds: Netscape files cannot hold more, and integral values convert
             // between Date's 2001 epoch and the Unix epoch exactly, so round trips compare equal.
-            record.expires = Date(timeIntervalSince1970: seconds.rounded(.down))
+            // At least 1: both file formats read 0 as "session cookie", so an expiry within the
+            // first second of 1970 would come back as a live session cookie, not an expired one.
+            record.expires = Date(timeIntervalSince1970: max(seconds.rounded(.down), 1))
         }
         return record.isWellFormed ? record : nil
     }
@@ -112,6 +122,8 @@ extension CookieRecord {
         let bare = bareDomain
         guard !bare.isEmpty, !bare.hasPrefix("."), !bare.contains(".."), domain.utf8.count <= 255,
               !bare.unicodeScalars.contains(where: Self.isForbiddenInDomain) else { return false }
+        guard name.utf8.count + value.utf8.count <= Self.maxNameValueBytes,
+              path.utf8.count <= Self.maxPathBytes else { return false }
         // Tabs and line breaks would also corrupt a Netscape file; ';' would split the
         // cookie when WebKit serializes the Cookie header.
         guard path.hasPrefix("/"),
@@ -253,7 +265,11 @@ public struct CookieParseResult: Equatable, Sendable {
 /// Expiry rules for numbers in files (Unix seconds): `0` and `-1` mean a session cookie (the
 /// Netscape and Puppeteer/Playwright conventions); other negative values, non-finite values
 /// and values after year 9999 (for example millisecond timestamps) skip the record. Fractions
-/// are truncated to whole seconds.
+/// are truncated to whole seconds, and an expiry inside the first second of 1970 is kept as
+/// `1` so that no export writes an expired cookie as the session marker `0`.
+///
+/// Size rules (RFC 6265bis): a record whose name plus value exceed 4096 bytes, or whose path
+/// exceeds 1024 bytes, is skipped.
 public enum CookieTransfer {
     public static let maxInputBytes = 10 * 1024 * 1024
     public static let maxCookies = 20_000
@@ -304,6 +320,7 @@ public enum CookieTransfer {
     ///   * A `#HttpOnly_` prefix on the domain marks an HttpOnly cookie (curl's convention);
     ///     every other line starting with `#` is a comment.
     ///   * A line with only 6 fields has an empty value (curl writes and accepts that).
+    ///   * An empty expiry field is a session cookie, like `0` (Python's http.cookiejar, yt-dlp).
     ///   * Extra tabs belong to the value: the 7th field is the rest of the line.
     ///   * LF, CRLF and CR line endings are accepted. A line without any tab is split on runs
     ///     of spaces instead, which recovers files whose tabs were lost in copy and paste.
@@ -341,7 +358,9 @@ public enum CookieTransfer {
             return .ignored
         }
 
-        var fields = line.split(separator: "\t", omittingEmptySubsequences: false)
+        // At most 7 fields, the 7th keeping any further tabs: a hostile line of millions of
+        // tabs must not become millions of substrings.
+        var fields = line.split(separator: "\t", maxSplits: 6, omittingEmptySubsequences: false)
         if fields.count == 1 {
             fields = splitOnSpaces(line, maxFields: 7)
         }
@@ -350,12 +369,14 @@ public enum CookieTransfer {
         guard let includeSubdomains = netscapeBool(fields[1]),
               let secure = netscapeBool(fields[3]) else { return .malformed }
         let expires: Date?
-        switch expiry(fromText: fields[4]) {
+        // An empty expiry is a session cookie: Python's http.cookiejar (MozillaCookieJar) and
+        // yt-dlp write session cookies that way, and those are often the login cookies.
+        switch fields[4].allSatisfy({ $0 == " " }) ? .session : expiry(fromText: fields[4]) {
         case .invalid: return .malformed
         case .session: expires = nil
         case .at(let date): expires = date
         }
-        let value = fields.count > 6 ? fields[6...].joined(separator: "\t") : ""
+        let value = fields.count > 6 ? String(fields[6]) : ""
         let record = CookieRecord(domain: domain(String(fields[0]), hostOnly: !includeSubdomains),
                                   path: String(fields[2]), name: String(fields[5]), value: value,
                                   secure: secure, httpOnly: httpOnly, expires: expires)
