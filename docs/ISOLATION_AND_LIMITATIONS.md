@@ -159,8 +159,10 @@ The honest options for real separation between identities are outside the browse
 
 CI runs `Resources/fingerprint_probe.js` in a macOS profile and, through `safaridriver`, in the
 runner's own Safari, then compares the two (`scripts/safari_reference.py`; both JSON files are
-kept as the `fingerprint-surfaces` artifact of each run). Every key that measures the engine or
-the Mac is identical: the User-Agent string (the profile declares the installed Safari's version),
+kept as the `fingerprint-surfaces` artifact of each run). Last result, on macOS 26 with
+Safari 26.6.2: 434 keys identical, 0 must-match keys differ; the 14 reported differences are the
+self-test's fixed language, the hidden window's size, `navigator.webdriver` and the five features
+below. Every key that measures the engine or the Mac is identical: the User-Agent string (the profile declares the installed Safari's version),
 `navigator` (platform, vendor, hardwareConcurrency, deviceMemory, maxTouchPoints,
 pdfViewerEnabled, the same five plugins and two MIME types, no own properties), screen size and
 colour depth, pointer and touch media queries, time zone and offset, the canvas pixels and PNG
@@ -170,21 +172,21 @@ the `Function.prototype.toString` text and shape of every native the shims touch
 
 What still differs, all of it on the engine's side and none of it a profile's choice:
 
-- Safari turns on features that WebKit leaves off in a WKWebView, through Safari's own feature
-  flags and, for a few, because WebKit gates them behind the SDK the app was linked against. In the
-  last comparison Safari had, and a profile had not: the Navigation API (`navigation`,
-  `NavigateEvent`), `URLPattern`, `trustedTypes`, `ScrollTimeline`/`ViewTimeline`,
-  `CSSPositionTryRule`, `CSSPageDescriptors`, `CommandEvent`/`oncommand`, `onscrollend`,
-  `LargestContentfulPaint`, `PerformanceEventTiming`, `performance.eventCounts`/`interactionCount`,
-  `PerformanceResourceTiming.deliveryType`/`firstInterimResponseStart`,
-  `caretPositionFromPoint`, `FileSystemWritableFileStream`, WebCodecs `AudioEncoder`,
-  `Math.sumPrecise`, Apple Pay (`ApplePaySession`, `ApplePaySetup`, `PaymentRequest`,
-  `MerchantValidationEvent`) and Web Push (`PushManager`); a WKWebView still has the legacy
-  `OverflowEvent`. An app can set only the preferences WebKit marks overridable
-  (`WKPreferences`, `NSUserDefaults`), and these are not among them. Build with the current Xcode,
-  as CI does on macOS 26, so that the SDK-gated ones that can match do match.
-- The count of `window`'s own properties follows from that feature set (1005 in Safari, 955 in a
-  profile).
+- Safari has a few features WebKit leaves off in a WKWebView. Built with the current Xcode on
+  macOS 26, a profile lacks only what is tied to Safari's own entitlements: Apple Pay
+  (`ApplePaySession`, `ApplePaySetup`, `PaymentRequest`, `MerchantValidationEvent`) and Web Push
+  (`PushManager`). The build matters: on the macOS 15.7 runner, built with Xcode 16, the same
+  comparison also listed the Navigation API (`navigation`, `NavigateEvent`), `URLPattern`,
+  `trustedTypes`, `ScrollTimeline`/`ViewTimeline`, `CSSPositionTryRule`, `CSSPageDescriptors`,
+  `CommandEvent`/`oncommand`, `onscrollend`, `LargestContentfulPaint`, `PerformanceEventTiming`,
+  `performance.eventCounts`/`interactionCount`,
+  `PerformanceResourceTiming.deliveryType`/`firstInterimResponseStart`, `caretPositionFromPoint`,
+  `FileSystemWritableFileStream`, WebCodecs `AudioEncoder` and `Math.sumPrecise` as Safari-only,
+  and the legacy `OverflowEvent` as WKWebView-only. WebKit enables such features for an app only
+  once it is linked against a recent enough SDK (Trusted Types says so in WebKit's source), and an
+  app can set only the preferences WebKit marks overridable (`WKPreferences`, `NSUserDefaults`),
+  which these are not — so build with the current Xcode, as CI does (`macos-26`).
+- The count of `window`'s own properties follows from that (1044 in Safari, 1029 in a profile).
 - `navigator.webdriver` is true in Safari only because safaridriver drives it: an artefact of the
   comparison, not a difference between a profile and a Safari a person uses.
 
