@@ -42,7 +42,8 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 ┌──────────────────────────────── BrowserCore (platform-independent) ────────────────────────┐
 │  MasterVault / UnlockedVault ── PBKDF2, key hierarchy;  DeviceSettings (settings.bin)      │
 │  ProfileRepository ── encrypted index + per-profile config, store factories                │
-│  PasswordVault / HistoryStore / BookmarkStore ── per-profile encrypted documents           │
+│  PasswordVault / HistoryStore / BookmarkStore / SessionStore ── per-profile encrypted docs │
+│  UserAgentMode / SafariVersion / UserAgentBuilder ── per-profile User-Agent                │
 │  EncryptedChunkStream / EncryptedDirectoryArchive / WebKitDataLayout ── WebKit data seal   │
 │  SyncCodec / SyncEngine ── encrypted sync client with per-record merges                    │
 │  SyncTransport ── backend contract                                                         │
@@ -75,6 +76,7 @@ profile key (random 256-bit per profile, stored only wrapped)
    ├─ HKDF "passwords"         → passwords.bin                 (AAD "passwords:v1:<uuid>")
    ├─ HKDF "history"           → history.bin                   (AAD "history:v1:<uuid>")
    ├─ HKDF "bookmarks"         → bookmarks.bin                 (AAD "bookmarks:v1:<uuid>")
+   ├─ HKDF "session"           → session.bin                   (AAD "session:v1:<uuid>")
    └─ HKDF "webdata-archive", salt = random per archive → webdata.pbsa chunk key
 ```
 
@@ -102,6 +104,7 @@ Application Support/PrivacyBrowser/      (0700)
     passwords.bin                 AES-GCM(password key, [PasswordEntry] JSON)
     history.bin                   AES-GCM(history key, HistoryDocument JSON)          [not for ephemeral profiles]
     bookmarks.bin                 AES-GCM(bookmarks key, BookmarkDocument JSON)
+    session.bin                   AES-GCM(session key, SessionDocument JSON)          [device-local, never synced]
     webdata.pbsa                  streaming encrypted archive of WebKit's data dirs
 
 WebKit/<bundle-id>/WebsiteDataStore/<uuid>/   unsandboxed  ┐ WebKit-owned plaintext; exists only
@@ -176,26 +179,40 @@ windows be merged and needs one `NSWindow` per tab.
 - History is recorded at `didCommit` and for same-document navigations, once WebKit has
   made the URL the current back/forward item. Titles arrive later via KVO.
 
-## Version-aware generations
+## User-Agent modes, language, session restore
 
-A profile targets an Apple OS generation (`DeviceGeneration` / `DeviceGenerations` in
-`BrowserCore`), stored as `ProfileConfiguration.deviceGenerationID` (tolerant decode; old
-configs read as the default generation).
+A profile declares one of four `UserAgentMode`s (`ProfileConfiguration.userAgentMode`):
 
-- `ProfileConfiguration.effectiveUserAgent` = explicit `userAgent` override, else the
-  generation's UA, else the WebKit default. `BrowserSession` applies it to every tab and
-  routes the injected scripts through `BehaviorSets` keyed by the generation's `behaviorSetID`.
-- `BehaviorSets` (app layer) is the extension point for future WebKit versions: today all
-  generations map to the current `PrivacyScripts` shims. Adding a new behaviour set and a new
-  generation that points at it needs no change to the profile format or call sites.
-- This is version *labelling* (self-declared UA + defaults), not core switching. Public APIs
-  cannot load a different WebKit build; see ISOLATION_AND_LIMITATIONS §2.
+| Mode | Applied as | Result |
+|---|---|---|
+| `safariMac` (default) | `applicationNameForUserAgent = "Version/<v> Safari/605.1.15"` | the UA Safari sends on this Mac |
+| `iPhone` | `customUserAgent` | iPhone Safari's UA string, for mobile layouts |
+| `iPad` | `customUserAgent` | the iPad-identifying string ("Request Mobile Website"); iPad Safari sends the Mac UA by default |
+| `custom` | `customUserAgent = userAgent` | the user's string (validated: 1–512 printable ASCII) |
+
+`ProfileConfiguration.userAgentResolution(safari:)` returns what to apply; `<v>` comes from
+`SafariVersion.detect()`, which reads `CFBundleShortVersionString` from Safari.app's
+`Info.plist` and otherwise falls back to a macOS → Safari table. The iPhone/iPad strings use the
+frozen iOS OS token Safari itself sends (18_6 for Safari 26.0, 18_7 from 26.1). Only
+`safariMac` is consistent with the engine: the other modes change the string and nothing else.
+Old configurations migrate on decode: `deviceGenerationID` `macos-*` / `ios-*` / `ipados-*`
+become `safariMac` / `iPhone` / `iPad`, and a stored custom `userAgent` becomes `custom`.
+
+`locale` (BCP-47, e.g. `de-DE`) yields `languages` (`["de-DE", "de"]`) and `acceptLanguage`
+(`de-DE,de;q=0.9`). WebKit has no public per-profile language API, so the app applies them
+where it can; requests WebKit makes on its own use the Mac's language.
+
+`restoreTabs` (default on) reopens the last session. `SessionStore` keeps windows → tabs
+(URL, title, selected tab) in `session.bin`, normalised on save and load: http(s) only,
+credentials and fragments stripped, at most 10 windows × 50 tabs. The file is device-local:
+it is not a `ProfileSyncFile`, so sync never sends or overwrites it. Ephemeral profiles get
+a memory-only store.
 
 ## Testing
 
 | Layer | How | Where it runs |
 |---|---|---|
-| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sync, HTTP transport, UA presets) | XCTest, 36 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sessions, sync, HTTP transport, User-Agent modes, locale) | XCTest, 55 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
 | JS shims (logic) | Node + ICU (`scripts/test-shims.mjs`) | Linux, every push |
 | App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 15 runner, every push |
 | App Sandbox container migration | `--selftest-write-vault` / `--selftest-read-vault` | macOS 15 runner, every push |

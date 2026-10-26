@@ -42,6 +42,7 @@ public struct SyncReport: Equatable, Sendable {
 /// NOT synced: WebKit data store archives (cookies/localStorage/IndexedDB/cache). They are
 /// large and only consistent while the profile is stopped. Syncing them would reuse
 /// `EncryptedDirectoryArchive` output as an additional object type.
+/// Also not synced: `session.bin` (the profile's open tabs), which is device-local.
 ///
 /// Run sync only while no profile is running: an incoming config replaces the file on disk,
 /// not a live session.

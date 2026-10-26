@@ -56,6 +56,7 @@ struct ProfileIndex: Codable, Equatable {
 /// profiles/<uuid>/passwords.bin    AEAD(passwordKey, [PasswordEntry] JSON)
 /// profiles/<uuid>/history.bin      AEAD(historyKey, HistoryDocument JSON)
 /// profiles/<uuid>/bookmarks.bin    AEAD(bookmarksKey, BookmarkDocument JSON)
+/// profiles/<uuid>/session.bin      AEAD(sessionKey, SessionDocument JSON)  device-local, never synced
 /// profiles/<uuid>/webdata.pbsa     encrypted archive of the WebKit data store (app layer)
 /// ```
 /// Profile names are only readable after unlock. Profile configurations are only
@@ -201,6 +202,14 @@ public final class ProfileRepository: @unchecked Sendable {
         try BookmarkStore(file: BookmarkStore.file(url: bookmarksURL(for: id), profileID: id, profileKey: key))
     }
 
+    /// Opens the profile's saved session (open windows and tabs). `persistent: false` gives a
+    /// memory-only store for ephemeral profiles. Throws `profileNotFound` for an unknown id.
+    /// The file is device-local: sync never reads or writes it.
+    public func sessionStore(for id: UUID, key: SymmetricKey, persistent: Bool = true) throws -> SessionStore {
+        _ = try summary(for: id)
+        return SessionStore(file: SessionStore.file(url: persistent ? sessionURL(for: id) : nil, profileID: id, profileKey: key))
+    }
+
     // MARK: Sync support (raw encrypted files; see SyncEngine)
 
     func currentIndex() -> ProfileIndex {
@@ -218,6 +227,7 @@ public final class ProfileRepository: @unchecked Sendable {
     func passwordsURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("passwords.bin") }
     func historyURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("history.bin") }
     func bookmarksURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("bookmarks.bin") }
+    func sessionURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("session.bin") }
 
     func url(of file: ProfileSyncFile, for id: UUID) -> URL {
         switch file {
@@ -301,6 +311,9 @@ public final class ProfileRepository: @unchecked Sendable {
 }
 
 /// Per-profile encrypted files that are synced.
+///
+/// `session.bin` (open tabs, `SessionStore`) is deliberately absent: which tabs are open is
+/// device-local state, and another device's tabs must not replace this one's.
 enum ProfileSyncFile: String, CaseIterable {
     case config, passwords, bookmarks, history
 
