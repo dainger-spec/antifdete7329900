@@ -32,8 +32,10 @@ enum HostSafari {
 /// is no public per-web-view setting (a content rule list's `modify-headers` action only applies
 /// for Safari web extensions). So the first profile launched in a run decides: the language of
 /// its proxy's country when that is known (`ProfileConfiguration.matchProxyLocation`), otherwise
-/// the app's own languages. The JavaScript shim never overrides navigator.language(s), so the
-/// header and the script always agree — a mismatch between them is itself a detection signal.
+/// the user's own languages — the list Safari on this Mac uses, not the app's UI language (which
+/// `Localization.applyProcessLanguage` keeps in the app's own domain). The JavaScript shim never
+/// overrides navigator.language(s), so the header and the script always agree — a mismatch
+/// between them is itself a detection signal.
 @MainActor
 enum WebContentLanguage {
     /// What WebKit was given (`AppleLanguages` as WebKit reads it), once decided.
@@ -49,14 +51,35 @@ enum WebContentLanguage {
             }
             return
         }
-        if let language {
+        let languages = languages(for: language)
+        if !languages.isEmpty {
             // The argument domain: this run only, never written to the app's preferences on disk
-            // (the same way WebKit overrides it in its own processes).
+            // (the same way WebKit overrides it in its own processes). It also hides the app's UI
+            // language from WebKit, which reads the same key.
             var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
-            arguments["AppleLanguages"] = [language]
+            arguments["AppleLanguages"] = languages
             UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         }
         decided = UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? []
         log.info("Websites see the languages \(decided?.joined(separator: ",") ?? "", privacy: .public) for this run")
+    }
+
+    /// The list WebKit is given: the proxy country's language, else the user's own languages.
+    static func languages(for language: String?) -> [String] {
+        if let language { return [language] }
+        return systemLanguages
+    }
+
+    /// What Safari reads: the user's preferred languages from the global domain, without this
+    /// app's own `AppleLanguages` (the UI language); if none are set, the user's region locale.
+    static var systemLanguages: [String] {
+        func global(_ key: String) -> Any? {
+            CFPreferencesCopyValue(key as CFString, kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        }
+        if let languages = global("AppleLanguages") as? [String], !languages.isEmpty { return languages }
+        if let locale = global("AppleLocale") as? String, !locale.isEmpty {
+            return [locale.split(separator: "@")[0].replacingOccurrences(of: "_", with: "-")]
+        }
+        return ["en-US"]
     }
 }

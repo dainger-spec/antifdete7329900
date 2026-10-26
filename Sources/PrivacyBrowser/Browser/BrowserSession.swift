@@ -95,6 +95,11 @@ final class BrowserSession {
         // As Safari: the Fullscreen API is available (a WKWebView has it off by default, which a
         // page sees as document.fullscreenEnabled === undefined).
         webConfiguration.preferences.isElementFullscreenEnabled = true
+        // As Safari: pages see the system's fonts only, not the ones the user installed (a WKWebView
+        // shows those by default, and a font list is among the strongest fingerprints). There is no
+        // public switch; this is the WKPreferences property Safari turns off, set only when this
+        // WebKit has it.
+        WebKitPreferences.setBool(webConfiguration.preferences, "_setShouldAllowUserInstalledFonts:", false)
         return webConfiguration
     }
 
@@ -172,5 +177,25 @@ final class BrowserSession {
         library.flush()
         userContentController.removeAllUserScripts()
         dataStore = nil
+    }
+}
+
+/// WebKit preferences Safari sets that have no public API (`WKPreferencesPrivate.h`). Each is applied
+/// only when this WebKit implements the selector, so a WebKit without it is left as it is.
+enum WebKitPreferences {
+    @discardableResult
+    static func setBool(_ object: NSObject, _ setter: String, _ value: Bool) -> Bool {
+        let selector = NSSelectorFromString(setter)
+        guard object.responds(to: selector), let method = class_getInstanceMethod(type(of: object), selector) else { return false }
+        typealias Setter = @convention(c) (NSObject, Selector, Bool) -> Void
+        unsafeBitCast(method_getImplementation(method), to: Setter.self)(object, selector, value)
+        return true
+    }
+
+    static func bool(_ object: NSObject, _ getter: String) -> Bool? {
+        let selector = NSSelectorFromString(getter)
+        guard object.responds(to: selector), let method = class_getInstanceMethod(type(of: object), selector) else { return nil }
+        typealias Getter = @convention(c) (NSObject, Selector) -> Bool
+        return unsafeBitCast(method_getImplementation(method), to: Getter.self)(object, selector)
     }
 }

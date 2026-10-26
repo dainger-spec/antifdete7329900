@@ -18,14 +18,33 @@ function makeWindow(config, parentContext) {
     var window = globalThis;
     const illegal = (o, C) => { if (!(o instanceof C)) throw new TypeError('illegal invocation'); };
     class Geolocation { getCurrentPosition() { illegal(this, Geolocation); throw new Error('native called'); } watchPosition() { illegal(this, Geolocation); } clearWatch() { illegal(this, Geolocation); } }
-    class Permissions { query(d) { illegal(this, Permissions); return Promise.resolve({ state: 'prompt', name: d.name }); } }
+    // As WebKit shapes them: values behind prototype getters that reject other receivers.
+    const slots = new WeakMap();
+    const iface = (name, keys) => {
+      const C = { [name]: class { constructor() { throw new TypeError('Illegal constructor'); } } }[name];
+      for (const k of keys) Object.defineProperty(C.prototype, k, { get() { illegal(this, C); return slots.get(this)[k]; }, enumerable: true, configurable: true });
+      return C;
+    };
+    const make = (C, values) => { const o = Object.create(C.prototype); slots.set(o, values); return o; };
+    globalThis.GeolocationCoordinates = iface('GeolocationCoordinates', ['latitude', 'longitude', 'altitude', 'accuracy', 'altitudeAccuracy', 'heading', 'speed']);
+    GeolocationCoordinates.prototype.toJSON = function toJSON() { illegal(this, GeolocationCoordinates); return {}; };
+    globalThis.GeolocationPosition = iface('GeolocationPosition', ['coords', 'timestamp']);
+    GeolocationPosition.prototype.toJSON = function toJSON() { illegal(this, GeolocationPosition); return {}; };
+    globalThis.GeolocationPositionError = iface('GeolocationPositionError', ['code', 'message']);
+    globalThis.PermissionStatus = iface('PermissionStatus', ['state', 'name']);
+    PermissionStatus.prototype.dispatchEvent = function dispatchEvent() { return true; };
+    class Permissions { query(d) { illegal(this, Permissions); return Promise.resolve(make(PermissionStatus, { state: 'prompt', name: d.name })); } }
+    class StorageManager { estimate() { illegal(this, StorageManager); return Promise.resolve({ quota: 1048576000, usage: 1234 }); } }
+    globalThis.StorageManager = StorageManager;
     globalThis.Geolocation = Geolocation; globalThis.Permissions = Permissions;
+    globalThis.Event = class Event { constructor(type) { this.type = type; } };
+    globalThis.WeakRef = WeakRef;
     class Navigator {
       get platform() { illegal(this, Navigator); return 'MacIntel'; } get maxTouchPoints() { illegal(this, Navigator); return 0; }
       get hardwareConcurrency() { illegal(this, Navigator); return 8; }
       get language() { illegal(this, Navigator); return 'en-US'; } get languages() { illegal(this, Navigator); return ['en-US']; }
     }
-    var navigator = Object.assign(Object.create(Navigator.prototype), { geolocation: new Geolocation(), permissions: new Permissions() });
+    var navigator = Object.assign(Object.create(Navigator.prototype), { geolocation: new Geolocation(), permissions: new Permissions(), storage: new StorageManager() });
     class Screen { get width() { illegal(this, Screen); return 1728; } get height() { illegal(this, Screen); return 1117; }
                    get availWidth() { illegal(this, Screen); return 1728; } get availHeight() { illegal(this, Screen); return 1079; } }
     var screen = new Screen();
@@ -45,11 +64,13 @@ function makeWindow(config, parentContext) {
   context.Function = vm.runInContext('Function', context);
   context.parent = parentContext || context;
   context.top = parentContext ? parentContext.top : context;
-  vm.runInContext(`(function (CONFIG) {\n${body}\n})(${JSON.stringify(config)});`, context);
+  vm.runInContext(`(function install(CONFIG) {\n${body}\n})(${JSON.stringify(config)});`, context);
   return context;
 }
 
 const run = (w, code) => vm.runInContext(code, w);
+// Bun runs JavaScriptCore, Safari's engine; Node runs V8.
+const JSC = typeof Bun !== 'undefined';
 let failures = 0;
 function test(name, fn) {
   Promise.resolve().then(fn).then(
@@ -200,7 +221,7 @@ const probeLies = `
   return lies;
 })`;
 const iPhone = { platform: 'iPhone', maxTouchPoints: 5, hardwareConcurrency: 4, screenWidth: 390, screenHeight: 844, devicePixelRatio: 3 };
-const everything = { geolocation: { mode: 'fixed', latitude: 1, longitude: 2, accuracy: 3 }, webRTC: 'relayOnly', timeZone: 'Europe/Berlin', device: iPhone };
+const everything = { geolocation: { mode: 'fixed', latitude: 1, longitude: 2, accuracy: 3 }, webRTC: 'relayOnly', timeZone: 'Europe/Berlin', device: iPhone, storageQuota: 0.6 * 128 * 2 ** 30 };
 const wrappers = [
   ['Function.prototype.toString'], ['Date.prototype.getTimezoneOffset', 'Date'], ['Date.prototype.getHours', 'Date'],
   ['Date.prototype.setHours', 'Date'], ['Date.prototype.setFullYear', 'Date'], ['Date.prototype.toString', 'Date'],
@@ -215,6 +236,11 @@ const wrappers = [
   ['Object.getPrototypeOf(navigator.geolocation).getCurrentPosition', 'Geolocation'],
   ['Object.getPrototypeOf(navigator.geolocation).watchPosition', 'Geolocation'],
   ['Object.getPrototypeOf(navigator.permissions).query', 'Permissions'],
+  ['Object.getOwnPropertyDescriptor(PermissionStatus.prototype, "state").get', 'PermissionStatus', 'state'],
+  ['StorageManager.prototype.estimate', 'StorageManager'],
+  ['Object.getOwnPropertyDescriptor(GeolocationCoordinates.prototype, "latitude").get', 'GeolocationCoordinates', 'latitude'],
+  ['Object.getOwnPropertyDescriptor(GeolocationPositionError.prototype, "code").get', 'GeolocationPositionError', 'code'],
+  ['GeolocationPosition.prototype.toJSON', 'GeolocationPosition'],
   ['RTCPeerConnection.prototype.setConfiguration', 'RTCPeerConnection'], ['window.open'],
 ];
 test('wrappers look native, from the window and from a frame', () => {
@@ -237,8 +263,11 @@ test('constructor-shaped wrappers keep the native shape', () => {
   assert.equal(run(w, 'Date.toString()'), nativeText('Date'));
   assert.equal(run(w, 'Date.length + Date.name'), '7Date');
   // Own properties in the engine's own order (Safari: statics, then length, name, prototype).
-  assert.equal(run(w, 'Object.getOwnPropertyNames(Date).join()'), 'parse,UTC,now,length,name,prototype');
-  assert.equal(run(w, 'Object.getOwnPropertyNames(Intl.DateTimeFormat).join()'), 'supportedLocalesOf,length,name,prototype');
+  // JavaScriptCore lists a script function's length and name first whatever the order they were
+  // defined in, so there the closest a replacement gets is length, name, statics, prototype.
+  const order = (statics) => (JSC ? ['length', 'name', ...statics, 'prototype'] : [...statics, 'length', 'name', 'prototype']).join();
+  assert.equal(run(w, 'Object.getOwnPropertyNames(Date).join()'), order(['parse', 'UTC', 'now']));
+  assert.equal(run(w, 'Object.getOwnPropertyNames(Intl.DateTimeFormat).join()'), order(['supportedLocalesOf']));
   assert.equal(run(w, 'Object.getOwnPropertyNames(Date.prototype.getHours).join()'), 'length,name');
   assert.equal(run(w, 'Object.getOwnPropertyNames(Function.prototype.toString).join()'), 'length,name');
   assert.equal(run(w, 'Object.getOwnPropertyNames(Object.getOwnPropertyDescriptor(Screen.prototype, "width").get).join()'), 'length,name');
@@ -258,7 +287,7 @@ test('constructor-shaped wrappers keep the native shape', () => {
 
 test('nothing is left on the window and instances', () => {
   const w = makeWindow(everything);
-  assert.equal(run(w, 'Object.getOwnPropertyNames(navigator).sort().join()'), 'geolocation,permissions');
+  assert.equal(run(w, 'Object.getOwnPropertyNames(navigator).sort().join()'), 'geolocation,permissions,storage');
   assert.equal(run(w, 'Object.getOwnPropertyNames(screen).join()'), '');
   assert.equal(run(w, 'Object.getOwnPropertySymbols(window).length'), 0);
   assert.equal(run(w, 'Object.getOwnPropertyDescriptor(window, "open").enumerable'), true);
@@ -310,18 +339,38 @@ test('window.safari for the macOS generation only', () => {
 });
 
 // ---- Geolocation, WebRTC ---------------------------------------------------------------------
-test('geolocation deny', async () => {
+test('geolocation deny: prompt until asked, then a real-looking denial', async () => {
   const w = makeWindow(base);
-  const result = await run(w, `new Promise((res) => navigator.geolocation.getCurrentPosition(() => res('success'), (e) => res(e.code)))`);
-  assert.equal(result, 1);
-  assert.equal((await run(w, `navigator.permissions.query({ name: 'geolocation' })`)).state, 'denied');
-  assert.equal((await run(w, `navigator.permissions.query({ name: 'camera' })`)).state, 'prompt');
+  // WebKit: 'prompt' until the page has called getCurrentPosition/watchPosition (hasBeenRequested).
+  assert.equal(await run(w, `navigator.permissions.query({ name: 'geolocation' }).then((s) => s.state)`), 'prompt');
+  const error = await run(w, `new Promise((res) => navigator.geolocation.getCurrentPosition(() => res('success'), (e) => res(e)))`);
+  assert.equal(run(w, 'GeolocationPositionError.prototype').isPrototypeOf(error), true);
+  w.error = error;
+  assert.equal(run(w, `[error.code, error.message, Object.getOwnPropertyNames(error).length].join()`), '1,User denied Geolocation,0');
+  assert.equal(await run(w, `navigator.permissions.query({ name: 'geolocation' }).then((s) => [s.state, s instanceof PermissionStatus, Object.getOwnPropertyNames(s).length].join())`), 'denied,true,0');
+  assert.equal(await run(w, `navigator.permissions.query({ name: 'camera' }).then((s) => s.state)`), 'prompt');
+  // Not a function: the engine's argument error, before any callback.
+  assert.throws(() => run(w, `navigator.geolocation.getCurrentPosition(1)`), (e) => e.name === 'TypeError');
+  // Receivers that are not ours still get the native getter's TypeError.
+  assert.throws(() => run(w, `Object.getOwnPropertyDescriptor(GeolocationPositionError.prototype, 'code').get.call({})`), (e) => e.name === 'TypeError');
 });
 
-test('geolocation fixed', async () => {
+test('storage quota: Safari\'s instead of the app default', async () => {
+  // WebKit: ceil(0.6 × 128 GB) for a browser's top-level origin on any Mac.
+  const w = makeWindow({ ...base, storageQuota: 0.6 * 128 * 2 ** 30 });
+  assert.equal(await run(w, `navigator.storage.estimate().then((e) => [e.quota, e.usage].join())`), '82463372084,1234');
+  const plain = makeWindow(base);
+  assert.equal(await run(plain, `navigator.storage.estimate().then((e) => e.quota)`), 1048576000);
+});
+
+test('geolocation fixed: position objects without own properties', async () => {
   const w = makeWindow({ ...base, geolocation: { mode: 'fixed', latitude: 48.8566, longitude: 2.3522, accuracy: 25 } });
-  const coords = await run(w, `new Promise((res) => navigator.geolocation.getCurrentPosition((p) => res([p.coords.latitude, p.coords.longitude, p.coords.accuracy])))`);
-  assert.deepEqual(Array.from(coords), [48.8566, 2.3522, 25]);
+  w.position = await run(w, `new Promise((res) => navigator.geolocation.getCurrentPosition((p) => res(p)))`);
+  assert.equal(run(w, `[position.coords.latitude, position.coords.longitude, position.coords.accuracy, position.coords.altitude].join()`), '48.8566,2.3522,25,');
+  assert.equal(run(w, `Object.getOwnPropertyNames(position).length + Object.getOwnPropertyNames(position.coords).length`), 0);
+  assert.equal(run(w, `position instanceof GeolocationPosition && position.coords instanceof GeolocationCoordinates`), true);
+  assert.equal(run(w, `JSON.stringify(position.toJSON().coords.latitude)`), '48.8566');
+  assert.equal(await run(w, `navigator.permissions.query({ name: 'geolocation' }).then((s) => s.state)`), 'granted');
 });
 
 test('WebRTC disabled: removed without a trace', () => {
@@ -347,5 +396,5 @@ test('WebRTC unrestricted', () => {
 
 process.on('beforeExit', () => {
   if (failures) { console.log(`${failures} failure(s)`); process.exitCode = 1; }
-  else console.log('all shim tests passed');
+  else console.log(`all shim tests passed (${JSC ? 'JavaScriptCore, Bun ' + Bun.version : 'V8, Node ' + process.version})`);
 });

@@ -21,6 +21,7 @@ import WebKit
 final class SelfTest {
     private var failures = 0
     private var passes = 0
+    private var retainedDelegates: [NSObject] = []
     private let origin = URL(string: "https://selftest.invalid/")!
     private let page = "<html><head><title>PB self-test</title></head><body>self-test</body></html>"
 
@@ -175,6 +176,10 @@ final class SelfTest {
         var sessionA: BrowserSession? = try makeSession(repository, a, key: keyA)
         var webA: WKWebView? = WKWebView(frame: .zero, configuration: sessionA!.makeWebViewConfiguration())
         webA!.customUserAgent = "PrivacyBrowserSelfTest/1.0"
+        // A UI delegate, as every tab has (BrowserTab): without one WebKit answers no permission query.
+        let uiDelegate = SelfTestUIDelegate()
+        retainedDelegates.append(uiDelegate) // the web view holds its UI delegate weakly
+        webA!.uiDelegate = uiDelegate
         try await PageLoader.load(webA!, html: page, baseURL: origin)
 
         check("shim: getTimezoneOffset in Asia/Tokyo",
@@ -183,13 +188,47 @@ final class SelfTest {
               try await js(webA!, "return Intl.DateTimeFormat().resolvedOptions().timeZone;") as? String == "Asia/Tokyo")
         check("shim: local getters use profile zone",
               try await js(webA!, "return new Date(Date.UTC(2024, 0, 15, 20)).getHours();") as? Int == 5)
+        // A worker made from a blob (as fingerprinting scripts make theirs) runs in the same zone as
+        // the page, keeps strict mode and its line numbers; the wrapper prints as native code.
+        let worker = try await js(webA!, """
+            const run = (code) => new Promise((resolve) => {
+              const w = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+              w.onmessage = (e) => resolve(e.data);
+              w.onerror = (e) => resolve('error line ' + e.lineno);
+              setTimeout(() => resolve('timeout'), 5000);
+            });
+            const zone = await run("'use strict'\\npostMessage([Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset(), (function () { return this === undefined; })()].join())");
+            const line = await run('\\n\\nthrow new Error("x")');
+            return [zone, line, Function.prototype.toString.call(Worker).includes('[native code]')].join('|');
+            """) as? String
+        check("shim: a blob worker runs in the profile's zone, strict and with its own line numbers",
+              worker == "Asia/Tokyo,-540,true|error line 3|true", worker ?? "nil")
         check("shim: WebRTC disabled",
               try await js(webA!, "return typeof RTCPeerConnection;") as? String == "undefined")
+        // WebKit says 'prompt' until the page asks (Geolocation::hasBeenRequested); the status is the
+        // engine's own PermissionStatus (a fake one threw on its onchange setter before).
+        let permission = "return await navigator.permissions.query({ name: 'geolocation' }).then((s) => [s.state, s instanceof PermissionStatus, Object.getOwnPropertyNames(s).length].join());"
+        let before = try await js(webA!, permission) as? String
+        check("shim: geolocation permission is 'prompt' until the page asks, on a real PermissionStatus", before == "prompt,true,0", before ?? "nil")
         let coords = try await js(webA!, """
             return await new Promise((resolve) => navigator.geolocation.getCurrentPosition(
-              (p) => resolve(p.coords.latitude + ',' + p.coords.longitude), (e) => resolve('error ' + e.code)));
+              (p) => resolve([p.coords.latitude, p.coords.longitude, Object.getOwnPropertyNames(p).length + Object.getOwnPropertyNames(p.coords).length,
+                              p instanceof GeolocationPosition, JSON.stringify(p.toJSON().coords.latitude)].join()),
+              (e) => resolve('error ' + e.code)));
             """) as? String
-        check("shim: fixed geolocation", coords == "48.8566,2.3522", coords ?? "nil")
+        check("shim: fixed geolocation, as an engine-shaped position", coords == "48.8566,2.3522,0,true,48.8566", coords ?? "nil")
+        let after = try await js(webA!, permission) as? String
+        check("shim: geolocation permission 'granted' once asked (fixed position)", after == "granted,true,0", after ?? "nil")
+        // A frame reached by index right after insertion, before anything touched its contentWindow.
+        let indexed = try await js(webA!, """
+            const frame = document.createElement('iframe');
+            document.body.appendChild(frame);
+            const child = window[window.length - 1];
+            const value = [child.Intl.DateTimeFormat().resolvedOptions().timeZone, typeof child.RTCPeerConnection].join();
+            frame.remove();
+            return value;
+            """) as? String
+        check("shim: a frame reached as window[i] right after insertion is patched", indexed == "Asia/Tokyo,undefined", indexed ?? "nil")
         check("native: custom user agent",
               try await js(webA!, "return navigator.userAgent;") as? String == "PrivacyBrowserSelfTest/1.0")
 
@@ -560,6 +599,13 @@ final class SelfTest {
         info("plain WKWebView: plugins \(string(reference, "plugins")), languages \(string(reference, "languages")), WebGL \(string(reference, "webgl.unmaskedRenderer"))")
         check("language: navigator.language is the language WebKit was given",
               string(reference, "language") == WebContentLanguage.decided?.first, string(reference, "language"))
+        // A profile without a proxy country: this Mac's languages, as Safari has them — not the
+        // app's UI language, which Localization.applyProcessLanguage keeps in the app's domain.
+        // (scripts/live_compare.py checks the result against Safari's navigator.language.)
+        let systemLanguages = WebContentLanguage.languages(for: nil)
+        check("language: without a proxy country, websites get this Mac's languages, not the app's UI language",
+              !systemLanguages.isEmpty && systemLanguages == WebContentLanguage.systemLanguages, systemLanguages.joined(separator: ","))
+        info("this Mac's languages (Safari's): \(systemLanguages.joined(separator: ","))")
 
         // Everything a page measures of the engine and the Mac, which no profile may change.
         let engineKeys = reference.keys.filter { key in
@@ -574,9 +620,17 @@ final class SelfTest {
             let profile = try repository.create(name: "Surface \(generationID)", configuration: ProfileConfiguration(
                 webRTCPolicy: .unrestricted, ephemeral: true, deviceGenerationID: generationID))
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
-            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            let tabConfiguration = session.makeWebViewConfiguration()
+            check("surface (\(generationID)): user-installed fonts hidden from pages, as in Safari",
+                  WebKitPreferences.bool(tabConfiguration.preferences, "_shouldAllowUserInstalledFonts") == false)
+            let tab = BrowserTab(configuration: tabConfiguration, context: session.tabContext)
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
             let probed = Self.flatten(try await js(tab.webView, probe) as? [String: Any] ?? [:])
+            // Safari's quota (82 463 372 084 on any Mac), not the 1000 MiB WebKit gives an app that is not a browser.
+            let quota = try await js(tab.webView, "return (await navigator.storage.estimate()).quota;") as? NSNumber
+            let safariQuota = PrivacyScripts.safariStorageQuota(for: DeviceGenerations.resolved(id: generationID).platform).rounded(.up)
+            check("surface (\(generationID)): storage quota is Safari's",
+                  quota?.doubleValue == safariQuota, "\(quota?.stringValue ?? "nil") vs \(String(format: "%.0f", safariQuota))")
             tab.tearDown()
             session.shutDown()
             try repository.delete(profile.id)
@@ -1186,6 +1240,9 @@ private final class QuitTestDelegate: NSObject, NSApplicationDelegate {
         return .terminateCancel
     }
 }
+
+/// The UI delegate a self-test web view gets where a tab's behaviour matters (permission queries).
+private final class SelfTestUIDelegate: NSObject, WKUIDelegate {}
 
 /// Awaits one main-frame navigation of a web view.
 @MainActor

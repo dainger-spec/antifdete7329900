@@ -30,12 +30,16 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private var recentlyClosed: [URL] = []
 
     private let tabStrip = TabStripView()
+    /// 0 with one tab: like Safari, the tab bar shows from the second tab on.
+    private var tabStripHeight: NSLayoutConstraint!
     private let webContainer = NSView()
     private let addressField = NSTextField()
     private var backButton: NSButton!
     private var forwardButton: NSButton!
     private var reloadButton: NSButton!
     private var bookmarkButton: NSButton!
+    /// The toolbar's items, in order (see `NSToolbarDelegate` below).
+    private var toolbarViews: [(NSToolbarItem.Identifier, String, NSView)] = []
     private var libraryObservation: AnyCancellable?
     private var isClosing = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserWindow")
@@ -62,6 +66,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         // name — to ~/Library/Saved Application State in plaintext.
         window.isRestorable = false
         window.title = "[\(session.profileName)]"
+        // Safari's window: the controls in a unified toolbar, no separate title row. A page measures
+        // the browser's chrome as outerHeight − innerHeight; this gives Safari's (52 pt with one tab).
+        window.titleVisibility = .hidden
+        window.toolbarStyle = .unified
         // Our own tab strip replaces AppKit window tabbing (which would allow merging windows
         // and needs one NSWindow per tab).
         window.tabbingMode = .disallowed
@@ -105,28 +113,40 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         badge.textColor = .secondaryLabelColor
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let bar = NSStackView(views: [backButton, forwardButton, reloadButton, addressField, bookmarkButton,
-                                      bookmarksMenuButton, historyButton, fillButton, saveButton, badge])
-        bar.orientation = .horizontal
-        bar.spacing = 6
-        bar.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 10)
+        // The address field takes the room the toolbar has left.
+        addressField.translatesAutoresizingMaskIntoConstraints = false
         addressField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let preferredWidth = addressField.widthAnchor.constraint(equalToConstant: 680)
+        preferredWidth.priority = .defaultLow
+        NSLayoutConstraint.activate([addressField.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+                                     addressField.widthAnchor.constraint(lessThanOrEqualToConstant: 680), preferredWidth])
+
+        toolbarViews = [
+            (.init("back"), "Back", backButton!), (.init("forward"), "Forward", forwardButton!),
+            (.init("reload"), "Reload", reloadButton!), (.init("address"), "Address", addressField),
+            (.init("bookmark"), "Bookmark", bookmarkButton!), (.init("bookmarks"), "Bookmarks", bookmarksMenuButton),
+            (.init("history"), "History", historyButton), (.init("fill"), "Fill Password", fillButton),
+            (.init("save"), "Save Password", saveButton), (.init("profile"), profileName, badge),
+        ]
+        let toolbar = NSToolbar(identifier: "PrivacyBrowser.BrowserWindow")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        window.toolbar = toolbar
 
         tabStrip.delegate = self
         let container = NSView()
-        for view in [tabStrip, bar, webContainer] as [NSView] {
+        for view in [tabStrip, webContainer] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
+        tabStripHeight = tabStrip.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
             tabStrip.topAnchor.constraint(equalTo: container.topAnchor),
             tabStrip.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             tabStrip.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            tabStrip.heightAnchor.constraint(equalToConstant: TabStripView.height),
-            bar.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
-            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            bar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            webContainer.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            tabStripHeight,
+            webContainer.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
             webContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             webContainer.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             webContainer.bottomAnchor.constraint(equalTo: container.bottomAnchor),
@@ -230,6 +250,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     /// Updates tab strip, address bar, buttons and window title from the selected tab.
     private func refreshChrome() {
+        let showsTabStrip = tabs.count > 1
+        tabStrip.isHidden = !showsTabStrip
+        tabStripHeight.constant = showsTabStrip ? TabStripView.height : 0
         tabStrip.update(items: tabs.map { tab in
             TabStripView.Item(title: tab.displayTitle,
                               toolTip: [tab.webView.title, tab.url?.absoluteString].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"),
@@ -477,6 +500,28 @@ extension BrowserWindowController: BrowserTabHost {
     func tabNeedsAttention(_ tab: BrowserTab) {
         if let index = tabs.firstIndex(where: { $0 === tab }), index != selectedIndex { selectTab(at: index) }
         window?.makeKeyAndOrderFront(nil)
+    }
+}
+
+// MARK: - NSToolbarDelegate
+
+extension BrowserWindowController: NSToolbarDelegate {
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarViews.map(\.0)
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarViews.map(\.0)
+    }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard let entry = toolbarViews.first(where: { $0.0 == itemIdentifier }) else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = entry.1
+        item.view = entry.2
+        if itemIdentifier.rawValue == "address" { item.visibilityPriority = .high }
+        return item
     }
 }
 

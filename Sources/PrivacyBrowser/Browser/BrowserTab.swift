@@ -345,6 +345,16 @@ extension BrowserTab: WKNavigationDelegate {
 // MARK: - WKUIDelegate
 
 extension BrowserTab: WKUIDelegate {
+    /// The window's frame, which WebKit turns into window.outerWidth/outerHeight and
+    /// screenX/screenY. WebKit asks the UI delegate for it (`WKUIDelegatePrivate`, the method Safari
+    /// answers); a delegate without it gets outerWidth = outerHeight = 0 and a screen position
+    /// computed from an empty rectangle — what embedded and headless browsers report. AppKit screen
+    /// coordinates; WebKit flips them.
+    @objc(_webView:getWindowFrameWithCompletionHandler:)
+    func webView(_ webView: WKWebView, windowFrameCompletion completionHandler: @escaping (CGRect) -> Void) {
+        completionHandler(webView.window?.frame ?? .zero)
+    }
+
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         host?.tab(self, createTabWith: configuration)

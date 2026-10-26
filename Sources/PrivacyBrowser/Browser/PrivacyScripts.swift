@@ -26,7 +26,9 @@ import WebKit
 /// toString of a fresh iframe (one registry per page, shared by every same-origin frame). The
 /// time zone shim covers the local constructor forms, `Date.parse`, the setters and
 /// sub-minute historical offsets, so Date is consistent with itself, not only with `Intl`.
-/// Web Workers are out of reach of a user script: their `Date`/`Intl` keep the host zone.
+/// A user script never runs in a worker; workers created from a blob of the page (how
+/// fingerprinting scripts create theirs) start with this script (`hookWorkers`), workers loaded
+/// from a URL and service workers keep the host's zone.
 enum PrivacyScripts {
     struct ShimConfiguration: Encodable {
         var timeZone: String?
@@ -37,6 +39,8 @@ enum PrivacyScripts {
         /// macOS generation: Safari the app exposes `window.safari` (`pushNotification`), a
         /// WKWebView does not; a page that checks it is told the same as by Safari.
         var safariObject: Bool
+        /// The per-origin storage quota Safari reports (`safariStorageQuota`), before rounding.
+        var storageQuota: Double?
 
         struct Geolocation: Encodable {
             var mode: String
@@ -79,7 +83,18 @@ enum PrivacyScripts {
         }
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, geolocation: geolocation,
                                  webRTC: configuration.webRTCPolicy.rawValue, device: device,
-                                 safariObject: configuration.deviceGeneration.platform == .macOS)
+                                 safariObject: configuration.deviceGeneration.platform == .macOS,
+                                 storageQuota: safariStorageQuota(for: configuration.deviceGeneration.platform))
+    }
+
+    /// navigator.storage.estimate().quota in Safari, before WebKit rounds it up: a browser's origin
+    /// quota ratio (0.6) times WebKit's *standard* volume capacity — 128 GB on a Mac, 64 GB on
+    /// iOS — which WebKit reports instead of the real disk size, so it is the same on every
+    /// device (`WebsiteDataStore::defaultStandardVolumeCapacity`). An app that is not a browser
+    /// reports a fixed 1000 MiB instead.
+    static func safariStorageQuota(for platform: DeviceGeneration.Platform) -> Double {
+        let gigabyte = 1024.0 * 1024.0 * 1024.0
+        return 0.6 * (platform == .macOS ? 128 : 64) * gigabyte
     }
 
     /// The declared device's screen in points for a mobile generation (the browser window is
@@ -100,12 +115,17 @@ enum PrivacyScripts {
 
     static func source(for configuration: ProfileConfiguration) -> String {
         let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration)), encoding: .utf8)) ?? "{}"
-        return "(function (CONFIG) {\n" + shimBody + "\n})(" + json + ");"
+        return "(function install(CONFIG) {\n" + shimBody + "\n})(" + json + ");"
     }
 
     static let shimBody = #"""
 'use strict';
 const patched = new WeakSet();
+// The same script runs in a worker created from a blob (see hookWorkers), where there is no window.
+const IS_WORKER = typeof WorkerGlobalScope === 'function' && self instanceof WorkerGlobalScope;
+// This whole script, read before Function.prototype.toString is replaced: what hookWorkers runs
+// first in a worker. `install` is the name PrivacyScripts.source gives the wrapping function.
+const SOURCE = typeof install === 'function' ? Function.prototype.toString.call(install) : null;
 // Shared by every same-origin frame of the page: the frame above answers with its registry when
 // its (patched) Function.prototype.toString is called with this key as `this`.
 const REGISTRY_KEY = Symbol.for('wk.shim.registry');
@@ -114,6 +134,7 @@ const registry = acquireRegistry();
 const NATIVE_TEMPLATE = Function.prototype.toString.call(Array.prototype.push).replace('push', '%NAME%');
 
 function acquireRegistry() {
+  if (IS_WORKER) return new WeakMap();
   let w = window;
   try {
     while (w.parent && w.parent !== w) {
@@ -130,8 +151,11 @@ function patchWindow(w) {
   patched.add(w);
   try { patchToString(w); } catch (e) {}
   if (CONFIG.device) { try { patchDevice(w, CONFIG.device); } catch (e) {} }
-  if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
+  if (CONFIG.timeZone || CONFIG.device) { try { hookWorkers(w); } catch (e) {} }
+  if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
+  if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
+  if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
   try { patchWebRTC(w, CONFIG.webRTC || 'disabled'); } catch (e) {}
   try { hookChildWindows(w); } catch (e) {}
@@ -162,15 +186,22 @@ function asNative(fn) {
 
 // A constructor shaped like a native one: `target` does the work (its new.target is the real
 // one), the bound function in front of it has no `prototype` of its own, so the own properties
-// can be laid out as the engine lays them out: statics, length, name, prototype.
-function constructor(name, length, target, statics, prototype) {
+// can be laid out as the engine lays them out — for a built-in (Date): statics, length, name,
+// prototype; for a DOM interface (`native` given): length, name, prototype, statics, and the
+// interface it inherits from (EventTarget) as its [[Prototype]].
+function constructor(name, length, target, statics, prototype, native) {
   const fn = Function.prototype.bind.call(target, null);
   delete fn.length;
   delete fn.name;
-  for (const key of Object.keys(statics)) define(fn, key, statics[key]);
+  const defineStatics = () => { for (const key of Object.keys(statics)) define(fn, key, statics[key]); };
+  if (!native) defineStatics();
   Object.defineProperty(fn, 'length', { value: length, writable: false, enumerable: false, configurable: true });
   Object.defineProperty(fn, 'name', { value: name, writable: false, enumerable: false, configurable: true });
   Object.defineProperty(fn, 'prototype', { value: prototype, writable: false, enumerable: false, configurable: false });
+  if (native) {
+    defineStatics();
+    Object.setPrototypeOf(fn, Object.getPrototypeOf(native));
+  }
   registry.set(fn, NATIVE_TEMPLATE.replace('%NAME%', name));
   return fn;
 }
@@ -211,6 +242,12 @@ function define(target, name, value) {
 // (Navigator.prototype.platform) throws the engine's TypeError. Rendering is left alone.
 function patchDevice(w, device) {
   const nav = w.navigator;
+  if (IS_WORKER) {
+    // WorkerNavigator has platform and hardwareConcurrency, nothing else of the device.
+    if (nav && 'platform' in nav) overrideGetter(w, nav, 'platform', device.platform);
+    if (nav && 'hardwareConcurrency' in nav) overrideGetter(w, nav, 'hardwareConcurrency', device.hardwareConcurrency);
+    return;
+  }
   if (nav) {
     overrideGetter(w, nav, 'platform', device.platform);
     overrideGetter(w, nav, 'maxTouchPoints', device.maxTouchPoints);
@@ -228,6 +265,9 @@ function patchDevice(w, device) {
   // On iOS the window is the screen; inner sizes stay what the web view really is.
   overrideGetter(w, w, 'outerWidth', device.screenWidth);
   overrideGetter(w, w, 'outerHeight', device.screenHeight);
+  for (const name of ['screenX', 'screenY', 'screenLeft', 'screenTop']) {
+    if (name in w) overrideGetter(w, w, name, 0);
+  }
 }
 
 function overrideGetter(w, obj, name, value) {
@@ -441,6 +481,27 @@ function patchTimeZone(w, TZ) {
   define(w.Intl, 'DateTimeFormat', DateTimeFormat);
 }
 
+// ---- Storage quota ------------------------------------------------------------------------------
+// Safari, a browser to WebKit, reports 60 % of a standard volume (128 GB on a Mac) per origin;
+// WebKit gives any other app a fixed 1000 MiB (a tenth of either to a third-party frame) — also the
+// small quota private-mode detectors look for. estimate() reports Safari's figure, rounded up as
+// WebKit rounds it; usage stays the engine's. Any other quota (a WebKit that already treats the
+// app as a browser) is left alone.
+function patchStorageQuota(w, quota) {
+  const Manager = w.StorageManager;
+  const estimate = Manager && Manager.prototype.estimate;
+  if (typeof estimate !== 'function') return;
+  const APP_QUOTA = 1048576000;
+  define(Manager.prototype, 'estimate', method('estimate', 0, function () {
+    return estimate.apply(this, arguments).then((result) => {
+      if (result && typeof result.quota === 'number' && result.quota <= APP_QUOTA) {
+        result.quota = Math.ceil(result.quota * (quota / APP_QUOTA));
+      }
+      return result;
+    });
+  }));
+}
+
 // ---- Safari the app -----------------------------------------------------------------------------
 // Safari exposes window.safari, a plain object holding a SafariRemoteNotification (website push
 // permission API); a page that looks for it to recognise Safari finds what Safari would give it.
@@ -458,57 +519,136 @@ function patchSafariObject(w) {
 }
 
 // ---- Geolocation ------------------------------------------------------------------------------
+// As WebKit answers a page whose user said no (deny) or allowed this position (fixed): an error or a
+// position after the request, and permissions.query reporting 'prompt' until the page has asked
+// (WebKit's Geolocation::hasBeenRequested), then 'denied' / 'granted'. Every object handed out is
+// an instance of the real interface with no own properties; its values come from the prototype
+// getters (and toJSON), which answer the engine's own way for every other receiver. The
+// PermissionStatus is the engine's own, only its state is answered here.
 function patchGeolocation(w, geo) {
   const nav = w.navigator;
   if (!nav || !nav.geolocation) return;
   const GeoProto = Object.getPrototypeOf(nav.geolocation);
-  const DENIED = { code: 1, message: 'User denied Geolocation', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 };
-  if (w.GeolocationPositionError) Object.setPrototypeOf(DENIED, w.GeolocationPositionError.prototype);
+  const fixed = geo.mode === 'fixed';
+  // Fake instances are bare Object.create(prototype) objects (no own properties). Their values live
+  // here and are served by prototype getters; a real instance falls through to the native getter.
+  const data = new WeakMap();
+  let requested = false; // WebKit: Geolocation::hasBeenRequested() -> permissions.query reports 'prompt' until then
+  const statuses = [];   // WeakRefs of PermissionStatus objects we handed out
+
+  function serve(proto, names, extra) {
+    if (!proto) return;
+    for (const key of names) {
+      const native = Object.getOwnPropertyDescriptor(proto, key);
+      if (!native || !native.get) continue;
+      const get = getter(key, function () {
+        const d = data.get(this);
+        return d !== undefined ? d[key] : native.get.call(this); // wrong receiver: the engine's own TypeError
+      });
+      Object.defineProperty(proto, key, { get: get, set: native.set, enumerable: native.enumerable, configurable: native.configurable });
+    }
+    if (extra) extra(proto);
+  }
+  function serveToJSON(proto, build) {
+    if (!proto) return;
+    const native = Object.getOwnPropertyDescriptor(proto, 'toJSON');
+    if (!native || typeof native.value !== 'function') return;
+    define(proto, 'toJSON', method('toJSON', 0, function () {
+      const d = data.get(this);
+      return d !== undefined ? build(d) : native.value.call(this);
+    }));
+  }
+  const fake = (Ctor, values) => {
+    const o = Object.create(Ctor ? Ctor.prototype : Object.prototype);
+    data.set(o, values);
+    return o;
+  };
+  const CoordsProto = w.GeolocationCoordinates && w.GeolocationCoordinates.prototype;
+  const PosProto = w.GeolocationPosition && w.GeolocationPosition.prototype;
+  const ErrProto = w.GeolocationPositionError && w.GeolocationPositionError.prototype;
+  const StatusProto = w.PermissionStatus && w.PermissionStatus.prototype;
+  const COORD_KEYS = ['latitude', 'longitude', 'altitude', 'accuracy', 'altitudeAccuracy', 'heading', 'speed'];
+  const coordsJSON = (d) => {
+    const out = {};
+    for (const k of COORD_KEYS) out[k] = d[k];
+    if (CoordsProto && Object.getOwnPropertyDescriptor(CoordsProto, 'floorLevel')) out.floorLevel = null;
+    return out;
+  };
+  serve(CoordsProto, COORD_KEYS.concat('floorLevel'));
+  serveToJSON(CoordsProto, coordsJSON);
+  serve(PosProto, ['coords', 'timestamp']);
+  serveToJSON(PosProto, (d) => ({ coords: d.coords, timestamp: d.timestamp }));
+  serve(ErrProto, ['code', 'message']);
 
   function position() {
-    const coords = Object.create(w.GeolocationCoordinates ? w.GeolocationCoordinates.prototype : Object.prototype);
-    const values = { latitude: geo.latitude, longitude: geo.longitude, accuracy: geo.accuracy,
-                     altitude: null, altitudeAccuracy: null, heading: null, speed: null };
-    for (const k of Object.keys(values)) Object.defineProperty(coords, k, { value: values[k], enumerable: true });
-    const pos = Object.create(w.GeolocationPosition ? w.GeolocationPosition.prototype : Object.prototype);
-    Object.defineProperty(pos, 'coords', { value: coords, enumerable: true });
-    Object.defineProperty(pos, 'timestamp', { value: Date.now(), enumerable: true });
-    return pos;
+    const coords = fake(w.GeolocationCoordinates, { latitude: geo.latitude, longitude: geo.longitude, accuracy: geo.accuracy,
+      altitude: null, altitudeAccuracy: null, heading: null, speed: null, floorLevel: null });
+    return fake(w.GeolocationPosition, { coords: coords, timestamp: w.Date.now() });
   }
-  function respond(success, error) {
+  const denied = () => fake(w.GeolocationPositionError, { code: 1, message: 'User denied Geolocation' });
+
+  function currentState() { return !requested ? 'prompt' : (fixed ? 'granted' : 'denied'); }
+  function markRequested() {
+    if (requested) return;
+    requested = true;
     w.setTimeout(() => {
-      if (geo.mode === 'fixed') { if (typeof success === 'function') success(position()); }
-      else if (typeof error === 'function') error(DENIED);
+      for (const ref of statuses) {
+        const s = ref.deref();
+        if (s) { try { s.dispatchEvent(new w.Event('change')); } catch (e) {} }
+      }
     }, 0);
   }
-  let nextWatch = 1;
-  const Geolocation = w.Geolocation;
-  const checkReceiver = (receiver, name) => {
-    if (Geolocation && !(receiver instanceof Geolocation)) throw new w.TypeError('Can only call Geolocation.' + name + ' on instances of Geolocation');
+  if (StatusProto) {
+    const states = new WeakSet();
+    const native = Object.getOwnPropertyDescriptor(StatusProto, 'state');
+    if (native && native.get) {
+      statuses.states = states;
+      Object.defineProperty(StatusProto, 'state', {
+        get: getter('state', function () {
+          const v = native.get.call(this); // receiver check
+          return states.has(this) ? currentState() : v;
+        }), set: native.set, enumerable: native.enumerable, configurable: native.configurable });
+      statuses.track = (s) => { states.add(s); statuses.push(new w.WeakRef(s)); };
+    }
+  }
+
+  function respond(success, error) {
+    markRequested();
+    w.setTimeout(() => {
+      if (fixed) success(position());
+      else if (typeof error === 'function') error(denied());
+    }, 0);
+  }
+  const check = (receiver, name, args) => {
+    if (w.Geolocation && !(receiver instanceof w.Geolocation)) throw new w.TypeError('Can only call Geolocation.' + name + ' on instances of Geolocation');
+    if (args.length < 1) throw new w.TypeError('Not enough arguments');
+    if (typeof args[0] !== 'function') throw new w.TypeError("Argument 1 ('successCallback') to Geolocation." + name + ' must be a function');
+    if (args[1] != null && typeof args[1] !== 'function') throw new w.TypeError("Argument 2 ('errorCallback') to Geolocation." + name + ' must be a function');
   };
+  let nextWatch = 1;
   define(GeoProto, 'getCurrentPosition', method('getCurrentPosition', 1, function (success, error) {
-    checkReceiver(this, 'getCurrentPosition');
+    check(this, 'getCurrentPosition', arguments);
     respond(success, error);
   }));
   define(GeoProto, 'watchPosition', method('watchPosition', 1, function (success, error) {
-    checkReceiver(this, 'watchPosition');
+    check(this, 'watchPosition', arguments);
     respond(success, error);
     return nextWatch++;
   }));
-  define(GeoProto, 'clearWatch', method('clearWatch', 1, function () { checkReceiver(this, 'clearWatch'); }));
+  define(GeoProto, 'clearWatch', method('clearWatch', 1, function (id) {
+    if (w.Geolocation && !(this instanceof w.Geolocation)) throw new w.TypeError('Can only call Geolocation.clearWatch on instances of Geolocation');
+    if (arguments.length < 1) throw new w.TypeError('Not enough arguments');
+  }));
 
-  if (nav.permissions && nav.permissions.query) {
+  if (nav.permissions && nav.permissions.query && statuses.track) {
     const PermProto = Object.getPrototypeOf(nav.permissions);
     const originalQuery = PermProto.query;
     define(PermProto, 'query', method('query', 1, function (descriptor) {
-      if (descriptor && descriptor.name === 'geolocation') {
-        const status = Object.create(w.PermissionStatus ? w.PermissionStatus.prototype : Object.prototype);
-        Object.defineProperty(status, 'state', { value: geo.mode === 'fixed' ? 'granted' : 'denied', enumerable: true });
-        Object.defineProperty(status, 'name', { value: 'geolocation', enumerable: true });
-        status.onchange = null;
-        return Promise.resolve(status);
-      }
-      return originalQuery.apply(this, arguments);
+      const result = originalQuery.apply(this, arguments); // real PermissionStatus, real errors
+      let isGeo = false;
+      try { isGeo = descriptor != null && String(descriptor.name) === 'geolocation'; } catch (e) {}
+      if (!isGeo) return result;
+      return result.then((s) => { statuses.track(s); return s; });
     }));
   }
 }
@@ -536,7 +676,7 @@ function patchWebRTC(w, policy) {
   };
   rtcTarget.prototype = Native.prototype; // instanceof goes through the bound target
   const statics = Native.generateCertificate ? { generateCertificate: Native.generateCertificate } : {};
-  const RTCPeerConnection = constructor('RTCPeerConnection', 0, rtcTarget, statics, Native.prototype);
+  const RTCPeerConnection = constructor('RTCPeerConnection', 0, rtcTarget, statics, Native.prototype, Native);
   const nativeSetConfiguration = Native.prototype.setConfiguration;
   if (nativeSetConfiguration) {
     define(Native.prototype, 'setConfiguration', method('setConfiguration', 0, function (config) {
@@ -544,7 +684,9 @@ function patchWebRTC(w, policy) {
     }));
   }
   define(Native.prototype, 'constructor', RTCPeerConnection);
+  // Only the names this engine has (Safari 26 has no webkitRTCPeerConnection any more).
   for (const name of names) {
+    if (!Object.prototype.hasOwnProperty.call(w, name)) continue;
     try { Object.defineProperty(w, name, { value: RTCPeerConnection, writable: true, enumerable: false, configurable: true }); } catch (e) {}
   }
 }
@@ -580,6 +722,86 @@ function hookChildWindows(w) {
   }
 }
 
-patchWindow(window);
+// ---- Workers ----------------------------------------------------------------------------------
+// A user script never runs in a worker, so a worker's Date/Intl would show the Mac's own zone (and
+// its navigator the Mac's values) next to the page's. Workers made from a blob this realm created —
+// how fingerprinting scripts make theirs — start with this script: the blob is handed to the
+// engine as [this script, the page's blob], so the worker keeps a blob: location, its own relative
+// URLs and its CSP. The script is one line (an indirect eval of its text), so the page's code keeps
+// its line numbers. Workers loaded from a URL are left alone: rewriting them would change their
+// location and how their relative URLs resolve. Service workers cannot be reached.
+function hookWorkers(w) {
+  const URLClass = w.URL;
+  const nativeCreate = URLClass && URLClass.createObjectURL;
+  if (!SOURCE || typeof nativeCreate !== 'function' || typeof w.Blob !== 'function' || typeof w.WeakRef !== 'function') return;
+  const blobs = new Map();        // blob: URL this realm created → WeakRef to its Blob
+  const replacements = new Map(); // that URL → the URL of the same Blob behind this script
+  // A CSP without 'unsafe-eval' stops the eval, never the page's own code after it.
+  const bootstrap = 'try { (0, eval)(' + JSON.stringify('(' + SOURCE + ')(' + JSON.stringify(CONFIG) + ');') + '); } catch (e) {}';
+  define(URLClass, 'createObjectURL', method('createObjectURL', 1, function (object) {
+    const url = nativeCreate.apply(this, arguments);
+    if (object instanceof w.Blob) {
+      if (blobs.size > 500) blobs.forEach((ref, key) => { if (!ref.deref()) blobs.delete(key); });
+      blobs.set(url, new w.WeakRef(object));
+    }
+    return url;
+  }));
+  // The page's script text, read with the engine's own XHR (a blob: URL of this realm reads
+  // synchronously), so the bootstrap can follow its directive prologue: a worker that starts with
+  // 'use strict' stays strict. Unreadable → the bootstrap simply goes first.
+  const XHR = w.XMLHttpRequest;
+  const xhrOpen = XHR && XHR.prototype.open, xhrSend = XHR && XHR.prototype.send;
+  const responseText = XHR && Object.getOwnPropertyDescriptor(XHR.prototype, 'responseText');
+  function read(url) {
+    try {
+      const xhr = new XHR();
+      xhrOpen.call(xhr, 'GET', url, false);
+      xhrSend.call(xhr);
+      return responseText.get.call(xhr);
+    } catch (e) { return null; }
+  }
+  // Leading comments and directives ('use strict'), which must stay first.
+  const PROLOGUE = /^(?:(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*(?:'[^'\\\n]*'|"[^"\\\n]*")[ \t]*(?:;|\r?\n|$))*/;
+  // The same replacement for the same URL: a SharedWorker is found again by its URL.
+  function replacementFor(url) {
+    const key = String(url);
+    if (replacements.has(key)) return replacements.get(key);
+    const blob = blobs.has(key) ? blobs.get(key).deref() : undefined;
+    if (!blob) return null;
+    const text = read(key);
+    let parts = [bootstrap, blob];
+    if (text !== null) {
+      const prologue = PROLOGUE.exec(text)[0];
+      // On the directive's own line, so the page's next line keeps its columns too.
+      const newline = /\r?\n$/.exec(prologue);
+      parts = newline ? [prologue.slice(0, newline.index) + ';', bootstrap, text.slice(newline.index)]
+                      : [prologue, bootstrap, text.slice(prologue.length)];
+    }
+    const replacement = nativeCreate.call(URLClass, new w.Blob(parts, { type: blob.type || 'text/javascript' }));
+    replacements.set(key, replacement);
+    return replacement;
+  }
+  for (const name of ['Worker', 'SharedWorker']) {
+    const Native = w[name];
+    if (typeof Native !== 'function') continue;
+    const workerTarget = function (scriptURL) {
+      const args = Array.prototype.slice.call(arguments);
+      // Without `new`: the engine's own TypeError.
+      if (new.target === undefined) return Reflect.apply(Native, this, args);
+      if (args.length > 0) {
+        let replacement = null;
+        try { replacement = replacementFor(scriptURL); } catch (e) {}
+        if (replacement) args[0] = replacement;
+      }
+      return Reflect.construct(Native, args, new.target);
+    };
+    workerTarget.prototype = Native.prototype; // what `new` constructs with (new.target is the target)
+    const Wrapped = constructor(name, Native.length, workerTarget, {}, Native.prototype, Native);
+    define(Native.prototype, 'constructor', Wrapped);
+    define(w, name, Wrapped);
+  }
+}
+
+patchWindow(IS_WORKER ? self : window);
 """#
 }

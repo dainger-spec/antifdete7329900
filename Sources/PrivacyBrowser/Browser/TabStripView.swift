@@ -25,7 +25,8 @@ final class TabStripView: NSView {
     private let newTabButton: NSButton
     private let separator = NSBox()
 
-    static let height: CGFloat = 30
+    /// Safari 26's tab bar (outerHeight − innerHeight goes from 52 to 90 with a second tab).
+    static let height: CGFloat = 38
     private let minTabWidth: CGFloat = 72
     private let maxTabWidth: CGFloat = 240
     private let buttonWidth: CGFloat = 30
