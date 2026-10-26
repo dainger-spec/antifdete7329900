@@ -306,6 +306,13 @@ final class SelfTest {
         check("proxy: a pasted proxy string is split into host, port and credentials",
               field == ProxyHostField(host: "127.0.0.1", port: 1080, username: "u", password: "p", kind: .socks5),
               String(describing: field))
+        check("proxy: a bracketed IPv6 proxy address is split into host and port",
+              (try? ProxyHostField.parse("[::1]:1080")) == ProxyHostField(host: "::1", port: 1080))
+
+        // Every proxied session carries the ping-load blocker (dns-prefetch would resolve outside
+        // the proxy; see ContentRules).
+        await ContentRules.prepare()
+        check("proxy: the ping-load blocker compiled", ContentRules.dnsPrefetchBlocker != nil)
 
         let environment = ProcessInfo.processInfo.environment
         guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init),
@@ -327,10 +334,29 @@ final class SelfTest {
         check("proxy: SOCKS5 carries the request", socksBody?.contains("PB-PROXY-OK via=socks5") == true, socksBody ?? "load failed")
         check("proxy: SOCKS5 receives the hostname (remote DNS)", socksBody?.contains("atyp=3") == true, socksBody ?? "nil")
 
+        // A proxy at an IPv6 literal (the IPv6 loopback; the self-test proxy listens there too).
+        if let http6Port = environment["PB_SELFTEST_HTTP6_PROXY_PORT"].flatMap(Int.init) {
+            let v6Body = try await loadThroughProxy(repository, ProxySettings(kind: .httpConnect, host: "::1", port: http6Port), url: target)
+            check("proxy: an IPv6 proxy address carries the request", v6Body?.contains("PB-PROXY-OK via=connect6") == true,
+                  v6Body ?? "load failed")
+        } else {
+            info("IPv6 proxy check skipped (PB_SELFTEST_HTTP6_PROXY_PORT not set)")
+        }
+
         // Port 9 (discard) on localhost is closed on CI runners: the load must fail, not go direct.
         let direct = try await loadThroughProxy(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9),
                                                 url: URL(string: "http://example.com/")!)
         check("proxy: fail-closed when the proxy is unreachable", direct == nil, "page loaded: \(direct ?? "")")
+        // A proxy host that does not resolve (".invalid" never does): the load fails too.
+        let unresolved = try await loadThroughProxy(repository, ProxySettings(kind: .socks5, host: "proxy.selftest.invalid", port: 1080),
+                                                    url: URL(string: "http://example.com/")!)
+        check("proxy: fail-closed when the proxy host does not resolve", unresolved == nil, "page loaded: \(unresolved ?? "")")
+
+        // What WebKit would send outside the proxy is blocked by the ping-load blocker: a beacon
+        // (same load type as a dns-prefetch) never reaches the proxy, a fetch does.
+        let served = try await servedPathsAfterBeacon(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort))
+        check("proxy: ping-type loads (dns-prefetch, beacons) are blocked in a proxied profile",
+              served.contains("/fetch-allowed") && !served.contains("/beacon-blocked"), served.joined(separator: ","))
 
         // A proxy that answers 407: the profile's credentials are sent, wrong ones fail closed.
         // Loaded in a BrowserTab, whose navigation delegate answers the proxy's challenge.
@@ -343,7 +369,7 @@ final class SelfTest {
             check("proxy: rejected credentials fail closed", wrong?.hasPrefix("PB proxied") != true, wrong ?? "nil")
             let none = try await titleThroughProxyTab(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: authPort),
                                                       url: target)
-            check("proxy: 407 without credentials fails closed", none?.hasPrefix("PB proxied") != true, none ?? "nil")
+            check("proxy: 407 without credentials fails closed and shows the error page", none == L("errorpage.title"), none ?? "nil")
         } else {
             info("proxy auth checks skipped (PB_SELFTEST_HTTP_AUTH_PROXY_PORT not set)")
         }
@@ -365,6 +391,23 @@ final class SelfTest {
         }
         info("proxy tab \(proxy.username ?? "-"):\(proxy.password == nil ? "-" : "***") -> \(tab.webView.title ?? "nil")")
         return tab.webView.title
+    }
+
+    /// In a page served by the proxy: sends a beacon and a fetch to the proxy, then reads back
+    /// which paths the proxy served (`/pb-served.json`).
+    private func servedPathsAfterBeacon(_ repository: ProfileRepository, _ proxy: ProxySettings) async throws -> [String] {
+        let profile = try repository.create(name: "Beacon", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
+        try await PageLoader.load(webView, url: URL(string: "http://proxied.selftest.invalid/beacon-page")!)
+        let served = try await js(webView, """
+            navigator.sendBeacon('/beacon-blocked', 'x');
+            await fetch('/fetch-allowed');
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();
+            """) as? [String] ?? []
+        return served
     }
 
     /// Loads `url` in an ephemeral profile using `proxy`. Returns the page text, or nil if the load failed.

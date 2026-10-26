@@ -88,6 +88,7 @@ final class ProfileManager: ObservableObject {
         // Where the proxy exits (time zone, country), asked through the proxy while the web data
         // decrypts. See ProfileConfiguration.matchProxyLocation.
         async let lookedUp = lookUpProxyLocation(stored)
+        if stored.proxy != nil { await ContentRules.prepare() }
         if !stored.ephemeral {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
             try await webDataVault.prepareForLaunch(profileID: id, key: key)

@@ -1,5 +1,6 @@
 import AppKit
 import BrowserCore
+import os
 import WebKit
 
 /// One running profile: its isolated `WKWebsiteDataStore`, its decrypted library (history,
@@ -59,6 +60,15 @@ final class BrowserSession {
         self.dataStore = store
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
         self.userContentController = BehaviorSets.makeUserContentController(for: configuration)
+        if configuration.proxy != nil {
+            // Loads WebKit would otherwise make outside the proxy (see ContentRules).
+            if let blocker = ContentRules.dnsPrefetchBlocker {
+                userContentController.add(blocker)
+            } else {
+                Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
+                    .error("No ping-load blocker: dns-prefetch of this profile may resolve outside its proxy")
+            }
+        }
     }
 
     var windowCount: Int { windows.count }

@@ -75,6 +75,8 @@
 "editor.webrtc.relay" = "Только через ретранслятор (TURN)";
 "editor.webrtc.unrestricted" = "Без ограничений";
 "errorpage.title" = "Не удалось загрузить страницу";
+"errorpage.proxy.noCredentials" = "Прокси этого профиля требует имя пользователя и пароль. Укажите их в настройках профиля.";
+"errorpage.proxy.rejected" = "Прокси отклонил имя пользователя и пароль профиля.";
 "gen.ios26" = "Safari на iOS 26 (только UA)";
 "gen.ios27" = "Safari на iOS 27 (только UA)";
 "gen.ipados26" = "Safari на iPadOS 26 (только UA)";

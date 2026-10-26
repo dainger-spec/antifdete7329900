@@ -46,6 +46,10 @@ final class BrowserTab: NSObject {
     private var tornDown = false
     /// Sheets whose result a WebKit completion handler is waiting for (see `presentSheet`).
     private var pendingSheets: [UUID: PendingSheet] = [:]
+    /// Why the profile's proxy challenge was just cancelled: shown by the error page of the
+    /// navigation that fails as a result (otherwise that failure reads "cancelled" and the tab
+    /// would stay blank).
+    private var proxyAuthFailure: String?
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserTab")
 
     private struct PendingSheet {
@@ -239,9 +243,18 @@ extension BrowserTab: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let nsError = error as NSError
+        if let reason = proxyAuthFailure {
+            // The load was cancelled by this tab itself, at the proxy's challenge (fail-closed).
+            proxyAuthFailure = nil
+            showErrorPage(reason)
+            return
+        }
         guard nsError.code != NSURLErrorCancelled else { return }
         // With a proxy configured and failover disabled, an unreachable proxy surfaces here.
-        let message = "\(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))"
+        showErrorPage("\(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))")
+    }
+
+    private func showErrorPage(_ message: String) {
         let escaped = message
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
@@ -268,7 +281,9 @@ extension BrowserTab: WKNavigationDelegate {
             if challenge.previousFailureCount == 0, let credential = context.proxyCredential {
                 completionHandler(.useCredential, credential)
             } else {
-                log.error("Proxy authentication \(challenge.previousFailureCount == 0 ? "requested, no credentials set" : "rejected", privacy: .public)")
+                let missing = challenge.previousFailureCount == 0
+                log.error("Proxy authentication \(missing ? "requested, no credentials set" : "rejected", privacy: .public)")
+                proxyAuthFailure = L(missing ? "errorpage.proxy.noCredentials" : "errorpage.proxy.rejected")
                 completionHandler(.cancelAuthenticationChallenge, nil)
             }
             return

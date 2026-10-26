@@ -75,6 +75,8 @@
 "editor.webrtc.relay" = "Relay (TURN) only";
 "editor.webrtc.unrestricted" = "Unrestricted";
 "errorpage.title" = "Page could not be loaded";
+"errorpage.proxy.noCredentials" = "The profile’s proxy requires a user name and password. Add them in the profile settings.";
+"errorpage.proxy.rejected" = "The proxy rejected the profile’s user name and password.";
 "gen.ios26" = "Safari on iOS 26 (UA only)";
 "gen.ios27" = "Safari on iOS 27 (UA only)";
 "gen.ipados26" = "Safari on iPadOS 26 (UA only)";

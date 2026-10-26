@@ -10,17 +10,21 @@ itself with a page that reports how the request arrived, e.g.
 `atyp=3` means the browser sent the *hostname* to the proxy (remote DNS resolution); an
 `.invalid` hostname can only load at all if it was not resolved locally.
 
-    python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082
+    python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083
 
 `--http-auth` is an HTTP CONNECT proxy that answers 407 until the request carries
 `Proxy-Authorization: Basic pb-user:pb-pass`, then reports `via=connect-auth`.
+`--http6` is the plain HTTP CONNECT proxy listening on the IPv6 loopback `::1`
+(a profile whose proxy host is an IPv6 literal); it reports `via=connect6`.
 
-Pages also report the request's `Accept-Language` header (`accept-language=...`), and the path
+Pages also report the request's `Accept-Language` header (`accept-language=...`), the path
 `/pb-geo.json` answers like a geolocation service (`{"timezone": "Europe/Berlin", "country": "DE"}`)
-for the proxy-location check.
+for the proxy-location check, and `/pb-served.json` lists the paths served so far (so the
+self-test can tell which requests reached the proxy, e.g. that a beacon did not).
 """
 import argparse
 import base64
+import json
 import socket
 import struct
 import threading
@@ -39,14 +43,23 @@ def read_until_blank_line(conn: socket.socket) -> bytes:
 
 
 GEO_ANSWER = b'{"ip":"203.0.113.7","country":"DE","timezone":"Europe/Berlin"}'
+SERVED: list = []
+SERVED_LOCK = threading.Lock()
 
 
 def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
     """Answers the (tunnelled or forwarded) HTTP request `request` for `path`."""
     accept_language = next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
                             if line.lower().startswith("accept-language:")), "-")
-    if path.split("?", 1)[0] == "/pb-geo.json":
+    plain_path = path.split("?", 1)[0]
+    with SERVED_LOCK:
+        if plain_path != "/pb-served.json":
+            SERVED.append(plain_path)
+        served = list(SERVED)
+    if plain_path == "/pb-geo.json":
         body, content_type = GEO_ANSWER, "application/json"
+    elif plain_path == "/pb-served.json":
+        body, content_type = json.dumps(served).encode(), "application/json"
     else:
         body = (
             f"<html><head><title>PB proxied {path}</title></head>"
@@ -69,7 +82,7 @@ def respond_with_page(conn: socket.socket, via: str) -> None:
     answer(conn, via, path, request)
 
 
-def handle_http(conn: socket.socket) -> None:
+def handle_http(conn: socket.socket, via: str = "connect") -> None:
     with conn:
         head = read_until_blank_line(conn).decode("latin-1", "replace")
         first = head.split("\r\n", 1)[0]
@@ -77,7 +90,7 @@ def handle_http(conn: socket.socket) -> None:
         target = rest.split(" ", 1)[0]
         if method.upper() == "CONNECT":
             conn.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-            respond_with_page(conn, f"via=connect target={target}")
+            respond_with_page(conn, f"via={via} target={target}")
         else:
             # Absolute-form request (plain forward proxy); answer directly.
             path = "/" + target.split("://", 1)[-1].split("/", 1)[-1] if "/" in target.split("://", 1)[-1] else "/"
@@ -103,6 +116,10 @@ def handle_http_auth(conn: socket.socket) -> None:
             return
         conn.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         respond_with_page(conn, f"via=connect-auth target={target}")
+
+
+def handle_http6(conn: socket.socket) -> None:
+    handle_http(conn, via="connect6")
 
 
 def recv_exact(conn: socket.socket, n: int) -> bytes:
@@ -139,12 +156,17 @@ def handle_socks(conn: socket.socket) -> None:
         respond_with_page(conn, f"via=socks5 atyp={atyp} target={host}:{port}")
 
 
-def serve(port: int, handler) -> None:
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("127.0.0.1", port))
-    server.listen(16)
-    print(f"[selftest-proxy] {handler.__name__} listening on 127.0.0.1:{port}", flush=True)
+def serve(port: int, handler, host: str = "127.0.0.1") -> None:
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    try:
+        server = socket.socket(family, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((host, port))
+        server.listen(16)
+    except OSError as exc:  # e.g. no IPv6 on this host: the other listeners keep serving
+        print(f"[selftest-proxy] {handler.__name__} cannot listen on {host}:{port}: {exc}", flush=True)
+        return
+    print(f"[selftest-proxy] {handler.__name__} listening on {host}:{port}", flush=True)
     while True:
         conn, _ = server.accept()
         threading.Thread(target=lambda c=conn: _safe(handler, c), daemon=True).start()
@@ -162,10 +184,13 @@ def main() -> None:
     parser.add_argument("--http", type=int, default=18080)
     parser.add_argument("--socks", type=int, default=18081)
     parser.add_argument("--http-auth", type=int, default=None)
+    parser.add_argument("--http6", type=int, default=None)
     args = parser.parse_args()
     threading.Thread(target=serve, args=(args.http, handle_http), daemon=True).start()
     if args.http_auth:
         threading.Thread(target=serve, args=(args.http_auth, handle_http_auth), daemon=True).start()
+    if args.http6:
+        threading.Thread(target=serve, args=(args.http6, handle_http6, "::1"), daemon=True).start()
     serve(args.socks, handle_socks)
 
 
