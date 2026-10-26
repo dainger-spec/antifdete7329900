@@ -25,6 +25,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var router: PacketRouter?
     private var expiryTimer: DispatchSourceTimer?
     private var reading = false
+    /// The app sends a message every minute while it has routes here. Uptime, not wall-clock
+    /// time: a Mac's sleep does not count.
+    private var lastAppMessage = DispatchTime.now()
+    /// Routes the app stopped tending this long ago — it crashed or was force-quit — are dropped
+    /// and the tunnel stops: nothing is left answering for a profile that no longer runs. Generous,
+    /// as App Nap may delay the app's timer.
+    static let heartbeatTimeout: TimeInterval = 600
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         logger.notice("startTunnel")
@@ -69,6 +76,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Control messages from the app: register / unregister a profile's route, status.
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
         queue.async {
+            self.lastAppMessage = DispatchTime.now()
             var reply = TunnelStatusReply(routes: self.router?.routeIDs ?? [], allocations: self.router?.allocationCount ?? 0)
             do {
                 guard let router = self.router else { throw ProviderError.notRunning }
@@ -96,9 +104,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }, log: { [logger] in logger.info("\($0, privacy: .public)") })
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 10, repeating: 10)
-        timer.setEventHandler { [weak self] in self?.router?.expire() }
+        timer.setEventHandler { [weak self] in
+            guard let self, let router = self.router else { return }
+            router.expire()
+            let silent = Double(DispatchTime.now().uptimeNanoseconds - self.lastAppMessage.uptimeNanoseconds) / 1e9
+            if !router.routeIDs.isEmpty, silent > Self.heartbeatTimeout {
+                self.logger.notice("no message from the app for \(Int(Self.heartbeatTimeout)) s: stopping")
+                router.unregisterAll()
+                self.cancelTunnelWithError(nil)
+            }
+        }
         timer.resume()
         expiryTimer = timer
+        lastAppMessage = DispatchTime.now()
         reading = true
         readPackets()
     }

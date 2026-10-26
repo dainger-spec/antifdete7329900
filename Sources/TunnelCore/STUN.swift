@@ -134,12 +134,16 @@ public struct STUNMessage: Equatable, Sendable {
         return bytes
     }
 
+    /// Callers keep a message within STUN's 16-bit length (`maximumBodyLength`); one that is not
+    /// gets a wrong length, never a trap in the shared extension.
     private func setLength(_ bytes: inout [UInt8], _ length: Int) {
-        put16(&bytes, 2, UInt16(length))
+        put16(&bytes, 2, UInt16(clamping: length))
     }
 
+    public static let maximumBodyLength = 0xFFFF
+
     static func append(_ type: UInt16, _ value: [UInt8], to bytes: inout [UInt8]) {
-        bytes += be16(type) + be16(UInt16(value.count)) + value
+        bytes += be16(type) + be16(UInt16(clamping: value.count)) + value
         let padding = (4 - value.count % 4) % 4
         bytes += [UInt8](repeating: 0, count: padding)
     }

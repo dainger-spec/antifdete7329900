@@ -44,9 +44,16 @@ final class TunnelManager: NSObject, ObservableObject {
     private var manager: NETunnelProviderManager?
     private var routes: [UUID: TunnelRoute] = [:]
     private var statusObserver: NSObjectProtocol?
+    private weak var observedConnection: NEVPNConnection?
     private var pendingRequest: OSSystemExtensionRequest?
-    /// The pending request asks for activation (Enable), not just the properties (a refresh).
+    /// The pending request asks for activation (Enable, or an update), not just the properties (a refresh).
     private var pendingIsActivation = false
+    /// The pending activation came from Enable: when it completes, the VPN configuration is
+    /// installed (its prompt) or switched back on. An update keeps the configuration as it is.
+    private var activationInstalls = false
+    /// While routes exist the app tells the extension it is alive; the extension drops routes the
+    /// app stopped tending (a crash, a force quit) and stops (`PacketTunnelProvider.heartbeatTimeout`).
+    private var heartbeat: Timer?
     private var connectWaiters: [CheckedContinuation<Bool, Never>] = []
     private var statusWaiters: [CheckedContinuation<Void, Never>] = []
     /// Launches between reserving a route and the extension's answer: the tunnel is not stopped meanwhile.
@@ -99,6 +106,14 @@ final class TunnelManager: NSObject, ObservableObject {
 
     private func extensionProperties(_ properties: [OSSystemExtensionProperties]) {
         if properties.contains(where: \.isEnabled) {
+            // macOS replaces an installed extension only on an activation request: one that is not
+            // this app's bundled version (an updated app) is replaced now, without a new approval.
+            if let bundled = bundledExtensionVersion,
+               !properties.contains(where: { $0.isEnabled && !$0.isUninstalling && $0.bundleVersion == bundled }) {
+                log.notice("the enabled extension is not this app's version \(bundled, privacy: .public): updating it")
+                activate(installing: false)
+                return
+            }
             Task { await loadConfiguration(install: false) }
         } else if properties.contains(where: \.isAwaitingUserApproval) {
             state = .awaitingApproval
@@ -112,13 +127,25 @@ final class TunnelManager: NSObject, ObservableObject {
     /// Asks macOS to activate the extension (a system prompt, then a switch in System Settings),
     /// then installs the VPN configuration (another prompt).
     func enable() {
+        activate(installing: true)
+    }
+
+    private func activate(installing: Bool) {
         guard let identifier = extensionIdentifier else { return }
         let request = OSSystemExtensionRequest.activationRequest(forExtensionWithIdentifier: identifier, queue: .main)
         request.delegate = self
         pendingRequest = request
         pendingIsActivation = true
+        activationInstalls = installing
         state = .checking
         OSSystemExtensionManager.shared.submitRequest(request)
+    }
+
+    /// CFBundleVersion of the extension inside this app (a new one per build, scripts/build-app.sh).
+    private var bundledExtensionVersion: String? {
+        guard let identifier = extensionIdentifier else { return nil }
+        let url = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/SystemExtensions/\(identifier).systemextension")
+        return Bundle(url: url)?.object(forInfoDictionaryKey: "CFBundleVersion") as? String
     }
 
     /// Opens System Settings where network extensions are allowed: on macOS 15+ General → Login
@@ -155,10 +182,11 @@ final class TunnelManager: NSObject, ObservableObject {
                 let proto = NETunnelProviderProtocol()
                 proto.providerBundleIdentifier = identifier
                 proto.serverAddress = "PrivacyBrowser WebRTC relay"
-                // WebKit binds its WebRTC sockets to the physical interface's address, and macOS
-                // would then send them out of that interface whatever the routing table says.
-                // Enforced routes put everything addressed to the relays' subnet into the tunnel,
-                // bound or not; nothing else is routed into it (includeAllNetworks stays off).
+                // A socket bound to the physical interface's address would leave by that interface
+                // whatever the routing table says. libwebrtc gathers on the tunnel interface for the
+                // relays (measured with a utun in CI); enforced routes, documented to supersede such
+                // scoping for the included routes (only the relays' subnets; includeAllNetworks
+                // stays off), are a second line.
                 proto.enforceRoutes = true
                 proto.includeAllNetworks = false
                 configuration.protocolConfiguration = proto
@@ -170,6 +198,12 @@ final class TunnelManager: NSObject, ObservableObject {
             }
             self.manager = manager
             observeStatus()
+            let status = manager?.connection.status
+            // A tunnel nothing needs — left running by a quit, a crash or a force quit — is stopped.
+            if routes.isEmpty, registering == 0, status == .connected || status == .connecting || status == .reasserting {
+                log.notice("stopping a tunnel no profile uses")
+                manager?.connection.stopVPNTunnel()
+            }
             state = manager?.connection.status == .connected ? .connected : .ready
         } catch {
             log.error("VPN configuration: \(error.localizedDescription, privacy: .public)")
@@ -177,8 +211,11 @@ final class TunnelManager: NSObject, ObservableObject {
         }
     }
 
+    /// Every load gives a new manager object, with a new connection object: the observer follows it.
     private func observeStatus() {
-        guard statusObserver == nil, let connection = manager?.connection else { return }
+        guard let connection = manager?.connection, connection !== observedConnection else { return }
+        if let statusObserver { NotificationCenter.default.removeObserver(statusObserver) }
+        observedConnection = connection
         statusObserver = NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange, object: connection, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.statusChanged() }
         }
@@ -231,17 +268,37 @@ final class TunnelManager: NSObject, ObservableObject {
         if !connected { log.notice("tunnel did not connect; WebRTC stays off for this profile") }
         guard connected, await send(.register(route)), routes[id] == route else {
             if routes[id] == route { routes[id] = nil }
+            if !connected {
+                await loadConfiguration(install: false) // switched off by another VPN, removed, …
+            } else if routes.isEmpty, registering == 1, let connection = manager?.connection {
+                connection.stopVPNTunnel() // started for this route alone
+            }
             return nil
         }
+        startHeartbeat()
         return WebRTCRelay(urls: route.turnURLs, username: route.username, credential: route.password)
     }
 
     func unregister(profile id: UUID) {
         guard let route = routes.removeValue(forKey: id) else { return }
-        Task {
-            _ = await send(.unregister(id: route.id))
-            // Nothing left to relay: stop the tunnel (and the VPN indicator) until it is needed.
-            if routes.isEmpty, registering == 0, manager?.connection.status == .connected { manager?.connection.stopVPNTunnel() }
+        if routes.isEmpty, registering == 0 {
+            // Nothing left to relay: stop the tunnel (and the VPN indicator) until it is needed, at
+            // once — a quit does not wait for the extension's answer.
+            heartbeat?.invalidate()
+            heartbeat = nil
+            if let connection = manager?.connection, connection.status != .disconnected { connection.stopVPNTunnel() }
+        } else {
+            Task { _ = await send(.unregister(id: route.id)) }
+        }
+    }
+
+    private func startHeartbeat() {
+        guard heartbeat == nil else { return }
+        heartbeat = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.routes.isEmpty else { return }
+                Task { _ = await self.send(.status) }
+            }
         }
     }
 
@@ -308,7 +365,8 @@ extension TunnelManager: OSSystemExtensionRequestDelegate {
             pendingIsActivation = false
             switch result {
             case .completed:
-                Task { await loadConfiguration(install: true) }
+                let install = activationInstalls
+                Task { await loadConfiguration(install: install) }
             case .willCompleteAfterReboot:
                 state = .failed(L("tunnel.state.reboot"))
             @unknown default:

@@ -8,8 +8,8 @@ import TunnelCore
 /// runner cannot load, so the CI harness (`PrivacyBrowser --utun-relay`) runs the extension's
 /// `PacketRouter` on real IP packets from real WebKit. Not used by the browser itself.
 ///
-/// What it does not reproduce: NetworkExtension's enforced routes. Its routes are ordinary
-/// ones, which a socket bound to another interface's address does not follow.
+/// What it does not reproduce: NetworkExtension's enforced routes; its routes are ordinary ones.
+/// (WebKit gathered on it anyway: its TURN traffic came from the utun's own addresses.)
 public final class UTunDevice {
     public enum DeviceError: Error, CustomStringConvertible {
         case system(String)

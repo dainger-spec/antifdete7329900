@@ -27,7 +27,9 @@ profile without a proxy as the control:
   two routes with the extension's own PacketRouter, each through its own UDP-capable proxy. One
   profile uses WebKit's default network selection (sockets bound to the physical interface's
   address, which ordinary routes do not redirect; the extension relies on enforced routes for
-  that), one has libwebrtc gather on every interface (`PBTunnelAllInterfaces`). Report only.
+  that), one has libwebrtc gather on every interface (`PBTunnelAllInterfaces`). Whether they get
+  candidates is only reported; a srflx or host candidate, or the relay's url shown to a page,
+  fails the run as for every proxied profile.
 
 Both proxies run on this machine, so the address a site sees is the same either way; what counts
 is whether the traffic passed through the proxy. Measured on macOS 26 (CI): HTTP/3 without a

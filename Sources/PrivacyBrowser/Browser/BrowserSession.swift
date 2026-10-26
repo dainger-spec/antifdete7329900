@@ -100,17 +100,17 @@ final class BrowserSession {
         // public switch; this is the WKPreferences property Safari turns off, set only when this
         // WebKit has it.
         WebKitPreferences.setBool(webConfiguration.preferences, "_setShouldAllowUserInstalledFonts:", false)
-        // WebRTC off (the default, and always with a proxy: `effectiveWebRTCPolicy`) is switched off
+        // WebRTC off (the default, and with a proxy the tunnel cannot carry: `webRTCRouting`) is switched off
         // in the engine, as Lockdown Mode does: no RTC interface in any frame, nothing for a page to
         // reach before the shim runs. The shim's removal stays as the fallback for a WebKit without
         // this WKPreferences property.
         if configuration.effectiveWebRTCPolicy == .disabled {
             WebKitPreferences.setBool(webConfiguration.preferences, "_setPeerConnectionEnabled:", false)
         }
-        // WebRTC through the packet tunnel: WebKit binds its sockets to the physical interface's
-        // address, and the tunnel's enforced routes carry them in anyway (TunnelManager). For the
-        // hardware checks in docs/TUNNEL.md, libwebrtc can also be made to gather on every
-        // interface, the tunnel's own included: `defaults write <bundle id> PBTunnelAllInterfaces -bool YES`.
+        // WebRTC through the packet tunnel: libwebrtc gathers on the tunnel interface for the relay
+        // addresses (measured with a utun in CI; the tunnel's enforced routes are a second line).
+        // For the hardware checks in docs/TUNNEL.md it can also be made to gather on every
+        // interface: `defaults write <bundle id> PBTunnelAllInterfaces -bool YES`.
         if case .relay = configuration.webRTCRouting, UserDefaults.standard.bool(forKey: "PBTunnelAllInterfaces") {
             WebKitPreferences.setBool(webConfiguration.preferences, "_setEnumeratingAllNetworkInterfacesEnabled:", true)
         }

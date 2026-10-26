@@ -89,7 +89,8 @@ if [[ "$NE" == "1" || "$NE" == "check" ]]; then
   plutil -lint "$SYSEXT/Contents/Info.plist" >/dev/null
   # NEProviderClasses names PacketTunnelExtension.PacketTunnelProvider: the Objective-C runtime
   # knows a Swift class by its mangled name, which must be in the binary.
-  strings "$SYSEXT/Contents/MacOS/PacketTunnelExtension" | grep -qx '_TtC21PacketTunnelExtension20PacketTunnelProvider' \
+  # (grep reads all of it: `grep -q` stopping early would fail the pipe under pipefail.)
+  strings "$SYSEXT/Contents/MacOS/PacketTunnelExtension" | grep -x '_TtC21PacketTunnelExtension20PacketTunnelProvider' >/dev/null \
     || { echo "error: the extension has no PacketTunnelExtension.PacketTunnelProvider class" >&2; exit 1; }
   EXT_ENTITLEMENTS="$(mktemp -t pbtunnel).entitlements"
   sed -e "s/\$(EXTENSION_ID)/$EXTENSION_ID/g" -e "s/\$(APP_GROUP)/$APP_GROUP/g" -e "s/\$(TEAM_ID)/$TEAM_ID/g" \

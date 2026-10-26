@@ -18,8 +18,8 @@ import Network
 ///
 /// What it does NOT cover (platform limitations):
 ///   * WebRTC (STUN, TURN over UDP or TCP, media): WebKit opens those sockets itself, without
-///     the proxy. A proxied profile therefore runs with WebRTC off
-///     (`ProfileConfiguration.effectiveWebRTCPolicy`).
+///     the proxy. A proxied profile runs with WebRTC off, or relay-only through the packet
+///     tunnel's relay for a SOCKS5 proxy (`ProfileConfiguration.webRTCRouting`, docs/TUNNEL.md).
 ///   * Traffic the app process itself makes outside WebKit (none in this prototype besides sync).
 ///   * WebKit's Safe Browsing lookups (made by the system outside the data store); this is
 ///     why `safeBrowsingEnabled` defaults to false.

@@ -217,8 +217,9 @@ What still differs, and why it cannot be changed from the app:
   cannot work (and that WebKit disables anyway once a page has user scripts) would be worse.
   `Object.getOwnPropertyNames(window).length` follows (1044 in Safari, 1029 in a profile with
   WebRTC on, 1022 with the default policy that removes it).
-- **WebRTC** is switched off by the default policy, and always with a proxy (a privacy choice of
-  the profile; without a proxy `relayOnly` and `unrestricted` keep it).
+- **WebRTC** is switched off by the default policy, and with a proxy unless the packet tunnel
+  carries it (SOCKS5 only, relay candidates only; [TUNNEL.md](TUNNEL.md)). Without a proxy,
+  `relayOnly` and `unrestricted` keep it.
 - **The replacement `Date` and `Intl.DateTimeFormat`** (only with a time zone set) list `length`
   and `name` before their statics: JavaScriptCore orders a script function's own properties that
   way whatever the definition order.
@@ -329,7 +330,7 @@ tunnel ([TUNNEL.md](TUNNEL.md)), below.
 | DNS prefetch | `<link rel="dns-prefetch">` (also as a `Link:` header) makes the network process resolve the host through the system resolver — WebKit skips it only for a *system-wide* proxy, not for a data store's `proxyConfigurations` | A content rule list blocking `ping`-type loads is added to every proxied profile (`ContentRules`): WebKit runs dns-prefetch through it as a ping. It also blocks `<a ping>` click trackers; beacons are fetches and unaffected. Verified by the self-test with an `<a ping>` |
 | Safe Browsing lookups | Made outside the data store's network session | Off by default (`safeBrowsingEnabled`) |
 | `mailto:`, `tel:`, custom schemes | Would hand the URL to another app, outside the profile | Blocked by the navigation policy |
-| Camera and microphone streams | Local capture; WebRTC transport isn't proxied | Asks the user every time |
+| Camera and microphone streams | Local capture; their WebRTC transport goes through the proxy only via the packet tunnel (SOCKS5), otherwise WebRTC is off with a proxy | Asks the user every time |
 | Sync traffic | Goes from the app process through the system network, not the profile proxy | Folder transport makes no network requests; HTTP sync is HTTPS and carries only encrypted blobs |
 
 **Proxy authentication:** credentials go into the data store's `ProxyConfiguration`
@@ -356,8 +357,11 @@ and 26 exposes a native `RTCPeerConnection` (observed by the self-test).
 whatever the profile's setting, because any other policy sends the page's ICE traffic from this
 Mac's own address:
 
-- **SOCKS5 proxy, packet tunnel on**: the page's only ICE server is a TURN relay on a virtual
-  address that the tunnel routes to the extension, under `iceTransportPolicy: "relay"`. The
+- **SOCKS5 proxy, packet tunnel on, WebRTC setting not Disabled**: the page's only ICE server is
+  a TURN relay on a virtual address that the tunnel routes to the extension, under
+  `iceTransportPolicy: "relay"`. The engine's WebRTC is on then, so the user script is what
+  keeps the page on the relay; it is hardened against pages that tamper with built-ins, but it
+  is page-level code ([TUNNEL.md](TUNNEL.md), "Enforcement is in the page"). The
   relay sends everything through the proxy's UDP ASSOCIATE, so the page, STUN servers and
   peers see the proxy's address. The page keeps seeing its own configuration. Its STUN servers
   are not contacted, and the urls that would name the relay (ICE events, `getStats()`) name

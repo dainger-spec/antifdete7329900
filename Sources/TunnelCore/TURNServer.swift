@@ -29,9 +29,11 @@ public protocol PeerRelayFactory: AnyObject {
 ///
 /// Shaped for WebKit's libwebrtc, the only client: it never sends REQUESTED-ADDRESS-FAMILY, so an
 /// allocation takes the family of the server address it was sent to (the IPv6 relay URL gives an
-/// IPv6 relay); it also uses the server as a STUN server (a Binding at once, then every 10 s),
-/// which is answered with the proxy's egress, never with the client's own address — that one is
-/// this Mac's and a page reads it back from `getStats()`.
+/// IPv6 relay). It also asks the server as a STUN server, without credentials, from the socket
+/// its allocation uses: a Binding is answered on a 5-tuple that holds an allocation, with that
+/// allocation's relayed address (the proxy's egress), never with the client's own address. Any
+/// other Binding gets nothing: the relay addresses are reachable by every process on the Mac,
+/// and an unauthenticated answer would tell them a profile's proxy address.
 ///
 /// Not thread-safe: the owner calls it, and the relays call back, on one serial queue.
 public final class TURNServer {
@@ -44,8 +46,8 @@ public final class TURNServer {
     public static let nonceLifetime: Double = 3600
     /// Allocations per route: a page normally needs one or two (IPv4, IPv6) per peer connection.
     public static let maximumAllocations = 64
-    /// After a failed egress probe, Bindings are refused for this long before the proxy is tried again.
-    public static let egressRetryInterval: Double = 30
+    /// How long a 5-tuple whose Allocate failed gets a Binding error (so the client stops asking).
+    public static let failedTupleLifetime: Double = 60
 
     public let route: TunnelRoute
     private let relays: PeerRelayFactory
@@ -55,10 +57,8 @@ public final class TURNServer {
     private let key: [UInt8]
     private let nonceSecret = SymmetricKey(size: .bits256)
     private var allocations: [FiveTuple: Allocation] = [:]
-    /// The proxy's egress per family, as the last relay through it found it: a Binding's answer.
-    private var egress: [IPAddr.Family: SocketAddress] = [:]
-    private var egressProbes: [IPAddr.Family: PeerRelay] = [:]
-    private var egressFailures: [IPAddr.Family: Double] = [:]
+    /// 5-tuples whose authenticated Allocate failed, until when: their Bindings get an error.
+    private var failedTuples: [FiveTuple: Double] = [:]
 
     struct FiveTuple: Hashable {
         var client: SocketAddress
@@ -130,6 +130,7 @@ public final class TURNServer {
     /// Drops what has expired: allocations (and their relays), permissions, channels.
     public func expire() {
         let time = now()
+        failedTuples = failedTuples.filter { $0.value > time }
         for (tuple, allocation) in allocations where allocation.expiresAt <= time {
             close(allocation)
             allocations[tuple] = nil
@@ -146,51 +147,22 @@ public final class TURNServer {
     public func shutdown() {
         for allocation in allocations.values { close(allocation) }
         allocations.removeAll()
-        for probe in egressProbes.values { probe.close() }
-        egressProbes.removeAll()
+        failedTuples.removeAll()
     }
 
     // MARK: Binding (the server as a STUN server)
 
-    /// Answers with the proxy's egress for the family of the address the Binding was sent to. Until
-    /// it is known, a relay through the proxy finds it and the Binding goes unanswered: the client
-    /// retransmits (after 250 ms, then doubling), and a retransmission gets the answer.
+    /// libwebrtc's Bindings come from the socket its Allocate uses, the first one before the
+    /// allocation is ready: unanswered then, a retransmission (after 250 ms, then doubling) gets
+    /// the relayed address. A 5-tuple whose Allocate failed gets 500, so gathering completes
+    /// without waiting ~40 s. Any other 5-tuple gets nothing.
     private func binding(_ message: STUNMessage, tuple: FiveTuple) {
-        let family = tuple.server.ip.family
-        let failedRecently = { self.egressFailures[family].map { self.now() - $0 < Self.egressRetryInterval } ?? false }
-        if egress[family] == nil, !failedRecently() { probeEgress(family) }
-        if let address = egress[family] {
+        if let relayed = allocations[tuple]?.relayed {
             respond(to: message, tuple: tuple, authenticated: false,
-                    attributes: [(STUNMessage.Attribute.xorMappedAddress, STUNMessage.xorAddress(address, transactionID: message.transactionID))])
-        } else if failedRecently() {
-            // The client gives up on this server at once instead of retransmitting for ~40 s.
+                    attributes: [(STUNMessage.Attribute.xorMappedAddress, STUNMessage.xorAddress(relayed, transactionID: message.transactionID))])
+        } else if let until = failedTuples[tuple], until > now() {
             respondError(to: message, tuple: tuple, code: 500, reason: "Server Error", authenticated: false)
         }
-    }
-
-    private func probeEgress(_ family: IPAddr.Family) {
-        guard egressProbes[family] == nil else { return }
-        var finished = false
-        let probe = relays.openRelay(for: route, family: family, onReady: { [weak self] result in
-            guard let self, !finished else { return }
-            finished = true
-            switch result {
-            case let .success(address) where address.family == family:
-                self.egress[family] = address
-                self.egressFailures[family] = nil
-                self.log("egress \(family): \(address)")
-            case .success:
-                self.egressFailures[family] = self.now()
-                self.log("egress \(family): the proxy has none")
-            case let .failure(error):
-                self.egressFailures[family] = self.now()
-                self.log("egress \(family) probe failed: \(error)")
-            }
-            self.egressProbes[family]?.close()
-            self.egressProbes[family] = nil
-        }, onReceive: { _, _ in }, onClosed: {})
-        // A relay may answer before `openRelay` returns: it is closed then and not kept.
-        if finished { probe.close() } else { egressProbes[family] = probe }
     }
 
     // MARK: Authentication (long-term credentials)
@@ -316,8 +288,9 @@ public final class TURNServer {
             guard let self, let allocation, self.allocations[tuple] === allocation else { return }
             self.receiveFromPeer(peer, payload, allocation: allocation)
         }, onClosed: { [weak self, weak allocation] in
-            // Without its association the allocation cannot carry anything: drop it, so the
-            // browser's next Refresh gets 437 and it allocates again (through a new association).
+            // Without its association the allocation cannot carry anything: drop it. libwebrtc's
+            // next Refresh then gets 437, which ends that TURN port (its connections are pruned);
+            // a new gathering or an ICE restart allocates again, through a new association.
             guard let self, let allocation, self.allocations[tuple] === allocation else { return }
             self.log("relay of \(tuple.client) closed by the proxy")
             self.close(allocation)
@@ -336,7 +309,6 @@ public final class TURNServer {
         switch result {
         case let .success(relayed) where relayed.family == allocation.family:
             allocation.relayed = relayed
-            egress[allocation.family] = relayed
             // The mapped address is the proxy's egress as well: the client's own is this Mac's.
             let response = encodeResponse(to: message, attributes: [
                 (STUNMessage.Attribute.xorRelayedAddress, STUNMessage.xorAddress(relayed, transactionID: message.transactionID)),
@@ -358,6 +330,7 @@ public final class TURNServer {
     private func fail(_ allocation: Allocation, message: STUNMessage, code: Int, reason: String) {
         close(allocation)
         allocations[allocation.tuple] = nil
+        failedTuples[allocation.tuple] = now() + Self.failedTupleLifetime
         respondError(to: message, tuple: allocation.tuple, code: code, reason: reason)
     }
 
@@ -486,6 +459,9 @@ public final class TURNServer {
             // Unpadded, as libwebrtc sends it (over UDP the padding is optional).
             send(be16(number) + be16(UInt16(payload.count)) + payload, tuple.client, tuple.server)
         } else {
+            // A Data indication whose body would not fit STUN's 16-bit length cannot be delivered.
+            let body = 4 + (peer.family == .v4 ? 8 : 20) + 4 + ((payload.count + 3) & ~3) + (allocation.fingerprint ? 8 : 0)
+            guard body <= STUNMessage.maximumBodyLength else { return }
             var transaction = [UInt8](repeating: 0, count: 12)
             for index in transaction.indices { transaction[index] = UInt8.random(in: 0...255) }
             let indication = STUNMessage(method: STUNMessage.Method.data.rawValue, messageClass: .indication, transactionID: transaction,

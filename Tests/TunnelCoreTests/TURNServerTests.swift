@@ -345,42 +345,64 @@ final class TURNServerTests: XCTestCase {
             .encode(fingerprint: true)
     }
 
-    /// libwebrtc sends the TURN server Bindings as well (no credentials): the answer is the proxy's
-    /// egress, found through the proxy, never the client's own address.
-    func testBindingIsAnsweredWithTheProxyEgress() throws {
+    /// libwebrtc asks the TURN server as a STUN server too, without credentials, from the socket of
+    /// its allocation: that 5-tuple gets the relayed address (the proxy's egress), never its own.
+    func testBindingOnAnAllocationsTupleGetsTheRelayedAddress() throws {
+        server.receive(bindingRequest(), from: client, to: relayAddress)
+        XCTAssertTrue(sent.isEmpty, "no allocation yet: unanswered, the client retransmits")
+        try allocate()
         let answer = try exchange(bindingRequest())
         XCTAssertEqual(answer.messageClass, .success)
         XCTAssertNil(answer.attribute(STUNMessage.Attribute.messageIntegrity))
         XCTAssertEqual(STUNMessage.decodeXorAddress(try XCTUnwrap(answer.attribute(STUNMessage.Attribute.xorMappedAddress)),
                                                     transactionID: answer.transactionID), egress)
-        // The probe relay is closed once it has answered; later Bindings reuse what it found.
-        XCTAssertEqual(relays.relays.count, 1)
-        XCTAssertEqual(relays.relays[0].family, .v4)
-        XCTAssertTrue(relays.relays[0].closed)
-        _ = try exchange(bindingRequest())
+        XCTAssertEqual(relays.relays.count, 1, "no other association is opened for it")
+    }
+
+    /// Any process on the Mac reaches the relay addresses: without an allocation of its own, a
+    /// Binding tells it nothing (and opens nothing through the proxy).
+    func testBindingFromAnotherTupleGetsNothing() throws {
+        try allocate()
+        sent.removeAll()
+        let stranger = SocketAddress(ip: IPAddr("192.168.1.20")!, port: 50999)
+        var answers: [[UInt8]] = []
+        let other = TURNServer(route: route(), relays: relays, now: { [unowned self] in self.clock },
+                               send: { payload, _, _ in answers.append(payload) })
+        other.receive(bindingRequest(), from: stranger, to: relayAddress)
+        server.receive(bindingRequest(), from: stranger, to: relayAddress)
+        XCTAssertTrue(answers.isEmpty)
+        XCTAssertTrue(sent.isEmpty)
         XCTAssertEqual(relays.relays.count, 1)
     }
 
-    func testBindingWaitsForASlowProxyAndBacksOffAfterAFailure() throws {
+    /// A 5-tuple whose Allocate failed gets 500 to its Bindings, so gathering completes at once.
+    func testBindingAfterAFailedAllocationIsRefused() throws {
         relays.egress = [:]
-        server.receive(bindingRequest(), from: client, to: relayAddress)
-        server.receive(bindingRequest(), from: client, to: relayAddress) // a retransmission while the probe runs
-        XCTAssertTrue(sent.isEmpty, "unanswered until the egress is known")
-        XCTAssertEqual(relays.relays.count, 1, "one probe at a time")
+        let attributes: [(UInt16, [UInt8])] = [(STUNMessage.Attribute.requestedTransport, [17, 0, 0, 0])]
+        turn.nonce = try XCTUnwrap(exchange(turn.request(.allocate, attributes, authenticated: false)).attribute(STUNMessage.Attribute.nonce))
+        server.receive(turn.request(.allocate, attributes), from: client, to: relayAddress)
         relays.relays[0].onReady(.failure(FakeRelayFactory.Refused()))
-        XCTAssertTrue(relays.relays[0].closed)
         let refused = try exchange(bindingRequest())
         XCTAssertEqual(refused.attribute(STUNMessage.Attribute.errorCode).flatMap(STUNMessage.decodeErrorCode), 500)
-        XCTAssertEqual(relays.relays.count, 1)
-
-        clock += TURNServer.egressRetryInterval + 1
+        clock += TURNServer.failedTupleLifetime + 1
+        server.expire()
         sent.removeAll()
         server.receive(bindingRequest(), from: client, to: relayAddress)
-        XCTAssertEqual(relays.relays.count, 2, "the proxy is tried again")
-        relays.relays[1].onReady(.success(egress))
-        let answer = try exchange(bindingRequest())
-        XCTAssertEqual(STUNMessage.decodeXorAddress(try XCTUnwrap(answer.attribute(STUNMessage.Attribute.xorMappedAddress)),
-                                                    transactionID: answer.transactionID), egress)
+        XCTAssertTrue(sent.isEmpty)
+    }
+
+    /// A peer datagram too large for a Data indication is dropped, not a trap in the extension.
+    func testOversizedPeerDatagramIsDropped() throws {
+        try allocate()
+        let relay = relays.relays[0]
+        let transaction = TURNTestClient.transaction()
+        _ = try exchange(turn.request(.createPermission, [(STUNMessage.Attribute.xorPeerAddress, STUNMessage.xorAddress(peer, transactionID: transaction))],
+                                      transaction: transaction))
+        sent.removeAll()
+        relay.onReceive(peer, [UInt8](repeating: 1, count: 65_520))
+        XCTAssertTrue(sent.isEmpty)
+        relay.onReceive(peer, [UInt8](repeating: 1, count: 1_000))
+        XCTAssertEqual(sent.count, 1)
     }
 
     /// Sent to the IPv6 relay address without REQUESTED-ADDRESS-FAMILY (libwebrtc never sends it),

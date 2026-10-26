@@ -52,28 +52,85 @@ function makeWindow(config, parentContext) {
     Object.defineProperty(globalThis, 'outerWidth', { get() { return 1200; }, set(v) {}, enumerable: true, configurable: true });
     Object.defineProperty(globalThis, 'outerHeight', { get() { return 820; }, set(v) {}, enumerable: true, configurable: true });
     var setTimeout = (f) => Promise.resolve().then(f);
-    // As WebKit: iceServers are validated (TypeError without urls, SyntaxError for a URL that is not
-    // stun/turn) and reported back by getConfiguration() as fresh objects.
-    const checkConfig = (c) => {
-      for (const server of (c && c.iceServers) || []) {
-        if (server.urls === undefined) throw new TypeError('Member RTCIceServer.urls is required');
-        for (const url of [].concat(server.urls)) { if (!/^(stun|stuns|turn|turns):/.test(url)) throw new SyntaxError('Bad URL'); }
+    // As WebKit: the configuration is converted as a WebIDL dictionary (members read with [[Get]] in
+    // lexicographic order, sequences through their @@iterator), iceServers are validated (TypeError
+    // without urls, SyntaxError for a URL that is not stun/turn) and reported back by
+    // getConfiguration() as fresh objects. The engine's own built-ins are captured, as C++ is not
+    // affected by what a page replaces.
+    const NativeTypeError = TypeError, NativeSyntaxError = SyntaxError, nativeTest = RegExp.prototype.test;
+    const NativeString = String, NativeNumber = Number, reflectApply = Reflect.apply, objectCreate = Object.create;
+    // Engine-side values are null-prototype records: what a page puts on Object.prototype cannot touch them.
+    const record = () => objectCreate(null);
+    // A WebIDL sequence: whatever @@iterator the value has (the page's own, for a page's array).
+    const sequence = (value) => { const items = []; for (const item of value) items[items.length] = item; return items; };
+    const MEMBERS = ['bundlePolicy', 'certificates', 'iceCandidatePoolSize', 'iceServers', 'iceTransportPolicy', 'rtcpMuxPolicy'];
+    const convertServer = (server) => {
+      const urls = server.urls, credential = server.credential, username = server.username;
+      if (urls === undefined) throw new NativeTypeError('Member RTCIceServer.urls is required');
+      const list = typeof urls === 'string' ? [urls] : sequence(urls);
+      for (let i = 0; i < list.length; i++) {
+        if (!reflectApply(nativeTest, /^(stun|stuns|turn|turns):/, [NativeString(list[i])])) throw new NativeSyntaxError('Bad URL');
       }
+      const converted = record();
+      converted.urls = typeof urls === 'string' ? urls : list;
+      if (username !== undefined) converted.username = NativeString(username);
+      if (credential !== undefined) converted.credential = NativeString(credential);
+      return converted;
     };
+    const convert = (c) => {
+      const out = record();
+      if (c === undefined || c === null) return out;
+      if (typeof c !== 'object' && typeof c !== 'function') throw new NativeTypeError('Type error');
+      for (let m = 0; m < MEMBERS.length; m++) {
+        const key = MEMBERS[m];
+        const value = c[key];
+        if (value === undefined) continue;
+        if (key === 'iceServers') {
+          const servers = sequence(value);
+          const converted = [];
+          for (let i = 0; i < servers.length; i++) converted[i] = convertServer(servers[i]);
+          out.iceServers = converted;
+        } else if (key === 'iceCandidatePoolSize') {
+          const n = NativeNumber(value);
+          if (!(n >= 0 && n <= 255)) throw new NativeTypeError('Value is outside the octet range');
+          out[key] = n;
+        } else {
+          out[key] = key === 'certificates' ? sequence(value) : NativeString(value);
+        }
+      }
+      return out;
+    };
+    globalThis.RTCStatsReport = class RTCStatsReport extends Map {};
+    // What only the engine knows: every peer connection it made (a test reads it; pages never get it).
+    const engine = { instances: [] };
+    Object.defineProperty(globalThis, '__engine', { value: engine });
     globalThis.RTCPeerConnection = class RTCPeerConnection {
-      constructor(c) { checkConfig(c); this.config = c; this.closed = false; }
-      setConfiguration(c) { illegal(this, RTCPeerConnection); checkConfig(c); this.config = c; }
+      constructor(c) {
+        this.config = convert(c); this.closed = false; this.gathered = this.config.iceCandidatePoolSize > 0;
+        engine.instances.push(this);
+      }
+      setConfiguration(c) { illegal(this, RTCPeerConnection); this.config = convert(c); }
       getConfiguration() {
         illegal(this, RTCPeerConnection);
-        const c = this.config || {};
-        return { iceServers: (c.iceServers || []).map((s) => Object.assign({}, s, Array.isArray(s.urls) ? { urls: s.urls.slice() } : {})),
-                 iceTransportPolicy: c.iceTransportPolicy || 'all', bundlePolicy: 'balanced', rtcpMuxPolicy: 'require', certificates: [] };
+        const c = this.config, servers = [];
+        for (let i = 0; c.iceServers && i < c.iceServers.length; i++) {
+          const s = c.iceServers[i], copy = {};
+          Object.defineProperty(copy, 'urls', { value: typeof s.urls === 'string' ? s.urls : [...s.urls], enumerable: true, writable: true, configurable: true });
+          if (s.username !== undefined) Object.defineProperty(copy, 'username', { value: s.username, enumerable: true, writable: true, configurable: true });
+          if (s.credential !== undefined) Object.defineProperty(copy, 'credential', { value: s.credential, enumerable: true, writable: true, configurable: true });
+          servers[i] = copy;
+        }
+        const result = {};
+        const own = (k, v) => Object.defineProperty(result, k, { value: v, enumerable: true, writable: true, configurable: true });
+        own('bundlePolicy', 'balanced'); own('certificates', []); own('iceServers', servers);
+        own('iceTransportPolicy', c.iceTransportPolicy || 'all'); own('rtcpMuxPolicy', 'require');
+        return result;
       }
       close() { illegal(this, RTCPeerConnection); this.closed = true; }
       // As WebKit: a promise of a new maplike report each call, its entries plain objects.
       getStats() { illegal(this, RTCPeerConnection); return Promise.resolve(report(this.stats)); }
     };
-    const report = (stats) => new Map((stats || []).map(([id, entry]) => [id, Object.assign({}, entry)]));
+    const report = (stats) => new RTCStatsReport((stats || []).map(([id, entry]) => [id, Object.assign({}, entry)]));
     globalThis.RTCRtpSender = class RTCRtpSender {
       getStats() { illegal(this, RTCRtpSender); return Promise.resolve(report(this.stats)); }
     };
@@ -82,6 +139,8 @@ function makeWindow(config, parentContext) {
       get url() { illegal(this, RTCPeerConnectionIceEvent); return this._url; }
     };
     globalThis.webkitRTCPeerConnection = globalThis.RTCPeerConnection;
+    engine.Native = globalThis.RTCPeerConnection;
+    engine.methods = Object.getOwnPropertyNames(engine.Native.prototype).map((name) => engine.Native.prototype[name]);
     globalThis.RTCDataChannel = function () {};
     globalThis.RTCIceTransport = function () {};
     Object.defineProperty(globalThis, 'open', { value: function open() { if (this !== globalThis) throw new TypeError('illegal invocation'); return null; },
@@ -433,7 +492,7 @@ test('WebRTC through the tunnel: the relay is the only ICE server, the page sees
   const w = makeWindow({ ...base, webRTC: 'tunnel', webRTCRelay: relay });
   run(w, `var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example:3478' }], iceTransportPolicy: 'all' })`);
   // What the engine got: relay-only through the tunnel's TURN server.
-  assert.equal(run(w, `JSON.stringify(pc.config)`), JSON.stringify({ iceServers: [{ urls: relay.urls, username: 'u1', credential: 'c1' }], iceTransportPolicy: 'relay' }));
+  assert.equal(run(w, `JSON.stringify(pc.config)`), JSON.stringify({ iceServers: relay.urls.map((urls) => ({ urls, username: 'u1', credential: 'c1' })), iceTransportPolicy: 'relay' }));
   // What the page reads back: its own servers and policy, fresh objects each time.
   assert.equal(run(w, `JSON.stringify(pc.getConfiguration().iceServers)`), JSON.stringify([{ urls: 'stun:stun.example:3478' }]));
   assert.equal(run(w, `pc.getConfiguration().iceTransportPolicy`), 'all');
@@ -487,6 +546,72 @@ test('WebRTC through the tunnel: getStats() names the page\'s servers, never the
   assert.equal((await read('sender.getStats()'))[0].url, 'turn:turn.example:3478?transport=tcp');
   // The engine's receiver check still applies.
   assert.throws(() => run(w, `RTCPeerConnection.prototype.getStats.call({})`), (e) => e.name === 'TypeError');
+});
+
+// A hostile page replaces the built-ins the shim could call when a peer connection is made, or puts
+// accessors on Object.prototype that a configuration object would inherit. The engine must still
+// get only the relay, relay-only; the native constructor and methods must never reach the page.
+test('WebRTC through the tunnel: a page that tampers with built-ins still gets only the relay', () => {
+  const relay = { urls: ['turn:192.0.2.10:3478?transport=udp', 'turn:[fd6b:3a1c:94e2:1::a]:3478?transport=udp'], username: 'u1', credential: 'c1' };
+  const attacker = `[{ urls: 'stun:attacker.example:3478' }]`;
+  const attacks = {
+    'accessors on Object.prototype': `
+      Object.defineProperty(Object.prototype, 'iceServers', { get() { return ${attacker}; }, set() {}, configurable: true });
+      Object.defineProperty(Object.prototype, 'iceTransportPolicy', { get() { return 'all'; }, set() {}, configurable: true });
+      Object.defineProperty(Object.prototype, 'urls', { get() { return 'stun:attacker.example:3478'; }, set() {}, configurable: true });`,
+    'Reflect': `
+      const construct = Reflect.construct, apply = Reflect.apply;
+      Reflect.construct = function (T, args, nt) { (window.__seen = window.__seen || []).push(T); return construct(T, [{ iceServers: ${attacker}, iceTransportPolicy: 'all' }], nt); };
+      Reflect.apply = function (f, t, a) { (window.__seen = window.__seen || []).push(f); return apply(f, t, a); };`,
+    'Function.prototype.call and apply': `
+      const apply = Reflect.apply;
+      Function.prototype.call = function (t, ...a) { (window.__seen = window.__seen || []).push(this); return apply(this, t, a); };
+      Function.prototype.apply = function (t, a) { (window.__seen = window.__seen || []).push(this); return apply(this, t, a || []); };`,
+    'Object.assign, Array.prototype.slice and the array iterator': `
+      Object.assign = function (target) { target.iceServers = ${attacker}; target.iceTransportPolicy = 'all'; return target; };
+      Array.prototype.slice = function () { return ['stun:attacker.example:3478']; };
+      Array.prototype[Symbol.iterator] = function* () { yield { urls: 'stun:attacker.example:3478' }; };`,
+    'Object.create and Object.defineProperty': `
+      Object.create = function () { return { iceServers: ${attacker}, iceTransportPolicy: 'all' }; };
+      const define = Object.defineProperty;
+      Object.defineProperty = function (o, k, d) { (window.__seen = window.__seen || []).push(d && d.value); return define(o, k, d); };`,
+    'WeakMap and Promise methods': `
+      WeakMap.prototype.get = function (k) { (window.__seen = window.__seen || []).push(k); return undefined; };
+      WeakMap.prototype.set = function (k, v) { (window.__seen = window.__seen || []).push(v); return this; };
+      Promise.prototype.then = function (f) { (window.__seen = window.__seen || []).push(f); return this; };`,
+  };
+  for (const [name, attack] of Object.entries(attacks)) {
+    const w = makeWindow({ ...base, webRTC: 'tunnel', webRTCRelay: relay });
+    run(w, attack);
+    try { run(w, `window.pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example:3478' }], iceTransportPolicy: 'all', iceCandidatePoolSize: 4 })`); } catch (e) {}
+    try { run(w, `pc.setConfiguration({ iceServers: [{ urls: 'stun:stun.example:3478' }], iceTransportPolicy: 'all' })`); } catch (e) {}
+    try { run(w, `class Sub extends RTCPeerConnection {}; window.sub = new Sub({ iceServers: [{ urls: 'stun:stun.example:3478' }], iceTransportPolicy: 'all' })`); } catch (e) {}
+    try { run(w, `pc.getConfiguration(); pc.getStats()`); } catch (e) {}
+    const report = JSON.parse(run(w, `JSON.stringify({
+      live: __engine.instances.filter((pc) => !pc.closed).map((pc) => pc.config),
+      gatheredOutsideRelay: __engine.instances.filter((pc) => pc.gathered && pc.config.iceTransportPolicy !== 'relay').length,
+      nativeSeen: (window.__seen || []).some((f) => f === __engine.Native || __engine.methods.includes(f)),
+    })`));
+    assert.ok(report.live.length >= 1, `${name}: a peer connection was made`);
+    for (const config of report.live) {
+      assert.equal(config.iceTransportPolicy, 'relay', `${name}: relay-only`);
+      assert.deepEqual(config.iceServers.map((s) => s.urls), relay.urls, `${name}: the relay is the only ICE server`);
+    }
+    assert.equal(report.gatheredOutsideRelay, 0, `${name}: nothing gathered outside the relay`);
+    assert.equal(report.nativeSeen, false, `${name}: the native constructor and methods stay out of the page's reach`);
+  }
+});
+
+test('WebRTC through the tunnel: the validating connection never gathers', () => {
+  const relay = { urls: ['turn:192.0.2.10:3478?transport=udp'], username: 'u1', credential: 'c1' };
+  const w = makeWindow({ ...base, webRTC: 'tunnel', webRTCRelay: relay });
+  run(w, `new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example:3478' }], iceTransportPolicy: 'all', iceCandidatePoolSize: 8 })`);
+  const instances = JSON.parse(run(w, `JSON.stringify(__engine.instances.map((pc) => ({ closed: pc.closed, gathered: pc.gathered, policy: pc.config.iceTransportPolicy })))`));
+  assert.deepEqual(instances, [{ closed: true, gathered: false, policy: 'all' }, { closed: false, gathered: true, policy: 'relay' }]);
+  // A bad pool size is the engine's error, from the real construction.
+  assert.throws(() => run(w, `new RTCPeerConnection({ iceCandidatePoolSize: 300 })`), (e) => e.name === 'TypeError');
+  // A non-dictionary is the engine's TypeError too.
+  assert.throws(() => run(w, `new RTCPeerConnection(5)`), (e) => e.name === 'TypeError');
 });
 
 test('WebRTC unrestricted', () => {

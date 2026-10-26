@@ -227,13 +227,13 @@ function constructor(name, length, target, statics, prototype, native) {
 }
 
 function method(name, length, impl) {
-  const fn = { [name](...args) { return impl.apply(this, args); } }[name];
+  const fn = { [name](...args) { return ReflectApply(impl, this, args); } }[name];
   Object.defineProperty(fn, 'length', { value: length });
   return asNative(fn);
 }
 
 function getter(name, impl) {
-  return asNative(Object.getOwnPropertyDescriptor({ get [name]() { return impl.call(this); } }, name).get);
+  return asNative(Object.getOwnPropertyDescriptor({ get [name]() { return ReflectApply(impl, this, []); } }, name).get);
 }
 
 function patchToString(w) {
@@ -674,6 +674,49 @@ function patchGeolocation(w, geo) {
 }
 
 // ---- WebRTC -----------------------------------------------------------------------------------
+// With relay-only routing the engine's WebRTC is on, and this script alone keeps a page on the
+// relay. Whatever runs when the page calls a peer connection API uses only built-ins captured
+// here, before any page script ran, and gives the engine null-prototype objects with own data
+// properties: replacing Reflect, Function.prototype.call/apply, Object.assign, Array.prototype
+// methods or iterators, or putting accessors on Object.prototype, changes nothing the engine
+// reads. The native constructor and methods never reach a function the page can replace.
+const ReflectApply = Reflect.apply;
+const ReflectConstruct = Reflect.construct;
+const ObjectCreate = Object.create;
+const ObjectDefineProperty = Object.defineProperty;
+const ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const SymbolIterator = Symbol.iterator;
+const WeakMapGet = WeakMap.prototype.get;
+const WeakMapSet = WeakMap.prototype.set;
+const PromiseThen = Promise.prototype.then;
+const RegExpExec = RegExp.prototype.exec;
+const StringSlice = String.prototype.slice;
+const StringToLowerCase = String.prototype.toLowerCase;
+const StringLastIndexOf = String.prototype.lastIndexOf;
+const StringIndexOf = String.prototype.indexOf;
+const call = (fn, self, ...args) => ReflectApply(fn, self, args);
+
+// An iterable the engine converts as a WebIDL sequence, iterated by closures of this script.
+function sequenceOf(items) {
+  const list = ObjectCreate(null);
+  ObjectDefineProperty(list, SymbolIterator, { value: function () {
+    let index = 0;
+    const iterator = ObjectCreate(null);
+    iterator.next = function () {
+      const result = ObjectCreate(null);
+      result.done = index >= items.length;
+      result.value = result.done ? undefined : items[index++];
+      return result;
+    };
+    return iterator;
+  } });
+  return list;
+}
+
+// RTCConfiguration members, in the order WebIDL reads them (lexicographic).
+const RTC_MEMBERS = ['bundlePolicy', 'certificates', 'iceCandidatePoolSize', 'iceServers', 'iceTransportPolicy',
+                     'rtcpMuxPolicy', 'targetLatency'];
+
 function patchWebRTC(w, policy, relay) {
   if (policy === 'unrestricted') return;
   const names = ['RTCPeerConnection', 'webkitRTCPeerConnection'];
@@ -690,122 +733,219 @@ function patchWebRTC(w, policy, relay) {
   }
   const Native = w.RTCPeerConnection;
   if (!Native) return;
+  const nativeProto = Native.prototype;
+  const nativeGetConfiguration = nativeProto.getConfiguration;
+  const nativeSetConfiguration = nativeProto.setConfiguration;
+  const nativeClose = nativeProto.close;
   // 'tunnel': the packet tunnel's TURN relay is the only ICE server, so every candidate is a
   // relay through the profile's proxy. The page keeps seeing its own configuration.
   const viaTunnel = policy === 'tunnel' && relay ? relay : null;
-  const forceRelay = (config) => {
-    const next = Object.assign({}, config, { iceTransportPolicy: 'relay' });
-    if (viaTunnel) next.iceServers = [{ urls: viaTunnel.urls.slice(), username: viaTunnel.username, credential: viaTunnel.credential }];
+  const relayServers = [];
+  if (viaTunnel) {
+    for (let i = 0; i < viaTunnel.urls.length; i++) {
+      relayServers[i] = { urls: String(viaTunnel.urls[i]), username: String(viaTunnel.username), credential: String(viaTunnel.credential) };
+    }
+  }
+  const relayList = () => {
+    const servers = [];
+    for (let i = 0; i < relayServers.length; i++) {
+      const server = ObjectCreate(null);
+      server.urls = relayServers[i].urls;
+      server.username = relayServers[i].username;
+      server.credential = relayServers[i].credential;
+      servers[i] = server;
+    }
+    return sequenceOf(servers);
+  };
+  // The page's configuration, each member read once, in the engine's order.
+  const read = (config) => {
+    const record = ObjectCreate(null);
+    if (config === undefined || config === null) return record;
+    for (let i = 0; i < RTC_MEMBERS.length; i++) {
+      const value = config[RTC_MEMBERS[i]];
+      if (value !== undefined) record[RTC_MEMBERS[i]] = value;
+    }
+    return record;
+  };
+  const isObject = (value) => value !== null && (typeof value === 'object' || typeof value === 'function');
+  // What the engine gets: relay-only; in the tunnel the relay as the only ICE server. Of the
+  // page's members only those that do not choose where packets go.
+  const engineConfig = (record) => {
+    const next = ObjectCreate(null);
+    for (let i = 0; i < RTC_MEMBERS.length; i++) {
+      const key = RTC_MEMBERS[i];
+      if (key !== 'iceServers' && key !== 'iceTransportPolicy' && record[key] !== undefined) next[key] = record[key];
+    }
+    if (viaTunnel) next.iceServers = relayList();
+    else if (record.iceServers !== undefined) next.iceServers = record.iceServers;
+    next.iceTransportPolicy = 'relay';
     return next;
   };
-  // The page's own iceServers and policy per connection, as the engine normalised them.
+  // The page's own servers and policy as the engine would hold them: a closed peer connection
+  // made from them validates them (the engine's own errors for a bad one) and reports them. It
+  // gets no candidate pool, so it gathers nothing, and nothing the page could not already name.
   const pageView = new WeakMap();
-  const snapshot = (config, rest) => {
-    // A closed peer connection made from the page's configuration: the engine validates it (and
-    // throws its own errors for a bad one) and says how it would report it.
-    const shadow = Reflect.construct(Native, [config, ...rest]);
-    const view = shadow.getConfiguration();
-    shadow.close();
-    return { iceServers: view.iceServers, iceTransportPolicy: view.iceTransportPolicy };
+  const snapshot = (config) => {
+    let shadowConfig = config;
+    if (config === undefined || config === null || isObject(config)) {
+      const record = read(config);
+      shadowConfig = ObjectCreate(null);
+      for (let i = 0; i < RTC_MEMBERS.length; i++) {
+        const key = RTC_MEMBERS[i];
+        if (key !== 'iceCandidatePoolSize' && record[key] !== undefined) shadowConfig[key] = record[key];
+      }
+      const shadow = ReflectConstruct(Native, [shadowConfig]);
+      const view = call(nativeGetConfiguration, shadow);
+      call(nativeClose, shadow);
+      return { record, view: { iceServers: view.iceServers, iceTransportPolicy: view.iceTransportPolicy } };
+    }
+    // Not a dictionary: the engine throws its TypeError.
+    const shadow = ReflectConstruct(Native, [shadowConfig]);
+    call(nativeClose, shadow);
+    return { record: read(undefined), view: null };
   };
   // The latest connection's view, for stats asked of a sender or receiver (they do not say
   // which connection they belong to; a page's connections normally share one configuration).
   let latestView = null;
-  const rtcTarget = function (config, ...rest) {
-    const view = viaTunnel ? snapshot(config, rest) : null;
-    const pc = Reflect.construct(Native, [forceRelay(config), ...rest], new.target === undefined ? rtcTarget : new.target);
-    if (view) { pageView.set(pc, view); latestView = view; }
+  const rtcTarget = function (config) {
+    let record, view = null;
+    if (viaTunnel) {
+      const checked = snapshot(config);
+      record = checked.record;
+      view = checked.view;
+    } else {
+      record = isObject(config) || config === undefined || config === null ? read(config) : null;
+    }
+    const target = new.target === undefined ? rtcTarget : new.target;
+    // A non-dictionary argument goes to the engine as given, which throws its TypeError.
+    const pc = ReflectConstruct(Native, [record ? engineConfig(record) : config], target);
+    if (view) { call(WeakMapSet, pageView, pc, view); latestView = view; }
     return pc;
   };
-  rtcTarget.prototype = Native.prototype; // instanceof goes through the bound target
+  rtcTarget.prototype = nativeProto; // instanceof goes through the bound target
   const statics = Native.generateCertificate ? { generateCertificate: Native.generateCertificate } : {};
-  const RTCPeerConnection = constructor('RTCPeerConnection', 0, rtcTarget, statics, Native.prototype, Native);
-  const nativeSetConfiguration = Native.prototype.setConfiguration;
+  const RTCPeerConnection = constructor('RTCPeerConnection', 0, rtcTarget, statics, nativeProto, Native);
   if (nativeSetConfiguration) {
-    define(Native.prototype, 'setConfiguration', method('setConfiguration', 0, function (config) {
-      const view = viaTunnel && pageView.has(this) ? snapshot(config, []) : null;
-      const result = nativeSetConfiguration.call(this, forceRelay(config));
-      if (view) { pageView.set(this, view); latestView = view; }
+    define(nativeProto, 'setConfiguration', method('setConfiguration', 0, function (config) {
+      const checked = viaTunnel && call(WeakMapGet, pageView, this) ? snapshot(config) : null;
+      const record = checked ? checked.record : (isObject(config) || config === undefined || config === null ? read(config) : null);
+      const result = call(nativeSetConfiguration, this, record ? engineConfig(record) : config);
+      if (checked && checked.view) { call(WeakMapSet, pageView, this, checked.view); latestView = checked.view; }
       return result;
     }));
   }
-  const nativeGetConfiguration = Native.prototype.getConfiguration;
   if (viaTunnel && nativeGetConfiguration) {
-    const copy = (servers) => servers.map((server) => Object.assign({}, server, Array.isArray(server.urls) ? { urls: server.urls.slice() } : {}));
-    define(Native.prototype, 'getConfiguration', method('getConfiguration', 0, function () {
-      const result = nativeGetConfiguration.call(this); // the engine's receiver check
-      const view = pageView.get(this);
+    const copyServers = (servers) => {
+      const copies = [];
+      for (let i = 0; i < servers.length; i++) {
+        const copy = {};
+        const keys = Object.keys(servers[i]);
+        for (let k = 0; k < keys.length; k++) {
+          const value = servers[i][keys[k]];
+          copy[keys[k]] = Array.isArray(value) ? value.slice() : value;
+        }
+        copies[i] = copy;
+      }
+      return copies;
+    };
+    define(nativeProto, 'getConfiguration', method('getConfiguration', 0, function () {
+      const result = call(nativeGetConfiguration, this); // the engine's receiver check
+      const view = call(WeakMapGet, pageView, this);
       if (view) {
-        result.iceServers = copy(view.iceServers);
-        result.iceTransportPolicy = view.iceTransportPolicy;
+        ObjectDefineProperty(result, 'iceServers', { value: copyServers(view.iceServers), writable: true, enumerable: true, configurable: true });
+        ObjectDefineProperty(result, 'iceTransportPolicy', { value: view.iceTransportPolicy, writable: true, enumerable: true, configurable: true });
       }
       return result;
     }));
   }
   // Where libwebrtc names the server a candidate came from — an ICE event's url, a candidate's
-  // url in getStats() — it names the relay ('turn:192.0.2.10:3478?transport=udp', and for what
-  // the relay answered as a STUN server 'stun:192.0.2.10:3478'). The page is shown its own server
-  // instead, in libwebrtc's form, or nothing when it configured none of that kind.
+  // url in getStats() — it names the relay ('turn:192.0.2.10:3478?transport=udp'). The page is
+  // shown its own server instead, in libwebrtc's form, or nothing when it configured none.
   if (viaTunnel) {
-    const relayHosts = viaTunnel.urls.map((url) => (iceURLParts(url) || {}).host).filter(Boolean);
+    const relayHosts = [];
+    for (let i = 0; i < relayServers.length; i++) {
+      const parts = iceURLParts(relayServers[i].urls);
+      if (parts) relayHosts[relayHosts.length] = parts.host;
+    }
     const isRelayURL = (url) => {
       const parts = typeof url === 'string' ? iceURLParts(url) : null;
-      return !!parts && relayHosts.includes(parts.host);
+      if (!parts) return false;
+      for (let i = 0; i < relayHosts.length; i++) if (relayHosts[i] === parts.host) return true;
+      return false;
     };
     const pageURL = (view, turn) => {
       const urls = [];
-      for (const server of (view && view.iceServers) || []) urls.push(...[].concat(server.urls));
+      const servers = (view && view.iceServers) || [];
+      for (let i = 0; i < servers.length; i++) {
+        const value = servers[i].urls;
+        if (typeof value === 'string') urls[urls.length] = value;
+        else for (let k = 0; k < value.length; k++) urls[urls.length] = value[k];
+      }
       // A relay candidate came from a TURN server; a Binding answer from a STUN server, or from a
       // TURN server over UDP, which libwebrtc asks as a STUN server too.
-      const candidates = turn ? urls.filter((url) => /^turns?:/i.test(url))
-                              : urls.filter((url) => /^stuns?:/i.test(url)).concat(urls.filter((url) => /^turn:/i.test(url)));
-      for (const url of candidates) {
-        const parts = iceURLParts(url);
-        if (!parts || !parts.host) continue;
-        const secure = /s$/.test(parts.scheme);
-        const port = parts.port || (secure ? '5349' : '3478');
-        if (!turn) return 'stun:' + parts.host + ':' + port;
-        const host = parts.host.includes(':') ? '[' + parts.host + ']' : parts.host;
-        return parts.scheme + ':' + host + ':' + port + '?transport=' + (parts.transport || (secure ? 'tcp' : 'udp'));
+      const ordered = [];
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < urls.length; i++) {
+          const parts = iceURLParts(urls[i]);
+          if (!parts || !parts.host) continue;
+          const isTurn = parts.scheme === 'turn' || parts.scheme === 'turns';
+          if (turn ? isTurn && pass === 0 : (pass === 0 ? !isTurn : parts.scheme === 'turn')) ordered[ordered.length] = parts;
+        }
       }
-      return null;
+      if (ordered.length === 0) return null;
+      const parts = ordered[0];
+      const secure = parts.scheme === 'stuns' || parts.scheme === 'turns';
+      const port = parts.port || (secure ? '5349' : '3478');
+      if (!turn) return 'stun:' + parts.host + ':' + port;
+      const host = call(StringIndexOf, parts.host, ':') >= 0 ? '[' + parts.host + ']' : parts.host;
+      return parts.scheme + ':' + host + ':' + port + '?transport=' + (parts.transport || (secure ? 'tcp' : 'udp'));
     };
-    const maskURL = (url, view) => (isRelayURL(url) ? pageURL(view, /^turns?:/i.test(url)) : url);
+    const maskURL = (url, view) => {
+      const parts = iceURLParts(url);
+      return pageURL(view, parts.scheme === 'turn' || parts.scheme === 'turns');
+    };
 
     const IceEvent = w.RTCPeerConnectionIceEvent;
-    const urlAccessor = IceEvent && Object.getOwnPropertyDescriptor(IceEvent.prototype, 'url');
+    const urlAccessor = IceEvent && ObjectGetOwnPropertyDescriptor(IceEvent.prototype, 'url');
+    const targetAccessor = w.Event && ObjectGetOwnPropertyDescriptor(w.Event.prototype, 'target');
     if (urlAccessor && urlAccessor.get) {
-      Object.defineProperty(IceEvent.prototype, 'url', {
+      const nativeURL = urlAccessor.get;
+      const nativeTarget = targetAccessor && targetAccessor.get;
+      ObjectDefineProperty(IceEvent.prototype, 'url', {
         configurable: true, enumerable: urlAccessor.enumerable, set: urlAccessor.set,
         get: getter('url', function () {
-          const value = urlAccessor.get.call(this);
-          return isRelayURL(value) ? maskURL(value, pageView.get(this.target)) : value;
+          const value = call(nativeURL, this);
+          if (!isRelayURL(value)) return value;
+          const target = nativeTarget ? call(nativeTarget, this) : this.target;
+          return maskURL(value, isObject(target) ? call(WeakMapGet, pageView, target) : undefined);
         })
       });
     }
     // Stats entries are the report's own objects: masked in place, a later get() reads the same.
+    const Report = w.RTCStatsReport;
+    const reportForEach = Report && Report.prototype.forEach;
     const sanitize = (report, view) => {
       try {
-        report.forEach((entry) => {
-          if (!entry || !isRelayURL(entry.url)) return;
+        call(reportForEach, report, (entry) => {
+          if (!isObject(entry) || !isRelayURL(entry.url)) return;
           const url = maskURL(entry.url, view);
           if (url === null) delete entry.url; else entry.url = url;
         });
       } catch (e) {}
       return report;
     };
-    const statsOwners = [Native.prototype, w.RTCRtpSender && w.RTCRtpSender.prototype, w.RTCRtpReceiver && w.RTCRtpReceiver.prototype];
+    const statsOwners = [nativeProto, w.RTCRtpSender && w.RTCRtpSender.prototype, w.RTCRtpReceiver && w.RTCRtpReceiver.prototype];
     for (const proto of statsOwners) {
       const nativeGetStats = proto && proto.getStats;
-      if (typeof nativeGetStats !== 'function') continue;
+      if (typeof nativeGetStats !== 'function' || typeof reportForEach !== 'function') continue;
       define(proto, 'getStats', method('getStats', 0, function () {
-        const view = pageView.get(this) || latestView;
-        const result = nativeGetStats.apply(this, arguments); // the engine's receiver check and errors
-        return result && typeof result.then === 'function' ? result.then((report) => sanitize(report, view)) : result;
+        const view = call(WeakMapGet, pageView, this) || latestView;
+        const result = ReflectApply(nativeGetStats, this, arguments); // the engine's receiver check and errors
+        try { return call(PromiseThen, result, (report) => sanitize(report, view)); } catch (e) { return result; }
       }));
     }
   }
-  define(Native.prototype, 'constructor', RTCPeerConnection);
+  define(nativeProto, 'constructor', RTCPeerConnection);
   // Only the names this engine has (Safari 26 has no webkitRTCPeerConnection any more).
   for (const name of names) {
     if (!Object.prototype.hasOwnProperty.call(w, name)) continue;
@@ -816,20 +956,25 @@ function patchWebRTC(w, policy, relay) {
 // 'turn:host:port?transport=udp', 'stun:[v6]:port', or libwebrtc's 'stun:v6:port' (its STUN urls
 // carry IPv6 without brackets) → scheme, host (lowercase, no brackets), port, transport.
 function iceURLParts(url) {
-  const match = /^(stuns?|turns?):([^?]*)(?:\?(.*))?$/i.exec(String(url));
+  if (typeof url !== 'string') return null;
+  const match = call(RegExpExec, /^(stuns?|turns?):([^?]*)(?:\?(.*))?$/i, url);
   if (!match) return null;
   const rest = match[2];
   let host = rest, port = '';
-  const bracketed = /^\[([^\]]*)\](?::(\d*))?$/.exec(rest);
+  const bracketed = call(RegExpExec, /^\[([^\]]*)\](?::(\d*))?$/, rest);
   if (bracketed) {
     host = bracketed[1];
     port = bracketed[2] || '';
   } else {
-    const colon = rest.lastIndexOf(':');
-    if (colon >= 0 && /^\d+$/.test(rest.slice(colon + 1))) { host = rest.slice(0, colon); port = rest.slice(colon + 1); }
+    const colon = call(StringLastIndexOf, rest, ':');
+    if (colon >= 0 && call(RegExpExec, /^\d+$/, call(StringSlice, rest, colon + 1))) {
+      host = call(StringSlice, rest, 0, colon);
+      port = call(StringSlice, rest, colon + 1);
+    }
   }
-  const transport = /(?:^|&)transport=([^&]*)/i.exec(match[3] || '');
-  return { scheme: match[1].toLowerCase(), host: host.toLowerCase(), port, transport: transport ? transport[1].toLowerCase() : '' };
+  const transport = call(RegExpExec, /(?:^|&)transport=([^&]*)/i, match[3] || '');
+  return { scheme: call(StringToLowerCase, match[1]), host: call(StringToLowerCase, host), port,
+           transport: transport ? call(StringToLowerCase, transport[1]) : '' };
 }
 
 // ---- Child windows ----------------------------------------------------------------------------

@@ -82,14 +82,19 @@ final class SOCKS5UDPRelay: PeerRelay {
             finish(.failure(RelayError.proxy("port \(proxy.port)")))
             return
         }
-        let control = NWConnection(host: NWEndpoint.Host(proxy.host), port: port, using: .tcp)
+        // Keepalive: a proxy host that vanishes without closing is noticed too.
+        let tcp = NWProtocolTCP.Options()
+        tcp.enableKeepalive = true
+        tcp.keepaliveIdle = 30
+        tcp.keepaliveInterval = 10
+        tcp.keepaliveCount = 3
+        let control = NWConnection(host: NWEndpoint.Host(proxy.host), port: port, using: NWParameters(tls: nil, tcp: tcp))
         self.control = control
         control.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
             case .ready: self.greet()
             case let .failed(error), let .waiting(error): self.fail(RelayError.proxy("control connection: \(error)"))
-            case .cancelled: self.died()
             default: break
             }
         }
@@ -211,6 +216,9 @@ final class SOCKS5UDPRelay: PeerRelay {
             guard let self else { return }
             switch state {
             case .ready:
+                // Once: a flow that becomes ready again after a path change keeps its loops.
+                guard self.state == .connecting else { break }
+                self.watchControl()
                 self.receive()
                 self.probe()
             case let .failed(error), let .waiting(error): self.fail(RelayError.proxy("relay flow: \(error)"))
@@ -251,7 +259,24 @@ final class SOCKS5UDPRelay: PeerRelay {
             if let data, let datagram = SOCKS5.unwrapDatagram([UInt8](data)), case let .address(peer) = datagram.source {
                 self.deliver(datagram.payload, from: peer)
             }
-            if error == nil { self.receive() }
+            if let error {
+                self.fail(RelayError.proxy("relay flow: \(error)"))
+            } else {
+                self.receive()
+            }
+        }
+    }
+
+    /// The association lives as long as the control connection (RFC 1928 §7). A proxy that ends it
+    /// closes that connection, which only a pending read reports: one is kept posted.
+    private func watchControl() {
+        control?.receive(minimumIncompleteLength: 1, maximumLength: 64) { [weak self] data, _, isComplete, error in
+            guard let self, self.state != .closed else { return }
+            if isComplete || error != nil || data == nil {
+                self.died()
+            } else {
+                self.watchControl()
+            }
         }
     }
 

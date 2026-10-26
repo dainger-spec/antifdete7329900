@@ -213,7 +213,7 @@ configs read as the default generation).
 |---|---|---|
 | Core (crypto, vault, profiles, archive, layout, history, bookmarks, sync, HTTP transport, UA presets, proxy location) | XCTest, 63 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
 | Tunnel protocols (STUN/TURN against RFC 5769 vectors, IPv4/IPv6 UDP packets, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy, several profiles through one router) | XCTest, 30 tests | Linux and macOS, every push |
-| Packet-tunnel extension | builds against the macOS SDK and is laid out as a system extension, plists linted, provider class checked (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner | macOS 26 runner, every push |
+| Packet-tunnel extension | builds against the macOS SDK and is laid out as a system extension, plists linted, provider class checked (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner. Its router runs on a raw utun interface opened as root (`--utun-relay`, `UTunDevice`) against real WebKit, inside the leak check | macOS 26 runner, every push |
 | JS shims (logic, CreepJS-style shape checks) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages) | Linux, every push |
 | App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 26 runner, every push |
 | Measured surface of a macOS profile vs. the runner's real Safari | `scripts/safari_reference.py` (safaridriver) with `Resources/fingerprint_probe.js` | macOS 26 runner, every push |
