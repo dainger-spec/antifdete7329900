@@ -42,7 +42,8 @@ class ProfileFilesFixture: XCTestCase {
     }
 
     /// Config, passwords, history, bookmarks, session and a WebKit data archive.
-    func populatedProfile(name: String = "Работа") throws -> ProfileSummary {
+    /// `largeWebData` adds that many bytes of website data (a backup chunk is 1 MiB).
+    func populatedProfile(name: String = "Работа", largeWebData: Int = 0) throws -> ProfileSummary {
         let profile = try repository.create(name: name, configuration: configuration)
         let key = try repository.profileKey(for: profile.id)
         try repository.passwordVault(for: profile.id).upsert(PasswordEntry(origin: "https://example.com", username: "u", password: "p"))
@@ -57,6 +58,9 @@ class ProfileFilesFixture: XCTestCase {
             let directory = root.appendingPathComponent("webkit-src-\(index)")
             try FileManager.default.createDirectory(at: directory.appendingPathComponent("LocalStorage"), withIntermediateDirectories: true)
             try Data("cookie-jar-\(index)".utf8).write(to: directory.appendingPathComponent("LocalStorage/db"))
+            if index == 0, largeWebData > 0 {
+                try Data(repeating: 0xA5, count: largeWebData).write(to: directory.appendingPathComponent("cache.bin"))
+            }
             roots[label] = directory
         }
         try EncryptedDirectoryArchive.seal(roots: roots, to: repository.webDataArchiveURL(for: profile.id), key: key)
@@ -286,7 +290,7 @@ final class ProfileBackupTests: ProfileFilesFixture {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: other.directory(for: profile.id).path), ["config.bin"])
 
         let third = try makeOtherRepository("third-vault")
-        for hostile in ["../escape.bin", "/abs.bin", "downloads/../../x", "a//b"] {
+        for hostile in ["../escape.bin", "/abs.bin", "downloads/../../x", "a//b", "./config.bin", "config.bin\u{0}x", "a/"] {
             XCTAssertThrowsError(try ProfileBackup.restore(from: craft(extraName: hostile), password: "pw", into: third)) {
                 XCTAssertEqual($0 as? CoreError, .unsafeArchivePath("backup entry"))
             }
@@ -332,6 +336,160 @@ final class ProfileBackupTests: ProfileFilesFixture {
         try assertProfileContents(repository, profile.id)
         XCTAssertNoThrow(try repository.loadConfiguration(second.id))
     }
+
+    /// Byte ranges of a backup file's encrypted chunks (each with its length prefix).
+    private func chunkRanges(_ data: Data) -> [Range<Int>] {
+        let kdfLength = Int(data[5]) << 8 | Int(data[6])
+        var offset = 7 + kdfLength + EncryptedChunkStream.headerLength
+        var ranges: [Range<Int>] = []
+        while offset + 4 <= data.count {
+            let length = data[offset..<offset + 4].reduce(0) { $0 << 8 | Int($1) }
+            ranges.append(offset..<min(offset + 4 + length, data.count))
+            offset += 4 + length
+        }
+        return ranges
+    }
+
+    /// The manifest is in the first chunk, so damage further on is only found while unpacking:
+    /// none of it may reach the vault, whether restoring into another vault or replacing.
+    func testDamageAfterTheManifestIsCaughtBeforeTheVaultChanges() throws {
+        let profile = try populatedProfile(largeWebData: 2_500_000)
+        let backup = try exportBackup(profile.id)
+        let original = try Data(contentsOf: backup)
+        let chunks = chunkRanges(original)
+        XCTAssertGreaterThanOrEqual(chunks.count, 3)
+        XCTAssertEqual(chunks.last?.upperBound, original.count)
+        // A change after the export, which a replace from a broken backup must not undo.
+        try repository.passwordVault(for: profile.id).upsert(PasswordEntry(origin: "https://later.test", username: "later", password: "x"))
+        let other = try makeOtherRepository()
+
+        var flipped = original
+        flipped[chunks[1].lowerBound + 100] ^= 0x01
+        let withoutMiddle = original.prefix(chunks[1].lowerBound) + original[chunks[2].lowerBound...]
+        let swapped = original.prefix(chunks[1].lowerBound) + original[chunks[2]] + original[chunks[1]]
+            + original[chunks[2].upperBound...]
+        let finalChunk = chunks[chunks.count - 1]
+        let cases: [(String, Data, CoreError?)] = [
+            ("bit flip in a later chunk", flipped, .authenticationFailed),
+            ("final chunk cut off at a chunk boundary", Data(original.prefix(finalChunk.lowerBound)), nil),
+            ("middle chunk removed", Data(withoutMiddle), .authenticationFailed),
+            ("chunks swapped", Data(swapped), .authenticationFailed),
+            ("final chunk repeated", original + original[finalChunk], nil),
+        ]
+        let targets: [(ProfileRepository, ProfileBackup.RestoreMode)] = [(other, .automatic), (repository, .replaceExisting)]
+        for (description, broken, expected) in cases {
+            try broken.write(to: backup)
+            XCTAssertNoThrow(try ProfileBackup.inspect(backup, password: "backup pw"), description)
+            for (repo, mode) in targets {
+                XCTAssertThrowsError(try ProfileBackup.restore(from: backup, password: "backup pw", into: repo, mode: mode),
+                                     description) { error in
+                    if let expected {
+                        XCTAssertEqual(error as? CoreError, expected, description)
+                    } else {
+                        guard case .corruptData? = error as? CoreError else { return XCTFail("\(description): \(error)") }
+                    }
+                }
+            }
+            XCTAssertTrue(other.list().isEmpty, description)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: other.profilesDirectory.path), [], description)
+            XCTAssertEqual(try hiddenEntries(repository), [], description)
+            XCTAssertEqual(try repository.passwordVault(for: profile.id).allEntries().map(\.username), ["u", "later"], description)
+        }
+        try original.write(to: backup)
+        let restored = try ProfileBackup.restore(from: backup, password: "backup pw", into: other)
+        try assertProfileContents(other, restored.id)
+    }
+
+    /// If the index cannot be written, a replace puts the old directory back and a copy or a
+    /// duplicate leaves nothing behind.
+    func testFailedCommitRollsBack() throws {
+        let profile = try populatedProfile()
+        let backup = try exportBackup(profile.id)
+        try repository.passwordVault(for: profile.id).upsert(PasswordEntry(origin: "https://later.test", username: "later", password: "x"))
+
+        // index.bin becomes a non-empty directory: the rename in saveIndex fails (also as root).
+        let index = repository.indexURL
+        let saved = root.appendingPathComponent("index.saved")
+        try FileManager.default.moveItem(at: index, to: saved)
+        try FileManager.default.createDirectory(at: index.appendingPathComponent("blocker"), withIntermediateDirectories: true)
+        for mode in [ProfileBackup.RestoreMode.replaceExisting, .copy] {
+            XCTAssertThrowsError(try ProfileBackup.restore(from: backup, password: "backup pw", into: repository, mode: mode)) {
+                guard case .io? = $0 as? CoreError else { return XCTFail("\(mode): \($0)") }
+            }
+        }
+        XCTAssertThrowsError(try repository.duplicate(profile.id, name: "Copy"))
+        try FileManager.default.removeItem(at: index)
+        try FileManager.default.moveItem(at: saved, to: index)
+
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: repository.profilesDirectory.path), [profile.id.uuidString])
+        XCTAssertEqual(repository.list().map(\.id), [profile.id])
+        XCTAssertEqual(try repository.passwordVault(for: profile.id).allEntries().map(\.username), ["u", "later"],
+                       "the replaced profile is back as it was")
+        let reopened = try ProfileRepository(vault: MasterVault.unlock(in: root, password: "master"))
+        XCTAssertEqual(reopened.list().map(\.id), [profile.id])
+        XCTAssertEqual(try reopened.loadConfiguration(profile.id), configuration)
+    }
+
+    /// After a crash or a failed rollback, the moved-aside directory is the profile's previous
+    /// data: it is deleted only if the live directory works, and moved back otherwise.
+    func testInterruptedReplaceKeepsOldDataUnlessTheLiveDirectoryWorks() throws {
+        let profile = try populatedProfile()
+        let profiles = repository.profilesDirectory
+        let live = repository.directory(for: profile.id)
+        func moveAside() throws -> URL {
+            let aside = profiles.appendingPathComponent(".replaced-\(profile.id.uuidString)-\(UUID().uuidString)")
+            try FileManager.default.moveItem(at: live, to: aside)
+            return aside
+        }
+
+        // A store write recreated the live directory without a configuration.
+        _ = try moveAside()
+        try SecureFile.write(Data("stray".utf8), to: live.appendingPathComponent("history.bin"))
+        repository.removeOrphanedDirectories()
+        XCTAssertEqual(try hiddenEntries(repository), [])
+        try assertProfileContents(repository, profile.id)
+
+        // The replacement arrived under a key the index does not have (crash before the index write).
+        _ = try moveAside()
+        try SecureFile.write(ProfileFileBinding.config.seal(JSONCoding.encoder.encode(configuration), profileID: profile.id,
+                                                            profileKey: SymmetricKey(size: .bits256)),
+                             to: live.appendingPathComponent("config.bin"))
+        repository.removeOrphanedDirectories()
+        XCTAssertEqual(try hiddenEntries(repository), [])
+        try assertProfileContents(repository, profile.id)
+
+        // Neither directory works: nothing is deleted.
+        let aside = try moveAside()
+        try SecureFile.write(Data("broken".utf8), to: aside.appendingPathComponent("config.bin"))
+        try SecureFile.ensureDirectory(live)
+        repository.removeOrphanedDirectories()
+        XCTAssertEqual(try hiddenEntries(repository), [aside.lastPathComponent])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: live.path))
+    }
+
+    func testExportRefusesDirectoryDestinationAndUnrestorableIterations() throws {
+        let profile = try repository.create(name: "P", configuration: configuration)
+
+        let folder = root.appendingPathComponent("Documents.\(ProfileBackup.fileExtension)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: folder.appendingPathComponent("note.txt"))
+        XCTAssertThrowsError(try ProfileBackup.export(profile: profile.id, from: repository, to: folder, password: "pw",
+                                                      iterations: testIterations)) {
+            guard case .io? = $0 as? CoreError else { return XCTFail("\($0)") }
+        }
+        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("note.txt")), Data("keep".utf8))
+
+        // A count that `inspect`/`restore` would refuse is refused up front; an existing file is kept.
+        let previous = root.appendingPathComponent("previous.\(ProfileBackup.fileExtension)")
+        try Data("older backup".utf8).write(to: previous)
+        for iterations in [0, ProfileBackup.maxIterations + 1] {
+            XCTAssertThrowsError(try ProfileBackup.export(profile: profile.id, from: repository, to: previous, password: "pw",
+                                                          iterations: iterations)) {
+                guard case .invalidConfiguration? = $0 as? CoreError else { return XCTFail("\($0)") }
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: previous), Data("older backup".utf8))
+    }
 }
 
 final class ProfileDuplicateTests: ProfileFilesFixture {
@@ -351,7 +509,8 @@ final class ProfileDuplicateTests: ProfileFilesFixture {
         XCTAssertNotEqual(key.rawBytes, sourceKey.rawBytes)
 
         XCTAssertEqual(try repository.loadConfiguration(duplicate.id), configuration)
-        XCTAssertEqual(try repository.bookmarkStore(for: duplicate.id, key: key).all().map(\.title), ["B"])
+        XCTAssertEqual(try repository.bookmarkStore(for: duplicate.id, key: key).all(), bookmarks.all(),
+                       "same bookmarks, same IDs")
         let document = try XCTUnwrap(BookmarkStore.file(url: repository.bookmarksURL(for: duplicate.id), profileID: duplicate.id,
                                                          profileKey: key).load())
         XCTAssertTrue(document.deleted.isEmpty, "the source's tombstones are not carried over")
@@ -398,6 +557,42 @@ final class ProfileDuplicateTests: ProfileFilesFixture {
         }
         XCTAssertEqual(repository.list(), before)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: repository.profilesDirectory.path).sorted(), directoriesBefore)
+    }
+}
+
+/// The stores' keys and AADs must stay exactly what earlier builds wrote, or existing profiles
+/// stop opening. These files are sealed with the literal derivations, not `ProfileFileBinding`.
+final class ProfileFileBindingTests: ProfileFilesFixture {
+    func testStoresOpenFilesWrittenWithTheOriginalDerivations() throws {
+        let id = try repository.create(name: "Old", configuration: ProfileConfiguration()).id
+        let key = try repository.profileKey(for: id)
+        let salt = withUnsafeBytes(of: id.uuid) { Data($0) }
+        func subkey(_ info: String) -> SymmetricKey {
+            HKDF<SHA256>.deriveKey(inputKeyMaterial: key, salt: salt, info: Data(info.utf8), outputByteCount: 32)
+        }
+        func write<T: Encodable>(_ value: T, _ file: String, key: SymmetricKey, aad: String) throws {
+            try SecureFile.write(AEAD.seal(JSONCoding.encoder.encode(value), key: key, aad: aad),
+                                 to: repository.directory(for: id).appendingPathComponent(file))
+        }
+        let now = Date()
+        try write(configuration, "config.bin", key: key, aad: "profile-config:v1:\(id.uuidString)")
+        try write([PasswordEntry(origin: "https://a.test", username: "old", password: "pw")], "passwords.bin",
+                  key: subkey("passwords"), aad: "passwords:v1:\(id.uuidString)")
+        try write(HistoryDocument(entries: [HistoryEntry(url: "https://a.test/", title: "Old page", firstVisitedAt: now,
+                                                         lastVisitedAt: now, visitCount: 1)]),
+                  "history.bin", key: subkey("history"), aad: "history:v1:\(id.uuidString)")
+        try write(BookmarkDocument(bookmarks: [Bookmark(id: UUID(), title: "Old mark", url: "https://a.test/", folder: nil,
+                                                        position: 1, createdAt: now, updatedAt: now)]),
+                  "bookmarks.bin", key: subkey("bookmarks"), aad: "bookmarks:v1:\(id.uuidString)")
+        try write(tabs, "session.bin", key: subkey("session"), aad: "session:v1:\(id.uuidString)")
+
+        XCTAssertEqual(try repository.loadConfiguration(id), configuration)
+        XCTAssertEqual(try repository.passwordVault(for: id).allEntries().map(\.username), ["old"])
+        XCTAssertEqual(try repository.historyStore(for: id, key: key).entries().map(\.title), ["Old page"])
+        XCTAssertEqual(try repository.bookmarkStore(for: id, key: key).all().map(\.title), ["Old mark"])
+        XCTAssertEqual(try sessionFile(repository, id, key: key).load(), tabs)
+        XCTAssertEqual(ProfileFileBinding.allCases.map(\.fileName),
+                       ["config.bin", "passwords.bin", "history.bin", "bookmarks.bin", "session.bin"])
     }
 }
 
