@@ -340,7 +340,15 @@ final class SelfTest {
         check("broken proxy: address bar keeps the address", controller.selectedTab?.url?.host == "example.com")
         check("broken proxy: status is failed", center.status(for: profile.id, hasProxy: true).isFailure,
               ProxyStatusCenter.describe(center.status(for: profile.id, hasProxy: true)))
-        let pageText = try await js(controller.selectedTab!.webView, "return document.body ? document.body.innerText : '';") as? String ?? ""
+        // The error page is loaded with loadHTMLString (async), so poll its body for the retry
+        // label rather than reading once — reading immediately races the load (flaky).
+        var pageText = ""
+        for _ in 0..<50 {
+            pageText = (try? await js(controller.selectedTab!.webView,
+                                      "return document.body ? document.body.innerText : '';")) as? String ?? ""
+            if pageText.contains(L("errorpage.retry")) { break }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
         check("broken proxy: error page explains it with a retry link", pageText.contains(L("errorpage.retry")), pageText)
         controller.close()
     }
