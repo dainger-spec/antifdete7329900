@@ -28,10 +28,16 @@ enum ProxyGeoLookup {
 
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "ProxyGeoLookup")
 
-    /// nil when no service answered within `timeout` seconds in total (proxy down, services
-    /// blocked or rate-limited).
-    static func lookUp(proxy: ProxySettings, userAgent: String, timeout: TimeInterval = 6) async -> ProxyLocation? {
-        guard let proxies = try? ProxyConfigurationFactory.make(proxy), !proxies.isEmpty else { return nil }
+    struct Result {
+        /// nil when no service answered within the timeout (proxy down, services blocked or rate-limited).
+        var location: ProxyLocation?
+        /// The proxy answered 407 and the profile has no credentials for it. Only this lookup sees
+        /// that: WebKit keeps a proxy's challenge to itself and leaves the page loading forever.
+        var proxyRequiresCredentials = false
+    }
+
+    static func lookUp(proxy: ProxySettings, userAgent: String, timeout: TimeInterval = 6) async -> Result {
+        guard let proxies = try? ProxyConfigurationFactory.make(proxy), !proxies.isEmpty else { return Result() }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.proxyConfigurations = proxies
         configuration.httpCookieStorage = nil
@@ -39,8 +45,12 @@ enum ProxyGeoLookup {
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         configuration.httpAdditionalHeaders = ["User-Agent": userAgent, "Accept": "application/json"]
         configuration.waitsForConnectivity = false
-        let session = URLSession(configuration: configuration)
+        let challenges = ProxyChallengeObserver(credential: proxy.username.map {
+            URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession)
+        })
+        let session = URLSession(configuration: configuration, delegate: challenges, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
+        var result = Result()
         let deadline = Date().addingTimeInterval(timeout)
         let endpoint = ProxyLocation.endpoint(of: proxy)
         for service in services {
@@ -55,13 +65,48 @@ enum ProxyGeoLookup {
                                                                      countryKeyPath: service.countryKeyPath,
                                                                      proxyEndpoint: endpoint) {
                     log.info("Proxy \(endpoint, privacy: .private) exits in \(location.timeZoneIdentifier, privacy: .public) (\(location.countryCode ?? "?", privacy: .public)) per \(service.url.host ?? "?", privacy: .public)")
-                    return location
+                    result.location = location
+                    return result
                 }
                 log.notice("\(service.url.host ?? "?", privacy: .public) gave no location (HTTP \(status))")
             } catch {
                 log.notice("\(service.url.host ?? "?", privacy: .public) through the proxy failed: \(error.localizedDescription, privacy: .public)")
             }
+            if challenges.proxyRequiredCredentials {
+                result.proxyRequiresCredentials = true
+                return result
+            }
         }
-        return nil
+        result.proxyRequiresCredentials = challenges.proxyRequiredCredentials
+        return result
+    }
+}
+
+/// Answers the proxy's own challenge with the profile's credentials, and notes when it has none
+/// to give (the load is then cancelled: fail-closed).
+private final class ProxyChallengeObserver: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let credential: URLCredential?
+    private let lock = NSLock()
+    private var _proxyRequiredCredentials = false
+
+    init(credential: URLCredential?) {
+        self.credential = credential
+    }
+
+    var proxyRequiredCredentials: Bool { lock.withLock { _proxyRequiredCredentials } }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let space = challenge.protectionSpace
+        guard space.isProxy(), space.authenticationMethod != NSURLAuthenticationMethodServerTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        if challenge.previousFailureCount == 0, let credential {
+            completionHandler(.useCredential, credential)
+        } else {
+            if credential == nil { lock.withLock { _proxyRequiredCredentials = true } }
+            completionHandler(.cancelAuthenticationChallenge, nil)
+        }
     }
 }

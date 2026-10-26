@@ -30,7 +30,10 @@ PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Resource
 # Differ by design between the self-test (which gives WebKit a fixed language, uses a hidden
 # window) and a Safari window: reported, never fatal.
 INFO_KEYS = {"language", "languages", "intlLocale", "innerSize", "outerSize", "windowOwnCount", "errorStack",
-             "orientation", "safari", "audio", "cookieEnabled"}
+             "orientation", "safari", "audio", "cookieEnabled",
+             # The WebRTC policy removes these on purpose in a default profile.
+             "features.RTCPeerConnection", "features.webkitRTCPeerConnection", "features.RTCDataChannel",
+             "features.window.webkitRTCPeerConnection", "natives.RTCPeerConnection"}
 # What a page measures of the engine and the Mac: must be identical.
 MUST_MATCH = {"ua", "appVersion", "vendor", "platform", "hardwareConcurrency", "deviceMemory", "maxTouchPoints",
               "pdfViewerEnabled", "plugins", "mimeTypes", "webdriver", "standalone", "doNotTrack", "ownNavigator",
@@ -146,7 +149,7 @@ def compare(safari, ours):
             continue
         line = f"{key}: Safari={json.dumps(a)[:160]}  profile={json.dumps(b)[:160]}"
         must = key in MUST_MATCH or key.startswith(MUST_MATCH_PREFIXES)
-        if key in INFO_KEYS or key.split(".")[0] in INFO_KEYS:
+        if key in INFO_KEYS or key.split(".")[0] in INFO_KEYS and key.split(".")[0] not in ("features", "natives"):
             diffs.append("INFO " + line)
         elif must:
             failures.append("FAIL " + line)

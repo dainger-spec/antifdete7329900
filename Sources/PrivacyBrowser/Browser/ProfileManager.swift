@@ -36,11 +36,14 @@ final class ProfileManager: ObservableObject {
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ProfileManager")
 
     /// Why a launch was refused before anything was decrypted (shown to the user).
-    enum LaunchError: LocalizedError {
+    enum LaunchError: LocalizedError, Equatable {
         case invalidProxy(host: String)
+        /// The proxy answered 407 and the profile has no user name and password for it.
+        case proxyNeedsCredentials(host: String)
         var errorDescription: String? {
             switch self {
             case .invalidProxy(let host): return String(format: L("launch.error.proxyInvalid"), host)
+            case .proxyNeedsCredentials(let host): return String(format: L("launch.error.proxyNeedsCredentials"), host)
             }
         }
     }
@@ -93,7 +96,8 @@ final class ProfileManager: ObservableObject {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
             try await webDataVault.prepareForLaunch(profileID: id, key: key)
         }
-        let location = stored.proxyLocation(lookedUp: await lookedUp)
+        let lookup = await lookedUp
+        let location = stored.proxyLocation(lookedUp: lookup.location)
 
         // Lock or Quit began while the data was decrypted: a window opened now would have no
         // manager and its data would stay unencrypted. No data store exists yet, so seal the
@@ -101,6 +105,12 @@ final class ProfileManager: ObservableObject {
         if isShuttingDown {
             if !stored.ephemeral { try await webDataVault.seal(profileID: id, key: key, activeStore: false) }
             return
+        }
+        // A proxy that wants credentials the profile does not have: WebKit would leave every page
+        // loading forever (it never shows the proxy's challenge). Refuse the launch instead.
+        if lookup.proxyRequiresCredentials, let proxy = stored.proxy {
+            if !stored.ephemeral { try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
+            throw LaunchError.proxyNeedsCredentials(host: proxy.host)
         }
         rememberProxyLocation(location, for: id, in: stored)
         let configuration = stored.applying(location)
@@ -129,14 +139,14 @@ final class ProfileManager: ObservableObject {
         try? repository.markLaunched(id)
     }
 
-    private func lookUpProxyLocation(_ configuration: ProfileConfiguration) async -> ProxyLocation? {
-        guard configuration.needsProxyLocation, let proxy = configuration.proxy else { return nil }
-        let location = await ProxyGeoLookup.lookUp(proxy: proxy,
-                                                   userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version))
-        if location == nil {
+    private func lookUpProxyLocation(_ configuration: ProfileConfiguration) async -> ProxyGeoLookup.Result {
+        guard configuration.needsProxyLocation, let proxy = configuration.proxy else { return ProxyGeoLookup.Result() }
+        let result = await ProxyGeoLookup.lookUp(proxy: proxy,
+                                                 userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version))
+        if result.location == nil {
             log.notice("Could not look up where the profile's proxy exits; using \(configuration.lastProxyLocation == nil ? "the system time zone" : "the last known location", privacy: .public)")
         }
-        return location
+        return result
     }
 
     /// Profiles already told, once per run, that websites see another language than their

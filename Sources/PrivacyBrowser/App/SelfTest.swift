@@ -368,9 +368,26 @@ final class SelfTest {
             let wrong = try await titleThroughProxyTab(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: authPort,
                                                                                  username: "pb-user", password: "wrong"), url: target)
             check("proxy: rejected credentials fail closed", wrong?.hasPrefix("PB proxied") != true, wrong ?? "nil")
-            let none = try await titleThroughProxyTab(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: authPort),
-                                                      url: target)
-            check("proxy: 407 without credentials fails closed and shows the error page", none == L("errorpage.title"), none ?? "nil")
+            // Without credentials WebKit never surfaces the proxy's challenge (the page would load
+            // forever): the launch-time lookup through the proxy sees the 407 and the profile is
+            // refused, with its data sealed again.
+            let services = ProxyGeoLookup.services
+            ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json")!,
+                                             timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+            defer { ProxyGeoLookup.services = services }
+            let noCredentials = try repository.create(name: "No proxy credentials", configuration: ProfileConfiguration(
+                proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: authPort)))
+            try await WebDataStoreVault(repository: repository).prepareForLaunch(profileID: noCredentials.id,
+                                                                                  key: repository.profileKey(for: noCredentials.id))
+            let manager = ProfileManager(repository: repository)
+            var launchError: Error?
+            do { try await manager.launch(noCredentials.id) } catch { launchError = error }
+            check("proxy: 407 without credentials refuses the launch (fail-closed)",
+                  launchError as? ProfileManager.LaunchError == .proxyNeedsCredentials(host: "127.0.0.1") && !manager.isRunning(noCredentials.id),
+                  launchError.map { String(describing: $0) } ?? "launched")
+            check("proxy: the refused profile's data is sealed again",
+                  WebDataStoreVault.discoverDirectories(for: noCredentials.id).isEmpty)
+            try repository.delete(noCredentials.id)
         } else {
             info("proxy auth checks skipped (PB_SELFTEST_HTTP_AUTH_PROXY_PORT not set)")
         }
@@ -548,8 +565,10 @@ final class SelfTest {
              "webkitObject", "webdriver", "doNotTrack"].contains(key) || key.hasPrefix("webgl.") || key.hasPrefix("features.")
         }.sorted()
         for generationID in [DeviceGenerations.defaultID, "ios-26"] {
+            // WebRTC left as the engine has it: its removal (the default policy) is checked by the
+            // shim checks and would otherwise be the one deliberate difference here.
             let profile = try repository.create(name: "Surface \(generationID)", configuration: ProfileConfiguration(
-                ephemeral: true, deviceGenerationID: generationID))
+                webRTCPolicy: .unrestricted, ephemeral: true, deviceGenerationID: generationID))
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
             let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
