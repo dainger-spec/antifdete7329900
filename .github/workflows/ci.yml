@@ -24,6 +24,12 @@ jobs:
         with:
           node-version: 22
       - run: TZ=America/New_York node scripts/test-shims.mjs
+      # The same tests under JavaScriptCore, the engine Safari runs: own-property order, error
+      # messages and function text differ from V8 in ways a page can see.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.23
+      - run: TZ=America/New_York bun scripts/test-shims.mjs
 
   macos:
     name: macOS build, core tests, WebKit self-test
@@ -62,6 +68,14 @@ jobs:
           code=$?
           if [ "$code" = "2" ]; then echo "::warning::Safari could not be driven on this runner; surface not compared"; exit 0; fi
           exit $code
+      - name: Live fingerprinting pages in Safari and in profiles (report, never fails the build)
+        # The same pages and scripts in this Mac's Safari and in on-screen profile windows of the
+        # same size: probe, window geometry, request header order, TLS/HTTP2 (tls.peet.ws),
+        # deviceinfo.me, CreepJS. Third-party sites change and go down, so this only reports.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 25
+        run: python3 scripts/live_compare.py --app build/unsandboxed/PrivacyBrowser.app --out build/live
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -70,6 +84,7 @@ jobs:
             build/surface-sandboxed
             build/surface-unsandboxed
             build/safari-surface.json
+            build/live
           if-no-files-found: ignore
       - name: App Sandbox container migration (unsandboxed data → sandboxed first launch)
         run: |

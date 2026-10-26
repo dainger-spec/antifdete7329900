@@ -12,6 +12,12 @@ MainActor.assumeIsolated {
         SelfTest.migrationStep(write: true)
     } else if arguments.contains("--selftest-read-vault") {
         SelfTest.migrationStep(write: false)
+    } else if arguments.contains("--capture-sites") {
+        // The app's own start-up, as far as web content can tell: its UI language is set, and the
+        // first profile (no proxy) decides the language websites see.
+        Localization.applyProcessLanguage()
+        WebContentLanguage.decide(nil)
+        SiteCapture.start(arguments: arguments)
     } else {
         // Russian by default (English fallback); must be set before AppKit builds its menus.
         Localization.applyProcessLanguage()
