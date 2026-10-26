@@ -240,6 +240,7 @@ test('constructor-shaped wrappers keep the native shape', () => {
   assert.equal(run(w, 'Object.getOwnPropertyNames(Date).join()'), 'parse,UTC,now,length,name,prototype');
   assert.equal(run(w, 'Object.getOwnPropertyNames(Intl.DateTimeFormat).join()'), 'supportedLocalesOf,length,name,prototype');
   assert.equal(run(w, 'Object.getOwnPropertyNames(Date.prototype.getHours).join()'), 'length,name');
+  assert.equal(run(w, 'Object.getOwnPropertyNames(Function.prototype.toString).join()'), 'length,name');
   assert.equal(run(w, 'Object.getOwnPropertyNames(Object.getOwnPropertyDescriptor(Screen.prototype, "width").get).join()'), 'length,name');
   assert.equal(run(w, 'Object.getPrototypeOf(Date) === Function.prototype && typeof Date === "function"'), true);
   assert.equal(run(w, 'Object.getOwnPropertyDescriptor(Date, "prototype").writable'), false);

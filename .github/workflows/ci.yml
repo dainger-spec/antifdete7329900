@@ -27,7 +27,10 @@ jobs:
 
   macos:
     name: macOS build, core tests, WebKit self-test
-    runs-on: macos-15
+    # The newest macOS and Xcode: WebKit enables several features only for apps linked against
+    # the current SDK (Trusted Types, …), and the Safari comparison should see the same engine
+    # and feature set a user of the current macOS gets.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - run: swift --version

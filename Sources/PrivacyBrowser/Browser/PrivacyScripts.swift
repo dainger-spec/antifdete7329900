@@ -142,14 +142,19 @@ function patchWindow(w) {
 // `prototype`, not constructible, `caller`/`arguments` throw. Its text is registered so that
 // Function.prototype.toString (patched per realm, one registry per page) prints it as native.
 
-function asNative(fn) {
-  // Native functions list `length` before `name`; a method made with a computed key does not.
+// Native functions list `length` before `name`; a method made with a computed key does not.
+function orderOwnProperties(fn) {
   const length = Object.getOwnPropertyDescriptor(fn, 'length');
   const name = Object.getOwnPropertyDescriptor(fn, 'name');
   delete fn.length;
   delete fn.name;
   Object.defineProperty(fn, 'length', length);
   Object.defineProperty(fn, 'name', name);
+  return fn;
+}
+
+function asNative(fn) {
+  orderOwnProperties(fn);
   // The engine prints an accessor without its "get " / "set " prefix.
   registry.set(fn, NATIVE_TEMPLATE.replace('%NAME%', fn.name.replace(/^[gs]et /, '')));
   return fn;
@@ -183,11 +188,11 @@ function getter(name, impl) {
 function patchToString(w) {
   const proto = w.Function.prototype;
   const native = proto.toString;
-  const toString = { toString() {
+  const toString = orderOwnProperties({ toString() {
     if (this === REGISTRY_KEY) return registry;
     const text = registry.get(this);
     return text !== undefined ? text : native.call(this);
-  } }.toString;
+  } }.toString);
   registry.set(toString, native.call(native));
   Object.defineProperty(proto, 'toString', { value: toString, writable: true, enumerable: false, configurable: true });
 }
