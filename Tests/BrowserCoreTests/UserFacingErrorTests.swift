@@ -316,11 +316,15 @@ final class UserFacingErrorTests: XCTestCase {
             XCTAssertFalse(russian[key]?.isEmpty ?? true, "missing ru: \(key)")
             XCTAssertFalse(english[key]?.isEmpty ?? true, "missing en: \(key)")
         }
-        // No orphaned error.* strings, and both languages carry the same set.
+        // Every key the mapper declares is localized in both tables. The app target adds its own
+        // `error.*` keys (action titles like error.title.launch, and error.code / error.generic.*)
+        // that this core test can't see, so the tables are a superset of `declared`, not equal to it.
         let russianErrorKeys = Set(russian.keys.filter { $0.hasPrefix("error.") })
         let englishErrorKeys = Set(english.keys.filter { $0.hasPrefix("error.") })
-        XCTAssertEqual(russianErrorKeys, declared, "orphans: \(russianErrorKeys.subtracting(declared).sorted())")
-        XCTAssertEqual(englishErrorKeys, declared, "orphans: \(englishErrorKeys.subtracting(declared).sorted())")
+        XCTAssertTrue(declared.isSubset(of: russianErrorKeys), "missing ru: \(declared.subtracting(russianErrorKeys).sorted())")
+        XCTAssertTrue(declared.isSubset(of: englishErrorKeys), "missing en: \(declared.subtracting(englishErrorKeys).sorted())")
+        // The two tables stay in step with each other.
+        XCTAssertEqual(russianErrorKeys, englishErrorKeys, "ru/en differ: \(russianErrorKeys.symmetricDifference(englishErrorKeys).sorted())")
         // The Russian table is really Russian (catches copy-paste of the English text).
         for key in declared where key.hasSuffix(".message") {
             XCTAssertNotNil(russian[key]?.range(of: "[а-яА-ЯёЁ]", options: .regularExpression), "not Russian: \(key)")

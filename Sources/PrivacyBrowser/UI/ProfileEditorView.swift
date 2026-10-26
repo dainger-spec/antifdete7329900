@@ -375,10 +375,7 @@ struct ProfileEditorView: View {
     // MARK: Helpers
 
     private var effectiveUserAgent: String {
-        let resolution = UserAgentBuilder.resolve(mode: draft.userAgentMode, customUserAgent: nil, safari: SafariInfo.version)
-        if let full = resolution.customUserAgent { return full }
-        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) "
-            + (resolution.applicationNameForUserAgent ?? "")
+        UserAgentBuilder.resolve(mode: draft.userAgentMode, customUserAgent: nil, safari: SafariInfo.version).expectedUserAgent
     }
 
     private func proxyCheckText(_ status: ProxyStatus) -> String {

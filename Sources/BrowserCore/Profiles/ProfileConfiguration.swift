@@ -61,6 +61,13 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// (`SessionStore`). Ephemeral profiles keep their session in memory only.
     public var restoreTabs: Bool
 
+    /// Capture ALL of the profile's traffic (TCP and UDP) in a per-profile packet tunnel so one
+    /// exit IP serves both — closing the UDP leak that `proxy` alone leaves (QUIC/HTTP3, WebRTC).
+    /// Off by default: the tunnel needs a Network Extension that only a provisioned build loads
+    /// (see `ProfileNetwork`, `docs/NETWORK.md`). When on but the tunnel can't run, the profile
+    /// fails closed (no network), never a direct or TCP-only fallback.
+    public var unifiedTunnel: Bool
+
     /// `userAgentMode: nil` infers the mode the same way an old file without the field is
     /// decoded: `.custom` when `userAgent` is non-empty, `.safariMac` otherwise.
     public init(startURL: URL? = nil,
@@ -75,7 +82,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 historyEnabled: Bool = true,
                 historyRetentionDays: Int? = 90,
                 locale: String? = nil,
-                restoreTabs: Bool = true) {
+                restoreTabs: Bool = true,
+                unifiedTunnel: Bool = false) {
         self.startURL = startURL
         self.userAgentMode = userAgentMode ?? Self.inferredMode(userAgent: userAgent)
         self.userAgent = userAgent
@@ -89,7 +97,12 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.historyRetentionDays = historyRetentionDays
         self.locale = locale
         self.restoreTabs = restoreTabs
+        self.unifiedTunnel = unifiedTunnel
     }
+
+    /// The profile's network mode and the egress it resolves to.
+    public var network: ProfileNetwork { ProfileNetwork(proxy: proxy, unifiedTunnel: unifiedTunnel) }
+
 
     // MARK: User agent and language
 
@@ -151,7 +164,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case startURL, userAgent, userAgentMode, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
-             safeBrowsingEnabled, historyEnabled, historyRetentionDays, locale, restoreTabs
+             safeBrowsingEnabled, historyEnabled, historyRetentionDays, locale, restoreTabs, unifiedTunnel
     }
 
     /// Read-only keys of older formats. Decoded for migration, never written.
@@ -184,6 +197,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             : defaults.historyRetentionDays
         locale = try c.decodeIfPresent(String.self, forKey: .locale)
         restoreTabs = try c.decodeIfPresent(Bool.self, forKey: .restoreTabs) ?? defaults.restoreTabs
+        unifiedTunnel = try c.decodeIfPresent(Bool.self, forKey: .unifiedTunnel) ?? defaults.unifiedTunnel
 
         if let stored = (try? c.decodeIfPresent(String.self, forKey: .userAgentMode)).flatMap({ $0 }),
            let mode = UserAgentMode(rawValue: stored) {
@@ -214,6 +228,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(historyRetentionDays, forKey: .historyRetentionDays)
         try c.encodeIfPresent(locale, forKey: .locale)
         try c.encode(restoreTabs, forKey: .restoreTabs)
+        try c.encode(unifiedTunnel, forKey: .unifiedTunnel)
     }
 
     public var historyPolicy: HistoryStore.Policy {
