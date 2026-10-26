@@ -1,6 +1,7 @@
 import BrowserCore
 import CryptoKit
 import Foundation
+import AppKit
 import os
 
 /// Launches, stops and deletes profiles; owns the running `BrowserSession`s.
@@ -20,26 +21,37 @@ final class ProfileManager: ObservableObject {
     /// Profiles currently being launched or sealed (UI shows a spinner, actions disabled).
     @Published private(set) var busyProfileIDs: Set<UUID> = []
 
-    var onError: ((String) -> Void)?
+    var onError: ((Error) -> Void)?
     /// Called after a profile's own windows all close (not on explicit stop/lock), so the app
     /// can bring the Profiles window back to the front.
     var onReturnToProfiles: (() -> Void)?
 
     private let repository: ProfileRepository
     private let webDataVault: WebDataStoreVault
+    private let proxyCenter: ProxyStatusCenter
     private var sessions: [UUID: BrowserSession] = [:]
     /// Profile keys are held only while the profile runs (needed to seal on stop).
     private var keys: [UUID: SymmetricKey] = [:]
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ProfileManager")
 
-    init(repository: ProfileRepository) {
+    init(repository: ProfileRepository, proxyCenter: ProxyStatusCenter) {
         self.repository = repository
+        self.proxyCenter = proxyCenter
         self.webDataVault = WebDataStoreVault(repository: repository)
     }
 
     var hasRunningProfiles: Bool { !sessions.isEmpty }
 
     func isRunning(_ id: UUID) -> Bool { sessions[id] != nil }
+
+    /// The running session of a profile (cookie import/export, menus).
+    func session(for id: UUID) -> BrowserSession? { sessions[id] }
+
+    /// The profile whose browser window is in front, if any.
+    var keyWindowProfileID: UUID? {
+        guard let controller = NSApp.keyWindow?.windowController as? BrowserWindowController else { return nil }
+        return sessions.first { $0.value.frontmostWindow === controller }?.key
+    }
 
     // MARK: Launch
 
@@ -68,8 +80,17 @@ final class ProfileManager: ObservableObject {
             try await webDataVault.prepareForLaunch(profileID: id, key: key)
         }
 
+        // Open tabs are device-local and saved only for persistent profiles that restore tabs.
+        let sessionStore = try repository.sessionStore(for: id, key: key, persistent: !configuration.ephemeral)
+        let savedState = configuration.restoreTabs ? (try? sessionStore.load()) ?? nil : nil
+
         let session = BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
-                                     passwordVault: passwords, library: library)
+                                     passwordVault: passwords, library: library, sessionStore: sessionStore)
+        session.proxyCenter = proxyCenter
+        if configuration.proxy != nil {
+            session.onLoadFinished = { [weak proxyCenter] in proxyCenter?.reportLoadSucceeded(id) }
+            session.onLoadFailed = { [weak proxyCenter] message in proxyCenter?.reportLoadFailed(id, message: message) }
+        }
         session.onAllWindowsClosed = { [weak self] in
             // Return to the Profiles window right away; sealing then runs in the background and
             // flips the row to "Encrypting…" via busyProfileIDs.
@@ -79,7 +100,12 @@ final class ProfileManager: ObservableObject {
         sessions[id] = session
         keys[id] = key
         runningProfileIDs.insert(id)
-        session.openWindow(url: configuration.startURL)
+        if let savedState, session.restore(savedState) {
+            Log.info("profiles", "launched \(Log.id(id)), restored \(savedState.windows.count) window(s)")
+        } else {
+            session.openWindow(url: configuration.startURL)
+            Log.info("profiles", "launched \(Log.id(id))")
+        }
         try? repository.markLaunched(id)
     }
 
@@ -107,7 +133,11 @@ final class ProfileManager: ObservableObject {
         // `session` is now the last reference; it is released when this scope ends, but its
         // data store reference was already dropped in shutDown().
         if !ephemeral, let key {
+            let started = Date()
             try await webDataVault.seal(profileID: id, key: key)
+            Log.info("profiles", "stopped and encrypted \(Log.id(id)) in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+        } else {
+            Log.info("profiles", "stopped \(Log.id(id))")
         }
     }
 
@@ -125,7 +155,8 @@ final class ProfileManager: ObservableObject {
             try await stop(id)
         } catch {
             log.error("Stopping \(id.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-            onError?(error.localizedDescription)
+            Log.error("profiles", "stopping \(Log.id(id)) failed: \(Log.describe(error))")
+            onError?(error)
         }
     }
 
@@ -140,6 +171,8 @@ final class ProfileManager: ObservableObject {
         defer { busyProfileIDs.remove(id) }
         await webDataVault.deleteData(profileID: id)
         try repository.delete(id)
+        proxyCenter.forget(id)
+        Log.info("profiles", "deleted \(Log.id(id))")
     }
 
     /// Called by sync when a profile was deleted on another device.
@@ -169,7 +202,8 @@ final class ProfileManager: ObservableObject {
                 try await webDataVault.seal(profileID: summary.id, key: repository.profileKey(for: summary.id),
                                             activeStore: false)
             } catch {
-                onError?("Could not re-encrypt data of profile “\(summary.name)”: \(error.localizedDescription)")
+                Log.error("profiles", "re-encrypting \(Log.id(summary.id)) after a crash failed: \(Log.describe(error))")
+                onError?(error)
             }
             busyProfileIDs.remove(summary.id)
         }

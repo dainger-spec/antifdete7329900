@@ -16,7 +16,8 @@ function makeWindow(config, extras = {}) {
     var window = globalThis;
     class Geolocation { getCurrentPosition() { throw new Error('native called'); } watchPosition() {} clearWatch() {} }
     class Permissions { query(d) { return Promise.resolve({ state: 'prompt', name: d.name }); } }
-    var navigator = { geolocation: new Geolocation(), permissions: new Permissions() };
+    class Navigator { get language() { return 'en-US'; } get languages() { return ['en-US']; } }
+    var navigator = Object.assign(new Navigator(), { geolocation: new Geolocation(), permissions: new Permissions() });
     var setTimeout = (f) => Promise.resolve().then(f);
     // Browsers expose these as configurable properties of window (not lexical bindings).
     globalThis.RTCPeerConnection = class RTCPeerConnection { constructor(c) { this.config = c; } setConfiguration(c) { this.config = c; } };
@@ -96,6 +97,53 @@ test('explicit timeZone option is respected', () => {
 test('no time zone configured → untouched', () => {
   const w = makeWindow({ ...base });
   assert.equal(run(w, `new Date('2024-01-15T12:00:00Z').getTimezoneOffset()`), new Date('2024-01-15T12:00:00Z').getTimezoneOffset());
+});
+
+test('locale: navigator.language(s) follow the profile, only the primary language', () => {
+  const w = makeWindow({ ...base, locale: 'de-DE' });
+  assert.equal(run(w, `navigator.language`), 'de-DE');
+  assert.deepEqual(Array.from(run(w, `navigator.languages`)), ['de-DE']);
+  assert.equal(run(w, `Object.isFrozen(navigator.languages)`), true);
+  // Patched on the prototype, like the native accessor; no own property on the instance.
+  assert.equal(run(w, `Object.prototype.hasOwnProperty.call(navigator, 'language')`), false);
+});
+
+test('locale: Intl defaults and toLocale*String', () => {
+  const w = makeWindow({ ...base, locale: 'de-DE' });
+  assert.equal(run(w, `Intl.DateTimeFormat().resolvedOptions().locale`), 'de-DE');
+  assert.equal(run(w, `new Intl.NumberFormat().format(1234567.891)`), new Intl.NumberFormat('de-DE').format(1234567.891));
+  assert.equal(run(w, `(1234.5).toLocaleString()`), (1234.5).toLocaleString('de-DE'));
+  assert.equal(run(w, `new Date(Date.UTC(2024, 0, 15, 12)).toLocaleDateString(undefined, { timeZone: 'UTC' })`),
+               new Date(Date.UTC(2024, 0, 15, 12)).toLocaleDateString('de-DE', { timeZone: 'UTC' }));
+  assert.equal(run(w, `new Intl.PluralRules().resolvedOptions().locale`), new Intl.PluralRules('de-DE').resolvedOptions().locale);
+  assert.equal(run(w, `'a'.localeCompare('ä')`), 'a'.localeCompare('ä', 'de-DE'));
+  // Explicit locales still win.
+  assert.equal(run(w, `new Intl.NumberFormat('en-US').format(1234.5)`), '1,234.5');
+  assert.equal(run(w, `new Intl.NumberFormat() instanceof Intl.NumberFormat`), true);
+  assert.equal(run(w, `Intl.NumberFormat.name + Intl.NumberFormat.length`), 'NumberFormat0');
+});
+
+test('locale: constructors that require new still throw without it', () => {
+  const w = makeWindow({ ...base, locale: 'fr-FR' });
+  assert.throws(() => run(w, `Intl.PluralRules()`), (e) => e.name === 'TypeError'); // error from the vm realm
+  assert.equal(run(w, `Intl.Collator().resolvedOptions().locale`), new Intl.Collator('fr-FR').resolvedOptions().locale);
+});
+
+test('locale and time zone together', () => {
+  const w = makeWindow({ ...base, timeZone: 'Asia/Tokyo', locale: 'ja-JP' });
+  const opts = { dateStyle: 'medium', timeStyle: 'short' };
+  assert.equal(run(w, `new Date('2024-01-15T12:00:00Z').toLocaleString(undefined, ${JSON.stringify(opts)})`),
+               new Date('2024-01-15T12:00:00Z').toLocaleString('ja-JP', { ...opts, timeZone: 'Asia/Tokyo' }));
+  const resolved = run(w, `Intl.DateTimeFormat().resolvedOptions()`);
+  assert.equal(resolved.locale, 'ja-JP');
+  assert.equal(resolved.timeZone, 'Asia/Tokyo');
+});
+
+test('no locale configured → untouched', () => {
+  const w = makeWindow({ ...base });
+  assert.equal(run(w, `navigator.language`), 'en-US');
+  assert.equal(run(w, `Intl.NumberFormat`), run(w, `Intl.NumberFormat`));
+  assert.equal(run(w, `Intl.NumberFormat.toString().includes('native code')`), true);
 });
 
 test('geolocation deny', async () => {

@@ -2,27 +2,40 @@ import BrowserCore
 import Foundation
 import WebKit
 
-/// JavaScript shims for settings WebKit has no native per-web-view API for.
-/// Aggressive iOS-like spoofing: navigator, screen, canvas/WebGL, fonts, audio.
-/// Still best-effort and detectable; not engine-level.
+/// JavaScript shims for settings WebKit has no native per-web-view API for:
+/// time zone, language (locale), geolocation, and WebRTC.
+///
+/// Deliberately NOT here: spoofing of hardware or engine signals (screen, canvas, WebGL, fonts,
+/// audio, `navigator.platform`, touch). A page measures those from the real engine and GPU, so
+/// overriding a few of them only makes a profile inconsistent; every profile reports this Mac
+/// as it is. See docs/ISOLATION_AND_LIMITATIONS.md §2.
+///
+/// PLATFORM LIMITATION — these are approximations, not engine-level enforcement:
+///   * Injected as a `WKUserScript` at document start into every frame (`forMainFrameOnly: false`)
+///     in the `.page` content world, i.e. they modify the objects the page sees.
+///   * Not applied inside Web Workers, Shared Workers, or Service Workers: WebKit does not
+///     inject user scripts there. Worker code sees the host time zone and has `Intl`/`Date`
+///     unpatched (workers have no geolocation or RTCPeerConnection, so those are unaffected).
+///   * A page can detect the patches (e.g. `Function.prototype.toString` on patched functions,
+///     timing, or property descriptors). They reduce what passive scripts learn; they do not
+///     hide the fact that a shim exists.
+///   * Child browsing contexts that the page reaches via `contentWindow`/`contentDocument`
+///     or `window.open` are patched synchronously on access. Access paths that bypass those
+///     getters (e.g. `window.frames[0]`, `window[0]`) can reach an unpatched about:blank frame
+///     before WebKit injects scripts into it.
+///   * Locale: `navigator.language(s)` and the default locale of `Intl` / `toLocale*String` follow
+///     the profile. The HTTP `Accept-Language` header does not: WebKit takes it from the app
+///     process's languages and WKWebView has no public per-view or per-store override.
 enum PrivacyScripts {
     struct ShimConfiguration: Encodable {
         var timeZone: String?
+        /// BCP 47, e.g. "de-DE"; nil leaves the Mac's language.
+        var locale: String?
         var geolocation: Geolocation
         var webRTC: String
-        var platform: String
-        var vendor: String
-        var hardwareConcurrency: Int
-        var deviceMemory: Double
-        var maxTouchPoints: Int
-        var languages: [String]
-        var screenWidth: Int
-        var screenHeight: Int
-        var devicePixelRatio: Double
-        var isIOS: Bool
 
         struct Geolocation: Encodable {
-            var mode: String
+            var mode: String // "deny" | "fixed"
             var latitude: Double?
             var longitude: Double?
             var accuracy: Double?
@@ -30,8 +43,6 @@ enum PrivacyScripts {
     }
 
     static func shimConfiguration(for configuration: ProfileConfiguration) -> ShimConfiguration {
-        let gen = configuration.deviceGeneration
-        let isIOS = gen.platform == .iOS || gen.platform == .iPadOS
         let geolocation: ShimConfiguration.Geolocation
         switch configuration.geolocation {
         case .deny:
@@ -39,21 +50,8 @@ enum PrivacyScripts {
         case let .fixed(latitude, longitude, accuracy):
             geolocation = .init(mode: "fixed", latitude: latitude, longitude: longitude, accuracy: accuracy)
         }
-        return ShimConfiguration(
-            timeZone: configuration.timeZoneIdentifier,
-            geolocation: geolocation,
-            webRTC: configuration.webRTCPolicy.rawValue,
-            platform: isIOS ? "iPhone" : "MacIntel",
-            vendor: "Apple Computer, Inc.",
-            hardwareConcurrency: isIOS ? 6 : 8,
-            deviceMemory: isIOS ? 4 : 8,
-            maxTouchPoints: isIOS ? 5 : 0,
-            languages: ["en-US", "en"],
-            screenWidth: isIOS ? 390 : 1440,
-            screenHeight: isIOS ? 844 : 900,
-            devicePixelRatio: isIOS ? 3 : 2,
-            isIOS: isIOS
-        )
+        return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, locale: configuration.locale,
+                                 geolocation: geolocation, webRTC: configuration.webRTCPolicy.rawValue)
     }
 
     static func makeUserContentController(for configuration: ProfileConfiguration) -> WKUserContentController {
@@ -66,10 +64,13 @@ enum PrivacyScripts {
     }
 
     static func source(for configuration: ProfileConfiguration) -> String {
+        // JSON is a subset of JS, so the encoded configuration is a safe literal: no string
+        // concatenation of user-provided values into code.
         let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration)), encoding: .utf8)) ?? "{}"
         return "(function (CONFIG) {\n" + shimBody + "\n})(" + json + ");"
     }
 
+    // BEGIN SHIM (extracted by scripts/test-shims.sh for testing under Node)
     static let shimBody = #"""
 'use strict';
 const patched = new WeakSet();
@@ -77,100 +78,19 @@ const patched = new WeakSet();
 function patchWindow(w) {
   if (!w || patched.has(w)) return;
   patched.add(w);
-  try { patchNavigator(w); } catch (e) {}
-  try { patchScreen(w); } catch (e) {}
-  if (CONFIG.isIOS) {
-    try { patchCanvasWebGL(w); } catch (e) {}
-    try { patchFonts(w); } catch (e) {}
-    try { patchAudio(w); } catch (e) {}
-  }
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
+  // After the time zone: its Intl.DateTimeFormat and toLocale*String wrappers get wrapped again.
+  if (CONFIG.locale) { try { patchLocale(w, CONFIG.locale); } catch (e) {} }
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
   try { patchWebRTC(w, CONFIG.webRTC || 'disabled'); } catch (e) {}
   try { hookChildWindows(w); } catch (e) {}
 }
 
-function patchNavigator(w) {
-  const nav = w.navigator;
-  if (!nav) return;
-  const define = (obj, prop, val) => Object.defineProperty(obj, prop, { value: val, writable: false, configurable: false });
-  define(nav, 'platform', CONFIG.platform);
-  define(nav, 'vendor', CONFIG.vendor);
-  define(nav, 'hardwareConcurrency', CONFIG.hardwareConcurrency);
-  define(nav, 'deviceMemory', CONFIG.deviceMemory);
-  define(nav, 'maxTouchPoints', CONFIG.maxTouchPoints);
-  define(nav, 'languages', Object.freeze(CONFIG.languages.slice()));
-  define(nav, 'language', CONFIG.languages[0]);
-  if (CONFIG.isIOS) {
-    define(nav, 'standalone', false);
-  }
-}
-
-function patchScreen(w) {
-  const s = w.screen;
-  if (!s) return;
-  Object.defineProperty(s, 'width', { value: CONFIG.screenWidth, writable: false });
-  Object.defineProperty(s, 'height', { value: CONFIG.screenHeight, writable: false });
-  Object.defineProperty(s, 'availWidth', { value: CONFIG.screenWidth, writable: false });
-  Object.defineProperty(s, 'availHeight', { value: CONFIG.screenHeight, writable: false });
-  Object.defineProperty(w, 'devicePixelRatio', { value: CONFIG.devicePixelRatio, writable: false });
-}
-
-function patchCanvasWebGL(w) {
-  const proto = w.HTMLCanvasElement && w.HTMLCanvasElement.prototype;
-  if (proto && proto.getContext) {
-    const orig = proto.getContext;
-    proto.getContext = function (type, attrs) {
-      const ctx = orig.apply(this, arguments);
-      if (type === '2d' && ctx) {
-        const origToData = ctx.getImageData;
-        ctx.getImageData = function () {
-          const data = origToData.apply(this, arguments);
-          for (let i = 0; i < data.data.length; i += 4) data.data[i] = (data.data[i] + 1) & 255;
-          return data;
-        };
-      }
-      return ctx;
-    };
-  }
-  if (w.WebGLRenderingContext) {
-    const getParam = w.WebGLRenderingContext.prototype.getParameter;
-    w.WebGLRenderingContext.prototype.getParameter = function (p) {
-      if (p === 37445) return 'Apple Inc.';
-      if (p === 37446) return 'Apple GPU';
-      return getParam.apply(this, arguments);
-    };
-  }
-}
-
-function patchFonts(w) {
-  // Crude font list reduction for iOS-like (system fonts only)
-  if (w.document && w.document.fonts) {
-    try {
-      Object.defineProperty(w.document.fonts, 'size', { value: 12, writable: false });
-    } catch (e) {}
-  }
-}
-
-function patchAudio(w) {
-  if (!w.AudioContext && !w.webkitAudioContext) return;
-  const AC = w.AudioContext || w.webkitAudioContext;
-  const orig = AC.prototype.getChannelData || AC.prototype.createAnalyser;
-  // Minimal noise on analyser if present
-  if (AC.prototype.createAnalyser) {
-    const origCreate = AC.prototype.createAnalyser;
-    AC.prototype.createAnalyser = function () {
-      const analyser = origCreate.apply(this, arguments);
-      const origGet = analyser.getFloatFrequencyData;
-      analyser.getFloatFrequencyData = function (array) {
-        origGet.apply(this, arguments);
-        for (let i = 0; i < array.length; i++) array[i] += (Math.random() - 0.5) * 0.0001;
-      };
-      return analyser;
-    };
-  }
-}
-
+// ---------------------------------------------------------------- time zone
+// Covers: Intl.DateTimeFormat default zone (and everything built on it), Date local-time
+// getters, getTimezoneOffset, toString/toDateString/toTimeString, toLocale*String.
+// Not covered: Date constructed from local components (new Date(y, m, d)), Date.parse of
+// strings without an offset, and local setters (setHours, …) — these still use the host zone.
 function patchTimeZone(w, TZ) {
   const NativeDate = w.Date;
   const proto = NativeDate.prototype;
@@ -185,8 +105,9 @@ function patchTimeZone(w, TZ) {
   const nameFormatter = new NativeDTF('en-US', { timeZone: TZ, timeZoneName: 'long' });
   const offsetCache = new Map();
 
+  // Minutes such that UTC = local + offset (same sign convention as getTimezoneOffset).
   function offsetFor(t) {
-    const bucket = Math.floor(t / 900000);
+    const bucket = Math.floor(t / 900000); // DST transitions fall on 15-minute boundaries
     if (offsetCache.has(bucket)) return offsetCache.get(bucket);
     const p = {};
     for (const part of partsFormatter.formatToParts(new NativeDate(t))) p[part.type] = part.value;
@@ -273,6 +194,61 @@ function patchTimeZone(w, TZ) {
   define(w.Intl, 'DateTimeFormat', DateTimeFormat);
 }
 
+// ------------------------------------------------------------------- locale
+// navigator.language / navigator.languages, and the locale Intl and toLocale*String use when the
+// page passes none. Like Safari, navigator.languages holds only the primary language (WebKit:
+// "We intentionally expose only the primary language for privacy reasons").
+// Not covered: the Accept-Language header, workers, and the language of form controls and
+// built-in UI (date pickers), which follow the app.
+function patchLocale(w, LOCALE) {
+  const nav = w.navigator;
+  if (nav) {
+    const list = Object.freeze([LOCALE]);
+    // The accessors live on Navigator.prototype in browsers; fall back to the object itself.
+    let owner = nav;
+    for (let p = nav; p && p !== Object.prototype; p = Object.getPrototypeOf(p)) {
+      if (Object.prototype.hasOwnProperty.call(p, 'language')) { owner = p; break; }
+    }
+    defineGetter(owner, 'language', function () { return LOCALE; });
+    defineGetter(owner, 'languages', function () { return list; });
+  }
+
+  const fill = (locales) => (locales === undefined ? LOCALE : locales);
+  const Intl = w.Intl;
+  // Constructors that may be called without `new` (legacy Intl); the others throw then, as natively.
+  const callable = ['DateTimeFormat', 'NumberFormat', 'Collator'];
+  for (const name of ['DateTimeFormat', 'NumberFormat', 'Collator', 'PluralRules', 'RelativeTimeFormat',
+                      'ListFormat', 'DisplayNames', 'Segmenter', 'DurationFormat']) {
+    const Native = Intl[name];
+    if (typeof Native !== 'function') continue;
+    const mayCall = callable.includes(name);
+    const Wrapped = function (locales, options) {
+      if (!new.target && !mayCall) return Native(locales, options); // throws the native TypeError
+      return Reflect.construct(Native, [fill(locales), options], new.target || Wrapped);
+    };
+    Wrapped.prototype = Native.prototype;
+    Object.defineProperty(Wrapped, 'name', { value: name, configurable: true });
+    Object.defineProperty(Wrapped, 'length', { value: 0, configurable: true });
+    if (Native.supportedLocalesOf) define(Wrapped, 'supportedLocalesOf', Native.supportedLocalesOf);
+    define(Native.prototype, 'constructor', Wrapped);
+    define(Intl, name, Wrapped);
+  }
+
+  const wrapLocales = (proto, name) => {
+    const original = proto && proto[name];
+    if (typeof original !== 'function') return;
+    define(proto, name, function (locales, options) { return original.call(this, fill(locales), options); });
+  };
+  for (const name of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString']) wrapLocales(w.Date.prototype, name);
+  wrapLocales(w.Number.prototype, 'toLocaleString');
+  if (w.BigInt) wrapLocales(w.BigInt.prototype, 'toLocaleString');
+  const nativeCompare = w.String.prototype.localeCompare;
+  define(w.String.prototype, 'localeCompare', function (that, locales, options) {
+    return nativeCompare.call(this, that, fill(locales), options);
+  });
+}
+
+// -------------------------------------------------------------- geolocation
 function patchGeolocation(w, geo) {
   const nav = w.navigator;
   if (!nav || !nav.geolocation) return;
@@ -317,6 +293,7 @@ function patchGeolocation(w, geo) {
   }
 }
 
+// ------------------------------------------------------------------- WebRTC
 function patchWebRTC(w, policy) {
   if (policy === 'unrestricted') return;
   const names = ['RTCPeerConnection', 'webkitRTCPeerConnection'];
@@ -328,6 +305,7 @@ function patchWebRTC(w, policy) {
     }
     return;
   }
+  // relayOnly: no host / server-reflexive candidates are gathered.
   const Native = w.RTCPeerConnection;
   if (!Native) return;
   const forceRelay = (config) => Object.assign({}, config, { iceTransportPolicy: 'relay' });
@@ -346,6 +324,7 @@ function patchWebRTC(w, policy) {
   }
 }
 
+// ----------------------------------------------------------- child windows
 function hookChildWindows(w) {
   const hook = (Ctor, prop, toWindow) => {
     if (!Ctor) return;
@@ -355,7 +334,7 @@ function hookChildWindows(w) {
       configurable: true, enumerable: descriptor.enumerable,
       get: function () {
         const value = descriptor.get.call(this);
-        try { patchWindow(toWindow(value)); } catch (e) {}
+        try { patchWindow(toWindow(value)); } catch (e) {} // cross-origin: inaccessible, and gets its own injection
         return value;
       }
     });
@@ -378,6 +357,11 @@ function define(target, name, value) {
   Object.defineProperty(target, name, { value: value, writable: true, configurable: true, enumerable: false });
 }
 
+function defineGetter(target, name, getter) {
+  Object.defineProperty(target, name, { get: getter, configurable: true, enumerable: true });
+}
+
 patchWindow(window);
 """#
+    // END SHIM
 }

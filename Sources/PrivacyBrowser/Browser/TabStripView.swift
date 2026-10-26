@@ -31,13 +31,13 @@ final class TabStripView: NSView {
     private let buttonWidth: CGFloat = 30
 
     override init(frame frameRect: NSRect) {
-        newTabButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "New Tab") ?? NSImage(),
+        newTabButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: L("browser.newTab")) ?? NSImage(),
                                 target: nil, action: nil)
         super.init(frame: frameRect)
         newTabButton.target = self
         newTabButton.action = #selector(newTab)
         newTabButton.isBordered = false
-        newTabButton.toolTip = "New Tab (⌘T)"
+        newTabButton.toolTip = L("browser.newTab.help")
         addSubview(newTabButton)
         separator.boxType = .separator
         addSubview(separator)
@@ -114,7 +114,7 @@ final class TabItemView: NSView {
     private var isHovered = false
 
     init() {
-        closeButton = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close Tab") ?? NSImage(),
+        closeButton = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: L("browser.closeTab")) ?? NSImage(),
                                target: nil, action: nil)
         super.init(frame: .zero)
         wantsLayer = true
@@ -125,7 +125,7 @@ final class TabItemView: NSView {
         closeButton.imageScaling = .scaleProportionallyDown
         closeButton.target = self
         closeButton.action = #selector(close)
-        closeButton.toolTip = "Close Tab (⌘W)"
+        closeButton.toolTip = L("browser.closeTab.help")
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false

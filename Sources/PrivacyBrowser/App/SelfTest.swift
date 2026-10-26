@@ -11,8 +11,12 @@ import WebKit
 ///   * that cookies, localStorage and IndexedDB survive seal → restore,
 ///   * that two running profiles do not see each other's data,
 ///   * that the JavaScript shims behave under JavaScriptCore,
-///   * per-profile proxies (HTTP CONNECT, SOCKS5 with remote DNS) and fail-closed behaviour,
-///   * the tab model with history recording and bookmarks.
+///   * per-profile proxies (HTTP CONNECT, SOCKS5 with remote DNS), fail-closed behaviour, the
+///     proxy check and the error page for a broken proxy,
+///   * the tab model with history recording and bookmarks, and saved/restored tabs,
+///   * user agent modes and the per-profile language,
+///   * cookie import/export through WebKit's cookie store,
+///   * profile duplication and export → import of a profile with its website data.
 ///
 /// Proxy checks need `scripts/selftest_proxy.py` and the env vars
 /// `PB_SELFTEST_HTTP_PROXY_PORT` / `PB_SELFTEST_SOCKS_PROXY_PORT`; they are skipped otherwise.
@@ -99,10 +103,13 @@ final class SelfTest {
         do {
             let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
             try await storageIsolationAndShims(repository)
-            try await deviceGenerations(repository)
+            try await userAgentModesAndLocale(repository)
+            try await cookieTransfer(repository)
+            try await duplicateAndBackup(repository)
             try await recoverySealing(repository)
             try await proxies(repository)
             try await tabsAndLibrary(repository)
+            try await sessionRestore(repository)
             try await windowLifecycle(repository)
         } catch {
             check("self-test ran without unexpected errors", false, String(describing: error))
@@ -129,12 +136,16 @@ final class SelfTest {
 
     private func storageIsolationAndShims(_ repository: ProfileRepository) async throws {
         let vault = WebDataStoreVault(repository: repository)
-        let a = try repository.create(name: "SelfTest A", configuration: ProfileConfiguration(
-            userAgent: "PrivacyBrowserSelfTest/1.0",
-            geolocation: .fixed(latitude: 48.8566, longitude: 2.3522, accuracyMeters: 25),
-            timeZoneIdentifier: "Asia/Tokyo",
-            webRTCPolicy: .disabled))
-        let b = try repository.create(name: "SelfTest B", configuration: ProfileConfiguration(webRTCPolicy: .relayOnly))
+        var configA = ProfileConfiguration()
+        configA.userAgentMode = .custom
+        configA.userAgent = "PrivacyBrowserSelfTest/1.0"
+        configA.geolocation = .fixed(latitude: 48.8566, longitude: 2.3522, accuracyMeters: 25)
+        configA.timeZoneIdentifier = "Asia/Tokyo"
+        configA.webRTCPolicy = .disabled
+        let a = try repository.create(name: "SelfTest A", configuration: configA)
+        var configB = ProfileConfiguration()
+        configB.webRTCPolicy = .relayOnly
+        let b = try repository.create(name: "SelfTest B", configuration: configB)
         do {
             try await storageChecks(repository, vault: vault, a: a.id, b: b.id)
         } catch {
@@ -298,6 +309,40 @@ final class SelfTest {
         let direct = try await loadThroughProxy(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9),
                                                 url: URL(string: "http://example.com/")!)
         check("proxy: fail-closed when the proxy is unreachable", direct == nil, "page loaded: \(direct ?? "")")
+
+        // The proxy check: a closed port is reported as a proxy problem, a working proxy as working.
+        let broken = ProxySettings(kind: .socks5, host: "127.0.0.1", port: 9)
+        let brokenStatus = await ProxyChecker.check(broken, timeout: 8)
+        if case .failed(let message) = brokenStatus {
+            check("proxy check: unreachable proxy is a proxy problem", message.kind == .proxy, message.technical)
+        } else {
+            check("proxy check: unreachable proxy is a proxy problem", false, ProxyStatusCenter.describe(brokenStatus))
+        }
+        let working = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort),
+                                               probe: URL(string: "http://proxied.selftest.invalid/probe")!, timeout: 8)
+        if case .working = working {
+            check("proxy check: working proxy answers", true)
+        } else {
+            check("proxy check: working proxy answers", false, ProxyStatusCenter.describe(working))
+        }
+
+        // A tab of a profile whose proxy is down: friendly error page, proxy status failed, no crash.
+        let profile = try repository.create(name: "Broken proxy", configuration: ProfileConfiguration(proxy: broken, ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let center = ProxyStatusCenter()
+        session.onLoadFailed = { center.reportLoadFailed(profile.id, message: $0) }
+        let controller = BrowserWindowController(session: session) // never shown
+        controller.addTab(url: URL(string: "https://example.com/")!)
+        let failed = await waitUntil(timeout: 20) { controller.selectedTab?.failedURL != nil }
+        check("broken proxy: error page instead of the site", failed,
+              controller.selectedTab?.url?.absoluteString ?? "nil")
+        check("broken proxy: address bar keeps the address", controller.selectedTab?.url?.host == "example.com")
+        check("broken proxy: status is failed", center.status(for: profile.id, hasProxy: true).isFailure,
+              ProxyStatusCenter.describe(center.status(for: profile.id, hasProxy: true)))
+        let pageText = try await js(controller.selectedTab!.webView, "return document.body ? document.body.innerText : '';") as? String ?? ""
+        check("broken proxy: error page explains it with a retry link", pageText.contains(L("errorpage.retry")), pageText)
+        controller.close()
     }
 
     /// Loads `url` in an ephemeral profile using `proxy`. Returns the page text, or nil if the load failed.
@@ -363,34 +408,147 @@ final class SelfTest {
         controller.close()
     }
 
-    // MARK: Device generations (version-aware UA reaches the page)
+    // MARK: User agent modes and language
 
-    /// A profile tagged with a device generation must apply that generation's self-declared
-    /// User-Agent to `navigator.userAgent` through the normal session → tab wiring, and an
-    /// explicit custom UA must still win.
-    private func deviceGenerations(_ repository: ProfileRepository) async throws {
-        func userAgent(for configuration: ProfileConfiguration) async throws -> String? {
-            let profile = try repository.create(name: "Gen \(UUID().uuidString.prefix(4))", configuration: configuration)
+    /// The user agent mode and the language reach the page through the normal session → tab
+    /// wiring: Safari for Mac = WebKit's UA plus Safari's "Version/x Safari/605.1.15"; iPhone =
+    /// the iPhone UA string; custom = exactly the string; locale = navigator.language and Intl.
+    private func userAgentModesAndLocale(_ repository: ProfileRepository) async throws {
+        func probe(_ configuration: ProfileConfiguration, _ script: String) async throws -> Any? {
+            let profile = try repository.create(name: "UA \(UUID().uuidString.prefix(4))", configuration: configuration)
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
             defer { session.shutDown() }
             let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            defer { tab.tearDown() }
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
-            return try await js(tab.webView, "return navigator.userAgent;") as? String
+            return try await js(tab.webView, script)
         }
+        var config = ProfileConfiguration(ephemeral: true)
 
-        let iosUA = try await userAgent(for: .forGeneration(DeviceGenerations.resolved(id: "ios-26")))
-        check("generation: iOS 26 UA reaches navigator.userAgent",
-              iosUA?.contains("iPhone OS 26") == true, iosUA ?? "nil")
+        let macUA = try await probe(config, "return navigator.userAgent;") as? String
+        info("Safari version used for the UA: \(SafariInfo.version.string)")
+        check("ua: Safari for Mac sends Safari's UA",
+              macUA?.contains("Macintosh") == true && macUA?.hasSuffix("Version/\(SafariInfo.version.uaVersionToken) Safari/605.1.15") == true,
+              macUA ?? "nil")
 
-        let macUA = try await userAgent(for: .forGeneration(DeviceGenerations.resolved(id: DeviceGenerations.defaultID)))
-        check("generation: default macOS UA reaches navigator.userAgent",
-              macUA?.contains("Macintosh") == true, macUA ?? "nil")
+        config.userAgentMode = .iPhone
+        let phoneUA = try await probe(config, "return navigator.userAgent;") as? String
+        check("ua: iPhone mode sends an iPhone UA", phoneUA?.contains("iPhone") == true, phoneUA ?? "nil")
 
-        var override = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: "ios-27"))
-        override.userAgent = "PrivacyBrowserSelfTest/UA-Override"
-        let overrideUA = try await userAgent(for: override)
-        check("generation: explicit user agent overrides the generation",
-              overrideUA == "PrivacyBrowserSelfTest/UA-Override", overrideUA ?? "nil")
+        config.userAgentMode = .custom
+        config.userAgent = "PrivacyBrowserSelfTest/UA-Custom"
+        let customUA = try await probe(config, "return navigator.userAgent;") as? String
+        check("ua: custom string is sent as is", customUA == "PrivacyBrowserSelfTest/UA-Custom", customUA ?? "nil")
+
+        var german = ProfileConfiguration(ephemeral: true)
+        german.locale = "de-DE"
+        let language = try await probe(german, "return [navigator.language, navigator.languages.join(','), Intl.NumberFormat().resolvedOptions().locale, (1234.5).toLocaleString()].join('|');") as? String
+        let parts = language?.split(separator: "|").map(String.init) ?? []
+        check("locale: navigator.language follows the profile", parts.first == "de-DE", language ?? "nil")
+        check("locale: navigator.languages holds only the primary language", parts.count > 1 && parts[1] == "de-DE", language ?? "nil")
+        check("locale: Intl and toLocaleString use it", parts.count > 3 && parts[2].hasPrefix("de") && parts[3] == "1.234,5",
+              language ?? "nil")
+    }
+
+    // MARK: Cookie import / export
+
+    private func cookieTransfer(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Cookies", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let expiry = Int(Date().addingTimeInterval(86_400).timeIntervalSince1970)
+        let netscape = """
+            # Netscape HTTP Cookie File
+            .selftest.invalid\tTRUE\t/\tTRUE\t\(expiry)\tpb_visible\tv1
+            #HttpOnly_selftest.invalid\tFALSE\t/\tTRUE\t\(expiry)\tpb_http_only\tv2
+            selftest.invalid\tFALSE\t/\tTRUE\t1000\tpb_expired\tv3
+            this line is not a cookie
+            """
+        guard let store = session.dataStore?.httpCookieStore else { throw CoreError.io("no data store") }
+        let result = try await CookieService.importCookies(Data(netscape.utf8), into: store)
+        check("cookies: import counts", result.imported == 2 && result.skipped == 2,
+              "imported=\(result.imported) skipped=\(result.skipped)")
+        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+        defer { tab.tearDown() }
+        try await PageLoader.load(tab.webView, html: page, baseURL: origin)
+        let visible = try await js(tab.webView, "return document.cookie;") as? String ?? ""
+        check("cookies: imported cookie reaches the page", visible.contains("pb_visible=v1"), visible)
+        check("cookies: HttpOnly stays hidden from scripts", !visible.contains("pb_http_only"), visible)
+        let stored = await cookies(in: session.dataStore!)
+        check("cookies: HttpOnly cookie is in the store", stored.contains { $0.name == "pb_http_only" && $0.isHTTPOnly },
+              stored.map(\.name).joined(separator: ","))
+
+        let (json, count) = try await CookieService.exportCookies(from: store, format: .json)
+        let reparsed = try CookieTransfer.parse(json)
+        check("cookies: JSON export round-trips", count >= 2 && Set(reparsed.cookies.map(\.name)).isSuperset(of: ["pb_visible", "pb_http_only"]),
+              "count=\(count)")
+        let (text, _) = try await CookieService.exportCookies(from: store, format: .netscape)
+        check("cookies: Netscape export keeps HttpOnly", String(decoding: text, as: UTF8.self).contains("#HttpOnly_"))
+
+        let other = try repository.create(name: "Cookies B", configuration: ProfileConfiguration(ephemeral: true))
+        let otherSession = try makeSession(repository, other.id, key: repository.profileKey(for: other.id))
+        defer { otherSession.shutDown() }
+        let otherCookies = await cookies(in: otherSession.dataStore!)
+        check("cookies: import stays in its profile", !otherCookies.contains { $0.name.hasPrefix("pb_") })
+    }
+
+    // MARK: Duplicate and export / import of a profile
+
+    private func duplicateAndBackup(_ repository: ProfileRepository) async throws {
+        let vault = WebDataStoreVault(repository: repository)
+        var config = ProfileConfiguration()
+        config.locale = "fr-FR"
+        let source = try repository.create(name: "Backup source", configuration: config)
+        let key = try repository.profileKey(for: source.id)
+        let token = UUID().uuidString
+        var cleanup = [source.id]
+        defer { for id in cleanup { Task { @MainActor in await vault.deleteData(profileID: id) } } }
+
+        // Run the source once, store a value, stop and seal it.
+        try await vault.prepareForLaunch(profileID: source.id, key: key)
+        var session: BrowserSession? = try makeSession(repository, source.id, key: key)
+        var web: WKWebView? = WKWebView(frame: .zero, configuration: session!.makeWebViewConfiguration())
+        try await PageLoader.load(web!, html: page, baseURL: origin)
+        _ = try await js(web!, "localStorage.setItem('pb', token); return true;", ["token": token])
+        web = nil
+        session?.shutDown()
+        session = nil
+        try await vault.seal(profileID: source.id, key: key)
+
+        // Duplicate: same settings, nothing of the data.
+        let copy = try repository.duplicate(source.id, name: "Backup copy")
+        cleanup.append(copy.id)
+        let copyKey = try repository.profileKey(for: copy.id)
+        check("duplicate: same settings", try repository.loadConfiguration(copy.id).locale == "fr-FR")
+        try await vault.prepareForLaunch(profileID: copy.id, key: copyKey)
+        let copySession = try makeSession(repository, copy.id, key: copyKey)
+        let copyWeb = WKWebView(frame: .zero, configuration: copySession.makeWebViewConfiguration())
+        try await PageLoader.load(copyWeb, html: page, baseURL: origin)
+        let copyValue = try await js(copyWeb, "return localStorage.getItem('pb') ?? 'null';") as? String
+        check("duplicate: starts with empty site data", copyValue == "null", copyValue ?? "nil")
+        copySession.shutDown()
+        try await vault.seal(profileID: copy.id, key: copyKey)
+
+        // Export → import as a copy (new id, re-encrypted, WebKit data relabelled) → data is there.
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-\(UUID().uuidString).pbbackup")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try ProfileBackup.export(profile: source.id, from: repository, to: file, password: "backup-pass", iterations: 10_000)
+        let exported = (try? Data(contentsOf: file)) ?? Data()
+        check("backup: file does not contain the token in plaintext", exported.count > 64 && exported.range(of: Data(token.utf8)) == nil)
+        let restored = try ProfileBackup.restore(from: file, password: "backup-pass", into: repository, mode: .copy)
+        cleanup.append(restored.id)
+        check("backup: restored as a new profile", restored.id != source.id)
+        let restoredKey = try repository.profileKey(for: restored.id)
+        try await vault.prepareForLaunch(profileID: restored.id, key: restoredKey)
+        let restoredSession = try makeSession(repository, restored.id, key: restoredKey)
+        let restoredWeb = WKWebView(frame: .zero, configuration: restoredSession.makeWebViewConfiguration())
+        try await PageLoader.load(restoredWeb, html: page, baseURL: origin)
+        let restoredValue = try await js(restoredWeb, "return localStorage.getItem('pb') ?? 'null';") as? String
+        check("backup: site data restored into the imported profile", restoredValue == token, restoredValue ?? "nil")
+        restoredSession.shutDown()
+        try await vault.seal(profileID: restored.id, key: restoredKey)
+        let wrong = (try? ProfileBackup.restore(from: file, password: "wrong", into: repository, mode: .copy)) == nil
+        check("backup: wrong password is refused", wrong)
     }
 
     // MARK: Crash recovery sealing (regression for the post-unlock crash)
@@ -432,6 +590,53 @@ final class SelfTest {
         let restored = try await js(web2, "return localStorage.getItem('pb') ?? 'null';") as? String
         check("recovery: data restored after recovery seal", restored == token, restored ?? "nil")
         session2.shutDown()
+    }
+
+    // MARK: Saved tabs
+
+    /// Open tabs are saved (encrypted) when the profile stops and come back on the next launch;
+    /// only the selected tab loads right away.
+    private func sessionRestore(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("saved-tabs checks skipped (need the self-test proxy to serve pages)")
+            return
+        }
+        let vault = WebDataStoreVault(repository: repository)
+        let profile = try repository.create(name: "Saved tabs", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)))
+        let key = try repository.profileKey(for: profile.id)
+        defer { Task { @MainActor in await vault.deleteData(profileID: profile.id) } }
+        let one = URL(string: "http://proxied.selftest.invalid/saved-one")!
+        let two = URL(string: "http://proxied.selftest.invalid/saved-two")!
+
+        try await vault.prepareForLaunch(profileID: profile.id, key: key)
+        let session = try makeSession(repository, profile.id, key: key)
+        let controller = session.openWindow(url: one)
+        controller.addTab(url: two)
+        let loaded = await waitUntil(timeout: 20) { controller.tabs.allSatisfy { !$0.isLoading && $0.webView.url != nil } }
+        check("saved tabs: two tabs loaded", loaded && controller.tabCount == 2)
+        session.shutDown()
+        try await vault.seal(profileID: profile.id, key: key)
+
+        let saved = try repository.sessionStore(for: profile.id, key: key).load()
+        check("saved tabs: state written on stop", saved?.windows.first?.tabs.map(\.url) == [one.absoluteString, two.absoluteString],
+              String(describing: saved?.windows.first?.tabs.map(\.url)))
+        check("saved tabs: selected tab remembered", saved?.windows.first?.selectedIndex == 1)
+        let sessionFile = repository.directory(for: profile.id).appendingPathComponent("session.bin")
+        let raw = (try? Data(contentsOf: sessionFile)) ?? Data()
+        check("saved tabs: encrypted on disk", raw.count > 16 && raw.range(of: Data("saved-one".utf8)) == nil, "\(raw.count) bytes")
+
+        try await vault.prepareForLaunch(profileID: profile.id, key: key)
+        let again = try makeSession(repository, profile.id, key: key)
+        defer { again.shutDown() }
+        let restored = saved.map { again.restore($0) } ?? false
+        let window = again.frontmostWindow
+        check("saved tabs: restored on launch", restored && window?.tabCount == 2, "\(window?.tabCount ?? 0) tabs")
+        check("saved tabs: selected tab restored", window?.selectedTab?.url == two)
+        check("saved tabs: background tab waits until shown", window?.tabs.first?.webView.url == nil && window?.tabs.first?.url == one)
+        _ = await waitUntil(timeout: 20) { window?.selectedTab?.isLoading == false }
+        again.shutDown()
+        try await vault.seal(profileID: profile.id, key: key)
     }
 
     // MARK: Window lifecycle (regression test for the close/quit crash)
@@ -476,7 +681,8 @@ final class SelfTest {
             bookmarks: try repository.bookmarkStore(for: id, key: key),
             recordsHistory: configuration.historyEnabled)
         return BrowserSession(profileID: id, profileName: try repository.summary(for: id).name, configuration: configuration,
-                              passwordVault: try repository.passwordVault(for: id), library: library)
+                              passwordVault: try repository.passwordVault(for: id), library: library,
+                              sessionStore: try repository.sessionStore(for: id, key: key, persistent: !configuration.ephemeral))
     }
 
     private func js(_ webView: WKWebView, _ body: String, _ arguments: [String: Any] = [:]) async throws -> Any? {

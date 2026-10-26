@@ -1,28 +1,42 @@
 import AppKit
+import BrowserCore
 import SwiftUI
 
 /// Started from `main.swift` (which also dispatches `--self-test`).
 struct PrivacyBrowserApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
+    @ObservedObject private var preferences = AppPreferences.shared
 
     var body: some Scene {
         Window(L("window.profiles.title"), id: "profiles") {
-            RootView()
+            RootView(preferences: preferences)
                 .environmentObject(model)
-                // Clean light theme by default (see docs); the browser content itself follows the site.
-                .preferredColorScheme(.light)
+                .preferredColorScheme(preferences.appearance.colorScheme)
                 .background(WindowReader { window in
                     appDelegate.model = model
                     model.profilesWindow = window
                 })
         }
+        .defaultSize(width: 980, height: 640)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button(L("menu.newTab")) { keyBrowserWindow?.newTab() }
                     .keyboardShortcut("t")
                 Button(L("menu.reopenClosedTab")) { keyBrowserWindow?.reopenClosedTab() }
                     .keyboardShortcut("t", modifiers: [.command, .shift])
+                Divider()
+                Button(L("profiles.action.new")) {
+                    model.activateProfilesWindow()
+                    model.sheet = .newProfile
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(model.phase != .unlocked)
+                Button(L("profiles.action.importProfile")) {
+                    model.activateProfilesWindow()
+                    ProfileActions.importProfile(model)
+                }
+                .disabled(model.phase != .unlocked)
             }
             CommandMenu(L("menu.browser")) {
                 Button(L("menu.openLocation")) { keyBrowserWindow?.focusAddressBar() }
@@ -45,6 +59,26 @@ struct PrivacyBrowserApp: App {
                     .keyboardShortcut(KeyEquivalent(Character("\(number)")))
                 }
             }
+            CommandMenu(L("menu.profile")) {
+                Button(L("menu.showDownloads")) { keyBrowserWindow?.showDownloadsFromMenu() }
+                    .keyboardShortcut("l", modifiers: [.command, .option])
+                Button(L("proxy.check")) {
+                    if let id = model.manager?.keyWindowProfileID { Task { await model.checkProxy(id) } }
+                }
+                Divider()
+                Button(L("profiles.row.importCookies")) {
+                    if let id = model.manager?.keyWindowProfileID { ProfileActions.importCookies(model, id) }
+                }
+                Button(L("menu.exportCookiesNetscape")) {
+                    if let id = model.manager?.keyWindowProfileID { ProfileActions.exportCookies(model, id, format: .netscape) }
+                }
+                Button(L("menu.exportCookiesJSON")) {
+                    if let id = model.manager?.keyWindowProfileID { ProfileActions.exportCookies(model, id, format: .json) }
+                }
+                Divider()
+                Button(L("menu.showProfiles")) { model.activateProfilesWindow() }
+                    .keyboardShortcut("0", modifiers: [.command, .shift])
+            }
             CommandMenu(L("menu.bookmarks")) {
                 Button(L("menu.bookmarkThisPage")) { keyBrowserWindow?.toggleBookmark() }
                     .keyboardShortcut("d")
@@ -53,12 +87,37 @@ struct PrivacyBrowserApp: App {
                 Button(L("menu.showHistory")) { keyBrowserWindow?.showHistory() }
                     .keyboardShortcut("y")
             }
+            CommandGroup(replacing: .help) {
+                ShowLogButton()
+            }
+        }
+
+        Window(L("window.log.title"), id: "log") {
+            LogView()
+                .frame(minWidth: 560, minHeight: 360)
+                .preferredColorScheme(preferences.appearance.colorScheme)
+        }
+        .defaultSize(width: 720, height: 480)
+
+        Settings {
+            SettingsView(preferences: preferences)
+                .environmentObject(model)
+                .preferredColorScheme(preferences.appearance.colorScheme)
         }
     }
 
     @MainActor
     private var keyBrowserWindow: BrowserWindowController? {
         NSApp.keyWindow?.windowController as? BrowserWindowController
+    }
+}
+
+/// Help ▸ Show Log.
+private struct ShowLogButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(L("menu.showLog")) { openWindow(id: "log") }
     }
 }
 
@@ -70,8 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when launched as a bare SwiftPM executable (`swift run`) instead of an .app bundle.
         NSApp.setActivationPolicy(.regular)
-        // Clean light theme regardless of the system setting (see docs/ISOLATION_AND_LIMITATIONS §11).
-        NSApp.appearance = NSAppearance(named: .aqua)
+        // Light by default; dark or "as the system" from Settings ▸ General.
+        AppPreferences.shared.applyAppearance()
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -86,11 +145,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Running profiles must be sealed (WebKit data encrypted) before the process exits.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let model, model.hasRunningProfiles else { return .terminateNow }
+        guard let model, model.hasRunningProfiles else {
+            Log.info("app", "quit")
+            return .terminateNow
+        }
         guard !isTerminating else { return .terminateLater } // ⌘Q pressed twice: don't start a second lock
         isTerminating = true
         Task { @MainActor in
             await model.lock()
+            Log.info("app", "quit after encrypting running profiles")
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

@@ -45,6 +45,18 @@
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<true/>
+		<!-- Only for the self-test mode: its proxy check probes http://proxied.selftest.invalid through the
+		     local test proxy. The .invalid TLD never resolves, so this opens nothing real. -->
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>selftest.invalid</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
 	</dict>
 	<!-- Deliberately no NSLocationUsageDescription: the app never uses CoreLocation.
 	     Geolocation is answered by the per-profile JavaScript shim (deny or fixed coordinates). -->

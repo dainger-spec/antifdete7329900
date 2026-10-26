@@ -17,7 +17,7 @@ final class ProfileLibrary: ObservableObject {
     @Published private(set) var historyRevision = 0
 
     let recordsHistory: Bool
-    var onError: ((String) -> Void)?
+    var onError: ((Error) -> Void)?
 
     private let history: HistoryStore
     private let bookmarkStore: BookmarkStore
@@ -70,7 +70,7 @@ final class ProfileLibrary: ObservableObject {
         do {
             try history.save()
         } catch {
-            report("Could not save history: \(error.localizedDescription)")
+            report(error)
         }
     }
 
@@ -87,7 +87,7 @@ final class ProfileLibrary: ObservableObject {
             guard let self else { return }
             self.saveTask = nil
             if case .failure(let error) = result {
-                self.report("Could not save history: \(error.localizedDescription)")
+                self.report(error)
             }
         }
     }
@@ -123,13 +123,14 @@ final class ProfileLibrary: ObservableObject {
         do {
             return try change()
         } catch {
-            report((error as? CoreError)?.description ?? error.localizedDescription)
+            report(error)
             return nil
         }
     }
 
-    private func report(_ message: String) {
-        log.error("\(message, privacy: .public)")
-        onError?(message)
+    private func report(_ error: Error) {
+        log.error("\(String(describing: error), privacy: .public)")
+        Log.error("library", "saving bookmarks or history failed: \(Log.describe(error))")
+        onError?(error)
     }
 }

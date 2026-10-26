@@ -21,10 +21,17 @@ protocol BrowserTabHost: AnyObject {
 /// Per-profile services every tab of a session shares.
 @MainActor
 struct BrowserTabContext {
+    let profileID: UUID
     let profileName: String
+    /// A full custom User-Agent (iPhone/iPad/custom modes); nil keeps WebKit's, completed by the
+    /// configuration's `applicationNameForUserAgent` (Safari for Mac).
     let userAgent: String?
+    let proxyConfigured: Bool
     let passwordVault: PasswordVault
     let library: ProfileLibrary
+    let downloads: DownloadsController
+    let onLoadFinished: () -> Void
+    let onLoadFailed: (UserFacingMessage) -> Void
 }
 
 /// One tab: a `WKWebView` and its navigation, UI and download delegates.
@@ -42,10 +49,15 @@ final class BrowserTab: NSObject {
     private var observations: [NSKeyValueObservation] = []
     private var lastRecordedURL: URL?
     private var tornDown = false
+    /// A restored tab that has not been shown yet: loads when first selected.
+    private var pending: SessionState.Tab?
+    /// The address of the page that failed to load (the error page itself is about:blank).
+    private(set) var failedURL: URL?
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserTab")
 
-    init(configuration: WKWebViewConfiguration, context: BrowserTabContext) {
+    init(configuration: WKWebViewConfiguration, context: BrowserTabContext, pending: SessionState.Tab? = nil) {
         self.context = context
+        self.pending = pending
         self.webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         // NATIVE: sets the User-Agent header and navigator.userAgent for this view.
@@ -62,16 +74,40 @@ final class BrowserTab: NSObject {
     // MARK: State
 
     var displayTitle: String {
+        if let pending { return pending.title.flatMap { $0.isEmpty ? nil : $0 } ?? URL(string: pending.url)?.host ?? pending.url }
+        if failedURL != nil, let host = failedURL?.host { return host }
         if let title = webView.title, !title.isEmpty { return title }
         if let host = webView.url?.host { return host }
         return L("tab.newTab")
     }
 
-    var url: URL? { webView.url }
+    /// What the address bar shows and what history, bookmarks and the saved session use.
+    var url: URL? {
+        if let pending { return URL(string: pending.url) }
+        return failedURL ?? webView.url
+    }
+
     var isLoading: Bool { webView.isLoading }
+    var estimatedProgress: Double { webView.estimatedProgress }
+    var isSecure: Bool { failedURL == nil && webView.url?.scheme?.lowercased() == "https" && webView.hasOnlySecureContent }
+
+    /// The tab as the saved session stores it.
+    var sessionTab: SessionState.Tab? {
+        guard let url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        return SessionState.Tab(url: url.absoluteString, title: pending?.title ?? webView.title)
+    }
 
     func load(_ url: URL) {
+        pending = nil
+        failedURL = nil
         webView.load(URLRequest(url: url))
+    }
+
+    /// Restored tabs load the first time they are shown.
+    func loadPendingIfNeeded() {
+        guard let pending else { return }
+        self.pending = nil
+        if let url = URL(string: pending.url) { load(url) }
     }
 
     private func observe() {
@@ -102,6 +138,12 @@ final class BrowserTab: NSObject {
                 MainActor.assumeIsolated { self?.notifyChanged() }
             },
             webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.notifyChanged() }
+            },
+            webView.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.notifyChanged() }
+            },
+            webView.observe(\.hasOnlySecureContent, options: [.new]) { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.notifyChanged() }
             },
         ]
@@ -179,33 +221,50 @@ extension BrowserTab: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        if let url = webView.url { recordVisit(url) }
+        if let url = webView.url, url.scheme?.lowercased() != "about" {
+            failedURL = nil
+            recordVisit(url)
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if let scheme = webView.url?.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+            context.onLoadFinished()
+        }
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
-        download.delegate = self
+        context.downloads.adopt(download)
     }
 
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
-        download.delegate = self
+        context.downloads.adopt(download)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        let nsError = error as NSError
-        guard nsError.code != NSURLErrorCancelled else { return }
-        // With a proxy configured and failover disabled, an unreachable proxy surfaces here.
-        let message = "\(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))"
-        let escaped = message
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-        let heading = L("errorpage.title")
-        let html = """
-        <html><head><meta charset="utf-8"><title>\(heading)</title></head>
-        <body style="font: 15px -apple-system; padding: 48px; color: #333; background: #fff">
-        <h2 style="font-weight: 600">\(heading)</h2><p style="color:#666">\(escaped)</p></body></html>
-        """
+        showErrorPage(for: error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        // Fails after commit (connection dropped mid-page): keep what is shown, report only.
+        if let message = UserFacingError.message(for: error, proxyConfigured: context.proxyConfigured) {
+            context.onLoadFailed(message)
+        }
+    }
+
+    /// A page that says what went wrong in plain words, with a Try Again link. With a proxy and
+    /// failover disabled, an unreachable proxy surfaces here and is reported as a proxy problem.
+    private func showErrorPage(for error: Error) {
+        guard let message = UserFacingError.message(for: error, proxyConfigured: context.proxyConfigured) else { return }
+        let failing = ((error as NSError).userInfo[NSURLErrorFailingURLErrorKey] as? URL) ?? webView.url
+        Log.notice("load", "\(Log.id(context.profileID)): \(message.technical)")
+        context.onLoadFailed(message)
+        failedURL = failing.flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
+        let html = ErrorPage.html(title: L(message.titleKey), message: L(message.messageKey),
+                                  retryURL: failedURL, retryLabel: L("errorpage.retry"),
+                                  details: message.technical, hint: message.kind == .proxy ? L("errorpage.proxyHint") : nil)
         webView.loadHTMLString(html, baseURL: nil)
+        notifyChanged()
     }
 
     func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
@@ -331,37 +390,5 @@ extension BrowserTab: WKUIDelegate {
         alert.addButton(withTitle: L("media.allowButton"))
         alert.addButton(withTitle: L("media.denyButton"))
         presentAlert(alert) { decisionHandler($0 == .alertFirstButtonReturn ? .grant : .deny) }
-    }
-}
-
-// MARK: - WKDownloadDelegate
-
-extension BrowserTab: WKDownloadDelegate {
-    /// LIMITATION: downloaded files are written to ~/Downloads unencrypted; they are outside the
-    /// profile's encrypted storage. In the App Sandbox this needs
-    /// `com.apple.security.files.downloads.read-write`.
-    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
-                  suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
-        completionHandler(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename))
-    }
-
-    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        showMessage(String(format: L("download.failed"), error.localizedDescription))
-    }
-
-    static func uniqueDownloadURL(suggestedFilename: String) -> URL {
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let safeName = suggestedFilename.replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
-            .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-        var destination = downloads.appendingPathComponent(safeName.isEmpty ? "download" : safeName)
-        let base = destination.deletingPathExtension().lastPathComponent
-        let ext = destination.pathExtension
-        var counter = 1
-        while FileManager.default.fileExists(atPath: destination.path) {
-            destination = downloads.appendingPathComponent(ext.isEmpty ? "\(base) (\(counter))" : "\(base) (\(counter)).\(ext)")
-            counter += 1
-        }
-        return destination
     }
 }

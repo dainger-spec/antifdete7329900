@@ -2,6 +2,7 @@ import AppKit
 import BrowserCore
 import Combine
 import os
+import SwiftUI
 import WebKit
 
 /// Window subclass so that File ▸ Close (⌘W) closes the current tab while the window's
@@ -31,12 +32,19 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     private let tabStrip = TabStripView()
     private let webContainer = NSView()
-    private let addressField = NSTextField()
+    private let addressField = AddressField()
+    private let securityIcon = NSImageView()
+    private let progressLine = ProgressLine()
     private var backButton: NSButton!
     private var forwardButton: NSButton!
     private var reloadButton: NSButton!
     private var bookmarkButton: NSButton!
+    private var downloadsButton: NSButton!
+    private let proxyButton = NSButton(title: "", target: nil, action: nil)
+    private var downloadsPopover: NSPopover?
     private var libraryObservation: AnyCancellable?
+    private var proxyObservation: AnyCancellable?
+    private var downloadsObservation: AnyCancellable?
     private var isClosing = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserWindow")
 
@@ -65,6 +73,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         libraryObservation = library.$bookmarks.sink { [weak self] _ in
             Task { @MainActor in self?.updateBookmarkButton() }
         }
+        proxyObservation = session.proxyCenter?.$statuses.sink { [weak self] _ in
+            Task { @MainActor in self?.updateProxyButton() }
+        }
+        downloadsObservation = session.downloads.$items.sink { [weak self] _ in
+            Task { @MainActor in self?.updateDownloadsButton() }
+        }
+        updateProxyButton()
     }
 
     @available(*, unavailable)
@@ -76,37 +91,54 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     // MARK: Interface
 
     private func buildInterface(in window: NSWindow) {
-        backButton = toolbarButton("chevron.left", "Back (⌘[)", #selector(goBack))
-        forwardButton = toolbarButton("chevron.right", "Forward (⌘])", #selector(goForward))
-        reloadButton = toolbarButton("arrow.clockwise", "Reload (⌘R)", #selector(reload))
-        bookmarkButton = toolbarButton("star", "Bookmark this page (⌘D)", #selector(toggleBookmark))
-        let bookmarksMenuButton = toolbarButton("book", "Bookmarks", #selector(showBookmarksMenu(_:)))
-        let historyButton = toolbarButton("clock.arrow.circlepath", "History (⌘Y)", #selector(showHistory))
-        let fillButton = toolbarButton("key.fill", "Fill saved password", #selector(fillPassword(_:)))
-        let saveButton = toolbarButton("key.viewfinder", "Save password from this page", #selector(savePassword))
+        backButton = toolbarButton("chevron.left", L("browser.back.help"), #selector(goBack))
+        forwardButton = toolbarButton("chevron.right", L("browser.forward.help"), #selector(goForward))
+        reloadButton = toolbarButton("arrow.clockwise", L("browser.reload.help"), #selector(reload))
+        bookmarkButton = toolbarButton("star", L("browser.bookmark.help"), #selector(toggleBookmark))
+        let bookmarksMenuButton = toolbarButton("book", L("browser.bookmarks.help"), #selector(showBookmarksMenu(_:)))
+        let historyButton = toolbarButton("clock.arrow.circlepath", L("browser.history.help"), #selector(showHistory))
+        downloadsButton = toolbarButton("arrow.down.circle", L("browser.downloads.help"), #selector(showDownloads(_:)))
+        let fillButton = toolbarButton("key.fill", L("browser.fillPassword.help"), #selector(fillPassword(_:)))
+        let saveButton = toolbarButton("key.viewfinder", L("browser.savePassword.help"), #selector(savePassword))
 
-        addressField.placeholderString = "Search or enter address"
+        addressField.placeholderString = L("browser.address.placeholder")
         addressField.delegate = self
         addressField.lineBreakMode = .byTruncatingTail
         addressField.cell?.usesSingleLineMode = true
         addressField.target = self
         addressField.action = #selector(addressEntered)
+        addressField.font = .systemFont(ofSize: NSFont.systemFontSize)
+        addressField.bezelStyle = .roundedBezel
+
+        securityIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        securityIcon.contentTintColor = .secondaryLabelColor
+        securityIcon.setContentHuggingPriority(.required, for: .horizontal)
+
+        proxyButton.target = self
+        proxyButton.action = #selector(proxyButtonClicked)
+        proxyButton.bezelStyle = .inline
+        proxyButton.imagePosition = .imageLeading
+        proxyButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        proxyButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let badge = NSTextField(labelWithString: profileName)
         badge.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
         badge.textColor = .secondaryLabelColor
-        badge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        badge.lineBreakMode = .byTruncatingTail
+        badge.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
-        let bar = NSStackView(views: [backButton, forwardButton, reloadButton, addressField, bookmarkButton,
-                                      bookmarksMenuButton, historyButton, fillButton, saveButton, badge])
+        let bar = NSStackView(views: [backButton, forwardButton, reloadButton, securityIcon, addressField, bookmarkButton,
+                                      bookmarksMenuButton, historyButton, downloadsButton, fillButton, saveButton,
+                                      proxyButton, badge])
         bar.orientation = .horizontal
         bar.spacing = 6
         bar.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 10)
         addressField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        addressField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         tabStrip.delegate = self
         let container = NSView()
-        for view in [tabStrip, bar, webContainer] as [NSView] {
+        for view in [tabStrip, bar, progressLine, webContainer] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
@@ -118,7 +150,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             bar.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
             bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            webContainer.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            progressLine.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            progressLine.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            progressLine.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            progressLine.heightAnchor.constraint(equalToConstant: 2),
+            webContainer.topAnchor.constraint(equalTo: progressLine.bottomAnchor),
             webContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             webContainer.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             webContainer.bottomAnchor.constraint(equalTo: container.bottomAnchor),
@@ -158,9 +194,38 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         return tab
     }
 
+    /// Rebuilds a window from the saved session: every tab is created, only the selected one loads.
+    func restoreTabs(_ state: SessionState.Window) {
+        guard let session else { return }
+        for saved in state.tabs {
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext,
+                                 pending: saved)
+            tab.host = self
+            tabs.append(tab)
+        }
+        if tabs.isEmpty {
+            addTab(url: nil)
+        } else {
+            selectTab(at: min(max(state.selectedIndex, 0), tabs.count - 1))
+        }
+    }
+
+    /// This window as the saved session stores it.
+    var sessionWindow: SessionState.Window {
+        var saved: [SessionState.Tab] = []
+        var selected = 0
+        for (index, tab) in tabs.enumerated() {
+            guard let item = tab.sessionTab else { continue }
+            if index == selectedIndex { selected = saved.count }
+            saved.append(item)
+        }
+        return SessionState.Window(tabs: saved, selectedIndex: selected)
+    }
+
     func selectTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
         selectedIndex = index
+        tabs[index].loadPendingIfNeeded()
         let webView = tabs[index].webView
         if webView.superview !== webContainer {
             webContainer.subviews.forEach { $0.removeFromSuperview() }
@@ -174,7 +239,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             ])
         }
         refreshChrome()
-        if webView.url != nil { window?.makeFirstResponder(webView) }
+        if tabs[index].url != nil { window?.makeFirstResponder(webView) }
     }
 
     func closeTab(at index: Int) {
@@ -224,7 +289,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private func refreshChrome() {
         tabStrip.update(items: tabs.map { tab in
             TabStripView.Item(title: tab.displayTitle,
-                              toolTip: [tab.webView.title, tab.url?.absoluteString].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"),
+                              toolTip: [tab.displayTitle, tab.url?.absoluteString].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"),
                               isLoading: tab.isLoading)
         }, selectedIndex: selectedIndex)
         guard let tab = selectedTab else { return }
@@ -235,8 +300,29 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         backButton.isEnabled = tab.webView.canGoBack
         forwardButton.isEnabled = tab.webView.canGoForward
         reloadButton.image = NSImage(systemSymbolName: tab.isLoading ? "xmark" : "arrow.clockwise",
-                                     accessibilityDescription: tab.isLoading ? "Stop" : "Reload")
+                                     accessibilityDescription: tab.isLoading ? L("browser.stop.help") : L("browser.reload.help"))
+        reloadButton.toolTip = tab.isLoading ? L("browser.stop.help") : L("browser.reload.help")
+        updateSecurityIcon(tab)
+        progressLine.update(fraction: tab.estimatedProgress, visible: tab.isLoading)
         updateBookmarkButton()
+    }
+
+    private func updateSecurityIcon(_ tab: BrowserTab) {
+        let scheme = tab.url?.scheme?.lowercased()
+        let symbol: String?
+        let help: String
+        if tab.failedURL != nil || scheme == nil || scheme == "about" {
+            symbol = nil; help = ""
+        } else if tab.isSecure {
+            symbol = "lock.fill"; help = L("browser.secure.help")
+        } else if scheme == "https" {
+            symbol = "lock.trianglebadge.exclamationmark"; help = L("browser.mixed.help")
+        } else {
+            symbol = "exclamationmark.triangle"; help = L("browser.insecure.help")
+        }
+        securityIcon.image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: help) }
+        securityIcon.toolTip = help
+        securityIcon.isHidden = symbol == nil
     }
 
     // MARK: Navigation
@@ -294,7 +380,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private func updateBookmarkButton() {
         let bookmarked = library.bookmark(for: selectedTab?.url) != nil
         bookmarkButton?.image = NSImage(systemSymbolName: bookmarked ? "star.fill" : "star",
-                                        accessibilityDescription: bookmarked ? "Remove bookmark" : "Bookmark this page")
+                                        accessibilityDescription: bookmarked ? L("browser.unbookmark.help") : L("browser.bookmark.help"))
         bookmarkButton?.isEnabled = selectedTab?.url.flatMap { HistoryStore.normalizedURL($0) } != nil
     }
 
@@ -353,6 +439,58 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     @objc func showHistory() { session?.showLibrary(.history, from: self) }
     @objc func showBookmarks() { session?.showLibrary(.bookmarks, from: self) }
 
+    // MARK: Downloads and proxy
+
+    @objc private func showDownloads(_ sender: NSButton) {
+        guard let session else { return }
+        if let popover = downloadsPopover, popover.isShown {
+            popover.close()
+            return
+        }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(rootView: DownloadsView(controller: session.downloads))
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+        downloadsPopover = popover
+    }
+
+    func showDownloadsFromMenu() {
+        if let button = downloadsButton { showDownloads(button) }
+    }
+
+    private func updateDownloadsButton() {
+        guard let session, let button = downloadsButton else { return }
+        let active = session.downloads.activeCount > 0
+        button.image = NSImage(systemSymbolName: active ? "arrow.down.circle.fill" : "arrow.down.circle",
+                               accessibilityDescription: L("browser.downloads.help"))
+        button.contentTintColor = active ? .controlAccentColor : nil
+    }
+
+    private func updateProxyButton() {
+        guard let session else { return }
+        let status = session.proxyCenter?.status(for: session.profileID, hasProxy: session.hasProxy)
+            ?? (session.hasProxy ? .unchecked : .direct)
+        let name = session.configuration.proxy.map(\.displayName) ?? L("proxy.none")
+        proxyButton.title = session.hasProxy ? (session.configuration.proxy?.kindLabel ?? "") : L("proxy.none.short")
+        proxyButton.image = NSImage(systemSymbolName: status.symbol, accessibilityDescription: L(status.labelKey))
+        switch status {
+        case .working: proxyButton.contentTintColor = .systemGreen
+        case .failed: proxyButton.contentTintColor = .systemRed
+        case .checking, .unchecked: proxyButton.contentTintColor = .secondaryLabelColor
+        case .direct: proxyButton.contentTintColor = .secondaryLabelColor
+        }
+        var help = "\(name) — \(L(status.labelKey))"
+        if case .failed(let message) = status { help += "\n" + L(message.messageKey) }
+        if session.hasProxy { help += "\n" + L("proxy.clickToCheck") }
+        proxyButton.toolTip = help
+    }
+
+    @objc private func proxyButtonClicked() {
+        guard let session, let proxy = session.configuration.proxy, let center = session.proxyCenter else { return }
+        let id = session.profileID
+        Task { await center.check(id, settings: proxy) }
+    }
+
     // MARK: Passwords
 
     @objc private func fillPassword(_ sender: NSButton) {
@@ -366,7 +504,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         default:
             let menu = NSMenu()
             for entry in entries {
-                let item = NSMenuItem(title: entry.username.isEmpty ? "(no username)" : entry.username,
+                let item = NSMenuItem(title: entry.username.isEmpty ? L("passwords.noUsername") : entry.username,
                                       action: #selector(fillFromMenu(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = entry.id
@@ -418,6 +556,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     // MARK: Lifecycle
 
     func windowWillClose(_ notification: Notification) {
+        if !isClosing { session?.windowWillClose(self, state: sessionWindow) }
         tearDown()
         // CRASH FIX: `windowDidClose` removes this controller from `session.windows`, which can
         // drop the last strong reference to it (and to its NSWindow). Releasing the window while
@@ -436,6 +575,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         guard !isClosing else { return }
         isClosing = true
         libraryObservation = nil
+        proxyObservation = nil
+        downloadsObservation = nil
+        downloadsPopover?.close()
         tabs.forEach { $0.tearDown() }
         tabs.removeAll()
         window?.delegate = nil
@@ -478,4 +620,48 @@ extension BrowserWindowController: TabStripViewDelegate {
     func tabStrip(_ strip: TabStripView, didSelect index: Int) { selectTab(at: index) }
     func tabStrip(_ strip: TabStripView, didClose index: Int) { closeTab(at: index) }
     func tabStripDidRequestNewTab(_ strip: TabStripView) { newTab() }
+}
+
+// MARK: - Address field and progress line
+
+/// The address bar: selects its whole text when clicked into, like Safari's, so typing replaces
+/// the address.
+final class AddressField: NSTextField {
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became {
+            DispatchQueue.main.async { [weak self] in self?.currentEditor()?.selectAll(nil) }
+        }
+        return became
+    }
+}
+
+/// A thin accent-colored bar under the toolbar showing page load progress.
+final class ProgressLine: NSView {
+    private var fraction: Double = 0
+
+    override var isFlipped: Bool { true }
+
+    func update(fraction: Double, visible: Bool) {
+        let value = visible ? min(max(fraction, 0.05), 1) : 0
+        guard value != self.fraction else { return }
+        self.fraction = value
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard fraction > 0 else { return }
+        NSColor.controlAccentColor.setFill()
+        NSRect(x: 0, y: 0, width: bounds.width * fraction, height: bounds.height).fill()
+    }
+}
+
+extension ProxySettings {
+    /// Short label for the toolbar: "SOCKS5", "HTTP", "HTTPS".
+    var kindLabel: String {
+        switch kind {
+        case .socks5: return "SOCKS5"
+        case .httpConnect: return tlsToProxy ? "HTTPS" : "HTTP"
+        }
+    }
 }

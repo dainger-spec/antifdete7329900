@@ -126,8 +126,7 @@ struct ChangePasswordView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button(L("changepw.action.change")) {
                     Task {
-                        await model.changePassword(current: current, new: new)
-                        if model.errorMessage == nil { dismiss() }
+                        if await model.changePassword(current: current, new: new) { dismiss() }
                     }
                 }
                 .disabled(current.isEmpty || new.count < 10 || new != confirmation)

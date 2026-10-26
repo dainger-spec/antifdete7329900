@@ -15,6 +15,7 @@ MainActor.assumeIsolated {
     } else {
         // Russian by default (English fallback); must be set before AppKit builds its menus.
         Localization.applyProcessLanguage()
+        Log.start()
         PrivacyBrowserApp.main()
     }
 }
