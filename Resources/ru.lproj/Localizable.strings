@@ -203,6 +203,7 @@
 "unlock.action.unlock" = "Разблокировать";
 "unlock.subtitle" = "Введите мастер-пароль, чтобы продолжить.";
 "unlock.title" = "Хранилище заблокировано";
+"unlock.vault.info" = "Открыто хранилище, созданное %1$@, в папке:\n%2$@\nЕсли пароль задавался в другой сборке (из Cursor или swift run, без sandbox или с другим bundle id), у неё своё хранилище со своим паролем.";
 "window.browser.title" = "[%@] %@";
 "window.library.title" = "[%@] Библиотека";
 "window.profiles.title" = "Профили";

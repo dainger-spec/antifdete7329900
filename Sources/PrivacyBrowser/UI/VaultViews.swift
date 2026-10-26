@@ -87,6 +87,17 @@ struct UnlockView: View {
             .frame(width: 300)
             .keyboardShortcut(.defaultAction)
             .disabled(password.isEmpty || model.isWorking)
+            if model.unlockFailed {
+                // Which vault was tried: another build (sandboxed or not, other bundle id) opens
+                // a different folder with a vault of its own.
+                Text(String(format: L("unlock.vault.info"), model.vaultCreatedDescription, model.vaultPathDescription))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .frame(width: 300)
+            }
         }
         .frame(width: 380)
         .card(padding: 28)
@@ -97,6 +108,9 @@ struct UnlockView: View {
 
     private func unlock() {
         let entered = password
+        // Return reaches both `.onSubmit` and the default button: the second call finds the
+        // field already cleared and must not submit "" (that is a "wrong password").
+        guard !entered.isEmpty, !model.isWorking else { return }
         password = ""
         Task { await model.unlock(password: entered) }
     }

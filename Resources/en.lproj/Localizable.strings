@@ -203,6 +203,7 @@
 "unlock.action.unlock" = "Unlock";
 "unlock.subtitle" = "Enter your master password to continue.";
 "unlock.title" = "Vault locked";
+"unlock.vault.info" = "Opened the vault created %1$@, in:\n%2$@\nIf you set your password in another build (from Cursor or swift run, unsandboxed, or with another bundle id), that build has its own vault with its own password.";
 "window.browser.title" = "[%@] %@";
 "window.library.title" = "[%@] Library";
 "window.profiles.title" = "Profiles";

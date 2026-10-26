@@ -12,6 +12,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var profiles: [ProfileSummary] = []
     @Published private(set) var isWorking = false
     @Published var errorMessage: String?
+    /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
+    /// vault it tried).
+    @Published private(set) var unlockFailed = false
     @Published private(set) var deviceSettings = DeviceSettings()
 
     private(set) var repository: ProfileRepository?
@@ -54,13 +57,42 @@ final class AppModel: ObservableObject {
     }
 
     func unlock(password: String) async {
+        // One Return press can arrive twice (field submit + default button): never try "" or a
+        // second attempt while one is running — that attempt would report a wrong password.
+        guard !password.isEmpty, !isWorking else { return }
         let root = root
+        unlockFailed = false
         await perform {
-            let vault = try await Task.detached(priority: .userInitiated) {
-                try MasterVault.unlock(in: root, password: password)
-            }.value
+            let vault: UnlockedVault
+            do {
+                vault = try await Task.detached(priority: .userInitiated) {
+                    try MasterVault.unlock(in: root, password: password)
+                }.value
+            } catch CoreError.wrongPassword {
+                self.unlockFailed = true
+                throw CoreError.wrongPassword
+            }
             try self.didUnlock(vault)
         }
+    }
+
+    /// For the unlock screen after a wrong password: when the vault this build opens was created
+    /// (from its plaintext header). A sandboxed `.app`, an unsandboxed build (`swift run`,
+    /// `SANDBOX=0`) and a build with another bundle id each open their own vault folder, so a
+    /// password set in one of them is "wrong" in another.
+    var vaultCreatedDescription: String {
+        guard let header = try? MasterVault.readHeader(in: root) else { return "?" }
+        return header.createdAt.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    /// The vault folder, with the real home directory shown as `~` (inside the App Sandbox
+    /// `homeDirectoryForCurrentUser` is the container, so the passwd entry is used instead).
+    var vaultPathDescription: String {
+        let path = root.path
+        if let home = getpwuid(getuid())?.pointee.pw_dir.map({ String(cString: $0) }), path.hasPrefix(home + "/") {
+            return "~" + String(path.dropFirst(home.count))
+        }
+        return path
     }
 
     private func didUnlock(_ vault: UnlockedVault) throws {
