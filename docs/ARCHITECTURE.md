@@ -21,7 +21,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 
 ```
 ┌──────────────────────────────── PrivacyBrowser (macOS app) ────────────────────────────────┐
-│  main.swift ── app, or --self-test (headless WebKit checks) / migration check modes         │
+│  main.swift ── app, --self-test (headless WebKit checks), --capture-sites, migration modes  │
 │  Localization (ru default, en fallback) · Theme (forced light appearance)                   │
 │  BehaviorSets ── device-generation → injected-script bundle (extension point)               │
 │  SwiftUI: Setup / Unlock / ProfileList / ProfileEditor / Passwords / SyncSettings / Library │
@@ -203,9 +203,10 @@ configs read as the default generation).
 | Layer | How | Where it runs |
 |---|---|---|
 | Core (crypto, vault, profiles, archive, layout, history, bookmarks, sync, HTTP transport, UA presets, proxy location) | XCTest, 54 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
-| JS shims (logic) | Node + ICU (`scripts/test-shims.mjs`) | Linux, every push |
+| JS shims (logic, CreepJS-style shape checks) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages) | Linux, every push |
 | App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 26 runner, every push |
 | Measured surface of a macOS profile vs. the runner's real Safari | `scripts/safari_reference.py` (safaridriver) with `Resources/fingerprint_probe.js` | macOS 26 runner, every push |
+| The same pages in Safari and in on-screen profile windows of the same size: probe, window geometry (1 and 2 tabs), request header order, permissions/quota/devices, TLS + HTTP/2 (tls.peet.ws) | `scripts/live_compare.py` + `PrivacyBrowser --capture-sites` (`SiteCapture.swift`, pages in `scripts/live_sites/`) | macOS 26 runner, every push (report only: third-party sites change) |
 | App Sandbox container migration | `--selftest-write-vault` / `--selftest-read-vault` | macOS 26 runner, every push |
 | Interactive UI (tab strip drawing, menus, sheets) | manual | — |
 

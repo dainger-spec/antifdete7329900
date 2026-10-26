@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 116/116 checks in both builds; the same 116 pass on macOS 15.7):
+(macOS 26, 125/125 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -26,7 +26,8 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Crash-recovery sealing | leftover website data from a crashed run is archived and deleted WITHOUT `WKWebsiteDataStore.remove(forIdentifier:)` (which aborted on an unknown id), then restores cleanly |
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
-| Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks; an iPhone profile reports its device class's navigator and screen values. CI also compares the macOS profile with the runner's real Safari (§2) |
+| Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks; an iPhone profile reports its device class's navigator and screen values; user-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
+| Shims in workers and frames | a worker made from a blob runs in the profile's zone, stays strict and keeps its line numbers; a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
 | Proxy: IPv6, unresolvable host | an HTTP proxy on `[::1]` tunnels the load; a proxy whose host does not resolve fails closed |
 | Proxy: dns-prefetch leak | an `<a ping>` (the load type WebKit gives dns-prefetch) reaches neither the proxy nor the network; a fetch to the same origin does |
 | Proxy: 407 without credentials | the launch is refused ("needs credentials") and the data is sealed again; nothing opens, directly or otherwise |
@@ -78,7 +79,7 @@ This project does not make a Mac look like an iPhone, and doesn't claim to.
 | Storage (cookies, localStorage, IndexedDB, cache, service workers) | `WKWebsiteDataStore(forIdentifier:)` | native, complete |
 | Egress IP and DNS | `proxyConfigurations` (SOCKS5 remote DNS, fail-closed) | native, verified |
 | User-Agent string (HTTP header + `navigator.userAgent`) | `customUserAgent` | native; changes the string only |
-| Time zone | JS shim (`Intl`, `Date` getters, offsets) | approximation; not in workers |
+| Time zone | JS shim (`Intl`, `Date` getters, offsets) | approximation; blob workers covered, URL-loaded and service workers not |
 | Geolocation | JS shim (deny / fixed coordinates) | approximation |
 | WebRTC exposure | JS shim (removed / relay-only) | approximation |
 
@@ -130,7 +131,7 @@ modified WebKit, or different hardware. None is attempted:
 |---|---|
 | Canvas 2D / WebGL pixels, WebGL renderer and vendor strings, extensions, limits | produced by the Mac's GPU and driver; WebKit exposes them as is |
 | AudioContext output | the Mac's audio stack |
-| Fonts (measured via text metrics) | macOS system fonts; iOS has a different font set |
+| Fonts (measured via text metrics) | macOS system fonts; iOS has a different font set. As in Safari, fonts the user installed are hidden from pages (the WebKit preference Safari sets, `_shouldAllowUserInstalledFonts`; it has no public API, so it is applied only when this WebKit has it, which the self-test checks) |
 | Screen size, colour depth, device pixel ratio, `matchMedia` results | the real display; no per-view override |
 | `navigator.platform`, `vendor`, `hardwareConcurrency`, `maxTouchPoints` | engine and hardware; `customUserAgent` changes only the UA string. macOS profiles keep the native values; iPhone/iPad profiles get their device class's values from the shim (detectable, not in workers) |
 | Touch and pointer behaviour, `ontouchstart`, orientation and motion events | macOS WebKit is a desktop engine; there is no touch-input emulation API |
@@ -157,44 +158,80 @@ The honest options for real separation between identities are outside the browse
 
 ### Measured against this Mac's Safari
 
-CI runs `Resources/fingerprint_probe.js` in a macOS profile and, through `safaridriver`, in the
-runner's own Safari, then compares the two (`scripts/safari_reference.py`; both JSON files are
-kept as the `fingerprint-surfaces` artifact of each run). Last result, on macOS 26 with
-Safari 26.6.2: 434 keys identical, 0 must-match keys differ; the 14 reported differences are the
-self-test's fixed language, the hidden window's size, `navigator.webdriver` and the five features
-below. Every key that measures the engine or the Mac is identical: the User-Agent string (the profile declares the installed Safari's version),
-`navigator` (platform, vendor, hardwareConcurrency, deviceMemory, maxTouchPoints,
-pdfViewerEnabled, the same five plugins and two MIME types, no own properties), screen size and
-colour depth, pointer and touch media queries, time zone and offset, the canvas pixels and PNG
-(the same data URL, byte for byte), the canvas text hash, WebGL (vendor, renderer "Apple GPU",
-every extension and parameter), the font set, `window.webkit`, the shape of `window.safari`, and
-the `Function.prototype.toString` text and shape of every native the shims touch.
+Two CI steps compare a macOS profile with the runner's own Safari (macOS 26.6.2, Safari 26.6.2),
+driving Safari through `safaridriver`:
 
-What still differs, all of it on the engine's side and none of it a profile's choice:
+- `scripts/safari_reference.py` runs `Resources/fingerprint_probe.js` in both: 434 keys identical,
+  0 must-match keys differ.
+- `scripts/live_compare.py` loads the same pages in Safari and in on-screen profile windows of the
+  same outer size (`PrivacyBrowser --capture-sites`, `SiteCapture.swift`), once for a default profile
+  and once with the time-zone and WebRTC wrappers running on Safari's own values. Both JSON sets
+  are kept in the `fingerprint-surfaces` artifact.
 
-- Safari has a few features WebKit leaves off in a WKWebView. Built with the current Xcode on
-  macOS 26, a profile lacks only what is tied to Safari's own entitlements: Apple Pay
-  (`ApplePaySession`, `ApplePaySetup`, `PaymentRequest`, `MerchantValidationEvent`) and Web Push
-  (`PushManager`). The build matters: on the macOS 15.7 runner, built with Xcode 16, the same
-  comparison also listed the Navigation API (`navigation`, `NavigateEvent`), `URLPattern`,
-  `trustedTypes`, `ScrollTimeline`/`ViewTimeline`, `CSSPositionTryRule`, `CSSPageDescriptors`,
-  `CommandEvent`/`oncommand`, `onscrollend`, `LargestContentfulPaint`, `PerformanceEventTiming`,
-  `performance.eventCounts`/`interactionCount`,
-  `PerformanceResourceTiming.deliveryType`/`firstInterimResponseStart`, `caretPositionFromPoint`,
-  `FileSystemWritableFileStream`, WebCodecs `AudioEncoder` and `Math.sumPrecise` as Safari-only,
-  and the legacy `OverflowEvent` as WKWebView-only. WebKit enables such features for an app only
-  once it is linked against a recent enough SDK (Trusted Types says so in WebKit's source), and an
-  app can set only the preferences WebKit marks overridable (`WKPreferences`, `NSUserDefaults`),
-  which these are not — so build with the current Xcode, as CI does (`macos-26`).
-- The count of `window`'s own properties follows from that (1044 in Safari, 1029 in a profile).
-- `navigator.webdriver` is true in Safari only because safaridriver drives it: an artefact of the
-  comparison, not a difference between a profile and a Safari a person uses.
+What is identical, key by key:
 
-So a page that fingerprints *feature support* can tell "Safari" from "a WKWebView app on the same
-Mac", the same way it tells Safari from a Safari View Controller or a Mail or Slack preview. It
-cannot tell two profiles of this app apart by any of this: they are the same engine on the same
-Mac. What separates profiles is what they declare (table above) and their storage and network
-(§1, §4).
+| Area | Result |
+|---|---|
+| Probe | UA (the profile declares the installed Safari's version), `navigator` (platform, vendor, hardwareConcurrency, `deviceMemory` undefined, maxTouchPoints, pdfViewerEnabled, the same five plugins and two MIME types — real Safari lists Chrome/Chromium/Edge PDF Viewer too, as the HTML spec requires — no own properties), language and `Intl` locale, screen and colour depth, pointer/touch media queries, time zone and offset, canvas pixels and PNG (the same data URL, byte for byte), canvas text, WebGL (vendor, renderer "Apple GPU", every extension and parameter), font metrics, `window.webkit`, the shape of `window.safari`, the toString text and shape of every native the shims touch |
+| Window | `outerWidth/outerHeight`, `innerWidth/innerHeight`, `screenX/screenY`, `visualViewport`: the browser chrome is 52 px with one tab and 90 px with two, as in Safari 26 (unified toolbar; tab bar from the second tab, 38 px) |
+| Network | request header set and order for navigations, `fetch` and XHR (31/31); TLS ClientHello (JA3, JA4, cipher and extension lists apart from the random GREASE values), HTTP/2 SETTINGS, WINDOW_UPDATE and pseudo-header order (Akamai fingerprint), TCP SYN — measured by tls.peet.ws |
+| APIs | permission states (geolocation, notifications, camera, microphone, persistent-storage, screen-wake-lock, midi, clipboard), storage quota, speech voices, `Notification.permission`, share, Private Click Measurement, storage access, platform authenticator |
+
+What a profile changed to get there (each was a difference before):
+
+- **Window geometry.** A WKWebView reported `outerWidth = outerHeight = 0` and a screen position
+  computed from an empty rectangle: WebKit asks the UI delegate for the window frame
+  (`WKUIDelegatePrivate`, which Safari implements) and gets nothing otherwise. The tab now answers
+  with its window's frame. The window itself is laid out like Safari's (see above); it used to add
+  a title bar and an always-visible tab strip (~92 px).
+- **Language.** Without a proxy country, websites saw the app's UI language (Russian), which
+  `Localization.applyProcessLanguage` keeps in the app's own defaults; they now see this Mac's
+  languages, read from the global domain, as Safari does.
+- **Fonts.** A WKWebView lets pages use fonts the user installed; Safari shows them only the
+  system's. The profile sets the WebKit preference Safari sets (private, applied only if present).
+- **Storage quota.** WebKit gives an app that is not a browser a fixed 1000 MiB per origin — the
+  small quota private-mode detectors look for. Safari reports 60 % of a *standard* 128 GB volume
+  (WebKit reports a standard capacity rather than the real disk's, so the figure is 82 463 372 084
+  on every Mac, a tenth of it in a third-party frame); `estimate()` now reports the same.
+- **Geolocation permission.** `permissions.query({name: 'geolocation'})` threw a TypeError (the shim
+  built a fake status); it is now the engine's own `PermissionStatus`, 'prompt' until the page asks.
+- **Wrappers under JavaScriptCore.** With relay-only WebRTC the wrapper added a
+  `webkitRTCPeerConnection` Safari 26 no longer has and inherited from `Function.prototype` instead
+  of `EventTarget`; both fixed. The shim tests run under JavaScriptCore (Bun) as well as V8.
+
+What still differs, and why it cannot be changed from the app:
+
+- **Apple Pay and Web Push.** `ApplePaySession`, `ApplePaySetup`, `MerchantValidationEvent`,
+  `PaymentRequest` and `PushManager` exist only in Safari. WebKit enables them for an embedder only
+  through private preferences, and they need Safari's entitlements to work; exposing objects that
+  cannot work (and that WebKit disables anyway once a page has user scripts) would be worse.
+  `Object.getOwnPropertyNames(window).length` follows (1044 in Safari, 1029 in a profile with
+  WebRTC on, 1022 with the default policy that removes it).
+- **WebRTC** is removed by the default policy (a privacy choice of the profile; `relayOnly` and
+  `unrestricted` keep it).
+- **The replacement `Date` and `Intl.DateTimeFormat`** (only with a time zone set) list `length`
+  and `name` before their statics: JavaScriptCore orders a script function's own properties that
+  way whatever the definition order.
+- **Media devices before permission.** On the CI runner Safari lists `audioinput,videoinput`, a
+  profile `audioinput` only. WebKit hides a kind the app has no capture authorisation for (macOS
+  privacy settings, per app); granting the app camera access once aligns it.
+- **Advanced Fingerprinting Protection.** Safari can add noise to canvas readback for scripts it
+  classifies as fingerprinting; there is no WKWebView switch for it. On the probe page (no such
+  script) the pixels are identical.
+- `navigator.webdriver` (true only under safaridriver) and the error-stack depth (WebDriver vs.
+  `callAsyncJavaScript`) differ only in the comparison harness.
+
+**deviceinfo.me** shows "Canvas: Spoofed" and "Fingerprinting Resistance: Detected" in a profile
+and equally in Safari 26 on the same Mac: its canvas test accepts only PNG data URLs of 142, 150,
+158 or 186 characters, and this WebKit's encoder writes 274 for the same five exact colours. The
+row sets the resistance verdict (`me()` in its script). Nothing in the profile causes it, and
+nothing a profile could do short of rewriting `toDataURL` (which would be a real lie) changes it.
+
+So a page that fingerprints *feature support* can still tell "Safari" from "a WKWebView app on the
+same Mac" by Apple Pay and Web Push, the same way it tells Safari from a Safari View Controller or
+a Mail or Slack preview. It cannot tell two profiles of this app apart by any of this: they are the
+same engine on the same Mac. What separates profiles is what they declare (table above) and their
+storage and network (§1, §4).
 
 ## 3. Encryption at rest
 
@@ -311,8 +348,8 @@ cannot be inspected from the page anyway.
 | Setting | Implementation | Native? | Gaps |
 |---|---|---|---|
 | User agent | `WKWebView.customUserAgent`, with presets in the editor | yes (string only) | `navigator.platform`, vendor, feature set and TLS fingerprint still identify WebKit on macOS (§2). Use the *Safari on macOS* preset; iPhone/iPad presets are UA-only and inconsistent |
-| Time zone | JS: `Intl.DateTimeFormat` default `timeZone`; `Date` local getters and setters, `getTimezoneOffset` (with the sub-minute offsets of historical dates), the local constructor forms `new Date(y, m, d, …)`, `Date.parse` and `new Date(string)` for strings without an offset, `toString`, `toDateString`, `toTimeString`, `toLocale*String`, `getYear`/`setYear` | no | Workers use the host zone (`Intl` and `Date` in a worker reveal it). `Intl.DateTimeFormat().format()` without an explicit zone follows the shim; other `Intl` constructors carry no zone |
-| Geolocation | JS: `navigator.geolocation` returns PERMISSION_DENIED, or fixed coordinates; `permissions.query({name:'geolocation'})` agrees | no | The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed |
+| Time zone | JS: `Intl.DateTimeFormat` default `timeZone`; `Date` local getters and setters, `getTimezoneOffset` (with the sub-minute offsets of historical dates), the local constructor forms `new Date(y, m, d, …)`, `Date.parse` and `new Date(string)` for strings without an offset, `toString`, `toDateString`, `toTimeString`, `toLocale*String`, `getYear`/`setYear`. A worker made from a blob of the page (how fingerprinting scripts make theirs) starts with the same shim: the blob is handed to the engine as [shim, page's blob], so the worker keeps its blob: location, relative URLs, CSP, strict mode and line numbers | no | Workers loaded from a URL and service workers use the host zone (rewriting them would change their location); under a CSP without `'unsafe-eval'` a blob worker does too. JavaScriptCore lists the replacement `Date`'s and `Intl.DateTimeFormat`'s `length`/`name` before their statics (`Object.getOwnPropertyNames(Date)`), which no script function can avoid. `Intl.DateTimeFormat().format()` without an explicit zone follows the shim; other `Intl` constructors carry no zone |
+| Geolocation | JS: `navigator.geolocation` answers as WebKit does for a user who said no ("User denied Geolocation") or who allowed the fixed coordinates; positions and errors are instances of the real interfaces with no own properties (values from the prototype getters and `toJSON`); `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks (WebKit's `hasBeenRequested`), then 'denied'/'granted' | no | The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed |
 | Time zone from the proxy | At launch, a geolocation service (ipinfo.io, then geojs.io, ipwho.is) is asked *through the profile's proxy* where it exits; the profile runs in that zone. The last answer per proxy is kept for when a lookup fails | — | A third-party request per launch (HTTPS, via the proxy only, no cookies). Off per profile, or set a zone explicitly. Without any answer the host zone is used |
 | Language | Process-wide: set before WebKit's first process from the first launched profile's proxy country (`WebContentLanguage`) | partly | WKWebView has no per-view `Accept-Language` / `navigator.languages` API; later profiles of the same run share the first one's language |
 
