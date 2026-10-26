@@ -138,6 +138,56 @@ final class SessionStoreTests: XCTestCase {
         }
     }
 
+    /// The tests above fail on the key alone (the HKDF salt is the profile id). Here the key is
+    /// the right one and only the AAD differs, so they prove the AAD binds both the profile id
+    /// and the purpose.
+    func testAADBindsProfileIDAndPurpose() throws {
+        try store().save(sample)
+        let key = try repo.profileKey(for: profile.id).derive(info: "session", salt: profile.id.rawBytes)
+        let url = repo.sessionURL(for: profile.id)
+        func load(aad: String) throws -> SessionDocument? {
+            try EncryptedDocumentFile<SessionDocument>(url: url, key: key, aad: aad).load()
+        }
+        XCTAssertEqual(try load(aad: "session:v1:\(profile.id.uuidString)")?.session, sample)
+        for aad in ["session:v1:\(UUID().uuidString)", "history:v1:\(profile.id.uuidString)",
+                    "session:v2:\(profile.id.uuidString)", "session:v1:", ""] {
+            XCTAssertThrowsError(try load(aad: aad), aad) {
+                XCTAssertEqual($0 as? CoreError, .authenticationFailed)
+            }
+        }
+    }
+
+    func testConcurrentUseIsSafe() throws {
+        let sessions = try store()
+        let states = (0..<8).map { i in
+            SessionState(windows: [.init(tabs: [.init(url: "https://site\(i).test/", title: "T\(i)")])],
+                         savedAt: Date(timeIntervalSince1970: Double(1_700_000_000 + i)))
+        }
+        let failures = NSLock()
+        var errors: [String] = []
+        DispatchQueue.concurrentPerform(iterations: 64) { i in
+            do {
+                switch i % 4 {
+                case 0, 1: try sessions.save(states[i % states.count])
+                case 2:
+                    // Every load sees a complete, authentic file (or none), never a torn write.
+                    if let loaded = try sessions.load(), !states.contains(loaded) {
+                        throw CoreError.corruptData("unexpected state \(loaded)")
+                    }
+                default: try sessions.clear()
+                }
+            } catch {
+                failures.withLock { errors.append("\(i): \(error)") }
+            }
+        }
+        XCTAssertEqual(errors, [])
+        try sessions.save(sample)
+        XCTAssertEqual(try store().load(), sample)
+        // No temporary files left behind by the atomic writes.
+        let names = try FileManager.default.contentsOfDirectory(atPath: repo.directory(for: profile.id).path).sorted()
+        XCTAssertEqual(names, ["config.bin", "session.bin"])
+    }
+
     func testUnsupportedFormatIsReported() throws {
         let key = try repo.profileKey(for: profile.id)
         let codec = EncryptedDocumentFile<[String: Int]>(url: repo.sessionURL(for: profile.id),

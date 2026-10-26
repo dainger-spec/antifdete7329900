@@ -110,12 +110,38 @@ public struct SafariVersion: Equatable, Sendable, CustomStringConvertible {
     /// `infoPlistURLs` can be read and parsed. Reads small files synchronously.
     public static func detect(infoPlistURLs: [URL] = infoPlistURLs,
                               operatingSystem: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion) -> SafariVersion {
+        detection(infoPlistURLs: infoPlistURLs, operatingSystem: operatingSystem).version
+    }
+
+    /// The result of `detection(...)`: the version and where it came from.
+    public struct Detection: Equatable, Sendable {
+        public let version: SafariVersion
+        /// The `Info.plist` the version was read from; `nil` when `version` is the macOS
+        /// `fallback` estimate.
+        public let infoPlistURL: URL?
+
+        public init(version: SafariVersion, infoPlistURL: URL?) {
+            self.version = version
+            self.infoPlistURL = infoPlistURL
+        }
+
+        /// True when Safari's `Info.plist` could not be read (e.g. the App Sandbox denied it)
+        /// and the version is the table estimate, which can lag the real Safari.
+        public var isFallback: Bool { infoPlistURL == nil }
+    }
+
+    /// Same as `detect`, but also says which source was used, so the app can log it: a
+    /// fallback estimate that differs from the real Safari makes the `.safariMac` UA differ from
+    /// Safari's in the `Version/` token.
+    public static func detection(infoPlistURLs: [URL] = infoPlistURLs,
+                                 operatingSystem: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion) -> Detection {
         for url in infoPlistURLs {
             if let data = try? Data(contentsOf: url), let version = parse(infoPlist: data) {
-                return version
+                return Detection(version: version, infoPlistURL: url)
             }
         }
-        return fallback(macOSMajor: operatingSystem.majorVersion, minor: operatingSystem.minorVersion)
+        return Detection(version: fallback(macOSMajor: operatingSystem.majorVersion, minor: operatingSystem.minorVersion),
+                         infoPlistURL: nil)
     }
 }
 
@@ -157,6 +183,18 @@ public enum UserAgentBuilder {
     /// at 10_15_7 and the WebKit token at 605.1.15 regardless of the real versions.
     public static let macWebKitPrefix = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
 
+    /// Longest `.custom` string accepted.
+    public static let maxCustomUserAgentLength = 512
+
+    /// A `.custom` string must be 1–512 printable ASCII characters. The string becomes the
+    /// HTTP `User-Agent` header, so control characters (CR/LF) and non-ASCII must never reach
+    /// `WKWebView.customUserAgent`. Used by `ProfileConfiguration.validate()` and, as a second
+    /// line of defence, by `resolve`.
+    public static func isValidCustomUserAgent(_ string: String) -> Bool {
+        !string.isEmpty && string.utf8.count <= maxCustomUserAgentLength
+            && string.utf8.allSatisfy { (0x20..<0x7F).contains($0) }
+    }
+
     public static func resolve(mode: UserAgentMode, customUserAgent: String?, safari: SafariVersion) -> UserAgentResolution {
         switch mode {
         case .safariMac:
@@ -171,9 +209,11 @@ public enum UserAgentBuilder {
             return UserAgentResolution(customUserAgent: mobileUserAgent(device: "iPad; CPU OS", safari: safari),
                                        applicationNameForUserAgent: nil)
         case .custom:
-            guard let customUserAgent, !customUserAgent.isEmpty else {
-                // `ProfileConfiguration.validate()` rejects this; never fall back to the bare
-                // WebKit default, which no real browser sends.
+            guard let customUserAgent, isValidCustomUserAgent(customUserAgent) else {
+                // `ProfileConfiguration.validate()` rejects this, but a stored configuration is
+                // not re-validated on load (corrupt, imported or written by another build). Never
+                // send an invalid header, and never fall back to the bare WebKit default, which
+                // no real browser sends.
                 return resolve(mode: .safariMac, customUserAgent: nil, safari: safari)
             }
             return UserAgentResolution(customUserAgent: customUserAgent, applicationNameForUserAgent: nil)
@@ -192,6 +232,13 @@ public enum UserAgentBuilder {
     /// release constant forever"). From 26.1 on, all Apple platforms report 18_7 (same bug,
     /// comments 9–10; WebKit `Quirks.cpp`: `frozenVersion = "18_7"`). Before Safari 26 the token
     /// was the real iOS version, which shipped with the same Safari major.minor.
+    ///
+    /// BEST EFFORT: Apple sets the frozen value outside open-source WebKit
+    /// (`systemMarketingVersionForUserAgentString` just reports the OS version) and has revised it
+    /// to a later iOS 18 security release before (18_6 → 18_6_2, bug 298473), and some
+    /// third-party UA lists show 18_7_x values with Safari 27. The mobile strings are therefore
+    /// representative of iOS Safari, not guaranteed byte-identical to a given device. They only
+    /// serve to get mobile layouts, so this is not worth tracking per point release.
     static func mobileOSToken(safari: SafariVersion) -> String {
         if safari.major >= 26 {
             return safari.major == 26 && safari.minor == 0 ? "18_6" : "18_7"

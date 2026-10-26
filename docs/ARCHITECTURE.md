@@ -188,13 +188,16 @@ A profile declares one of four `UserAgentMode`s (`ProfileConfiguration.userAgent
 | `safariMac` (default) | `applicationNameForUserAgent = "Version/<v> Safari/605.1.15"` | the UA Safari sends on this Mac |
 | `iPhone` | `customUserAgent` | iPhone Safari's UA string, for mobile layouts |
 | `iPad` | `customUserAgent` | the iPad-identifying string ("Request Mobile Website"); iPad Safari sends the Mac UA by default |
-| `custom` | `customUserAgent = userAgent` | the user's string (validated: 1–512 printable ASCII) |
+| `custom` | `customUserAgent = userAgent` | the user's string (validated: 1–512 printable ASCII; an invalid stored string resolves as `safariMac`) |
 
 `ProfileConfiguration.userAgentResolution(safari:)` returns what to apply; `<v>` comes from
 `SafariVersion.detect()`, which reads `CFBundleShortVersionString` from Safari.app's
-`Info.plist` and otherwise falls back to a macOS → Safari table. The iPhone/iPad strings use the
-frozen iOS OS token Safari itself sends (18_6 for Safari 26.0, 18_7 from 26.1). Only
-`safariMac` is consistent with the engine: the other modes change the string and nothing else.
+`Info.plist` and otherwise falls back to a macOS → Safari table (`SafariVersion.detection()`
+also says which source was used, for the log: the table can lag the real Safari). The
+iPhone/iPad strings use the frozen iOS OS token Safari itself sends (18_6 for Safari 26.0, 18_7
+from 26.1). Apple sets that value outside open-source WebKit and has revised it before, so the
+mobile strings are representative, not byte-exact. Only `safariMac` is consistent with the
+engine: the other modes change the string and nothing else.
 Old configurations migrate on decode: `deviceGenerationID` `macos-*` / `ios-*` / `ipados-*`
 become `safariMac` / `iPhone` / `iPad`, and a stored custom `userAgent` becomes `custom`.
 
@@ -212,7 +215,7 @@ a memory-only store.
 
 | Layer | How | Where it runs |
 |---|---|---|
-| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sessions, sync, HTTP transport, User-Agent modes, locale) | XCTest, 55 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sessions, sync, HTTP transport, User-Agent modes, locale) | XCTest, 58 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
 | JS shims (logic) | Node + ICU (`scripts/test-shims.mjs`) | Linux, every push |
 | App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 15 runner, every push |
 | App Sandbox container migration | `--selftest-write-vault` / `--selftest-read-vault` | macOS 15 runner, every push |

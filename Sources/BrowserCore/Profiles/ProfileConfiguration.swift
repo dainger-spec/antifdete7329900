@@ -227,8 +227,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             }
         }
         if userAgentMode == .custom {
-            guard let userAgent, !userAgent.isEmpty, userAgent.count <= 512,
-                  userAgent.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value < 0x7F }) else {
+            guard let userAgent, UserAgentBuilder.isValidCustomUserAgent(userAgent) else {
                 throw CoreError.invalidConfiguration("custom user agent must be 1–512 printable ASCII characters")
             }
         }

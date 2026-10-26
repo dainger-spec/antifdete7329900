@@ -64,6 +64,30 @@ final class UserAgentTests: XCTestCase {
         XCTAssertFalse(UserAgentMode.iPhone.matchesEngine)
     }
 
+    /// A stored configuration is not re-validated on load, so resolution must not pass an
+    /// invalid string (header injection via CR/LF, non-ASCII, oversized) to the web view.
+    func testInvalidCustomUserAgentNeverReachesTheWebView() throws {
+        let safari = try version("26.0")
+        let safariMac = UserAgentBuilder.resolve(mode: .safariMac, customUserAgent: nil, safari: safari)
+        let maxLength = String(repeating: "a", count: UserAgentBuilder.maxCustomUserAgentLength)
+        for bad in ["Custom/1.0\r\nX-Injected: 1", "Custom/1.0\n", "tab\there", "Ünïcode/1", "emoji 🙂", "\u{7F}",
+                    maxLength + "a"] {
+            XCTAssertFalse(UserAgentBuilder.isValidCustomUserAgent(bad), bad)
+            XCTAssertEqual(UserAgentBuilder.resolve(mode: .custom, customUserAgent: bad, safari: safari), safariMac, bad)
+            // Same rule in validate() and at resolution.
+            XCTAssertThrowsError(try ProfileConfiguration(userAgent: bad, userAgentMode: .custom).validate(), bad)
+            // A config that bypassed validate() (e.g. decoded from disk) still resolves safely.
+            let stored = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: JSONCoding.encoder.encode(
+                ProfileConfiguration(userAgent: bad, userAgentMode: .custom)))
+            XCTAssertEqual(stored.userAgentResolution(safari: safari), safariMac, bad)
+        }
+        for good in ["Custom/1.0", " ", "~", maxLength] {
+            XCTAssertTrue(UserAgentBuilder.isValidCustomUserAgent(good), good)
+            XCTAssertEqual(UserAgentBuilder.resolve(mode: .custom, customUserAgent: good, safari: safari).customUserAgent, good)
+            XCTAssertNoThrow(try ProfileConfiguration(userAgent: good, userAgentMode: .custom).validate(), good)
+        }
+    }
+
     // MARK: Safari version
 
     func testSafariVersionParsing() throws {
@@ -136,6 +160,16 @@ final class UserAgentTests: XCTestCase {
         let os = OperatingSystemVersion(majorVersion: 15, minorVersion: 6, patchVersion: 1)
         XCTAssertEqual(SafariVersion.detect(infoPlistURLs: [missing, garbage, real], operatingSystem: os).string, "26.0.1")
         XCTAssertEqual(SafariVersion.detect(infoPlistURLs: [missing, garbage], operatingSystem: os).string, "18.6")
+
+        // The source is reported so the app can log a fallback (which can lag the real Safari).
+        let found = SafariVersion.detection(infoPlistURLs: [missing, garbage, real], operatingSystem: os)
+        XCTAssertEqual(found, SafariVersion.Detection(version: try version("26.0.1"), infoPlistURL: real))
+        XCTAssertFalse(found.isFallback)
+        let estimated = SafariVersion.detection(infoPlistURLs: [missing, garbage], operatingSystem: os)
+        XCTAssertEqual(estimated.version.string, "18.6")
+        XCTAssertNil(estimated.infoPlistURL)
+        XCTAssertTrue(estimated.isFallback)
+        XCTAssertTrue(SafariVersion.detection(infoPlistURLs: [], operatingSystem: os).isFallback)
     }
 
     // MARK: Configuration
@@ -166,6 +200,9 @@ final class UserAgentTests: XCTestCase {
         XCTAssertEqual(try decode(#"{\#(base),"userAgentMode":"future"}"#).userAgentMode, .safariMac)
         XCTAssertEqual(try decode(#"{\#(base),"userAgentMode":"future","userAgent":"X/1"}"#).userAgentMode, .custom)
         XCTAssertEqual(try decode(#"{\#(base),"userAgentMode":"future","deviceGenerationID":"ios-26"}"#).userAgentMode, .iPhone)
+        // A mode of the wrong type does not fail the whole profile either.
+        XCTAssertEqual(try decode(#"{\#(base),"userAgentMode":5,"userAgent":"X/1"}"#).userAgentMode, .custom)
+        XCTAssertEqual(try decode(#"{\#(base),"userAgentMode":null,"deviceGenerationID":"ipados-26"}"#).userAgentMode, .iPad)
 
         // Re-encoding writes the mode and never the old generation id.
         let migrated = try decode(#"{\#(base),"deviceGenerationID":"ipados-26"}"#)

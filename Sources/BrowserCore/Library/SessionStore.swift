@@ -140,7 +140,9 @@ struct SessionDocument: Codable, Equatable {
 /// this file). It lives in the profile directory, so deleting the profile deletes it.
 /// Ephemeral profiles get a memory-only store (`url == nil`) that never writes.
 ///
-/// Thread-safe; saves are serialised, so the last `save` call wins.
+/// Thread-safe: `load`, `save` and `clear` are serialised, and each file write is atomic. Of two
+/// saves made concurrently from different threads, the one that runs last wins, so the app
+/// should save from one queue (debounced on tab changes, and once before shutdown).
 public final class SessionStore: @unchecked Sendable {
     private let file: EncryptedDocumentFile<SessionDocument>
     private let lock = NSLock()
@@ -177,8 +179,14 @@ public final class SessionStore: @unchecked Sendable {
     /// Normalises and stores `state`. A state with no restorable tab removes the saved session
     /// instead, so the next launch starts fresh.
     ///
+    /// APP LAYER: take the final snapshot *before* tearing windows down when a profile stops or
+    /// the app quits, and do not save while windows close one by one: the last of those saves
+    /// sees no tabs and would delete the session that should be restored.
+    ///
     /// Refuses to recreate a missing profile directory: a late save from a profile that was
-    /// deleted meanwhile must not leave a `session.bin` behind.
+    /// deleted meanwhile must not leave a `session.bin` behind. (A save racing with the
+    /// deletion itself can still leave an orphaned, encrypted directory; the profile is no longer
+    /// in the index, so `ProfileRepository.removeOrphanedDirectories()` removes it.)
     public func save(_ state: SessionState) throws {
         let clean = state.normalized()
         try lock.withLock {
