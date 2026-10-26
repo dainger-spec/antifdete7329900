@@ -77,6 +77,20 @@ public struct WebKitDataLayout: Equatable, Sendable {
             .replacingOccurrences(of: "/", with: "|")
     }
 
+    /// The same archive root label for another profile: the trailing UUID component is replaced,
+    /// keeping its letter case. Used when a restored backup becomes a copy with a new profile ID
+    /// (`destination(forLabel:profileID:)` only accepts labels that end in the profile's UUID).
+    /// Throws for a label that does not end in `oldID`.
+    public static func relabel(_ label: String, from oldID: UUID, to newID: UUID) throws -> String {
+        var components = label.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        guard components.count >= 2, let last = components.last,
+              last.lowercased() == oldID.uuidString.lowercased() else {
+            throw CoreError.unsafeArchivePath(label)
+        }
+        components[components.count - 1] = last == last.lowercased() ? newID.uuidString.lowercased() : newID.uuidString
+        return components.joined(separator: "|")
+    }
+
     /// Where an archived root is restored in *this* layout.
     ///
     /// Labels written by the other layout are translated (bundle-ID component removed or

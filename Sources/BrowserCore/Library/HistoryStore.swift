@@ -54,8 +54,7 @@ public final class HistoryStore: @unchecked Sendable {
     public let policy: Policy
 
     static func file(url: URL?, profileID: UUID, profileKey: SymmetricKey) -> EncryptedDocumentFile<HistoryDocument> {
-        EncryptedDocumentFile(url: url, key: profileKey.derive(info: "history", salt: profileID.rawBytes),
-                              aad: "history:v1:\(profileID.uuidString)")
+        ProfileFileBinding.history.document(url: url, profileID: profileID, profileKey: profileKey)
     }
 
     init(file: EncryptedDocumentFile<HistoryDocument>, policy: Policy) throws {

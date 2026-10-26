@@ -44,6 +44,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │  ProfileRepository ── encrypted index + per-profile config, store factories                │
 │  PasswordVault / HistoryStore / BookmarkStore ── per-profile encrypted documents           │
 │  EncryptedChunkStream / EncryptedDirectoryArchive / WebKitDataLayout ── WebKit data seal   │
+│  ProfileBackup ── password-protected single-file profile export / import (.pbbackup)       │
 │  SyncCodec / SyncEngine ── encrypted sync client with per-record merges                    │
 │  SyncTransport ── backend contract                                                         │
 │     ├── LocalDirectorySyncTransport  (local-only)                                          │
@@ -76,7 +77,16 @@ profile key (random 256-bit per profile, stored only wrapped)
    ├─ HKDF "history"           → history.bin                   (AAD "history:v1:<uuid>")
    ├─ HKDF "bookmarks"         → bookmarks.bin                 (AAD "bookmarks:v1:<uuid>")
    └─ HKDF "webdata-archive", salt = random per archive → webdata.pbsa chunk key
+
+backup password (chosen per export; independent of the master password)
+   │ PBKDF2-HMAC-SHA256, 600 000 iterations, random salt (KDF parameters in the file header)
+   ▼
+backup key
+   └─ HKDF "profile-backup", salt = random per file → .pbbackup chunk key
 ```
+
+`ProfileFileBinding` (BrowserCore) is the one place that defines each per-profile file's key
+and AAD; the stores, profile duplication and restore-as-copy all use it.
 
 All HKDF derivations use the vault ID (or profile ID) as salt. Every ciphertext's AAD
 names its purpose and owner, so moving a ciphertext into another file or profile makes
@@ -125,6 +135,35 @@ streamed in 1 MiB chunks, so memory use stays bounded. Readers reject truncation
 after the final chunk, reordered chunks, unsafe paths (`..`, absolute, NUL) and symlinks.
 Extraction goes to a staging directory, and nothing reaches its destination until the
 whole archive has authenticated.
+
+The root labels in the record stream are WebKit paths that end in the profile UUID
+(`WebKitDataLayout`), so the archive is bound to its profile twice: by the key and by the labels.
+
+### Profile backups (`.pbbackup`) and duplicates
+
+```
+file     = "PBBK" | version u8 (=1) | kdfLength u16 | KDFParameters JSON
+           | chunk stream as above, key = HKDF(PBKDF2(backup password), salt, "profile-backup")
+payload  = manifestLength u32 | manifest JSON | { nameLength u16 | name | size u64 | bytes }* | 0 u16
+manifest = profile ID, name, dates, file list, and the profile key
+```
+
+`ProfileBackup.export` copies the profile's files as they are on disk (still encrypted with the
+profile key): `config.bin`, `passwords.bin`, `history.bin`, `bookmarks.bin`, `session.bin`,
+`webdata.pbsa`. The profile key travels inside the encrypted manifest, so a backup restores into
+any vault with only the backup password. Restoring unpacks into a staging directory and changes
+the vault only after the whole file has authenticated.
+
+- Restored in place (same ID: a vault without that profile, or "replace"): same ID and key.
+  A replace moves the old directory aside and moves it back on failure or after a crash.
+- Restored as a copy (`.copy`, or the original still exists or was deleted): a new ID and a
+  new random profile key. Every file is re-encrypted for them, including `webdata.pbsa`, whose
+  root labels are renamed to the new UUID.
+- Unknown entries written by other builds are authenticated and skipped. Unsafe names fail the restore.
+
+`ProfileRepository.duplicate` means "same settings, fresh data". It creates a new ID and key,
+re-encrypts the configuration and (optionally) the bookmarks, and copies nothing else: no
+cookies or website data, history, passwords or session.
 
 ## Profile lifecycle
 

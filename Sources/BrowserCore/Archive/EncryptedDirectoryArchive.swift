@@ -161,6 +161,79 @@ public enum EncryptedDirectoryArchive {
         return stats
     }
 
+    /// Re-encrypts an archive under `newKey`, passing every root label through `relabel`, and
+    /// atomically writes the result to `destination` (which may be `source`).
+    ///
+    /// Used when a restored profile backup becomes a copy with a new profile ID and key: the
+    /// WebKit layout's root labels end in the profile UUID (`WebKitDataLayout.relabel`). Records
+    /// are streamed one by one and only re-encrypted in memory, so no plaintext reaches the disk.
+    /// The result replaces `destination` only after the whole source has authenticated.
+    @discardableResult
+    static func reseal(from source: URL, key: SymmetricKey, to destination: URL, newKey: SymmetricKey,
+                       chunkSize: Int = defaultChunkSize, relabel: (String) throws -> String) throws -> Stats {
+        let temp = destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(destination.lastPathComponent).\(UUID().uuidString).tmp")
+        try SecureFile.ensureDirectory(destination.deletingLastPathComponent())
+        guard FileManager.default.createFile(atPath: temp.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
+            throw CoreError.io("cannot create \(temp.path)")
+        }
+        var stats = Stats()
+        do {
+            let input = try FileHandle(forReadingFrom: source)
+            defer { try? input.close() }
+            let output = try FileHandle(forWritingTo: temp)
+            defer { try? output.close() }
+            let reader = try EncryptedChunkReader(handle: input, key: key)
+            let writer = try EncryptedChunkWriter(handle: output, key: newKey, chunkSize: chunkSize)
+            var labels: [String: String] = [:]
+            while true {
+                let kindByte = try reader.read(1)[0]
+                guard let kind = Kind(rawValue: kindByte) else { throw CoreError.corruptData("record kind \(kindByte)") }
+                if kind == .end { break }
+                let pathLength = Int(try readUInt(reader, bytes: 2))
+                guard let path = String(data: try reader.read(pathLength), encoding: .utf8) else {
+                    throw CoreError.corruptData("path encoding")
+                }
+                let mode = Int(try readUInt(reader, bytes: 2))
+                var components = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+                for component in components {
+                    do { try validateComponent(component) } catch { throw CoreError.unsafeArchivePath(path) }
+                }
+                let label = components[0]
+                if labels[label] == nil {
+                    let renamed = try relabel(label)
+                    try validateComponent(renamed)
+                    labels[label] = renamed
+                }
+                components[0] = labels[label] ?? label
+                try writeHeader(kind: kind, path: components.joined(separator: "/"), mode: mode, writer: writer)
+                if kind == .file {
+                    let size = try readUInt(reader, bytes: 8)
+                    try writeUInt(size, bytes: 8, writer: writer)
+                    var remaining = size
+                    while remaining > 0 {
+                        let piece = Int(min(remaining, UInt64(defaultChunkSize)))
+                        try writer.write(try reader.read(piece))
+                        remaining -= UInt64(piece)
+                    }
+                    stats.files += 1
+                    stats.bytes += size
+                } else {
+                    stats.directories += 1
+                }
+            }
+            try reader.finish()
+            try writer.write(Data([Kind.end.rawValue]))
+            try writer.finish()
+            try output.synchronize()
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            throw error
+        }
+        try SecureFile.replace(destination, with: temp)
+        return stats
+    }
+
     // MARK: Private
 
     private static func walk(directory: String, archivePath: String, writer: EncryptedChunkWriter, stats: inout Stats) throws {

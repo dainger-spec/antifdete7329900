@@ -116,6 +116,52 @@ public final class ProfileRepository: @unchecked Sendable {
         return summary
     }
 
+    /// A new profile with the same settings and fresh, isolated data: a new ID, a new random
+    /// profile key, the configuration re-encrypted for both,
+    /// and — if `copyBookmarks` — the bookmarks. Nothing else is copied: no cookies or other
+    /// website data (`webdata.pbsa`), history, passwords or session, so the duplicate starts
+    /// signed out everywhere and shares no stored state with the original. `name` is validated
+    /// like `create`.
+    ///
+    /// The source may be running: its configuration and bookmarks are saved on every change,
+    /// so what is copied is current.
+    @discardableResult
+    public func duplicate(_ id: UUID, name: String, copyBookmarks: Bool = true) throws -> ProfileSummary {
+        let cleanName = try Self.validatedName(name)
+        let sourceKey = try profileKey(for: id)
+        let configuration = try loadConfiguration(id, key: sourceKey)
+        var bookmarks: BookmarkDocument?
+        if copyBookmarks,
+           let document = try BookmarkStore.file(url: bookmarksURL(for: id), profileID: id, profileKey: sourceKey).load() {
+            // Live bookmarks only: the source's deletion tombstones (kept for sync) mean nothing
+            // to a profile that never had those bookmarks.
+            bookmarks = BookmarkDocument(bookmarks: document.bookmarks)
+        }
+
+        let newID = UUID()
+        let newKey = SymmetricKey(size: .bits256)
+        let wrapped = try AEAD.seal(newKey.rawBytes, key: vault.profileKeyWrappingKey, aad: Self.keyAAD(newID))
+        let summary = ProfileSummary(id: newID, name: cleanName, createdAt: Date(), lastLaunchedAt: nil, revision: 1)
+        let newDirectory = directory(for: newID)
+        try SecureFile.ensureDirectory(newDirectory)
+        do {
+            try writeConfiguration(configuration, id: newID, key: newKey)
+            if let bookmarks {
+                try BookmarkStore.file(url: bookmarksURL(for: newID), profileID: newID, profileKey: newKey).save(bookmarks)
+            }
+            try lock.withLock {
+                var updated = index
+                updated.entries.append(ProfileIndexEntry(summary: summary, wrappedKey: wrapped))
+                try saveIndex(updated)
+                index = updated
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: newDirectory)
+            throw error
+        }
+        return summary
+    }
+
     public func rename(_ id: UUID, to name: String) throws {
         let cleanName = try Self.validatedName(name)
         try mutateSummary(id) { $0.name = cleanName; $0.revision += 1 }
@@ -148,12 +194,28 @@ public final class ProfileRepository: @unchecked Sendable {
         try? FileManager.default.removeItem(at: directory(for: id))
     }
 
-    /// Deletes profile directories that are not referenced by the index.
+    /// Deletes profile directories that are not referenced by the index, and cleans up after a
+    /// backup restore that a crash interrupted (`ProfileBackup.restore`): staging directories
+    /// are deleted, and a profile directory that was moved aside to be replaced is moved back
+    /// if its replacement never arrived. Call it when no restore is running (e.g. at unlock).
     public func removeOrphanedDirectories() {
         let known = Set(list().map { $0.id.uuidString })
         let contents = (try? FileManager.default.contentsOfDirectory(atPath: profilesDirectory.path)) ?? []
-        for name in contents where !known.contains(name) && UUID(uuidString: name) != nil {
-            try? FileManager.default.removeItem(at: profilesDirectory.appendingPathComponent(name))
+        for name in contents {
+            let url = profilesDirectory.appendingPathComponent(name)
+            if name.hasPrefix(Self.replacedDirectoryPrefix) {
+                let idString = String(name.dropFirst(Self.replacedDirectoryPrefix.count).prefix(36))
+                if let id = UUID(uuidString: idString), known.contains(id.uuidString),
+                   !FileManager.default.fileExists(atPath: directory(for: id).path),
+                   (try? FileManager.default.moveItem(at: url, to: directory(for: id))) != nil {
+                    continue
+                }
+                try? FileManager.default.removeItem(at: url)
+            } else if name.hasPrefix(Self.restoreStagingPrefix) {
+                try? FileManager.default.removeItem(at: url)
+            } else if !known.contains(name) && UUID(uuidString: name) != nil {
+                try? FileManager.default.removeItem(at: url)
+            }
         }
     }
 
@@ -245,6 +307,38 @@ public final class ProfileRepository: @unchecked Sendable {
         }
     }
 
+    // MARK: Backup support (see ProfileBackup)
+
+    /// Name prefix of the directory a backup restore unpacks into (inside `profilesDirectory`).
+    static let restoreStagingPrefix = ".restore-"
+    /// Name prefix of a profile directory moved aside while a restore replaces it:
+    /// `".replaced-<profile uuid>-<random>"`, so an interrupted replace can be undone.
+    static let replacedDirectoryPrefix = ".replaced-"
+
+    func contains(_ id: UUID) -> Bool {
+        lock.withLock { index.entries.contains { $0.summary.id == id } }
+    }
+
+    func wasDeleted(_ id: UUID) -> Bool {
+        lock.withLock { index.deletedProfileIDs.contains(id) }
+    }
+
+    /// Adds `summary` with `key`, or replaces the entry with the same ID (key and summary).
+    func installProfile(_ summary: ProfileSummary, key: SymmetricKey) throws {
+        let wrapped = try AEAD.seal(key.rawBytes, key: vault.profileKeyWrappingKey, aad: Self.keyAAD(summary.id))
+        try lock.withLock {
+            var updated = index
+            let entry = ProfileIndexEntry(summary: summary, wrappedKey: wrapped)
+            if let position = updated.entries.firstIndex(where: { $0.summary.id == summary.id }) {
+                updated.entries[position] = entry
+            } else {
+                updated.entries.append(entry)
+            }
+            try saveIndex(updated)
+            index = updated
+        }
+    }
+
 
     // MARK: Private
 
@@ -289,9 +383,9 @@ public final class ProfileRepository: @unchecked Sendable {
 
     private var indexAAD: String { "profile-index:v1:\(vault.vaultID.uuidString)" }
     static func keyAAD(_ id: UUID) -> String { "profile-key:v1:\(id.uuidString)" }
-    static func configAAD(_ id: UUID) -> String { "profile-config:v1:\(id.uuidString)" }
+    static func configAAD(_ id: UUID) -> String { ProfileFileBinding.config.aad(id) }
 
-    private static func validatedName(_ name: String) throws -> String {
+    static func validatedName(_ name: String) throws -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= 128 else {
             throw CoreError.invalidConfiguration("profile name must be 1–128 characters")

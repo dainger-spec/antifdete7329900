@@ -36,8 +36,7 @@ public final class BookmarkStore: @unchecked Sendable {
     static let maxFolderLength = 128
 
     static func file(url: URL?, profileID: UUID, profileKey: SymmetricKey) -> EncryptedDocumentFile<BookmarkDocument> {
-        EncryptedDocumentFile(url: url, key: profileKey.derive(info: "bookmarks", salt: profileID.rawBytes),
-                              aad: "bookmarks:v1:\(profileID.uuidString)")
+        ProfileFileBinding.bookmarks.document(url: url, profileID: profileID, profileKey: profileKey)
     }
 
     init(file: EncryptedDocumentFile<BookmarkDocument>) throws {
