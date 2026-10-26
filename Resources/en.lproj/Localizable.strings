@@ -96,6 +96,7 @@
 "history.notice.off" = "History recording is turned off for this profile.";
 "history.search" = "Search history";
 "launch.error.proxyInvalid" = "The profile's proxy is misconfigured (address “%@”). The profile was not started, so no site opens directly. Fix the proxy address in the profile settings.";
+"launch.languageFixed" = "Websites see the language “%1$@” (set for this run by the first profile launched). For this profile’s proxy they would expect “%2$@”: quit the app and launch this profile first.";
 "library.bookmarks.empty" = "No bookmarks. Use ☆ in the toolbar or ⌘D to bookmark a page.";
 "library.edit" = "Edit…";
 "library.editor.choose" = "Choose";

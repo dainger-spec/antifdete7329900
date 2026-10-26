@@ -106,6 +106,7 @@ final class ProfileManager: ObservableObject {
         let configuration = stored.applying(location)
         // Before the first web view of the run: WebKit reads its language list only once.
         WebContentLanguage.decide(location?.webLanguage)
+        noteLanguageMismatch(for: id, wanted: location?.webLanguage)
         let session: BrowserSession
         do {
             session = try BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
@@ -136,6 +137,17 @@ final class ProfileManager: ObservableObject {
             log.notice("Could not look up where the profile's proxy exits; using \(configuration.lastProxyLocation == nil ? "the system time zone" : "the last known location", privacy: .public)")
         }
         return location
+    }
+
+    /// Profiles already told, once per run, that websites see another language than their
+    /// proxy's country suggests (WebKit's language list is fixed by the first profile launched).
+    private var languageMismatchNoted: Set<UUID> = []
+
+    private func noteLanguageMismatch(for id: UUID, wanted: String?) {
+        guard let wanted, let decided = WebContentLanguage.decided?.first, decided != wanted,
+              !languageMismatchNoted.contains(id) else { return }
+        languageMismatchNoted.insert(id)
+        onError?(String(format: L("launch.languageFixed"), decided, wanted))
     }
 
     /// Keeps a newly found proxy location in the profile's configuration, as the fallback for a

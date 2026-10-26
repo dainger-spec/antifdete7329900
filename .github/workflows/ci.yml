@@ -45,11 +45,27 @@ jobs:
           status=0
           for variant in sandboxed unsandboxed; do
             echo "::group::self-test ($variant)"
-            build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test || status=1
+            PB_SELFTEST_SURFACE_OUT="$PWD/build/surface-$variant" build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test || status=1
             echo "::endgroup::"
           done
           kill $PROXY_PID || true
           exit $status
+      - name: Compare the fingerprint surface with this Mac's real Safari (safaridriver)
+        run: |
+          sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
+          python3 scripts/safari_reference.py --compare build/surface-unsandboxed/surface-macos.json --out build/safari-surface.json
+          code=$?
+          if [ "$code" = "2" ]; then echo "::warning::Safari could not be driven on this runner; surface not compared"; exit 0; fi
+          exit $code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fingerprint-surfaces
+          path: |
+            build/surface-sandboxed
+            build/surface-unsandboxed
+            build/safari-surface.json
+          if-no-files-found: ignore
       - name: App Sandbox container migration (unsandboxed data → sandboxed first launch)
         run: |
           # Separate bundle ID so the sandbox container does not exist yet.

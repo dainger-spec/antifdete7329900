@@ -49,9 +49,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         self.passwordVault = session.passwordVault
         self.library = session.library
 
-        let window = BrowserWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
+        // A mobile generation's window is the declared device's screen: its web content can never
+        // be wider or taller than the screen the page is told about (see PrivacyScripts).
+        let deviceScreen = PrivacyScripts.deviceScreenSize(for: session.configuration)
+        let contentSize = deviceScreen ?? CGSize(width: 1200, height: 820)
+        let window = BrowserWindow(contentRect: NSRect(origin: .zero, size: contentSize),
                                    styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                    backing: .buffered, defer: false)
+        if let deviceScreen { window.contentMaxSize = deviceScreen }
         window.isReleasedWhenClosed = false
         // Never saved as restorable state at quit: AppKit would write the title — the profile's
         // name — to ~/Library/Saved Application State in plaintext.

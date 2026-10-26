@@ -33,6 +33,9 @@ cp "$BIN_DIR/PrivacyBrowser" "$APP/Contents/MacOS/PrivacyBrowser"
 sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Info.plist > "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
+# The fingerprint probe the self-test and scripts/safari_reference.py share.
+cp Resources/fingerprint_probe.js "$APP/Contents/Resources/fingerprint_probe.js"
+
 # Localized strings into Bundle.main, where the app looks them up (see Localization.swift).
 for lang in en ru; do
   cp -R "Resources/$lang.lproj" "$APP/Contents/Resources/$lang.lproj"

@@ -19,6 +19,14 @@ import WebKit
 /// A macOS profile overrides no navigator or screen value at all: it runs on the very engine and
 /// hardware it declares, and native values agree with everything else a page can measure
 /// (CSS media queries, window sizes), which a fixed screen size would not.
+///
+/// What is replaced is replaced the way the engine defines it: accessors on the prototypes,
+/// strict methods with only `length` and `name`, the native receiver checks, and a
+/// `Function.prototype.toString` that prints them as native code — also when a page asks the
+/// toString of a fresh iframe (one registry per page, shared by every same-origin frame). The
+/// time zone shim covers the local constructor forms, `Date.parse`, the setters and
+/// sub-minute historical offsets, so Date is consistent with itself, not only with `Intl`.
+/// Web Workers are out of reach of a user script: their `Date`/`Intl` keep the host zone.
 enum PrivacyScripts {
     struct ShimConfiguration: Encodable {
         var timeZone: String?
@@ -70,6 +78,13 @@ enum PrivacyScripts {
                                  webRTC: configuration.webRTCPolicy.rawValue, device: device)
     }
 
+    /// The declared device's screen in points for a mobile generation (the browser window is
+    /// sized to it, so inner sizes never exceed the screen the page is told about); nil for macOS.
+    static func deviceScreenSize(for configuration: ProfileConfiguration) -> CGSize? {
+        guard let device = shimConfiguration(for: configuration).device else { return nil }
+        return CGSize(width: device.screenWidth, height: device.screenHeight)
+    }
+
     static func makeUserContentController(for configuration: ProfileConfiguration) -> WKUserContentController {
         let controller = WKUserContentController()
         controller.addUserScript(WKUserScript(source: source(for: configuration),
@@ -87,10 +102,29 @@ enum PrivacyScripts {
     static let shimBody = #"""
 'use strict';
 const patched = new WeakSet();
+// Shared by every same-origin frame of the page: the frame above answers with its registry when
+// its (patched) Function.prototype.toString is called with this key as `this`.
+const REGISTRY_KEY = Symbol.for('wk.shim.registry');
+const registry = acquireRegistry();
+// How this engine prints a native function; the name is substituted per function.
+const NATIVE_TEMPLATE = Function.prototype.toString.call(Array.prototype.push).replace('push', '%NAME%');
+
+function acquireRegistry() {
+  let w = window;
+  try {
+    while (w.parent && w.parent !== w) {
+      w = w.parent;
+      const shared = w.Function.prototype.toString.call(REGISTRY_KEY); // native: TypeError
+      if (shared) return shared;
+    }
+  } catch (e) {}
+  return new WeakMap();
+}
 
 function patchWindow(w) {
   if (!w || patched.has(w)) return;
   patched.add(w);
+  try { patchToString(w); } catch (e) {}
   if (CONFIG.device) { try { patchDevice(w, CONFIG.device); } catch (e) {} }
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
@@ -98,29 +132,72 @@ function patchWindow(w) {
   try { hookChildWindows(w); } catch (e) {}
 }
 
-// Mobile generations: the declared device's navigator and screen values. Each is a getter where
-// the engine defines it (on the prototype for navigator and screen, on window itself for
-// devicePixelRatio), shaped like the native one, so navigator, screen and window gain no own
-// property. Rendering is left alone (see PrivacyScripts).
+// ---- Functions that look native -------------------------------------------------------------
+// Every replacement is a strict method or accessor: own properties `length` and `name` only, no
+// `prototype`, not constructible, `caller`/`arguments` throw. Its text is registered so that
+// Function.prototype.toString (patched per realm, one registry per page) prints it as native.
+
+function asNative(fn) {
+  registry.set(fn, NATIVE_TEMPLATE.replace('%NAME%', fn.name));
+  return fn;
+}
+
+function method(name, length, impl) {
+  const fn = { [name](...args) { return impl.apply(this, args); } }[name];
+  Object.defineProperty(fn, 'length', { value: length });
+  return asNative(fn);
+}
+
+function getter(name, impl) {
+  return asNative(Object.getOwnPropertyDescriptor({ get [name]() { return impl.call(this); } }, name).get);
+}
+
+function patchToString(w) {
+  const proto = w.Function.prototype;
+  const native = proto.toString;
+  const toString = { toString() {
+    if (this === REGISTRY_KEY) return registry;
+    const text = registry.get(this);
+    return text !== undefined ? text : native.call(this);
+  } }.toString;
+  registry.set(toString, native.call(native));
+  Object.defineProperty(proto, 'toString', { value: toString, writable: true, enumerable: false, configurable: true });
+}
+
+// Replaces a property keeping its enumerability (window.open is enumerable, prototype methods are not).
+function define(target, name, value) {
+  const existing = Object.getOwnPropertyDescriptor(target, name);
+  Object.defineProperty(target, name, { value: value, writable: true, configurable: true,
+                                        enumerable: existing ? !!existing.enumerable : false });
+}
+
+// ---- Device (mobile generations) -------------------------------------------------------------
+// The declared device's navigator and screen values as accessors where the engine defines them:
+// on the prototypes for navigator and screen (no own property appears on the instances), on the
+// window itself for its own attributes. Each calls the native accessor first, so a wrong receiver
+// (Navigator.prototype.platform) throws the engine's TypeError. Rendering is left alone.
 function patchDevice(w, device) {
   const nav = w.navigator;
   if (nav) {
-    overrideGetter(nav, 'platform', device.platform);
-    overrideGetter(nav, 'maxTouchPoints', device.maxTouchPoints);
-    overrideGetter(nav, 'hardwareConcurrency', device.hardwareConcurrency);
-    overrideGetter(nav, 'standalone', false); // iOS Safari only: false in a browser tab
+    overrideGetter(w, nav, 'platform', device.platform);
+    overrideGetter(w, nav, 'maxTouchPoints', device.maxTouchPoints);
+    overrideGetter(w, nav, 'hardwareConcurrency', device.hardwareConcurrency);
+    overrideGetter(w, nav, 'standalone', false); // iOS Safari only: false in a browser tab
   }
   const s = w.screen;
   if (s) {
-    overrideGetter(s, 'width', device.screenWidth);
-    overrideGetter(s, 'height', device.screenHeight);
-    overrideGetter(s, 'availWidth', device.screenWidth);   // iOS has no menu bar or Dock
-    overrideGetter(s, 'availHeight', device.screenHeight);
+    overrideGetter(w, s, 'width', device.screenWidth);
+    overrideGetter(w, s, 'height', device.screenHeight);
+    overrideGetter(w, s, 'availWidth', device.screenWidth); // iOS has no menu bar or Dock
+    overrideGetter(w, s, 'availHeight', device.screenHeight);
   }
-  overrideGetter(w, 'devicePixelRatio', device.devicePixelRatio);
+  overrideGetter(w, w, 'devicePixelRatio', device.devicePixelRatio);
+  // On iOS the window is the screen; inner sizes stay what the web view really is.
+  overrideGetter(w, w, 'outerWidth', device.screenWidth);
+  overrideGetter(w, w, 'outerHeight', device.screenHeight);
 }
 
-function overrideGetter(obj, name, value) {
+function overrideGetter(w, obj, name, value) {
   let holder = obj;
   while (holder && !Object.prototype.hasOwnProperty.call(holder, name)) holder = Object.getPrototypeOf(holder);
   if (!holder || holder === Object.prototype) {
@@ -129,21 +206,32 @@ function overrideGetter(obj, name, value) {
     holder = proto && proto !== Object.prototype ? proto : obj;
   }
   const native = Object.getOwnPropertyDescriptor(holder, name);
-  // An accessor named "get <name>", like the native getter.
-  const getter = Object.getOwnPropertyDescriptor({ get [name]() { return value; } }, name).get;
-  Object.defineProperty(holder, name, {
-    get: getter,
-    set: native ? native.set : undefined,
-    enumerable: native ? native.enumerable : true,
-    configurable: true
+  const Interface = holder === obj ? null : holder.constructor;
+  const get = getter(name, function () {
+    if (native && native.get) native.get.call(this); // enforces the receiver like the engine
+    else if (Interface && !(this instanceof Interface)) {
+      throw new w.TypeError('The ' + Interface.name + '.' + name + ' getter can only be used on instances of ' + Interface.name);
+    }
+    return value;
   });
+  Object.defineProperty(holder, name, { get: get, set: native ? native.set : undefined,
+                                        enumerable: native ? native.enumerable : true, configurable: true });
 }
 
+// ---- Time zone --------------------------------------------------------------------------------
+// Date and Intl behave as if the system zone were TZ: local getters and setters, the local
+// constructor forms, Date.parse of strings without an offset, toString's zone name, and the
+// default time zone of Intl.DateTimeFormat and toLocale*String. Offsets keep sub-minute
+// precision (pre-1900 "LMT" offsets have seconds), as the engine's own do.
 function patchTimeZone(w, TZ) {
   const NativeDate = w.Date;
   const proto = NativeDate.prototype;
   const NativeDTF = w.Intl.DateTimeFormat;
   const nativeGetTime = proto.getTime;
+  const nativeSetTime = proto.setTime;
+  const nativeParse = NativeDate.parse;
+  const nativeLocal = ['getFullYear', 'getMonth', 'getDate', 'getHours', 'getMinutes', 'getSeconds', 'getMilliseconds']
+    .map((name) => proto[name]);
 
   const partsFormatter = new NativeDTF('en-US', {
     timeZone: TZ, hourCycle: 'h23', era: 'short',
@@ -154,6 +242,7 @@ function patchTimeZone(w, TZ) {
   const nameFormatter = new NativeDTF(undefined, { timeZone: TZ, timeZoneName: 'long' });
   const offsetCache = new Map();
 
+  // Minutes west of UTC at instant t (fractional before standard time), as getTimezoneOffset.
   function offsetFor(t) {
     const bucket = Math.floor(t / 900000);
     if (offsetCache.has(bucket)) return offsetCache.get(bucket);
@@ -165,16 +254,68 @@ function patchTimeZone(w, TZ) {
     wallAsUTC.setUTCFullYear(year, +p.month - 1, +p.day);
     wallAsUTC.setUTCHours(+p.hour % 24, +p.minute, +p.second, 0);
     const truncated = t - (((t % 1000) + 1000) % 1000);
-    const offset = Math.round((truncated - nativeGetTime.call(wallAsUTC)) / 60000);
+    const offset = (truncated - nativeGetTime.call(wallAsUTC)) / 60000;
     if (offsetCache.size > 512) offsetCache.clear();
     offsetCache.set(bucket, offset);
     return offset;
   }
-
-  function wall(date) {
-    const t = nativeGetTime.call(date);
-    return isNaN(t) ? null : new NativeDate(t - offsetFor(t) * 60000);
+  // Wall-clock time in TZ, expressed as a UTC timestamp, and back.
+  const toWall = (t) => t - offsetFor(t) * 60000;
+  function fromWall(wallMs) {
+    let t = wallMs + offsetFor(wallMs) * 60000;
+    t = wallMs + offsetFor(t) * 60000; // second pass settles instants near a transition
+    return t;
   }
+  // A string the engine parsed as host-local time: the wall clock it meant, read back with the
+  // engine's own local getters (they and its parser agree to the millisecond, even for the
+  // pre-standard-time offsets with seconds).
+  function hostToWall(tHost) {
+    const date = new NativeDate(tHost);
+    const [year, month, day, hours, minutes, seconds, ms] = nativeLocal.map((getter) => getter.call(date));
+    const wall = new NativeDate(0);
+    wall.setUTCFullYear(year, month, day);
+    wall.setUTCHours(hours, minutes, seconds, ms);
+    return nativeGetTime.call(wall);
+  }
+  // Strings with their own offset (Z, +01:00, GMT+0100, UTC, EST…) or date-only ISO forms (UTC per spec).
+  const absolute = /^\d{4}(-\d{2}){0,2}$|(?:Z|[+-]\d{2}:?\d{2}|\b(?:UTC?|GMT|[ECMP][SD]T)\b)(?:\s*\(.*\))?\s*$/i;
+
+  function parse(text) {
+    const tHost = nativeParse.call(NativeDate, text);
+    if (isNaN(tHost) || absolute.test(String(text).trim())) return tHost;
+    return fromWall(hostToWall(tHost));
+  }
+
+  function construct(target, args) {
+    if (args.length === 0) return Reflect.construct(NativeDate, [], target);
+    if (args.length === 1) {
+      let value = args[0];
+      if (typeof value === 'object' && value !== null && !(value instanceof NativeDate)) {
+        value = value[Symbol.toPrimitive] ? value[Symbol.toPrimitive]('default') : value.valueOf();
+        if (typeof value === 'object') value = String(value);
+      }
+      if (typeof value === 'string') return Reflect.construct(NativeDate, [parse(value)], target);
+      return Reflect.construct(NativeDate, [value], target);
+    }
+    const numbers = args.map(Number);
+    let year = numbers[0];
+    if (!isNaN(year)) { const whole = Math.trunc(year); if (whole >= 0 && whole <= 99) year = 1900 + whole; }
+    const wall = NativeDate.UTC(year, numbers[1], numbers.length > 2 ? numbers[2] : 1, numbers[3] || 0,
+                                numbers[4] || 0, numbers[5] || 0, numbers[6] || 0);
+    return Reflect.construct(NativeDate, [isNaN(wall) ? NaN : fromWall(wall)], target);
+  }
+  const DateShim = function Date(...args) {
+    if (new.target === undefined) return String(new DateShim());
+    return construct(new.target, args);
+  };
+  Object.defineProperty(DateShim, 'length', { value: 7 });
+  Object.defineProperty(DateShim, 'prototype', { value: proto, writable: false, enumerable: false, configurable: false });
+  define(DateShim, 'now', NativeDate.now);
+  define(DateShim, 'UTC', NativeDate.UTC);
+  define(DateShim, 'parse', method('parse', 1, parse));
+  asNative(DateShim);
+  define(proto, 'constructor', DateShim);
+  define(w, 'Date', DateShim);
 
   const utcGetters = {
     FullYear: proto.getUTCFullYear, Month: proto.getUTCMonth, Date: proto.getUTCDate,
@@ -183,15 +324,43 @@ function patchTimeZone(w, TZ) {
   };
   for (const name of Object.keys(utcGetters)) {
     const utcGetter = utcGetters[name];
-    define(proto, 'get' + name, function () {
-      const shifted = wall(this);
-      return shifted === null ? NaN : utcGetter.call(shifted);
-    });
+    define(proto, 'get' + name, method('get' + name, 0, function () {
+      const t = nativeGetTime.call(this);
+      return isNaN(t) ? NaN : utcGetter.call(new NativeDate(toWall(t)));
+    }));
   }
-  define(proto, 'getTimezoneOffset', function () {
+  define(proto, 'getYear', method('getYear', 0, function () {
+    const t = nativeGetTime.call(this);
+    return isNaN(t) ? NaN : new NativeDate(toWall(t)).getUTCFullYear() - 1900;
+  }));
+  define(proto, 'getTimezoneOffset', method('getTimezoneOffset', 0, function () {
     const t = nativeGetTime.call(this);
     return isNaN(t) ? NaN : offsetFor(t);
-  });
+  }));
+
+  const utcSetters = {
+    FullYear: [proto.setUTCFullYear, 3], Month: [proto.setUTCMonth, 2], Date: [proto.setUTCDate, 1],
+    Hours: [proto.setUTCHours, 4], Minutes: [proto.setUTCMinutes, 3], Seconds: [proto.setUTCSeconds, 2],
+    Milliseconds: [proto.setUTCMilliseconds, 1]
+  };
+  for (const name of Object.keys(utcSetters)) {
+    const [utcSetter, length] = utcSetters[name];
+    define(proto, 'set' + name, method('set' + name, length, function (...args) {
+      const t = nativeGetTime.call(this);
+      // Only setFullYear works on an invalid date (from +0); the others leave it invalid.
+      if (isNaN(t) && name !== 'FullYear') return nativeSetTime.call(this, NaN);
+      const wallDate = new NativeDate(toWall(isNaN(t) ? 0 : t));
+      const wall = utcSetter.apply(wallDate, args);
+      return nativeSetTime.call(this, isNaN(wall) ? NaN : fromWall(wall));
+    }));
+  }
+  define(proto, 'setYear', method('setYear', 1, function (year) {
+    let y = Number(year);
+    if (isNaN(y)) return nativeSetTime.call(this, NaN);
+    const whole = Math.trunc(y);
+    if (whole >= 0 && whole <= 99) y = 1900 + whole;
+    return proto.setFullYear.call(this, y);
+  }));
 
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -199,29 +368,30 @@ function patchTimeZone(w, TZ) {
   const yearString = (y) => (y < 0 ? '-' + pad(-y, 6) : pad(y, 4));
   function zoneSuffix(t) {
     const minutesEast = -offsetFor(t);
-    const a = Math.abs(minutesEast);
+    const a = Math.abs(Math.trunc(minutesEast));
     const namePart = nameFormatter.formatToParts(new NativeDate(t)).find((p) => p.type === 'timeZoneName');
     return 'GMT' + (minutesEast >= 0 ? '+' : '-') + pad(Math.floor(a / 60)) + pad(a % 60) +
       ' (' + (namePart ? namePart.value : TZ) + ')';
   }
+  const wall = (date) => { const t = nativeGetTime.call(date); return isNaN(t) ? null : new NativeDate(toWall(t)); };
   function datePart(s) {
     return days[s.getUTCDay()] + ' ' + months[s.getUTCMonth()] + ' ' + pad(s.getUTCDate()) + ' ' + yearString(s.getUTCFullYear());
   }
   function timePart(s, t) {
     return pad(s.getUTCHours()) + ':' + pad(s.getUTCMinutes()) + ':' + pad(s.getUTCSeconds()) + ' ' + zoneSuffix(t);
   }
-  define(proto, 'toString', function () {
+  define(proto, 'toString', method('toString', 0, function () {
     const s = wall(this);
     return s === null ? 'Invalid Date' : datePart(s) + ' ' + timePart(s, nativeGetTime.call(this));
-  });
-  define(proto, 'toDateString', function () {
+  }));
+  define(proto, 'toDateString', method('toDateString', 0, function () {
     const s = wall(this);
     return s === null ? 'Invalid Date' : datePart(s);
-  });
-  define(proto, 'toTimeString', function () {
+  }));
+  define(proto, 'toTimeString', method('toTimeString', 0, function () {
     const s = wall(this);
     return s === null ? 'Invalid Date' : timePart(s, nativeGetTime.call(this));
-  });
+  }));
 
   const withZone = (options) => {
     const o = Object.assign({}, options);
@@ -230,18 +400,21 @@ function patchTimeZone(w, TZ) {
   };
   for (const name of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString']) {
     const original = proto[name];
-    define(proto, name, function (locales, options) { return original.call(this, locales, withZone(options)); });
+    define(proto, name, method(name, 0, function (locales, options) { return original.call(this, locales, withZone(options)); }));
   }
 
-  function DateTimeFormat(locales, options) {
+  const DateTimeFormat = function DateTimeFormat(locales, options) {
     return Reflect.construct(NativeDTF, [locales, withZone(options)], new.target || DateTimeFormat);
-  }
-  DateTimeFormat.prototype = NativeDTF.prototype;
+  };
+  Object.defineProperty(DateTimeFormat, 'length', { value: 0 });
+  Object.defineProperty(DateTimeFormat, 'prototype', { value: NativeDTF.prototype, writable: false, enumerable: false, configurable: false });
   define(DateTimeFormat, 'supportedLocalesOf', NativeDTF.supportedLocalesOf);
+  asNative(DateTimeFormat);
   define(NativeDTF.prototype, 'constructor', DateTimeFormat);
   define(w.Intl, 'DateTimeFormat', DateTimeFormat);
 }
 
+// ---- Geolocation ------------------------------------------------------------------------------
 function patchGeolocation(w, geo) {
   const nav = w.navigator;
   if (!nav || !nav.geolocation) return;
@@ -266,14 +439,25 @@ function patchGeolocation(w, geo) {
     }, 0);
   }
   let nextWatch = 1;
-  define(GeoProto, 'getCurrentPosition', function (success, error) { respond(success, error); });
-  define(GeoProto, 'watchPosition', function (success, error) { respond(success, error); return nextWatch++; });
-  define(GeoProto, 'clearWatch', function () {});
+  const Geolocation = w.Geolocation;
+  const checkReceiver = (receiver, name) => {
+    if (Geolocation && !(receiver instanceof Geolocation)) throw new w.TypeError('Can only call Geolocation.' + name + ' on instances of Geolocation');
+  };
+  define(GeoProto, 'getCurrentPosition', method('getCurrentPosition', 1, function (success, error) {
+    checkReceiver(this, 'getCurrentPosition');
+    respond(success, error);
+  }));
+  define(GeoProto, 'watchPosition', method('watchPosition', 1, function (success, error) {
+    checkReceiver(this, 'watchPosition');
+    respond(success, error);
+    return nextWatch++;
+  }));
+  define(GeoProto, 'clearWatch', method('clearWatch', 1, function () { checkReceiver(this, 'clearWatch'); }));
 
   if (nav.permissions && nav.permissions.query) {
     const PermProto = Object.getPrototypeOf(nav.permissions);
     const originalQuery = PermProto.query;
-    define(PermProto, 'query', function (descriptor) {
+    define(PermProto, 'query', method('query', 1, function (descriptor) {
       if (descriptor && descriptor.name === 'geolocation') {
         const status = Object.create(w.PermissionStatus ? w.PermissionStatus.prototype : Object.prototype);
         Object.defineProperty(status, 'state', { value: geo.mode === 'fixed' ? 'granted' : 'denied', enumerable: true });
@@ -282,51 +466,62 @@ function patchGeolocation(w, geo) {
         return Promise.resolve(status);
       }
       return originalQuery.apply(this, arguments);
-    });
+    }));
   }
 }
 
+// ---- WebRTC -----------------------------------------------------------------------------------
 function patchWebRTC(w, policy) {
   if (policy === 'unrestricted') return;
   const names = ['RTCPeerConnection', 'webkitRTCPeerConnection'];
   if (policy === 'disabled') {
+    // Removed outright, as in an engine built without WebRTC: no trace of a property remains.
     for (const name of names.concat(['RTCDataChannel', 'RTCIceCandidate', 'RTCSessionDescription',
                                      'RTCRtpSender', 'RTCRtpReceiver', 'RTCRtpTransceiver'])) {
       try { delete w[name]; } catch (e) {}
-      try { Object.defineProperty(w, name, { value: undefined, writable: false, configurable: false }); } catch (e) {}
+      if (Object.prototype.hasOwnProperty.call(w, name)) {
+        try { Object.defineProperty(w, name, { value: undefined, writable: false, configurable: false }); } catch (e) {}
+      }
     }
     return;
   }
   const Native = w.RTCPeerConnection;
   if (!Native) return;
   const forceRelay = (config) => Object.assign({}, config, { iceTransportPolicy: 'relay' });
-  function RTCPeerConnection(config, ...rest) {
+  const RTCPeerConnection = function RTCPeerConnection(config, ...rest) {
     return Reflect.construct(Native, [forceRelay(config), ...rest], new.target || RTCPeerConnection);
-  }
-  RTCPeerConnection.prototype = Native.prototype;
+  };
+  Object.defineProperty(RTCPeerConnection, 'length', { value: 0 });
+  Object.defineProperty(RTCPeerConnection, 'prototype', { value: Native.prototype, writable: false, enumerable: false, configurable: false });
   if (Native.generateCertificate) define(RTCPeerConnection, 'generateCertificate', Native.generateCertificate);
+  asNative(RTCPeerConnection);
   const nativeSetConfiguration = Native.prototype.setConfiguration;
   if (nativeSetConfiguration) {
-    define(Native.prototype, 'setConfiguration', function (config) { return nativeSetConfiguration.call(this, forceRelay(config)); });
+    define(Native.prototype, 'setConfiguration', method('setConfiguration', 0, function (config) {
+      return nativeSetConfiguration.call(this, forceRelay(config));
+    }));
   }
   define(Native.prototype, 'constructor', RTCPeerConnection);
   for (const name of names) {
-    try { Object.defineProperty(w, name, { value: RTCPeerConnection, writable: false, configurable: false }); } catch (e) {}
+    try { Object.defineProperty(w, name, { value: RTCPeerConnection, writable: true, enumerable: false, configurable: true }); } catch (e) {}
   }
 }
 
+// ---- Child windows ----------------------------------------------------------------------------
+// This script runs in every same-origin frame; the accessors are patched for a window reached
+// before its own copy ran (contentWindow of a frame created a moment ago, a popup).
 function hookChildWindows(w) {
   const hook = (Ctor, prop, toWindow) => {
     if (!Ctor) return;
     const descriptor = Object.getOwnPropertyDescriptor(Ctor.prototype, prop);
     if (!descriptor || !descriptor.get) return;
     Object.defineProperty(Ctor.prototype, prop, {
-      configurable: true, enumerable: descriptor.enumerable,
-      get: function () {
+      configurable: true, enumerable: descriptor.enumerable, set: descriptor.set,
+      get: getter(prop, function () {
         const value = descriptor.get.call(this);
         try { patchWindow(toWindow(value)); } catch (e) {}
         return value;
-      }
+      })
     });
   };
   hook(w.HTMLIFrameElement, 'contentWindow', (v) => v);
@@ -335,16 +530,12 @@ function hookChildWindows(w) {
   hook(w.HTMLObjectElement, 'contentWindow', (v) => v);
   const nativeOpen = w.open;
   if (nativeOpen) {
-    define(w, 'open', function () {
-      const opened = nativeOpen.apply(this, arguments);
+    define(w, 'open', method('open', 0, function (...args) {
+      const opened = nativeOpen.apply(this, args);
       try { patchWindow(opened); } catch (e) {}
       return opened;
-    });
+    }));
   }
-}
-
-function define(target, name, value) {
-  Object.defineProperty(target, name, { value: value, writable: true, configurable: true, enumerable: false });
 }
 
 patchWindow(window);

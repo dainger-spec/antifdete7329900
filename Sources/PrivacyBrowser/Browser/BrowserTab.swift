@@ -285,6 +285,13 @@ extension BrowserTab: WKNavigationDelegate {
                 log.error("Proxy authentication \(missing ? "requested, no credentials set" : "rejected", privacy: .public)")
                 proxyAuthFailure = L(missing ? "errorpage.proxy.noCredentials" : "errorpage.proxy.rejected")
                 completionHandler(.cancelAuthenticationChallenge, nil)
+                // WebKit does not always report the cancelled load to didFailProvisionalNavigation;
+                // the tab must not stay blank, so the error page is shown from here then.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self, !self.tornDown, let reason = self.proxyAuthFailure else { return }
+                    self.proxyAuthFailure = nil
+                    self.showErrorPage(reason)
+                }
             }
             return
         }

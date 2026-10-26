@@ -352,11 +352,12 @@ final class SelfTest {
                                                     url: URL(string: "http://example.com/")!)
         check("proxy: fail-closed when the proxy host does not resolve", unresolved == nil, "page loaded: \(unresolved ?? "")")
 
-        // What WebKit would send outside the proxy is blocked by the ping-load blocker: a beacon
-        // (same load type as a dns-prefetch) never reaches the proxy, a fetch does.
-        let served = try await servedPathsAfterBeacon(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort))
-        check("proxy: ping-type loads (dns-prefetch, beacons) are blocked in a proxied profile",
-              served.contains("/fetch-allowed") && !served.contains("/beacon-blocked"), served.joined(separator: ","))
+        // What WebKit would send outside the proxy is blocked by the ping-load blocker: an
+        // <a ping> (the same load type as a dns-prefetch) never reaches the proxy, a fetch does.
+        let served = try await servedPathsAfterPing(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort))
+        check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
+              served.contains("/fetch-allowed") && !served.contains("/ping-blocked"), served.joined(separator: ","))
+        info("proxy: a beacon \(served.contains("/beacon") ? "still reaches" : "does not reach") the proxy (beacons are fetches, not pings)")
 
         // A proxy that answers 407: the profile's credentials are sent, wrong ones fail closed.
         // Loaded in a BrowserTab, whose navigation delegate answers the proxy's challenge.
@@ -393,16 +394,20 @@ final class SelfTest {
         return tab.webView.title
     }
 
-    /// In a page served by the proxy: sends a beacon and a fetch to the proxy, then reads back
-    /// which paths the proxy served (`/pb-served.json`).
-    private func servedPathsAfterBeacon(_ repository: ProfileRepository, _ proxy: ProxySettings) async throws -> [String] {
-        let profile = try repository.create(name: "Beacon", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
+    /// In a page served by the proxy: clicks an `<a ping>`, sends a beacon and a fetch to the
+    /// proxy, then reads back which paths the proxy served (`/pb-served.json`).
+    private func servedPathsAfterPing(_ repository: ProfileRepository, _ proxy: ProxySettings) async throws -> [String] {
+        let profile = try repository.create(name: "Ping", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
         let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
         defer { session.shutDown() }
         let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
-        try await PageLoader.load(webView, url: URL(string: "http://proxied.selftest.invalid/beacon-page")!)
+        try await PageLoader.load(webView, url: URL(string: "http://proxied.selftest.invalid/ping-page")!)
         let served = try await js(webView, """
-            navigator.sendBeacon('/beacon-blocked', 'x');
+            const a = document.createElement('a');
+            a.href = '#clicked'; a.ping = '/ping-blocked'; a.textContent = 'ping';
+            document.body.appendChild(a);
+            a.click();
+            navigator.sendBeacon('/beacon', 'x');
             await fetch('/fetch-allowed');
             await new Promise((resolve) => setTimeout(resolve, 1500));
             return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();
@@ -509,91 +514,130 @@ final class SelfTest {
     /// A macOS profile must look exactly like a plain WKWebView of this Mac (no own properties,
     /// native navigator and screen values, untouched rendering), an iPhone profile like an
     /// iPhone's Safari where the shim can say so, and neither may add noise or Chromium-only
-    /// properties. Compared against a web view without any profile script.
+    /// properties. Compared against a web view without any profile script. The probe is
+    /// Resources/fingerprint_probe.js, the one scripts/safari_reference.py runs in real Safari;
+    /// with PB_SELFTEST_SURFACE_OUT set, every result is written there as JSON for that comparison.
     private func fingerprintSurface(_ repository: ProfileRepository) async throws {
+        guard let probe = Self.loadProbe() else {
+            check("surface: fingerprint_probe.js found (app bundle or PB_SELFTEST_PROBE)", false)
+            return
+        }
         let plainConfiguration = WKWebViewConfiguration()
         plainConfiguration.websiteDataStore = .nonPersistent()
         let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
         try await PageLoader.load(plain, html: page, baseURL: origin)
-        let reference = try await js(plain, Self.surfaceProbe) as? [String: Any] ?? [:]
-        func string(_ probe: [String: Any], _ key: String) -> String { probe[key].map { "\($0)" } ?? "nil" }
+        let reference = Self.flatten(try await js(plain, probe) as? [String: Any] ?? [:])
+        writeSurface(reference, name: "plain")
+        func string(_ probe: [String: String], _ key: String) -> String { probe[key] ?? "nil" }
 
-        let colors = reference["canvasColors"] as? Int ?? -1
-        let urlLength = reference["canvasURLLength"] as? Int ?? -1
+        let colors = Int(string(reference, "canvas.colors")) ?? -1
+        let urlLength = Int(string(reference, "canvas.urlLength")) ?? -1
         // deviceinfo.me wants exactly 5 colours AND a data URL of 150, 158, 142 or 186 characters.
         let verdict = colors != 5 ? "Spoofed: the pixels differ (noise)"
             : [150, 158, 142, 186].contains(urlLength) ? "Allowed"
             : "Spoofed, only because this WebKit's PNG encoding is not on the page's list (pixels exact)"
         info("plain WKWebView: canvas \(colors) colours, PNG \(urlLength) chars → deviceinfo.me verdict: \(verdict)")
-        info("plain WKWebView: plugins \(string(reference, "plugins")), languages \(string(reference, "languages"))")
+        info("plain WKWebView: plugins \(string(reference, "plugins")), languages \(string(reference, "languages")), WebGL \(string(reference, "webgl.unmaskedRenderer"))")
         check("language: navigator.language is the language WebKit was given",
               string(reference, "language") == WebContentLanguage.decided?.first, string(reference, "language"))
 
+        // Everything a page measures of the engine and the Mac, which no profile may change.
+        let engineKeys = reference.keys.filter { key in
+            ["plugins", "mimeTypes", "pdfViewerEnabled", "language", "languages", "deviceMemory", "ownNavigator", "ownScreen",
+             "navigatorProtoCount", "colorDepth", "canvas.colors", "canvas.urlLength", "canvas.url", "canvasText", "fonts",
+             "webkitObject", "webdriver", "doNotTrack"].contains(key) || key.hasPrefix("webgl.") || key.hasPrefix("features.")
+        }.sorted()
         for generationID in [DeviceGenerations.defaultID, "ios-26"] {
             let profile = try repository.create(name: "Surface \(generationID)", configuration: ProfileConfiguration(
                 ephemeral: true, deviceGenerationID: generationID))
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
             let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
-            let probe = try await js(tab.webView, Self.surfaceProbe) as? [String: Any] ?? [:]
+            let probed = Self.flatten(try await js(tab.webView, probe) as? [String: Any] ?? [:])
             tab.tearDown()
             session.shutDown()
             try repository.delete(profile.id)
 
             let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone"
-            for key in ["plugins", "pdfViewerEnabled", "language", "languages", "deviceMemory", "ownNavigator", "ownScreen"] {
-                check("surface (\(name)): \(key) as in a plain web view", string(probe, key) == string(reference, key),
-                      "\(string(probe, key)) vs \(string(reference, key))")
-            }
-            // The shim adds no noise: the rendering functions are the engine's own. (Pixel values
-            // are only reported: WebKit's own fingerprinting protection may vary them per session.)
-            check("surface (\(name)): canvas, WebGL and audio functions are native", probe["renderingNative"] as? Bool == true)
-            info("surface (\(name)): canvas \(string(probe, "canvasColors")) colours, PNG \(string(probe, "canvasURLLength")) chars")
-            check("surface (\(name)): one language, as WebKit exposes", string(probe, "languages") == string(probe, "language"))
+            writeSurface(probed, name: name.lowercased())
+            let differing = engineKeys.filter { string(probed, $0) != string(reference, $0) }
+            check("surface (\(name)): engine and hardware signals as in a plain web view (\(engineKeys.count) keys)",
+                  differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
+            // The shim adds no noise and no visible wrappers: toString, length and own properties
+            // of the rendering functions are the engine's own.
+            let renderingNatives = probed.filter { $0.key.hasPrefix("natives.") && ($0.key.contains("Canvas") || $0.key.contains("WebGL")
+                || $0.key.contains("AudioContext")) }
+            check("surface (\(name)): canvas, WebGL and audio functions are native",
+                  !renderingNatives.isEmpty && renderingNatives.values.allSatisfy { $0.hasPrefix("native-text") || $0 == "absent" },
+                  renderingNatives.map { "\($0.key)=\($0.value)" }.joined(separator: "; "))
+            check("surface (\(name)): one language, as WebKit exposes", string(probed, "languages") == string(probed, "language"))
             if name == "macOS" {
-                for key in ["platform", "maxTouchPoints", "hardwareConcurrency", "screen"] {
-                    check("surface (macOS): native \(key)", string(probe, key) == string(reference, key),
-                          "\(string(probe, key)) vs \(string(reference, key))")
+                for key in ["ua", "platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
+                            "timeZone", "tzOffset", "dateString"] where key != "ua" {
+                    check("surface (macOS): native \(key)", string(probed, key) == string(reference, key),
+                          "\(string(probed, key)) vs \(string(reference, key))")
                 }
+                check("surface (macOS): the UA is this Mac's Safari",
+                      string(probed, "ua").hasSuffix("Version/\(HostSafari.version) Safari/605.1.15"), string(probed, "ua"))
             } else {
-                check("surface (iPhone): navigator", string(probe, "platform") == "iPhone" && string(probe, "maxTouchPoints") == "5"
-                      && string(probe, "hardwareConcurrency") == "4" && string(probe, "standalone") == "false",
-                      "\(string(probe, "platform")) \(string(probe, "maxTouchPoints")) \(string(probe, "hardwareConcurrency")) \(string(probe, "standalone"))")
-                check("surface (iPhone): screen", string(probe, "screen") == "390x844x390x844x3", string(probe, "screen"))
+                check("surface (iPhone): navigator", string(probed, "platform") == "iPhone" && string(probed, "maxTouchPoints") == "5"
+                      && string(probed, "hardwareConcurrency") == "4" && string(probed, "standalone") == "false",
+                      "\(string(probed, "platform")) \(string(probed, "maxTouchPoints")) \(string(probed, "hardwareConcurrency")) \(string(probed, "standalone"))")
+                check("surface (iPhone): screen", string(probed, "screen") == "390x844x390x844x3", string(probed, "screen"))
             }
         }
     }
 
-    /// deviceinfo.me's canvas test (a 6×6 canvas, five greys), the properties it and similar pages
-    /// read, and whether the rendering APIs are still the engine's own functions.
-    private static let surfaceProbe = """
-        const canvas = document.createElement('canvas');
-        canvas.width = 6; canvas.height = 6;
-        const ctx = canvas.getContext('2d');
-        const greys = ['#000000', '#404040', '#808080', '#BFBFBF', '#FFFFFF'];
-        for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++) { ctx.fillStyle = greys[x]; ctx.fillRect(x, y, 1, 1); }
-        const pixels = new Uint32Array(ctx.getImageData(0, 0, 6, 6).data.buffer);
-        const isNative = (f) => typeof f === 'function' && /\\[native code\\]/.test(Function.prototype.toString.call(f));
-        return {
-          canvasColors: new Set(Array.from(pixels, (p) => p & 0xFFFFFF)).size,
-          canvasURLLength: canvas.toDataURL().length,
-          renderingNative: isNative(HTMLCanvasElement.prototype.getContext) && isNative(HTMLCanvasElement.prototype.toDataURL)
-            && isNative(CanvasRenderingContext2D.prototype.getImageData) && isNative(WebGLRenderingContext.prototype.getParameter)
-            && (typeof AudioContext === 'undefined' || isNative(AudioContext.prototype.createAnalyser)),
-          plugins: Array.from(navigator.plugins, (p) => p.name).join('|'),
-          pdfViewerEnabled: String(navigator.pdfViewerEnabled),
-          language: navigator.language,
-          languages: Array.from(navigator.languages).join(','),
-          deviceMemory: typeof navigator.deviceMemory,
-          ownNavigator: Object.getOwnPropertyNames(navigator).join(','),
-          ownScreen: Object.getOwnPropertyNames(screen).join(','),
-          platform: navigator.platform,
-          maxTouchPoints: String(navigator.maxTouchPoints),
-          hardwareConcurrency: String(navigator.hardwareConcurrency),
-          standalone: String(navigator.standalone),
-          screen: [screen.width, screen.height, screen.availWidth, screen.availHeight, devicePixelRatio].join('x'),
-        };
-        """
+    /// The probe from the app bundle (build-app.sh copies it), else from PB_SELFTEST_PROBE.
+    private static func loadProbe() -> String? {
+        if let url = Bundle.main.url(forResource: "fingerprint_probe", withExtension: "js"),
+           let source = try? String(contentsOf: url, encoding: .utf8) {
+            return source
+        }
+        if let path = ProcessInfo.processInfo.environment["PB_SELFTEST_PROBE"] {
+            return try? String(contentsOfFile: path, encoding: .utf8)
+        }
+        return nil
+    }
+
+    /// Nested probe results as "canvas.colors" → "5" (numbers and booleans as JavaScript prints them).
+    private static func flatten(_ value: [String: Any], prefix: String = "") -> [String: String] {
+        var out: [String: String] = [:]
+        for (key, item) in value {
+            if let nested = item as? [String: Any] {
+                out.merge(flatten(nested, prefix: prefix + key + "."), uniquingKeysWith: { $1 })
+            } else if let number = item as? NSNumber {
+                // JSONSerialization hands booleans over as NSNumber too; keep "true"/"false".
+                out[prefix + key] = CFGetTypeID(number) == CFBooleanGetTypeID() ? (number.boolValue ? "true" : "false") : number.stringValue
+            } else {
+                out[prefix + key] = item.map { "\($0)" } ?? "null"
+            }
+        }
+        return out
+    }
+
+    /// PB_SELFTEST_SURFACE_OUT: a directory; one JSON file per probed surface.
+    private func writeSurface(_ surface: [String: String], name: String) {
+        guard let directory = ProcessInfo.processInfo.environment["PB_SELFTEST_SURFACE_OUT"], !directory.isEmpty else { return }
+        var nested: [String: Any] = [:]
+        for (key, value) in surface {
+            let parts = key.split(separator: ".", maxSplits: 1).map(String.init)
+            if parts.count == 2 {
+                var inner = nested[parts[0]] as? [String: Any] ?? [:]
+                inner[parts[1]] = value
+                nested[parts[0]] = inner
+            } else {
+                nested[key] = value
+            }
+        }
+        do {
+            try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: nested, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("surface-\(name).json"))
+        } catch {
+            info("could not write the \(name) surface: \(error.localizedDescription)")
+        }
+    }
 
     // MARK: Proxy location (time zone of the proxy's exit IP)
 
