@@ -37,7 +37,8 @@ if [[ "$NE" == "1" ]]; then
   APP_FLAGS=(-Xswiftc -DPB_NETWORK_EXTENSION)
 fi
 
-swift build -c "$CONFIG" --product PrivacyBrowser "${APP_FLAGS[@]}"
+# ${APP_FLAGS[@]+...} so an empty array doesn't trip `set -u` under the runner's bash 3.2.
+swift build -c "$CONFIG" --product PrivacyBrowser ${APP_FLAGS[@]+"${APP_FLAGS[@]}"}
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 
 rm -rf "$APP"
