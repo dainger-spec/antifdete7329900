@@ -11,12 +11,10 @@ import os
 /// provider's memory): it re-declares the handful of `providerConfiguration` keys that
 /// `TunnelConfiguration.dictionary` writes.
 ///
-/// SCOPE — read before trusting this on real traffic. The control flow (configuration decode,
-/// tunnel settings, start/stop, fail-closed) is complete. The packet datapath — reassembling the
-/// captured IP packets into flows and relaying them to a SOCKS5/HTTP proxy, including SOCKS5 UDP
-/// ASSOCIATE — is the part that must be exercised on hardware with the manual checklist; it is
-/// isolated in `Relay` and marked. UDP is dropped (never leaked) whenever the policy says so or
-/// the datapath for it is not active.
+/// The control flow (configuration decode, tunnel settings, start/stop, fail-closed) lives here;
+/// the packet datapath — TCP relayed over SOCKS5/HTTP CONNECT (or direct), UDP over SOCKS5 UDP
+/// ASSOCIATE (or direct, or dropped), DNS answered on 10.111.0.1 — is `Relay`. It cannot run in CI:
+/// run the manual checklist in ../docs/NETWORK.md on a Mac with an `NE=1` build before trusting it.
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     private let log = Logger(subsystem: "PrivacyBrowser.PacketTunnel", category: "tunnel")
     private var relay: Relay?
@@ -37,8 +35,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         log.notice("startTunnel exit=\(exitKind, privacy: .public) udpDropped=\(udpDropped, privacy: .public)")
 
         // A point-to-point IPv4 tunnel that claims the default route, so every flow of the app is
-        // handed to us. DNS is resolved by the exit (through the proxy for a proxy exit), so no
-        // plaintext DNS escapes around it.
+        // handed to us. The DNS server 10.111.0.1 is answered by `Relay`, which forwards each query
+        // over TCP through the exit (the proxy for a proxy exit), so no plaintext DNS escapes around it.
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         let ipv4 = NEIPv4Settings(addresses: ["10.111.0.2"], subnetMasks: ["255.255.255.255"])
         ipv4.includedRoutes = [NEIPv4Route.default()]

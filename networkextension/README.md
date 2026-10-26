@@ -21,9 +21,10 @@ extension and the app's "Единый выход для TCP/UDP" toggle stays un
 
 - `PacketTunnelProvider.swift` — the `NEPacketTunnelProvider` subclass. Reads the profile's
   `TunnelConfiguration` from `providerConfiguration`, sets up the tunnel's network settings, and
-  forwards captured TCP and UDP to the exit (the profile's proxy, or this Mac's interface),
-  dropping UDP when the exit proxy cannot carry it. The proxy password is read from the keychain
+  hands the packet flow to `Relay`. The proxy password is read from the keychain
   via the protocol's `passwordReference`, never from the configuration dictionary.
+- `Relay.swift` — the datapath: forwards captured TCP, UDP and DNS to the exit (the profile's
+  proxy, or this Mac's interface), dropping UDP when the exit proxy cannot carry it.
 - `Info.plist` — the extension's `NSExtension` declaration (`com.apple.networkextension.packet-tunnel`).
 - `PacketTunnel.entitlements` — the `packet-tunnel-provider` entitlement and the app-group used to
   share the keychain item with the container app.
@@ -33,13 +34,12 @@ extension and the app's "Единый выход для TCP/UDP" toggle stays un
 **Control plane: complete.** Configuration decode, tunnel network settings, keychain password
 read, start/stop, and fail-closed start are done.
 
-**Datapath (`Relay.swift`): a fail-closed scaffold, not yet a working forwarder.** The read loop
-and the UDP-drop policy are in place, but the TCP/IP flow reassembly and the SOCKS5/HTTP relay
-(including SOCKS5 UDP ASSOCIATE) are **not implemented** — they need a userspace stack and must be
-built and tested on real hardware, which CI cannot do. Until a flow's relay is wired, its packets
-are **dropped, never forwarded in the clear**, so the fail-closed guarantee holds: with the tunnel
-on and the datapath incomplete, a profile gets no traffic rather than a leak. Do not treat the
-tunnel as functional for real browsing yet; the model, control plane, UI and docs around it are
-complete, and the datapath is the remaining work, called out in `Relay.swift` and
-`../docs/NETWORK.md`. The code has no dependency on `BrowserCore`, so the extension stays well
-under the memory limit the system gives a packet-tunnel provider.
+**Datapath (`Relay.swift`): forwards real traffic.** TCP is terminated in a small userspace TCP
+endpoint and relayed per flow over SOCKS5 `CONNECT` / HTTP `CONNECT` (TLS to the proxy if
+configured) or directly; UDP goes over SOCKS5 `UDP ASSOCIATE` (SOCKS5 without TLS), directly (no
+proxy), or is dropped (HTTP CONNECT / SOCKS over TLS); DNS to the tunnel resolver 10.111.0.1 is
+answered by forwarding over TCP through the exit. A flow whose relay does not come up is reset or
+dropped — never sent in the clear. Details and limits are in `../docs/NETWORK.md`. It has been
+exercised off-device only; **run the manual checklist in `../docs/NETWORK.md` on a Mac with
+`NE=1`** before relying on it. The code has no dependency on `BrowserCore`, so the extension stays
+well under the memory limit the system gives a packet-tunnel provider.
