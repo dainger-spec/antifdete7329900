@@ -1,3 +1,8 @@
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 #if canImport(Darwin)
 import Darwin
@@ -29,8 +34,17 @@ public struct ProxyLocation: Codable, Equatable, Sendable {
         self.exitIP = exitIP
     }
 
+    /// The proxy a location belongs to: kind, host and port, and its credentials when it has
+    /// some, as a short digest. Gateway proxies pick the exit country or session from the
+    /// username (some from the password), so other credentials are another proxy: nothing
+    /// remembered applies, and an exit-IP change is not one. Without credentials the key is the
+    /// one older builds stored.
     public static func endpoint(of proxy: ProxySettings) -> String {
-        "\(proxy.kind.rawValue)://\(proxy.host):\(proxy.port)"
+        let address = "\(proxy.kind.rawValue)://\(proxy.host):\(proxy.port)"
+        guard proxy.username?.isEmpty == false || proxy.password?.isEmpty == false else { return address }
+        let credentials = Data(((proxy.username ?? "") + "\u{0}" + (proxy.password ?? "")).utf8)
+        let digest = SHA256.hash(data: credentials).prefix(8).map { String(format: "%02x", $0) }.joined()
+        return address + "#" + digest
     }
 
     /// Same place, from the same exit IP, for the same proxy (the lookup time aside).

@@ -1018,6 +1018,20 @@ final class SelfTest {
         let watchedIP = try repository.loadConfiguration(watched.id).lastProxyLocation?.exitIP
         check("exit IP: the lookup runs for the option alone, and remembers the new address",
               watchedIP == "198.51.100.4", watchedIP ?? "nil")
+        // Turned off in the editor while a lookup is still under way: the stored IP goes, and the
+        // late answer neither warns nor brings an IP back.
+        geo("ip=192.0.2.44&delay=2")
+        messages.removeAll()
+        try await manager.launch(watched.id)
+        var edited = try repository.loadConfiguration(watched.id)
+        edited.warnOnProxyIPChange = false
+        try repository.saveConfiguration(edited.keepingProxyLocation(of: repository.loadConfiguration(watched.id)), for: watched.id)
+        let settled = await lookupsDone()
+        try await manager.stop(watched.id)
+        let afterOff = try repository.loadConfiguration(watched.id).lastProxyLocation
+        check("exit IP: turned off while a lookup is under way, no IP is kept and nothing is reported",
+              settled && afterOff != nil && afterOff?.exitIP == nil && !messages.contains { $0.contains("192.0.2.44") },
+              "\(String(describing: afterOff)) | \(messages)")
         _ = try await run(unwatched.id, ip: "203.0.113.7")
         let quiet = try await run(unwatched.id, ip: "198.51.100.4")
         let unwatchedStored = try repository.loadConfiguration(unwatched.id)

@@ -125,7 +125,7 @@ final class AppModel: ObservableObject {
             unlockFailed = false
             phase = .setup
         } catch {
-            errorMessage = (error as? CoreError)?.description ?? error.localizedDescription
+            showError((error as? CoreError)?.description ?? error.localizedDescription)
         }
     }
 
@@ -141,12 +141,7 @@ final class AppModel: ObservableObject {
         let repository = try ProfileRepository(vault: vault)
         repository.removeOrphanedDirectories()
         let manager = ProfileManager(repository: repository)
-        // A launch can report several things at once (an exit-IP change and a new time zone, a
-        // language note): they are shown together, none replaces another.
-        manager.onError = { [weak self] message in
-            guard let self else { return }
-            self.errorMessage = self.errorMessage.map { $0 + "\n\n" + message } ?? message
-        }
+        manager.onError = { [weak self] message in self?.showError(message) }
         manager.onReturnToProfiles = { [weak self] in
             self?.activateProfilesWindow()
             self?.refresh()
@@ -225,13 +220,8 @@ final class AppModel: ObservableObject {
     /// Changes take effect the next time the profile is launched.
     func updateProfile(_ id: UUID, name: String, configuration: ProfileConfiguration) throws {
         guard let repository else { return }
-        // The proxy location is the launch's cache, not an edit: a lookup may have stored a newer
-        // one while the editor was open. (A location of another proxy is ignored at launch.)
-        var configuration = configuration
-        if let current = try? repository.loadConfiguration(id) {
-            configuration.lastProxyLocation = current.lastProxyLocation
-        }
-        try repository.saveConfiguration(configuration, for: id)
+        let stored = try? repository.loadConfiguration(id)
+        try repository.saveConfiguration(configuration.keepingProxyLocation(of: stored), for: id)
         if try repository.summary(for: id).name != name {
             try repository.rename(id, to: name)
         }
@@ -273,7 +263,7 @@ final class AppModel: ObservableObject {
             let bookmark = try folder.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
             try updateDeviceSettings { $0.syncTarget = .folder(bookmark: bookmark, path: folder.path) }
         } catch {
-            errorMessage = "Could not remember the sync folder: \(error.localizedDescription)"
+            showError("Could not remember the sync folder: \(error.localizedDescription)")
         }
     }
 
@@ -286,7 +276,7 @@ final class AppModel: ObservableObject {
             try HTTPSyncTransport.validate(url)
             try updateDeviceSettings { $0.syncTarget = .server(baseURL: url, token: token) }
         } catch {
-            errorMessage = (error as? CoreError)?.description ?? error.localizedDescription
+            showError((error as? CoreError)?.description ?? error.localizedDescription)
         }
     }
 
@@ -294,7 +284,7 @@ final class AppModel: ObservableObject {
         do {
             try updateDeviceSettings { $0.syncTarget = nil }
         } catch {
-            errorMessage = error.localizedDescription
+            showError(error.localizedDescription)
         }
     }
 
@@ -302,7 +292,7 @@ final class AppModel: ObservableObject {
     func syncNow() async {
         guard let repository, let manager, let target = deviceSettings.syncTarget else { return }
         guard !manager.hasRunningProfiles else {
-            errorMessage = "Stop all profiles before syncing."
+            showError("Stop all profiles before syncing.")
             return
         }
         isWorking = true
@@ -332,7 +322,7 @@ final class AppModel: ObservableObject {
         } catch {
             let message = (error as? CoreError)?.description ?? error.localizedDescription
             status = DeviceSettings.SyncStatus(error: message)
-            errorMessage = "Sync failed: \(message)"
+            showError("Sync failed: \(message)")
         }
         try? updateDeviceSettings { $0.lastSync = status }
         refresh()
@@ -348,13 +338,23 @@ final class AppModel: ObservableObject {
 
     // MARK: Helpers
 
+    /// Shows `message` in the error alert. What arrives while it is up is shown with it (a launch
+    /// can report several things at once: an exit-IP change, a new time zone, a language note),
+    /// not instead of it; a message already shown is not repeated, and the latest few are kept.
+    func showError(_ message: String) {
+        var shown = errorMessage?.components(separatedBy: "\n\n") ?? []
+        guard !shown.contains(message) else { return }
+        shown.append(message)
+        errorMessage = shown.suffix(5).joined(separator: "\n\n")
+    }
+
     private func perform(_ work: () async throws -> Void) async {
         isWorking = true
         defer { isWorking = false }
         do {
             try await work()
         } catch {
-            errorMessage = (error as? CoreError)?.description ?? error.localizedDescription
+            showError((error as? CoreError)?.description ?? error.localizedDescription)
         }
     }
 }

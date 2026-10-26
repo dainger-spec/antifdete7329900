@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 140/140 checks in both builds):
+(macOS 26, 142/142 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -36,17 +36,21 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Proxy: dns-prefetch leak | an `<a ping>` (the load type WebKit gives dns-prefetch) reaches neither the proxy nor the network; a fetch to the same origin does |
 | Proxy: 407 without credentials | the launch is refused ("needs credentials") and the data is sealed again; nothing opens, directly or otherwise |
 | Proxy: `Accept-Language` | the header the proxy sees is the language the app decided at its first launch (`de-DE,de;q=0.9` in the self-test) |
-| Time zone from the proxy | a profile with a proxy and *Match the proxy's location* runs in the time zone the lookup through the proxy returned, cached per profile |
+| Time zone from the proxy | a profile with a proxy and *Time zone of the proxy's location* runs in the time zone the lookup through the proxy returned, cached per profile |
 | Several SOCKS5 profiles at once | three profiles behind three SOCKS5 proxies, one with username/password authentication, are launched together through the app's launch path and load at the same time: each page arrives through its own proxy, by name, with its own credentials; after one stops the others keep loading through theirs; wrong or missing SOCKS5 credentials fail closed |
 | Launch speed | with a location remembered for the proxy, a launch waits at most 1 s for a 4 s lookup (the lookup finishes in the background, and its new time zone is remembered and noted for the next launch); with nothing remembered it waits at most 3 s |
-| Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy host and port) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported |
+| Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy and credentials) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported or stored, and turning it off while a lookup is under way leaves no IP stored and nothing reported |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
 Run it yourself: `build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test`. For the
-proxy checks, start `python3 scripts/selftest_proxy.py --http 18080 --socks 18081` first and set
-`PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081`. The self-test uses a
-temporary vault and removes everything it creates.
+proxy checks, start the self-test proxy as CI does,
+`python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085`,
+and set `PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081
+PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
+PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085`. Without a variable
+its checks (407, IPv6, several SOCKS5 profiles at once) are skipped and the count is lower. The
+self-test uses a temporary vault and removes everything it creates.
 
 ## 1. Storage isolation between profiles
 
@@ -346,8 +350,12 @@ waits for it; when it answers later (the launch stopped waiting, below), the pro
 the same message. Nothing opens directly either way. With that lookup switched off, a proxy that
 wants credentials shows as pages that never load.
 
-**SOCKS5 authentication** (RFC 1929 username/password) works the same way, through
-`applyCredential`; the self-test runs a SOCKS5 proxy that accepts nothing else.
+**SOCKS5 authentication** (RFC 1929 username/password): the credentials go into the same
+`ProxyConfiguration` through `applyCredential` and are sent in the SOCKS5 handshake. SOCKS5 has
+no 407: a proxy that rejects missing or wrong credentials makes every load fail (nothing goes
+direct), but the launch does not learn why and is not refused, so the profile opens and its
+pages show load errors. The self-test runs a SOCKS5 proxy that accepts only username/password
+and checks that wrong or missing credentials fail closed against a real host.
 
 **Several proxied profiles at once:** each profile has its own data store, and so its own network
 session with its own proxy configuration and credentials. Its launch-time lookup has its own
@@ -359,21 +367,25 @@ process-wide, not per profile:
   ([TUNNEL.md](TUNNEL.md)).
 
 **Launch and the lookup through the proxy:** the lookup (time zone, country, exit IP) runs while
-the profile's data decrypts. A launch waits for it only when the profile matches the proxy's
-location (*Match the proxy's location*): at most 3 s when nothing is remembered for that proxy
-yet, at most 1 s when a location is. Without an answer by then, the remembered location (or the
+the profile's data decrypts. A launch waits for it only when the profile takes its location
+from the proxy (*Time zone of the proxy's location*, on by default; with *Override time zone*
+the zone is the explicit one, but the lookup still runs and is waited for, for the country and
+so the language): at most 3 s when nothing is remembered for that proxy yet, at most 1 s when a
+location is. A location is remembered per proxy: kind, host, port and credentials (gateway
+proxies pick the exit country or session from the username or password). Without an answer by then, the remembered location (or the
 host's zone) is used and the lookup finishes in the background. Its answer is remembered for the
 next launch. A time zone different from the one the profile runs in is noted, and applies from
 the next launch (pages already open keep theirs). So is a language the proxy's country would
 want when the first profile launched got no answer in time (§6). A late answer is dropped when
 the profile was launched again since, or the app is locking or quitting. Several messages from
-one launch are shown together.
+one launch are shown together (a message already shown is not repeated).
 
 **Exit-IP warning** (per profile, off by default): the launch compares the proxy's exit IP, as
-the lookup sees it, with the one seen at the previous launch through the same proxy host and
-port, and warns when it changed (a rotating or reassigned proxy). It needs the lookup, which then
-runs even without the time-zone matching. The last IP is stored, encrypted with the profile, only
-while the option is on.
+the lookup sees it, with the one seen at the previous launch through the same proxy and
+credentials, and warns when it changed (a rotating or reassigned proxy). It needs the lookup,
+which then runs even without the time-zone matching. The last IP is stored, encrypted with the
+profile, only while the option is on: turning it off (or removing the proxy) deletes it when the
+profile is saved, and a lookup still under way then neither stores an IP nor warns.
 
 **Verify the proxy by hand:** set a SOCKS5 proxy, for example `ssh -D 1080 host`, open
 `https://ifconfig.me`, and confirm it shows the proxy's IP. Then stop the proxy and
@@ -433,7 +445,7 @@ cannot be inspected from the page anyway.
 | User agent | `WKWebView.customUserAgent`, with presets in the editor | yes (string only) | `navigator.platform`, vendor, feature set and TLS fingerprint still identify WebKit on macOS (§2). Use the *Safari on macOS* preset; iPhone/iPad presets are UA-only and inconsistent |
 | Time zone | JS: `Intl.DateTimeFormat` default `timeZone`; `Date` local getters and setters, `getTimezoneOffset` (with the sub-minute offsets of historical dates), the local constructor forms `new Date(y, m, d, …)`, `Date.parse` and `new Date(string)` for strings without an offset, `toString`, `toDateString`, `toTimeString`, `toLocale*String`, `getYear`/`setYear`. A worker made from a blob of the page (how fingerprinting scripts make theirs) starts with the same shim: the blob is handed to the engine as [shim, page's blob], so the worker keeps its blob: location, relative URLs, CSP, strict mode and line numbers | no | Workers loaded from a URL and service workers use the host zone (rewriting them would change their location); under a CSP without `'unsafe-eval'` a blob worker does too. JavaScriptCore lists the replacement `Date`'s and `Intl.DateTimeFormat`'s `length`/`name` before their statics (`Object.getOwnPropertyNames(Date)`), which no script function can avoid. `Intl.DateTimeFormat().format()` without an explicit zone follows the shim; other `Intl` constructors carry no zone |
 | Geolocation | JS: `navigator.geolocation` answers as WebKit does for a user who said no ("User denied Geolocation") or who allowed the fixed coordinates; positions and errors are instances of the real interfaces with no own properties (values from the prototype getters and `toJSON`); `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks (WebKit's `hasBeenRequested`), then 'denied'/'granted' | no | The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed |
-| Time zone from the proxy | At launch, a geolocation service (ipinfo.io, then geojs.io, ipwho.is) is asked *through the profile's proxy* where it exits; the profile runs in that zone. The last answer per proxy is used on later launches when the new lookup takes over 1 s (and when a lookup fails), that lookup finishing in the background; with nothing remembered the launch waits for it at most 3 s (§4) | — | A third-party request per launch (HTTPS, via the proxy only, no cookies). Off per profile, or set a zone explicitly. Without any answer the host zone is used; a time zone that changed applies from the next launch |
+| Time zone from the proxy | At launch, a geolocation service (ipinfo.io, then geojs.io, ipwho.is) is asked *through the profile's proxy* where it exits; the profile runs in that zone. The last answer per proxy is used on later launches when the new lookup takes over 1 s (and when a lookup fails), that lookup finishing in the background; with nothing remembered the launch waits for it at most 3 s (§4) | — | A third-party request per launch (HTTPS, via the proxy only, no cookies). Off per profile with *Time zone of the proxy's location*; *Override time zone* replaces the zone but keeps the lookup, for the country (language). Without any answer the host zone is used; a time zone that changed applies from the next launch |
 | Language | Process-wide: set before WebKit's first process from the first launched profile's proxy country (`WebContentLanguage`) | partly | WKWebView has no per-view `Accept-Language` / `navigator.languages` API; later profiles of the same run share the first one's language |
 
 The shim logic is tested under Node (`scripts/test-shims.mjs`) against ICU, across

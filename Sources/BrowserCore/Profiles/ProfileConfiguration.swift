@@ -162,6 +162,16 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         return cached
     }
 
+    /// This configuration as an edit saves it: the proxy location is the launches' cache, not part
+    /// of the edit, so it is kept as `stored` has it (a lookup may have written a newer one while
+    /// the editor was open), and its exit IP only while the warning that asks for it is on.
+    public func keepingProxyLocation(of stored: ProfileConfiguration?) -> ProfileConfiguration {
+        var edited = self
+        if let stored { edited.lastProxyLocation = stored.lastProxyLocation }
+        if !edited.warnOnProxyIPChange || edited.proxy == nil { edited.lastProxyLocation?.exitIP = nil }
+        return edited
+    }
+
     /// This launch's lookup, or else the last location found for the same proxy.
     public func proxyLocation(lookedUp: ProxyLocation?) -> ProxyLocation? {
         guard needsProxyLocation, let proxy else { return nil }

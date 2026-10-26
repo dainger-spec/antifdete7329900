@@ -85,7 +85,7 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 140 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 142 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
@@ -152,7 +152,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Per-profile proxy (SOCKS5, HTTP CONNECT, HTTPS-to-proxy, auth, bypass list) | `WKWebsiteDataStore.proxyConfigurations`, `allowFailover = false`. **CONNECT tunnelling, SOCKS5 remote DNS, SOCKS5 and HTTP proxy authentication, and fail-closed verified by the self-test** |
 | Several proxied profiles at once | Each profile's data store has its own proxy and credentials. **Three SOCKS5 profiles (one with authentication) launched together and loading at once, each through its own proxy, verified by the self-test** |
 | Fast launch with a proxy | The lookup through the proxy (time zone, exit IP) holds a launch at most 1 s when a location is remembered for that proxy (the lookup finishes in the background), at most 3 s with nothing remembered. **Verified by the self-test** |
-| Proxy exit-IP warning | Per profile, off by default: a warning when the proxy's exit IP differs from the previous launch's (same proxy host and port) |
+| Proxy exit-IP warning | Per profile, off by default: a warning when the proxy's exit IP differs from the previous launch's (same proxy and credentials); the IP is stored only while the option is on |
 | Version-aware profiles | **Device / version** picker (`DeviceGeneration`): macOS 26 / iOS 26 / iOS 27 / iPadOS 26. Sets the self-declared `User-Agent` and defaults, and names a behaviour set. The macOS UA names the host's Safari version; iOS profiles additionally get navigator/screen values. Does **not** switch the real WebKit core. |
 | Per-profile user agent | `WKWebView.customUserAgent` (an explicit UA overrides the generation) |
 | Russian / English UI | `Localizable.strings` (ru default, en fallback), deterministic bundle lookup |

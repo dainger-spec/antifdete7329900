@@ -240,13 +240,13 @@ final class ProfileManager: ObservableObject {
     /// What a finished lookup tells: the exit IP compared with the previous launch's (when the
     /// profile asks for that), and the location to remember for the next launch.
     private func proxyLookupFinished(_ result: ProxyGeoLookup.Result, for id: UUID, name: String, stored: ProfileConfiguration) {
-        guard var found = result.location else { return }
-        if stored.warnOnProxyIPChange, let change = found.exitIPChange(since: stored.lastProxyLocation) {
+        guard let found = result.location else { return }
+        // Not when the warning was turned off since the launch (a late answer).
+        let current = try? repository.loadConfiguration(id)
+        if stored.warnOnProxyIPChange, current?.warnOnProxyIPChange != false, let change = found.exitIPChange(since: stored.lastProxyLocation) {
             log.notice("The proxy of \(id.uuidString, privacy: .public) exits from another IP than at the previous launch")
             onError?(String(format: L("launch.proxyIPChanged"), name, change.old, change.new))
         }
-        // The exit IP is kept only for the warning that asks for it.
-        if !stored.warnOnProxyIPChange { found.exitIP = nil }
         rememberProxyLocation(found, for: id)
     }
 
@@ -278,10 +278,13 @@ final class ProfileManager: ObservableObject {
 
     /// Keeps a newly found proxy location (and exit IP) in the profile's configuration, for the
     /// next launch. Read again first: the user may have edited the profile meanwhile, and an
-    /// answer about a proxy they replaced is not kept. Written only when it changed.
+    /// answer about a proxy they replaced (or its credentials) is not kept. The exit IP is kept
+    /// only while the warning that asks for it is on. Written only when it changed.
     private func rememberProxyLocation(_ found: ProxyLocation, for id: UUID) {
         do {
             var current = try repository.loadConfiguration(id)
+            var found = found
+            if !current.warnOnProxyIPChange { found.exitIP = nil }
             guard current.proxy.map(ProxyLocation.endpoint(of:)) == found.proxyEndpoint,
                   !found.isSameLocation(as: current.lastProxyLocation) else { return }
             current.lastProxyLocation = found

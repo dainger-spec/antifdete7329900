@@ -152,6 +152,51 @@ final class ProxyLocationTests: XCTestCase {
         XCTAssertNil(config.rememberedProxyLocation, "remembered for another proxy")
     }
 
+    func testRememberedLocationBelongsToTheProxysCredentialsToo() {
+        let plain = ProxySettings(kind: .socks5, host: "gw.example", port: 7000)
+        XCTAssertEqual(ProxyLocation.endpoint(of: plain), "socks5://gw.example:7000", "the key older builds stored")
+        let germany = ProxySettings(kind: .socks5, host: "gw.example", port: 7000, username: "user-country-de", password: "secret")
+        let japan = ProxySettings(kind: .socks5, host: "gw.example", port: 7000, username: "user-country-jp", password: "secret")
+        let newPassword = ProxySettings(kind: .socks5, host: "gw.example", port: 7000, username: "user-country-de", password: "other")
+        let keys = [plain, germany, japan, newPassword].map(ProxyLocation.endpoint(of:))
+        XCTAssertEqual(Set(keys).count, 4, "\(keys)")
+        XCTAssertEqual(ProxyLocation.endpoint(of: germany), ProxyLocation.endpoint(of: germany), "stable")
+        XCTAssertFalse(keys[1].contains("user-country-de") || keys[1].contains("secret"), "a digest, not the credentials")
+        XCTAssertNotEqual(ProxyLocation.endpoint(of: ProxySettings(kind: .socks5, host: "gw.example", port: 7000, username: "ab", password: "c")),
+                          ProxyLocation.endpoint(of: ProxySettings(kind: .socks5, host: "gw.example", port: 7000, username: "a", password: "bc")))
+
+        // Remembered under one username: not used under another, nor is an IP change seen.
+        let berlin = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: keys[1], exitIP: "203.0.113.7")
+        var config = ProfileConfiguration(proxy: germany, lastProxyLocation: berlin, warnOnProxyIPChange: true)
+        XCTAssertEqual(config.rememberedProxyLocation, berlin)
+        config.proxy = japan
+        XCTAssertNil(config.rememberedProxyLocation)
+        XCTAssertNil(config.proxyLocation(lookedUp: nil))
+        let tokyo = ProxyLocation(timeZoneIdentifier: "Asia/Tokyo", countryCode: "JP", proxyEndpoint: keys[2], exitIP: "198.51.100.4")
+        XCTAssertNil(tokyo.exitIPChange(since: berlin))
+    }
+
+    func testAnEditKeepsTheStoredLocationAndTheExitIPOnlyWithTheWarning() {
+        let proxy = ProxySettings(kind: .socks5, host: "203.0.113.7", port: 1080)
+        let endpoint = ProxyLocation.endpoint(of: proxy)
+        let older = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: endpoint, exitIP: "203.0.113.7")
+        let newer = ProxyLocation(timeZoneIdentifier: "Asia/Tokyo", countryCode: "JP", proxyEndpoint: endpoint, exitIP: "198.51.100.4")
+        let stored = ProfileConfiguration(proxy: proxy, lastProxyLocation: newer, warnOnProxyIPChange: true)
+        // The editor opened before the lookup stored `newer`: saving keeps `newer`.
+        var edited = ProfileConfiguration(proxy: proxy, lastProxyLocation: older, warnOnProxyIPChange: true)
+        XCTAssertEqual(edited.keepingProxyLocation(of: stored).lastProxyLocation, newer)
+        // The warning turned off, or the proxy removed: the location stays, its exit IP goes.
+        edited.warnOnProxyIPChange = false
+        XCTAssertEqual(edited.keepingProxyLocation(of: stored).lastProxyLocation?.timeZoneIdentifier, "Asia/Tokyo")
+        XCTAssertNil(edited.keepingProxyLocation(of: stored).lastProxyLocation?.exitIP)
+        edited.warnOnProxyIPChange = true
+        edited.proxy = nil
+        XCTAssertNil(edited.keepingProxyLocation(of: stored).lastProxyLocation?.exitIP)
+        // Nothing stored to read (a failed read): the edit's own copy, by the same rule.
+        edited.proxy = proxy
+        XCTAssertEqual(edited.keepingProxyLocation(of: nil).lastProxyLocation, older)
+    }
+
     func testProxyLocationFieldsRoundTripAndDefaultOnForOldConfigs() throws {
         let legacy = #"{"ephemeral":false,"geolocation":{"deny":{}},"safeBrowsingEnabled":false,"webRTCPolicy":"disabled"}"#
         let old = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(legacy.utf8))
