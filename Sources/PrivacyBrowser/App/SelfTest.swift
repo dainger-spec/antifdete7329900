@@ -807,6 +807,11 @@ final class SelfTest {
         _ = try await js(web!, "localStorage.setItem('pb', token); return true;", ["token": token])
         web = nil
         session = nil
+        // Dropping the session is not yet the crash: WebKit's network process still commits the
+        // last localStorage transaction and closes the store on its own queue. Recovery seals what
+        // reached the disk (a crash takes the network process down with the app), so wait for it.
+        let reachedDisk = await waitUntil(timeout: 8) { webKitData(of: profile.id, contains: token) }
+        if !reachedDisk { info("recovery: the value had not reached the disk after 8 s") }
         check("recovery: unsealed data present after simulated crash",
               !layout.discoverDirectories(for: profile.id).isEmpty)
 
@@ -1139,6 +1144,20 @@ final class SelfTest {
         await withCheckedContinuation { continuation in
             store.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
         }
+    }
+
+    /// Whether `text` is on disk somewhere in the profile's WebKit directories, as UTF-8 or as the
+    /// UTF-16 WebKit stores localStorage values in: tells that a write has been committed.
+    private func webKitData(of profileID: UUID, contains text: String) -> Bool {
+        let needles = [Data(text.utf8), text.data(using: .utf16LittleEndian) ?? Data()].filter { !$0.isEmpty }
+        for directory in WebDataStoreVault.layout.discoverDirectories(for: profileID) {
+            guard let files = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil) else { continue }
+            for case let file as URL in files {
+                guard let data = try? Data(contentsOf: file), !data.isEmpty else { continue }
+                if needles.contains(where: { data.range(of: $0) != nil }) { return true }
+            }
+        }
+        return false
     }
 
     private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) async -> Bool {

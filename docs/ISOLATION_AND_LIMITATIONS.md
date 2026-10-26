@@ -7,9 +7,9 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 ## 0. What is verified automatically
 
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
-on every push (macOS 15 runner) for both the sandboxed and the unsandboxed build, with a local
-test proxy (`scripts/selftest_proxy.py`). Last observed results (macOS 15.7, 50/50 checks
-in both builds):
+on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
+unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
+(macOS 26, 116/116 checks in both builds; the same 116 pass on macOS 15.7):
 
 | Claim | Self-test result |
 |---|---|
@@ -26,6 +26,14 @@ in both builds):
 | Crash-recovery sealing | leftover website data from a crashed run is archived and deleted WITHOUT `WKWebsiteDataStore.remove(forIdentifier:)` (which aborted on an unknown id), then restores cleanly |
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
+| Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari`, which Safari has and a bare WKWebView lacks; an iPhone profile reports its device class's navigator and screen values. CI also compares the macOS profile with the runner's real Safari (§2) |
+| Proxy: IPv6, unresolvable host | an HTTP proxy on `[::1]` tunnels the load; a proxy whose host does not resolve fails closed |
+| Proxy: dns-prefetch leak | an `<a ping>` (the load type WebKit gives dns-prefetch) reaches neither the proxy nor the network; a fetch to the same origin does |
+| Proxy: 407 without credentials | the launch is refused ("needs credentials") and the data is sealed again; nothing opens, directly or otherwise |
+| Proxy: `Accept-Language` | the header the proxy sees is the language the app decided at its first launch (`de-DE,de;q=0.9` in the self-test) |
+| Time zone from the proxy | a profile with a proxy and *Match the proxy's location* runs in the time zone the lookup through the proxy returned, cached per profile |
+| ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
+| Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
 Run it yourself: `build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test`. For the
 proxy checks, start `python3 scripts/selftest_proxy.py --http 18080 --socks 18081` first and set
@@ -140,11 +148,51 @@ replaced the way the engine defines it — accessors on the prototypes, strict m
 only `length` and `name`, the native receiver errors, and a `Function.prototype.toString`
 that prints them as native code even from a fresh iframe — so the replacement itself is not
 the thing a page notices; the inconsistencies listed above still are. CI compares a macOS
-profile's whole measured surface with this Mac's real Safari (`scripts/safari_reference.py`).
+profile's whole measured surface with this Mac's real Safari (`scripts/safari_reference.py`,
+results below).
 The honest options for real separation between identities are outside the browser:
 - a separate macOS user account per identity (OS-level separation);
 - a different Mac or VM per identity (different hardware fingerprint);
 - for a genuine iPhone fingerprint, Safari on an actual iPhone.
+
+### Measured against this Mac's Safari
+
+CI runs `Resources/fingerprint_probe.js` in a macOS profile and, through `safaridriver`, in the
+runner's own Safari, then compares the two (`scripts/safari_reference.py`; both JSON files are
+kept as the `fingerprint-surfaces` artifact of each run). Every key that measures the engine or
+the Mac is identical: the User-Agent string (the profile declares the installed Safari's version),
+`navigator` (platform, vendor, hardwareConcurrency, deviceMemory, maxTouchPoints,
+pdfViewerEnabled, the same five plugins and two MIME types, no own properties), screen size and
+colour depth, pointer and touch media queries, time zone and offset, the canvas pixels and PNG
+(the same data URL, byte for byte), the canvas text hash, WebGL (vendor, renderer "Apple GPU",
+every extension and parameter), the font set, `window.webkit`, the shape of `window.safari`, and
+the `Function.prototype.toString` text and shape of every native the shims touch.
+
+What still differs, all of it on the engine's side and none of it a profile's choice:
+
+- Safari turns on features that WebKit leaves off in a WKWebView, through Safari's own feature
+  flags and, for a few, because WebKit gates them behind the SDK the app was linked against. In the
+  last comparison Safari had, and a profile had not: the Navigation API (`navigation`,
+  `NavigateEvent`), `URLPattern`, `trustedTypes`, `ScrollTimeline`/`ViewTimeline`,
+  `CSSPositionTryRule`, `CSSPageDescriptors`, `CommandEvent`/`oncommand`, `onscrollend`,
+  `LargestContentfulPaint`, `PerformanceEventTiming`, `performance.eventCounts`/`interactionCount`,
+  `PerformanceResourceTiming.deliveryType`/`firstInterimResponseStart`,
+  `caretPositionFromPoint`, `FileSystemWritableFileStream`, WebCodecs `AudioEncoder`,
+  `Math.sumPrecise`, Apple Pay (`ApplePaySession`, `ApplePaySetup`, `PaymentRequest`,
+  `MerchantValidationEvent`) and Web Push (`PushManager`); a WKWebView still has the legacy
+  `OverflowEvent`. An app can set only the preferences WebKit marks overridable
+  (`WKPreferences`, `NSUserDefaults`), and these are not among them. Build with the current Xcode,
+  as CI does on macOS 26, so that the SDK-gated ones that can match do match.
+- The count of `window`'s own properties follows from that feature set (1005 in Safari, 955 in a
+  profile).
+- `navigator.webdriver` is true in Safari only because safaridriver drives it: an artefact of the
+  comparison, not a difference between a profile and a Safari a person uses.
+
+So a page that fingerprints *feature support* can tell "Safari" from "a WKWebView app on the same
+Mac", the same way it tells Safari from a Safari View Controller or a Mail or Slack preview. It
+cannot tell two profiles of this app apart by any of this: they are the same engine on the same
+Mac. What separates profiles is what they declare (table above) and their storage and network
+(§1, §4).
 
 ## 3. Encryption at rest
 
@@ -235,7 +283,7 @@ reload: the page must fail, not show your own IP.
 
 WebKit offers no public preference to disable WebRTC or set an IP-handling policy. Its
 default already hides local IPs behind mDNS host candidates, but STUN still discovers the
-public IP over UDP, outside the proxy. WKWebView on macOS 15 exposes a native
+public IP over UDP, outside the proxy. WKWebView on macOS 15 and 26 exposes a native
 `RTCPeerConnection` (observed by the self-test).
 
 The profile setting is enforced by a document-start user script in every frame:

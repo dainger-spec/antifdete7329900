@@ -202,11 +202,11 @@ configs read as the default generation).
 
 | Layer | How | Where it runs |
 |---|---|---|
-| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sync, HTTP transport, UA presets) | XCTest, 36 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sync, HTTP transport, UA presets, proxy location) | XCTest, 54 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
 | JS shims (logic) | Node + ICU (`scripts/test-shims.mjs`) | Linux, every push |
-| App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 15 runner, every push |
-| Measured surface of a macOS profile vs. the runner's real Safari | `scripts/safari_reference.py` (safaridriver) with `Resources/fingerprint_probe.js` | macOS 15 runner, every push |
-| App Sandbox container migration | `--selftest-write-vault` / `--selftest-read-vault` | macOS 15 runner, every push |
+| App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 26 runner, every push |
+| Measured surface of a macOS profile vs. the runner's real Safari | `scripts/safari_reference.py` (safaridriver) with `Resources/fingerprint_probe.js` | macOS 26 runner, every push |
+| App Sandbox container migration | `--selftest-write-vault` / `--selftest-read-vault` | macOS 26 runner, every push |
 | Interactive UI (tab strip drawing, menus, sheets) | manual | — |
 
 ## Window lifecycle

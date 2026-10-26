@@ -85,7 +85,9 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   ping-load blocker, the proxy-location time zone, tabs, history, bookmarks, the
   device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
-- the surface comparison with the runner's real Safari (`scripts/safari_reference.py`);
+- the surface comparison with the runner's real Safari (`scripts/safari_reference.py`): every
+  key that measures the engine or the Mac is identical; what differs is the set of features
+  Safari alone enables (listed in `docs/ISOLATION_AND_LIMITATIONS.md` §2);
 - a container-migration check.
 
 ## Using it
