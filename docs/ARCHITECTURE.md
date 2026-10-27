@@ -34,6 +34,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │        └── BrowserSession (one per running profile)                                        │
 │              ├── WKWebsiteDataStore(forIdentifier:) + proxyConfigurations                  │
 │              ├── ProfileProcessPool ── own WKProcessPool (time zone in the engine, workers)│
+│              ├── SafariStorageQuota ── Safari's quota in the store (persistent profiles)   │
 │              ├── WKUserContentController + PrivacyScripts (TZ / geo / WebRTC)              │
 │              ├── ProfileLibrary ── HistoryStore + BookmarkStore (observable, debounced)    │
 │              ├── LibraryWindowController ── bookmarks & history UI                         │

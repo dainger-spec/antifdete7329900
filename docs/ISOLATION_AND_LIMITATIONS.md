@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26.6.2, 202/202 checks in both builds):
+(macOS 26.6.2, 210/210 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -20,6 +20,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Two running profiles isolated | localStorage, IndexedDB and cookies of A are invisible to B, for the same origin, at the same time |
 | JS shims under JavaScriptCore | time zone (offset, `Intl`, local getters; in WebKit's shared pool, as without the engine override below), fixed geolocation, WebRTC removed, WebRTC relay-only |
 | Time zone in the engine | where WebKit has the process pool's time zone override (the self-test logs which private pieces it found; macOS 26.6.2 has `_WKProcessPoolConfiguration.timeZoneOverride` and `-[WKProcessPool _initWithConfiguration:]`, not the newer `+_processPoolWithConfiguration:`), two profiles in different zones running at once each report their own zone in the page, a frame, workers made from a blob and loaded from a URL, and shared and service workers that answer; `Date` and `Intl` are the engine's own (no shim); each profile has a pool of its own, and its shared and service workers carry its own User-Agent (what the same workers report in WebKit's shared pool is logged) |
+| Storage quota in the engine | where WebKit has `_WKWebsiteDataStoreConfiguration` (macOS 26.6.2 has it), a persistent profile's store is made with Safari's quota: the page, workers made from a blob and loaded from a URL, and the service worker report 82 463 372 084 (macOS generation) or 41 231 686 042 (iPhone generation), and the store opens again from the same directories. An ephemeral profile keeps WebKit's in-memory store; the shim reports Safari's figure in its pages and blob workers |
 | WebRTC off (default) | switched off in the engine (`_peerConnectionEnabled` is false): the window has no `RTC*` interface at all |
 | HTTP CONNECT proxy | `http://` is tunnelled via `CONNECT`; an `.invalid` host loads, so it was resolved by the proxy |
 | SOCKS5 proxy | the hostname is sent to the proxy (`ATYP=3`, remote DNS) |
@@ -60,7 +61,9 @@ self-test uses a temporary vault and removes everything it creates.
 
 ## 1. Storage isolation between profiles
 
-**Mechanism.** Each persistent profile uses `WKWebsiteDataStore(forIdentifier: <profile UUID>)`.
+**Mechanism.** Each persistent profile uses `WKWebsiteDataStore(forIdentifier: <profile UUID>)`
+(made from `_WKWebsiteDataStoreConfiguration` with the same identifier where WebKit has it: the
+same directories, with Safari's storage quota, §2).
 Each ephemeral profile uses `WKWebsiteDataStore.nonPersistent()`. Every `WKWebView` of a
 profile gets that store: every tab of every window, and popups, because
 `createWebViewWith` uses the configuration WebKit passes in, which inherits the opener's
@@ -216,7 +219,13 @@ What a profile changed to get there (each was a difference before):
 - **Storage quota.** WebKit gives an app that is not a browser a fixed 1000 MiB per origin — the
   small quota private-mode detectors look for. Safari reports 60 % of a *standard* 128 GB volume
   (WebKit reports a standard capacity rather than the real disk's, so the figure is 82 463 372 084
-  on every Mac, a tenth of it in a third-party frame); `estimate()` now reports the same.
+  on every Mac, a tenth of it in a third-party frame). A persistent profile's store now has that
+  quota in WebKit itself (`SafariStorageQuota`: `_WKWebsiteDataStoreConfiguration` with a browser's
+  ratios, 0.6 per origin and 0.8 in all, and the standard volume, 64 GB for an iPhone generation),
+  so every scope reports it, URL-loaded and service workers included, and an origin can store as
+  much as in Safari. An ephemeral profile's store has no volume to take a ratio of: there the shim
+  reports Safari's figure in the page and its blob workers, and URL-loaded and service workers
+  still report 1000 MiB.
 - **Geolocation permission.** `permissions.query({name: 'geolocation'})` threw a TypeError (the shim
   built a fake status); it is now the engine's own `PermissionStatus`, 'prompt' until the page asks.
 - **Wrappers under JavaScriptCore.** With relay-only WebRTC the wrapper added a

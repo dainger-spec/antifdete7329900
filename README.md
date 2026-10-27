@@ -18,7 +18,7 @@ This is a prototype. The core has unit tests, and the app is checked end-to-end 
 real WebKit in CI. It has not had a security review, and some features are
 approximations limited by what WebKit exposes. The tables below say which parts are which.
 
-**Fingerprint note (2026-10-26):** no canvas, WebGL, audio or font noise — noise is exactly what fingerprinting tests detect. macOS profiles override no navigator or screen value and declare this Mac's real Safari version; iPhone/iPad profiles only get their device class's navigator/screen values. A profile with a proxy runs in the time zone of the proxy's exit IP — set in the engine through a WebKit process pool of the profile's own where WebKit allows it (every worker included), otherwise by a shim (workers created from a blob too) — and the first profile launched sets the language websites see (otherwise this Mac's languages, as in Safari). The window reports Safari's geometry (real outer size, 52/90 px of chrome; background tabs too), user-installed fonts are hidden and the storage quota is Safari's. CI measures a profile against the runner's real Safari, page by page, including TLS/HTTP2 and header order: what still differs is Apple Pay/Web Push (Safari-only) and the profile's own privacy choices ([§2](docs/ISOLATION_AND_LIMITATIONS.md#measured-against-this-macs-safari)). deviceinfo.me's "Canvas: Spoofed" / "Fingerprinting Resistance: Detected" appear in real Safari 26 as well (its PNG-length list predates this WebKit). iOS fidelity remains UA-level (TLS, GPU, fonts, touch are the Mac's).
+**Fingerprint note (2026-10-26):** no canvas, WebGL, audio or font noise — noise is exactly what fingerprinting tests detect. macOS profiles override no navigator or screen value and declare this Mac's real Safari version; iPhone/iPad profiles only get their device class's navigator/screen values. A profile with a proxy runs in the time zone of the proxy's exit IP — set in the engine through a WebKit process pool of the profile's own where WebKit allows it (every worker included), otherwise by a shim (workers created from a blob too) — and the first profile launched sets the language websites see (otherwise this Mac's languages, as in Safari). The window reports Safari's geometry (real outer size, 52/90 px of chrome; background tabs too), user-installed fonts are hidden and the storage quota is Safari's (in WebKit itself for saved profiles, every worker included). CI measures a profile against the runner's real Safari, page by page, including TLS/HTTP2 and header order: what still differs is Apple Pay/Web Push (Safari-only) and the profile's own privacy choices ([§2](docs/ISOLATION_AND_LIMITATIONS.md#measured-against-this-macs-safari)). deviceinfo.me's "Canvas: Spoofed" / "Fingerprinting Resistance: Detected" appear in real Safari 26 as well (its PNG-length list predates this WebKit). iOS fidelity remains UA-level (TLS, GPU, fonts, touch are the Mac's).
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, key hierarchy, on-disk layout, lifecycles, tabs, testing
 - [docs/ISOLATION_AND_LIMITATIONS.md](docs/ISOLATION_AND_LIMITATIONS.md): what is isolated, what leaks, fingerprinting, App Sandbox, verified results
@@ -95,7 +95,7 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 202 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 210 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
@@ -113,8 +113,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   mid-run), tabs, history,
   bookmarks, background tabs that measure their window as the shown tab does, the time zone in
   the engine where WebKit has the override (two profiles in different zones at once, in the page,
-  frames and every kind of worker), the
-  device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
+  frames and every kind of worker), Safari's storage quota in a saved profile's store (the page,
+  every kind of worker), the device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
 - the surface comparison with the runner's real Safari (`scripts/safari_reference.py`): every
   key that measures the engine or the Mac is identical; what differs is the set of features
