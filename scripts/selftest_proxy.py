@@ -32,6 +32,14 @@ its confirmation; `?spa=1`: no form, a button whose script removes the fields, a
 fetch does; `?autofocus=1`), and `/pb-frame?src=<url>` a page with that URL in an iframe.
 `/pb-cookies` shows the request's `Cookie` header (`PB-COOKIES cookie=...`), for the cookie import
 checks.
+
+`/pb-warmup/<name>?run=<id>` are pages for the session warm-up robot: each sets a cookie
+(`pbwarm_<name>=<id>`), is tall enough to scroll, and has, in view, one plain link to the same site
+(`Next article` → `/pb-warmup/<name>-next`) next to links the robot must never follow (sign-out,
+another site, a file, a new window); a page-world listener reports the page's scroll, wheel and
+click events and whether they were trusted (`/pb-warmup/event/<id>/<name>-<what>`). `<name>` `alert`
+shows an alert; `broken` closes the connection without an answer (a page that does not load). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
+User-Agent headers.
 """
 import argparse
 import base64
@@ -60,6 +68,42 @@ def read_until_blank_line(conn: socket.socket) -> bytes:
 GEO_ANSWER = b'{"ip":"203.0.113.7","country":"DE","timezone":"Europe/Berlin"}'
 SERVED: list = []
 SERVED_LOCK = threading.Lock()
+WARMUP_LOG: list = []
+
+
+def header(request: str, name: str) -> str:
+    prefix = name.lower() + ":"
+    return next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
+                 if line.lower().startswith(prefix)), "")
+
+
+def warmup_page(name: str, run: str) -> bytes:
+    """A page of the warm-up robot checks (see the module docstring)."""
+    def esc(text: str) -> str:
+        return html.escape(text, quote=True)
+    q = f"?run={esc(run)}"
+    links = (
+        f'<p><a id="next" href="/pb-warmup/{esc(name)}-next{q}">Next article</a></p>'
+        f'<p><a href="/pb-warmup/logout{q}">Sign out</a></p>'
+        f'<p><a href="http://partner.othersite.invalid/pb-warmup/partner{q}">Partner site</a></p>'
+        f'<p><a href="/pb-warmup/file.zip{q}">Big file archive</a></p>'
+        f'<p><a href="/pb-warmup/popup{q}" target="_blank">New window</a></p>'
+    )
+    # The links again every few paragraphs: some are in view wherever the page is scrolled to.
+    filler = "".join((links if i % 5 == 4 else "") + f"<p>Paragraph {i} of the warm-up page {esc(name)}.</p>"
+                     for i in range(120))
+    script = (
+        "<script>(() => { const run = " + json.dumps(run) + ", name = " + json.dumps(name) + "; const seen = {};"
+        " const report = (what) => { if (seen[what]) return; seen[what] = true;"
+        " fetch('/pb-warmup/event/' + encodeURIComponent(run) + '/' + encodeURIComponent(name) + '-' + what); };"
+        " addEventListener('scroll', (e) => report(e.isTrusted ? 'scroll' : 'scroll-untrusted'), {passive: true});"
+        " addEventListener('wheel', (e) => report(e.isTrusted ? 'wheel' : 'wheel-untrusted'), {passive: true});"
+        " document.addEventListener('click', (e) => report(e.isTrusted ? 'click' : 'click-untrusted'), true);"
+        + (" setTimeout(() => alert('PB warm-up'), 300);" if name == "alert" else "")
+        + " })();</script>"
+    )
+    return (f'<!doctype html><html><head><meta charset="utf-8"><title>PB warm-up {esc(name)}</title></head>'
+            f'<body style="font: 15px -apple-system; margin: 20px">{links}{filler}{script}</body></html>').encode()
 
 
 def login_page(params: dict) -> bytes:
@@ -88,6 +132,7 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
     accept_language = next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
                             if line.lower().startswith("accept-language:")), "-")
     plain_path, _, query = path.partition("?")
+    extra_headers = ""
     with SERVED_LOCK:
         if plain_path != "/pb-served.json":
             SERVED.append(plain_path)
@@ -109,6 +154,25 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         content_type = "text/html; charset=utf-8"
     elif plain_path == "/pb-login":
         body, content_type = login_page({key: values[0] for key, values in parse_qs(query).items()}), "text/html; charset=utf-8"
+    elif plain_path == "/pb-warmup/log.json":
+        with SERVED_LOCK:
+            body, content_type = json.dumps(WARMUP_LOG).encode(), "application/json"
+    elif plain_path.startswith("/pb-warmup/"):
+        with SERVED_LOCK:
+            WARMUP_LOG.append({"path": plain_path, "query": query, "referer": header(request, "Referer"),
+                               "cookie": header(request, "Cookie"), "userAgent": header(request, "User-Agent")})
+        name = plain_path[len("/pb-warmup/"):]
+        run = parse_qs(query).get("run", [""])[0]
+        if name == "broken":
+            # Closed without an answer: the page does not load.
+            print(f"[selftest-proxy] closed unanswered {via} path={path}", flush=True)
+            return
+        if name.startswith("event/"):
+            body, content_type = b"ok", "text/plain"
+        else:
+            cookie_name = "".join(c if c.isalnum() else "_" for c in name)
+            extra_headers = f"Set-Cookie: pbwarm_{cookie_name}={run or 'x'}; Max-Age=86400; Path=/\r\n"
+            body, content_type = warmup_page(name, run), "text/html; charset=utf-8"
     elif plain_path == "/pb-frame":
         src = parse_qs(query).get("src", ["about:blank"])[0].replace('"', "%22")
         body = (f'<!doctype html><html><head><title>PB frame</title></head><body>'
@@ -121,7 +185,7 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         ).encode()
         content_type = "text/html; charset=utf-8"
     conn.sendall(
-        f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n".encode()
+        f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n{extra_headers}".encode()
         + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
         + body
     )

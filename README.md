@@ -85,7 +85,7 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 170 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 181 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
@@ -96,7 +96,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   (a damaged Netscape file, queued for a stopped profile and applied before its first page,
   a cut-off JSON into a running one, persistence across stop and launch), profile sync between
   two vaults (cookies recorded at stop and launch, applied before the first page on the other
-  device, a change and a deletion coming back, settings newer-wins with a conflict copy), tabs, history,
+  device, a change and a deletion coming back, settings newer-wins with a conflict copy), the
+  session warm-up robot (pages in order through the proxy with the profile's cookies and
+  User-Agent, time on each page, scrolling, only the safe link followed, nothing in the page
+  world, Stop, tab closed, a page dialog, the profile stopped mid-run), tabs, history,
   bookmarks, the
   device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
@@ -148,10 +151,14 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 7. **Cookies:** **⋯ → Import Cookies…** reads a JSON or Netscape `cookies.txt` export, shows
    what can be imported and why the rest cannot (with line numbers), then imports into that
    profile: at once when it runs, otherwise when it next starts.
-8. **Stop**, or closing the last window, saves history and encrypts the profile's website
+8. **Warm-up:** **⋯ → Warm Up…** takes web addresses (one per line) and an optional search,
+   starts the profile if it is stopped, and visits the pages one after the other in a tab of
+   it: a random time on each page, scrolling, and if asked one plain link followed. **Stop**
+   in the sheet, closing the robot's tab or stopping the profile ends it.
+9. **Stop**, or closing the last window, saves history and encrypts the profile's website
    data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
    and waits until every profile is sealed.
-9. **Sync (optional):** **More → Sync…** offers a folder (local-only) or a server (client
+10. **Sync (optional):** **More → Sync…** offers a folder (local-only) or a server (client
    for the documented API; no server is included). Stop all profiles before syncing. A
    profile's settings, passwords, bookmarks, history and persistent cookies sync, encrypted;
    another Mac gets the cookies at its next launch of the profile, before the first page
@@ -183,6 +190,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Cookie import into a profile | **⋯ → Import Cookies…**: JSON (EditThisCookie, Cookie-Editor, Puppeteer/DevTools, Playwright, Selenium, Chrome and Firefox database exports, JSON Lines) and Netscape `cookies.txt`. Damaged files import whatever is readable (bad bytes, a broken or cut-off JSON entry or a malformed line cost only that cookie); the report lists every other entry with its line and reason (public-suffix domain, expired, `__Host-` rules, …). A running profile gets them at once (and the store is read back for any WebKit refused), a stopped one at its next launch before the first page loads (queued encrypted). **Checked by the self-test** end to end through the proxy |
 | App Sandbox | Default build; entitlements in `Resources/PrivacyBrowser.entitlements` (documented in the limitations doc, §9); container migration. **Sandbox enforcement and migration verified in CI** |
 | Encrypted sync client | Engine with CAS writes, per-record merges for bookmarks and history, tombstones; folder transport; HTTP transport for a documented API |
+| Session warm-up ("cookie robot") | **⋯ → Warm Up…**: the pages of a list (and a search first, if given) visited one after the other in a tab of the profile — its proxy, cookies, User-Agent and scripts, as when browsing — with a random time on each page (5–15 s by default), trackpad-like scrolling, and optionally one plain link followed (same site; from the search, a result; never sign-out, purchase, deletion, download or new-window links). Waits while its tab is not shown; stops on Stop, when its tab closes, when a page shows a dialog and when the profile stops. Scrolls and clicks with real events while its window is key, from an isolated script world otherwise; nothing is added to the page world. **Checked by the self-test** through the proxy (order, cookies and User-Agent on the requests, Referer of the followed link, links refused, the stop cases, sealing after a stop mid-run) |
 | Profile sync: cookies and settings | A profile's persistent cookies sync as `cookies.bin` (encrypted with the profile key), merged cookie by cookie — the newer change wins, deletions included; recorded when the profile stops, applied at its next launch before the first page loads, imported cookies joining at that launch. Settings changed on two Macs: the newer edit wins, the other kept as `config.bin.conflict`. Session and partitioned cookies, and ephemeral profiles, never sync ([docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md)). **Checked by the self-test** with a second vault set up from the sync folder, and by unit tests |
 
 ### Approximated (the platform offers no native API)
@@ -220,6 +228,7 @@ Sources/
     Profiles/                      ProfileConfiguration, ProfileRepository
     Passwords/                     PasswordVault, PasswordMatching (site rules), PublicSuffixList
     Cookies/                       CookieImporter (JSON and Netscape readers, checks, report), CookieJar (synced cookies, merge)
+    WarmUp/                        WarmUpPlan (pages, timing, which links), WebAddress (typed text → address or search)
     Library/                       HistoryStore, BookmarkStore (mergeable, tombstones)
     Archive/                       encrypted chunk stream, directory archiver, WebKitDataLayout
     Sync/                          envelope/codec, engine, SyncTransport contract
@@ -229,9 +238,9 @@ Sources/
     App/                           main.swift, PrivacyBrowserApp, AppModel, AppEnvironment, SelfTest, SiteCapture
     Browser/                       ProfileManager, BrowserSession, BrowserWindowController, BrowserTab,
                                    TabStripView, ProfileLibrary, LibraryWindowController, PasswordAutoFill
-                                   (+ PasswordAutoFillScript, AutoFillPanel),
+                                   (+ PasswordAutoFillScript, AutoFillPanel), WarmUpRobot,
                                    WebDataStoreVault, ProxyConfigurationFactory, PrivacyScripts
-    UI/                            setup/unlock, profile list, editor, passwords, library, sync settings
+    UI/                            setup/unlock, profile list, editor, passwords, library, sync settings, warm-up
 Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
 Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist
 scripts/                           build-app.sh, test-shims.mjs, selftest_proxy.py, safari_reference.py,

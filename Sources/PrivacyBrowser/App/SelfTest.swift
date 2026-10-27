@@ -135,6 +135,7 @@ final class SelfTest {
             try await passwordAutoFill(repository)
             try await cookieImport(repository)
             try await profileSync(repository)
+            try await warmUp(repository)
             try await lockDuringLaunch(repository)
             try await quitFromFocusedPage(repository)
             try await forcedSealAtQuit(repository)
@@ -1678,6 +1679,163 @@ final class SelfTest {
               "\(zones) \(conflict.resolvedConflicts)")
         check("profile sync: no errors reported", messages.isEmpty, "\(messages)")
         try await managerA.delete(profile.id)
+    }
+
+    // MARK: Session warm-up robot
+
+    /// The robot of a profile behind the self-test proxy, through the app's own launch path, with
+    /// short waits: it visits the plan's pages in order in a tab of the profile (its proxy,
+    /// cookies, User-Agent), stays on each, scrolls, follows only the plain link of the same site,
+    /// leaves nothing in the page world, and stops when asked, when its tab closes, when a page
+    /// shows a dialog and when the profile stops (whose data then seals as usual).
+    private func warmUp(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("warm-up checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let run = String(UUID().uuidString.prefix(8)).lowercased()
+        let base = "http://warmup.selftest.invalid/pb-warmup/"
+        func page(_ name: String) -> String { "\(base)\(name)?run=\(run)" }
+        let profile = try repository.create(name: "Warm-up", configuration: ProfileConfiguration(
+            startURL: URL(string: page("home")), proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort),
+            matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        // Real mouse and wheel events reach a web view only in a key window, which the
+        // self-test's .prohibited activation policy never gives (as in the password checks).
+        let policy = NSApp.activationPolicy()
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.activate(ignoringOtherApps: true)
+        defer { NSApp.setActivationPolicy(policy) }
+        try await manager.launch(profile.id)
+        let robot = manager.warmUpRobot(for: profile.id)
+        robot.limits = .init(loadTimeout: 15, startTimeout: 8, scriptTimeout: 5, dwellOverride: 3...3.5, pauseOverride: 0.2...0.4)
+
+        struct LogEntry: Decodable {
+            var path: String
+            var query: String
+            var referer: String
+            var cookie: String
+            var userAgent: String
+        }
+        func proxyLog() async -> [LogEntry] {
+            guard let webView = manager.session(for: profile.id)?.frontmostWindow?.selectedTab?.webView,
+                  let text = try? await js(webView, "return await (await fetch('/pb-warmup/log.json')).text();") as? String,
+                  let entries = try? JSONDecoder().decode([LogEntry].self, from: Data(text.utf8)) else { return [] }
+            return entries.filter { $0.query.contains("run=\(run)") || $0.path.hasPrefix("/pb-warmup/event/\(run)/") }
+        }
+
+        // A run: three pages, a line that is no web address, and a page the proxy closes unanswered.
+        let plan = WarmUpPlan(addresses: [page("a"), "javascript:alert(1)", page("b"), page("broken"), page("c")].joined(separator: "\n"),
+                              scroll: true, followLinks: true)
+        let started = manager.startWarmUp(profile.id, plan: plan)
+        let ended = await waitUntil(timeout: 120) { robot.state != .running }
+        let visits = robot.visits
+        let outcomes = visits.map { visit -> String in
+            switch visit.outcome {
+            case .loaded?: return "loaded"
+            case .failed?: return "failed"
+            case .timedOut?: return "timedOut"
+            case nil: return "-"
+            }
+        }
+        check("warm-up: the plan's pages are visited one after the other in a tab of the profile, a page that does not load reported and skipped",
+              started && ended && robot.state == .finished
+                  && visits.map(\.url.absoluteString) == [page("a"), page("b"), page("broken"), page("c")]
+                  && outcomes == ["loaded", "loaded", "failed", "loaded"],
+              "started=\(started) state=\(robot.state) \(visits.map(\.url.absoluteString)) \(outcomes) \(visits.map(\.outcome))")
+        let log = await proxyLog()
+        let pagesServed = log.filter { !$0.path.contains("/event/") }.map(\.path)
+        let userAgent = manager.session(for: profile.id)?.frontmostWindow?.selectedTab?.webView.customUserAgent ?? "?"
+        let requestB = log.first { $0.path == "/pb-warmup/b" }
+        check("warm-up: the pages come through the profile's proxy with its User-Agent and the cookies the pages before set",
+              pagesServed.filter { ["/pb-warmup/a", "/pb-warmup/b", "/pb-warmup/c"].contains($0) } == ["/pb-warmup/a", "/pb-warmup/b", "/pb-warmup/c"]
+                  && requestB?.cookie.contains("pbwarm_a=\(run)") == true
+                  && log.filter { !$0.path.contains("/event/") }.allSatisfy { $0.userAgent == userAgent },
+              "\(pagesServed) cookie(b)=\(requestB?.cookie ?? "-") ua=\(userAgent)")
+        let loaded = visits.filter { $0.outcome == .loaded }
+        check("warm-up: it stays on each page between the plan's times (plus half again on the page of the followed link)",
+              loaded.count == 3 && loaded.allSatisfy { $0.dwell >= 3 && $0.dwell <= 3.5 * 1.5 + 0.01 },
+              "\(visits.map(\.dwell))")
+        let events = Set(log.compactMap { entry -> String? in
+            entry.path.hasPrefix("/pb-warmup/event/\(run)/") ? String(entry.path.dropFirst("/pb-warmup/event/\(run)/".count)) : nil
+        })
+        check("warm-up: it scrolls each page it stays on (the pages see trusted scroll events)",
+              ["a", "b", "c"].allSatisfy { events.contains("\($0)-scroll") } && loaded.allSatisfy { $0.scrolls > 0 },
+              "\(events.sorted()) scrolls=\(visits.map(\.scrolls))")
+        info("warm-up: scrolled with \(robot.scrollInput?.rawValue ?? "-") input (wheel events seen: \(events.contains { $0.hasSuffix("-wheel") })), clicked with \(robot.clickInput?.rawValue ?? "-") input (trusted clicks seen: \(events.contains { $0.hasSuffix("-click") }))")
+        let referers = Dictionary(log.map { ($0.path, $0.referer) }, uniquingKeysWith: { first, _ in first })
+        let refused = ["/pb-warmup/logout", "/pb-warmup/partner", "/pb-warmup/file.zip", "/pb-warmup/popup"]
+        check("warm-up: from each page it follows only the plain link of the same site (with the page as Referer), never sign-out, another site, a file or a new window",
+              ["a", "b", "c"].allSatisfy { referers["/pb-warmup/\($0)-next"] == page($0) }
+                  && !log.contains { refused.contains($0.path) }
+                  && loaded.allSatisfy { $0.followed?.path == "\($0.url.path)-next" && $0.followedOutcome == .loaded },
+              "\(referers.filter { $0.key.hasSuffix("-next") }) refused requested: \(log.map(\.path).filter(refused.contains))")
+        var traces: String?
+        if let webView = manager.session(for: profile.id)?.frontmostWindow?.selectedTab?.webView {
+            traces = try? await js(webView, """
+                return [typeof window.webkit, Object.getOwnPropertyNames(window).filter((n) => /warm|robot/i.test(n)).join(',')].join('|');
+                """) as? String
+        }
+        check("warm-up: the page world shows nothing of the robot (no window.webkit, no globals of its own)",
+              traces == "undefined|", traces ?? "nil")
+        let history = manager.session(for: profile.id)?.library.historyEntries(matching: "pb-warmup").map(\.url) ?? []
+        var stored: [String] = []
+        // Read in its own scope: a store held past this point would keep the stop below from sealing.
+        if let store = manager.session(for: profile.id)?.dataStore { stored = await cookies(in: store).map(\.name) }
+        check("warm-up: the profile keeps what the visits leave, as when browsing: history and the pages' cookies",
+              ["a", "b", "c"].allSatisfy { name in history.contains { $0.contains("/pb-warmup/\(name)?") } }
+                  && ["pbwarm_a", "pbwarm_b", "pbwarm_c", "pbwarm_a_next"].allSatisfy(stored.contains),
+              "history=\(history) cookies=\(stored.sorted())")
+
+        // Stopped by the user while on a page: nothing more is requested.
+        let long = WarmUpPlan(addresses: [page("s1"), page("s2")].joined(separator: "\n"), scroll: false, followLinks: false)
+        robot.limits.dwellOverride = 30...30
+        manager.startWarmUp(profile.id, plan: long)
+        _ = await waitUntil(timeout: 20) { robot.visits.first?.outcome == .loaded }
+        let before = await proxyLog().count
+        robot.stop()
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        let after = await proxyLog()
+        check("warm-up: Stop ends the run at once; no further page is requested",
+              robot.state == .stopped(.byUser) && !after.contains { $0.path == "/pb-warmup/s2" } && after.count <= before + 1,
+              "state=\(robot.state) before=\(before) after=\(after.map(\.path))")
+
+        // Its tab closed by the user.
+        manager.startWarmUp(profile.id, plan: long)
+        _ = await waitUntil(timeout: 20) { robot.visits.first?.outcome == .loaded }
+        if let tab = robot.currentTab, let controller = manager.session(for: profile.id)?.frontmostWindow,
+           let index = controller.tabs.firstIndex(where: { $0 === tab }) {
+            controller.closeTab(at: index)
+        }
+        let closed = await waitUntil(timeout: 3) { robot.state == .stopped(.tabClosed) }
+        check("warm-up: closing its tab stops the run", closed, "state=\(robot.state)")
+
+        // A page that shows a dialog: the robot stops and leaves it to the user.
+        manager.startWarmUp(profile.id, plan: WarmUpPlan(addresses: page("alert"), scroll: false, followLinks: false))
+        let asked = await waitUntil(timeout: 20) { robot.state == .stopped(.pageNeedsAttention) }
+        check("warm-up: a page waiting for an answer to a dialog stops the run", asked, "state=\(robot.state)")
+        if let controller = manager.session(for: profile.id)?.frontmostWindow,
+           let index = controller.tabs.firstIndex(where: { $0.hasPendingSheet }) {
+            controller.closeTab(at: index) // answers the dialog
+        }
+
+        // The profile stopped during a run: the robot stops first, and the data seals as usual.
+        manager.startWarmUp(profile.id, plan: long)
+        _ = await waitUntil(timeout: 20) { robot.visits.first?.outcome == .loaded }
+        var sealError: String?
+        do { try await manager.stop(profile.id) } catch { sealError = String(describing: error) }
+        check("warm-up: stopping the profile stops its run first; the profile's data is sealed as usual",
+              robot.state == .stopped(.profileStopped) && sealError == nil && !manager.isRunning(profile.id)
+                  && !webKitDataDirectoriesExist(profile.id) && messages.isEmpty,
+              "state=\(robot.state) seal=\(sealError ?? "ok") messages=\(messages)")
+        try await manager.delete(profile.id)
+    }
+
+    /// The profile's WebKit data is not on disk in plain form (sealed).
+    private func webKitDataDirectoriesExist(_ profileID: UUID) -> Bool {
+        !WebDataStoreVault.discoverDirectories(for: profileID).isEmpty
     }
 
     /// The values of the inputs `selectors` in the page.

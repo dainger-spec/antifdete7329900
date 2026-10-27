@@ -28,6 +28,7 @@ struct ProfileListView: View {
     @State private var editing: ProfileEditorView.Target?
     @State private var passwordsFor: ProfileSummary?
     @State private var importingCookiesFor: ProfileSummary?
+    @State private var warmingUp: ProfileSummary?
     @State private var pendingDelete: ProfileSummary?
     @State private var changingPassword = false
     @State private var showingSync = false
@@ -59,6 +60,7 @@ struct ProfileListView: View {
         .sheet(item: $editing) { target in ProfileEditorView(target: target) }
         .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
         .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
+        .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
         // "Passwords…" in a browser window's AutoFill list.
         .onReceive(model.$passwordsRequest.compactMap { $0 }) { profile in
             passwordsFor = profile
@@ -109,6 +111,8 @@ struct ProfileListView: View {
                         ProfileRow(profile: profile,
                                    running: model.isRunning(profile.id),
                                    busy: model.isBusy(profile.id),
+                                   warmUp: model.manager?.isWarmingUp(profile.id) == true
+                                       ? model.manager?.warmUpRobot(for: profile.id) : nil,
                                    onLaunch: { Task { await model.launch(profile.id) } },
                                    onStop: { Task { await model.stop(profile.id) } },
                                    onNewWindow: { model.manager?.openNewWindow(profile.id) },
@@ -116,6 +120,7 @@ struct ProfileListView: View {
                                    onEdit: { editing = .existing(profile) },
                                    onPasswords: { passwordsFor = profile },
                                    onImportCookies: { importingCookiesFor = profile },
+                                   onWarmUp: { warmingUp = profile },
                                    onDelete: { pendingDelete = profile })
                     }
                 }
@@ -143,6 +148,8 @@ private struct ProfileRow: View {
     let profile: ProfileSummary
     let running: Bool
     let busy: Bool
+    /// Its warm-up robot, while one runs.
+    let warmUp: WarmUpRobot?
     let onLaunch: () -> Void
     let onStop: () -> Void
     let onNewWindow: () -> Void
@@ -150,6 +157,7 @@ private struct ProfileRow: View {
     let onEdit: () -> Void
     let onPasswords: () -> Void
     let onImportCookies: () -> Void
+    let onWarmUp: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -185,6 +193,7 @@ private struct ProfileRow: View {
                 Button(L("profiles.row.edit"), action: onEdit)
                 Button(L("profiles.row.passwords"), action: onPasswords)
                 Button(L("profiles.row.importCookies"), action: onImportCookies)
+                Button(L("profiles.row.warmUp"), action: onWarmUp)
                 Divider()
                 Button(L("profiles.row.delete"), role: .destructive, action: onDelete)
             } label: { Image(systemName: "ellipsis") }
@@ -204,6 +213,9 @@ private struct ProfileRow: View {
 
     private var subtitle: String {
         if busy { return running ? L("profiles.row.starting") : L("profiles.row.encrypting") }
+        if let warmUp {
+            return String(format: L("profiles.row.warmingUp"), max(warmUp.visits.count, 1), warmUp.pageCount)
+        }
         if running { return L("profiles.row.running") }
         guard let last = profile.lastLaunchedAt else { return L("profiles.row.neverLaunched") }
         return String(format: L("profiles.row.lastUsed"), last.formatted(.relative(presentation: .named)))

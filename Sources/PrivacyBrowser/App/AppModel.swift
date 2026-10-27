@@ -281,6 +281,28 @@ final class AppModel: ObservableObject {
         return try await manager.importCookies(cookies, into: id)
     }
 
+    // MARK: Session warm-up
+
+    /// The profile's last warm-up plan, or a new one.
+    func warmUpPlan(for id: UUID) -> WarmUpPlan {
+        (try? repository?.warmUpPlan(for: id)) ?? WarmUpPlan()
+    }
+
+    /// Remembers `plan` for the profile and starts it, launching the profile first when it is
+    /// stopped. False when it did not start (the launch failed, and said why).
+    func startWarmUp(_ plan: WarmUpPlan, for id: UUID) async -> Bool {
+        guard let repository, let manager else { return false }
+        do {
+            try repository.saveWarmUpPlan(plan, for: id)
+        } catch {
+            showError(error.localizedDescription)
+        }
+        if !manager.isRunning(id) { await launch(id) }
+        // The manager of this unlock: a Lock while the profile started ends it.
+        guard let current = self.manager, current === manager, current.isRunning(id) else { return false }
+        return current.startWarmUp(id, plan: plan)
+    }
+
     /// Whether `password` is the master password (asked before saved passwords are shown).
     func verifyMasterPassword(_ password: String) async -> Bool {
         guard let vault = repository?.vault else { return false }

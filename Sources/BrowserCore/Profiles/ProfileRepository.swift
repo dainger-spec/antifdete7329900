@@ -63,6 +63,8 @@ struct ProfileIndex: Codable, Equatable {
 ///                                  synced and merged per cookie
 /// profiles/<uuid>/cookies-baseline.bin AEAD(cookieBaselineKey, CookieBaseline JSON): what the cookie
 ///                                  store held at the last record or apply (this device only)
+/// profiles/<uuid>/warmup.bin       AEAD(warmUpKey, WarmUpPlan JSON): the last session warm-up plan
+///                                  (this device only)
 /// ```
 /// Profile names are only readable after unlock. Profile configurations are only
 /// decrypted when launched or edited.
@@ -283,6 +285,24 @@ public final class ProfileRepository: @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: cookieJarURL(for: id).path),
               (try? cookieJar(for: id)) != CookieJarDocument() else { return }
         try saveCookieJar(CookieJarDocument(), for: id)
+    }
+
+    // MARK: Warm-up plan (this Mac only)
+
+    func warmUpPlanURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("warmup.bin") }
+
+    private func warmUpPlanFile(for id: UUID) throws -> EncryptedDocumentFile<WarmUpPlan> {
+        EncryptedDocumentFile(url: warmUpPlanURL(for: id), key: try profileKey(for: id).derive(info: "warm-up", salt: id.rawBytes),
+                              aad: "warm-up:v1:\(id.uuidString)")
+    }
+
+    /// The profile's last warm-up plan (`WarmUpPlan`), or nil when none was saved.
+    public func warmUpPlan(for id: UUID) throws -> WarmUpPlan? {
+        try warmUpPlanFile(for: id).load()
+    }
+
+    public func saveWarmUpPlan(_ plan: WarmUpPlan, for id: UUID) throws {
+        try warmUpPlanFile(for: id).save(plan)
     }
 
     // MARK: Sync support (raw encrypted files; see SyncEngine)

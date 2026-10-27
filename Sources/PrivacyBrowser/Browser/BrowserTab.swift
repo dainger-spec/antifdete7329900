@@ -64,6 +64,11 @@ final class BrowserTab: NSObject {
     /// A dialog of this tab is waiting for the user (self-test hook).
     var hasPendingSheet: Bool { !pendingSheets.isEmpty }
 
+    /// How many loads of this tab failed before their page came (an error page was shown
+    /// instead), and why the last one did: the warm-up robot tells a failed visit by them.
+    private(set) var failedNavigations = 0
+    private(set) var lastNavigationError: String?
+
     /// Password AutoFill in this tab: suggestions, filling, the save question.
     private(set) lazy var passwords = TabPasswordAutoFill(tab: self, vault: context.passwordVault,
                                                           settings: context.passwordSettings)
@@ -273,6 +278,8 @@ extension BrowserTab: WKNavigationDelegate {
     }
 
     private func showErrorPage(_ message: String) {
+        failedNavigations += 1
+        lastNavigationError = message
         let escaped = message
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")

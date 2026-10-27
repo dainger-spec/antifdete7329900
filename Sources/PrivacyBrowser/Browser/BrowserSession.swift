@@ -145,7 +145,8 @@ final class BrowserSession {
         }
     }
 
-    private var frontmostWindow: BrowserWindowController? {
+    /// The profile's window nearest the front (the warm-up robot opens its tab there).
+    var frontmostWindow: BrowserWindowController? {
         let ordered = NSApp.orderedWindows.compactMap { $0.windowController as? BrowserWindowController }
         return ordered.first { controller in windows.contains { $0 === controller } } ?? windows.last
     }

@@ -192,6 +192,8 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
 - Passwords are not merged per entry yet: concurrent edits on two devices resolve to the
   remote file, and the local one is kept as `passwords.bin.conflict`. Adding tombstones
   to `PasswordVault` would allow the same merge as bookmarks.
+- The warm-up plan (`warmup.bin`) is not synced; the cookies and history its visits leave are,
+  with the profile's.
 - `cookies-import.bin` (cookies imported into a stopped profile, until its next launch) is not
   synced itself: it is applied on the Mac it was imported on, at the profile's next launch,
   and from there the cookies are in `cookies.bin` and sync with the rest.

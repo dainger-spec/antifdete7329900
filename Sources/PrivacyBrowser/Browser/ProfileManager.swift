@@ -50,6 +50,8 @@ final class ProfileManager: ObservableObject {
     private var latestLaunch: [UUID: UUID] = [:]
     /// Launches whose lookup through the proxy has not finished yet.
     private var lookupsInFlight: Set<UUID> = []
+    /// The session warm-up robot of each profile that used one since unlock.
+    private var warmUpRobots: [UUID: WarmUpRobot] = [:]
 
     /// A lookup through a profile's proxy is still running (self-test hook).
     var hasProxyLookupsInFlight: Bool { !lookupsInFlight.isEmpty }
@@ -339,6 +341,9 @@ final class ProfileManager: ObservableObject {
 
     func stop(_ id: UUID) async throws {
         guard let session = sessions.removeValue(forKey: id) else { return }
+        // First of all, before anything waits: the robot must not act in a session going away
+        // (a tab it opened now would get no store, proxy or scripts of the profile).
+        warmUpRobots[id]?.stop(.profileStopped)
         launchTokens[id] = nil
         tunnel.unregister(profile: id)
         let key = keys.removeValue(forKey: id)
@@ -421,12 +426,35 @@ final class ProfileManager: ObservableObject {
         busyProfileIDs.insert(id)
         defer { busyProfileIDs.remove(id) }
         await webDataVault.deleteData(profileID: id)
+        warmUpRobots[id] = nil
         try repository.delete(id)
     }
 
     /// Called by sync when a profile was deleted on another device.
     func removeWebData(for id: UUID) async {
         await webDataVault.deleteData(profileID: id)
+    }
+
+    // MARK: Session warm-up
+
+    /// The profile's warm-up robot (made on first use).
+    func warmUpRobot(for id: UUID) -> WarmUpRobot {
+        if let robot = warmUpRobots[id] { return robot }
+        let robot = WarmUpRobot(profileID: id)
+        robot.onProgress = { [weak self] in self?.objectWillChange.send() }
+        warmUpRobots[id] = robot
+        return robot
+    }
+
+    /// A warm-up robot of a profile is running (the profile list shows it).
+    func isWarmingUp(_ id: UUID) -> Bool { warmUpRobots[id]?.isRunning ?? false }
+
+    /// Starts `plan` in the running profile. False when the profile is not running, or the robot
+    /// cannot start (already running, nothing to visit).
+    @discardableResult
+    func startWarmUp(_ id: UUID, plan: WarmUpPlan) -> Bool {
+        guard !isShuttingDown, let session = sessions[id] else { return false }
+        return warmUpRobot(for: id).start(plan, in: session)
     }
 
     // MARK: Cookie import

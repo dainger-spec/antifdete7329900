@@ -43,8 +43,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private var isClosing = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserWindow")
 
-    /// Search used for address-bar input that is not a URL. Queries go through the profile's proxy.
-    static let searchURLTemplate = "https://duckduckgo.com/?q="
+    /// Search used for address-bar input that is not a URL (`WebAddress`). Queries go through the
+    /// profile's proxy.
+    static let searchURLTemplate = WebAddress.searchURLTemplate
 
     init(session: BrowserSession) {
         self.session = session
@@ -307,16 +308,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     static func url(fromAddressBarInput input: String) -> URL? {
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
-        if let url = URL(string: text), let scheme = url.scheme?.lowercased(), ["http", "https", "about"].contains(scheme) {
-            return url
-        }
-        if !text.contains(" "), text.contains(".") || text.hasPrefix("localhost"), let url = URL(string: "https://" + text), url.host != nil {
-            return url
-        }
-        let query = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=?#"))) ?? ""
-        return URL(string: searchURLTemplate + query)
+        WebAddress.url(fromAddressBarInput: input)
     }
 
     // MARK: Bookmarks and history
