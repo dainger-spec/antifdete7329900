@@ -22,7 +22,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 ```
 ┌──────────────────────────────── PrivacyBrowser (macOS app) ────────────────────────────────┐
 │  main.swift ── app, --self-test (headless WebKit checks), --capture-sites, migration modes  │
-│  Localization (ru default, en fallback) · Theme (forced light appearance)                   │
+│  Localization (ru default, en fallback) · Theme (dark chrome; web content follows system)   │
 │  BehaviorSets ── device-generation → injected-script bundle (extension point)               │
 │  SwiftUI: Setup / Unlock / ProfileList / ProfileEditor / Passwords / SyncSettings / Library │
 │        │                                                                                   │

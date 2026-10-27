@@ -74,6 +74,8 @@ final class AutoFillPanel: NSPanel {
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
         animationBehavior = .utilityWindow
+        // Part of the app's chrome (dark), like the window it opens over.
+        appearance = Theme.chromeAppearance
     }
 
     @available(*, unavailable)

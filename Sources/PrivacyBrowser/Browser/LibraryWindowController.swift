@@ -21,6 +21,7 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
         window.tabbingMode = .disallowed
         super.init(window: window)
         window.delegate = self
+        Theme.applyChrome(to: window)
         window.center()
     }
 

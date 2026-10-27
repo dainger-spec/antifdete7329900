@@ -28,6 +28,9 @@ final class ProfileManager: ObservableObject {
     var onReturnToProfiles: (() -> Void)?
     /// "Passwords…" in a profile's AutoFill list: open that profile's password manager.
     var onShowPasswords: ((UUID) -> Void)?
+    /// A profile's stored configuration changed outside the editor (a proxy lookup remembered a
+    /// new exit location): the Profiles list shows it.
+    var onConfigurationChanged: ((UUID) -> Void)?
 
     private let repository: ProfileRepository
     private let webDataVault: WebDataStoreVault
@@ -308,6 +311,7 @@ final class ProfileManager: ObservableObject {
                   !found.isSameLocation(as: current.lastProxyLocation) else { return }
             current.lastProxyLocation = found
             try repository.saveConfiguration(current, for: id)
+            onConfigurationChanged?(id)
         } catch {
             log.error("Could not store the proxy location of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
         }

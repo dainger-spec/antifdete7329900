@@ -10,13 +10,18 @@ struct PrivacyBrowserApp: App {
         Window(L("window.profiles.title"), id: "profiles") {
             RootView()
                 .environmentObject(model)
-                // Clean light theme by default (see docs); the browser content itself follows the site.
-                .preferredColorScheme(.light)
+                // Lumen's chrome is always dark (Theme); web content follows the system (WebContentAppearance).
+                .preferredColorScheme(.dark)
                 .background(WindowReader { window in
                     appDelegate.model = model
                     model.profilesWindow = window
+                    Theme.applyChrome(to: window)
                 })
         }
+        // The sidebar runs to the top of the window, under the traffic lights.
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1180, height: 740)
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button(L("menu.newTab")) { keyBrowserWindow?.newTab() }
@@ -75,8 +80,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when launched as a bare SwiftPM executable (`swift run`) instead of an .app bundle.
         NSApp.setActivationPolicy(.regular)
-        // Clean light theme regardless of the system setting (see docs/ISOLATION_AND_LIMITATIONS §11).
-        NSApp.appearance = NSAppearance(named: .aqua)
+        // `NSApp.appearance` stays unset: each window of the app is made dark itself (Theme.applyChrome),
+        // and web content keeps following the system's setting, as in Safari (see
+        // docs/ISOLATION_AND_LIMITATIONS §11).
         NSApp.activate(ignoringOtherApps: true)
     }
 

@@ -11,6 +11,8 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var phase: Phase
     @Published private(set) var profiles: [ProfileSummary] = []
+    /// What the Profiles list shows about each profile beyond its summary (see `ProfileDetails`).
+    @Published private(set) var details: [UUID: ProfileDetails] = [:]
     @Published private(set) var isWorking = false
     /// A sync is running: launches wait for it (it replaces the profiles' files on disk).
     private var isSyncing = false
@@ -150,6 +152,7 @@ final class AppModel: ObservableObject {
             self?.activateProfilesWindow()
             self?.refresh()
         }
+        manager.onConfigurationChanged = { [weak self] _ in self?.refresh() }
         manager.onShowPasswords = { [weak self] id in
             guard let self, let summary = self.profiles.first(where: { $0.id == id }) else { return }
             self.activateProfilesWindow()
@@ -196,6 +199,7 @@ final class AppModel: ObservableObject {
         manager = nil
         repository = nil
         profiles = []
+        details = [:]
         deviceSettings = DeviceSettings()
         phase = MasterVault.exists(in: root) ? .locked : .setup
     }
@@ -213,6 +217,15 @@ final class AppModel: ObservableObject {
 
     func refresh() {
         profiles = repository?.list() ?? []
+        var details: [UUID: ProfileDetails] = [:]
+        if let repository {
+            for profile in profiles {
+                if let configuration = try? repository.loadConfiguration(profile.id) {
+                    details[profile.id] = ProfileDetails(configuration)
+                }
+            }
+        }
+        self.details = details
     }
 
     func createProfile(name: String, configuration: ProfileConfiguration) throws {
@@ -257,6 +270,8 @@ final class AppModel: ObservableObject {
     }
 
     func isRunning(_ id: UUID) -> Bool { manager?.runningProfileIDs.contains(id) ?? false }
+    /// A sync is replacing the profiles' files (the sidebar says so).
+    var isSyncInProgress: Bool { isSyncing }
     func isBusy(_ id: UUID) -> Bool { manager?.busyProfileIDs.contains(id) ?? false }
 
     func passwordVault(for id: UUID) throws -> PasswordVault {
@@ -445,5 +460,23 @@ final class AppModel: ObservableObject {
         } catch {
             showError((error as? CoreError)?.description ?? error.localizedDescription)
         }
+    }
+}
+
+/// What the Profiles list shows about a profile beyond its summary, read from its encrypted
+/// configuration when the list refreshes (one small decryption per profile).
+struct ProfileDetails: Equatable {
+    /// "host:port" of its proxy; nil when it connects directly.
+    var proxyEndpoint: String?
+    /// Where the proxy was last seen exiting (ISO 3166-1 alpha-2), when a lookup found it.
+    var exitCountryCode: String?
+    var ephemeral: Bool
+    var deviceGeneration: DeviceGeneration
+
+    init(_ configuration: ProfileConfiguration) {
+        proxyEndpoint = configuration.proxy.map { "\($0.host):\($0.port)" }
+        exitCountryCode = configuration.rememberedProxyLocation?.countryCode
+        ephemeral = configuration.ephemeral
+        deviceGeneration = configuration.deviceGeneration
     }
 }

@@ -8,7 +8,9 @@ a key derived from a master password. That covers profile list, settings, passwo
 history, bookmarks and sync settings. A profile's WebKit website data is decrypted only
 while that profile is running.
 
-The UI is in **Russian by default** (English fallback) and uses a clean **light theme**.
+The UI is in **Russian by default** (English fallback) and uses Lumen's **dark theme**: flat
+near-black surfaces, hairline borders, one restrained blue accent. Web pages are not themed;
+they follow the Mac's light/dark setting as they do in Safari.
 
 This is a prototype. The core has unit tests, and the app is checked end-to-end against
 real WebKit in CI. It has not had a security review, and some features are
@@ -56,8 +58,11 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: â€
 - **Language:** the UI starts in Russian. `PRIVACYBROWSER_LANG=en` switches it to English.
   The strings tables (`Resources/{ru,en}.lproj`) are copied into the bundle by
   `build-app.sh`, so `swift run` and the Xcode SwiftPM scheme show raw keys instead.
-- **Appearance:** the app always uses the light (Aqua) appearance, whatever the system
-  setting.
+- **Appearance:** the app's own windows are always dark (Lumen's theme). Web content follows
+  the system's light/dark setting, as in Safari, so pages see the `prefers-color-scheme`
+  Safari would give them.
+- **Design review:** `PrivacyBrowser --render-ui-snapshots <folder>` renders the screens with
+  sample data into PNG files (CI uploads them as the `ui-snapshots` artifact).
 
 ### Tests
 

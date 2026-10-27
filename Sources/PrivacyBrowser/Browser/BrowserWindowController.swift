@@ -74,7 +74,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         window.tabbingMode = .disallowed
         super.init(window: window)
         window.delegate = self
+        // Dark chrome; the pages inside keep the system's light or dark (as in Safari).
+        Theme.applyChrome(to: window)
         buildInterface(in: window)
+        WebContentAppearance.shared.follow(webContainer)
         window.center()
         // @Published emits before the value changes; read the store on the next main-actor turn.
         libraryObservation = library.$bookmarks.sink { [weak self] _ in

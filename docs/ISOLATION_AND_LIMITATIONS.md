@@ -761,9 +761,15 @@ use-after-free), and the resulting crash took the whole app down, so it looked a
 profile window quit the app. The callback now runs on the next run-loop turn, and
 `BrowserSession.shutDown()` is idempotent. The self-test's `lifecycle:` checks cover this.
 
-**Appearance.** The app forces the light (Aqua) appearance, regardless of the system setting:
-`NSApp.appearance` plus `.preferredColorScheme(.light)`. Web content is not restyled; pages
-render as their sites define them.
+**Appearance.** The app's own windows are always dark (Lumen's theme, `Theme.swift`): each
+window the app draws gets the Dark Aqua appearance and its SwiftUI views the dark colour
+scheme. `NSApp.appearance` is left unset, so web content keeps following the Mac's
+light/dark setting, as in Safari: the container of a window's web views is given the
+system's appearance explicitly, and again whenever the setting changes
+(`WebContentAppearance`). Pages therefore get the `prefers-color-scheme`, form controls and
+scroll bars Safari would give them. Earlier builds forced the light appearance on
+everything, web content included, so on a Mac set to dark, pages saw light where Safari
+reports dark. Web content is not restyled; pages render as their sites define them.
 
 **Language.**
 - The UI defaults to Russian, with English as the fallback. Strings live in
