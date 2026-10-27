@@ -354,7 +354,15 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     /// The start page covers the selected tab while it is an empty new tab.
     private func updateStartPage() {
-        startPage.isHidden = !(selectedTab?.showsStartPage ?? false)
+        let shows = selectedTab?.showsStartPage ?? false
+        guard startPage.isHidden == shows else { return }
+        startPage.isHidden = !shows
+        guard shows, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        startPage.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            startPage.animator().alphaValue = 1
+        }
     }
 
     // MARK: Chrome

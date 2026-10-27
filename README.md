@@ -65,6 +65,9 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: â€
   Safari would give them.
 - **Design review:** `PrivacyBrowser --render-ui-snapshots <folder>` renders the screens with
   sample data into PNG files (CI uploads them as the `ui-snapshots` artifact).
+- **App icon:** `build-app.sh` has the app draw its icon from the Lumen mark
+  (`--render-app-icon <folder>.iconset`) and packs it with `iconutil` into
+  `Contents/Resources/AppIcon.icns`. A bare `swift run` sets the same icon in the Dock at launch.
 
 ### Tests
 

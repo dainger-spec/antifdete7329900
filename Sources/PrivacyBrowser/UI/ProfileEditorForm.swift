@@ -143,11 +143,11 @@ struct ProfileEditorForm: View {
     private var general: some View {
         VStack(alignment: .leading, spacing: 14) {
             EditorField(L("editor.name")) {
-                TextField(L("editor.name"), text: $draft.name).lumenField()
+                TextField(L("editor.name"), text: $draft.name, prompt: Text(verbatim: "")).lumenField()
             }
             EditorField(L("editor.startURL")) {
-                TextField(L("editor.startURL"), text: $draft.startURL, prompt: Text(verbatim: "https://example.com"))
-                    .lumenField()
+                TextField(L("editor.startURL"), text: $draft.startURL, prompt: Text(verbatim: ""))
+                    .lumenField("https://example.com", isEmpty: draft.startURL.isEmpty)
             }
             EditorDivider()
             EditorToggle(L("editor.ephemeral.title"), detail: L("editor.ephemeral.detail"), isOn: $draft.ephemeral)
@@ -171,9 +171,9 @@ struct ProfileEditorForm: View {
             EditorToggle(L("editor.ua.useCustom"), isOn: $draft.customUserAgent)
             if draft.customUserAgent {
                 EditorField(L("editor.ua.field")) {
-                    TextField(L("editor.ua.field"), text: $draft.userAgent, axis: .vertical)
+                    TextField(L("editor.ua.field"), text: $draft.userAgent, prompt: Text(verbatim: ""), axis: .vertical)
                         .lineLimit(2...4)
-                        .lumenField(height: nil)
+                        .lumenField("Mozilla/5.0 (…)", isEmpty: draft.userAgent.isEmpty, height: nil)
                 }
             } else {
                 EditorField(L("editor.ua.effective")) {
@@ -211,26 +211,29 @@ struct ProfileEditorForm: View {
                 }
                 HStack(alignment: .top, spacing: 12) {
                     EditorField(L("editor.proxy.host")) {
-                        TextField(L("editor.proxy.host"), text: $draft.proxyHost).lumenField()
+                        TextField(L("editor.proxy.host"), text: $draft.proxyHost, prompt: Text(verbatim: ""))
+                            .lumenField("proxy.example.com", isEmpty: draft.proxyHost.isEmpty)
                     }
                     EditorField(L("editor.proxy.port")) {
-                        TextField(L("editor.proxy.port"), text: $draft.proxyPort).lumenField()
+                        TextField(L("editor.proxy.port"), text: $draft.proxyPort, prompt: Text(verbatim: ""))
+                            .lumenField("1080", isEmpty: draft.proxyPort.isEmpty)
                     }
                     .frame(width: 96)
                 }
                 HStack(alignment: .top, spacing: 12) {
                     EditorField(L("editor.proxy.username")) {
-                        TextField(L("editor.proxy.username"), text: $draft.proxyUsername).lumenField()
+                        TextField(L("editor.proxy.username"), text: $draft.proxyUsername, prompt: Text(verbatim: "")).lumenField()
                     }
                     EditorField(L("editor.proxy.password")) {
-                        SecureField(L("editor.proxy.password"), text: $draft.proxyPassword).lumenField()
+                        SecureField(L("editor.proxy.password"), text: $draft.proxyPassword, prompt: Text(verbatim: "")).lumenField()
                     }
                 }
                 if draft.proxyKind == .httpConnect {
                     EditorToggle(L("editor.proxy.tls"), isOn: $draft.proxyTLS)
                 }
                 EditorField(L("editor.proxy.bypass")) {
-                    TextField(L("editor.proxy.bypass"), text: $draft.proxyExcludedDomains).lumenField()
+                    TextField(L("editor.proxy.bypass"), text: $draft.proxyExcludedDomains, prompt: Text(verbatim: ""))
+                        .lumenField("localhost, example.com", isEmpty: draft.proxyExcludedDomains.isEmpty)
                 }
                 ProxyLocationCard(draft: $draft)
                 if draft.matchProxyLocation && !draft.overrideTimeZone {
@@ -278,9 +281,9 @@ struct ProfileEditorForm: View {
             }
             if draft.geoMode == .fixed {
                 HStack(alignment: .top, spacing: 12) {
-                    EditorField(L("editor.geo.lat")) { TextField(L("editor.geo.lat"), text: $draft.latitude).lumenField() }
-                    EditorField(L("editor.geo.lon")) { TextField(L("editor.geo.lon"), text: $draft.longitude).lumenField() }
-                    EditorField(L("editor.geo.accuracy")) { TextField(L("editor.geo.accuracy"), text: $draft.accuracy).lumenField() }
+                    EditorField(L("editor.geo.lat")) { TextField(L("editor.geo.lat"), text: $draft.latitude, prompt: Text(verbatim: "")).lumenField("52.52", isEmpty: draft.latitude.isEmpty) }
+                    EditorField(L("editor.geo.lon")) { TextField(L("editor.geo.lon"), text: $draft.longitude, prompt: Text(verbatim: "")).lumenField("13.405", isEmpty: draft.longitude.isEmpty) }
+                    EditorField(L("editor.geo.accuracy")) { TextField(L("editor.geo.accuracy"), text: $draft.accuracy, prompt: Text(verbatim: "")).lumenField("50", isEmpty: draft.accuracy.isEmpty) }
                         .frame(width: 120)
                 }
             }

@@ -267,20 +267,37 @@ extension View {
     /// on, a hairline, radius 6; the accent ring while focused. `height` nil: as tall as its lines
     /// (a multi-line field).
     func lumenField(height: CGFloat? = 32) -> some View {
-        modifier(LumenField(height: height))
+        modifier(LumenField(height: height, placeholder: nil))
+    }
+
+    /// The same, with `placeholder` drawn in the tertiary colour while the field is empty. Give
+    /// the field an empty prompt: macOS draws the prompt of an unfocused field almost as bright as
+    /// its text, so an example there reads as a value.
+    func lumenField(_ placeholder: String, isEmpty: Bool, height: CGFloat? = 32) -> some View {
+        modifier(LumenField(height: height, placeholder: isEmpty ? placeholder : nil))
     }
 }
 
 private struct LumenField: ViewModifier {
     let height: CGFloat?
+    let placeholder: String?
     @FocusState private var focused: Bool
 
     func body(content: Content) -> some View {
         content
             .textFieldStyle(.plain)
             .font(.lumenBody)
-            .foregroundStyle(Theme.textPrimary)
             .focused($focused)
+            .overlay(alignment: height == nil ? .topLeading : .leading) {
+                if let placeholder {
+                    Text(placeholder)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
             .padding(.horizontal, 10)
             .padding(.vertical, height == nil ? 7 : 0)
             .frame(height: height)
@@ -343,6 +360,28 @@ struct IconBadge: View {
     }
 }
 
+/// A quiet empty state: a symbol over a line or two of text, centred in the room it is given.
+struct LumenEmptyHint: View {
+    let symbol: String
+    let text: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Theme.textTertiary)
+            Text(text)
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 320)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// A profile's glyph: its initial on one of five flat dark tints, chosen from its id so it stays
 /// the same everywhere (Profiles list, editor, a browser window's profile chip).
 struct ProfileAvatar: View {
@@ -400,6 +439,32 @@ struct LumenProgressBar: View {
         .animation(Theme.hoverAnimation, value: fraction)
         .accessibilityElement()
         .accessibilityValue(Text(verbatim: "\(Int((min(max(fraction, 0), 1) * 100).rounded())) %"))
+    }
+}
+
+/// An indeterminate progress line: a short accent segment sweeping along a 2 pt track (the
+/// launch screen while the vault opens). Under Reduce Motion it stands still, centred.
+struct LumenActivityLine: View {
+    var width: CGFloat = 180
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let segment = width * 0.3
+        TimelineView(.animation(minimumInterval: nil, paused: reduceMotion)) { context in
+            let period = 1.4
+            let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
+            let eased = CGFloat(t * t * (3 - 2 * t))
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.10))
+                Capsule().fill(Theme.accentFill)
+                    .frame(width: segment)
+                    .offset(x: reduceMotion ? (width - segment) / 2 : -segment + (width + segment) * eased)
+            }
+            .frame(width: width, height: 2)
+            .clipShape(Capsule())
+        }
+        .frame(width: width, height: 2)
+        .accessibilityHidden(true)
     }
 }
 

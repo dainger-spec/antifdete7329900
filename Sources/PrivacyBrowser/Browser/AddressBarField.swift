@@ -53,19 +53,38 @@ final class AddressBarField: NSTextField {
     }
 }
 
-/// Insets the text from the box's sides and centres its line vertically, for drawing and for
-/// the field editor alike.
+/// Insets the text from the box's sides and centres its line vertically: for drawing, and for
+/// the field editor, which AppKit places from the frame `edit`/`select` get (not from
+/// `drawingRect`), so those get the text's rect directly.
 final class AddressBarFieldCell: NSTextFieldCell {
     private static let inset: CGFloat = 10
+    private var isPlacingEditor = false
+
+    /// One line, inset from the sides, in the middle of `rect`.
+    private func textRect(_ rect: NSRect) -> NSRect {
+        let font = self.font ?? .systemFont(ofSize: 13)
+        let inner = rect.insetBy(dx: Self.inset, dy: 0)
+        let height = min(inner.height, ceil(font.ascender - font.descender + font.leading))
+        return NSRect(x: inner.minX, y: inner.minY + ((inner.height - height) / 2).rounded(.down),
+                      width: inner.width, height: height)
+    }
 
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
-        let inner = rect.insetBy(dx: Self.inset, dy: 0)
-        var drawing = super.drawingRect(forBounds: inner)
-        let slack = drawing.height - cellSize(forBounds: inner).height
-        if slack > 0 {
-            drawing.size.height -= slack
-            drawing.origin.y += (slack / 2).rounded(.down)
-        }
-        return drawing
+        let drawing = super.drawingRect(forBounds: rect)
+        return isPlacingEditor ? drawing : textRect(drawing)
+    }
+
+    override func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, event: NSEvent?) {
+        isPlacingEditor = true
+        defer { isPlacingEditor = false }
+        super.edit(withFrame: textRect(rect), in: controlView, editor: textObj, delegate: delegate, event: event)
+    }
+
+    override func select(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?,
+                         start selStart: Int, length selLength: Int) {
+        isPlacingEditor = true
+        defer { isPlacingEditor = false }
+        super.select(withFrame: textRect(rect), in: controlView, editor: textObj, delegate: delegate,
+                     start: selStart, length: selLength)
     }
 }

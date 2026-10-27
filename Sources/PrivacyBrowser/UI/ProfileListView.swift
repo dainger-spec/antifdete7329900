@@ -6,13 +6,14 @@ struct RootView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        Group {
+        ZStack {
             switch model.phase {
-            case .setup: SetupView()
-            case .locked: UnlockView()
-            case .unlocked: ProfileListView()
+            case .setup: SetupView().transition(.opacity)
+            case .locked: UnlockView().transition(.opacity)
+            case .unlocked: ProfileListView().transition(.opacity)
             }
         }
+        .animation(Theme.appearAnimation, value: model.phase)
         .frame(minWidth: ProfilesScreen.minimumWindowWidth, minHeight: 560)
         .background(Theme.surface)
         .tint(Theme.accentFill)
@@ -351,6 +352,7 @@ struct ProfilesScreen: View {
                     .padding(.bottom, 20)
                 }
                 .scrollIndicators(.automatic)
+                .animation(Theme.appearAnimation, value: visibleRows.filter(\.isActive).map(\.id))
             }
             .transition(.opacity)
         }
@@ -822,13 +824,23 @@ struct LumenSearchField: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textTertiary)
-            TextField(text: $text, prompt: Text(prompt).foregroundColor(Theme.textTertiary)) {
+            TextField(text: $text, prompt: Text(verbatim: "")) {
                 Text(prompt)
             }
             .textFieldStyle(.plain)
             .font(.lumenBody)
-            .foregroundStyle(Theme.textPrimary)
             .focused($focused)
+            .overlay(alignment: .leading) {
+                if text.isEmpty {
+                    // Lumen's placeholder: macOS draws an unfocused field's prompt almost as bright as text.
+                    Text(prompt)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
             if !text.isEmpty {
                 Button {
                     text = ""

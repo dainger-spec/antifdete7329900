@@ -33,7 +33,12 @@ struct CookieImportView: View {
                     }
                     if reading { ProgressView().controlSize(.small) }
                 }
-                if let report { reportView(report) } else { Spacer() }
+                if let report {
+                    reportView(report)
+                } else {
+                    LumenEmptyHint(symbol: "doc.text.magnifyingglass", text: L("cookies.empty"))
+                        .opacity(reading ? 0 : 1)
+                }
                 if let outcome { outcomeView(outcome) }
                 if let error { Text(error).foregroundStyle(Theme.danger).font(.lumenSecondary) }
             }

@@ -80,6 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when launched as a bare SwiftPM executable (`swift run`) instead of an .app bundle.
         NSApp.setActivationPolicy(.regular)
+        // Such a run has no icon file either: the Dock gets the icon drawn (the .app carries AppIcon.icns).
+        if Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") == nil, let icon = AppIcon.image() {
+            NSApp.applicationIconImage = icon
+        }
         // `NSApp.appearance` stays unset: each window of the app is made dark itself (Theme.applyChrome),
         // and web content keeps following the system's setting, as in Safari (see
         // docs/ISOLATION_AND_LIMITATIONS §11).

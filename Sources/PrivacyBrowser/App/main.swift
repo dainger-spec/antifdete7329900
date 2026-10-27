@@ -15,6 +15,10 @@ MainActor.assumeIsolated {
     } else if arguments.contains("--utun-relay") {
         // The packet tunnel's data path on a utun interface, for CI (root; UTunRelayHarness.swift).
         UTunRelayHarness.start(arguments: arguments)
+    } else if let index = arguments.firstIndex(of: "--render-app-icon") {
+        // The app icon's iconset, drawn from the Lumen mark (AppIcon.swift; scripts/build-app.sh).
+        let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "AppIcon.iconset"
+        exit(AppIcon.writeIconset(to: URL(fileURLWithPath: folder)) ? 0 : 1)
     } else if arguments.contains("--render-ui-snapshots") {
         // The app's screens with sample data, as PNG files for design review (UISnapshots.swift).
         UISnapshots.start(arguments: arguments)

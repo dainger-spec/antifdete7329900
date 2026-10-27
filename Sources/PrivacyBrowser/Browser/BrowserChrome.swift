@@ -166,12 +166,21 @@ struct StartPageView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.textTertiary)
-            TextField(text: $query, prompt: Text(L("toolbar.address.placeholder")).foregroundColor(Theme.textTertiary)) {
+            TextField(text: $query, prompt: Text(verbatim: "")) {
                 Text(L("toolbar.address.placeholder"))
             }
             .textFieldStyle(.plain)
             .font(.system(size: 14))
-            .foregroundStyle(Theme.textPrimary)
+            .overlay(alignment: .leading) {
+                if query.isEmpty {
+                    // Lumen's placeholder: macOS draws an unfocused field's prompt almost as bright as text.
+                    Text(L("toolbar.address.placeholder"))
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.textTertiary)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
             .onSubmit {
                 let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { return }

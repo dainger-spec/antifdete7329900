@@ -52,6 +52,7 @@ jobs:
         # as the ui-snapshots artifact. A click that does not reach its button fails the job at the end.
         id: ui
         continue-on-error: true
+        timeout-minutes: 8
         run: |
           status=0
           for lang in en ru; do

@@ -116,6 +116,21 @@ enum UISnapshots {
         }.capture(into: folder)
         // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
         problems += await browserWindows(into: folder)
+        // The launch screen (the Profiles window before unlocking), also while the vault opens.
+        let lockModel = AppModel()
+        problems += await Shot(name: "launch-unlock", size: CGSize(width: 1180, height: 740)) {
+            UnlockView().environmentObject(lockModel)
+        }.capture(into: folder)
+        problems += await Shot(name: "launch-setup", size: CGSize(width: 1180, height: 740)) {
+            SetupView().environmentObject(lockModel)
+        }.capture(into: folder)
+        problems += await Shot(name: "launch-working", size: CGSize(width: 1180, height: 740)) {
+            LockScreen(title: L("unlock.title"), subtitle: L("unlock.subtitle"), isWorking: true,
+                       workingLabel: L("unlock.working")) { Color.clear.frame(width: 300, height: 80) }
+        }.capture(into: folder)
+        problems += await Shot(name: "app-icon", size: CGSize(width: 900, height: 640), titled: false) {
+            AppIconSheet()
+        }.capture(into: folder)
         problems += await Shot(name: "brand", size: CGSize(width: 900, height: 560), titled: false) {
             BrandSheet()
         }.capture(into: folder)
@@ -217,7 +232,7 @@ enum UISnapshots {
                 let tab = controller.addTab(url: nil, select: false, afterSelected: false)
                 tab?.webView.loadHTMLString("<!doctype html><title>\(title)</title><body></body>", baseURL: nil)
             }
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             problems += capture(window, name: "browser-tabs", into: folder)
             window.close()
             return problems
@@ -441,6 +456,33 @@ private struct BrandSheet: View {
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.backdrop)
+    }
+}
+
+/// The app icon as drawn for the .icns, at Dock and Finder sizes on dark and light backgrounds.
+private struct AppIconSheet: View {
+    private let sizes: [CGFloat] = [256, 128, 64, 32, 16]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            row(background: Color(hex: 0x0B0C0F))
+            row(background: Color(hex: 0xECECEC))
+        }
+    }
+
+    private func row(background: Color) -> some View {
+        HStack(alignment: .bottom, spacing: 28) {
+            ForEach(sizes, id: \.self) { size in
+                if let image = AppIcon.image(pixels: Int(size * 2)) {
+                    Image(nsImage: NSImage(cgImage: image, size: NSSize(width: size, height: size)))
+                        .interpolation(.high)
+                        .frame(width: size, height: size)
+                }
+            }
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(background)
     }
 }
 

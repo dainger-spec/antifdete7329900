@@ -771,6 +771,11 @@ scroll bars Safari would give them. Earlier builds forced the light appearance o
 everything, web content included, so on a Mac set to dark, pages saw light where Safari
 reports dark. Web content is not restyled; pages render as their sites define them.
 
+**Launch screen.** Setting up and unlocking the vault happen on a dark launch screen: the
+mark, a title and the form. While the key is derived (Argon2id), the form gives way to a
+progress line, and the Profiles window fades in once the vault is open. Lock fades back to
+the same screen. Under Reduce Motion the screen and the start page appear without motion.
+
 **Browser window.** The toolbar is flat: the window's dark colour under a transparent title
 bar, with no glass behind its items (macOS 26 would add it). It holds the Lumen mark, the
 navigation buttons, the address field and the profile chip. The chip shows the profile's

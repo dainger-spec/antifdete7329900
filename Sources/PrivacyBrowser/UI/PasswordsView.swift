@@ -92,8 +92,8 @@ struct PasswordListView: View {
                 .font(.lumenBody).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
             HStack(spacing: 8) {
-                SecureField(L("passwords.locked.field"), text: $masterPassword)
-                    .lumenField()
+                SecureField(L("passwords.locked.field"), text: $masterPassword, prompt: Text(verbatim: ""))
+                    .lumenField(L("passwords.locked.field"), isEmpty: masterPassword.isEmpty)
                     .frame(width: 260)
                     .onSubmit(unlock)
                 Button(L("passwords.locked.unlock"), action: unlock)
@@ -265,23 +265,25 @@ struct PasswordListView: View {
             Text(initial.id == nil ? L("passwords.addTitle") : L("passwords.editTitle"))
                 .font(.lumenSection)
                 .foregroundStyle(Theme.textPrimary)
-            TextField(L("passwords.placeholder.origin"), text: binding.website).lumenField()
-            TextField(L("passwords.placeholder.username"), text: binding.username).lumenField()
+            TextField(L("passwords.placeholder.origin"), text: binding.website, prompt: Text(verbatim: ""))
+                .lumenField(L("passwords.placeholder.origin"), isEmpty: binding.wrappedValue.website.isEmpty)
+            TextField(L("passwords.placeholder.username"), text: binding.username, prompt: Text(verbatim: ""))
+                .lumenField(L("passwords.placeholder.username"), isEmpty: binding.wrappedValue.username.isEmpty)
             HStack {
                 Group {
                     if revealed {
-                        TextField(L("passwords.placeholder.password"), text: binding.password)
+                        TextField(L("passwords.placeholder.password"), text: binding.password, prompt: Text(verbatim: ""))
                     } else {
-                        SecureField(L("passwords.placeholder.password"), text: binding.password)
+                        SecureField(L("passwords.placeholder.password"), text: binding.password, prompt: Text(verbatim: ""))
                     }
                 }
-                .lumenField()
+                .lumenField(L("passwords.placeholder.password"), isEmpty: binding.wrappedValue.password.isEmpty)
                 Button { revealed.toggle() } label: { Image(systemName: revealed ? "eye.slash" : "eye") }
                     .buttonStyle(LumenIconButtonStyle())
             }
-            TextField(L("passwords.placeholder.note"), text: binding.note, axis: .vertical)
+            TextField(L("passwords.placeholder.note"), text: binding.note, prompt: Text(verbatim: ""), axis: .vertical)
                 .lineLimit(2...4)
-                .lumenField(height: nil)
+                .lumenField(L("passwords.placeholder.note"), isEmpty: binding.wrappedValue.note.isEmpty, height: nil)
             Spacer()
             HStack {
                 Button(L("common.cancel")) { draft = nil }

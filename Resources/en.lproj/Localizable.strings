@@ -25,6 +25,7 @@
 "cookies.done.applied" = "%ld cookies imported into the running profile.";
 "cookies.done.queued" = "%1$ld cookies will be added when “%2$@” next starts, before its first page loads.";
 "cookies.done.refused" = "WebKit did not keep %1$ld of them: %2$@";
+"cookies.empty" = "Choose an export: what can be imported, and what cannot and why, is shown here before anything is imported.";
 "cookies.error.busy" = "The profile is starting or being encrypted; try again in a moment.";
 "cookies.explanation" = "A JSON export (EditThisCookie, Cookie-Editor, Puppeteer, Playwright, Selenium, Chrome or Firefox databases) or a Netscape cookies.txt. The file is checked first: what cannot be imported is listed with its line and the reason. A running profile gets the cookies at once; a stopped one when it next starts, before its first page loads.";
 "cookies.format.json" = "JSON";
@@ -343,6 +344,7 @@
 "setup.rule.match" = "Passwords do not match.";
 "setup.subtitle" = "The master password encrypts the profile list, every profile's settings, saved passwords, history, bookmarks and archived website data. It cannot be recovered — if you forget it, the data is lost.";
 "setup.title" = "Create a master password";
+"setup.working" = "Creating the vault…";
 "start.empty" = "Bookmarks and recently visited pages appear here.";
 "start.exit" = "Through the profile's proxy · %@";
 "start.favorites" = "Favorites";
@@ -411,6 +413,7 @@
 "unlock.title" = "Vault locked";
 "unlock.vault.info" = "Opened the vault created %1$@, in:\n%2$@\nIf you set your password in another build (from Cursor or swift run, unsandboxed, or with another bundle id), that build has its own vault with its own password.";
 "unlock.vault.test" = "This looks like a test vault: it was created by the CI migration check (password “migration-check”), not by the app.";
+"unlock.working" = "Unlocking…";
 "warmup.addresses" = "Web addresses, one per line";
 "warmup.dwell" = "On each page";
 "warmup.error.notStarted" = "The warm-up could not start in “%@”: the profile needs an open window, and no warm-up may already be running in it.";

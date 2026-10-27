@@ -77,8 +77,8 @@ private struct WarmUpPanel: View {
                 .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
                     .strokeBorder(Theme.fieldBorder, lineWidth: 1))
             problems
-            TextField(L("warmup.search"), text: $plan.searchQuery, prompt: Text(L("warmup.searchPrompt")))
-                .lumenField()
+            TextField(L("warmup.search"), text: $plan.searchQuery, prompt: Text(verbatim: ""))
+                .lumenField(L("warmup.searchPrompt"), isEmpty: plan.searchQuery.isEmpty)
             HStack {
                 Text(L("warmup.dwell"))
                 Spacer()

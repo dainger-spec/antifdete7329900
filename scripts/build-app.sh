@@ -59,6 +59,12 @@ cp "$BIN_DIR/PrivacyBrowser" "$APP/Contents/MacOS/PrivacyBrowser"
 sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Info.plist > "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
+# The app icon: the app draws its iconset from the Lumen mark (Sources/PrivacyBrowser/App/AppIcon.swift).
+ICON_DIR="$(mktemp -d -t pbicon)"
+"$BIN_DIR/PrivacyBrowser" --render-app-icon "$ICON_DIR/AppIcon.iconset" >/dev/null
+iconutil -c icns -o "$APP/Contents/Resources/AppIcon.icns" "$ICON_DIR/AppIcon.iconset"
+rm -rf "$ICON_DIR"
+
 # The fingerprint probe the self-test and scripts/safari_reference.py share.
 cp Resources/fingerprint_probe.js "$APP/Contents/Resources/fingerprint_probe.js"
 
