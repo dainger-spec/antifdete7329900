@@ -32,20 +32,24 @@ public enum WebAddress {
         url(fromTypedAddress: input) ?? searchURL(for: input)
     }
 
-    /// `a` and `b` are the same address once written as a browser writes it: scheme and host in
-    /// lower case, no default port, "/" for an empty path. (A typed `example.com#news` is the page
-    /// WebKit shows as `https://example.com/#news`.)
-    public static func isSameAddress(_ a: URL?, _ b: URL?) -> Bool {
+    /// `a` and `b` are the same page, whatever their fragments, once written as a browser writes
+    /// them: scheme and host in lower case, no default port, "/" for an empty path. (A typed
+    /// `example.com#news` is the page WebKit shows as `https://example.com/#news`, and still is
+    /// once the page has rewritten that to `#/news`.)
+    public static func isSameDocument(_ a: URL?, _ b: URL?) -> Bool {
         guard let a, let b else { return false }
-        return canonical(a) == canonical(b)
+        return document(a) == document(b)
     }
 
-    private static func canonical(_ url: URL) -> String {
-        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return url.absoluteString }
+    private static func document(_ url: URL) -> String {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: true) else {
+            return String(url.absoluteString.prefix { $0 != "#" })
+        }
         parts.scheme = parts.scheme?.lowercased()
         parts.host = parts.host?.lowercased()
         if (parts.scheme == "https" && parts.port == 443) || (parts.scheme == "http" && parts.port == 80) { parts.port = nil }
         if parts.host != nil, parts.path.isEmpty { parts.path = "/" }
-        return parts.string ?? url.absoluteString
+        parts.fragment = nil
+        return parts.string ?? String(url.absoluteString.prefix { $0 != "#" })
     }
 }
