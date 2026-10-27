@@ -1261,8 +1261,9 @@ final class SelfTest {
             return
         }
         window.makeKeyAndOrderFront(nil)
+        let isKey = await waitUntil(timeout: 3) { window.isKeyWindow }
         let webView = tab.webView
-        info("password AutoFill world: \(PasswordAutoFill.worldKind); key window: \(window.isKeyWindow)")
+        info("password AutoFill world: \(PasswordAutoFill.worldKind); app active: \(NSApp.isActive); key window: \(isKey)")
 
         func open(_ string: String) async -> Bool {
             guard let url = URL(string: string) else { return false }
@@ -1451,19 +1452,20 @@ final class SelfTest {
         check("passwords: a sign-up form's new password is offered for saving",
               signUpAsked && savedLogins().contains("http://signup.thirdsite.invalid eve e7epass"), "\(savedLogins())")
 
-        // A frame of another site inside the page: it is offered nothing saved for the page's site.
-        if realInput == true {
-            TabPasswordAutoFill.testFocusLog = []
-            _ = await open("http://login.selftest.invalid/pb-frame?src=http://evil.othertest.invalid/pb-login")
-            try? await Task.sleep(nanoseconds: 1_500_000_000) // the frame's own page loads
-            _ = await click("#user", inFrame: "#frame")
-            let focused = await waitUntil(timeout: 5) { TabPasswordAutoFill.testFocusLog.contains { $0.hasPrefix("evil.othertest.invalid:") } }
-            check("passwords: a login field in a frame of another site is offered none of the page's logins",
-                  focused && TabPasswordAutoFill.testFocusLog.contains("evil.othertest.invalid:0") && AutoFillPanel.current == nil,
-                  "\(TabPasswordAutoFill.testFocusLog)")
-        } else {
-            info("password AutoFill: the frame check needs real clicks (a cross-origin frame cannot be focused by script); skipped")
-        }
+        // Frames: one of another site is offered none of the page's logins; one of the same site is
+        // offered them under a header naming its host. The frame's origin is WebKit's.
+        TabPasswordAutoFill.testFocusLog = []
+        _ = await open("http://login.selftest.invalid/pb-frame?src=http://evil.othertest.invalid/pb-login%3Fpbtestfocus%3D1")
+        let crossSiteAsked = await waitUntil(timeout: 8) { TabPasswordAutoFill.testFocusLog.contains { $0.hasPrefix("evil.othertest.invalid:") } }
+        check("passwords: a login field in a frame of another site is offered none of the page's logins",
+              crossSiteAsked && TabPasswordAutoFill.testFocusLog.contains("evil.othertest.invalid:0") && AutoFillPanel.current == nil,
+              "\(TabPasswordAutoFill.testFocusLog)")
+        _ = await open("http://login.selftest.invalid/pb-frame?src=http://www.selftest.invalid/pb-login%3Fpbtestfocus%3D1")
+        let sameSiteListed = await waitUntil(timeout: 8) { AutoFillPanel.current != nil }
+        check("passwords: a frame of the same site is offered its logins, under a header naming the frame's host",
+              sameSiteListed && AutoFillPanel.current?.titles == ["ann"] && AutoFillPanel.current?.header?.contains("www.selftest.invalid") == true,
+              "\(TabPasswordAutoFill.testFocusLog) \(AutoFillPanel.current?.titles ?? []) \(AutoFillPanel.current?.header ?? "nil")")
+        AutoFillPanel.current?.dismiss()
     }
 
     /// The values of the inputs `selectors` in the page.

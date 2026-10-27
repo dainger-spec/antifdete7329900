@@ -153,13 +153,16 @@ function report(how, credentials) {
   const key = credentials.username + '\u0000' + credentials.password;
   if (key === lastReport.key && performance.now() - lastReport.at < 3000) return;
   lastReport = { key, at: performance.now() };
+  // Reported once: a later form navigation in this frame does not report it again.
+  lastTypedPassword = null;
   post({ type: 'submit', how, username: credentials.username, password: credentials.password, kind: credentials.kind });
 }
 
 // The first page of a two-step sign-in: one user-name field the user typed into, no password.
 function reportUsernameStep(scope) {
   const form = analyze(scope);
-  if (form.passwords.length) return;
+  // A user-name page often carries a hidden password field for the next step.
+  if (form.passwords.some(visible)) return;
   const typedTexts = form.inputs.filter((e) => isTextual(e) && visible(e) && e.value && typed.has(e));
   const field = typedTexts.find((e) => /\busername\b/.test(autocompleteOf(e))) ||
     (typedTexts.length === 1 && looksLikeUsername(typedTexts[0]) ? typedTexts[0] : null);
@@ -259,6 +262,8 @@ addEventListener('input', (event) => {
   if (!event.isTrusted || !isInput(el)) return;
   typed.add(el);
   if (isPasswordField(el)) lastTypedPassword = new WeakRef(el);
+  // Typing closes the list (it would cover the next field; ↓ opens it again).
+  moved();
 }, true);
 
 addEventListener('focusin', (event) => {
@@ -339,7 +344,7 @@ globalThis.__pbPasswords = {
     const scopes = [...Array.from(document.forms), document];
     for (const scope of scopes) {
       const credentials = credentialsIn(scope, false);
-      if (credentials) return { username: credentials.username, password: credentials.password };
+      if (credentials) return { username: credentials.username, password: credentials.password, origin: location.origin };
     }
     return null;
   },
@@ -347,6 +352,7 @@ globalThis.__pbPasswords = {
   // event): the form of the password the user typed last, if it was typed.
   submitted() {
     const field = lastTypedPassword && lastTypedPassword.deref();
+    lastTypedPassword = null;
     if (!field || !field.isConnected) return null;
     const credentials = credentialsIn(scopeOf(field), true);
     return credentials ? { username: credentials.username, password: credentials.password } : null;
@@ -372,6 +378,14 @@ if (CONFIG.test) {
     if (el) arm(el);
     return !!el;
   };
+  // A frame the self-test cannot reach (another origin): its #user field asks for suggestions
+  // once the page has loaded.
+  if (/[?&]pbtestfocus=1(&|$)/.test(location.search)) {
+    addEventListener('DOMContentLoaded', () => {
+      const el = document.querySelector('#user');
+      if (el) suggest(el, 'test');
+    });
+  }
 }
 """#
 }

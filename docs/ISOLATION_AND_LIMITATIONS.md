@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 143/143 checks in both builds):
+(macOS 26, 157/157 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -40,7 +40,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Several SOCKS5 profiles at once | three profiles behind three SOCKS5 proxies, one with username/password authentication, are launched together through the app's launch path and load at the same time: each page arrives through its own proxy, by name, with its own credentials; after one stops the others keep loading through theirs; wrong or missing SOCKS5 credentials fail closed |
 | Launch speed | with a location remembered for the proxy, a launch waits at most 1 s for a 4 s lookup (the lookup finishes in the background, and its new time zone is remembered and noted for the next launch); with nothing remembered it waits at most 3 s |
 | Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy and credentials) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported or stored, and turning it off, or replacing the proxy, while a lookup is under way leaves no new IP stored and nothing reported |
-| Password AutoFill | in a profile window on the self-test proxy's sign-in pages: the page world has no `window.webkit` and no trace of the script; a password a page script wrote and submitted is not offered; a typed sign-in is offered (Save, saved with its user name), a new password for it as Update, nothing anywhere on the site after Never for This Website; a login field lists the site's saved login and choosing it fills both fields with `input` and `change` (and `:autofill` where WebKit allows the world); a filled-in login submitted again asks nothing; a sign-in by script (fields removed after the button's click) and a sign-up form (new password = confirmation) are offered; a frame of another site is offered none |
+| Password AutoFill | in a profile window on the self-test proxy's sign-in pages: the page world has no `window.webkit` and no trace of the script; a password a page script wrote and submitted is not offered; a typed sign-in is offered (Save, saved with its user name), a new password for it as Update, nothing anywhere on the site after Never for This Website; a login field lists the site's saved login and choosing it fills both fields with `input` and `change` (and `:autofill` where WebKit allows the world); a filled-in login submitted again asks nothing; a sign-in by script (fields removed after the button's click) and a sign-up form (new password = confirmation) are offered; a frame of another site is offered none, a frame of the same site its logins under a header naming it. The runner gives the window no keyboard focus, so typing is stood in for by marking the fields typed inside the isolated world (reported by the self-test); real clicks and keys are used where they arrive |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
@@ -491,7 +491,7 @@ the browser does it itself, as close to Safari as that allows.
 | A saved user name with a new password: **Update Password / Not Now** | The same; the same password again asks nothing |
 | Change-password and sign-up forms (`autocomplete="new-password"`, two or three password fields) | The new password is the one saved, only when it equals its confirmation |
 | Two-step sign-ins (user name, then password on the next page) | The user name of the first page is kept for 10 minutes for the password page of the same site |
-| Nothing is filled without the user (Safari has asked for interaction since 2014) | Focusing a login field (or clicking it, or ↓) lists the site's saved logins under it; a login is filled only when chosen (click, or ↓/↑ and Return). Never on page load, never into hidden fields |
+| Nothing is filled without the user (Safari has asked for interaction since 2014) | Focusing a login field (or clicking it, or ↓) lists the site's saved logins under it; a login is filled only when chosen (click, or ↓/↑ and Return). A click in the list's first half second picks nothing (a page can focus a field just as the user clicks), Return only a row chosen with ↓/↑, and typing closes the list. Never on page load, never into hidden fields |
 | Logins grouped by site; a saved login offered on other hosts of the same site | Registrable domain from the Public Suffix List (`login.example.co.uk` and `www.example.co.uk` share; `alice.github.io` and `bob.github.io` do not); the page's own host first, then the most recently used. The list shows the host of a login saved on another host |
 | Filling fires `input`, then `change` (plain bubbling events) | The same events; React, Vue and Angular forms take the values |
 | `autocomplete="off"` ignored for logins | Ignored |
@@ -508,6 +508,9 @@ the browser does it itself, as close to Safari as that allows.
   of these (fields kept on the page after a fetch) is not offered; the toolbar's save button
   then saves what the fields hold. A failed sign-in is offered too, as Safari does at form
   submission.
+- **What counts as typed.** Trusted `input` events: a page script that inserts text with
+  `document.execCommand('insertText')` produces those too, so it can make a password look typed.
+  The user still has to answer the question, which names the site.
 - **Events are untrusted.** Values are set from the isolated world, so the `input`/`change`
   events have `isTrusted == false` (Safari's are trusted); a site that rejects untrusted
   events must be typed into. macOS 27 adds trusted events for AutoFill worlds; not used yet.

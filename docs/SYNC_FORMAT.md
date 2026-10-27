@@ -134,6 +134,6 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
 - `PasswordEntry.lastUsedAt` (when AutoFill last filled the login) and the configuration's
   `passwordAutoFill` / `passwordNeverSaveSites` are optional fields: an older build reads the
   files and drops them when it rewrites one (a login then loses its last-used date, a profile
-  its "Never for This Website" list).
+  its "Never for This Website" list, and an AutoFill switch turned off is on again).
 - Dates are encoded as ISO 8601 with whole seconds, so ordering within the same second is
   arbitrary.

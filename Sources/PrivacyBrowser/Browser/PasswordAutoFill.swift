@@ -117,8 +117,9 @@ final class TabPasswordAutoFill {
     private let settings: ProfilePasswordSettings
     /// The user name of the first page of a two-step sign-in, for its password page.
     private var pendingUsername: (site: String, username: String, at: Date)?
-    /// The last sign-in asked about: the same one reported twice (submit event and navigation) is asked once.
-    private var lastAsked: (key: String, at: Date)?
+    /// Sign-ins already asked about in this tab: one reported twice (submit event and navigation),
+    /// or again after "Not Now", is asked once.
+    private var asked: Set<String> = []
     private var panel: AutoFillPanel?
     private let log = Logger(subsystem: "PrivacyBrowser", category: "PasswordAutoFill")
 
@@ -283,7 +284,9 @@ final class TabPasswordAutoFill {
         PasswordAutoFill.call("return globalThis.__pbPasswords ? globalThis.__pbPasswords.capture() : null;",
                               in: nil, of: tab.webView) { [weak self] value in
             guard let self else { return }
-            guard let fields = value as? [String: Any], let password = fields["password"] as? String, !password.isEmpty else {
+            // Saved for the page's own origin only: the document must still be the one the address names.
+            guard let fields = value as? [String: Any], let password = fields["password"] as? String, !password.isEmpty,
+                  fields["origin"] as? String == origin.serialized else {
                 self.tab?.showMessage(L("pw.typeFirst"))
                 return
             }
@@ -320,8 +323,10 @@ final class TabPasswordAutoFill {
             username = step.username
         }
         let key = [origin.serialized, username, password].joined(separator: "\u{0}")
-        if !explicit, let last = lastAsked, last.key == key, Date().timeIntervalSince(last.at) < 30 { return }
-        lastAsked = (key, Date())
+        if !explicit {
+            guard !asked.contains(key) else { return }
+            asked.insert(key)
+        }
 
         let decision = vault.saveDecision(username: username, password: password, at: origin)
         let record: PasswordPromptRecord

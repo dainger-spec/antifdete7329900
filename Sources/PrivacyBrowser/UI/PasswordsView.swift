@@ -151,9 +151,12 @@ struct PasswordListView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .card()
         }
-        .onChange(of: selection) { _, _ in
-            draft = nil
-            revealed = false
+        // Choosing another login ends an edit (a new one, too); "Add Password" clears the selection itself.
+        .onChange(of: selection) { _, newValue in
+            if newValue != nil, draft?.id != newValue {
+                draft = nil
+                revealed = false
+            }
         }
     }
 

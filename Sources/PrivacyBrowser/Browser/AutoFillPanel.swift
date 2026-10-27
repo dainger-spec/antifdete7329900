@@ -18,8 +18,15 @@ final class AutoFillPanel: NSPanel {
 
     let field: TabPasswordAutoFill.FieldReference?
     private(set) var entries: [PasswordEntry] = []
+    /// The line above the logins (a frame's site), if any (self-test hook).
+    private(set) var header: String?
     private var rows: [AutoFillRow] = []
     private var highlighted: Int?
+    /// Return picks only a row chosen with ↓/↑, never one the mouse happens to rest on.
+    private var highlightedByKeyboard = false
+    /// When it appeared: a click in its first moments was aimed at what was there before (a page
+    /// can focus a field just as the user clicks), so it picks nothing.
+    private var shownAt = Date()
     private var monitor: Any?
     private var onChoice: ((Choice) -> Void)?
     private weak var parentWindowRef: NSWindow?
@@ -36,6 +43,7 @@ final class AutoFillPanel: NSPanel {
         current?.dismiss()
         let panel = AutoFillPanel(field: field)
         panel.entries = entries
+        panel.header = header
         panel.onChoice = onChoice
         panel.parentWindowRef = window
         panel.build(pageHost: pageHost, header: header, showsManager: showsManager, minimumWidth: anchor.width)
@@ -51,6 +59,7 @@ final class AutoFillPanel: NSPanel {
         window.addChildWindow(panel, ordered: .above)
         panel.orderFront(nil)
         panel.startMonitoring()
+        panel.shownAt = Date()
         current = panel
         return panel
     }
@@ -131,7 +140,10 @@ final class AutoFillPanel: NSPanel {
 
     private func startMonitoring() {
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self] event in
-            MainActor.assumeIsolated { self?.handle(event) ?? event }
+            MainActor.assumeIsolated {
+                guard let self else { return event }
+                return self.handle(event) // nil: the key was the list's
+            }
         }
         if let parent = parentWindowRef {
             resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: parent,
@@ -150,13 +162,13 @@ final class AutoFillPanel: NSPanel {
         guard event.window === parentWindowRef else { return event }
         switch event.keyCode {
         case 125: // ↓
-            highlight(highlighted.map { min($0 + 1, rows.count - 1) } ?? 0)
+            highlight(highlighted.map { min($0 + 1, rows.count - 1) } ?? 0, byKeyboard: true)
             return nil
         case 126: // ↑
-            highlight(highlighted.map { max($0 - 1, 0) } ?? rows.count - 1)
+            highlight(highlighted.map { max($0 - 1, 0) } ?? rows.count - 1, byKeyboard: true)
             return nil
-        case 36, 76: // Return, Enter: with a row highlighted, that row; otherwise the page's
-            guard let highlighted else { return event }
+        case 36, 76: // Return, Enter: with a row chosen by ↓/↑, that row; otherwise the page's
+            guard let highlighted, highlightedByKeyboard else { return event }
             choose(at: highlighted)
             return nil
         case 53: // Esc
@@ -167,9 +179,16 @@ final class AutoFillPanel: NSPanel {
         }
     }
 
-    fileprivate func highlight(_ index: Int?) {
+    fileprivate func highlight(_ index: Int?, byKeyboard: Bool = false) {
         highlighted = index
+        highlightedByKeyboard = byKeyboard && index != nil
         for row in rows { row.isHighlighted = row.index == index }
+    }
+
+    /// A click on row `index`, unless the list has only just appeared under the mouse.
+    fileprivate func click(at index: Int) {
+        guard Date().timeIntervalSince(shownAt) >= 0.5 else { return }
+        choose(at: index)
     }
 
     /// Picks row `index` (an entry, or the last row: "Passwords…").
@@ -266,7 +285,7 @@ private final class AutoFillRow: NSView {
     override func mouseExited(with event: NSEvent) { if isHighlighted { panel?.highlight(nil) } }
     override func mouseDown(with event: NSEvent) {}
     override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { panel?.choose(at: index) }
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { panel?.click(at: index) }
     }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

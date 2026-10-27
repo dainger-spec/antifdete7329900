@@ -85,14 +85,15 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 143 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 157 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
   profiles launched and loading at once, the ping-load blocker, the proxy-location time zone,
   launches that wait only briefly on the lookup through the proxy, the exit-IP warning, password
-  AutoFill (save, update, never, suggestions and fill, sign-in by script, sign-up, a frame of
-  another site, nothing for a password a page script wrote), tabs, history, bookmarks, the
+  AutoFill (save, update, never, suggestions and fill, sign-in by script, sign-up, frames of
+  another and of the same site, nothing for a password a page script wrote), tabs, history,
+  bookmarks, the
   device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
 - the surface comparison with the runner's real Safari (`scripts/safari_reference.py`): every
@@ -168,7 +169,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Stable window lifecycle | closing a profile window never quits or crashes the app (use-after-free fixed); verified by the self-test |
 | Encryption at rest of everything the app writes | AES-256-GCM; Argon2id (64 MiB, t=3, p=4; older PBKDF2 vaults upgraded on unlock) → vault key → HKDF per purpose |
 | Password storage under a key derived from the user's password | Per-profile vault (`passwords.bin`, AES-GCM under a key derived from the profile key); the manager asks for the master password before it shows anything |
-| Password AutoFill, Safari's behaviour | Save / Update / Never after a sign-in the user typed; suggestions under login fields of the site (registrable domain, Public Suffix List), filled only on choice, with `input` and `change` as Safari; two-step sign-ins, sign-ins by script, sign-up forms; no https login on an http page; never into hidden fields or a frame of another site. **Verified end to end by the self-test** |
+| Password AutoFill, Safari's behaviour | Save / Update / Never after a sign-in the user typed; suggestions under login fields of the site (registrable domain, Public Suffix List), filled only on choice, with `input` and `change` as Safari; two-step sign-ins, sign-ins by script, sign-up forms; no https login on an http page; never into hidden fields or a frame of another site. **Checked by the self-test** in a profile window (save, update, never, suggestions and fill, sign-in by script, sign-up, frames); on the CI runner, which gives the window no keyboard focus, typing is stood in for by marking the fields typed inside the isolated world |
 | App Sandbox | Default build; entitlements in `Resources/PrivacyBrowser.entitlements` (documented in the limitations doc, §9); container migration. **Sandbox enforcement and migration verified in CI** |
 | Encrypted sync client | Engine with CAS writes, per-record merges for bookmarks and history, tombstones; folder transport; HTTP transport for a documented API |
 
