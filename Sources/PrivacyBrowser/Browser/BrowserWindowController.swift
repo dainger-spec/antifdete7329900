@@ -209,6 +209,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     func windowDidResize(_ notification: Notification) {
         fitAddressField()
+        sizeHiddenTabs()
     }
 
     private func toolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
@@ -234,14 +235,30 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let index = afterSelected && !tabs.isEmpty ? selectedIndex + 1 : tabs.count
         tabs.insert(tab, at: index)
         if !select && index <= selectedIndex { selectedIndex += 1 }
-        if let url { tab.load(url) }
         if select || tabs.count == 1 {
+            if let url { tab.load(url) }
             selectTab(at: index)
             if url == nil && configuration == nil { focusAddressBar() }
+            sizeHiddenTabs()
         } else {
             refreshChrome()
+            // A tab opened behind (⌘-click) has the shown tab's size before its page starts loading.
+            sizeHiddenTabs()
+            if let url { tab.load(url) }
         }
         return tab
+    }
+
+    /// Tabs not shown keep the size of the one shown: a page in a background tab measures the
+    /// viewport it will be shown in, as in Safari, not a 0×0 view (what headless browsers report).
+    /// Their window frame comes from `BrowserTab` (the window the tab belongs to).
+    private func sizeHiddenTabs() {
+        // The tab strip may just have appeared (second tab): lay out before measuring.
+        window?.contentView?.layoutSubtreeIfNeeded()
+        let bounds = NSRect(origin: .zero, size: webContainer.bounds.size)
+        for tab in tabs where tab.webView.superview !== webContainer && tab.webView.frame != bounds {
+            tab.webView.frame = bounds
+        }
     }
 
     func selectTab(at index: Int) {

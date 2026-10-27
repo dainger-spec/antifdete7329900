@@ -418,10 +418,11 @@ extension BrowserTab: WKUIDelegate {
     /// screenX/screenY. WebKit asks the UI delegate for it (`WKUIDelegatePrivate`, the method Safari
     /// answers); a delegate without it gets outerWidth = outerHeight = 0 and a screen position
     /// computed from an empty rectangle — what embedded and headless browsers report. AppKit screen
-    /// coordinates; WebKit flips them.
+    /// coordinates; WebKit flips them. A tab not shown (only the selected tab's view is in the
+    /// window) answers with the window it belongs to, as a background tab does in Safari.
     @objc(_webView:getWindowFrameWithCompletionHandler:)
     func webView(_ webView: WKWebView, windowFrameCompletion completionHandler: @escaping (CGRect) -> Void) {
-        completionHandler(webView.window?.frame ?? .zero)
+        completionHandler(webView.window?.frame ?? host?.hostWindow?.frame ?? .zero)
     }
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,

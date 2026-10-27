@@ -14,7 +14,7 @@ import WebKit
 ///   * per-profile proxies (HTTP CONNECT, SOCKS5 with remote DNS) and fail-closed behaviour,
 ///   * several SOCKS5 profiles launched and loading at once, each through its own proxy,
 ///   * launches that wait only briefly on the lookup through the proxy, and the exit-IP warning,
-///   * the tab model with history recording and bookmarks.
+///   * the tab model with history recording and bookmarks, and the geometry background tabs see.
 ///
 /// Proxy checks need `scripts/selftest_proxy.py` and the env vars
 /// `PB_SELFTEST_HTTP_PROXY_PORT` / `PB_SELFTEST_SOCKS_PROXY_PORT` (and for the concurrent SOCKS5
@@ -130,6 +130,7 @@ final class SelfTest {
             try await socksProfilesSideBySide(repository)
             try await proxyLookupAndExitIP(repository)
             try await tabsAndLibrary(repository)
+            try await backgroundTabGeometry(repository)
             try await windowLifecycle(repository)
             try await dialogTeardown(repository)
             try await passwordAutoFill(repository)
@@ -584,6 +585,62 @@ final class SelfTest {
         controller.selectTab(number: 1)
         check("tabs: select tab 1", controller.selectedTab?.url == one)
         controller.close()
+    }
+
+    // MARK: Background tabs
+
+    /// A page opened in a background tab (⌘-click) measures the window its tab belongs to — the
+    /// shown tab's viewport, the window's outer size and position — not a 0×0 view outside any
+    /// window (what headless browsers report); also after the window is resized.
+    private func backgroundTabGeometry(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("background tab checks skipped (need the self-test proxy to serve pages)")
+            return
+        }
+        let profile = try repository.create(name: "Background tab", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let controller = session.openWindow(url: URL(string: "http://proxied.selftest.invalid/front")!)
+        guard let front = controller.selectedTab else {
+            check("tabs: a window opens with its tab", false)
+            return
+        }
+        let frontLoaded = await waitUntil(timeout: 20) { !front.isLoading && front.webView.title?.hasPrefix("PB proxied") == true }
+        // ⌘-click in the shown page: its tab's host opens the link in a tab behind it.
+        controller.tab(front, openInBackground: URLRequest(url: URL(string: "http://proxied.selftest.invalid/back")!))
+        guard let back = controller.tabs.first(where: { $0 !== front }) else {
+            check("tabs: ⌘-click opens a background tab", false)
+            return
+        }
+        let backLoaded = await waitUntil(timeout: 20) { !back.isLoading && back.webView.title?.hasPrefix("PB proxied") == true }
+        check("tabs: ⌘-click loads the page in a tab behind the shown one", frontLoaded && backLoaded && front.isSelected && !back.isSelected,
+              "front loaded \(frontLoaded), background loaded \(backLoaded), background shown \(back.isSelected)")
+
+        let geometry = "return [innerWidth, innerHeight, outerWidth, outerHeight, screenX, screenY].join('x');"
+        // Both tabs' measurements once they agree: WebKit hands a view's new size to its page asynchronously.
+        func measure() async -> (front: String?, back: String?) {
+            var values: (front: String?, back: String?) = (nil, nil)
+            let deadline = Date().addingTimeInterval(5)
+            repeat {
+                values = ((try? await js(front.webView, geometry)) as? String, (try? await js(back.webView, geometry)) as? String)
+                if values.front != nil && values.front == values.back { break }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            } while Date() < deadline
+            return values
+        }
+        let before = await measure()
+        let parts = (before.back ?? "").split(separator: "x").compactMap { Int($0) }
+        check("tabs: a background tab measures its window as the shown tab does (viewport, outer size, position), not 0×0",
+              before.back != nil && before.back == before.front && parts.count == 6 && parts[0] > 0 && parts[1] > 0 && parts[2] > 0 && parts[3] > 0,
+              "shown \(before.front ?? "nil"), background \(before.back ?? "nil")")
+        controller.window?.setContentSize(NSSize(width: 900, height: 600))
+        let after = await measure()
+        check("tabs: a background tab follows its window when the window is resized",
+              after.back != nil && after.back == after.front && after.back != before.back && after.back?.hasPrefix("900x") == true,
+              "shown \(after.front ?? "nil"), background \(after.back ?? "nil")")
+        let visibility = (try? await js(back.webView, "return document.visibilityState;")) as? String
+        info("background tab: document.visibilityState = \(visibility ?? "nil") (Safari: hidden)")
     }
 
     // MARK: Device generations (version-aware UA reaches the page)

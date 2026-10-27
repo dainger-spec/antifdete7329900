@@ -24,6 +24,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | SOCKS5 proxy | the hostname is sent to the proxy (`ATYP=3`, remote DNS) |
 | Fail-closed | with the proxy unreachable, loads fail ("Could not connect to the server") instead of going direct |
 | Tabs, history, bookmarks | tab open/close/reopen/select, visits and titles recorded, bookmark toggle persisted encrypted |
+| Background tabs | a page opened behind the shown tab (⌘-click) measures what the shown tab does: viewport, the window's outer size and position — not 0×0 — and follows the window when it is resized |
 | Window lifecycle (crash fix) | closing one of two windows keeps the profile running; closing the last reports "all closed" once, on a later run-loop turn; `shutDown()` twice is safe |
 | Crash-recovery sealing | leftover website data from a crashed run is archived and deleted WITHOUT `WKWebsiteDataStore.remove(forIdentifier:)` (which aborted on an unknown id), then restores cleanly |
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
@@ -674,8 +675,8 @@ interacted (`callAsyncJavaScript` forces a user gesture), in any content world. 
 (scroll position, links) therefore mark the page as activated: `navigator.userActivation` reports
 `hasBeenActive` even on a page the robot only scrolled with the wheel, where a visitor's would not
 (wheel scrolling is no activation). It loads a page only while its tab is the one shown, because
-a page loading in a tab out of sight has no window (outer size 0×0), which no visitor's has; it
-waits meanwhile.
+a page loading in a tab out of sight is hidden (`document.visibilityState`) and cannot be scrolled
+with the wheel, which is not how a visitor reads it; it waits meanwhile.
 
 **Stopping.** Stop in the sheet; closing the robot's tab; stopping the profile (the robot is
 stopped first, before the data store is released, and holds its tab only weakly, so the seal is
