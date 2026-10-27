@@ -10,9 +10,150 @@ import assert from 'node:assert/strict';
 const swift = readFileSync(new URL('../Sources/PrivacyBrowser/Browser/PrivacyScripts.swift', import.meta.url), 'utf8');
 const body = swift.split('static let shimBody = #"""')[1].split('"""#')[0];
 
+// SHIM_FORM=worker runs every test on the shim as a worker's blob gets it: one line of code, made
+// by the shim itself (oneLine in PrivacyScripts.swift) from its own text.
+const FORM = process.env.SHIM_FORM === 'worker' ? 'worker' : 'page';
+
+// Blobs, blob: URLs, workers and Trusted Types as WebKit has them, as far as the worker hook uses
+// them. A Blob converts its parts as a WebIDL sequence (through their @@iterator, `next` read once,
+// `return` on an error), holds UTF-8 bytes (a string of char codes 0-255) and slices them; a worker
+// records the script it would run; with Trusted Types enforced (engine.tt.enforced) a string URL
+// goes through the default policy or is a violation. Like the engine's C++, none of it calls a
+// built-in a page can replace.
+const ENGINE_WORKERS = String.raw`(() => {
+  const engine = globalThis.__engine;
+  const reflectApply = Reflect.apply, NativeTypeError = TypeError, NativeString = String, objectCreate = Object.create, defineProperty = Object.defineProperty;
+  const uncurry = (f) => (self, ...args) => reflectApply(f, self, args);
+  const weakHas = uncurry(WeakMap.prototype.has), weakGet = uncurry(WeakMap.prototype.get), weakSet = uncurry(WeakMap.prototype.set);
+  const mapGet = uncurry(Map.prototype.get), mapSet = uncurry(Map.prototype.set), mapDelete = uncurry(Map.prototype.delete), mapHas = uncurry(Map.prototype.has);
+  const slice = uncurry(String.prototype.slice), lower = uncurry(String.prototype.toLowerCase), wellFormed = uncurry(String.prototype.toWellFormed);
+  const fromCharCode = String.fromCharCode, nativeEncode = encodeURIComponent, nativeDecode = decodeURIComponent, nativeEscape = escape, nativeUnescape = unescape;
+  const append = (list, value) => { defineProperty(list, list.length, { __proto__: null, value, writable: true, enumerable: true, configurable: true }); };
+  const toText = (v) => { if (typeof v === 'symbol') throw new NativeTypeError('Cannot convert a symbol to a string'); return NativeString(v); };
+  const encode = (s) => nativeUnescape(nativeEncode(wellFormed(s)));
+  const decode = (b) => nativeDecode(nativeEscape(b));
+  const bytesOf = (view) => { let out = ''; for (let k = 0; k < view.length; k++) out += fromCharCode(view[k]); return out; };
+  const blobs = new WeakMap();
+  const sequenceOf = (value) => {
+    if (value === undefined) return '';
+    if (value === null || (typeof value !== 'object' && typeof value !== 'function')) throw new NativeTypeError('Value is not a sequence');
+    const method = value[Symbol.iterator];
+    if (typeof method !== 'function') throw new NativeTypeError('Value is not a sequence');
+    const iterator = reflectApply(method, value, []);
+    if (iterator === null || (typeof iterator !== 'object' && typeof iterator !== 'function')) throw new NativeTypeError('Iterator is not an object');
+    const next = iterator.next;
+    let bytes = '';
+    for (;;) {
+      const result = reflectApply(next, iterator, []);
+      if (result === null || (typeof result !== 'object' && typeof result !== 'function')) throw new NativeTypeError('Iterator result is not an object');
+      if (result.done) return bytes;
+      const item = result.value;
+      try {
+        bytes += weakHas(blobs, item) ? weakGet(blobs, item).bytes
+          : item instanceof ArrayBuffer ? bytesOf(new Uint8Array(item))
+          : ArrayBuffer.isView(item) ? bytesOf(new Uint8Array(item.buffer, item.byteOffset, item.byteLength))
+          : encode(toText(item));
+      } catch (e) {
+        const close = iterator.return;
+        if (close !== undefined && close !== null) { try { reflectApply(close, iterator, []); } catch (ignored) {} }
+        throw e;
+      }
+    }
+  };
+  const data = (blob) => { if (!weakHas(blobs, blob)) throw new NativeTypeError('The Blob.size getter can only be used on instances of Blob'); return weakGet(blobs, blob); };
+  const Blob = class Blob {
+    constructor(...args) {
+      const bytes = sequenceOf(args[0]);
+      let type = '';
+      const options = args[1];
+      if (options !== undefined && options !== null) {
+        if (typeof options !== 'object' && typeof options !== 'function') throw new NativeTypeError('Type error');
+        options.endings; // read before type: WebIDL dictionary members in order
+        if (options.type !== undefined) type = lower(toText(options.type));
+      }
+      weakSet(blobs, this, { bytes, type });
+    }
+    get size() { return data(this).bytes.length; }
+    get type() { return data(this).type; }
+    slice(...args) {
+      const d = data(this), size = d.bytes.length;
+      const at = (v, fallback) => v === undefined ? fallback : v < 0 ? Math.max(size + Math.trunc(v), 0) : Math.min(Math.trunc(v), size);
+      const start = at(args[0], 0), end = at(args[1], size);
+      const piece = objectCreate(Blob.prototype);
+      weakSet(blobs, piece, { bytes: slice(d.bytes, start, Math.max(start, end)), type: args[2] === undefined ? '' : lower(toText(args[2])) });
+      return piece;
+    }
+  };
+  const File = class File extends Blob { constructor(...args) { super(args[0], args[2]); } };
+  const urls = new Map();
+  let serial = 0;
+  const URL = class URL {
+    static createObjectURL(...args) {
+      if (args.length === 0) throw new NativeTypeError('Not enough arguments');
+      if (!weakHas(blobs, args[0])) throw new NativeTypeError('Argument 1 is not a Blob or a MediaSource');
+      const url = 'blob:https://page.test/' + (++serial);
+      mapSet(urls, url, args[0]);
+      return url;
+    }
+    static revokeObjectURL(...args) {
+      if (args.length === 0) throw new NativeTypeError('Not enough arguments');
+      mapDelete(urls, toText(args[0]));
+    }
+  };
+  Object.defineProperty(URL.createObjectURL, 'length', { value: 1 });
+  Object.defineProperty(URL.revokeObjectURL, 'length', { value: 1 });
+  const trusted = new WeakMap(), policies = new WeakMap();
+  let defaultPolicy = null;
+  const TrustedScriptURL = class TrustedScriptURL { toString() { return weakGet(trusted, this); } };
+  const TrustedTypePolicy = class TrustedTypePolicy {
+    createScriptURL(input, ...rest) {
+      const rules = weakGet(policies, this);
+      const made = objectCreate(TrustedScriptURL.prototype);
+      weakSet(trusted, made, toText(reflectApply(rules.createScriptURL, rules, [toText(input), rest[0], rest[1]])));
+      return made;
+    }
+  };
+  const TrustedTypePolicyFactory = class TrustedTypePolicyFactory {
+    createPolicy(name, rules) {
+      const policy = objectCreate(TrustedTypePolicy.prototype);
+      weakSet(policies, policy, rules);
+      if (name === 'default') defaultPolicy = policy;
+      return policy;
+    }
+    isScriptURL(value) { return weakHas(trusted, value); }
+    get defaultPolicy() { return defaultPolicy; }
+  };
+  engine.tt = { enforced: false, violations: [] };
+  const compliant = (value, sink) => {
+    if (weakHas(trusted, value)) return weakGet(trusted, value);
+    const text = toText(value);
+    if (!engine.tt.enforced) return text;
+    if (defaultPolicy !== null) {
+      const rules = weakGet(policies, defaultPolicy);
+      const made = reflectApply(rules.createScriptURL, rules, [text, 'TrustedScriptURL', sink]);
+      if (made !== undefined && made !== null) return toText(made);
+    }
+    append(engine.tt.violations, sink + '|' + text);
+    throw new NativeTypeError('This assignment requires a TrustedScriptURL');
+  };
+  engine.workers = [];
+  const workerClass = (kind) => ({ [kind]: class {
+    constructor(...args) {
+      if (args.length === 0) throw new NativeTypeError('Not enough arguments');
+      const url = compliant(args[0], kind + ' constructor');
+      const blob = mapGet(urls, url);
+      append(engine.workers, { kind, raw: args[0], url, options: args[1], script: blob ? decode(weakGet(blobs, blob).bytes) : null });
+    }
+  } })[kind];
+  engine.urls = { has: (url) => mapHas(urls, url) };
+  const expose = { Blob, File, URL, Worker: workerClass('Worker'), SharedWorker: workerClass('SharedWorker'),
+                   TrustedScriptURL, TrustedTypePolicy, TrustedTypePolicyFactory, trustedTypes: objectCreate(TrustedTypePolicyFactory.prototype) };
+  for (const name of Object.keys(expose)) Object.defineProperty(globalThis, name, { value: expose[name], writable: true, configurable: true });
+})();`;
+
 // A realm shaped like a WebKit window: navigator and screen values are accessors on the
 // prototypes that reject other receivers; window attributes are own accessors.
-function makeWindow(config, parentContext) {
+function makeWindow(config, parentContext, form = FORM) {
   const context = vm.createContext({});
   vm.runInContext(`
     var window = globalThis;
@@ -152,8 +293,52 @@ function makeWindow(config, parentContext) {
   context.Function = vm.runInContext('Function', context);
   context.parent = parentContext || context;
   context.top = parentContext ? parentContext.top : context;
-  vm.runInContext(`(function install(CONFIG) {\n${body}\n})(${JSON.stringify(config)});`, context);
+  vm.runInContext(ENGINE_WORKERS, context);
+  vm.runInContext(form === 'worker' ? `(${oneLineInstall()})(${JSON.stringify(config)});`
+                                    : `(function install(CONFIG) {\n${body}\n})(${JSON.stringify(config)});`, context);
   return context;
+}
+
+// The shim as one line, `function install(CONFIG) {…}`: what a page's shim puts in front of a
+// worker's blob (a worker made in a page with the shim in its page form), without the configuration.
+let oneLineText = null;
+function oneLineInstall() {
+  if (oneLineText === null) {
+    const config = { geolocation: { mode: 'deny' }, webRTC: 'disabled', timeZone: 'UTC' };
+    const w = makeWindow(config, undefined, 'page');
+    const script = vm.runInContext("new Worker(URL.createObjectURL(new Blob(['0']))); __engine.workers[0].script", w);
+    const tail = `)(${JSON.stringify(config)});0`;
+    assert.ok(script.startsWith('(function install(CONFIG) {') && script.endsWith(tail), 'worker bootstrap: ' + String(script).slice(0, 80));
+    oneLineText = script.slice(1, script.length - tail.length);
+  }
+  return oneLineText;
+}
+
+// A realm shaped like a WebKit worker (WorkerGlobalScope, WorkerNavigator, postMessage), with a
+// window's Blob, URL and Worker (nested workers), running `script` as a worker runs its blob.
+// codeGeneration false: no eval or Function from strings, as under a CSP without 'unsafe-eval' (V8).
+function runWorker(script, { codeGeneration = true } = {}) {
+  const context = vm.createContext({}, codeGeneration ? {} : { codeGeneration: { strings: false } });
+  vm.runInContext(String.raw`
+    globalThis.WorkerGlobalScope = class WorkerGlobalScope { static [Symbol.hasInstance](o) { return o === globalThis; } };
+    var self = globalThis;
+    const illegal = (o, C) => { if (!(o instanceof C)) throw new TypeError('illegal invocation'); };
+    class WorkerNavigator { get platform() { illegal(this, WorkerNavigator); return 'MacIntel'; }
+                            get hardwareConcurrency() { illegal(this, WorkerNavigator); return 8; } }
+    class StorageManager { estimate() { illegal(this, StorageManager); return Promise.resolve({ quota: 1048576000, usage: 0 }); } }
+    globalThis.StorageManager = StorageManager;
+    var navigator = Object.create(WorkerNavigator.prototype);
+    Object.defineProperty(navigator, 'storage', { value: new StorageManager() });
+    var messages = [];
+    var postMessage = (m) => { messages.push(m); };
+    Object.defineProperty(globalThis, '__engine', { value: {} });
+  `, context);
+  vm.runInContext(ENGINE_WORKERS, context);
+  context.Function = vm.runInContext('Function', context);
+  let error = null;
+  try { vm.runInContext(script, context, { filename: 'blob:worker' }); } catch (e) { error = e; }
+  const line = error ? Number((/blob:worker:(\d+)/.exec(String(error.stack)) || [])[1]) : null;
+  return { context, error, line, messages: () => Array.from(vm.runInContext('messages', context)) };
 }
 
 const run = (w, code) => vm.runInContext(code, w);
@@ -163,7 +348,7 @@ let failures = 0;
 function test(name, fn) {
   Promise.resolve().then(fn).then(
     () => console.log(`ok   ${name}`),
-    (e) => { failures++; console.log(`FAIL ${name}\n     ${e.message}`); });
+    (e) => { failures++; console.log(`FAIL ${name}\n     ${e.message}`); if (process.env.SHIM_DEBUG) console.log(e.stack); });
 }
 const nativeText = (name) => run(makeWindow({ geolocation: { mode: 'deny' }, webRTC: 'unrestricted' }),
                                  'Function.prototype.toString.call(Array.prototype.push)').replace('push', name);
@@ -354,6 +539,7 @@ const wrappers = [
   ['Object.getOwnPropertyDescriptor(GeolocationPositionError.prototype, "code").get', 'GeolocationPositionError', 'code'],
   ['GeolocationPosition.prototype.toJSON', 'GeolocationPosition'],
   ['RTCPeerConnection.prototype.setConfiguration', 'RTCPeerConnection'], ['window.open'],
+  ['URL.createObjectURL'], ['URL.revokeObjectURL'],
 ];
 test('wrappers look native, from the window and from a frame', () => {
   const top = makeWindow(everything);
@@ -643,6 +829,201 @@ test('WebRTC through the tunnel: the validating connection never gathers', () =>
 test('WebRTC unrestricted', () => {
   const w = makeWindow({ ...base, webRTC: 'unrestricted' });
   assert.equal(run(w, `new RTCPeerConnection({ iceTransportPolicy: 'all' }).config.iceTransportPolicy`), 'all');
+});
+
+// ---- Workers made from a blob ------------------------------------------------------------------
+// The page's blob reaches the engine as [its directives, the shim on one line, the rest]: no eval
+// (blocked and reported under a CSP without 'unsafe-eval'), nothing read back (connect-src), and
+// the page's strict mode and line numbers kept — each script is also run as the engine runs the
+// page's own blob, for comparison.
+const ZONE_REPORT = "postMessage([Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset(), (function () { return this === undefined; })()].join())";
+const tokyo = { ...base, timeZone: 'Asia/Tokyo' };
+const LINE_BREAKS = new RegExp('\\r\\n|[\\n\\r' + String.fromCharCode(0x2028, 0x2029) + ']');
+const lineCount = (text) => text.split(LINE_BREAKS).length;
+// What the page's next worker is made with, for Blob parts given as an expression in the page.
+function blobWorker(w, parts, kind = 'Worker') {
+  const index = run(w, '__engine.workers.length');
+  run(w, `new ${kind}(URL.createObjectURL(new Blob(${parts}, { type: 'text/javascript' })))`);
+  return run(w, `__engine.workers[${index}]`);
+}
+
+test('workers: the shim goes into a blob worker as one line of code, without eval', () => {
+  const w = makeWindow(tokyo);
+  const code = "'use strict'\n" + ZONE_REPORT;
+  const worker = blobWorker(w, JSON.stringify([code]));
+  assert.equal(lineCount(worker.script), lineCount(code));
+  assert.ok(!/\beval\s*\(/.test(worker.script), 'no eval');
+  // As under a CSP without 'unsafe-eval' (V8 can forbid code from strings in a realm).
+  const worker2 = runWorker(worker.script, { codeGeneration: false });
+  assert.equal(worker2.error, null);
+  assert.deepEqual(worker2.messages(), ['Asia/Tokyo,-540,true']);
+});
+
+test('workers: the page\'s directives stay first; its lines and strict mode are its own', () => {
+  const w = makeWindow(tokyo);
+  const strict = "postMessage(String((function () { return this === undefined; })()))";
+  const cases = [
+    ["'use strict'\n" + strict],
+    ['"use strict";' + strict],
+    ["/* licence\n */\n// comment\n'use strict';\r\n" + strict],
+    ["'use strict' + 1;\n" + strict], // no directive: sloppy, as the engine runs it
+    ["'use str", "ict';\n", strict],  // the directive across parts
+    ['\n\n' + strict],
+    [strict],
+    ["'use strict'\n\nthrow new Error('x')"],
+    ["\n\nthrow new Error('x')"],
+    ["'use strict'"],                // nothing but a directive, with no ; or line break after it
+    ["'use strict'  "],
+  ];
+  for (const parts of cases) {
+    const own = runWorker(parts.join(''));
+    const worker = blobWorker(w, JSON.stringify(parts));
+    const hooked = runWorker(worker.script);
+    assert.deepEqual([hooked.messages(), hooked.line], [own.messages(), own.line], JSON.stringify(parts));
+    assert.equal(lineCount(worker.script), lineCount(parts.join('')), JSON.stringify(parts));
+  }
+});
+
+test('workers: a blob not made from strings gets the shim first', () => {
+  const w = makeWindow(tokyo);
+  const worker = blobWorker(w, `[new Uint8Array([${Array.from(ZONE_REPORT, (c) => c.charCodeAt(0)).join()}])]`);
+  assert.ok(worker.script.startsWith('(function install(CONFIG)'));
+  assert.deepEqual(runWorker(worker.script).messages(), ['Asia/Tokyo,-540,false']);
+});
+
+test('workers: the configuration goes in without a line break', () => {
+  const w = makeWindow({ ...tokyo, note: 'a' + String.fromCharCode(0x2028, 0x2029) });
+  const worker = blobWorker(w, JSON.stringify([ZONE_REPORT]));
+  assert.equal(lineCount(worker.script), 1);
+  assert.deepEqual(runWorker(worker.script).messages(), ['Asia/Tokyo,-540,false']);
+});
+
+test('workers: a blob worker\'s own blob workers get the same shim', () => {
+  const w = makeWindow(tokyo);
+  const code = 'new Worker(URL.createObjectURL(new Blob([' + JSON.stringify(ZONE_REPORT) + '])));';
+  const outer = blobWorker(w, JSON.stringify([code]));
+  const realm = runWorker(outer.script);
+  assert.equal(realm.error, null);
+  const inner = vm.runInContext('__engine.workers[0].script', realm.context);
+  assert.equal(inner.slice(0, -ZONE_REPORT.length), outer.script.slice(0, -code.length));
+  assert.deepEqual(runWorker(inner).messages(), ['Asia/Tokyo,-540,false']);
+});
+
+test('workers: the URL is converted once, as the engine converts it', () => {
+  const w = makeWindow(tokyo);
+  assert.equal(run(w, `(() => {
+    const url = URL.createObjectURL(new Blob(['1']));
+    let calls = 0;
+    new Worker({ toString() { calls++; return url; } });
+    let error = '';
+    try { new Worker(Symbol()); } catch (e) { error = e.constructor.name; }
+    return [calls, __engine.workers[0].script.startsWith('(function install'), error].join();
+  })()`), '1,true,TypeError');
+});
+
+test('workers: a TrustedScriptURL, or any URL under a default policy, reaches the engine as given', () => {
+  const w = makeWindow(tokyo);
+  assert.equal(run(w, `(() => {
+    const policy = trustedTypes.createPolicy('page', { createScriptURL: (u) => u });
+    const url = URL.createObjectURL(new Blob(['1']));
+    const trusted = policy.createScriptURL(url);
+    new Worker(trusted);
+    const first = __engine.workers[0];
+    __engine.tt.enforced = true;
+    const seen = [];
+    trustedTypes.createPolicy('default', { createScriptURL: (u) => { seen.push(u); return u; } });
+    const url2 = URL.createObjectURL(new Blob(['2']));
+    new Worker(url2);
+    const second = __engine.workers[1];
+    return [first.raw === trusted, first.script, seen.join() === url2, second.url === url2, second.script, __engine.tt.violations.length].join();
+  })()`), 'true,1,true,true,2,0');
+});
+
+test('workers: a revoked URL fails as the engine\'s would', () => {
+  const w = makeWindow(tokyo);
+  assert.equal(run(w, `(() => {
+    const url = URL.createObjectURL(new Blob(['1']));
+    new Worker(url);
+    const replacement = __engine.workers[0].url;
+    URL.revokeObjectURL(url);
+    new Worker(url);
+    const again = __engine.workers[1];
+    const other = URL.createObjectURL(new Blob(['2']));
+    URL.revokeObjectURL(other);
+    new Worker(other);
+    return [replacement !== url, __engine.urls.has(replacement), again.url === replacement, again.script, __engine.workers[2].url === other, __engine.workers[2].script].join();
+  })()`), 'true,false,true,,true,');
+});
+
+test('workers: a shared worker is made from the same blob for the same URL', () => {
+  const w = makeWindow(tokyo);
+  assert.equal(run(w, `(() => {
+    const url = URL.createObjectURL(new Blob(['onconnect = () => {};']));
+    new SharedWorker(url, 'a');
+    new SharedWorker(url, 'a');
+    return [__engine.workers[0].url === __engine.workers[1].url, __engine.workers[0].url !== url, __engine.workers[1].options].join();
+  })()`), 'true,true,a');
+});
+
+test('workers: built-ins a page replaced are not what the worker hook calls', () => {
+  const made = (tamper) => {
+    const w = makeWindow(tokyo);
+    if (tamper) {
+      run(w, `(() => {
+        const boom = function () { throw new Error('page code ran'); };
+        const define = Object.defineProperty;
+        const replace = [[String.prototype, ['charCodeAt', 'slice', 'indexOf', 'replace', 'toLowerCase', 'toString']], [RegExp.prototype, ['exec', 'test']],
+          [Map.prototype, ['get', 'set', 'has', 'delete', 'forEach']], [WeakMap.prototype, ['get', 'set', 'has']], [Reflect, ['construct', 'apply']],
+          [Function.prototype, ['call', 'apply', 'bind']], [JSON, ['stringify', 'parse']], [Object, ['create', 'defineProperty', 'getPrototypeOf', 'getOwnPropertyDescriptor']],
+          [Array.prototype, ['push', 'slice', 'join']]];
+        for (let i = 0; i < replace.length; i++) for (let k = 0; k < replace[i][1].length; k++) replace[i][0][replace[i][1][k]] = boom;
+        // The engine reads a page's own options object (type, endings) through these, as it should;
+        // setting them, or reading the iterator members, on an object of the hook's would be the hook.
+        for (const name of ['type', 'endings']) define(Object.prototype, name, { __proto__: null, get() {}, set: boom, configurable: true });
+        for (const name of ['next', 'done', 'value', 'return']) define(Object.prototype, name, { __proto__: null, get: boom, set: boom, configurable: true });
+        globalThis.String = boom;
+      })()`);
+    }
+    return blobWorker(w, "['\\'use strict\\';\\n" + ZONE_REPORT.replace(/'/g, "\\'") + "']");
+  };
+  const clean = made(false), tampered = made(true);
+  assert.equal(tampered.script, clean.script);
+  assert.deepEqual(runWorker(tampered.script).messages(), ['Asia/Tokyo,-540,true']);
+});
+
+test('Blob keeps the engine\'s shape, and File still inherits from it', () => {
+  const shape = `[Blob.name, Blob.length, Object.getOwnPropertyNames(Blob).join(), Object.getPrototypeOf(File) === Blob,
+    Blob.prototype.constructor === Blob, new Blob(['ab']) instanceof Blob, new Blob(['ab']).size, new File(['a'], 'f') instanceof Blob,
+    (() => { class B extends Blob {} const b = new B(['xyz']); return b instanceof B && b.size === 3 && b.constructor === B; })(),
+    (() => { try { Blob(); } catch (e) { return e.constructor.name; } })(),
+    (() => { try { new Blob(5); } catch (e) { return e.message; } })(),
+    (() => { try { new Blob({}); } catch (e) { return e.message; } })(),
+    Object.getOwnPropertyDescriptor(window, 'Blob').enumerable, Object.getOwnPropertyDescriptor(Blob, 'prototype').writable].join('|')`;
+  const w = makeWindow(tokyo);
+  assert.equal(run(w, shape), run(makeWindow(base), shape));
+  assert.equal(run(w, 'Function.prototype.toString.call(Blob)'), nativeText('Blob'));
+  assert.equal(run(w, 'Function.prototype.toString.call(Worker)'), nativeText('Worker'));
+  assert.equal(run(w, 'Object.getOwnPropertyNames(Worker).join()'), run(makeWindow(base), 'Object.getOwnPropertyNames(Worker).join()'));
+});
+
+test('Blob reads the page\'s parts as the engine reads them', () => {
+  const probe = `(() => {
+    const log = [];
+    const parts = ['a', { toString() { log.push('toString'); return 'b'; } }];
+    const proxy = new Proxy(parts, { get(t, k, r) { log.push('get ' + String(k)); return Reflect.get(t, k, r); } });
+    const b1 = new Blob(proxy);
+    let i = 0;
+    const iterable = { get [Symbol.iterator]() { log.push('@@iterator'); return function () {
+      return { get next() { log.push('next'); return () => ({ get done() { log.push('done'); return i >= 2; }, get value() { log.push('value'); return 'v' + i++; } }); },
+               get return() { log.push('return'); return () => { log.push('closed'); return {}; }; } };
+    }; } };
+    const b2 = new Blob(iterable);
+    const failing = { *[Symbol.iterator]() { try { yield 'x'; yield { toString() { throw new Error('part'); } }; yield 'never'; } finally { log.push('finally'); } } };
+    let error = '';
+    try { new Blob(failing); } catch (e) { error = e.message; }
+    return [log.join(), b1.size, b2.size, error].join('|');
+  })()`;
+  assert.equal(run(makeWindow(tokyo), probe), run(makeWindow(base), probe));
 });
 
 process.on('beforeExit', () => {

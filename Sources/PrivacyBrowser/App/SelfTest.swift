@@ -123,6 +123,7 @@ final class SelfTest {
             try await firstWebKitUse(repository) // must run before anything else touches WebKit
             try await storageIsolationAndShims(repository)
             try await engineTimeZone(repository)
+            try await workersUnderCSP(repository)
             try await deviceGenerations(repository)
             try await fingerprintSurface(repository)
             try await recoverySealing(repository)
@@ -666,6 +667,146 @@ final class SelfTest {
               "shown \(after.front ?? "nil"), background \(after.back ?? "nil")")
         let visibility = (try? await js(back.webView, "return document.visibilityState;")) as? String
         info("background tab: document.visibilityState = \(visibility ?? "nil") (Safari: hidden)")
+    }
+
+    // MARK: Workers under a strict CSP
+
+    /// What the self-test proxy's `/pb-csp/page` makes of blob workers: the profile's zone, strict
+    /// mode and line numbers in one, and the controls (an eval in a worker of the page's own, which
+    /// the CSP blocks, and a blocked image).
+    private static let cspWorkersScript = """
+        const run = (code) => new Promise((resolve) => {
+          const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+          worker.onmessage = (e) => resolve(String(e.data));
+          worker.onerror = (e) => { e.preventDefault(); resolve('error line ' + e.lineno); };
+          setTimeout(() => resolve('timeout'), 5000);
+        });
+        const zone = await run("'use strict'\\npostMessage([Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset(), (function () { return this === undefined; })()].join())");
+        const line = await run('\\n\\nthrow new Error("x")');
+        const control = await run("let r; try { eval('/*pb-control*/1'); r = 'eval ran'; } catch (e) { r = e.name; } postMessage(r);");
+        new Image().src = 'http://127.0.0.2:9/pb-control.png';
+        return JSON.stringify({ zone, line, control });
+        """
+
+    /// The same with Trusted Types required: a worker from a TrustedScriptURL, one from a string
+    /// under the page's default policy (and the URL the policy is shown), and the controls (a string
+    /// into an HTML sink, a blocked image).
+    private static let trustedTypesWorkersScript = """
+        if (typeof trustedTypes === 'undefined') return JSON.stringify({ unavailable: true });
+        const run = (url) => new Promise((resolve) => {
+          const worker = new Worker(url);
+          worker.onmessage = (e) => resolve(String(e.data));
+          worker.onerror = (e) => { e.preventDefault(); resolve('error ' + e.message); };
+          setTimeout(() => resolve('timeout'), 5000);
+        }).catch((e) => 'threw ' + e.name);
+        const code = "postMessage([Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset()].join())";
+        const policy = trustedTypes.createPolicy('pbtest', { createScriptURL: (u) => u });
+        const trusted = await run(policy.createScriptURL(URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))));
+        try { document.createElement('div').innerHTML = '<b>pb-control</b>'; } catch (e) {}
+        const seen = [];
+        trustedTypes.createPolicy('default', { createScriptURL: (u) => { seen.push(u); return u; } });
+        const own = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+        const viaDefault = await run(own);
+        new Image().src = 'http://127.0.0.2:9/pb-control.png';
+        return JSON.stringify({ trusted, viaDefault, defaultSaw: seen.length === 1 && seen[0] === own ? 'the page URL' : seen.join(' ') });
+        """
+
+    /// The shim in workers made from a blob, on a page under the CSP a site that collects violation
+    /// reports sends (`/pb-csp/page`: no 'unsafe-eval', connect-src 'self', report-uri). The shim goes
+    /// into the worker as code and reads nothing back, so the site gets no report a page in Safari
+    /// would not cause. Checked against controls the page causes itself, which show that reports
+    /// arrive (the image's must; whether WebKit reports a worker's violations is logged). The worker
+    /// still runs in the profile's zone (the shim's: WebKit's shared pool), strict, with the page's
+    /// line numbers. With Trusted Types required, a worker from a TrustedScriptURL, or under a
+    /// default policy, is made from the page's own URL, as in Safari.
+    private func workersUnderCSP(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("worker CSP checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let profile = try repository.create(name: "Workers under CSP", configuration: ProfileConfiguration(
+            timeZoneIdentifier: "Asia/Tokyo", ephemeral: true))
+        let session = try inSharedPool { try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id)) }
+        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+        defer { tab.tearDown(); session.shutDown() }
+        for trustedTypes in [false, true] {
+            let label = trustedTypes ? "Trusted Types" : "strict CSP"
+            let run = UUID().uuidString
+            try await PageLoader.load(tab.webView, url: URL(string: "http://127.0.0.1:\(httpPort)/pb-csp/page?run=\(run)\(trustedTypes ? "&tt=1" : "")")!)
+            let text: String
+            do {
+                text = try await js(tab.webView, trustedTypes ? Self.trustedTypesWorkersScript : Self.cspWorkersScript) as? String ?? "{}"
+            } catch {
+                check("workers (\(label)): the page's script ran", false, String(describing: error))
+                continue
+            }
+            let result = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+            if result["unavailable"] != nil {
+                info("workers (\(label)): no trustedTypes in this WebKit, checks skipped")
+                continue
+            }
+            // Each report is a request of its own: wait for the image's, then a moment for any after it.
+            var reports = try await cspReports(tab.webView, run: run)
+            for _ in 0..<16 where !reports.contains(where: Self.isImageControl) {
+                try await Task.sleep(nanoseconds: 500_000_000)
+                reports = try await cspReports(tab.webView, run: run)
+            }
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            reports = try await cspReports(tab.webView, run: run)
+            // Besides the image, the page's other control: at most one report of its directive (with
+            // its sample, where WebKit sends one). Anything else came from the shim.
+            let controlDirective = trustedTypes ? "require-trusted-types-for" : "script-src"
+            var controlReported = false
+            var unexpected: [String] = []
+            for report in reports where !Self.isImageControl(report) {
+                let sample = report["script-sample"] as? String ?? ""
+                if !controlReported && Self.directive(of: report).hasPrefix(controlDirective) && (sample.isEmpty || sample.contains("pb-control")) {
+                    controlReported = true
+                } else {
+                    unexpected.append(Self.describe(report))
+                }
+            }
+            let summary = reports.map(Self.describe).joined(separator: "; ")
+            info("workers (\(label)): \(text); reports: \(summary.isEmpty ? "none" : summary)")
+            check("workers (\(label)): the site receives no violation report beyond the page's own controls",
+                  reports.contains(where: Self.isImageControl) && unexpected.isEmpty,
+                  "unexpected: \(unexpected.joined(separator: "; ")); all: \(summary)")
+            if trustedTypes {
+                let started = { (value: Any?) -> Bool in
+                    guard let value = value as? String else { return false }
+                    return !["threw", "timeout", "error"].contains(where: { value.hasPrefix($0) })
+                }
+                check("workers (Trusted Types): a worker from a TrustedScriptURL starts, as does one under a default policy, which is shown the page's own URL",
+                      started(result["trusted"]) && started(result["viaDefault"]) && result["defaultSaw"] as? String == "the page URL", text)
+            } else {
+                info("workers (strict CSP): the profile runs in WebKit's shared pool, the zone in the shim: \(!session.timeZoneByEngine); "
+                     + "a worker's own eval reported by WebKit: \(controlReported)")
+                check("workers (strict CSP): a blob worker runs in the profile's zone, strict, with the page's line numbers",
+                      result["zone"] as? String == "Asia/Tokyo,-540,true" && result["line"] as? String == "error line 3", text)
+                check("workers (strict CSP): the page's CSP applies in its blob workers (their own eval is blocked)",
+                      result["control"] as? String == "EvalError", text)
+            }
+        }
+    }
+
+    /// The CSP violation reports the self-test proxy received for `run`.
+    private func cspReports(_ webView: WKWebView, run: String) async throws -> [[String: Any]] {
+        let text = try await js(webView, "return await (await fetch('/pb-csp/reports.json?run=' + run, { cache: 'no-store' })).text();",
+                                ["run": run]) as? String ?? "[]"
+        return (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [[String: Any]] ?? []
+    }
+
+    private static func directive(of report: [String: Any]) -> String {
+        report["effective-directive"] as? String ?? report["violated-directive"] as? String ?? ""
+    }
+
+    private static func isImageControl(_ report: [String: Any]) -> Bool {
+        directive(of: report).hasPrefix("img-src") && (report["blocked-uri"] as? String ?? "").contains("127.0.0.2")
+    }
+
+    private static func describe(_ report: [String: Any]) -> String {
+        [directive(of: report), report["blocked-uri"] as? String ?? "-", report["script-sample"] as? String ?? "",
+         report["source-file"] as? String ?? ""].joined(separator: " ")
     }
 
     // MARK: Time zone in the engine

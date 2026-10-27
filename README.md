@@ -75,6 +75,7 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: �
 swift test                                        # core tests (also run on Linux in CI)
 TZ=America/New_York node scripts/test-shims.mjs   # JS shim logic and CreepJS-style shape checks (Node 18+)
 TZ=America/New_York bun scripts/test-shims.mjs    # the same under JavaScriptCore, Safari's engine
+TZ=America/New_York SHIM_FORM=worker node scripts/test-shims.mjs   # on the one-line form a blob worker gets
 
 # End-to-end against the real WebKit of this Mac (headless, temporary vault, cleans up):
 python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 \
@@ -114,7 +115,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   bookmarks, background tabs that measure their window as the shown tab does, the time zone in
   the engine where WebKit has the override (two profiles in different zones at once, in the page,
   frames and every kind of worker), Safari's storage quota in a saved profile's store (the page,
-  every kind of worker), the device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
+  every kind of worker), blob workers under a strict CSP and under Trusted Types (no violation
+  report beyond the page's own), the device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
 - the surface comparison with the runner's real Safari (`scripts/safari_reference.py`): every
   key that measures the engine or the Mac is identical; what differs is the set of features

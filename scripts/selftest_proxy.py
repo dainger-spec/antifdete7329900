@@ -40,6 +40,12 @@ checks.
 service worker, asked 'quota', answer with `navigator.storage.estimate().quota`. The listener also answers requests made to it
 directly (`http://127.0.0.1:<port>/…`, a secure context, which service workers need).
 
+`/pb-csp/page?run=<id>` is an empty page under a strict Content-Security-Policy, as a site that
+collects violation reports sends it: no 'unsafe-eval', `connect-src 'self'`, blob: workers allowed,
+`report-uri /pb-csp/report?run=<id>` (`&tt=1` also requires Trusted Types, allowing the policies
+`pbtest` and `default`). The reports the browser posts are kept per run and listed by
+`/pb-csp/reports.json?run=<id>`.
+
 `/pb-warmup/<name>?run=<id>` are pages for the session warm-up robot: each sets a cookie
 (`pbwarm_<name>=<id>`), is tall enough to scroll, and has, in view, one plain link to the same site
 (`Next article` → `/pb-warmup/<name>-next`) next to links the robot must never follow (sign-out,
@@ -78,12 +84,29 @@ GEO_ANSWER = b'{"ip":"203.0.113.7","country":"DE","timezone":"Europe/Berlin"}'
 SERVED: list = []
 SERVED_LOCK = threading.Lock()
 WARMUP_LOG: list = []
+CSP_REPORTS: list = []
 
 
 def header(request: str, name: str) -> str:
     prefix = name.lower() + ":"
     return next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
                  if line.lower().startswith(prefix)), "")
+
+
+def request_body(conn: socket.socket, request: str) -> bytes:
+    """The body of a request whose head (and maybe the start of its body) `request` holds."""
+    _, _, start = request.partition("\r\n\r\n")
+    body = start.encode("latin-1", "replace")
+    try:
+        length = min(int(header(request, "Content-Length") or "0"), 1 << 20)
+    except ValueError:
+        length = 0
+    while len(body) < length:
+        chunk = conn.recv(length - len(body))
+        if not chunk:
+            break
+        body += chunk
+    return body
 
 
 def warmup_page(name: str, run: str) -> bytes:
@@ -206,6 +229,33 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
             cookie_name = "".join(c if c.isalnum() else "_" for c in name)
             extra_headers = f"Set-Cookie: pbwarm_{cookie_name}={run or 'x'}; Max-Age=86400; Path=/\r\n"
             body, content_type = warmup_page(name, run), "text/html; charset=utf-8"
+    elif plain_path == "/pb-csp/page":
+        params = {key: values[0] for key, values in parse_qs(query).items()}
+        run = "".join(c for c in params.get("run", "") if c.isalnum() or c == "-")
+        policy = ("default-src 'none'; script-src 'nonce-pbcsp' 'report-sample'; worker-src blob:; connect-src 'self'; "
+                  f"img-src 'self'; report-uri /pb-csp/report?run={run}")
+        if params.get("tt") == "1":
+            policy += "; require-trusted-types-for 'script'; trusted-types pbtest default"
+        extra_headers = f"Content-Security-Policy: {policy}\r\n"
+        body = b"<!doctype html><html><head><meta charset='utf-8'><title>PB CSP</title></head><body>csp</body></html>"
+        content_type = "text/html; charset=utf-8"
+    elif plain_path == "/pb-csp/report":
+        run = parse_qs(query).get("run", [""])[0]
+        payload = request_body(conn, request)
+        try:
+            report = json.loads(payload.decode("utf-8", "replace"))
+            report = report.get("csp-report", report) if isinstance(report, dict) else report
+        except ValueError:
+            report = {"unparsed": payload.decode("utf-8", "replace")}
+        with SERVED_LOCK:
+            CSP_REPORTS.append({"run": run, "report": report})
+        print(f"[selftest-proxy] CSP report run={run}: {json.dumps(report)[:300]}", flush=True)
+        body, content_type = b"", "text/plain"
+    elif plain_path == "/pb-csp/reports.json":
+        run = parse_qs(query).get("run", [""])[0]
+        with SERVED_LOCK:
+            body = json.dumps([entry["report"] for entry in CSP_REPORTS if entry["run"] == run]).encode()
+        content_type = "application/json"
     elif plain_path == "/pb-scopes/page":
         body = b"<!doctype html><html><head><meta charset='utf-8'><title>PB scopes</title></head><body>scopes</body></html>"
         content_type = "text/html; charset=utf-8"

@@ -1048,75 +1048,344 @@ function hookChildWindows(w) {
 // ---- Workers ----------------------------------------------------------------------------------
 // A user script never runs in a worker, so a worker's Date/Intl would show the Mac's own zone (and
 // its navigator the Mac's values) next to the page's. Workers made from a blob this realm created —
-// how fingerprinting scripts make theirs — start with this script: the blob is handed to the
-// engine as [this script, the page's blob], so the worker keeps a blob: location, its own relative
-// URLs and its CSP. The script is one line (an indirect eval of its text), so the page's code keeps
-// its line numbers. Workers loaded from a URL are left alone: rewriting them would change their
-// location and how their relative URLs resolve. Service workers cannot be reached.
+// how fingerprinting scripts make theirs — start with this script: the engine gets a blob of [the
+// page's directives, this script, the rest of the page's blob], so the worker keeps a blob:
+// location, its own relative URLs, its CSP and its strict mode. The script goes in as code on one
+// line, so the page's code keeps its line numbers, and never through eval: a CSP without
+// 'unsafe-eval', or one requiring Trusted Types, would block that and report it to the site. Where
+// the directives end comes from the strings the page made its Blob of, not from reading the blob
+// back, which connect-src would block and report. Left alone: workers loaded from a URL (rewriting
+// them would change their location and how their relative URLs resolve), service workers (out of
+// reach), a TrustedScriptURL (only a policy of the page's can make one; a string in its place would
+// be a violation) and any URL while the page has a default Trusted Types policy (which would be
+// shown another URL than the page's). What runs when the page calls these uses only built-ins
+// captured here, before any page script ran.
+const FunctionCall = Function.prototype.call;
+const charCodeAt = FunctionCall.bind(String.prototype.charCodeAt);
+const ObjectGetPrototypeOf = Object.getPrototypeOf;
+const NativeMap = Map;
+const MapGet = Map.prototype.get;
+const MapSet = Map.prototype.set;
+const MapHas = Map.prototype.has;
+const MapDelete = Map.prototype.delete;
+const NativeWeakMap = WeakMap;
+// This realm's configuration as a worker's copy of the script receives it (JSON, which can hold
+// U+2028/U+2029; written as escapes, they cannot count as line breaks).
+const CONFIG_JSON = JSON.stringify(CONFIG).replace(/[\u2028\u2029]/g, (c) => (c === '\u2028' ? '\\u2028' : '\\u2029'));
+
+// This script as one line of code: comments dropped, each run of white space, line breaks and
+// comments one space — a semicolon where a line break ends a return, break, continue, throw or
+// yield or comes before ++ or --, as the engine reads those — and a line break in a template
+// literal written \n. Null for anything else this script does not contain; no worker is rewritten
+// then. The shim tests run the result under V8 and JavaScriptCore.
+const WORD = /[A-Za-z_$][\w$]*/y;
+const NUMBER = /(?:0[xXbBoO][\da-fA-F_]+|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?)n?/y;
+const QUOTED = /'(?:[^'\\\n\r\u2028\u2029]|\\[^\n\r\u2028\u2029])*'|"(?:[^"\\\n\r\u2028\u2029]|\\[^\n\r\u2028\u2029])*"/y;
+const REGEX_LITERAL = /\/(?:[^/\\[\n\r\u2028\u2029]|\\[^\n\r\u2028\u2029]|\[(?:[^\]\\\n\r\u2028\u2029]|\\[^\n\r\u2028\u2029])*\])+\/[A-Za-z]*/y;
+const TEMPLATE_TEXT = /(?:[^`\\$\n\r\u2028\u2029]|\\[^\n\r\u2028\u2029]|\$(?!\{))*/y;
+// Words after which a / starts a regular expression; after any other word or value it divides.
+const BEFORE_EXPRESSION = { __proto__: null, return: 1, typeof: 1, instanceof: 1, in: 1, of: 1, new: 1, delete: 1,
+                            void: 1, throw: 1, case: 1, do: 1, else: 1, yield: 1, await: 1 };
+// Words no line break may follow: one ends the statement.
+const ENDED_BY_LINE_BREAK = { __proto__: null, return: 1, break: 1, continue: 1, throw: 1, yield: 1 };
+let oneLineSource; // undefined until a worker needs it; null if this script could not be put on one line
+
+function oneLine(source) {
+  const n = source.length;
+  const isBreak = (c) => c === 10 || c === 13 || c === 0x2028 || c === 0x2029;
+  const scan = (re) => {
+    re.lastIndex = i;
+    const match = call(RegExpExec, re, source);
+    return match === null ? null : match[0];
+  };
+  // A template literal's text from i: true at its end, false at a ${ (resumed by its }).
+  const template = () => {
+    for (;;) {
+      const text = scan(TEMPLATE_TEXT);
+      out += text;
+      i += text.length;
+      const c = charCodeAt(source, i);
+      if (c === 96) { out += '`'; i++; return true; }
+      if (c === 36) { out += '${'; i += 2; resume[open++] = depth; return false; }
+      if (c !== 10) return null; // \r, U+2028/U+2029, a line continuation, or no end
+      out += '\\n';
+      i++;
+    }
+  };
+  let out = '', i = 0, depth = 0, open = 0;
+  const resume = ObjectCreate(null); // the brace depth of each open template literal's ${
+  let space = false, lineBreak = false;
+  let last = '', property = false, value = false; // the last token, whether it was a .name, whether it ends a value
+  while (i < n) {
+    const c = charCodeAt(source, i);
+    const d = charCodeAt(source, i + 1);
+    if (isBreak(c)) { space = lineBreak = true; i++; continue; }
+    if (c === 32 || c === 9 || c === 11 || c === 12 || c === 0xA0 || c === 0xFEFF) { space = true; i++; continue; }
+    if (c === 47 && d === 47) {
+      while (i < n && !isBreak(charCodeAt(source, i))) i++;
+      space = true;
+      continue;
+    }
+    if (c === 47 && d === 42) {
+      const end = call(StringIndexOf, source, '*/', i + 2);
+      if (end < 0) return null;
+      for (let k = i + 2; k < end; k++) if (isBreak(charCodeAt(source, k))) lineBreak = true;
+      i = end + 2;
+      space = true;
+      continue;
+    }
+    // HTML-like comments (<!--, and --> at a line's start) end where a line does: never joined.
+    if ((c === 60 && call(StringSlice, source, i, i + 4) === '<!--') || (c === 45 && d === 45 && charCodeAt(source, i + 2) === 62)) return null;
+    if (space && out !== '') {
+      const ended = (ENDED_BY_LINE_BREAK[last] === 1 && !property) || ((c === 43 || c === 45) && d === c && value);
+      out += lineBreak && ended ? ';' : ' ';
+    }
+    space = lineBreak = false;
+    if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 36) {
+      const word = scan(WORD);
+      property = last === '.';
+      value = property || BEFORE_EXPRESSION[word] !== 1;
+      last = word;
+      out += word;
+      i += word.length;
+      continue;
+    }
+    property = false;
+    if ((c >= 48 && c <= 57) || (c === 46 && d >= 48 && d <= 57)) {
+      const number = scan(NUMBER);
+      out += number;
+      i += number.length;
+      last = '';
+      value = true;
+      continue;
+    }
+    if (c === 39 || c === 34) {
+      const string = scan(QUOTED);
+      if (string === null) return null;
+      out += string;
+      i += string.length;
+      last = '';
+      value = true;
+      continue;
+    }
+    if (c === 96 || (c === 125 && open > 0 && resume[open - 1] === depth)) {
+      if (c === 125) open--;
+      out += c === 96 ? '`' : '}';
+      i++;
+      const ended = template();
+      if (ended === null) return null;
+      last = '';
+      value = ended;
+      continue;
+    }
+    if (c === 47) {
+      if (!value) {
+        if (last === '}') return null; // a block's end or an object literal's: not known here
+        const regex = scan(REGEX_LITERAL);
+        if (regex === null) return null;
+        out += regex;
+        i += regex.length;
+        last = '';
+        value = true;
+        continue;
+      }
+    } else if (c === 43 || c === 45) {
+      if (d === c) { out += c === 43 ? '++' : '--'; i += 2; last = ''; continue; } // a value stays one
+    } else if (c === 123) {
+      depth++;
+    } else if (c === 125) {
+      depth--;
+    } else if (c > 126 || c < 33 || c === 35 || c === 64 || c === 92) {
+      return null; // non-ASCII, private names, decorators, escapes
+    }
+    out += call(StringSlice, source, i, i + 1);
+    i++;
+    last = call(StringSlice, out, out.length - 1);
+    value = c === 41 || c === 93; // ) ]
+  }
+  return depth === 0 && open === 0 ? out : null;
+}
+
+// Where this script goes in a blob made of `parts` (what the page gave new Blob): after the
+// directives at its start and the comments before them, given as their UTF-8 length — when a line
+// break ends them, on their line, so the next line keeps its columns too — and after a semicolon
+// unless they end with one (a directive the text ends with would otherwise be called). Null when
+// the strings at the start do not show where the directives end.
+const PROLOGUE = /^(?:(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*(?:'[^'\\\n]*'|"[^"\\\n]*")[ \t]*(?:;|\r?\n|$))*/;
+// What surely follows the directives: past white space and comments, a character no directive or
+// comment starts with.
+const AFTER_PROLOGUE = /^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)*[^\s'"/]/;
+const LINE_END = /\r?\n$/;
+const ENDS_STATEMENT = /;\s*$/;
+const HEAD_LIMIT = 65536;
+
+function prologueOf(parts) {
+  let head = '', whole = true;
+  for (let k = 0; k < parts.length; k++) {
+    const part = parts[k];
+    if (typeof part !== 'string') { whole = false; break; }
+    if (head.length + part.length > HEAD_LIMIT) {
+      head += call(StringSlice, part, 0, HEAD_LIMIT - head.length);
+      whole = false;
+      break;
+    }
+    head += part;
+  }
+  let prologue = call(RegExpExec, PROLOGUE, head)[0];
+  if (!whole && call(RegExpExec, AFTER_PROLOGUE, call(StringSlice, head, prologue.length)) === null) return null;
+  const lineEnd = call(RegExpExec, LINE_END, prologue);
+  if (lineEnd !== null) prologue = call(StringSlice, prologue, 0, lineEnd.index);
+  const where = ObjectCreate(null);
+  where.bytes = utf8Length(prologue);
+  where.semicolon = where.bytes > 0 && call(RegExpExec, ENDS_STATEMENT, prologue) === null;
+  return where;
+}
+
+// The length of `text` in UTF-8, as the engine encodes a Blob's strings (a lone surrogate as U+FFFD).
+function utf8Length(text) {
+  let bytes = 0;
+  for (let k = 0; k < text.length; k++) {
+    const c = charCodeAt(text, k);
+    if (c < 0x80) bytes += 1;
+    else if (c < 0x800) bytes += 2;
+    else if (c >= 0xD800 && c <= 0xDBFF && (charCodeAt(text, k + 1) & 0xFC00) === 0xDC00) { bytes += 4; k++; }
+    else bytes += 3;
+  }
+  return bytes;
+}
+
+// The page's iterable as the engine iterates a WebIDL sequence — its @@iterator called once, `next`
+// read once, `done` and then `value` read from each result, `return` on an error — with each value
+// also kept in `parts` (a null-prototype list).
+function forwarding(iterable, iterate, parts) {
+  const sequence = ObjectCreate(null);
+  ObjectDefineProperty(sequence, SymbolIterator, { value: function () {
+    const iterator = ReflectApply(iterate, iterable, []);
+    if (iterator === null || (typeof iterator !== 'object' && typeof iterator !== 'function')) return iterator;
+    const next = iterator.next;
+    const forward = ObjectCreate(null);
+    if (typeof next !== 'function') { forward.next = next; return forward; } // the engine's TypeError
+    forward.next = function () {
+      const result = ReflectApply(next, iterator, []);
+      if (result === null || (typeof result !== 'object' && typeof result !== 'function')) return result;
+      const step = ObjectCreate(null);
+      step.done = !!result.done;
+      if (!step.done) parts[parts.length++] = step.value = result.value;
+      return step;
+    };
+    forward.return = function () {
+      const close = iterator.return;
+      return close === undefined || close === null ? undefined : ReflectApply(close, iterator, []);
+    };
+    return forward;
+  } });
+  return sequence;
+}
+
 function hookWorkers(w) {
   const URLClass = w.URL;
+  const NativeBlob = w.Blob;
   const nativeCreate = URLClass && URLClass.createObjectURL;
-  if (!SOURCE || typeof nativeCreate !== 'function' || typeof w.Blob !== 'function' || typeof w.WeakRef !== 'function') return;
-  const blobs = new Map();        // blob: URL this realm created → WeakRef to its Blob
-  const replacements = new Map(); // that URL → the URL of the same Blob behind this script
-  // A CSP without 'unsafe-eval' stops the eval, never the page's own code after it.
-  const bootstrap = 'try { (0, eval)(' + JSON.stringify('(' + SOURCE + ')(' + JSON.stringify(CONFIG) + ');') + '); } catch (e) {}';
-  define(URLClass, 'createObjectURL', method('createObjectURL', 1, function (object) {
-    const url = nativeCreate.apply(this, arguments);
-    if (object instanceof w.Blob) {
-      if (blobs.size > 500) blobs.forEach((ref, key) => { if (!ref.deref()) blobs.delete(key); });
-      blobs.set(url, new w.WeakRef(object));
+  const nativeRevoke = URLClass && URLClass.revokeObjectURL;
+  if (!SOURCE || typeof nativeCreate !== 'function' || typeof nativeRevoke !== 'function' || typeof NativeBlob !== 'function') return;
+  const blobProto = NativeBlob.prototype;
+  const blobSize = (ObjectGetOwnPropertyDescriptor(blobProto, 'size') || {}).get;
+  const blobType = (ObjectGetOwnPropertyDescriptor(blobProto, 'type') || {}).get;
+  const blobSlice = blobProto.slice;
+  if (typeof blobSize !== 'function' || typeof blobType !== 'function' || typeof blobSlice !== 'function') return;
+  const trustedTypes = w.trustedTypes;
+  const factory = trustedTypes ? ObjectGetPrototypeOf(trustedTypes) : null;
+  const isScriptURL = factory && factory.isScriptURL;
+  const defaultPolicy = factory && (ObjectGetOwnPropertyDescriptor(factory, 'defaultPolicy') || {}).get;
+  const prologues = new NativeWeakMap(); // a Blob the page made from parts → where this script goes in it
+  const blobs = new NativeMap();         // a blob: URL this realm made → its Blob, until revoked
+  const replacements = new NativeMap();  // that URL → the URL of a blob with this script in front
+
+  const blobTarget = function (...args) {
+    if (new.target === undefined) return ReflectApply(NativeBlob, this, args); // the engine's own TypeError
+    let parts = null;
+    const value = args[0];
+    if (args.length > 0 && value !== null && (typeof value === 'object' || typeof value === 'function')) {
+      const iterate = value[SymbolIterator]; // read once, as the engine reads it
+      if (typeof iterate === 'function') {
+        parts = ObjectCreate(null);
+        parts.length = 0;
+        args[0] = forwarding(value, iterate, parts);
+      } else {
+        args[0] = ObjectCreate(null); // the engine's own TypeError, without reading the page's again
+      }
     }
+    const blob = ReflectConstruct(NativeBlob, args, new.target);
+    if (parts !== null) {
+      try {
+        const where = prologueOf(parts);
+        if (where !== null) call(WeakMapSet, prologues, blob, where);
+      } catch (e) {}
+    }
+    return blob;
+  };
+  blobTarget.prototype = blobProto; // what `new` constructs with (new.target is the target)
+  const WrappedBlob = constructor('Blob', NativeBlob.length, blobTarget, {}, blobProto, NativeBlob);
+  define(blobProto, 'constructor', WrappedBlob);
+  define(w, 'Blob', WrappedBlob);
+  // File inherits from Blob: its [[Prototype]] is the interface object a page sees.
+  if (typeof w.File === 'function' && ObjectGetPrototypeOf(w.File) === NativeBlob) Object.setPrototypeOf(w.File, WrappedBlob);
+
+  define(URLClass, 'createObjectURL', method('createObjectURL', 1, function (object) {
+    const url = ReflectApply(nativeCreate, this, arguments);
+    try {
+      call(blobSize, object); // a Blob (or File), not a MediaSource
+      call(MapSet, blobs, url, object);
+    } catch (e) {}
     return url;
   }));
-  // The page's script text, read with the engine's own XHR (a blob: URL of this realm reads
-  // synchronously), so the bootstrap can follow its directive prologue: a worker that starts with
-  // 'use strict' stays strict. Unreadable → the bootstrap simply goes first.
-  const XHR = w.XMLHttpRequest;
-  const xhrOpen = XHR && XHR.prototype.open, xhrSend = XHR && XHR.prototype.send;
-  const responseText = XHR && Object.getOwnPropertyDescriptor(XHR.prototype, 'responseText');
-  function read(url) {
+  define(URLClass, 'revokeObjectURL', method('revokeObjectURL', 1, function (url) {
+    if (arguments.length === 0) return ReflectApply(nativeRevoke, this, arguments); // the engine's own TypeError
+    const key = `${url}`; // converted once, as the engine converts it
+    const result = ReflectApply(nativeRevoke, this, [key]);
+    // The blob behind this script goes with it; its URL stays the one for `key`, so a worker made
+    // from `key` now fails as the engine's would (a running shared worker is still found by it).
     try {
-      const xhr = new XHR();
-      xhrOpen.call(xhr, 'GET', url, false);
-      xhrSend.call(xhr);
-      return responseText.get.call(xhr);
-    } catch (e) { return null; }
-  }
-  // Leading comments and directives ('use strict'), which must stay first.
-  const PROLOGUE = /^(?:(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*(?:'[^'\\\n]*'|"[^"\\\n]*")[ \t]*(?:;|\r?\n|$))*/;
+      call(MapDelete, blobs, key);
+      if (call(MapHas, replacements, key)) call(nativeRevoke, URLClass, call(MapGet, replacements, key));
+    } catch (e) {}
+    return result;
+  }));
+
   // The same replacement for the same URL: a SharedWorker is found again by its URL.
-  function replacementFor(url) {
-    const key = String(url);
-    if (replacements.has(key)) return replacements.get(key);
-    const blob = blobs.has(key) ? blobs.get(key).deref() : undefined;
-    if (!blob) return null;
-    const text = read(key);
-    let parts = [bootstrap, blob];
-    if (text !== null) {
-      const prologue = PROLOGUE.exec(text)[0];
-      // On the directive's own line, so the page's next line keeps its columns too.
-      const newline = /\r?\n$/.exec(prologue);
-      parts = newline ? [prologue.slice(0, newline.index) + ';', bootstrap, text.slice(newline.index)]
-                      : [prologue, bootstrap, text.slice(prologue.length)];
-    }
-    const replacement = nativeCreate.call(URLClass, new w.Blob(parts, { type: blob.type || 'text/javascript' }));
-    replacements.set(key, replacement);
+  function replacementFor(key) {
+    if (call(MapHas, replacements, key)) return call(MapGet, replacements, key);
+    const blob = call(MapGet, blobs, key);
+    if (blob === undefined) return null;
+    if (oneLineSource === undefined) oneLineSource = oneLine(SOURCE);
+    if (oneLineSource === null) return null;
+    const bootstrap = '(' + oneLineSource + ')(' + CONFIG_JSON + ');';
+    // A blob not made from strings (fetched, a File) gets this script first.
+    const where = call(WeakMapGet, prologues, blob);
+    const items = where === undefined || where.bytes === 0 ? [bootstrap, blob]
+      : [call(blobSlice, blob, 0, where.bytes), where.semicolon ? ';' : '', bootstrap, call(blobSlice, blob, where.bytes)];
+    const options = ObjectCreate(null);
+    options.type = call(blobType, blob) || 'text/javascript';
+    const replacement = call(nativeCreate, URLClass, new NativeBlob(sequenceOf(items), options));
+    call(MapSet, replacements, key, replacement);
     return replacement;
   }
   for (const name of ['Worker', 'SharedWorker']) {
     const Native = w[name];
     if (typeof Native !== 'function') continue;
-    const workerTarget = function (scriptURL) {
-      const args = Array.prototype.slice.call(arguments);
-      // Without `new`: the engine's own TypeError.
-      if (new.target === undefined) return Reflect.apply(Native, this, args);
-      if (args.length > 0) {
-        let replacement = null;
-        try { replacement = replacementFor(scriptURL); } catch (e) {}
-        if (replacement) args[0] = replacement;
+    const workerTarget = function (...args) {
+      if (new.target === undefined) return ReflectApply(Native, this, args); // the engine's own TypeError
+      if (args.length > 0 && !(typeof isScriptURL === 'function' && call(isScriptURL, trustedTypes, args[0]))) {
+        const key = `${args[0]}`; // converted once, as the engine converts it
+        args[0] = key;
+        try {
+          if (!(typeof defaultPolicy === 'function' && call(defaultPolicy, trustedTypes) !== null)) {
+            const replacement = replacementFor(key);
+            if (replacement !== null) args[0] = replacement;
+          }
+        } catch (e) {} // the page's own URL, then
       }
-      return Reflect.construct(Native, args, new.target);
+      return ReflectConstruct(Native, args, new.target);
     };
     workerTarget.prototype = Native.prototype; // what `new` constructs with (new.target is the target)
     const Wrapped = constructor(name, Native.length, workerTarget, {}, Native.prototype, Native);
