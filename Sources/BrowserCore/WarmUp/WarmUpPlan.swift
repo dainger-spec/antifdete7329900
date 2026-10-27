@@ -266,6 +266,8 @@ public struct WarmUpVisit: Equatable, Sendable, Identifiable {
     public var url: URL
     public var kind: WarmUpPlan.Page.Kind
     public var outcome: Outcome?
+    /// When the robot took the page as loaded: its own load had come and nothing was loading.
+    public var loadedAt: Date?
     public var title: String
     public var dwell: TimeInterval
     public var scrolls: Int

@@ -1760,6 +1760,17 @@ final class SelfTest {
         // then reading and clicking), and from there to the next page (half of it, then the pause).
         func requested(_ name: String) -> Double? { log.first { $0.path == "/pb-warmup/\(name)" }?.time }
         func span(_ from: String, _ to: String) -> Double? { requested(to).flatMap { end in requested(from).map { end - $0 } } }
+        // The robot takes a page as loaded only once its own load has come, so never before the
+        // proxy was even asked for it. In the run's new tab, WebKit can drop the address the robot
+        // asked for while it decides on the tab's first (blank) load; the robot's earlier test
+        // (address changed, nothing loading) could take that moment for the page having come.
+        let tooSoon = loaded.compactMap { visit -> String? in
+            let name = visit.url.lastPathComponent
+            guard let at = visit.loadedAt?.timeIntervalSince1970, let asked = requested(name) else { return "\(name): no times" }
+            return at >= asked ? nil : "\(name): \(String(format: "%.3f", asked - at)) s before its request"
+        }
+        check("warm-up: a page counts as visited only once it has come (never before the proxy was asked for it)",
+              !loaded.isEmpty && tooSoon.isEmpty, "\(tooSoon)")
         let onPage = ["a", "b", "c"].map { span($0, "\($0)-next") }
         let onFollowed = [span("a-next", "b"), span("b-next", "broken")]
         check("warm-up: it stays on each page between the plan's times, and half as long on the page of the followed link (as measured at the proxy)",
@@ -1794,6 +1805,20 @@ final class SelfTest {
               ["a", "b", "c"].allSatisfy { name in history.contains { $0.contains("/pb-warmup/\(name)?") } }
                   && ["pbwarm_a", "pbwarm_b", "pbwarm_c", "pbwarm_a_next"].allSatisfy(stored.contains),
               "history=\(history) cookies=\(stored.sorted())")
+
+        // An address that only jumps within the page shown (the same page with a fragment): WebKit
+        // makes no new page for it, so nothing commits; the robot takes it as visited once the tab
+        // shows that address instead of waiting out its load time.
+        let jump = WarmUpPlan(addresses: [page("f"), page("f") + "#part"].joined(separator: "\n"), scroll: false, followLinks: false)
+        robot.limits.dwellOverride = 1...1
+        robot.limits.pauseOverride = 0.2...0.2
+        let jumpStarted = Date()
+        manager.startWarmUp(profile.id, plan: jump)
+        let jumped = await waitUntil(timeout: 20) { robot.state != .running }
+        let jumpTime = Date().timeIntervalSince(jumpStarted)
+        check("warm-up: an address that only jumps within the page shown counts as visited at once (no new page comes for it)",
+              jumped && robot.state == .finished && robot.visits.map(\.outcome) == [.loaded, .loaded] && jumpTime < 10,
+              "state=\(robot.state) \(robot.visits.map(\.outcome)) in \(String(format: "%.1f", jumpTime)) s")
 
         // Stopped by the user while on a page whose next one is due within a second and a half:
         // three seconds later it still has not been asked for.

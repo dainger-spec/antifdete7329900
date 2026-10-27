@@ -68,6 +68,15 @@ final class BrowserTab: NSObject {
     /// instead), and why the last one did: the warm-up robot tells a failed visit by them.
     private(set) var failedNavigations = 0
     private(set) var lastNavigationError: String?
+    /// Main-frame navigations whose page committed (held weakly): who started a load knows by it
+    /// when its page came. The URL and `isLoading` do not always tell: a load requested while the
+    /// tab's previous one is still being decided can leave the tab, for a moment, with no address
+    /// and nothing loading before it starts (WebKit drops the pending request when it decides on
+    /// the earlier load).
+    private let committedNavigations = NSHashTable<WKNavigation>.weakObjects()
+    /// Main-frame navigations that ended before their page came: failed, or cancelled when
+    /// another load took their place (held weakly).
+    private let abandonedNavigations = NSHashTable<WKNavigation>.weakObjects()
     /// Set while the warm-up robot drives this tab: what would be downloaded is refused instead
     /// (a response WebKit cannot show fails as a load), so a run never saves a file.
     var refusesDownloads = false
@@ -108,9 +117,21 @@ final class BrowserTab: NSObject {
     /// Shown in its window (the selected tab's web view is the only one in the window).
     var isSelected: Bool { webView.window != nil }
 
-    func load(_ url: URL) {
+    /// Loads `url`; returns the navigation it started (see `hasCommitted`).
+    @discardableResult
+    func load(_ url: URL) -> WKNavigation? {
         startsEmpty = false
-        webView.load(URLRequest(url: url))
+        return webView.load(URLRequest(url: url))
+    }
+
+    /// The page of `navigation` has committed (replaced the one before).
+    func hasCommitted(_ navigation: WKNavigation) -> Bool {
+        committedNavigations.contains(navigation)
+    }
+
+    /// `navigation` ended without its page: it failed, or another load took its place.
+    func hasAbandoned(_ navigation: WKNavigation) -> Bool {
+        abandonedNavigations.contains(navigation)
     }
 
     private func observe() {
@@ -260,6 +281,7 @@ extension BrowserTab: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        if let navigation { committedNavigations.add(navigation) }
         passwords.closeSuggestions()
         if let url = webView.url { recordVisit(url) }
     }
@@ -273,6 +295,7 @@ extension BrowserTab: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if let navigation { abandonedNavigations.add(navigation) }
         let nsError = error as NSError
         if let reason = proxyAuthFailure {
             // The load was cancelled by this tab itself, at the proxy's challenge (fail-closed).

@@ -160,6 +160,7 @@ final class WarmUpRobot: ObservableObject {
             guard let outcome = await load(page.url, in: tab, run: run), isCurrent(run) else { return }
             update(index, run: run) {
                 $0.outcome = outcome
+                if outcome == .loaded { $0.loadedAt = Date() }
                 $0.title = tab.webView.title ?? ""
             }
             // A page that did not load is left at once (its error page is no visit).
@@ -244,14 +245,21 @@ final class WarmUpRobot: ObservableObject {
     private func load(_ url: URL, in tab: BrowserTab, run: Int) async -> WarmUpVisit.Outcome? {
         let failures = tab.failedNavigations
         let before = tab.url
-        tab.load(url)
-        return await waitForPage(in: tab, failuresBefore: failures, urlBefore: before, run: run)
+        let navigation = tab.load(url)
+        return await waitForPage(in: tab, failuresBefore: failures, urlBefore: before,
+                                 own: navigation.map { (navigation: $0, url: url) }, run: run)
     }
 
     /// Waits for a navigation of `tab` to start and its page to load (or fail, or take longer
-    /// than `limits.loadTimeout`).
-    private func waitForPage(in tab: BrowserTab, failuresBefore: Int, urlBefore: URL?, run: Int,
-                             startTimeout: TimeInterval? = nil) async -> WarmUpVisit.Outcome? {
+    /// than `limits.loadTimeout`). For a load the robot started (`own`) only that load counts, not
+    /// a changed address with nothing loading: the run's first page is asked for while its new
+    /// tab's blank load is still being decided, and WebKit drops the pending address when it decides
+    /// on that load, which can leave the tab with no address and nothing loading until the page's
+    /// own load starts. Taken for the page, that moment is the likely reason a run's first page was
+    /// at times never scrolled.
+    private func waitForPage(in tab: BrowserTab, failuresBefore: Int, urlBefore: URL?,
+                             own: (navigation: WKNavigation, url: URL)? = nil,
+                             run: Int, startTimeout: TimeInterval? = nil) async -> WarmUpVisit.Outcome? {
         let begun = Date()
         var started = false
         while true {
@@ -261,9 +269,19 @@ final class WarmUpRobot: ObservableObject {
                 guard await waitWhileLoading(tab, run: run, limit: 3) else { return nil }
                 return .failed(tab.lastNavigationError ?? "")
             }
-            started = started || tab.isLoading || tab.url != urlBefore
+            if let own {
+                // Its page committed; or the load ended without one (it failed — the error page is
+                // counted above — or another load took its place); or it only jumped within the
+                // page shown (a fragment: no new page commits) and the tab shows the address asked for.
+                let ended = tab.hasCommitted(own.navigation) || tab.hasAbandoned(own.navigation)
+                started = started || ended || tab.isLoading
+                if ended || WebAddress.isSameAddress(tab.url, own.url), !tab.isLoading { return .loaded }
+            } else {
+                // A link the page followed: the URL changes when its load starts.
+                started = started || tab.isLoading || tab.url != urlBefore
+                if started, !tab.isLoading { return .loaded }
+            }
             let elapsed = Date().timeIntervalSince(begun)
-            if started, !tab.isLoading { return .loaded }
             if !started, elapsed > (startTimeout ?? limits.startTimeout) {
                 return .failed(L("warmup.visit.notStarted"))
             }

@@ -31,4 +31,21 @@ public enum WebAddress {
     public static func url(fromAddressBarInput input: String) -> URL? {
         url(fromTypedAddress: input) ?? searchURL(for: input)
     }
+
+    /// `a` and `b` are the same address once written as a browser writes it: scheme and host in
+    /// lower case, no default port, "/" for an empty path. (A typed `example.com#news` is the page
+    /// WebKit shows as `https://example.com/#news`.)
+    public static func isSameAddress(_ a: URL?, _ b: URL?) -> Bool {
+        guard let a, let b else { return false }
+        return canonical(a) == canonical(b)
+    }
+
+    private static func canonical(_ url: URL) -> String {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return url.absoluteString }
+        parts.scheme = parts.scheme?.lowercased()
+        parts.host = parts.host?.lowercased()
+        if (parts.scheme == "https" && parts.port == 443) || (parts.scheme == "http" && parts.port == 80) { parts.port = nil }
+        if parts.host != nil, parts.path.isEmpty { parts.path = "/" }
+        return parts.string ?? url.absoluteString
+    }
 }

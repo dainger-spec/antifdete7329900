@@ -80,6 +80,23 @@ final class WarmUpPlanTests: XCTestCase {
     }
 }
 
+final class WebAddressTests: XCTestCase {
+    func testTheSameAddressAsTypedAndAsTheBrowserWritesIt() {
+        func same(_ a: String, _ b: String) -> Bool { WebAddress.isSameAddress(URL(string: a), URL(string: b)) }
+        XCTAssertTrue(same("https://example.com#news", "https://example.com/#news"))
+        XCTAssertTrue(same("HTTPS://Example.COM/a?b=1#c", "https://example.com/a?b=1#c"))
+        XCTAssertTrue(same("https://example.com:443/", "https://example.com/"))
+        XCTAssertTrue(same("http://example.com:80/x", "http://example.com/x"))
+        XCTAssertTrue(same("https://example.com?q=1", "https://example.com/?q=1"))
+        XCTAssertFalse(same("https://example.com/#news", "https://example.com/#other"))
+        XCTAssertFalse(same("https://example.com/a", "https://example.com/A"))
+        XCTAssertFalse(same("https://example.com:8443/", "https://example.com/"))
+        XCTAssertFalse(same("https://example.com/", "http://example.com/"))
+        XCTAssertFalse(WebAddress.isSameAddress(nil, URL(string: "about:blank")))
+        XCTAssertFalse(same("about:blank", "https://example.com/"))
+    }
+}
+
 final class WarmUpTimingTests: XCTestCase {
     func testDwellStaysBetweenThePlansTimes() {
         var generator = SeededGenerator(state: 1)

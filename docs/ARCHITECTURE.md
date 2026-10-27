@@ -236,7 +236,8 @@ ProfileManager.warmUpRobot(for:) ── one WarmUpRobot per profile; stop(id) st
         ▼
 WarmUpRobot (main actor, one Task per run; tab and session held weakly)
    for each WarmUpPlan page (BrowserCore: pages(), WarmUpTiming, WarmUpLinkPolicy):
-     wait until its tab is shown → tab.load(url) → wait (isLoading, failedNavigations)
+     wait until its tab is shown → tab.load(url) → wait for that navigation (committed, ended,
+       or a jump within the page to the address) with nothing loading; failedNavigations
      → stay WarmUpTiming.dwell: wheel gestures (native NSEvent from CGEvent, else scrollBy)
      → follow one allowed link (mouse events once a trusted move reached it, else click())
      → pause
