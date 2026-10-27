@@ -37,7 +37,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │              ├── ProfileLibrary ── HistoryStore + BookmarkStore (observable, debounced)    │
 │              ├── LibraryWindowController ── bookmarks & history UI                         │
 │              └── BrowserWindowController × n                                               │
-│                    ├── TabStripView                                                        │
+│                    ├── TabStripView, BrowserChrome (profile chip, start page)              │
 │                    └── BrowserTab × n ── WKWebView + navigation/UI/download delegates      │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────── BrowserCore (platform-independent) ────────────────────────┐

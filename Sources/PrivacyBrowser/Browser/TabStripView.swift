@@ -39,7 +39,9 @@ final class TabStripView: NSView {
         newTabButton.action = #selector(newTab)
         newTabButton.isBordered = false
         newTabButton.toolTip = "New Tab (⌘T)"
+        newTabButton.contentTintColor = Theme.NS.textSecondary
         addSubview(newTabButton)
+        wantsLayer = true
         separator.boxType = .separator
         addSubview(separator)
     }
@@ -49,6 +51,12 @@ final class TabStripView: NSView {
 
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Self.height) }
     override var isFlipped: Bool { true }
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        // The toolbar's colour: the strip reads as part of the window's chrome.
+        layer?.backgroundColor = Theme.NS.toolbar.cgColor
+    }
 
     func update(items: [Item], selectedIndex: Int) {
         while itemViews.count < items.count {
@@ -88,10 +96,11 @@ final class TabStripView: NSView {
         }
         for (index, view) in itemViews.enumerated() {
             let x = CGFloat(index) * width - offset
-            view.frame = NSRect(x: x, y: 0, width: width, height: Self.height - 1)
+            // Inset tabs with a gap between them; the strip's own height is unchanged.
+            view.frame = NSRect(x: x + 6, y: 5, width: width - 6, height: Self.height - 11)
             view.isHidden = x + width <= 0 || x >= available
         }
-        newTabButton.frame = NSRect(x: min(total, available), y: 0, width: buttonWidth, height: Self.height - 1)
+        newTabButton.frame = NSRect(x: min(total, available) + 4, y: 0, width: buttonWidth, height: Self.height - 1)
         separator.frame = NSRect(x: 0, y: Self.height - 1, width: bounds.width, height: 1)
     }
 
@@ -120,13 +129,14 @@ final class TabItemView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         titleField.lineBreakMode = .byTruncatingTail
-        titleField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        titleField.font = .systemFont(ofSize: 12)
         titleField.cell?.usesSingleLineMode = true
         closeButton.isBordered = false
         closeButton.imageScaling = .scaleProportionallyDown
         closeButton.target = self
         closeButton.action = #selector(close)
         closeButton.toolTip = "Close Tab (⌘W)"
+        closeButton.contentTintColor = Theme.NS.textTertiary
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -148,7 +158,8 @@ final class TabItemView: NSView {
         if item.isLoading { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
         isLoading = item.isLoading
         isSelected = selected
-        titleField.textColor = selected ? .labelColor : .secondaryLabelColor
+        titleField.textColor = selected ? Theme.NS.textPrimary : Theme.NS.textSecondary
+        titleField.font = .systemFont(ofSize: 12, weight: selected ? .medium : .regular)
         needsDisplay = true
         needsLayout = true
     }
@@ -168,11 +179,12 @@ final class TabItemView: NSView {
 
     override func updateLayer() {
         // Resolved against the current appearance (light/dark) each time AppKit asks.
+        layer?.cornerRadius = 6
         layer?.backgroundColor = isSelected
-            ? NSColor.controlBackgroundColor.cgColor
-            : (isHovered ? NSColor.quaternaryLabelColor.cgColor : NSColor.clear.cgColor)
-        layer?.borderColor = NSColor.separatorColor.cgColor
-        layer?.borderWidth = 0.5
+            ? Theme.NS.tabSelected.cgColor
+            : (isHovered ? Theme.NS.hover.cgColor : NSColor.clear.cgColor)
+        layer?.borderColor = Theme.NS.hairline.cgColor
+        layer?.borderWidth = isSelected ? 1 : 0
     }
 
     override func updateTrackingAreas() {

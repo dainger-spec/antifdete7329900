@@ -2,6 +2,7 @@ import AppKit
 import BrowserCore
 import Combine
 import os
+import SwiftUI
 import WebKit
 
 /// Window subclass so that File ▸ Close (⌘W) closes the current tab while the window's
@@ -29,10 +30,16 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private var recentlyClosed: [URL] = []
 
     private let tabStrip = TabStripView()
+    /// The profile chip and the start page (see BrowserChrome.swift).
+    private let chrome: BrowserChromeModel
+    /// Over the web views while the selected tab is an empty new tab.
+    private var startPage: NSHostingView<StartPageView>!
     /// 0 with one tab: like Safari, the tab bar shows from the second tab on.
     private var tabStripHeight: NSLayoutConstraint!
+    /// The address field's width: what the other toolbar items leave, up to 680 pt (`fitAddressField`).
+    private var addressWidth: NSLayoutConstraint!
     private let webContainer = NSView()
-    private let addressField = NSTextField()
+    private let addressField = AddressBarField()
     private var backButton: NSButton!
     private var forwardButton: NSButton!
     private var reloadButton: NSButton!
@@ -40,6 +47,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// The toolbar's items, in order (see `NSToolbarDelegate` below).
     private var toolbarViews: [(NSToolbarItem.Identifier, String, NSView)] = []
     private var libraryObservation: AnyCancellable?
+    private var startPageObservation: AnyCancellable?
     private var isClosing = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserWindow")
 
@@ -51,6 +59,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         self.session = session
         self.profileName = session.profileName
         self.library = session.library
+        self.chrome = BrowserChromeModel(profileName: session.profileName, profileID: session.profileID,
+                                         exit: BrowserWindowController.profileExit(of: session))
 
         // A mobile generation's window is the declared device's screen: its web content can never
         // be wider or taller than the screen the page is told about (see PrivacyScripts).
@@ -74,14 +84,22 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         window.tabbingMode = .disallowed
         super.init(window: window)
         window.delegate = self
-        // Dark chrome; the pages inside keep the system's light or dark (as in Safari).
+        // Dark chrome; the pages inside keep the system's light or dark (as in Safari). The toolbar
+        // is flat (the window's colour under a transparent title bar), not a material. Its height —
+        // which pages measure as outerHeight − innerHeight — stays Safari's.
         Theme.applyChrome(to: window)
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .line
+        window.backgroundColor = Theme.NS.toolbar
         buildInterface(in: window)
         WebContentAppearance.shared.follow(webContainer)
         window.center()
         // @Published emits before the value changes; read the store on the next main-actor turn.
         libraryObservation = library.$bookmarks.sink { [weak self] _ in
             Task { @MainActor in self?.updateBookmarkButton() }
+        }
+        startPageObservation = library.$bookmarks.combineLatest(library.$historyRevision).sink { [weak self] _ in
+            Task { @MainActor in self?.refreshStartPage() }
         }
     }
 
@@ -103,27 +121,33 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let fillButton = toolbarButton("key.fill", L("toolbar.fillPassword"), #selector(fillPassword(_:)))
         let saveButton = toolbarButton("key.viewfinder", L("toolbar.savePassword"), #selector(savePassword))
 
-        addressField.placeholderString = "Search or enter address"
+        addressField.placeholderAttributedString = NSAttributedString(
+            string: L("toolbar.address.placeholder"),
+            attributes: [.foregroundColor: Theme.NS.textTertiary, .font: NSFont.systemFont(ofSize: 13)])
         addressField.delegate = self
         addressField.lineBreakMode = .byTruncatingTail
         addressField.cell?.usesSingleLineMode = true
         addressField.target = self
         addressField.action = #selector(addressEntered)
 
-        let badge = NSTextField(labelWithString: profileName)
-        badge.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
-        badge.textColor = .secondaryLabelColor
+        // The profile chip: its glyph, name and the flag of where it exits.
+        let badge = NSHostingView(rootView: ProfileChipView(model: chrome))
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // The app's mark, where Safari has its sidebar button.
+        let mark = NSHostingView(rootView: LumenMark(size: 20))
+        mark.setFrameSize(NSSize(width: 20, height: 20))
 
         // The address field takes the room the toolbar has left.
         addressField.translatesAutoresizingMaskIntoConstraints = false
         addressField.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let preferredWidth = addressField.widthAnchor.constraint(equalToConstant: 680)
-        preferredWidth.priority = .defaultLow
-        NSLayoutConstraint.activate([addressField.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
-                                     addressField.widthAnchor.constraint(lessThanOrEqualToConstant: 680), preferredWidth])
+        addressWidth = addressField.widthAnchor.constraint(equalToConstant: 680)
+        addressWidth.priority = .defaultLow
+        NSLayoutConstraint.activate([addressField.heightAnchor.constraint(equalToConstant: 28),
+                                     addressField.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+                                     addressField.widthAnchor.constraint(lessThanOrEqualToConstant: 680), addressWidth])
 
         toolbarViews = [
+            (.init("mark"), "Lumen", mark),
             (.init("back"), "Back", backButton!), (.init("forward"), "Forward", forwardButton!),
             (.init("reload"), "Reload", reloadButton!), (.init("address"), "Address", addressField),
             (.init("bookmark"), "Bookmark", bookmarkButton!), (.init("bookmarks"), "Bookmarks", bookmarksMenuButton),
@@ -138,7 +162,17 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
         tabStrip.delegate = self
         let container = NSView()
-        for view in [tabStrip, webContainer] as [NSView] {
+        startPage = NSHostingView(rootView: StartPageView(
+            model: chrome,
+            open: { [weak self] url in self?.openFromStartPage(url) },
+            submit: { [weak self] text in
+                guard let url = BrowserWindowController.url(fromAddressBarInput: text) else { return }
+                self?.openFromStartPage(url)
+            }))
+        // Part of the chrome (dark), unlike the web views beside it (the system's appearance).
+        startPage.appearance = Theme.chromeAppearance
+        startPage.isHidden = true
+        for view in [tabStrip, webContainer, startPage] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
@@ -152,8 +186,29 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             webContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             webContainer.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             webContainer.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            startPage.topAnchor.constraint(equalTo: webContainer.topAnchor),
+            startPage.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+            startPage.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+            startPage.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
         ])
         window.contentView = container
+        fitAddressField()
+    }
+
+    /// NSToolbar gives the address field its preferred width and sends the items that no longer
+    /// fit to the overflow menu, rather than narrowing the field: so the field asks only for what
+    /// the other items leave (between its 160 and 680 pt).
+    private func fitAddressField() {
+        guard let window else { return }
+        // Each item with the toolbar's spacing (measured on macOS 26: 24 pt between icons).
+        let others = toolbarViews.filter { $0.0.rawValue != "address" }
+            .reduce(CGFloat(0)) { $0 + max($1.2.fittingSize.width, $1.2.frame.width) + 26 }
+        // The traffic lights and the toolbar's own margins.
+        addressWidth.constant = min(680, max(160, window.frame.width - others - 120))
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        fitAddressField()
     }
 
     private func toolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
@@ -175,6 +230,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let tab = BrowserTab(configuration: configuration ?? session.makeWebViewConfiguration(),
                              context: session.tabContext)
         tab.host = self
+        tab.startsEmpty = url == nil && configuration == nil
         let index = afterSelected && !tabs.isEmpty ? selectedIndex + 1 : tabs.count
         tabs.insert(tab, at: index)
         if !select && index <= selectedIndex { selectedIndex += 1 }
@@ -256,6 +312,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let showsTabStrip = tabs.count > 1
         tabStrip.isHidden = !showsTabStrip
         tabStripHeight.constant = showsTabStrip ? TabStripView.height : 0
+        updateStartPage()
         tabStrip.update(items: tabs.map { tab in
             TabStripView.Item(title: tab.displayTitle,
                               toolTip: [tab.webView.title, tab.url?.absoluteString].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"),
@@ -282,10 +339,39 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         }
         addressField.stringValue = url.absoluteString
         tab.load(url)
+        updateStartPage()
     }
 
     func focusAddressBar() {
         window?.makeFirstResponder(addressField)
+    }
+
+    /// A favourite, a recent page or a search from the start page: in the empty tab itself.
+    private func openFromStartPage(_ url: URL) {
+        load(url)
+        if let webView = selectedTab?.webView { window?.makeFirstResponder(webView) }
+    }
+
+    /// The start page covers the selected tab while it is an empty new tab.
+    private func updateStartPage() {
+        startPage.isHidden = !(selectedTab?.showsStartPage ?? false)
+    }
+
+    // MARK: Chrome
+
+    private static func profileExit(of session: BrowserSession) -> ProfileExit {
+        guard let proxy = session.configuration.proxy else { return .direct }
+        return .proxy(endpoint: "\(proxy.host):\(proxy.port)", countryCode: session.exitLocation?.countryCode)
+    }
+
+    /// The session learnt where its proxy exits (a lookup that finished after launch).
+    func exitLocationDidChange() {
+        guard let session else { return }
+        chrome.exit = Self.profileExit(of: session)
+    }
+
+    private func refreshStartPage() {
+        chrome.update(bookmarks: library.bookmarks, history: library.historyEntries(matching: "", limit: 12))
     }
 
     @objc func goBack() { selectedTab?.webView.goBack() }
@@ -411,6 +497,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         guard !isClosing else { return }
         isClosing = true
         libraryObservation = nil
+        startPageObservation = nil
         tabs.forEach { $0.tearDown() }
         tabs.removeAll()
         window?.delegate = nil
@@ -464,7 +551,14 @@ extension BrowserWindowController: NSToolbarDelegate {
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
         item.label = entry.1
         item.view = entry.2
-        if itemIdentifier.rawValue == "address" { item.visibilityPriority = .high }
+        // Flat items on the toolbar's own colour: no glass platters behind them (macOS 26 gives
+        // bordered items one), the same look on every macOS.
+        item.isBordered = false
+        switch itemIdentifier.rawValue {
+        case "address", "profile": item.visibilityPriority = .high
+        case "mark": item.visibilityPriority = .low
+        default: break
+        }
         return item
     }
 }

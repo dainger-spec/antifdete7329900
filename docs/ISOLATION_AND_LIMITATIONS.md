@@ -771,9 +771,27 @@ scroll bars Safari would give them. Earlier builds forced the light appearance o
 everything, web content included, so on a Mac set to dark, pages saw light where Safari
 reports dark. Web content is not restyled; pages render as their sites define them.
 
+**Browser window.** The toolbar is flat: the window's dark colour under a transparent title
+bar, with no glass behind its items (macOS 26 would add it). It holds the Lumen mark, the
+navigation buttons, the address field and the profile chip. The chip shows the profile's
+glyph and name and, through a proxy, the flag of the country its exit IP is in. That country
+comes from this launch's lookup, else from the location remembered for the same proxy, and
+it is updated when a lookup finishes after launch.
+- An empty new tab (⌘T, or a window opened without an address) shows a start page:
+  - the profile's favourites (its top-level bookmarks);
+  - its last visited pages;
+  - where its proxy exits.
+- The start page is a native view laid over the tab, not web content. Pages never see it,
+  and nothing is loaded for it: no favicons are fetched, and the tiles show the site's
+  initial instead. The tab's web view stays blank underneath until something is opened, and
+  popups, links and tabs opened with an address never show it.
+- The toolbar keeps Safari's 52 pt and the tab strip its 38 pt, so the `outerHeight −
+  innerHeight` that pages measure is unchanged. CI's comparison with this Mac's Safari
+  checks it.
+
 **Language.**
 - The UI defaults to Russian, with English as the fallback. Strings live in
-  `Resources/{ru,en}.lproj/Localizable.strings` (206 keys, both languages complete), which
+  `Resources/{ru,en}.lproj/Localizable.strings` (both languages complete), which
   `build-app.sh` copies into the app bundle.
 - Lookups go through an explicitly chosen bundle (`Localization.swift`), so the language is
   deterministic within a launch. Setting `AppleLanguages` makes AppKit's own menus and

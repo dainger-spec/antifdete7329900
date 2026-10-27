@@ -32,6 +32,11 @@ final class BrowserSession {
     let passwordSettings: ProfilePasswordSettings
     let library: ProfileLibrary
     var onAllWindowsClosed: (() -> Void)?
+    /// Where this run's proxy exits (the launch's lookup, or what was remembered for the proxy),
+    /// shown in its windows' chrome; set again when a lookup finishes after launch.
+    var exitLocation: ProxyLocation? {
+        didSet { windows.forEach { $0.exitLocationDidChange() } }
+    }
 
     private(set) var dataStore: WKWebsiteDataStore?
     private let userContentController: WKUserContentController

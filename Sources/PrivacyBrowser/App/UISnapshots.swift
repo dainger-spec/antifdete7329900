@@ -114,6 +114,8 @@ enum UISnapshots {
         problems += await Shot(name: "sheet-change-password", size: CGSize(width: 420, height: 330), titled: false) {
             ChangePasswordView().environmentObject(model)
         }.capture(into: folder)
+        // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
+        problems += await browserWindows(into: folder)
         problems += await Shot(name: "brand", size: CGSize(width: 900, height: 560), titled: false) {
             BrandSheet()
         }.capture(into: folder)
@@ -158,6 +160,92 @@ enum UISnapshots {
                                               eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0) {
                 NSApp.postEvent(event, atStart: false)
             }
+        }
+    }
+
+    // MARK: Browser window
+
+    /// Opens a real browser window of a running profile — ephemeral, through a SOCKS5 proxy whose
+    /// last known exit is Germany, with a few bookmarks and visited pages — and captures it with
+    /// its start page, then with three tabs. Nothing listens on the proxy's port, and nothing here
+    /// is loaded from the network.
+    private static func browserWindows(into folder: URL) async -> Int {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-snapshots-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        do {
+            let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "snapshots", iterations: 10_000))
+            let proxy = ProxySettings(kind: .socks5, host: "127.0.0.1", port: 9)
+            let profile = try repository.create(name: "Northwind", configuration: ProfileConfiguration(
+                proxy: proxy, ephemeral: true, matchProxyLocation: false))
+            let key = try repository.profileKey(for: profile.id)
+            let configuration = try repository.loadConfiguration(profile.id, key: key)
+            let library = ProfileLibrary(
+                history: try repository.historyStore(for: profile.id, key: key, policy: configuration.historyPolicy, persistent: false),
+                bookmarks: try repository.bookmarkStore(for: profile.id, key: key),
+                recordsHistory: true)
+            let passwordSettings = ProfilePasswordSettings(repository: repository, profileID: profile.id, profileName: profile.name,
+                                                           launchConfiguration: configuration)
+            // As a launch with a proxy does (ProfileManager.launch).
+            await ContentRules.prepare()
+            let session = try BrowserSession(profileID: profile.id, profileName: profile.name, configuration: configuration,
+                                             passwordVault: try repository.passwordVault(for: profile.id),
+                                             passwordSettings: passwordSettings, library: library)
+            defer { session.shutDown() }
+            session.exitLocation = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE",
+                                                 proxyEndpoint: ProxyLocation.endpoint(of: proxy))
+            let favourites = [("Northwind App", "https://app.northwind.example/"), ("Team Docs", "https://docs.northwind.example/"),
+                              ("Mail", "https://mail.northwind.example/"), ("Calendar", "https://calendar.northwind.example/"),
+                              ("Analytics", "https://analytics.northwind.example/"), ("Status", "https://status.northwind.example/")]
+            for (title, address) in favourites {
+                if let url = URL(string: address) { _ = library.addBookmark(title: title, url: url) }
+            }
+            let visited = [("Inbox — Mail", "https://mail.northwind.example/inbox"),
+                           ("Q3 report — Team Docs", "https://docs.northwind.example/q3"),
+                           ("Dashboard — Northwind", "https://app.northwind.example/dashboard")]
+            for (title, address) in visited {
+                if let url = URL(string: address) { library.recordVisit(url: url, title: title) }
+            }
+            let controller = session.openWindow(url: nil)
+            guard let window = controller.window else {
+                print("FAIL no browser window")
+                return 1
+            }
+            var problems = 0
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            problems += capture(window, name: "browser-start", into: folder)
+            for title in ["Northwind — Dashboard", "Q3 report — Team Docs"] {
+                let tab = controller.addTab(url: nil, select: false, afterSelected: false)
+                tab?.webView.loadHTMLString("<!doctype html><title>\(title)</title><body></body>", baseURL: nil)
+            }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            problems += capture(window, name: "browser-tabs", into: folder)
+            window.close()
+            return problems
+        } catch {
+            print("FAIL browser window snapshot: \(error)")
+            return 1
+        }
+    }
+
+    /// Writes `window` as it is on screen (its frame view: title bar and toolbar included).
+    static func capture(_ window: NSWindow, name: String, into folder: URL) -> Int {
+        guard let view = window.contentView?.superview ?? window.contentView,
+              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            print("FAIL no bitmap for \(name)")
+            return 1
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let data = rep.representation(using: .png, properties: [:]) else {
+            print("FAIL could not encode \(name)")
+            return 1
+        }
+        do {
+            try data.write(to: folder.appendingPathComponent("\(name).png"))
+            print("WROTE \(name).png (\(rep.pixelsWide)×\(rep.pixelsHigh))")
+            return 0
+        } catch {
+            print("FAIL could not write \(name): \(error)")
+            return 1
         }
     }
 

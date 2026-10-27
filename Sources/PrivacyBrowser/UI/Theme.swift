@@ -111,6 +111,8 @@ enum Theme {
         static let hairline = NSColor.white.withAlphaComponent(0.08)
         static let divider = NSColor.white.withAlphaComponent(0.07)
         static let hover = NSColor.white.withAlphaComponent(0.05)
+        static let field = NSColor(hex: 0x0F1115)
+        static let fieldBorder = NSColor.white.withAlphaComponent(0.10)
         static let textPrimary = NSColor(hex: 0xECEEF2)
         static let textSecondary = NSColor(hex: 0xA2A9B6)
         static let textTertiary = NSColor(hex: 0x7C8494)
@@ -360,6 +362,11 @@ struct ProfileAvatar: View {
         // A stable index from the UUID's bytes (hashValue is seeded per launch).
         let sum = withUnsafeBytes(of: id.uuid) { $0.reduce(0) { $0 &+ Int($1) } }
         return palette[sum % palette.count]
+    }
+
+    /// The same palette for anything named by a string (a site's host).
+    static func colors(forKey key: String) -> (fill: UInt32, text: UInt32) {
+        palette[key.utf8.reduce(0) { $0 &+ Int($1) } % palette.count]
     }
 
     var body: some View {

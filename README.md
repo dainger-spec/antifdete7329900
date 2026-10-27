@@ -9,8 +9,10 @@ history, bookmarks and sync settings. A profile's WebKit website data is decrypt
 while that profile is running.
 
 The UI is in **Russian by default** (English fallback) and uses Lumen's **dark theme**: flat
-near-black surfaces, hairline borders, one restrained blue accent. Web pages are not themed;
-they follow the Mac's light/dark setting as they do in Safari.
+near-black surfaces, hairline borders, one restrained blue accent. A browser window shows its
+profile as a chip in the toolbar (glyph, name, and the flag of the country its proxy exits in),
+and an empty tab shows a native start page with the profile's favourites and recent pages.
+Web pages are not themed; they follow the Mac's light/dark setting as they do in Safari.
 
 This is a prototype. The core has unit tests, and the app is checked end-to-end against
 real WebKit in CI. It has not had a security review, and some features are

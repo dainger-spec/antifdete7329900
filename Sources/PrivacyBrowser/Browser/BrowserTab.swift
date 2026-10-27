@@ -101,10 +101,15 @@ final class BrowserTab: NSObject {
 
     var url: URL? { webView.url }
     var isLoading: Bool { webView.isLoading }
+    /// Opened as an empty new tab (not a popup, not with an address): its window shows the start
+    /// page over it until it starts loading something.
+    var startsEmpty = false
+    var showsStartPage: Bool { startsEmpty && webView.url == nil && !webView.isLoading }
     /// Shown in its window (the selected tab's web view is the only one in the window).
     var isSelected: Bool { webView.window != nil }
 
     func load(_ url: URL) {
+        startsEmpty = false
         webView.load(URLRequest(url: url))
     }
 

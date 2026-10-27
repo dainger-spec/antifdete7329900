@@ -198,6 +198,8 @@ final class ProfileManager: ObservableObject {
         keys[id] = key
         launchTokens[id] = token
         runningProfileIDs.insert(id)
+        // This launch's lookup (also one made only for the exit IP), else what was found before.
+        session.exitLocation = lookup?.location ?? stored.rememberedProxyLocation
         session.openWindow(url: configuration.startURL)
         try? repository.markLaunched(id)
         if lookup == nil, let lookupTask {
@@ -287,6 +289,7 @@ final class ProfileManager: ObservableObject {
             return
         }
         proxyLookupFinished(result, for: id, name: name, stored: stored)
+        if running, let found = result.location { sessions[id]?.exitLocation = found }
         if running, stored.needsProxyLocation, stored.timeZoneIdentifier == nil,
            let zone = result.location?.timeZoneIdentifier, zone != runningZone {
             onError?(String(format: L("launch.proxyZoneChanged"), name, zone))
