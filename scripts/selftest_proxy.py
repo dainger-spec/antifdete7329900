@@ -33,6 +33,12 @@ fetch does; `?autofocus=1`), and `/pb-frame?src=<url>` a page with that URL in a
 `/pb-cookies` shows the request's `Cookie` header (`PB-COOKIES cookie=...`), for the cookie import
 checks.
 
+`/pb-scopes/page` is an empty page for the time-zone checks in every scope a page can reach:
+`/pb-scopes/worker.js` (a dedicated worker), `/pb-scopes/shared.js` (a shared worker) and
+`/pb-scopes/sw.js` (a service worker) each answer a message with their time zone, the offset of
+2024-01-15 and their User-Agent (`zone|offset|ua`). The listener also answers requests made to it
+directly (`http://127.0.0.1:<port>/…`, a secure context, which service workers need).
+
 `/pb-warmup/<name>?run=<id>` are pages for the session warm-up robot: each sets a cookie
 (`pbwarm_<name>=<id>`), is tall enough to scroll, and has, in view, one plain link to the same site
 (`Next article` → `/pb-warmup/<name>-next`) next to links the robot must never follow (sign-out,
@@ -137,6 +143,18 @@ def login_page(params: dict) -> bytes:
     return f'<!doctype html><html><head><meta charset="utf-8"><title>PB login</title></head><body>{body}{script}</body></html>'.encode()
 
 
+# What each worker scope reports (see the module docstring), and how it is asked.
+SCOPE_REPORT = ("const report = () => [Intl.DateTimeFormat().resolvedOptions().timeZone,"
+                " new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset(), navigator.userAgent].join('|');\n")
+SCOPE_SCRIPTS = {
+    "/pb-scopes/worker.js": "onmessage = () => postMessage(report());\n",
+    "/pb-scopes/shared.js": "onconnect = (e) => { const port = e.ports[0]; port.onmessage = () => port.postMessage(report()); };\n",
+    "/pb-scopes/sw.js": ("addEventListener('install', () => skipWaiting());\n"
+                         "addEventListener('activate', (e) => e.waitUntil(clients.claim()));\n"
+                         "addEventListener('message', (e) => { if (e.ports[0]) e.ports[0].postMessage(report()); });\n"),
+}
+
+
 def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
     """Answers the (tunnelled or forwarded) HTTP request `request` for `path`."""
     accept_language = next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
@@ -184,6 +202,11 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
             cookie_name = "".join(c if c.isalnum() else "_" for c in name)
             extra_headers = f"Set-Cookie: pbwarm_{cookie_name}={run or 'x'}; Max-Age=86400; Path=/\r\n"
             body, content_type = warmup_page(name, run), "text/html; charset=utf-8"
+    elif plain_path == "/pb-scopes/page":
+        body = b"<!doctype html><html><head><meta charset='utf-8'><title>PB scopes</title></head><body>scopes</body></html>"
+        content_type = "text/html; charset=utf-8"
+    elif plain_path in SCOPE_SCRIPTS:
+        body, content_type = (SCOPE_REPORT + SCOPE_SCRIPTS[plain_path]).encode(), "text/javascript; charset=utf-8"
     elif plain_path == "/pb-frame":
         src = parse_qs(query).get("src", ["about:blank"])[0].replace('"', "%22")
         body = (f'<!doctype html><html><head><title>PB frame</title></head><body>'

@@ -277,6 +277,23 @@ test('no time zone configured → Date untouched', () => {
   assert.equal(run(w, `Date.toString()`), nativeText('Date'));
 });
 
+// ---- Time zone: an engine that already runs in the zone ---------------------------------------
+// The profile's process pool can set the zone in the engine (ProfileProcessPool): Date and Intl
+// then stay the engine's own, and a realm whose engine reports another zone still gets the shim.
+const SHAPE = "[Object.getOwnPropertyNames(Date).join(), Object.getOwnPropertyNames(Intl.DateTimeFormat).join()].join('|')";
+test('time zone: an engine already in the profile zone keeps its own Date and Intl', () => {
+  const host = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const w = makeWindow({ ...base, timeZone: host, engineTimeZone: true });
+  assert.equal(run(w, SHAPE), vm.runInContext(SHAPE, vm.createContext({})));
+  assert.equal(run(w, 'Intl.DateTimeFormat().resolvedOptions().timeZone'), host);
+});
+test('time zone: a realm whose engine reports another zone still gets the shim', () => {
+  const w = makeWindow({ ...base, timeZone: 'Asia/Tokyo', engineTimeZone: true });
+  assert.notEqual(run(w, SHAPE), vm.runInContext(SHAPE, vm.createContext({})));
+  assert.equal(run(w, `new Date('2024-01-15T12:00:00Z').getTimezoneOffset()`), -540);
+  assert.equal(run(w, 'Intl.DateTimeFormat().resolvedOptions().timeZone'), 'Asia/Tokyo');
+});
+
 // ---- Looks native (what CreepJS inspects) --------------------------------------------------
 // Each wrapper: `length` and `name` only, no prototype, not constructible, caller/arguments throw,
 // prints as native code — also through the Function.prototype.toString of another frame.

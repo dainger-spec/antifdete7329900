@@ -33,8 +33,9 @@ PROBE = os.path.join(ROOT, "Resources", "fingerprint_probe.js")
 
 
 def profiles(zone):
-    """A profile as a new user gets it, and one that runs the time-zone and WebRTC wrappers with
-    Safari's own zone (whatever a page then notices is the wrapper itself, not a different value)."""
+    """A profile as a new user gets it, and one with a time zone and the WebRTC wrapper, on Safari's
+    own zone (whatever a page then notices is the mechanism itself, not a different value). The zone
+    is set in the engine where WebKit allows it (ProfileProcessPool), else by the shim's wrapper."""
     return [{"name": "default"}, {"name": "shimmed", "timeZone": zone or "host", "webRTC": "relayOnly"}]
 
 

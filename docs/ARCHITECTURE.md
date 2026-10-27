@@ -33,6 +33,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │        ├── WebDataStoreVault ── seal/unseal WebKit dirs (WebKitDataLayout + archive)       │
 │        └── BrowserSession (one per running profile)                                        │
 │              ├── WKWebsiteDataStore(forIdentifier:) + proxyConfigurations                  │
+│              ├── ProfileProcessPool ── own WKProcessPool (time zone in the engine, workers)│
 │              ├── WKUserContentController + PrivacyScripts (TZ / geo / WebRTC)              │
 │              ├── ProfileLibrary ── HistoryStore + BookmarkStore (observable, debounced)    │
 │              ├── LibraryWindowController ── bookmarks & history UI                         │

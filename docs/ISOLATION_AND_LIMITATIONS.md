@@ -18,7 +18,8 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | WebKit data location (undocumented) | sandboxed: `Container/Data/Library/WebKit/WebsiteDataStore/<uuid>`; unsandboxed: `~/Library/WebKit/<bundle-id>/WebsiteDataStore/<uuid>`. One directory per store; no separate cache directory was observed |
 | Seal → restore of website data | cookies, localStorage and IndexedDB survive; the archive holds no plaintext; plaintext is gone after seal; WebKit released the store after 1 s |
 | Two running profiles isolated | localStorage, IndexedDB and cookies of A are invisible to B, for the same origin, at the same time |
-| JS shims under JavaScriptCore | time zone (offset, `Intl`, local getters), fixed geolocation, WebRTC removed, WebRTC relay-only |
+| JS shims under JavaScriptCore | time zone (offset, `Intl`, local getters; in WebKit's shared pool, as without the engine override below), fixed geolocation, WebRTC removed, WebRTC relay-only |
+| Time zone in the engine | where WebKit has the process pool's time zone override, two profiles in different zones running at once each report their own zone in the page, a frame, workers made from a blob and loaded from a URL, and shared and service workers that answer; `Date` and `Intl` are the engine's own (no shim); each profile has a pool of its own, and its shared and service workers carry its own User-Agent (what the same workers report in WebKit's shared pool is logged) |
 | WebRTC off (default) | switched off in the engine (`_peerConnectionEnabled` is false): the window has no `RTC*` interface at all |
 | HTTP CONNECT proxy | `http://` is tunnelled via `CONNECT`; an `.invalid` host loads, so it was resolved by the proxy |
 | SOCKS5 proxy | the hostname is sent to the proxy (`ATYP=3`, remote DNS) |
@@ -95,7 +96,7 @@ This project does not make a Mac look like an iPhone, and doesn't claim to.
 | Storage (cookies, localStorage, IndexedDB, cache, service workers) | `WKWebsiteDataStore(forIdentifier:)` | native, complete |
 | Egress IP and DNS | `proxyConfigurations` (SOCKS5 remote DNS, fail-closed) | native, verified |
 | User-Agent string (HTTP header + `navigator.userAgent`) | `customUserAgent` | native; changes the string only |
-| Time zone | JS shim (`Intl`, `Date` getters, offsets) | approximation; blob workers covered, URL-loaded and service workers not |
+| Time zone | the profile's own process pool with WebKit's time zone override (SPI, where present; `ProfileProcessPool`), else a JS shim (`Intl`, `Date` getters, offsets) | in the engine: every scope, workers included; the shim: blob workers covered, URL-loaded and service workers not |
 | Geolocation | JS shim (deny / fixed coordinates) | approximation |
 | WebRTC exposure | off in the engine (private `WKPreferences` property, as Lockdown Mode) or a JS shim (relay-only) | native when off; approximation for relay-only |
 
@@ -187,7 +188,8 @@ driving Safari through `safaridriver`:
   0 must-match keys differ.
 - `scripts/live_compare.py` loads the same pages in Safari and in on-screen profile windows of the
   same outer size (`PrivacyBrowser --capture-sites`, `SiteCapture.swift`), once for a default profile
-  and once with the time-zone and WebRTC wrappers running on Safari's own values. Both JSON sets
+  and once with a time zone (Safari's own: in the engine where WebKit allows it, §6, else the shim's
+  wrapper) and the WebRTC wrapper running on Safari's own values. Both JSON sets
   are kept in the `fingerprint-surfaces` artifact.
 
 What is identical, key by key:
@@ -232,9 +234,10 @@ What still differs, and why it cannot be changed from the app:
 - **WebRTC** is switched off by the default policy, and with a proxy unless the packet tunnel
   carries it (SOCKS5 only, relay candidates only; [TUNNEL.md](TUNNEL.md)). Without a proxy,
   `relayOnly` and `unrestricted` keep it.
-- **The replacement `Date` and `Intl.DateTimeFormat`** (only with a time zone set) list `length`
-  and `name` before their statics: JavaScriptCore orders a script function's own properties that
-  way whatever the definition order.
+- **The replacement `Date` and `Intl.DateTimeFormat`** (only where the time zone is the shim's: a
+  WebKit without the process pool's time zone override, §6) list `length` and `name` before their
+  statics: JavaScriptCore orders a script function's own properties that way whatever the
+  definition order.
 - **Media devices before permission.** On the CI runner Safari lists `audioinput,videoinput`, a
   profile `audioinput` only. WebKit hides a kind the app has no capture authorisation for (macOS
   privacy settings, per app); granting the app camera access once aligns it.
@@ -452,7 +455,7 @@ cannot be inspected from the page anyway.
 | Setting | Implementation | Native? | Gaps |
 |---|---|---|---|
 | User agent | `WKWebView.customUserAgent`, with presets in the editor | yes (string only) | `navigator.platform`, vendor, feature set and TLS fingerprint still identify WebKit on macOS (§2). Use the *Safari on macOS* preset; iPhone/iPad presets are UA-only and inconsistent |
-| Time zone | JS: `Intl.DateTimeFormat` default `timeZone`; `Date` local getters and setters, `getTimezoneOffset` (with the sub-minute offsets of historical dates), the local constructor forms `new Date(y, m, d, …)`, `Date.parse` and `new Date(string)` for strings without an offset, `toString`, `toDateString`, `toTimeString`, `toLocale*String`, `getYear`/`setYear`. A worker made from a blob of the page (how fingerprinting scripts make theirs) starts with the same shim: the blob is handed to the engine as [shim, page's blob], so the worker keeps its blob: location, relative URLs, CSP, strict mode and line numbers | no | Workers loaded from a URL and service workers use the host zone (rewriting them would change their location); under a CSP without `'unsafe-eval'` a blob worker does too. JavaScriptCore lists the replacement `Date`'s and `Intl.DateTimeFormat`'s `length`/`name` before their statics (`Object.getOwnPropertyNames(Date)`), which no script function can avoid. `Intl.DateTimeFormat().format()` without an explicit zone follows the shim; other `Intl` constructors carry no zone |
+| Time zone | In the engine where WebKit allows it: each profile runs in a WebKit process pool of its own (`ProfileProcessPool`), whose configuration names the zone (`_WKProcessPoolConfiguration.timeZoneOverride`, SPI since macOS 13). WebKit hands it to every process the pool launches, which sets it process-wide before any script runs, so the page, its frames, dedicated, shared and service workers, `Date`, `Intl` and `Temporal` report it as the engine's own. The shim checks at document start, in each realm, that the engine reports the zone and then replaces nothing; a realm whose engine does not (a process the override did not reach) gets the shim below. Without the SPI, JS: `Intl.DateTimeFormat` default `timeZone`; `Date` local getters and setters, `getTimezoneOffset` (with the sub-minute offsets of historical dates), the local constructor forms `new Date(y, m, d, …)`, `Date.parse` and `new Date(string)` for strings without an offset, `toString`, `toDateString`, `toTimeString`, `toLocale*String`, `getYear`/`setYear`. A worker made from a blob of the page (how fingerprinting scripts make theirs) starts with the same shim: the blob is handed to the engine as [shim, page's blob], so the worker keeps its blob: location, relative URLs, CSP, strict mode and line numbers | in the engine where the SPI exists; otherwise no | Only without the SPI: workers loaded from a URL and service workers use the host zone (rewriting them would change their location); under a CSP without `'unsafe-eval'` a blob worker does too. JavaScriptCore lists the replacement `Date`'s and `Intl.DateTimeFormat`'s `length`/`name` before their statics (`Object.getOwnPropertyNames(Date)`), which no script function can avoid. `Intl.DateTimeFormat().format()` without an explicit zone follows the shim; other `Intl` constructors carry no zone |
 | Geolocation | JS: `navigator.geolocation` answers as WebKit does for a user who said no ("User denied Geolocation") or who allowed the fixed coordinates; positions and errors are instances of the real interfaces with no own properties (values from the prototype getters and `toJSON`); `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks (WebKit's `hasBeenRequested`), then 'denied'/'granted' | no | The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed |
 | Time zone from the proxy | At launch, a geolocation service (ipinfo.io, then geojs.io, ipwho.is) is asked *through the profile's proxy* where it exits; the profile runs in that zone. The last answer per proxy is used on later launches when the new lookup takes over 1 s (and when a lookup fails), that lookup finishing in the background; with nothing remembered the launch waits for it at most 3 s (§4) | — | A third-party request per launch (HTTPS, via the proxy only, no cookies). Off per profile with *Time zone of the proxy's location*; *Override time zone* replaces the zone but keeps the lookup, for the country (language). Without any answer the host zone is used; a time zone that changed applies from the next launch |
 | Language | Process-wide: set before WebKit's first process from the first launched profile's proxy country (`WebContentLanguage`) | partly | WKWebView has no per-view `Accept-Language` / `navigator.languages` API; later profiles of the same run share the first one's language |
