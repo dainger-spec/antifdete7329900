@@ -131,5 +131,9 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
 - Passwords are not merged per entry yet: concurrent edits on two devices resolve to the
   remote file, and the local one is kept as `passwords.bin.conflict`. Adding tombstones
   to `PasswordVault` would allow the same merge as bookmarks.
+- `PasswordEntry.lastUsedAt` (when AutoFill last filled the login) and the configuration's
+  `passwordAutoFill` / `passwordNeverSaveSites` are optional fields: an older build reads the
+  files and drops them when it rewrites one (a login then loses its last-used date, a profile
+  its "Never for This Website" list).
 - Dates are encoded as ISO 8601 with whole seconds, so ordering within the same second is
   arbitrary.

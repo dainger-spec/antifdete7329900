@@ -38,6 +38,7 @@ struct ProfileDraft {
     var historyEnabled = true
     /// 0 = keep forever.
     var historyRetentionDays = 90
+    var passwordAutoFill = true
 
     struct RetentionChoice: Hashable {
         var days: Int
@@ -86,6 +87,7 @@ struct ProfileDraft {
         safeBrowsing = c.safeBrowsingEnabled
         historyEnabled = c.historyEnabled
         historyRetentionDays = c.historyRetentionDays ?? 0
+        passwordAutoFill = c.passwordAutoFill
     }
 
     func makeConfiguration() throws -> ProfileConfiguration {
@@ -156,6 +158,9 @@ struct ProfileDraft {
         configuration.safeBrowsingEnabled = safeBrowsing
         configuration.historyEnabled = historyEnabled
         configuration.historyRetentionDays = historyRetentionDays == 0 ? nil : historyRetentionDays
+        // The "Never for This Website" list is the browser's; saving keeps the stored one
+        // (ProfileConfiguration.keepingStoredState).
+        configuration.passwordAutoFill = passwordAutoFill
         try configuration.validate()
         return configuration
     }
@@ -202,6 +207,7 @@ struct ProfileEditorView: View {
                 generalSection
                 identitySection
                 historySection
+                passwordsSection
                 networkSection
                 privacySection
                 if let error {
@@ -262,6 +268,14 @@ struct ProfileEditorView: View {
             }
         } header: { Text(L("editor.section.history")) } footer: {
             Text(L("editor.history.footer"))
+        }
+    }
+
+    private var passwordsSection: some View {
+        Section {
+            Toggle(L("editor.passwords.autoFill"), isOn: $draft.passwordAutoFill)
+        } header: { Text(L("editor.section.passwords")) } footer: {
+            Text(L("editor.passwords.footer"))
         }
     }
 

@@ -24,6 +24,8 @@ final class ProfileManager: ObservableObject {
     /// Called after a profile's own windows all close (not on explicit stop/lock), so the app
     /// can bring the Profiles window back to the front.
     var onReturnToProfiles: (() -> Void)?
+    /// "Passwords…" in a profile's AutoFill list: open that profile's password manager.
+    var onShowPasswords: ((UUID) -> Void)?
 
     private let repository: ProfileRepository
     private let webDataVault: WebDataStoreVault
@@ -32,6 +34,8 @@ final class ProfileManager: ObservableObject {
     private var sessions: [UUID: BrowserSession] = [:]
     /// Profile keys are held only while the profile runs (needed to seal on stop).
     private var keys: [UUID: SymmetricKey] = [:]
+    /// The password vault a launch opened, until its session holds it (`passwordVault(for:)`).
+    private var launchingVaults: [UUID: PasswordVault] = [:]
     /// Set by `shutDown()` (Lock / Quit): no launch starts, and a launch suspended in an await
     /// seals what it decrypted instead of opening a window that would outlive this manager.
     private(set) var isShuttingDown = false
@@ -103,6 +107,9 @@ final class ProfileManager: ObservableObject {
             do { try proxy.validate() } catch { throw LaunchError.invalidProxy(host: proxy.host) }
         }
         let passwords = try repository.passwordVault(for: id)
+        // Until the session exists, the password manager uses this same vault (one writer per file).
+        launchingVaults[id] = passwords
+        defer { launchingVaults[id] = nil }
         // Ephemeral profiles keep history in memory only; bookmarks are explicit user data and persist.
         let history = try repository.historyStore(for: id, key: key, policy: stored.historyPolicy,
                                                   persistent: !stored.ephemeral)
@@ -160,8 +167,11 @@ final class ProfileManager: ObservableObject {
         noteLanguageMismatch(for: id, wanted: location?.webLanguage)
         let session: BrowserSession
         do {
+            let passwordSettings = ProfilePasswordSettings(repository: repository, profileID: id, profileName: summary.name,
+                                                           launchConfiguration: stored)
+            passwordSettings.showManager = { [weak self] in self?.onShowPasswords?(id) }
             session = try BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
-                                         passwordVault: passwords, library: library)
+                                         passwordVault: passwords, passwordSettings: passwordSettings, library: library)
         } catch {
             tunnel.unregister(profile: id)
             // Thrown before the session created its data store (see BrowserSession.init).
@@ -405,9 +415,11 @@ final class ProfileManager: ObservableObject {
 
     // MARK: Passwords
 
-    /// The running session's vault if the profile is running (single writer), otherwise a fresh one.
+    /// The running (or launching) profile's vault, so that each file has one writer; otherwise a
+    /// fresh one.
     func passwordVault(for id: UUID) throws -> PasswordVault {
         if let session = sessions[id] { return session.passwordVault }
+        if let launching = launchingVaults[id] { return launching }
         return try repository.passwordVault(for: id)
     }
 

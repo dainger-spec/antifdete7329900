@@ -132,6 +132,7 @@ final class SelfTest {
             try await tabsAndLibrary(repository)
             try await windowLifecycle(repository)
             try await dialogTeardown(repository)
+            try await passwordAutoFill(repository)
             try await lockDuringLaunch(repository)
             try await quitFromFocusedPage(repository)
             try await forcedSealAtQuit(repository)
@@ -1025,7 +1026,7 @@ final class SelfTest {
         try await manager.launch(watched.id)
         var edited = try repository.loadConfiguration(watched.id)
         edited.warnOnProxyIPChange = false
-        try repository.saveConfiguration(edited.keepingProxyLocation(of: repository.loadConfiguration(watched.id)), for: watched.id)
+        try repository.saveConfiguration(edited.keepingStoredState(of: repository.loadConfiguration(watched.id)), for: watched.id)
         let settled = await lookupsDone()
         try await manager.stop(watched.id)
         let afterOff = try repository.loadConfiguration(watched.id).lastProxyLocation
@@ -1043,7 +1044,7 @@ final class SelfTest {
         try await manager.launch(watched.id)
         var replaced = try repository.loadConfiguration(watched.id)
         replaced.proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9)
-        try repository.saveConfiguration(replaced.keepingProxyLocation(of: repository.loadConfiguration(watched.id)), for: watched.id)
+        try repository.saveConfiguration(replaced.keepingStoredState(of: repository.loadConfiguration(watched.id)), for: watched.id)
         let replacedSettled = await lookupsDone()
         try await manager.stop(watched.id)
         let afterReplace = try repository.loadConfiguration(watched.id).lastProxyLocation
@@ -1207,6 +1208,268 @@ final class SelfTest {
         session.shutDown()
         session.shutDown() // idempotent; must not crash or call back
         check("lifecycle: shutDown is idempotent", allClosedCalls == 1 && session.windowCount == 0)
+    }
+
+    // MARK: Password AutoFill
+
+    /// US keyboard key codes of the characters the AutoFill checks type.
+    private static let keyCodes: [Character: UInt16] = [
+        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12, "w": 13,
+        "e": 14, "r": 15, "y": 16, "t": 17, "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23, "9": 25, "7": 26,
+        "8": 28, "0": 29, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46,
+    ]
+
+    private enum SignInSubmit { case returnKey, button }
+
+    /// Password AutoFill in a profile window, on the self-test proxy's sign-in pages (`/pb-login`,
+    /// `/pb-frame`): the page world sees nothing of it; a sign-in the user typed is offered for
+    /// saving — Save, Update for a new password, nothing anywhere on the site after "Never for This
+    /// Website" — and a password a page script wrote is not; a login field lists the site's saved
+    /// logins and fills the chosen one as Safari does (`input` and `change`, `:autofill` where the
+    /// world allows it); a sign-in by script (fields removed after a click) and a sign-up form are
+    /// recognised; a frame of another site is offered none. Clicks and typing are real events where
+    /// the runner delivers them to the window; otherwise the isolated world is driven directly
+    /// (reported).
+    private func passwordAutoFill(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("password AutoFill checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let profile = try repository.create(name: "Passwords", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let vault = session.passwordVault
+        var answer = PasswordPromptAnswer.save
+        TabPasswordAutoFill.testPrompts = []
+        TabPasswordAutoFill.testFocusLog = []
+        TabPasswordAutoFill.testAnswer = { _ in answer }
+        let policy = NSApp.activationPolicy()
+        defer {
+            TabPasswordAutoFill.testAnswer = nil
+            AutoFillPanel.current?.dismiss()
+            session.shutDown()
+            try? repository.delete(profile.id)
+            NSApp.setActivationPolicy(policy)
+        }
+        // Real key and mouse events reach a web view in a key window, which the self-test's
+        // .prohibited activation policy never gives.
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.activate(ignoringOtherApps: true)
+        let controller = session.openWindow(url: nil)
+        guard let tab = controller.selectedTab, let window = controller.window else {
+            check("passwords: a profile window with a tab", false)
+            return
+        }
+        window.makeKeyAndOrderFront(nil)
+        let webView = tab.webView
+        info("password AutoFill world: \(PasswordAutoFill.worldKind); key window: \(window.isKeyWindow)")
+
+        func open(_ string: String) async -> Bool {
+            guard let url = URL(string: string) else { return false }
+            AutoFillPanel.current?.dismiss()
+            tab.load(url)
+            let loaded = await waitUntil(timeout: 15) { !tab.isLoading && tab.url == url }
+            _ = window.makeFirstResponder(webView)
+            return loaded
+        }
+        func page(_ body: String, _ arguments: [String: Any] = [:]) async -> Any? {
+            try? await js(webView, body, arguments)
+        }
+        func autoFillWorld(_ body: String, _ arguments: [String: Any] = [:]) async -> Any? {
+            try? await js(webView, body, arguments, world: PasswordAutoFill.world)
+        }
+        func eventually(_ timeout: TimeInterval, _ condition: () async -> Bool) async -> Bool {
+            let deadline = Date().addingTimeInterval(timeout)
+            while Date() < deadline {
+                if await condition() { return true }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            return await condition()
+        }
+        func sendKey(_ keyCode: UInt16, _ characters: String) {
+            for type in [NSEvent.EventType.keyDown, .keyUp] {
+                if let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [],
+                                                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                                context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                                                isARepeat: false, keyCode: keyCode) {
+                    window.sendEvent(event)
+                }
+            }
+        }
+        func type(_ text: String) {
+            for character in text { sendKey(Self.keyCodes[character] ?? 0, String(character)) }
+        }
+        /// A click in the middle of `selector`; `frame`: the selector of the iframe it is in.
+        func click(_ selector: String, inFrame frame: String? = nil) async -> Bool {
+            let script = """
+                const frame = frameSelector ? document.querySelector(frameSelector) : null;
+                // In the frame: its first input, at the default 8 px body margin.
+                if (frame) { const f = frame.getBoundingClientRect(); return [f.left + 8 + 40, f.top + 8 + 8]; }
+                const r = document.querySelector(selector).getBoundingClientRect();
+                return [r.left + r.width / 2, r.top + r.height / 2];
+                """
+            guard let center = await page(script, ["selector": selector, "frameSelector": frame ?? ""]) as? [Double],
+                  center.count == 2 else { return false }
+            let zoom = webView.pageZoom
+            let point = webView.convert(NSPoint(x: center[0] * zoom, y: center[1] * zoom), to: nil)
+            for (type, pressure) in [(NSEvent.EventType.leftMouseDown, Float(1)), (.leftMouseUp, Float(0))] {
+                if let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                                                  timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                                  context: nil, eventNumber: 0, clickCount: 1, pressure: pressure) {
+                    window.sendEvent(event)
+                }
+            }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            return true
+        }
+        var realInput: Bool?
+        /// Types the sign-in and submits it (Return, or the page's button); without real input on
+        /// this runner, writes the values from the page and marks them typed in the AutoFill world.
+        func signIn(_ username: String, _ password: String, confirm: Bool = false, submit: SignInSubmit = .returnKey) async {
+            let fields = [("#user", username), ("#pass", password)] + (confirm ? [("#confirm", password)] : [])
+            let selectors = fields.map { $0.0 }, values = fields.map { $0.1 }
+            if realInput != false {
+                for (selector, value) in fields {
+                    _ = await click(selector)
+                    type(value)
+                }
+                let typed = await eventually(2) { await self.inputValues(webView, selectors) == values }
+                if realInput == nil {
+                    realInput = typed
+                    info(typed ? "password AutoFill: real clicks and typing reach the page"
+                               : "password AutoFill: no real key events reach the page on this runner; the isolated world is driven directly")
+                }
+                if typed {
+                    AutoFillPanel.current?.dismiss()
+                    if submit == .returnKey { sendKey(36, "\r") } else { _ = await click("#go") }
+                    return
+                }
+            }
+            _ = await page("for (const [s, v] of pairs) document.querySelector(s).value = v; return true;",
+                           ["pairs": fields.map { [$0.0, $0.1] }])
+            for (selector, _) in fields { _ = await autoFillWorld("return globalThis.__pbPasswords.markTyped(s);", ["s": selector]) }
+            if submit == .returnKey {
+                _ = await page("document.querySelector('form').requestSubmit(); return true;")
+            } else {
+                _ = await autoFillWorld("return globalThis.__pbPasswords.arm('#go');")
+                _ = await page("document.querySelector('#go').click(); return true;")
+            }
+        }
+        func prompts(_ count: Int) async -> Bool { await waitUntil(timeout: 6) { TabPasswordAutoFill.testPrompts.count >= count } }
+        func savedLogins() -> [String] { vault.allEntries().map { "\($0.origin) \($0.username) \($0.password)" } }
+        let login = "http://login.selftest.invalid/pb-login"
+
+        guard await open(login) else {
+            check("passwords: the sign-in page loads through the proxy", false, tab.url?.absoluteString ?? "nil")
+            return
+        }
+        let pageSees = await page("return [typeof window.webkit, typeof window.__pbPasswords].join(',');") as? String
+        check("passwords: the page world sees no AutoFill script and no message handler (no window.webkit, as in Safari)",
+              pageSees == "undefined,undefined", pageSees ?? "nil")
+
+        // A page script that fills in and submits a password: not a sign-in by the user.
+        _ = await page("document.querySelector('#user').value = 'mallory'; document.querySelector('#pass').value = 'scripted';"
+                       + " document.querySelector('form').requestSubmit(); return true;")
+        _ = await waitUntil(timeout: 5) { tab.url?.path == "/pb-welcome" && !tab.isLoading }
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        check("passwords: a password a page script wrote and submitted is not offered for saving",
+              TabPasswordAutoFill.testPrompts.isEmpty, "\(TabPasswordAutoFill.testPrompts)")
+
+        // Save.
+        _ = await open(login)
+        await signIn("ann", "s3cret1")
+        let saveAsked = await prompts(1)
+        check("passwords: a sign-in the user typed is offered for saving (Save Password), with its user name, and saved",
+              saveAsked && TabPasswordAutoFill.testPrompts.first == PasswordPromptRecord(kind: .save, username: "ann", host: "login.selftest.invalid")
+                  && savedLogins() == ["http://login.selftest.invalid ann s3cret1"],
+              "\(TabPasswordAutoFill.testPrompts) \(savedLogins())")
+
+        // Suggestions under the field; the chosen login filled as Safari fills it.
+        _ = await open(login)
+        if realInput == true {
+            _ = await click("#user")
+        } else {
+            _ = await autoFillWorld("return globalThis.__pbPasswords.suggest('#user');")
+        }
+        let listed = await waitUntil(timeout: 5) { AutoFillPanel.current != nil }
+        check("passwords: a login field lists the site's saved logins under it",
+              listed && AutoFillPanel.current?.titles == ["ann"],
+              "\(AutoFillPanel.current?.titles ?? []) focus: \(TabPasswordAutoFill.testFocusLog)")
+        AutoFillPanel.current?.choose(at: 0)
+        let filledIn = await eventually(5) { await self.inputValues(webView, ["#user", "#pass"]) == ["ann", "s3cret1"] }
+        let events = await page("return pbEvents.join(' ');") as? String ?? ""
+        check("passwords: choosing a login fills user name and password, with input and change events as Safari's AutoFill",
+              filledIn && events.contains("user:input user:change") && events.contains("pass:input pass:change"), events)
+        if PasswordAutoFill.worldKind.hasPrefix("autofill") {
+            let marked = await page("return document.querySelector('#pass').matches(':-webkit-autofill');") as? Bool
+            check("passwords: filled fields are marked :autofill (Safari's highlight)", marked == true, "\(String(describing: marked))")
+        } else {
+            info("password AutoFill: no AutoFill world in this WebKit; filled fields are not marked :autofill")
+        }
+        check("passwords: the filled login is marked used (offered first next time)", vault.allEntries().first?.lastUsedAt != nil)
+        _ = await page("document.querySelector('form').requestSubmit(); return true;")
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        check("passwords: submitting a filled-in login asks nothing", TabPasswordAutoFill.testPrompts.count == 1,
+              "\(TabPasswordAutoFill.testPrompts)")
+
+        // Update.
+        _ = await open(login)
+        await signIn("ann", "n3wpass2")
+        let updateAsked = await prompts(2)
+        check("passwords: a new password for a saved user name is offered as Update Password, and replaces the old one",
+              updateAsked && TabPasswordAutoFill.testPrompts.last?.kind == .update
+                  && savedLogins() == ["http://login.selftest.invalid ann n3wpass2"],
+              "\(TabPasswordAutoFill.testPrompts) \(savedLogins())")
+
+        // Never for This Website: nothing asked on any page of the site afterwards.
+        answer = .never
+        _ = await open(login)
+        await signIn("bob", "b0bpass")
+        let neverAsked = await prompts(3)
+        let neverSites = (try? repository.loadConfiguration(profile.id).passwordNeverSaveSites) ?? []
+        answer = .save
+        _ = await open("http://www.selftest.invalid/pb-login")
+        await signIn("cid", "c1dpass")
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        check("passwords: after Never for This Website nothing is saved or asked on the site",
+              neverAsked && neverSites == ["http://login.selftest.invalid"] && TabPasswordAutoFill.testPrompts.count == 3
+                  && savedLogins().count == 1,
+              "\(neverSites) \(TabPasswordAutoFill.testPrompts) \(savedLogins())")
+
+        // A sign-in by script: no form submission, the fields removed after the button's click.
+        _ = await open("http://app.othersite.invalid/pb-login?spa=1")
+        await signIn("dan", "d4npass", submit: .button)
+        let scriptAsked = await prompts(4)
+        check("passwords: a sign-in by script (fields removed after the click) is offered for saving",
+              scriptAsked && TabPasswordAutoFill.testPrompts.last == PasswordPromptRecord(kind: .save, username: "dan", host: "app.othersite.invalid"),
+              "\(TabPasswordAutoFill.testPrompts)")
+
+        // A sign-up form: the new password (equal to its confirmation) is the one saved.
+        _ = await open("http://signup.thirdsite.invalid/pb-login?signup=1")
+        await signIn("eve", "e7epass", confirm: true)
+        let signUpAsked = await prompts(5)
+        check("passwords: a sign-up form's new password is offered for saving",
+              signUpAsked && savedLogins().contains("http://signup.thirdsite.invalid eve e7epass"), "\(savedLogins())")
+
+        // A frame of another site inside the page: it is offered nothing saved for the page's site.
+        if realInput == true {
+            TabPasswordAutoFill.testFocusLog = []
+            _ = await open("http://login.selftest.invalid/pb-frame?src=http://evil.othertest.invalid/pb-login")
+            try? await Task.sleep(nanoseconds: 1_500_000_000) // the frame's own page loads
+            _ = await click("#user", inFrame: "#frame")
+            let focused = await waitUntil(timeout: 5) { TabPasswordAutoFill.testFocusLog.contains { $0.hasPrefix("evil.othertest.invalid:") } }
+            check("passwords: a login field in a frame of another site is offered none of the page's logins",
+                  focused && TabPasswordAutoFill.testFocusLog.contains("evil.othertest.invalid:0") && AutoFillPanel.current == nil,
+                  "\(TabPasswordAutoFill.testFocusLog)")
+        } else {
+            info("password AutoFill: the frame check needs real clicks (a cross-origin frame cannot be focused by script); skipped")
+        }
+    }
+
+    /// The values of the inputs `selectors` in the page.
+    private func inputValues(_ webView: WKWebView, _ selectors: [String]) async -> [String] {
+        (try? await js(webView, "return selectors.map((s) => (document.querySelector(s) || {}).value || '');",
+                       ["selectors": selectors])) as? [String] ?? []
     }
 
     // MARK: Dialogs (regression for the teardown crash)
@@ -1464,13 +1727,20 @@ final class SelfTest {
             history: try repository.historyStore(for: id, key: key, policy: configuration.historyPolicy, persistent: !configuration.ephemeral),
             bookmarks: try repository.bookmarkStore(for: id, key: key),
             recordsHistory: configuration.historyEnabled)
-        return try BrowserSession(profileID: id, profileName: try repository.summary(for: id).name, configuration: configuration,
-                              passwordVault: try repository.passwordVault(for: id), library: library)
+        let name = try repository.summary(for: id).name
+        return try BrowserSession(profileID: id, profileName: name, configuration: configuration,
+                                  passwordVault: try repository.passwordVault(for: id),
+                                  passwordSettings: ProfilePasswordSettings(repository: repository, profileID: id, profileName: name,
+                                                                            launchConfiguration: configuration),
+                                  library: library)
     }
 
-    private func js(_ webView: WKWebView, _ body: String, _ arguments: [String: Any] = [:]) async throws -> Any? {
-        try await withCheckedThrowingContinuation { continuation in
-            webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: .page) { result in
+    /// Runs `body` in the page's world (or `world`), as page scripts would.
+    private func js(_ webView: WKWebView, _ body: String, _ arguments: [String: Any] = [:],
+                    world: WKContentWorld? = nil) async throws -> Any? {
+        let world = world ?? .page
+        return try await withCheckedThrowingContinuation { continuation in
+            webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: world) { result in
                 switch result {
                 case .success(let value): continuation.resume(returning: value)
                 case .failure(let error): continuation.resume(throwing: error)

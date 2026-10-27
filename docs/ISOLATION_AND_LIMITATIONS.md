@@ -40,6 +40,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Several SOCKS5 profiles at once | three profiles behind three SOCKS5 proxies, one with username/password authentication, are launched together through the app's launch path and load at the same time: each page arrives through its own proxy, by name, with its own credentials; after one stops the others keep loading through theirs; wrong or missing SOCKS5 credentials fail closed |
 | Launch speed | with a location remembered for the proxy, a launch waits at most 1 s for a 4 s lookup (the lookup finishes in the background, and its new time zone is remembered and noted for the next launch); with nothing remembered it waits at most 3 s |
 | Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy and credentials) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported or stored, and turning it off, or replacing the proxy, while a lookup is under way leaves no new IP stored and nothing reported |
+| Password AutoFill | in a profile window on the self-test proxy's sign-in pages: the page world has no `window.webkit` and no trace of the script; a password a page script wrote and submitted is not offered; a typed sign-in is offered (Save, saved with its user name), a new password for it as Update, nothing anywhere on the site after Never for This Website; a login field lists the site's saved login and choosing it fills both fields with `input` and `change` (and `:autofill` where WebKit allows the world); a filled-in login submitted again asks nothing; a sign-in by script (fields removed after the button's click) and a sign-up form (new password = confirmation) are offered; a frame of another site is offered none |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
@@ -476,19 +477,63 @@ the page's `navigator` with a worker's, which a user script cannot reach.
 
 ## 8. Passwords
 
-WKWebView has no AutoFill integration: neither Safari's AutoFill nor the system
-credential provider is available to third-party WKWebView hosts on macOS. The prototype
-offers:
+Each profile has its own password vault (`passwords.bin`, AES-GCM under a key derived from the
+profile key, §3). Safari's profiles share one set of passwords; here a login saved in one
+profile is never offered in another. WKWebView on macOS 26 has no AutoFill API (Safari's
+AutoFill and the system credential provider are not available to third-party web views), so
+the browser does it itself, as close to Safari as that allows.
 
-- **Fill:** an explicit button. It runs in the isolated `.defaultClient` JS world, so page
-  scripts can't intercept the function or the prototypes it uses. Before filling, it
-  checks that `location.origin` equals the entry's origin. Main frame only.
-- **Save:** an explicit button that reads the typed values, with a confirmation dialog.
-- **HTTP Basic/Digest:** answered from the vault on the first challenge, with a prompt
-  after that.
+**What matches Safari**
 
-Origins are matched exactly (scheme, host and port) without subdomain matching, so
-credentials are never offered to a different site.
+| Safari | Here |
+|---|---|
+| After a sign-in: "Do you want to save your password for “site”?" — **Save Password / Not Now / Never for This Website** | The same question as a window sheet, after a submitted form, or after a click or Return when the sign-in fields leave the page (a sign-in by script). Navigation is not held up by it |
+| A saved user name with a new password: **Update Password / Not Now** | The same; the same password again asks nothing |
+| Change-password and sign-up forms (`autocomplete="new-password"`, two or three password fields) | The new password is the one saved, only when it equals its confirmation |
+| Two-step sign-ins (user name, then password on the next page) | The user name of the first page is kept for 10 minutes for the password page of the same site |
+| Nothing is filled without the user (Safari has asked for interaction since 2014) | Focusing a login field (or clicking it, or ↓) lists the site's saved logins under it; a login is filled only when chosen (click, or ↓/↑ and Return). Never on page load, never into hidden fields |
+| Logins grouped by site; a saved login offered on other hosts of the same site | Registrable domain from the Public Suffix List (`login.example.co.uk` and `www.example.co.uk` share; `alice.github.io` and `bob.github.io` do not); the page's own host first, then the most recently used. The list shows the host of a login saved on another host |
+| Filling fires `input`, then `change` (plain bubbling events) | The same events; React, Vue and Angular forms take the values |
+| `autocomplete="off"` ignored for logins | Ignored |
+| HTTP authentication sheet with **Remember this password** | The same; the next challenge is answered from the vault |
+| Passwords app: locked until authenticated; search, view, copy, edit, delete; excluded websites | **⋯ → Passwords…**: locked until the master password is entered; the same operations, and the "Never" websites with **Remove** |
+| AutoFill switch ("User names and passwords") | Per profile: **AutoFill user names and passwords** in the profile editor (on by default) |
+
+**Where it differs, and why**
+
+- **Detection is heuristic.** Without an AutoFill hook, a sign-in is a submitted form whose
+  password the user typed (trusted `input` events), a form navigation (read during the policy
+  decision, held for at most 0.3 s; `form.submit()` fires no `submit` event), or the password
+  field leaving the page within 5 s of a click on a button or Return. A sign-in that does none
+  of these (fields kept on the page after a fetch) is not offered; the toolbar's save button
+  then saves what the fields hold. A failed sign-in is offered too, as Safari does at form
+  submission.
+- **Events are untrusted.** Values are set from the isolated world, so the `input`/`change`
+  events have `isTrusted == false` (Safari's are trusted); a site that rejects untrusted
+  events must be typed into. macOS 27 adds trusted events for AutoFill worlds; not used yet.
+- **`:autofill` highlight and the key button** need a world with AutoFill scripting: public API
+  from macOS 27, WebKit SPI from macOS 15.4 (`_WKContentWorldConfiguration.allowAutofill`,
+  used only when present, as the private `WKPreferences` in §2). Without it the fields keep
+  their own style. The self-test reports which world this WebKit gave.
+- **Stricter than Safari:** a login saved on an https page is never offered on an http page
+  (Chrome and Firefox refuse too; Safari offers it with a warning); ports must match.
+- **Not implemented:** strong-password suggestions for sign-up forms, Touch ID before filling,
+  "Recently Deleted", import/export, shared credentials between related domains, passkeys.
+- **Frames.** A frame of another site is offered that site's logins only, under a header that
+  names it; the frame's origin always comes from WebKit, never from the page. An opaque origin
+  (sandboxed frame, `data:`) gets nothing. Placing the list under a field in a cross-origin
+  frame uses the click into it.
+
+**Isolation from pages.** The script runs in its own `WKContentWorld`, and its message handler
+is registered only there: the page world has no `window.webkit` (as in Safari, checked against
+a plain WKWebView and the runner's Safari, §2), cannot see or call the script, cannot post to
+the handler, and cannot replace the prototypes it uses. A page script that writes a password and
+submits the form is not offered for saving (self-test). Before writing a value the script checks
+that the document is the one the user focused and that `location.origin` is the frame's.
+
+**Storage.** Entries: origin, user name, password, note, changed and last-used dates. The
+"Never" websites and the switch are in the profile's encrypted configuration. The password
+manager asks for the master password (one Argon2id derivation) each time it is opened.
 
 ## 9. App Sandbox
 

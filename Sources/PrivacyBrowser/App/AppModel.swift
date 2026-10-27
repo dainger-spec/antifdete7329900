@@ -13,6 +13,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var profiles: [ProfileSummary] = []
     @Published private(set) var isWorking = false
     @Published var errorMessage: String?
+    /// A profile whose password manager should open (from "Passwords…" in a browser window).
+    @Published var passwordsRequest: ProfileSummary?
     /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
     /// vault it tried).
     @Published private(set) var unlockFailed = false
@@ -146,6 +148,11 @@ final class AppModel: ObservableObject {
             self?.activateProfilesWindow()
             self?.refresh()
         }
+        manager.onShowPasswords = { [weak self] id in
+            guard let self, let summary = self.profiles.first(where: { $0.id == id }) else { return }
+            self.activateProfilesWindow()
+            self.passwordsRequest = summary
+        }
         managerObservation = manager.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         self.repository = repository
         self.manager = manager
@@ -221,7 +228,7 @@ final class AppModel: ObservableObject {
     func updateProfile(_ id: UUID, name: String, configuration: ProfileConfiguration) throws {
         guard let repository else { return }
         let stored = try? repository.loadConfiguration(id)
-        try repository.saveConfiguration(configuration.keepingProxyLocation(of: stored), for: id)
+        try repository.saveConfiguration(configuration.keepingStoredState(of: stored), for: id)
         if try repository.summary(for: id).name != name {
             try repository.rename(id, to: name)
         }
@@ -248,6 +255,25 @@ final class AppModel: ObservableObject {
     func passwordVault(for id: UUID) throws -> PasswordVault {
         guard let manager else { throw CoreError.vaultNotFound }
         return try manager.passwordVault(for: id)
+    }
+
+    /// Whether `password` is the master password (asked before saved passwords are shown).
+    func verifyMasterPassword(_ password: String) async -> Bool {
+        guard let vault = repository?.vault else { return false }
+        return await Task.detached(priority: .userInitiated) { vault.verifyPassword(password) }.value
+    }
+
+    /// The sites a profile never saves passwords for ("Never for This Website").
+    func neverSavedSites(for id: UUID) -> [String] {
+        (try? repository?.loadConfiguration(id).passwordNeverSaveSites) ?? []
+    }
+
+    /// Removes a site from that list: the browser offers to save passwords there again.
+    func removeNeverSavedSite(_ site: String, for id: UUID) throws {
+        guard let repository else { return }
+        var configuration = try repository.loadConfiguration(id)
+        configuration.passwordNeverSaveSites.removeAll { $0 == site }
+        try repository.saveConfiguration(configuration, for: id)
     }
 
     // MARK: Sync (optional)

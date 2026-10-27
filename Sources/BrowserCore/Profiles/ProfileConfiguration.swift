@@ -42,7 +42,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// proxy and credentials, `ProxyLocation.endpoint(of:)`, e.g. a provider that rotates or
     /// reassigned the address). Needs the lookup through the proxy, which then runs even without
     /// `matchProxyLocation`. The exit IP is stored only while this is on
-    /// (`keepingProxyLocation(of:)`). Default off.
+    /// (`keepingStoredState(of:)`). Default off.
     public var warnOnProxyIPChange: Bool
 
     /// APPROXIMATION: JavaScript removal/wrapping of `RTCPeerConnection`.
@@ -68,6 +68,16 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// and the behaviour set, unless `userAgent` overrides the UA. `nil` → the default generation.
     public var deviceGenerationID: String?
 
+    /// AutoFill for user names and passwords, as Safari's setting of that name: after a sign-in the
+    /// browser offers to save what was typed, and a login field shows the profile's saved logins
+    /// for the site. Off: nothing is offered or saved; the explicit toolbar buttons still work.
+    /// Default on; older configurations decode as on.
+    public var passwordAutoFill: Bool
+
+    /// Websites the user answered "Never for This Website" for: no offer to save there (any page
+    /// of the same site, `WebOrigin.site`). Origins, `scheme://host[:port]`.
+    public var passwordNeverSaveSites: [String]
+
     /// Set by the app for one launch, never stored: the relay in the packet tunnel that carries
     /// this profile's WebRTC through its SOCKS5 proxy. Nil when the tunnel is not available.
     public var webRTCRelay: WebRTCRelay?
@@ -85,7 +95,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 deviceGenerationID: String? = nil,
                 matchProxyLocation: Bool = true,
                 lastProxyLocation: ProxyLocation? = nil,
-                warnOnProxyIPChange: Bool = false) {
+                warnOnProxyIPChange: Bool = false,
+                passwordAutoFill: Bool = true,
+                passwordNeverSaveSites: [String] = []) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -100,6 +112,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.matchProxyLocation = matchProxyLocation
         self.lastProxyLocation = lastProxyLocation
         self.warnOnProxyIPChange = warnOnProxyIPChange
+        self.passwordAutoFill = passwordAutoFill
+        self.passwordNeverSaveSites = passwordNeverSaveSites
     }
 
     /// A new profile seeded from a generation: the generation supplies the UA (by reference,
@@ -164,12 +178,16 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         return cached
     }
 
-    /// This configuration as an edit saves it: the proxy location is the launches' cache, not part
-    /// of the edit, so it is kept as `stored` has it (a lookup may have written a newer one while
-    /// the editor was open), and its exit IP only while the warning that asks for it is on.
-    public func keepingProxyLocation(of stored: ProfileConfiguration?) -> ProfileConfiguration {
+    /// This configuration as an edit saves it: what the browser keeps itself is not part of the
+    /// edit, so it is kept as `stored` has it (a lookup or a "Never for This Website" may have
+    /// written something newer while the editor was open): the proxy location, with its exit IP
+    /// only while the warning that asks for it is on, and the sites passwords are never saved for.
+    public func keepingStoredState(of stored: ProfileConfiguration?) -> ProfileConfiguration {
         var edited = self
-        if let stored { edited.lastProxyLocation = stored.lastProxyLocation }
+        if let stored {
+            edited.lastProxyLocation = stored.lastProxyLocation
+            edited.passwordNeverSaveSites = stored.passwordNeverSaveSites
+        }
         if !edited.warnOnProxyIPChange || edited.proxy == nil { edited.lastProxyLocation?.exitIP = nil }
         return edited
     }
@@ -195,7 +213,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
-             matchProxyLocation, lastProxyLocation, warnOnProxyIPChange
+             matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -220,6 +238,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         // A cache: one that no longer decodes is dropped, never a reason to fail the profile.
         lastProxyLocation = (try? c.decodeIfPresent(ProxyLocation.self, forKey: .lastProxyLocation)) ?? nil
         warnOnProxyIPChange = try c.decodeIfPresent(Bool.self, forKey: .warnOnProxyIPChange) ?? defaults.warnOnProxyIPChange
+        passwordAutoFill = try c.decodeIfPresent(Bool.self, forKey: .passwordAutoFill) ?? defaults.passwordAutoFill
+        passwordNeverSaveSites = try c.decodeIfPresent([String].self, forKey: .passwordNeverSaveSites) ?? defaults.passwordNeverSaveSites
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -240,6 +260,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(matchProxyLocation, forKey: .matchProxyLocation)
         try c.encodeIfPresent(lastProxyLocation, forKey: .lastProxyLocation)
         try c.encode(warnOnProxyIPChange, forKey: .warnOnProxyIPChange)
+        try c.encode(passwordAutoFill, forKey: .passwordAutoFill)
+        try c.encode(passwordNeverSaveSites, forKey: .passwordNeverSaveSites)
     }
 
     public var historyPolicy: HistoryStore.Policy {

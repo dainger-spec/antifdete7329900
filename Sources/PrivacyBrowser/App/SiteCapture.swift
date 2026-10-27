@@ -144,7 +144,11 @@ final class SiteCapture {
         UserDefaults.standard.set(profileSpec.allInterfaces ?? false, forKey: "PBTunnelAllInterfaces")
         defer { UserDefaults.standard.removeObject(forKey: "PBTunnelAllInterfaces") }
         let session = try BrowserSession(profileID: summary.id, profileName: summary.name, configuration: configuration,
-                                         passwordVault: try repository.passwordVault(for: summary.id), library: library)
+                                         passwordVault: try repository.passwordVault(for: summary.id),
+                                         passwordSettings: ProfilePasswordSettings(repository: repository, profileID: summary.id,
+                                                                                   profileName: summary.name,
+                                                                                   launchConfiguration: configuration),
+                                         library: library)
         defer { session.shutDown() }
         let controller = session.openWindow(url: nil)
         // 60 pt from the screen's top-left corner, where live_compare.py puts Safari's window too

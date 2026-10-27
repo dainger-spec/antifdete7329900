@@ -21,7 +21,6 @@ final class BrowserWindow: NSWindow {
 final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
     private weak var session: BrowserSession?
     private let profileName: String
-    private let passwordVault: PasswordVault
     private let library: ProfileLibrary
 
     private(set) var tabs: [BrowserTab] = []
@@ -50,7 +49,6 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     init(session: BrowserSession) {
         self.session = session
         self.profileName = session.profileName
-        self.passwordVault = session.passwordVault
         self.library = session.library
 
         // A mobile generation's window is the declared device's screen: its web content can never
@@ -98,8 +96,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         bookmarkButton = toolbarButton("star", "Bookmark this page (⌘D)", #selector(toggleBookmark))
         let bookmarksMenuButton = toolbarButton("book", "Bookmarks", #selector(showBookmarksMenu(_:)))
         let historyButton = toolbarButton("clock.arrow.circlepath", "History (⌘Y)", #selector(showHistory))
-        let fillButton = toolbarButton("key.fill", "Fill saved password", #selector(fillPassword(_:)))
-        let saveButton = toolbarButton("key.viewfinder", "Save password from this page", #selector(savePassword))
+        let fillButton = toolbarButton("key.fill", L("toolbar.fillPassword"), #selector(fillPassword(_:)))
+        let saveButton = toolbarButton("key.viewfinder", L("toolbar.savePassword"), #selector(savePassword))
 
         addressField.placeholderString = "Search or enter address"
         addressField.delegate = self
@@ -188,6 +186,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     func selectTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
+        selectedTab?.passwords.closeSuggestions()
         selectedIndex = index
         let webView = tabs[index].webView
         if webView.superview !== webContainer {
@@ -386,64 +385,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     // MARK: Passwords
 
+    /// The key button: the page's saved logins, under the button (as the list under a login field).
     @objc private func fillPassword(_ sender: NSButton) {
-        guard let tab = selectedTab, let url = tab.url, let origin = PasswordEntry.normalizedOrigin(for: url) else { return }
-        let entries = passwordVault.entries(for: url)
-        switch entries.count {
-        case 0:
-            tab.showMessage(String(format: L("pw.noSaved"), origin))
-        case 1:
-            fill(entries[0], origin: origin, in: tab)
-        default:
-            let menu = NSMenu()
-            for entry in entries {
-                let item = NSMenuItem(title: entry.username.isEmpty ? "(no username)" : entry.username,
-                                      action: #selector(fillFromMenu(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = entry.id
-                menu.addItem(item)
-            }
-            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
-        }
+        selectedTab?.passwords.showSuggestionsFromToolbar(anchor: sender)
     }
 
-    @objc private func fillFromMenu(_ item: NSMenuItem) {
-        guard let tab = selectedTab, let id = item.representedObject as? UUID, let url = tab.url,
-              let origin = PasswordEntry.normalizedOrigin(for: url),
-              let entry = passwordVault.entries(for: url).first(where: { $0.id == id }) else { return }
-        fill(entry, origin: origin, in: tab)
-    }
-
-    private func fill(_ entry: PasswordEntry, origin: String, in tab: BrowserTab) {
-        PasswordAutofill.fill(entry, origin: origin, in: tab.webView) { [weak tab] filled in
-            if !filled { tab?.showMessage(L("pw.noField")) }
-        }
-    }
-
+    /// Saves what the page's password fields hold (the question a sign-in asks, on demand).
     @objc private func savePassword() {
-        guard let tab = selectedTab, let url = tab.url, let origin = PasswordEntry.normalizedOrigin(for: url) else { return }
-        PasswordAutofill.capture(origin: origin, in: tab.webView) { [weak self, weak tab] captured in
-            guard let self, let tab else { return }
-            guard let captured else {
-                tab.showMessage(L("pw.typeFirst"))
-                return
-            }
-            let alert = NSAlert()
-            alert.messageText = String(format: L("pw.saveTitle"), captured.origin)
-            alert.informativeText = captured.username.isEmpty ? L("pw.noUsernameDetected") : String(format: L("pw.usernameLabel"), captured.username)
-            alert.addButton(withTitle: L("common.save"))
-            alert.addButton(withTitle: L("common.cancel"))
-            guard let window = self.window else { return }
-            alert.beginSheetModal(for: window) { response in
-                guard response == .alertFirstButtonReturn else { return }
-                do {
-                    try self.passwordVault.upsert(PasswordEntry(origin: captured.origin, username: captured.username,
-                                                                password: captured.password))
-                } catch {
-                    tab.showMessage(String(format: L("pw.couldNotSave"), error.localizedDescription))
-                }
-            }
-        }
+        selectedTab?.passwords.saveFromPage()
     }
 
     // MARK: Lifecycle

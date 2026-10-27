@@ -26,6 +26,10 @@ Pages also report the request's `Accept-Language` header (`accept-language=...`)
 "Europe/Berlin", "country": "DE"}`; `?ip=`, `?tz=` and `?delay=<seconds>` change the answer) for
 the proxy-location checks, and `/pb-served.json` lists the paths served so far (so the self-test
 can tell which requests reached the proxy, e.g. that a beacon did not).
+
+`/pb-login` is a sign-in form for the password AutoFill checks (`?signup=1`: a new password and
+its confirmation; `?spa=1`: no form, a button whose script removes the fields, as a sign-in by
+fetch does; `?autofocus=1`), and `/pb-frame?src=<url>` a page with that URL in an iframe.
 """
 import argparse
 import base64
@@ -55,6 +59,27 @@ SERVED: list = []
 SERVED_LOCK = threading.Lock()
 
 
+def login_page(params: dict) -> bytes:
+    """The sign-in form of the password AutoFill checks; page-world listeners log the events
+    the fields receive (`pbEvents`)."""
+    autofocus = " autofocus" if params.get("autofocus") else ""
+    new = "new-password" if params.get("signup") else "current-password"
+    fields = (
+        f'<input id="user" name="login" type="text" autocomplete="username"{autofocus}>'
+        f'<input id="pass" name="password" type="password" autocomplete="{new}">'
+        + ('<input id="confirm" name="confirm" type="password" autocomplete="new-password">' if params.get("signup") else "")
+    )
+    if params.get("spa"):
+        body = (f'<div id="box">{fields}<button id="go" type="button">Sign in</button></div>'
+                "<script>document.getElementById('go').addEventListener('click', () =>"
+                " setTimeout(() => document.getElementById('box').remove(), 300));</script>")
+    else:
+        body = f'<form id="f" action="/pb-welcome" method="post">{fields}<button id="go" type="submit">Sign in</button></form>'
+    script = ("<script>window.pbEvents = []; for (const id of ['user', 'pass']) for (const type of ['input', 'change'])"
+              " { const el = document.getElementById(id); if (el) el.addEventListener(type, () => pbEvents.push(id + ':' + type)); }</script>")
+    return f'<!doctype html><html><head><meta charset="utf-8"><title>PB login</title></head><body>{body}{script}</body></html>'.encode()
+
+
 def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
     """Answers the (tunnelled or forwarded) HTTP request `request` for `path`."""
     accept_language = next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
@@ -73,6 +98,13 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         body, content_type = json.dumps(answer_json).encode(), "application/json"
     elif plain_path == "/pb-served.json":
         body, content_type = json.dumps(served).encode(), "application/json"
+    elif plain_path == "/pb-login":
+        body, content_type = login_page({key: values[0] for key, values in parse_qs(query).items()}), "text/html; charset=utf-8"
+    elif plain_path == "/pb-frame":
+        src = parse_qs(query).get("src", ["about:blank"])[0].replace('"', "%22")
+        body = (f'<!doctype html><html><head><title>PB frame</title></head><body>'
+                f'<iframe id="frame" src="{src}" width="480" height="220" style="border:0"></iframe></body></html>').encode()
+        content_type = "text/html; charset=utf-8"
     else:
         body = (
             f"<html><head><title>PB proxied {path}</title></head>"

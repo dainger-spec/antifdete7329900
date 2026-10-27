@@ -108,7 +108,7 @@ Application Support/PrivacyBrowser/      (0700)
   sync-state.bin                  AES-GCM(sync key, per-object revision + hash)        [only after sync]
   profiles/<uuid>/
     config.bin                    AES-GCM(profile key, ProfileConfiguration JSON)
-    passwords.bin                 AES-GCM(password key, [PasswordEntry] JSON)
+    passwords.bin                 AES-GCM(password key, [PasswordEntry] JSON: origin, user name, password, note, dates)
     history.bin                   AES-GCM(history key, HistoryDocument JSON)          [not for ephemeral profiles]
     bookmarks.bin                 AES-GCM(bookmarks key, BookmarkDocument JSON)
     webdata.pbsa                  streaming encrypted archive of WebKit's data dirs
@@ -162,6 +162,37 @@ At launch the profile key also opens the password vault, the history and the boo
 (`ProfileLibrary`). History changes are saved encrypted after a 3 s debounce, off the main
 thread; `BrowserSession.shutDown()` flushes them synchronously before the data store is
 released.
+
+## Password AutoFill
+
+```
+page frame (any origin)                     app (main thread)
+┌──────────────────────────────┐   focus    ┌─────────────────────────────────────────────┐
+│ world "PrivacyBrowser.       │──────────▶ │ PasswordAutoFillHandler (session)            │
+│  Passwords" (isolated):      │   submit   │   origin = frameInfo.securityOrigin          │
+│  PasswordAutoFillScript      │──────────▶ │   → BrowserTab.passwords (TabPasswordAutoFill)│
+│  · typed-field tracking      │  username  │      · candidates: PasswordMatching (site)   │
+│  · submit / click / Return   │──────────▶ │      · AutoFillPanel under the field         │
+│  · fill(token, field, …)  ◀──┼────────────│      · Save / Update / Never sheet            │
+└──────────────────────────────┘ callAsync  │      · PasswordVault, ProfilePasswordSettings │
+page world: no window.webkit,    JavaScript └─────────────────────────────────────────────┘
+no access to the script
+```
+
+- The script and its message handler live in their own `WKContentWorld` (with AutoFill
+  scripting where WebKit offers it: `:autofill` marking and the key button), registered only
+  there, so the page world is what a plain WKWebView's (and Safari's) is.
+- A frame's origin always comes from WebKit (`WKScriptMessage.frameInfo.securityOrigin`);
+  logins are offered and filled by `PasswordMatching` (registrable domain via the Public Suffix
+  List, same port, never an https login on an http page). The script checks the document token
+  and `location.origin` again before it writes a value.
+- A save is offered only for a password field that received trusted user input; the question
+  is a sheet on the window (`BrowserTab.presentAlert`, answered "Not Now" when the tab closes).
+  A form navigation (`WKNavigationType.formSubmitted`) is held for at most 0.3 s while the
+  script reads the typed password (for `form.submit()`, which fires no `submit` event).
+- "Never for This Website" and the on/off switch are in `ProfileConfiguration`
+  (`passwordNeverSaveSites`, `passwordAutoFill`), read afresh for each decision, so edits apply
+  to a running profile.
 
 Quitting with profiles running seals them all before the process exits (`QuitCoordinator`):
 the first `terminate:` is cancelled, windows close and profiles seal in the normal run loop,
@@ -242,5 +273,6 @@ configs read as the default generation).
   `@MainActor`. That matches WebKit's main-thread requirement.
 - Key derivation (Argon2id) and archive I/O run on detached tasks, so the UI stays responsive.
 - `ProfileRepository` and `PasswordVault` serialise mutations with a lock. While a profile
-  runs, the manager hands out that session's `PasswordVault` instance, so each file has
-  only one writer.
+  runs (and from the moment its launch opened the vault), the manager hands out that
+  session's `PasswordVault` instance, so each file has only one writer. The vault posts
+  `didChangeNotification` after a write, so the password manager shows what the browser saved.

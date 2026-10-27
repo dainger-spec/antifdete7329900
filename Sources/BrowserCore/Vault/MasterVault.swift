@@ -153,6 +153,12 @@ public final class UnlockedVault: @unchecked Sendable {
 
     private var vaultSalt: Data { withUnsafeBytes(of: header.vaultID.uuid) { Data($0) } }
 
+    /// Whether `password` opens this vault (one key derivation: Argon2id, a fraction of a second).
+    /// Asked before saved passwords are shown, as Safari asks for Touch ID or the login password.
+    public func verifyPassword(_ password: String) -> Bool {
+        (try? MasterVault.unlock(header: header, root: root, password: password)) != nil
+    }
+
     /// Re-wraps the VMK under a key derived from `newPassword` (Argon2id, or PBKDF2 with
     /// `iterations` for tests). Data keys are unchanged.
     public func changePassword(current: String, new newPassword: String, iterations: Int? = nil) throws {

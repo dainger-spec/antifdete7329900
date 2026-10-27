@@ -24,6 +24,8 @@ struct BrowserTabContext {
     let profileName: String
     let userAgent: String?
     let passwordVault: PasswordVault
+    /// AutoFill on or off, and the sites passwords are never saved for, as they are now.
+    let passwordSettings: ProfilePasswordSettings
     let library: ProfileLibrary
     /// The profile proxy's user name and password, answered to the proxy's own auth challenges.
     let proxyCredential: URLCredential?
@@ -62,6 +64,10 @@ final class BrowserTab: NSObject {
     /// A dialog of this tab is waiting for the user (self-test hook).
     var hasPendingSheet: Bool { !pendingSheets.isEmpty }
 
+    /// Password AutoFill in this tab: suggestions, filling, the save question.
+    private(set) lazy var passwords = TabPasswordAutoFill(tab: self, vault: context.passwordVault,
+                                                          settings: context.passwordSettings)
+
     init(configuration: WKWebViewConfiguration, context: BrowserTabContext) {
         self.context = context
         self.webView = WKWebView(frame: .zero, configuration: configuration)
@@ -87,6 +93,8 @@ final class BrowserTab: NSObject {
 
     var url: URL? { webView.url }
     var isLoading: Bool { webView.isLoading }
+    /// Shown in its window (the selected tab's web view is the only one in the window).
+    var isSelected: Bool { webView.window != nil }
 
     func load(_ url: URL) {
         webView.load(URLRequest(url: url))
@@ -140,6 +148,7 @@ final class BrowserTab: NSObject {
     func tearDown() {
         guard !tornDown else { return }
         tornDown = true
+        passwords.closeSuggestions()
         dismissPendingSheets()
         observations.forEach { $0.invalidate() }
         observations.removeAll()
@@ -152,7 +161,7 @@ final class BrowserTab: NSObject {
 
     // MARK: Dialog helpers
 
-    private func presentAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+    func presentAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         presentSheet(alert.window, begin: { alert.beginSheetModal(for: $0, completionHandler: $1) }, respond: completion)
     }
 
@@ -215,6 +224,14 @@ extension BrowserTab: WKNavigationDelegate {
             host?.tab(self, openInBackground: navigationAction.request)
             decisionHandler(.cancel)
         } else if ["http", "https", "about", "blob", "data"].contains(scheme) {
+            // A form submission: the AutoFill script reads a password typed into it first (a form
+            // submitted by `form.submit()` sends no `submit` event). sourceFrame can be nil although
+            // Swift declares it non-optional; read through KVC.
+            if navigationAction.navigationType == .formSubmitted,
+               let source = (navigationAction as NSObject).value(forKey: "sourceFrame") as? WKFrameInfo {
+                passwords.formSubmitted(from: source) { decisionHandler(.allow) }
+                return
+            }
             decisionHandler(.allow)
         } else {
             // mailto:, tel:, custom app schemes: handing them to other apps would leave the
@@ -230,6 +247,7 @@ extension BrowserTab: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        passwords.closeSuggestions()
         if let url = webView.url { recordVisit(url) }
     }
 
@@ -306,12 +324,20 @@ extension BrowserTab: WKNavigationDelegate {
             completionHandler(.useCredential, URLCredential(user: entry.username, password: entry.password, persistence: .forSession))
             return
         }
-        promptForHTTPCredentials(host: space.host, realm: space.realm) { credential in
-            if let credential {
-                completionHandler(.useCredential, credential)
-            } else {
+        promptForHTTPCredentials(host: space.host, realm: space.realm) { [weak self] credential, remember in
+            guard let credential else {
                 completionHandler(.cancelAuthenticationChallenge, nil)
+                return
             }
+            // "Remember this password", as Safari's sign-in sheet: kept in the profile's vault.
+            if remember, let self, let origin = PasswordEntry.normalizedOrigin(for: url), let password = credential.password {
+                do {
+                    try self.context.passwordVault.upsert(PasswordEntry(origin: origin, username: credential.user ?? "", password: password))
+                } catch {
+                    self.log.error("Could not save the HTTP sign-in: \(String(describing: error), privacy: .public)")
+                }
+            }
+            completionHandler(.useCredential, credential)
         }
     }
 
@@ -320,7 +346,7 @@ extension BrowserTab: WKNavigationDelegate {
         webView.reload()
     }
 
-    private func promptForHTTPCredentials(host: String, realm: String?, completion: @escaping (URLCredential?) -> Void) {
+    private func promptForHTTPCredentials(host: String, realm: String?, completion: @escaping (URLCredential?, Bool) -> Void) {
         let alert = NSAlert()
         alert.messageText = String(format: L("auth.login"), host)
         alert.informativeText = realm.map { String(format: L("auth.realm"), $0) } ?? ""
@@ -328,16 +354,21 @@ extension BrowserTab: WKNavigationDelegate {
         user.placeholderString = L("passwords.placeholder.username")
         let pass = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         pass.placeholderString = L("passwords.placeholder.password")
-        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
+        let remember = NSButton(checkboxWithTitle: L("auth.remember"), target: nil, action: nil)
+        remember.frame = NSRect(x: 0, y: 0, width: 260, height: 20)
+        user.frame.origin.y = 56
+        pass.frame.origin.y = 26
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 80))
         accessory.addSubview(user)
         accessory.addSubview(pass)
+        accessory.addSubview(remember)
         alert.accessoryView = accessory
         alert.addButton(withTitle: L("auth.logIn"))
         alert.addButton(withTitle: L("common.cancel"))
         presentAlert(alert) { response in
             completion(response == .alertFirstButtonReturn
                        ? URLCredential(user: user.stringValue, password: pass.stringValue, persistence: .forSession)
-                       : nil)
+                       : nil, remember.state == .on)
         }
     }
 }

@@ -57,6 +57,11 @@ struct ProfileListView: View {
         }
         .sheet(item: $editing) { target in ProfileEditorView(target: target) }
         .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
+        // "Passwords…" in a browser window's AutoFill list.
+        .onReceive(model.$passwordsRequest.compactMap { $0 }) { profile in
+            passwordsFor = profile
+            model.passwordsRequest = nil
+        }
         .sheet(isPresented: $changingPassword) { ChangePasswordView() }
         .sheet(isPresented: $showingSync) { SyncSettingsView() }
         .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
@@ -197,90 +202,5 @@ private struct ProfileRow: View {
         if running { return L("profiles.row.running") }
         guard let last = profile.lastLaunchedAt else { return L("profiles.row.neverLaunched") }
         return String(format: L("profiles.row.lastUsed"), last.formatted(.relative(presentation: .named)))
-    }
-}
-
-struct PasswordListView: View {
-    let profile: ProfileSummary
-    @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var entries: [PasswordEntry] = []
-    @State private var origin = ""
-    @State private var username = ""
-    @State private var password = ""
-    @State private var error: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(String(format: L("passwords.title"), profile.name)).font(.title3.bold())
-            List {
-                ForEach(entries) { entry in
-                    HStack {
-                        IconBadge(symbol: "key.fill", size: 28)
-                        VStack(alignment: .leading) {
-                            Text(entry.origin)
-                            Text(entry.username.isEmpty ? L("passwords.noUsername") : entry.username)
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(role: .destructive) { remove(entry) } label: { Image(systemName: "trash") }
-                            .buttonStyle(.borderless)
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(Theme.fieldBackground)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-            .frame(minHeight: 200)
-            HStack {
-                TextField(L("passwords.placeholder.origin"), text: $origin)
-                TextField(L("passwords.placeholder.username"), text: $username)
-                SecureField(L("passwords.placeholder.password"), text: $password)
-                Button(L("passwords.add"), action: add).disabled(password.isEmpty)
-            }
-            .textFieldStyle(.roundedBorder)
-            if let error { Text(error).foregroundStyle(.red).font(.caption) }
-            HStack {
-                Spacer()
-                Button(L("common.done")) { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(20)
-        .frame(width: 640, height: 460)
-        .background(Theme.pageBackground)
-        .onAppear(perform: reload)
-    }
-
-    private func reload() {
-        do {
-            entries = try model.passwordVault(for: profile.id).allEntries()
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    private func add() {
-        guard let url = URL(string: origin.trimmingCharacters(in: .whitespaces)),
-              let normalized = PasswordEntry.normalizedOrigin(for: url) else {
-            error = L("passwords.error.origin")
-            return
-        }
-        do {
-            try model.passwordVault(for: profile.id).upsert(PasswordEntry(origin: normalized, username: username, password: password))
-            origin = ""; username = ""; password = ""; error = nil
-            reload()
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    private func remove(_ entry: PasswordEntry) {
-        do {
-            try model.passwordVault(for: profile.id).remove(id: entry.id)
-            reload()
-        } catch {
-            self.error = error.localizedDescription
-        }
     }
 }

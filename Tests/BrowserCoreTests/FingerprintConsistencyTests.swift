@@ -184,17 +184,17 @@ final class ProxyLocationTests: XCTestCase {
         let stored = ProfileConfiguration(proxy: proxy, lastProxyLocation: newer, warnOnProxyIPChange: true)
         // The editor opened before the lookup stored `newer`: saving keeps `newer`.
         var edited = ProfileConfiguration(proxy: proxy, lastProxyLocation: older, warnOnProxyIPChange: true)
-        XCTAssertEqual(edited.keepingProxyLocation(of: stored).lastProxyLocation, newer)
+        XCTAssertEqual(edited.keepingStoredState(of: stored).lastProxyLocation, newer)
         // The warning turned off, or the proxy removed: the location stays, its exit IP goes.
         edited.warnOnProxyIPChange = false
-        XCTAssertEqual(edited.keepingProxyLocation(of: stored).lastProxyLocation?.timeZoneIdentifier, "Asia/Tokyo")
-        XCTAssertNil(edited.keepingProxyLocation(of: stored).lastProxyLocation?.exitIP)
+        XCTAssertEqual(edited.keepingStoredState(of: stored).lastProxyLocation?.timeZoneIdentifier, "Asia/Tokyo")
+        XCTAssertNil(edited.keepingStoredState(of: stored).lastProxyLocation?.exitIP)
         edited.warnOnProxyIPChange = true
         edited.proxy = nil
-        XCTAssertNil(edited.keepingProxyLocation(of: stored).lastProxyLocation?.exitIP)
+        XCTAssertNil(edited.keepingStoredState(of: stored).lastProxyLocation?.exitIP)
         // Nothing stored to read (a failed read): the edit's own copy, by the same rule.
         edited.proxy = proxy
-        XCTAssertEqual(edited.keepingProxyLocation(of: nil).lastProxyLocation, older)
+        XCTAssertEqual(edited.keepingStoredState(of: nil).lastProxyLocation, older)
     }
 
     func testProxyLocationFieldsRoundTripAndDefaultOnForOldConfigs() throws {

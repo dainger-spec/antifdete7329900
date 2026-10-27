@@ -29,11 +29,14 @@ final class BrowserSession {
     let profileName: String
     let configuration: ProfileConfiguration
     let passwordVault: PasswordVault
+    let passwordSettings: ProfilePasswordSettings
     let library: ProfileLibrary
     var onAllWindowsClosed: (() -> Void)?
 
     private(set) var dataStore: WKWebsiteDataStore?
     private let userContentController: WKUserContentController
+    /// Receives the AutoFill script's messages (registered in its own content world only).
+    private let passwordHandler = PasswordAutoFillHandler()
     private var windows: [BrowserWindowController] = []
     private var libraryWindow: LibraryWindowController?
     private var isClosing = false
@@ -41,12 +44,13 @@ final class BrowserSession {
     /// Throws when the profile's proxy cannot be applied — before any data store exists, so a
     /// profile with a broken proxy never starts on a direct connection (fail-closed).
     init(profileID: UUID, profileName: String, configuration: ProfileConfiguration,
-         passwordVault: PasswordVault, library: ProfileLibrary) throws {
+         passwordVault: PasswordVault, passwordSettings: ProfilePasswordSettings, library: ProfileLibrary) throws {
         let proxies = try ProxyConfigurationFactory.make(configuration.proxy)
         self.profileID = profileID
         self.profileName = profileName
         self.configuration = configuration
         self.passwordVault = passwordVault
+        self.passwordSettings = passwordSettings
         self.library = library
 
         // `.nonPersistent()` needs WebKit initialized but does not initialize it, and an ephemeral
@@ -69,6 +73,9 @@ final class BrowserSession {
                     .error("No ping-load blocker: dns-prefetch of this profile may resolve outside its proxy")
             }
         }
+        passwordHandler.session = self
+        PasswordAutoFill.install(in: userContentController, handler: passwordHandler,
+                                 testHooks: CommandLine.arguments.contains("--self-test"))
     }
 
     var windowCount: Int { windows.count }
@@ -78,7 +85,7 @@ final class BrowserSession {
 
     var tabContext: BrowserTabContext {
         BrowserTabContext(profileName: profileName, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version),
-                          passwordVault: passwordVault, library: library,
+                          passwordVault: passwordVault, passwordSettings: passwordSettings, library: library,
                           proxyCredential: configuration.proxy.flatMap { proxy in
                               proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
                           })
@@ -143,6 +150,14 @@ final class BrowserSession {
         return ordered.first { controller in windows.contains { $0 === controller } } ?? windows.last
     }
 
+    /// The tab showing `webView`, in any window of this profile.
+    func tab(for webView: WKWebView) -> BrowserTab? {
+        for controller in windows {
+            if let tab = controller.tabs.first(where: { $0.webView === webView }) { return tab }
+        }
+        return nil
+    }
+
     func windowDidClose(_ controller: BrowserWindowController) {
         windows.removeAll { $0 === controller }
         if windows.isEmpty && !isClosing {
@@ -190,6 +205,8 @@ final class BrowserSession {
         }
         library.flush()
         userContentController.removeAllUserScripts()
+        // The controller holds its handlers strongly.
+        userContentController.removeAllScriptMessageHandlers()
         dataStore = nil
     }
 }

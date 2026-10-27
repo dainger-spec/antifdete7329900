@@ -90,8 +90,9 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
   profiles launched and loading at once, the ping-load blocker, the proxy-location time zone,
-  launches that wait only briefly on the lookup through the proxy, the exit-IP warning, tabs,
-  history, bookmarks, the
+  launches that wait only briefly on the lookup through the proxy, the exit-IP warning, password
+  AutoFill (save, update, never, suggestions and fill, sign-in by script, sign-up, a frame of
+  another site, nothing for a password a page script wrote), tabs, history, bookmarks, the
   device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
 - the surface comparison with the runner's real Safari (`scripts/safari_reference.py`): every
@@ -129,8 +130,16 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    - The 📖 menu opens bookmarks.
    - ⌘Y opens the Library window: searchable history grouped by day, with Clear (last hour,
      today, all), and bookmark management (add, edit, folders, drag to reorder, delete).
-6. **Passwords:** 🔑 fills a saved login and the save button stores what you typed. Saved
-   passwords also answer HTTP Basic/Digest. Manage them under **⋯ → Passwords…**.
+6. **Passwords** (as Safari's AutoFill, per profile):
+   - After you sign in, the window asks **Save Password / Not Now / Never for This Website**
+     (or **Update Password** for a new password of a saved user name).
+   - Clicking into a login field lists the site's saved logins under it; ↓/↑ and Return or a
+     click fill one. Nothing is filled before you choose. 🔑 in the toolbar lists them too.
+   - HTTP Basic/Digest sign-ins can be remembered (**Remember this password**) and are answered
+     from the vault afterwards.
+   - **⋯ → Passwords…** (master password first) shows, edits, adds and deletes saved passwords,
+     and the websites they are never saved for. **⋯ → Edit…** → **AutoFill user names and passwords**
+     turns it off for a profile.
 7. **Stop**, or closing the last window, saves history and encrypts the profile's website
    data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
    and waits until every profile is sealed.
@@ -158,7 +167,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Russian / English UI | `Localizable.strings` (ru default, en fallback), deterministic bundle lookup |
 | Stable window lifecycle | closing a profile window never quits or crashes the app (use-after-free fixed); verified by the self-test |
 | Encryption at rest of everything the app writes | AES-256-GCM; Argon2id (64 MiB, t=3, p=4; older PBKDF2 vaults upgraded on unlock) → vault key → HKDF per purpose |
-| Password storage under a key derived from the user's password | Per-profile vault; explicit fill/save; HTTP auth |
+| Password storage under a key derived from the user's password | Per-profile vault (`passwords.bin`, AES-GCM under a key derived from the profile key); the manager asks for the master password before it shows anything |
+| Password AutoFill, Safari's behaviour | Save / Update / Never after a sign-in the user typed; suggestions under login fields of the site (registrable domain, Public Suffix List), filled only on choice, with `input` and `change` as Safari; two-step sign-ins, sign-ins by script, sign-up forms; no https login on an http page; never into hidden fields or a frame of another site. **Verified end to end by the self-test** |
 | App Sandbox | Default build; entitlements in `Resources/PrivacyBrowser.entitlements` (documented in the limitations doc, §9); container migration. **Sandbox enforcement and migration verified in CI** |
 | Encrypted sync client | Engine with CAS writes, per-record merges for bookmarks and history, tombstones; folder transport; HTTP transport for a documented API |
 
@@ -173,7 +183,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | WebRTC through a profile's SOCKS5 proxy | Packet-tunnel system extension (`NE=1` builds): a TURN relay per profile on a virtual address, relaying through the proxy's UDP ASSOCIATE; several profiles with different proxies at once; IPv4 and IPv6 ([docs/TUNNEL.md](docs/TUNNEL.md)). Without it, or with an HTTP proxy, WebRTC is off in proxied profiles, with a warning | Needs a paid Apple Developer team and user approval; the extension itself has not run on a real Mac yet (CI cannot load it); relay-only is enforced by the page script, not the engine; starting it disconnects another VPN app's tunnel; relay candidates only; the proxy must relay UDP |
 | Navigator / screen (iPhone/iPad profiles) | Document-start JS getters on the prototypes (blob workers too) | URL-loaded workers keep the Mac's values; GPU/TLS/fonts/canvas still the Mac's |
 | Website language (`Accept-Language`, `navigator.language`) | Set once per app run, before WebKit starts, from the first launched profile's proxy country | WebKit has one language list per process: later profiles share it |
-| Password autofill | Explicit buttons in an isolated JS world | No automatic form detection; main frame only |
+| Password AutoFill | A user script in its own content world (invisible to pages; no `window.webkit` in the page world), a native suggestion list and Safari's save questions | WKWebView on macOS 26 has no AutoFill API: sign-ins are recognised by heuristics (a submitted form, or the fields leaving after a click), filled values fire untrusted `input`/`change` events, and `:autofill` (Safari's highlight) and WebKit's key button need a WebKit with AutoFill scripting; no strong-password suggestions or Touch ID; passwords are per profile (Safari profiles share them) |
 
 ### Not implemented / limited
 
@@ -194,7 +204,7 @@ Sources/
     Crypto/                        AEAD (AES-GCM), Argon2id + BLAKE2b, PBKDF2, HKDF helpers
     Vault/                         MasterVault (key hierarchy), DeviceSettings
     Profiles/                      ProfileConfiguration, ProfileRepository
-    Passwords/                     PasswordVault
+    Passwords/                     PasswordVault, PasswordMatching (site rules), PublicSuffixList
     Library/                       HistoryStore, BookmarkStore (mergeable, tombstones)
     Archive/                       encrypted chunk stream, directory archiver, WebKitDataLayout
     Sync/                          envelope/codec, engine, SyncTransport contract
@@ -203,12 +213,14 @@ Sources/
   PrivacyBrowser/                  macOS app (SwiftUI + AppKit + WebKit)
     App/                           main.swift, PrivacyBrowserApp, AppModel, AppEnvironment, SelfTest, SiteCapture
     Browser/                       ProfileManager, BrowserSession, BrowserWindowController, BrowserTab,
-                                   TabStripView, ProfileLibrary, LibraryWindowController, PasswordAutofill,
+                                   TabStripView, ProfileLibrary, LibraryWindowController, PasswordAutoFill
+                                   (+ PasswordAutoFillScript, AutoFillPanel),
                                    WebDataStoreVault, ProxyConfigurationFactory, PrivacyScripts
-    UI/                            setup/unlock, profile list, editor, library, sync settings
+    UI/                            setup/unlock, profile list, editor, passwords, library, sync settings
 Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
 Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist
 scripts/                           build-app.sh, test-shims.mjs, selftest_proxy.py, safari_reference.py,
+                                   update_public_suffix_list.py,
                                    live_compare.py + live_sites/ (pages measured in Safari and in profiles),
                                    leak_check.py (QUIC/WebRTC around a proxy)
 docs/                              architecture, isolation and limitations, sync format, sync server API
