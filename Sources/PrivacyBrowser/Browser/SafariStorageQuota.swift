@@ -13,6 +13,11 @@ import WebKit
 /// standard capacity, so a profile's pages, all its workers and its service workers report Safari's
 /// figure as the engine's own, and can store as much as in Safari.
 ///
+/// Persistent stores only. WebKit applies the ratio to the capacity of the volume a store's files
+/// are on; a non-persistent store has none, so its quota would stay 1000 MiB whatever the ratio
+/// (and lifting it with a capacity override would let one origin keep tens of gigabytes in memory).
+/// Ephemeral profiles keep WebKit's default store and the shim.
+///
 /// PLATFORM LIMITATION: private API, used only where present. Without it the store is WebKit's
 /// default and the shim reports Safari's figure in pages and blob workers (`PrivacyScripts`).
 @MainActor
@@ -33,29 +38,30 @@ enum SafariStorageQuota {
     /// This WebKit can give a data store Safari's quota.
     static var isAvailable: Bool {
         guard let configurationClass else { return false }
-        return ["initWithIdentifier:", "initNonPersistentConfiguration", "setOriginQuotaRatio:", "setTotalQuotaRatio:",
-                "setStandardVolumeCapacity:"].allSatisfy { configurationClass.instancesRespond(to: NSSelectorFromString($0)) }
+        return ["initWithIdentifier:", "setOriginQuotaRatio:", "setTotalQuotaRatio:", "setStandardVolumeCapacity:",
+                "isPersistent"].allSatisfy { configurationClass.instancesRespond(to: NSSelectorFromString($0)) }
             && WKWebsiteDataStore.instancesRespond(to: NSSelectorFromString("_initWithConfiguration:"))
     }
 
-    /// A data store with Safari's quota: persistent under `identifier` (the same directories as
-    /// `WKWebsiteDataStore(forIdentifier:)`), non-persistent without one. Nil without the SPI.
-    static func makeStore(identifier: UUID?, platform: DeviceGeneration.Platform) -> WKWebsiteDataStore? {
-        guard isAvailable else { return nil }
-        let configuration = identifier.map { WebKitObjects.make("_WKWebsiteDataStoreConfiguration", "initWithIdentifier:", $0 as NSUUID) }
-            ?? WebKitObjects.make("_WKWebsiteDataStoreConfiguration", "initNonPersistentConfiguration")
-        guard let configuration else { return nil }
+    /// A persistent data store with Safari's quota, under `identifier` (the same directories as
+    /// `WKWebsiteDataStore(forIdentifier:)`). Nil without the SPI.
+    static func makeStore(identifier: UUID, platform: DeviceGeneration.Platform) -> WKWebsiteDataStore? {
+        guard isAvailable,
+              let configuration = WebKitObjects.make("_WKWebsiteDataStoreConfiguration", "initWithIdentifier:", identifier as NSUUID)
+        else { return nil }
         configuration.setValue(NSNumber(value: originRatio), forKey: "originQuotaRatio")
         configuration.setValue(NSNumber(value: totalRatio), forKey: "totalQuotaRatio")
         configuration.setValue(NSNumber(value: standardVolumeCapacity(for: platform)), forKey: "standardVolumeCapacity")
         return WebKitObjects.make(WKWebsiteDataStore.self, "_initWithConfiguration:", configuration) as? WKWebsiteDataStore
     }
 
-    /// `store` was made with Safari's quota (it reports it in every scope; self-test and the shim).
-    static func isApplied(to store: WKWebsiteDataStore) -> Bool {
-        guard store.responds(to: NSSelectorFromString("_configuration")),
-              let configuration = store.value(forKey: "_configuration") as? NSObject,
-              configuration.responds(to: NSSelectorFromString("originQuotaRatio")) else { return false }
-        return (configuration.value(forKey: "originQuotaRatio") as? NSNumber)?.doubleValue == originRatio
+    /// `store` reports Safari's quota for `platform` in every scope: a persistent store made with its
+    /// ratio and standard volume (a store handed back by WebKit keeps the configuration it was made with).
+    static func isApplied(to store: WKWebsiteDataStore, platform: DeviceGeneration.Platform) -> Bool {
+        guard isAvailable, store.responds(to: NSSelectorFromString("_configuration")),
+              let configuration = store.value(forKey: "_configuration") as? NSObject else { return false }
+        return (configuration.value(forKey: "persistent") as? NSNumber)?.boolValue == true
+            && (configuration.value(forKey: "originQuotaRatio") as? NSNumber)?.doubleValue == originRatio
+            && (configuration.value(forKey: "standardVolumeCapacity") as? NSNumber)?.uint64Value == standardVolumeCapacity(for: platform)
     }
 }

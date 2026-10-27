@@ -11,8 +11,8 @@ import WebKit
 ///     cookies, localStorage/sessionStorage, IndexedDB, Cache API, service workers, the HTTP
 ///     disk cache, HSTS state, and credentials for that store separately from every other
 ///     store, and serves it through a separate network *session*.
-///   * Ephemeral profiles use a non-persistent store (in-memory only). Both kinds get Safari's
-///     storage quota where WebKit allows it (`SafariStorageQuota`).
+///   * Ephemeral profiles use `WKWebsiteDataStore.nonPersistent()` (in-memory only). Persistent
+///     stores get Safari's storage quota where WebKit allows it (`SafariStorageQuota`).
 ///   * Every web view of this profile — every tab of every window, and `window.open` popups,
 ///     which WebKit creates from the opener's configuration — uses this data store, and the
 ///     profile's own process pool where WebKit allows it (`ProfileProcessPool`: the profile's time
@@ -74,7 +74,7 @@ final class BrowserSession {
         WebDataStoreVault.ensureWebKitInitialized()
         let platform = configuration.deviceGeneration.platform
         let store: WKWebsiteDataStore = configuration.ephemeral
-            ? SafariStorageQuota.makeStore(identifier: nil, platform: platform) ?? .nonPersistent()
+            ? .nonPersistent()
             : WebDataStoreVault.makeStore(for: profileID, platform: platform)
         // Applies to all network loads of this data store. Empty only when no proxy is configured.
         store.proxyConfigurations = proxies
@@ -82,7 +82,7 @@ final class BrowserSession {
         let pool = ProfileProcessPool.make(timeZone: configuration.timeZoneIdentifier)
         self.processPool = pool?.processPool
         self.timeZoneByEngine = pool?.timeZone != nil
-        self.storageQuotaByEngine = SafariStorageQuota.isApplied(to: store)
+        self.storageQuotaByEngine = !configuration.ephemeral && SafariStorageQuota.isApplied(to: store, platform: platform)
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
         self.userContentController = BehaviorSets.makeUserContentController(for: configuration, timeZoneByEngine: timeZoneByEngine,
                                                                             storageQuotaByEngine: storageQuotaByEngine)

@@ -129,16 +129,23 @@ final class WebDataStoreVault {
     /// Where WebKit allows it the store gets Safari's storage quota (`SafariStorageQuota`); then it
     /// is made from a configuration naming the identifier, which uses the same directories.
     static func makeStore(for profileID: UUID, platform: DeviceGeneration.Platform = .macOS) -> WKWebsiteDataStore {
-        // A store of this profile made earlier in this run and not removed since may still be alive.
-        // `WKWebsiteDataStore(forIdentifier:)` hands that one back; a configuration would make a
-        // second store on the same directories, which must never exist.
-        let mayBeAlive = registeredStoreIDs.contains(profileID)
         registeredStoreIDs.insert(profileID)
-        if !mayBeAlive, let store = SafariStorageQuota.makeStore(identifier: profileID, platform: platform) {
+        // A store of this profile made earlier in this run may still be alive (WebKit can keep it
+        // after a removal succeeded, or after a failed seal). `WKWebsiteDataStore(forIdentifier:)`
+        // hands that one back; a configuration would make a second store on the same directories,
+        // which must never exist. The wrapper lives exactly as long as WebKit's store.
+        if liveStores.object(forKey: profileID as NSUUID) == nil,
+           let store = SafariStorageQuota.makeStore(identifier: profileID, platform: platform) {
+            liveStores.setObject(store, forKey: profileID as NSUUID)
             return store
         }
-        return WKWebsiteDataStore(forIdentifier: profileID)
+        let store = WKWebsiteDataStore(forIdentifier: profileID)
+        liveStores.setObject(store, forKey: profileID as NSUUID)
+        return store
     }
+
+    /// Every persistent store made in this run, while WebKit keeps it (weakly held).
+    private static let liveStores = NSMapTable<NSUUID, WKWebsiteDataStore>.strongToWeakObjects()
 
     // MARK: Launch
 

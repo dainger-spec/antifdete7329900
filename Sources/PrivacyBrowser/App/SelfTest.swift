@@ -230,6 +230,10 @@ final class SelfTest {
         retainedDelegates.append(uiDelegate) // the web view holds its UI delegate weakly
         webA!.uiDelegate = uiDelegate
         try await PageLoader.load(webA!, html: page, baseURL: origin)
+        // What the page sees of the store made from the configuration (not just the flag): Safari's figure.
+        let quotaA = try await js(webA!, "return (await navigator.storage.estimate()).quota;") as? NSNumber
+        check("storage quota: the persistent store reports Safari's quota in the page",
+              quotaA?.doubleValue == PrivacyScripts.safariStorageQuota(for: .macOS).rounded(.up), quotaA?.stringValue ?? "nil")
 
         check("shim: getTimezoneOffset in Asia/Tokyo",
               try await js(webA!, "return new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset();") as? Int == -540)
@@ -749,17 +753,17 @@ final class SelfTest {
         try await PageLoader.load(plain, url: scopesPage)
         let nativeShape = try await js(plain, "return \(Self.dateShape);") as? String
 
-        struct Running { let zone: String; let offset: Int; let session: BrowserSession; let tab: BrowserTab }
+        struct Running { let id: UUID; let zone: String; let offset: Int; let session: BrowserSession; let tab: BrowserTab }
         var running: [Running] = []
         defer { running.forEach { $0.tab.tearDown(); $0.session.shutDown() } }
-        // An iPhone and a macOS profile at once: different zones, and different User-Agents.
+        // An iPhone and a macOS profile at once: different zones, and different User-Agents. Persistent,
+        // as a user's profiles are (their stores get Safari's storage quota); deleted at the end.
         for (zone, offset, generation) in [("Asia/Tokyo", -540, "ios-26"), ("America/New_York", 300, DeviceGenerations.defaultID)] {
             var configuration = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: generation))
             configuration.timeZoneIdentifier = zone
-            configuration.ephemeral = true
             let profile = try repository.create(name: "Zone \(zone)", configuration: configuration)
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
-            running.append(Running(zone: zone, offset: offset, session: session,
+            running.append(Running(id: profile.id, zone: zone, offset: offset, session: session,
                                    tab: BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)))
         }
         for profile in running { try await PageLoader.load(profile.tab.webView, url: scopesPage) }
@@ -785,7 +789,7 @@ final class SelfTest {
             check("time zone (\(label)): a worker made from a blob reports the page's storage quota (Safari's)",
                   scopes["quota"] != nil && scopes["blobQuota"] == scopes["quota"], report)
             // Safari's quota in the data store itself: every scope reports it, URL and service workers too.
-            check("storage quota (\(label)): a non-persistent store has Safari's quota where WebKit allows it",
+            check("storage quota (\(label)): a persistent store has Safari's quota in WebKit where WebKit allows it",
                   profile.session.storageQuotaByEngine == SafariStorageQuota.isAvailable)
             if profile.session.storageQuotaByEngine {
                 let safariQuota = String(format: "%.0f", PrivacyScripts.safariStorageQuota(
@@ -816,6 +820,14 @@ final class SelfTest {
                 }
             }
         }
+        // The persistent profiles' data goes, as a deleted profile's does.
+        let vault = WebDataStoreVault(repository: repository)
+        for profile in running {
+            profile.tab.tearDown()
+            profile.session.shutDown()
+            await vault.deleteData(profileID: profile.id)
+        }
+        running.removeAll()
 
         // A zone given by a link name (Asia/Calcutta for Asia/Kolkata): the engine names it by its
         // primary id, and the shim must not take over for the name alone.
