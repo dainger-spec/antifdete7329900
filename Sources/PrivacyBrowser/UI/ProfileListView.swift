@@ -260,15 +260,15 @@ struct ProfilesScreen: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(L("profiles.title"))
-                    .font(.lumenTitle)
-                    .kerning(-0.2)
-                    .foregroundStyle(Theme.textPrimary)
-                Text(countLine)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textSecondary)
-                    .monospacedDigit()
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    title
+                    Text(countLine)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .monospacedDigit()
+                }
+                title
             }
             .lineLimit(1)
             Spacer(minLength: 12)
@@ -290,6 +290,7 @@ struct ProfilesScreen: View {
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
+            .tint(Theme.textSecondary)
             .fixedSize()
             .frame(width: 28, height: 28)
             .hoverHighlight(cornerRadius: Theme.controlRadius)
@@ -306,6 +307,14 @@ struct ProfilesScreen: View {
         .frame(height: 52)
         .background(Theme.surface)
         .animation(Theme.hoverAnimation, value: isWorking)
+    }
+
+    private var title: some View {
+        Text(L("profiles.title"))
+            .font(.lumenTitle)
+            .kerning(-0.2)
+            .foregroundStyle(Theme.textPrimary)
+            .fixedSize()
     }
 
     private var countLine: String {
@@ -509,11 +518,13 @@ private struct SyncStatusButton: View {
                 Text(text)
                     .font(.lumenSecondary)
                     .foregroundStyle(sync == .failed ? Theme.warning : Theme.textSecondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 8)
-            .frame(height: 26)
+            .padding(.vertical, 5)
+            .frame(minHeight: 26)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -660,6 +671,7 @@ private struct ProfileRow: View {
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
+            .tint(Theme.textSecondary)
             .fixedSize()
             .frame(width: 28, height: 28)
             .hoverHighlight(cornerRadius: Theme.controlRadius)
@@ -733,12 +745,13 @@ private struct WarmUpLine: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(String(format: L("profiles.row.warmingUp"), max(page, 1), total))
+            Text(String(format: L("profiles.row.warmUpShort"), max(page, 1), total))
                 .font(.lumenSecondary)
                 .foregroundStyle(Theme.accent)
                 .lineLimit(1)
                 .monospacedDigit()
-            LumenProgressBar(fraction: total > 0 ? Double(page) / Double(total) : 0, width: 64)
+                .fixedSize()
+            LumenProgressBar(fraction: total > 0 ? Double(page) / Double(total) : 0, width: 48)
         }
     }
 }
@@ -749,6 +762,7 @@ private struct LiveWarmUpLine: View {
 
     var body: some View {
         WarmUpLine(page: robot.visits.count, total: robot.pageCount)
+            .help(String(format: L("profiles.row.warmingUp"), max(robot.visits.count, 1), robot.pageCount))
     }
 }
 

@@ -36,26 +36,37 @@ struct PasswordListView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(String(format: L("passwords.title"), profile.name)).font(.title3.bold())
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Text(String(format: L("passwords.title"), profile.name))
+                    .font(.lumenSheetTitle)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
                 Spacer()
                 if unlocked {
-                    TextField(L("passwords.search"), text: $search)
-                        .textFieldStyle(.roundedBorder)
+                    LumenSearchField(text: $search, prompt: L("passwords.search"))
                         .frame(width: 220)
                 }
             }
-            if unlocked { content } else { locked }
-            if let error { Text(error).foregroundStyle(.red).font(.caption) }
-            HStack {
-                Spacer()
-                Button(L("common.done")) { dismiss() }.keyboardShortcut(.cancelAction)
+            .padding(.horizontal, 24)
+            .padding(.top, 22)
+            .padding(.bottom, 14)
+            Group {
+                if unlocked { content } else { locked }
             }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 16)
+            .frame(maxHeight: .infinity)
+            SheetFooter(leading: {
+                if let error { Text(error).foregroundStyle(Theme.danger).font(.lumenSecondary).lineLimit(2) }
+            }, buttons: {
+                Button(L("common.done")) { dismiss() }
+                    .buttonStyle(.lumenSecondary)
+                    .keyboardShortcut(.cancelAction)
+            })
         }
-        .padding(20)
-        .frame(width: 780, height: 540)
-        .background(Theme.pageBackground)
+        .frame(width: 780, height: 560)
+        .background(Theme.raised)
         .onReceive(NotificationCenter.default.publisher(for: PasswordVault.didChangeNotification)) { note in
             if unlocked, note.userInfo?["profileID"] as? UUID == profile.id { reload() }
         }
@@ -72,23 +83,27 @@ struct PasswordListView: View {
     // MARK: Locked
 
     private var locked: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             Spacer()
-            IconBadge(symbol: "lock.fill", size: 48)
-            Text(L("passwords.locked.title")).font(.title3.bold())
+            IconBadge(symbol: "lock", tint: Theme.textSecondary, size: 44)
+                .padding(.bottom, 4)
+            Text(L("passwords.locked.title")).font(.lumenSheetTitle).foregroundStyle(Theme.textPrimary)
             Text(String(format: L("passwords.locked.message"), profile.name))
-                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            HStack {
+                .font(.lumenBody).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            HStack(spacing: 8) {
                 SecureField(L("passwords.locked.field"), text: $masterPassword)
-                    .textFieldStyle(.roundedBorder)
+                    .lumenField()
                     .frame(width: 260)
                     .onSubmit(unlock)
                 Button(L("passwords.locked.unlock"), action: unlock)
+                    .buttonStyle(LumenButtonStyle(kind: .primary, height: 32))
                     .keyboardShortcut(.defaultAction)
                     .disabled(masterPassword.isEmpty || checking)
                 if checking { ProgressView().controlSize(.small) }
             }
-            if wrongPassword { Text(L("passwords.locked.wrong")).foregroundStyle(.red).font(.caption) }
+            .padding(.top, 6)
+            if wrongPassword { Text(L("passwords.locked.wrong")).foregroundStyle(Theme.danger).font(.lumenSecondary) }
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -135,6 +150,8 @@ struct PasswordListView: View {
                         Text(entries.isEmpty ? L("passwords.empty") : L("passwords.noMatches")).foregroundStyle(.secondary)
                     }
                 }
+                .scrollContentBackground(.hidden)
+                .background(Theme.raisedInset)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
                 HStack {
                     Button {
@@ -142,6 +159,7 @@ struct PasswordListView: View {
                         revealed = true
                         draft = Draft()
                     } label: { Label(L("passwords.add"), systemImage: "plus") }
+                    .buttonStyle(.lumenGhost)
                     Spacer()
                 }
                 if !neverSaved.isEmpty { neverSavedList }
@@ -149,7 +167,7 @@ struct PasswordListView: View {
             .frame(width: 300)
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .card()
+                .card(fill: Theme.raisedInset)
         }
         // Choosing another login ends an edit (a new one, too); "Add Password" clears the selection itself.
         .onChange(of: selection) { _, newValue in
@@ -221,8 +239,10 @@ struct PasswordListView: View {
                     draft = Draft(id: entry.id, website: entry.origin, username: entry.username,
                                   password: entry.password, note: entry.note ?? "")
                 }
+                .buttonStyle(.lumenSecondary)
                 Spacer()
                 Button(L("common.delete"), role: .destructive) { pendingDelete = entry }
+                    .buttonStyle(.lumenDestructive)
             }
         }
     }
@@ -242,29 +262,37 @@ struct PasswordListView: View {
     private func editor(_ initial: Draft) -> some View {
         let binding = Binding(get: { draft ?? initial }, set: { draft = $0 })
         return VStack(alignment: .leading, spacing: 10) {
-            Text(initial.id == nil ? L("passwords.addTitle") : L("passwords.editTitle")).font(.headline)
-            TextField(L("passwords.placeholder.origin"), text: binding.website)
-            TextField(L("passwords.placeholder.username"), text: binding.username)
+            Text(initial.id == nil ? L("passwords.addTitle") : L("passwords.editTitle"))
+                .font(.lumenSection)
+                .foregroundStyle(Theme.textPrimary)
+            TextField(L("passwords.placeholder.origin"), text: binding.website).lumenField()
+            TextField(L("passwords.placeholder.username"), text: binding.username).lumenField()
             HStack {
-                if revealed {
-                    TextField(L("passwords.placeholder.password"), text: binding.password)
-                } else {
-                    SecureField(L("passwords.placeholder.password"), text: binding.password)
+                Group {
+                    if revealed {
+                        TextField(L("passwords.placeholder.password"), text: binding.password)
+                    } else {
+                        SecureField(L("passwords.placeholder.password"), text: binding.password)
+                    }
                 }
+                .lumenField()
                 Button { revealed.toggle() } label: { Image(systemName: revealed ? "eye.slash" : "eye") }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(LumenIconButtonStyle())
             }
-            TextField(L("passwords.placeholder.note"), text: binding.note, axis: .vertical).lineLimit(2...4)
+            TextField(L("passwords.placeholder.note"), text: binding.note, axis: .vertical)
+                .lineLimit(2...4)
+                .lumenField(height: nil)
             Spacer()
             HStack {
                 Button(L("common.cancel")) { draft = nil }
+                    .buttonStyle(.lumenSecondary)
                 Spacer()
                 Button(L("common.save")) { save(binding.wrappedValue) }
+                    .buttonStyle(.lumenPrimary)
                     .keyboardShortcut(.defaultAction)
                     .disabled(binding.wrappedValue.password.isEmpty || binding.wrappedValue.website.isEmpty)
             }
         }
-        .textFieldStyle(.roundedBorder)
     }
 
     // MARK: Actions

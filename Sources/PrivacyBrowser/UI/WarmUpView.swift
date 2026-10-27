@@ -29,32 +29,33 @@ private struct WarmUpPanel: View {
     private var reading: (pages: [WarmUpPlan.Page], problems: [WarmUpPlan.Problem]) { plan.pages() }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(String(format: L("warmup.title"), profile.name)).font(.title3.bold())
-            Text(L("warmup.explanation")).font(.callout).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 0) {
+            SheetHeader(title: String(format: L("warmup.title"), profile.name), subtitle: L("warmup.explanation"))
             HStack(alignment: .top, spacing: 16) {
                 planEditor.frame(width: 330)
                 progress
             }
-            HStack {
-                status
-                Spacer()
+            .padding(.horizontal, 24)
+            .padding(.bottom, 16)
+            .frame(maxHeight: .infinity, alignment: .top)
+            SheetFooter(leading: { status }, buttons: {
                 Button(L("common.done")) { dismiss() }
+                    .buttonStyle(.lumenSecondary)
                     .keyboardShortcut(.cancelAction)
                 if robot.isRunning {
                     Button(L("warmup.stop")) { robot.stop() }
+                        .buttonStyle(.lumenPrimary)
                         .keyboardShortcut(.defaultAction)
                 } else {
                     Button(L("warmup.start")) { start() }
+                        .buttonStyle(.lumenPrimary)
                         .keyboardShortcut(.defaultAction)
                         .disabled(starting || reading.pages.isEmpty || model.isBusy(profile.id))
                 }
-            }
+            })
         }
-        .padding(20)
-        .frame(width: 780, height: 560)
-        .background(Theme.pageBackground)
+        .frame(width: 780, height: 600)
+        .background(Theme.raised)
         .onAppear {
             guard !loaded else { return }
             loaded = true
@@ -66,13 +67,18 @@ private struct WarmUpPanel: View {
 
     private var planEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(L("warmup.addresses")).font(.subheadline.bold())
+            Text(L("warmup.addresses")).font(.lumenLabel).foregroundStyle(Theme.textPrimary)
             TextEditor(text: $plan.addresses)
-                .font(.system(.callout, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(6)
                 .frame(minHeight: 150)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.separator))
+                .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.field))
+                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                    .strokeBorder(Theme.fieldBorder, lineWidth: 1))
             problems
             TextField(L("warmup.search"), text: $plan.searchQuery, prompt: Text(L("warmup.searchPrompt")))
+                .lumenField()
             HStack {
                 Text(L("warmup.dwell"))
                 Spacer()
@@ -82,7 +88,9 @@ private struct WarmUpPanel: View {
                 Text(L("warmup.seconds")).foregroundStyle(.secondary)
             }
             Toggle(L("warmup.scroll"), isOn: $plan.scroll)
+                .toggleStyle(.switch).controlSize(.small)
             Toggle(L("warmup.followLinks"), isOn: $plan.followLinks)
+                .toggleStyle(.switch).controlSize(.small)
             Text(L("warmup.note")).font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -92,8 +100,9 @@ private struct WarmUpPanel: View {
     private func secondsField(_ value: Binding<TimeInterval>) -> some View {
         TextField("", value: Binding(get: { Int(value.wrappedValue) }, set: { value.wrappedValue = TimeInterval($0) }),
                   format: .number)
-            .frame(width: 48)
             .multilineTextAlignment(.trailing)
+            .lumenField(height: 28)
+            .frame(width: 56)
             .onSubmit { plan = plan.normalized }
     }
 
@@ -107,7 +116,7 @@ private struct WarmUpPanel: View {
                 }
                 if problems.count > 4 { Text(String(format: L("warmup.problems.more"), problems.count - 4)) }
             }
-            .font(.caption).foregroundStyle(.orange)
+            .font(.caption).foregroundStyle(Theme.warning)
         }
     }
 
@@ -131,7 +140,7 @@ private struct WarmUpPanel: View {
                 Spacer()
             }
             .frame(maxWidth: .infinity)
-            .card()
+            .card(fill: Theme.raisedInset)
         } else {
             List(robot.visits) { visit in
                 VStack(alignment: .leading, spacing: 2) {
@@ -144,6 +153,8 @@ private struct WarmUpPanel: View {
                     Text(detail(of: visit)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.raisedInset)
             .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
         }
     }
@@ -153,9 +164,9 @@ private struct WarmUpPanel: View {
         case nil:
             if robot.isRunning && visit.id == robot.visits.last?.id { ProgressView().controlSize(.mini) }
             else { Image(systemName: "minus.circle").foregroundStyle(.secondary) }
-        case .loaded?: Image(systemName: "checkmark.circle").foregroundStyle(.green)
-        case .timedOut?: Image(systemName: "clock").foregroundStyle(.orange)
-        case .failed?: Image(systemName: "xmark.circle").foregroundStyle(.red)
+        case .loaded?: Image(systemName: "checkmark.circle").foregroundStyle(Theme.running)
+        case .timedOut?: Image(systemName: "clock").foregroundStyle(Theme.warning)
+        case .failed?: Image(systemName: "xmark.circle").foregroundStyle(Theme.danger)
         }
     }
 
@@ -186,19 +197,20 @@ private struct WarmUpPanel: View {
                 if starting { Text(L("warmup.status.starting")) } else { EmptyView() }
             case .running:
                 if robot.waitingForTab {
-                    Label(L("warmup.status.waitingForTab"), systemImage: "pause.circle").foregroundStyle(.orange)
+                    Label(L("warmup.status.waitingForTab"), systemImage: "pause.circle").foregroundStyle(Theme.warning)
                 } else {
                     Text(String(format: L("warmup.status.running"), robot.visits.count, robot.pageCount))
                 }
             case .finished:
                 let failed = robot.visits.filter { if case .failed? = $0.outcome { return true } else { return false } }.count
                 Label(String(format: L("warmup.status.finished"), robot.visits.count, failed), systemImage: "checkmark.circle")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Theme.running)
             case let .stopped(reason):
-                Label(Self.describe(reason), systemImage: "stop.circle").foregroundStyle(reason == .byUser ? Color.secondary : Color.orange)
+                Label(Self.describe(reason), systemImage: "stop.circle").foregroundStyle(reason == .byUser ? Theme.textSecondary : Theme.warning)
             }
         }
-        .font(.callout)
+        .font(.lumenSecondary)
+        .lineLimit(2)
     }
 
     static func describe(_ reason: WarmUpRobot.StopReason) -> String {

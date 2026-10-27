@@ -10,7 +10,7 @@ struct TunnelSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(L("tunnel.title")).font(.title3.bold()).padding([.top, .horizontal], 20)
+            SheetHeader(title: L("tunnel.title"))
             Form {
                 Text(L("tunnel.intro")).fixedSize(horizontal: false, vertical: true)
 
@@ -33,16 +33,19 @@ struct TunnelSettingsView: View {
 
                 if !tunnel.canCarryWebRTC {
                     Label(L("tunnel.warning.off"), systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(Theme.warning).fixedSize(horizontal: false, vertical: true)
                 }
                 Text(L("tunnel.limits")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            .formStyle(.grouped)
+            .lumenForm()
+            SheetFooter {
+                Button(L("common.done")) { dismiss() }
+                    .buttonStyle(.lumenPrimary)
+                    .keyboardShortcut(.defaultAction)
+            }
         }
         .frame(width: 560)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) { Button(L("common.done")) { dismiss() } }
-        }
+        .background(Theme.raised)
         .onAppear { tunnel.refresh() }
     }
 
@@ -70,9 +73,9 @@ struct TunnelSettingsView: View {
 
     private var statusColor: Color {
         switch tunnel.state {
-        case .ready, .connected: return .green
-        case .failed: return .red
-        case .awaitingApproval, .needsConfiguration: return .orange
+        case .ready, .connected: return Theme.running
+        case .failed: return Theme.danger
+        case .awaitingApproval, .needsConfiguration: return Theme.warning
         default: return .secondary
         }
     }

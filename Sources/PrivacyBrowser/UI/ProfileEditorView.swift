@@ -92,6 +92,58 @@ struct ProfileDraft {
         syncCookies = c.syncCookies
     }
 
+    /// The proxy these fields describe (nil without one). The Host field often holds a pasted
+    /// proxy string (socks5://user:pass@host:port, host:port, host:port:user:pass): it is split into
+    /// its parts; what is not a host is rejected.
+    func makeProxy() throws -> ProxySettings? {
+        guard proxyEnabled else { return nil }
+        let field: ProxyHostField
+        do {
+            field = try ProxyHostField.parse(proxyHost)
+        } catch {
+            throw CoreError.invalidConfiguration(String(format: L("editor.error.proxyHost"),
+                                                        proxyHost.trimmingCharacters(in: .whitespacesAndNewlines)))
+        }
+        var portText = proxyPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let pastedPort = field.port {
+            guard portText.isEmpty || Int(portText) == pastedPort else {
+                throw CoreError.invalidConfiguration(L("editor.error.proxyPortConflict"))
+            }
+            portText = String(pastedPort)
+        }
+        guard let port = Int(portText), (1...65535).contains(port) else {
+            throw CoreError.invalidConfiguration(L("editor.error.port"))
+        }
+        var user = proxyUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+        var password = proxyPassword
+        if let pastedUser = field.username {
+            guard user.isEmpty || user == pastedUser else {
+                throw CoreError.invalidConfiguration(L("editor.error.proxyUserConflict"))
+            }
+            user = pastedUser
+            password = field.password ?? ""
+        }
+        // A scheme in the pasted string is more specific than the picker.
+        let kind = field.kind ?? proxyKind
+        return ProxySettings(
+            kind: kind,
+            host: field.host,
+            port: port,
+            username: user.isEmpty ? nil : user,
+            password: user.isEmpty ? nil : password,
+            // The TLS toggle is shown for HTTP CONNECT only; its hidden value must not leak into SOCKS5.
+            tlsToProxy: kind == .httpConnect && (field.tlsToProxy ?? proxyTLS),
+            excludedDomains: proxyExcludedDomains.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+    }
+
+    /// What the last lookup through the proxy found, while these fields still describe that proxy
+    /// (`ProxyLocation.endpoint(of:)`): nil once host, port or credentials name another one.
+    var knownProxyLocation: ProxyLocation? {
+        guard let location = lastProxyLocation, let proxy = try? makeProxy() else { return nil }
+        return location.proxyEndpoint == ProxyLocation.endpoint(of: proxy) ? location : nil
+    }
+
     func makeConfiguration() throws -> ProfileConfiguration {
         var configuration = ProfileConfiguration()
         let trimmedURL = startURL.trimmingCharacters(in: .whitespaces)
@@ -103,48 +155,7 @@ struct ProfileDraft {
         if customUserAgent {
             configuration.userAgent = userAgent.trimmingCharacters(in: .whitespaces)
         }
-        if proxyEnabled {
-            // The Host field often holds a pasted proxy string (socks5://user:pass@host:port,
-            // host:port, host:port:user:pass): split it into its parts; reject what is not a host.
-            let field: ProxyHostField
-            do {
-                field = try ProxyHostField.parse(proxyHost)
-            } catch {
-                throw CoreError.invalidConfiguration(String(format: L("editor.error.proxyHost"),
-                                                            proxyHost.trimmingCharacters(in: .whitespacesAndNewlines)))
-            }
-            var portText = proxyPort.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let pastedPort = field.port {
-                guard portText.isEmpty || Int(portText) == pastedPort else {
-                    throw CoreError.invalidConfiguration(L("editor.error.proxyPortConflict"))
-                }
-                portText = String(pastedPort)
-            }
-            guard let port = Int(portText), (1...65535).contains(port) else {
-                throw CoreError.invalidConfiguration(L("editor.error.port"))
-            }
-            var user = proxyUsername.trimmingCharacters(in: .whitespacesAndNewlines)
-            var password = proxyPassword
-            if let pastedUser = field.username {
-                guard user.isEmpty || user == pastedUser else {
-                    throw CoreError.invalidConfiguration(L("editor.error.proxyUserConflict"))
-                }
-                user = pastedUser
-                password = field.password ?? ""
-            }
-            // A scheme in the pasted string is more specific than the picker.
-            let kind = field.kind ?? proxyKind
-            configuration.proxy = ProxySettings(
-                kind: kind,
-                host: field.host,
-                port: port,
-                username: user.isEmpty ? nil : user,
-                password: user.isEmpty ? nil : password,
-                // The TLS toggle is shown for HTTP CONNECT only; its hidden value must not leak into SOCKS5.
-                tlsToProxy: kind == .httpConnect && (field.tlsToProxy ?? proxyTLS),
-                excludedDomains: proxyExcludedDomains.split(separator: ",")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
-        }
+        configuration.proxy = try makeProxy()
         if geoMode == .fixed {
             guard let lat = Double(latitude), let lon = Double(longitude), let acc = Double(accuracy) else {
                 throw CoreError.invalidConfiguration(L("editor.error.coords"))
@@ -188,181 +199,23 @@ struct ProfileEditorView: View {
     @State private var error: String?
     @State private var loaded = false
     @State private var showingTunnel = false
+    @State private var tab: ProfileEditorForm.Tab = .general
     @ObservedObject private var tunnel = TunnelManager.shared
 
-    /// With a proxy, WebRTC can only be on through the network extension's relay, and only for SOCKS5.
-    private var webRTCLocked: Bool {
-        draft.proxyEnabled && !(draft.proxyKind == .socks5 && tunnel.canCarryWebRTC)
-    }
-
-    private static let timeZones = TimeZone.knownTimeZoneIdentifiers.sorted()
-
-    /// Which UA preset the current text matches ("custom" when it matches none).
-    private var selectedGeneration: DeviceGeneration { DeviceGenerations.resolved(id: draft.deviceGenerationID) }
+    /// The glyph colour of a profile not created yet (it has no id).
+    private static let newProfileAvatarID = UUID(uuid: (0x4C, 0x55, 0x4D, 0x45, 0x4E, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 1))
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text(target.isNew ? L("editor.title.new") : L("editor.title.edit"))
-                .font(.title3.bold())
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding([.top, .horizontal], 20)
-            Form {
-                generalSection
-                identitySection
-                historySection
-                passwordsSection
-                syncSection
-                networkSection
-                privacySection
-                if let error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                }
-            }
-            .formStyle(.grouped)
-        }
-        .frame(width: 540, height: 660)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
-            ToolbarItem(placement: .confirmationAction) { Button(L("common.save"), action: save) }
-        }
-        .onAppear(perform: load)
-        .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
+        ProfileEditorForm(draft: $draft, tab: $tab, isNew: target.isNew, avatarID: avatarID, error: error,
+                          tunnelCarriesWebRTC: tunnel.canCarryWebRTC,
+                          onCancel: { dismiss() }, onSave: save, onTunnelSettings: { showingTunnel = true })
+            .onAppear(perform: load)
+            .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
     }
 
-    private var generalSection: some View {
-        Section(L("editor.section.general")) {
-            TextField(L("editor.name"), text: $draft.name)
-            TextField(L("editor.startURL"), text: $draft.startURL, prompt: Text(verbatim: "https://example.com"))
-            Toggle(L("editor.ephemeral"), isOn: $draft.ephemeral)
-        }
-    }
-
-    private var identitySection: some View {
-        Section {
-            Picker(L("editor.generation"), selection: $draft.deviceGenerationID) {
-                ForEach(DeviceGenerations.all) { generation in
-                    Text(L(generation.nameKey)).tag(generation.id)
-                }
-            }
-            if !selectedGeneration.matchesEngine {
-                Label(L("editor.generation.inconsistent"), systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            Toggle(L("editor.ua.useCustom"), isOn: $draft.customUserAgent)
-            if draft.customUserAgent {
-                TextField(L("editor.ua.field"), text: $draft.userAgent, axis: .vertical).lineLimit(2...4)
-            } else {
-                LabeledContent(L("editor.ua.effective")) {
-                    Text(selectedGeneration.userAgent(hostSafariVersion: HostSafari.version)).font(.caption.monospaced())
-                        .foregroundStyle(.secondary).lineLimit(3).textSelection(.enabled)
-                }
-            }
-        } header: { Text(L("editor.section.identity")) } footer: {
-            Text(L("editor.generation.footer"))
-        }
-    }
-
-    private var historySection: some View {
-        Section {
-            Toggle(L("editor.history.record"), isOn: $draft.historyEnabled)
-            if draft.historyEnabled {
-                Picker(L("editor.history.keep"), selection: $draft.historyRetentionDays) {
-                    ForEach(ProfileDraft.retentionChoices, id: \.days) { Text(L($0.labelKey)).tag($0.days) }
-                }
-            }
-        } header: { Text(L("editor.section.history")) } footer: {
-            Text(L("editor.history.footer"))
-        }
-    }
-
-    private var passwordsSection: some View {
-        Section {
-            Toggle(L("editor.passwords.autoFill"), isOn: $draft.passwordAutoFill)
-        } header: { Text(L("editor.section.passwords")) } footer: {
-            Text(L("editor.passwords.footer"))
-        }
-    }
-
-    private var syncSection: some View {
-        Section {
-            Toggle(L("editor.sync.cookies"), isOn: $draft.syncCookies)
-                .disabled(draft.ephemeral)
-        } header: { Text(L("editor.section.sync")) } footer: {
-            Text(L(draft.ephemeral ? "editor.sync.footer.ephemeral" : "editor.sync.footer"))
-        }
-    }
-
-    private var networkSection: some View {
-        Section {
-            Toggle(L("editor.proxy.use"), isOn: $draft.proxyEnabled)
-            if draft.proxyEnabled {
-                Picker(L("editor.proxy.type"), selection: $draft.proxyKind) {
-                    Text(verbatim: "SOCKS5").tag(ProxySettings.Kind.socks5)
-                    Text(verbatim: "HTTP CONNECT").tag(ProxySettings.Kind.httpConnect)
-                }
-                TextField(L("editor.proxy.host"), text: $draft.proxyHost)
-                TextField(L("editor.proxy.port"), text: $draft.proxyPort)
-                TextField(L("editor.proxy.username"), text: $draft.proxyUsername)
-                SecureField(L("editor.proxy.password"), text: $draft.proxyPassword)
-                if draft.proxyKind == .httpConnect {
-                    Toggle(L("editor.proxy.tls"), isOn: $draft.proxyTLS)
-                }
-                TextField(L("editor.proxy.bypass"), text: $draft.proxyExcludedDomains)
-                Toggle(L("editor.proxy.warnIPChange"), isOn: $draft.warnOnProxyIPChange)
-                if draft.warnOnProxyIPChange {
-                    Text(L("editor.proxy.warnIPChange.note")).font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        } header: { Text(L("editor.section.network")) } footer: {
-            Text(L("editor.network.footer"))
-        }
-    }
-
-    private var privacySection: some View {
-        Section {
-            // With a proxy, WebRTC goes through the network extension's relay (SOCKS5 only) or is off
-            // (ProfileConfiguration.webRTCRouting); the stored choice is kept either way.
-            Picker(L("editor.webrtc"), selection: webRTCLocked ? .constant(WebRTCPolicy.disabled) : $draft.webRTC) {
-                Text(L("editor.webrtc.disabled")).tag(WebRTCPolicy.disabled)
-                Text(L("editor.webrtc.relay")).tag(WebRTCPolicy.relayOnly)
-                Text(L("editor.webrtc.unrestricted")).tag(WebRTCPolicy.unrestricted)
-            }
-            .disabled(webRTCLocked)
-            if draft.proxyEnabled {
-                if draft.proxyKind != .socks5 {
-                    Text(L("editor.webrtc.httpProxy")).font(.caption).foregroundStyle(.secondary)
-                } else if tunnel.canCarryWebRTC {
-                    Text(L("editor.webrtc.viaTunnel")).font(.caption).foregroundStyle(.secondary)
-                } else {
-                    Label(L("editor.webrtc.tunnelOff"), systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.orange)
-                    Button(L("editor.webrtc.tunnelSettings")) { showingTunnel = true }
-                }
-            }
-            Picker(L("editor.geo"), selection: $draft.geoMode) {
-                ForEach(ProfileDraft.GeoMode.allCases) { Text(L($0.labelKey)).tag($0) }
-            }
-            if draft.geoMode == .fixed {
-                TextField(L("editor.geo.lat"), text: $draft.latitude)
-                TextField(L("editor.geo.lon"), text: $draft.longitude)
-                TextField(L("editor.geo.accuracy"), text: $draft.accuracy)
-            }
-            Toggle(L("editor.tz.override"), isOn: $draft.overrideTimeZone)
-            if draft.overrideTimeZone {
-                Picker(L("editor.tz"), selection: $draft.timeZone) {
-                    ForEach(Self.timeZones, id: \.self) { Text(verbatim: $0).tag($0) }
-                }
-            } else if draft.proxyEnabled {
-                Toggle(L("editor.tz.fromProxy"), isOn: $draft.matchProxyLocation)
-                if draft.matchProxyLocation {
-                    Text(L("editor.tz.fromProxy.note")).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Toggle(L("editor.safeBrowsing"), isOn: $draft.safeBrowsing)
-        } header: { Text(L("editor.section.privacy")) } footer: {
-            Text(L("editor.privacy.footer"))
-        }
+    private var avatarID: UUID {
+        if case .existing(let summary) = target { return summary.id }
+        return Self.newProfileAvatarID
     }
 
     private func load() {

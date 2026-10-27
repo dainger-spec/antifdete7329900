@@ -151,27 +151,30 @@ struct ChangePasswordView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(L("changepw.title")).font(.title3.bold()).padding([.top, .horizontal], 20)
+            SheetHeader(title: L("changepw.title"))
             Form {
                 SecureField(L("changepw.current"), text: $current)
                 SecureField(L("changepw.new"), text: $new)
                 SecureField(L("changepw.repeat"), text: $confirmation)
                 Text(L("changepw.note")).font(.caption).foregroundStyle(.secondary)
             }
-            .formStyle(.grouped)
-        }
-        .frame(width: 400)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
-            ToolbarItem(placement: .confirmationAction) {
+            .lumenForm()
+            SheetFooter {
+                Button(L("common.cancel")) { dismiss() }
+                    .buttonStyle(.lumenSecondary)
+                    .keyboardShortcut(.cancelAction)
                 Button(L("changepw.action.change")) {
                     Task {
                         await model.changePassword(current: current, new: new)
                         if model.errorMessage == nil { dismiss() }
                     }
                 }
+                .buttonStyle(.lumenPrimary)
+                .keyboardShortcut(.defaultAction)
                 .disabled(current.isEmpty || new.count < 10 || new != confirmation)
             }
         }
+        .frame(width: 420)
+        .background(Theme.raised)
     }
 }

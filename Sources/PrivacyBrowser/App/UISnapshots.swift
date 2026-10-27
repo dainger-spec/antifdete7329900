@@ -68,6 +68,52 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-no-matches", size: CGSize(width: 1180, height: 520)) {
             ProfilesPreview(rows: rows, search: "zzz", sync: .syncing)
         }.capture(into: folder)
+        // The profile editor, one picture per tab (sheets have no title bar).
+        let draft = sampleDraft()
+        var unknownExit = draft
+        unknownExit.lastProxyLocation = nil
+        var newProfile = ProfileDraft()
+        newProfile.name = String(format: L("editor.defaultName"), 8)
+        var privacy = draft
+        privacy.geoMode = .fixed
+        privacy.latitude = "52.52"
+        privacy.longitude = "13.405"
+        privacy.overrideTimeZone = true
+        privacy.timeZone = "Europe/Berlin"
+        var ephemeral = draft
+        ephemeral.ephemeral = true
+        let editors: [(String, ProfileDraft, ProfileEditorForm.Tab, Bool, String?)] = [
+            ("editor-network", draft, .network, false, nil),
+            ("editor-network-unchecked", unknownExit, .network, false, nil),
+            ("editor-general-new", newProfile, .general, true, nil),
+            ("editor-identity", draft, .identity, false, nil),
+            ("editor-privacy", privacy, .privacy, false, nil),
+            ("editor-data-ephemeral", ephemeral, .data, false, L("editor.error.port")),
+        ]
+        for (name, sample, tab, isNew, error) in editors {
+            problems += await Shot(name: name, size: ProfileEditorForm.size, titled: false) {
+                EditorPreview(draft: sample, tab: tab, isNew: isNew, error: error)
+            }.capture(into: folder)
+        }
+        // The other sheets, as they open.
+        let model = AppModel()
+        if let northwind = sampleSummary(name: "Northwind", id: rows[1].id) {
+            problems += await Shot(name: "sheet-passwords-locked", size: CGSize(width: 780, height: 560), titled: false) {
+                PasswordListView(profile: northwind).environmentObject(model)
+            }.capture(into: folder)
+            problems += await Shot(name: "sheet-cookie-import", size: CGSize(width: 680, height: 560), titled: false) {
+                CookieImportView(profile: northwind).environmentObject(model)
+            }.capture(into: folder)
+        } else {
+            print("FAIL could not make a sample profile summary")
+            problems += 1
+        }
+        problems += await Shot(name: "sheet-sync", size: CGSize(width: 540, height: 460), titled: false) {
+            SyncSettingsView().environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "sheet-change-password", size: CGSize(width: 420, height: 330), titled: false) {
+            ChangePasswordView().environmentObject(model)
+        }.capture(into: folder)
         problems += await Shot(name: "brand", size: CGSize(width: 900, height: 560), titled: false) {
             BrandSheet()
         }.capture(into: folder)
@@ -113,6 +159,31 @@ enum UISnapshots {
                 NSApp.postEvent(event, atStart: false)
             }
         }
+    }
+
+    /// A proxied profile whose last lookup found Germany, two minutes ago.
+    static func sampleDraft() -> ProfileDraft {
+        var draft = ProfileDraft()
+        draft.name = "Northwind"
+        draft.proxyEnabled = true
+        draft.proxyKind = .socks5
+        draft.proxyHost = "proxy.northwind.example"
+        draft.proxyPort = "1080"
+        draft.proxyUsername = "nw-team"
+        draft.proxyPassword = "correct-horse"
+        draft.warnOnProxyIPChange = true
+        if let proxy = try? draft.makeProxy() {
+            draft.lastProxyLocation = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE",
+                                                    proxyEndpoint: ProxyLocation.endpoint(of: proxy),
+                                                    resolvedAt: Date().addingTimeInterval(-120))
+        }
+        return draft
+    }
+
+    /// `ProfileSummary` has no public initialiser; a sample is decoded like a stored one.
+    static func sampleSummary(name: String, id: UUID) -> ProfileSummary? {
+        let json = #"{"id":"\#(id.uuidString)","name":"\#(name)","createdAt":0,"revision":1}"#
+        return try? JSONDecoder().decode(ProfileSummary.self, from: Data(json.utf8))
     }
 
     final class ClickLog {
@@ -219,6 +290,19 @@ private struct Shot {
             print("FAIL could not write \(url.path): \(error)")
             return 1
         }
+    }
+}
+
+/// The editor's form with its draft and tab held in state, as the sheet holds them.
+private struct EditorPreview: View {
+    @State var draft: ProfileDraft
+    @State var tab: ProfileEditorForm.Tab
+    var isNew = false
+    var error: String?
+
+    var body: some View {
+        ProfileEditorForm(draft: $draft, tab: $tab, isNew: isNew, avatarID: UISnapshots.sampleRows()[1].id,
+                          error: error, tunnelCarriesWebRTC: false)
     }
 }
 

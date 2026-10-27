@@ -177,7 +177,7 @@ private struct BookmarkEditor: View {
                     .fixedSize()
                 }
             }
-            if let error { Text(error).foregroundStyle(.red).font(.caption) }
+            if let error { Text(error).foregroundStyle(Theme.danger).font(.caption) }
         }
         .formStyle(.grouped)
         .frame(width: 460)

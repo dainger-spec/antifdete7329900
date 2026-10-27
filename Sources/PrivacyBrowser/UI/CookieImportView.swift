@@ -21,33 +21,39 @@ struct CookieImportView: View {
     @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(String(format: L("cookies.title"), profile.name)).font(.title3.bold())
-            Text(L("cookies.explanation")).font(.callout).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button(L("cookies.chooseFile")) { choosingFile = true }
-                    .disabled(reading || importing)
-                if let fileName { Text(fileName).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
-                if reading { ProgressView().controlSize(.small) }
+        VStack(alignment: .leading, spacing: 0) {
+            SheetHeader(title: String(format: L("cookies.title"), profile.name), subtitle: L("cookies.explanation"))
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Button { choosingFile = true } label: { Label(L("cookies.chooseFile"), systemImage: "doc") }
+                        .buttonStyle(.lumenSecondary)
+                        .disabled(reading || importing)
+                    if let fileName {
+                        Text(fileName).font(.lumenBody).foregroundStyle(Theme.textSecondary).lineLimit(1).truncationMode(.middle)
+                    }
+                    if reading { ProgressView().controlSize(.small) }
+                }
+                if let report { reportView(report) } else { Spacer() }
+                if let outcome { outcomeView(outcome) }
+                if let error { Text(error).foregroundStyle(Theme.danger).font(.lumenSecondary) }
             }
-            if let report { reportView(report) } else { Spacer() }
-            if let outcome { outcomeView(outcome) }
-            if let error { Text(error).foregroundStyle(.red).font(.caption) }
-            HStack {
-                Spacer()
+            .padding(.horizontal, 24)
+            .padding(.bottom, 16)
+            .frame(maxHeight: .infinity, alignment: .top)
+            SheetFooter {
                 Button(L(outcome == nil ? "common.cancel" : "common.done")) { dismiss() }
+                    .buttonStyle(.lumenSecondary)
                     .keyboardShortcut(.cancelAction)
                 if outcome == nil, let report, !report.cookies.isEmpty {
                     Button(String(format: L("cookies.import"), report.cookies.count)) { importCookies(report.cookies) }
+                        .buttonStyle(.lumenPrimary)
                         .keyboardShortcut(.defaultAction)
                         .disabled(importing)
                 }
             }
         }
-        .padding(20)
-        .frame(width: 680, height: 540)
-        .background(Theme.pageBackground)
+        .frame(width: 680, height: 560)
+        .background(Theme.raised)
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in
             switch result {
             case let .success(url): read(url)
@@ -61,7 +67,8 @@ struct CookieImportView: View {
     private func reportView(_ report: CookieImportReport) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(String(format: L("cookies.summary"), report.cookies.count, report.entriesFound))
-                .font(.headline)
+                .font(.lumenSection)
+                .foregroundStyle(Theme.textPrimary)
             if let format = report.format {
                 Text(String(format: L("cookies.formatLine"),
                             L(format == .json ? "cookies.format.json" : "cookies.format.netscape"), report.encoding))
@@ -69,10 +76,10 @@ struct CookieImportView: View {
             }
             if report.damagedByteSequences > 0 {
                 Label(String(format: L("cookies.damagedBytes"), report.damagedByteSequences), systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
+                    .font(.caption).foregroundStyle(Theme.warning)
             }
             if !report.problems.isEmpty {
-                Text(String(format: L("cookies.problemsTitle"), report.failures.count)).font(.subheadline.bold())
+                Text(String(format: L("cookies.problemsTitle"), report.failures.count)).font(.lumenLabel)
                 List(Array(report.problems.enumerated()), id: \.offset) { _, problem in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
@@ -83,6 +90,8 @@ struct CookieImportView: View {
                             .foregroundStyle(Self.isNotice(problem.reason) ? Color.secondary : Color.primary)
                     }
                 }
+                .scrollContentBackground(.hidden)
+                .background(Theme.raisedInset)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
             } else {
                 Spacer()
@@ -95,15 +104,15 @@ struct CookieImportView: View {
             switch outcome {
             case let .applied(stored, refused):
                 Label(String(format: L("cookies.done.applied"), stored), systemImage: "checkmark.circle")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Theme.running)
                 if !refused.isEmpty {
                     Text(String(format: L("cookies.done.refused"), refused.count,
                                 refused.prefix(10).map { "\($0.name) (\($0.domain))" }.joined(separator: ", ")))
-                        .font(.caption).foregroundStyle(.orange)
+                        .font(.caption).foregroundStyle(Theme.warning)
                 }
             case let .queued(count):
                 Label(String(format: L("cookies.done.queued"), count, profile.name), systemImage: "clock")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Theme.running)
             }
         }
     }

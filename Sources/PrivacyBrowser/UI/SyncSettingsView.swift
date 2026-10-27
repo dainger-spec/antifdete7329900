@@ -28,7 +28,7 @@ struct SyncSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(L("sync.title")).font(.title3.bold()).padding([.top, .horizontal], 20)
+            SheetHeader(title: L("sync.title"))
             Form {
                 Picker(L("sync.to"), selection: $mode) {
                     ForEach(Mode.allCases) { Text(L($0.labelKey)).tag($0) }
@@ -57,7 +57,7 @@ struct SyncSettingsView: View {
                 }
 
                 Section(L("sync.status")) {
-                    Text(statusText).foregroundStyle(model.lastSyncStatus?.error == nil ? Color.secondary : Color.red)
+                    Text(statusText).foregroundStyle(model.lastSyncStatus?.error == nil ? Color.secondary : Theme.danger)
                     HStack {
                         Button(L("sync.now")) { Task { await model.syncNow() } }
                             .disabled(model.syncTarget == nil || model.isWorking || model.hasRunningProfiles)
@@ -69,12 +69,15 @@ struct SyncSettingsView: View {
                 }
                 Text(L("sync.footer")).font(.caption).foregroundStyle(.secondary)
             }
-            .formStyle(.grouped)
+            .lumenForm()
+            SheetFooter {
+                Button(L("common.done")) { dismiss() }
+                    .buttonStyle(.lumenPrimary)
+                    .keyboardShortcut(.defaultAction)
+            }
         }
         .frame(width: 540)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) { Button(L("common.done")) { dismiss() } }
-        }
+        .background(Theme.raised)
         .onAppear(perform: load)
     }
 

@@ -262,14 +262,15 @@ struct LumenIconButtonStyle: ButtonStyle {
 
 extension View {
     /// Lumen's text field look for a `TextField` or `SecureField`: darker than the surface it sits
-    /// on, a hairline, radius 6; the accent ring while focused.
-    func lumenField(height: CGFloat = 32) -> some View {
+    /// on, a hairline, radius 6; the accent ring while focused. `height` nil: as tall as its lines
+    /// (a multi-line field).
+    func lumenField(height: CGFloat? = 32) -> some View {
         modifier(LumenField(height: height))
     }
 }
 
 private struct LumenField: ViewModifier {
-    let height: CGFloat
+    let height: CGFloat?
     @FocusState private var focused: Bool
 
     func body(content: Content) -> some View {
@@ -279,7 +280,9 @@ private struct LumenField: ViewModifier {
             .foregroundStyle(Theme.textPrimary)
             .focused($focused)
             .padding(.horizontal, 10)
+            .padding(.vertical, height == nil ? 7 : 0)
             .frame(height: height)
+            .frame(minHeight: height == nil ? 32 : nil)
             .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.field))
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
                 .strokeBorder(focused ? Theme.accent : Theme.fieldBorder, lineWidth: 1))
@@ -293,11 +296,12 @@ private struct LumenField: ViewModifier {
 // MARK: - Containers and small parts
 
 extension View {
-    /// A tile on the window surface: one tone lighter, a hairline, radius 10.
-    func card(padding: CGFloat = 16, cornerRadius: CGFloat = Theme.cornerRadius) -> some View {
+    /// A tile one tone lighter than what it sits on (`fill`: `Theme.card` on a window,
+    /// `Theme.raisedInset` in a sheet), a hairline, radius 10.
+    func card(padding: CGFloat = 16, cornerRadius: CGFloat = Theme.cornerRadius, fill: Color = Theme.card) -> some View {
         self
             .padding(padding)
-            .background(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(Theme.card))
+            .background(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(fill))
             .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(Theme.hairline, lineWidth: 1))
     }

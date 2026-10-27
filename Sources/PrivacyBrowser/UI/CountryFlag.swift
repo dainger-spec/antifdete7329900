@@ -57,8 +57,15 @@ struct CountryFlag: View {
 /// Country names in the app's UI language ("Germany", "Германия").
 enum CountryNames {
     static func name(for code: String) -> String {
-        Locale(identifier: Localization.languageCode).localizedString(forRegionCode: code.uppercased()) ?? code.uppercased()
+        let region = code.uppercased()
+        if let short = shortNames[Localization.languageCode]?[region] { return short }
+        return Locale(identifier: Localization.languageCode).localizedString(forRegionCode: region) ?? region
     }
+
+    /// The short forms people use where the full name does not fit a table column.
+    private static let shortNames: [String: [String: String]] = [
+        "ru": ["US": "США", "AE": "ОАЭ", "GB": "Великобритания"],
+    ]
 }
 
 /// How a flag is drawn into a square (the circle clips it). Coordinates are fractions of the side.
