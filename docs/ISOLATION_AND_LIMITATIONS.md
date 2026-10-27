@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 183/183 checks in both builds):
+(macOS 26.6.2, 202/202 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -19,7 +19,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Seal → restore of website data | cookies, localStorage and IndexedDB survive; the archive holds no plaintext; plaintext is gone after seal; WebKit released the store after 1 s |
 | Two running profiles isolated | localStorage, IndexedDB and cookies of A are invisible to B, for the same origin, at the same time |
 | JS shims under JavaScriptCore | time zone (offset, `Intl`, local getters; in WebKit's shared pool, as without the engine override below), fixed geolocation, WebRTC removed, WebRTC relay-only |
-| Time zone in the engine | checked only where WebKit has the process pool's time zone override (the self-test logs which private pieces it found); there, two profiles in different zones running at once each report their own zone in the page, a frame, workers made from a blob and loaded from a URL, and shared and service workers that answer; `Date` and `Intl` are the engine's own (no shim); each profile has a pool of its own, and its shared and service workers carry its own User-Agent (what the same workers report in WebKit's shared pool is logged) |
+| Time zone in the engine | where WebKit has the process pool's time zone override (the self-test logs which private pieces it found; macOS 26.6.2 has `_WKProcessPoolConfiguration.timeZoneOverride` and `-[WKProcessPool _initWithConfiguration:]`, not the newer `+_processPoolWithConfiguration:`), two profiles in different zones running at once each report their own zone in the page, a frame, workers made from a blob and loaded from a URL, and shared and service workers that answer; `Date` and `Intl` are the engine's own (no shim); each profile has a pool of its own, and its shared and service workers carry its own User-Agent (what the same workers report in WebKit's shared pool is logged) |
 | WebRTC off (default) | switched off in the engine (`_peerConnectionEnabled` is false): the window has no `RTC*` interface at all |
 | HTTP CONNECT proxy | `http://` is tunnelled via `CONNECT`; an `.invalid` host loads, so it was resolved by the proxy |
 | SOCKS5 proxy | the hostname is sent to the proxy (`ATYP=3`, remote DNS) |
@@ -235,7 +235,8 @@ What still differs, and why it cannot be changed from the app:
   carries it (SOCKS5 only, relay candidates only; [TUNNEL.md](TUNNEL.md)). Without a proxy,
   `relayOnly` and `unrestricted` keep it.
 - **The replacement `Date` and `Intl.DateTimeFormat`** (only where the time zone is the shim's: a
-  WebKit without the process pool's time zone override, §6) list `length` and `name` before their
+  WebKit without the process pool's time zone override, §6; on macOS 26.6.2 the live comparison's
+  profile with a time zone has the engine's own, as Safari) list `length` and `name` before their
   statics: JavaScriptCore orders a script function's own properties that way whatever the
   definition order.
 - **Media devices before permission.** On the CI runner Safari lists `audioinput,videoinput`, a
