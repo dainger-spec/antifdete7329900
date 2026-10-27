@@ -8,7 +8,7 @@ import WebKit
 ///   * Time zone. `_WKProcessPoolConfiguration.timeZoneOverride` (WebKit SPI, macOS 13+) is handed
 ///     to every process the pool launches, which sets it process-wide before any script runs
 ///     (`WebProcess::initializeWebProcess` → `WTF::setTimeZoneOverride`). The page, its frames,
-///     dedicated, shared and service workers, `Date`, `Intl` and `Temporal` then report the
+///     dedicated, shared and service workers, `Date` and `Intl` (and `Temporal`, where WebKit exposes it) then report the
 ///     profile's zone as the engine's own values. The JavaScript shim reaches only the page and the
 ///     workers it makes from a blob (docs/ISOLATION_AND_LIMITATIONS.md §6).
 ///   * Workers. WebKit gives the service and shared workers of a pool the User-Agent of the page

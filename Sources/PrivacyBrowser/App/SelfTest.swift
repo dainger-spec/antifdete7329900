@@ -831,13 +831,15 @@ final class SelfTest {
             sharedSessions.append(session)
             inShared.append(BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext))
         }
-        for tab in inShared { try await PageLoader.load(tab.webView, url: scopesPage) }
-        let iPhoneUA = try await js(inShared[0].webView, "return navigator.userAgent;") as? String ?? "nil"
-        let workerUA = try await js(inShared[0].webView, """
+        // Information only: a failure here must not end the self-test.
+        for tab in inShared { try? await PageLoader.load(tab.webView, url: scopesPage) }
+        let iPhoneUA = (try? await js(inShared[0].webView, "return navigator.userAgent;")) as? String ?? "nil"
+        let workerUA = (try? await js(inShared[0].webView, """
+            if (typeof SharedWorker !== 'function') return 'no SharedWorker';
             const shared = new SharedWorker('/pb-scopes/shared.js');
             return await Promise.race([new Promise((resolve) => { shared.port.onmessage = (e) => resolve(String(e.data).split('|')[2]); shared.port.postMessage('report'); }),
                                        new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000))]);
-            """) as? String ?? "nil"
+            """)) as? String ?? "nil"
         info("shared pool: the iPhone profile's shared worker reports \(workerUA == iPhoneUA ? "its own User-Agent" : "another User-Agent: \(workerUA)")")
     }
 

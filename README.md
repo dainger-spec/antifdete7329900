@@ -112,8 +112,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   nothing in the page world while it acts, Stop, tab closed, a page dialog, the profile stopped
   mid-run), tabs, history,
   bookmarks, background tabs that measure their window as the shown tab does, the time zone in
-  the engine (two profiles in different zones at once, in the page, frames and every kind of
-  worker), the
+  the engine where WebKit has the override (two profiles in different zones at once, in the page,
+  frames and every kind of worker), the
   device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
 - the surface comparison with the runner's real Safari (`scripts/safari_reference.py`): every

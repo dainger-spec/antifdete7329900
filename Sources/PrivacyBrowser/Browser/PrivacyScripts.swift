@@ -326,15 +326,15 @@ function overrideGetter(w, obj, name, value) {
 
 // ---- Time zone --------------------------------------------------------------------------------
 // Whether this realm's engine already runs in TZ: its default zone is the one Intl names for TZ,
-// or, for a link (Asia/Calcutta, which the engine names by its primary Asia/Kolkata), a zone with
-// the same rules and names over the zone's history.
+// or, for a link (Asia/Calcutta, which the engine names by its primary Asia/Kolkata; GMT, which it
+// names UTC), a zone whose wall clock is the same over the zone's history.
 const ZONE_PROBES = [-2208988800000, -880000000000, 0, 631152000000, 1262304000000, 1705320000000, 1721044800000];
 function engineReportsZone(w, TZ) {
   try {
     const DTF = w.Intl.DateTimeFormat;
     if (new DTF().resolvedOptions().timeZone === new DTF(undefined, { timeZone: TZ }).resolvedOptions().timeZone) return true;
     const options = { era: 'short', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
-                      second: 'numeric', hourCycle: 'h23', timeZoneName: 'long' };
+                      second: 'numeric', hourCycle: 'h23' };
     const engine = new DTF('en-US', options);
     options.timeZone = TZ;
     const wanted = new DTF('en-US', options);
