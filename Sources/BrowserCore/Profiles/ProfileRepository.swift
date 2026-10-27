@@ -59,6 +59,10 @@ struct ProfileIndex: Codable, Equatable {
 /// profiles/<uuid>/webdata.pbsa     encrypted archive of the WebKit data store (app layer)
 /// profiles/<uuid>/cookies-import.bin AEAD(cookieImportKey, [ImportedCookie] JSON): imported while
 ///                                  the profile was stopped, applied at its next launch (not synced)
+/// profiles/<uuid>/cookies.bin      AEAD(cookiesKey, CookieJarDocument JSON): the persistent cookies,
+///                                  synced and merged per cookie
+/// profiles/<uuid>/cookies-baseline.bin AEAD(cookieBaselineKey, CookieBaseline JSON): what the cookie
+///                                  store held at the last record or apply (this device only)
 /// ```
 /// Profile names are only readable after unlock. Profile configurations are only
 /// decrypted when launched or edited.
@@ -239,6 +243,48 @@ public final class ProfileRepository: @unchecked Sendable {
         try? FileManager.default.removeItem(at: importedCookiesURL(for: id))
     }
 
+    // MARK: Synced cookies
+
+    func cookieJarURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("cookies.bin") }
+    func cookieBaselineURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("cookies-baseline.bin") }
+
+    static func cookieJarFile(url: URL?, profileID id: UUID, profileKey: SymmetricKey) -> EncryptedDocumentFile<CookieJarDocument> {
+        EncryptedDocumentFile(url: url, key: profileKey.derive(info: "cookies", salt: id.rawBytes), aad: "cookies:v1:\(id.uuidString)")
+    }
+
+    private func cookieBaselineFile(for id: UUID) throws -> EncryptedDocumentFile<CookieBaseline> {
+        EncryptedDocumentFile(url: cookieBaselineURL(for: id), key: try profileKey(for: id).derive(info: "cookie-baseline", salt: id.rawBytes),
+                              aad: "cookie-baseline:v1:\(id.uuidString)")
+    }
+
+    /// The profile's synced cookies (`CookieJarDocument`; empty before the first record).
+    public func cookieJar(for id: UUID) throws -> CookieJarDocument {
+        try Self.cookieJarFile(url: cookieJarURL(for: id), profileID: id, profileKey: profileKey(for: id)).load() ?? CookieJarDocument()
+    }
+
+    public func saveCookieJar(_ jar: CookieJarDocument, for id: UUID) throws {
+        try Self.cookieJarFile(url: cookieJarURL(for: id), profileID: id, profileKey: profileKey(for: id)).save(jar)
+    }
+
+    /// What this device's store held at the last record or apply (`CookieBaseline`).
+    public func cookieBaseline(for id: UUID) throws -> CookieBaseline {
+        try cookieBaselineFile(for: id).load() ?? CookieBaseline()
+    }
+
+    public func saveCookieBaseline(_ baseline: CookieBaseline, for id: UUID) throws {
+        try cookieBaselineFile(for: id).save(baseline)
+    }
+
+    /// Cookie sync turned off for the profile (or the profile made ephemeral): the synced
+    /// document is emptied, so that sync empties it on the other devices too (their cookie stores
+    /// keep what they have), and this device's baseline goes.
+    public func clearSyncedCookies(for id: UUID) throws {
+        try? FileManager.default.removeItem(at: cookieBaselineURL(for: id))
+        guard FileManager.default.fileExists(atPath: cookieJarURL(for: id).path),
+              (try? cookieJar(for: id)) != CookieJarDocument() else { return }
+        try saveCookieJar(CookieJarDocument(), for: id)
+    }
+
     // MARK: Sync support (raw encrypted files; see SyncEngine)
 
     func currentIndex() -> ProfileIndex {
@@ -263,6 +309,7 @@ public final class ProfileRepository: @unchecked Sendable {
         case .passwords: return passwordsURL(for: id)
         case .bookmarks: return bookmarksURL(for: id)
         case .history: return historyURL(for: id)
+        case .cookies: return cookieJarURL(for: id)
         }
     }
 
@@ -278,11 +325,49 @@ public final class ProfileRepository: @unchecked Sendable {
             let codec = HistoryStore.file(url: nil, profileID: id, profileKey: key)
             let policy = (try? loadConfiguration(id, key: key))?.historyPolicy ?? .init()
             return try codec.encode(HistoryStore.merge(codec.decode(local), codec.decode(remote), policy: policy))
+        case .cookies:
+            let codec = Self.cookieJarFile(url: nil, profileID: id, profileKey: key)
+            // Cookie sync is off (the settings just synced say so): nothing to keep.
+            if let configuration = try? loadConfiguration(id, key: key), !configuration.syncsCookies {
+                return try codec.encode(CookieJarDocument())
+            }
+            return try codec.encode(CookieJarDocument.merge(codec.decode(local), codec.decode(remote)))
         case .config, .passwords:
             throw CoreError.unsupportedFormat("\(file.rawValue) is not mergeable")
         }
     }
 
+    /// Which of two versions of a file changed on two devices wins, for a file the newer version
+    /// settles (the settings).
+    struct NewerVersion: Equatable {
+        var remoteWins: Bool
+        /// The losing version holds settings the winner does not: kept as `<file>.conflict`.
+        var keepsConflictCopy: Bool
+    }
+
+    /// For the settings changed on two devices: which version wins. The same settings on both
+    /// (only what the browser keeps for itself differs, such as the proxy location found at a
+    /// launch): the remote version, no copy. Different settings: the newer by
+    /// `ProfileConfiguration.settingsModifiedAt` — a version with the time beats one without (not
+    /// edited since it was created, or rewritten by an older build) — the other kept as a copy.
+    /// Nil when that cannot be told (equal times, or neither has one).
+    func newerVersion(_ file: ProfileSyncFile, profileID id: UUID, local: Data, remote: Data) throws -> NewerVersion? {
+        guard file == .config else { return nil }
+        let key = try profileKey(for: id)
+        func decode(_ data: Data) throws -> ProfileConfiguration {
+            try JSONCoding.decoder.decode(ProfileConfiguration.self, from: AEAD.open(data, key: key, aad: Self.configAAD(id)))
+        }
+        let localConfiguration = try decode(local), remoteConfiguration = try decode(remote)
+        if localConfiguration.hasSameSettings(as: remoteConfiguration) {
+            return NewerVersion(remoteWins: true, keepsConflictCopy: false)
+        }
+        switch (localConfiguration.settingsModifiedAt, remoteConfiguration.settingsModifiedAt) {
+        case let (local?, remote?) where local != remote: return NewerVersion(remoteWins: remote > local, keepsConflictCopy: true)
+        case (nil, _?): return NewerVersion(remoteWins: true, keepsConflictCopy: true)
+        case (_?, nil): return NewerVersion(remoteWins: false, keepsConflictCopy: true)
+        default: return nil
+        }
+    }
 
     // MARK: Private
 
@@ -340,9 +425,11 @@ public final class ProfileRepository: @unchecked Sendable {
 
 /// Per-profile encrypted files that are synced.
 enum ProfileSyncFile: String, CaseIterable {
-    case config, passwords, bookmarks, history
+    case config, passwords, bookmarks, history, cookies
 
-    var isMergeable: Bool { self == .bookmarks || self == .history }
+    var isMergeable: Bool { self == .bookmarks || self == .history || self == .cookies }
+    /// Changed on two devices: the newer version wins, the other is kept as `<file>.conflict`.
+    var prefersNewer: Bool { self == .config }
 }
 
 #if !canImport(Darwin)

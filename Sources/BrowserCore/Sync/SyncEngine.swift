@@ -16,9 +16,10 @@ public struct SyncReport: Equatable, Sendable {
     public var pulled: [String] = []
     /// Objects whose compare-and-swap lost a race; retried on the next sync.
     public var deferred: [String] = []
-    /// Objects changed on both sides and resolved by `resolveConflict` (config, passwords).
+    /// Objects changed on both sides where one version won and the other was kept as
+    /// `<file>.conflict` (or dropped, by `resolveConflict: .keepLocal`): config, passwords.
     public var resolvedConflicts: [String] = []
-    /// Objects changed on both sides and merged record by record (bookmarks, history).
+    /// Objects changed on both sides and merged record by record (bookmarks, history, cookies).
     public var merged: [String] = []
     /// Profiles deleted on another device and removed locally. The app layer must also
     /// remove their WebKit data stores.
@@ -35,13 +36,19 @@ public struct SyncReport: Equatable, Sendable {
 /// * `profile/<id>/passwords`  the profile's encrypted `passwords.bin`, as-is.
 /// * `profile/<id>/bookmarks`  `bookmarks.bin`; concurrent edits are merged per bookmark.
 /// * `profile/<id>/history`    `history.bin`; concurrent edits are merged per URL.
+/// * `profile/<id>/cookies`    `cookies.bin`, the persistent cookies; merged per cookie, the newer
+///                             change winning (`CookieJarDocument`).
+///
+/// A config changed on two devices: the newer settings win (`settingsModifiedAt`), and the other
+/// device's file is kept as `config.bin.conflict`; when only what the browser keeps for itself
+/// differs (the proxy location), the remote file, no copy; without a time on either side, or
+/// equal ones, `resolveConflict`.
 ///
 /// Profile files are already encrypted with per-profile keys; the envelope adds a second
 /// layer that hides object names and binds blobs to their name and revision.
 ///
-/// NOT synced: WebKit data store archives (cookies/localStorage/IndexedDB/cache). They are
-/// large and only consistent while the profile is stopped. Syncing them would reuse
-/// `EncryptedDirectoryArchive` output as an additional object type.
+/// NOT synced: WebKit data store archives (localStorage/IndexedDB/cache; cookies sync through
+/// `cookies.bin` instead). They are large and only consistent while the profile is stopped.
 ///
 /// Run sync only while no profile is running: an incoming config replaces the file on disk,
 /// not a live session.
@@ -119,8 +126,11 @@ public final class SyncEngine: @unchecked Sendable {
                 let merge: ((Data, Data) throws -> Data)? = file.isMergeable
                     ? { [repository] local, remote in try repository.mergeSyncedFile(file, profileID: id, local: local, remote: remote) }
                     : nil
+                let newer: ((Data, Data) throws -> ProfileRepository.NewerVersion?)? = file.prefersNewer
+                    ? { [repository] local, remote in try repository.newerVersion(file, profileID: id, local: local, remote: remote) }
+                    : nil
                 try await syncFile(name: "profile/\(id.uuidString)/\(file.rawValue)", url: repository.url(of: file, for: id),
-                                   merge: merge, remote: remote, state: &state, report: &report)
+                                   merge: merge, newer: newer, remote: remote, state: &state, report: &report)
             }
         }
 
@@ -164,10 +174,12 @@ public final class SyncEngine: @unchecked Sendable {
 
     // MARK: Opaque encrypted files
 
-    /// `merge` (bookmarks, history) combines both versions record by record; files without one
-    /// (config, passwords) go through `resolveConflict`.
-    private func syncFile(name: String, url: URL, merge: ((Data, Data) throws -> Data)?, remote: [String: Int],
-                          state: inout [String: ItemState], report: inout SyncReport) async throws {
+    /// `merge` (bookmarks, history, cookies) combines both versions record by record; `newer`
+    /// (config) tells which version is newer, the other is kept as `<file>.conflict`; the rest
+    /// (passwords, or a config without times) goes through `resolveConflict`.
+    private func syncFile(name: String, url: URL, merge: ((Data, Data) throws -> Data)?,
+                          newer: ((Data, Data) throws -> ProfileRepository.NewerVersion?)?,
+                          remote: [String: Int], state: inout [String: ItemState], report: inout SyncReport) async throws {
         let objectID = codec.objectID(for: name)
         let localData = FileManager.default.fileExists(atPath: url.path) ? try SecureFile.read(url) : nil
         let known = state[name]
@@ -194,6 +206,26 @@ public final class SyncEngine: @unchecked Sendable {
                 try await push(name: name, data: merged, revision: decoded.revision + 1,
                                expected: decoded.revision, state: &state, report: &report)
                 return
+            }
+            if let newer, let localData {
+                guard let blob = try await transport.fetch(objectID: objectID) else { return }
+                let decoded = try codec.decode(blob)
+                guard decoded.payload.logicalName == name else { throw CoreError.corruptData("unexpected object \(decoded.payload.logicalName)") }
+                if let verdict = try newer(localData, decoded.payload.data) {
+                    if verdict.keepsConflictCopy { report.resolvedConflicts.append(name) }
+                    let conflictURL = url.appendingPathExtension("conflict")
+                    if verdict.remoteWins {
+                        if verdict.keepsConflictCopy { try SecureFile.write(localData, to: conflictURL) }
+                        try SecureFile.write(decoded.payload.data, to: url)
+                        state[name] = ItemState(revision: decoded.revision, sha256: Self.hash(decoded.payload.data))
+                        report.pulled.append(name)
+                    } else {
+                        if verdict.keepsConflictCopy { try SecureFile.write(decoded.payload.data, to: conflictURL) }
+                        try await push(name: name, data: localData, revision: decoded.revision + 1,
+                                       expected: decoded.revision, state: &state, report: &report)
+                    }
+                    return
+                }
             }
             report.resolvedConflicts.append(name)
             switch resolveConflict(name) {

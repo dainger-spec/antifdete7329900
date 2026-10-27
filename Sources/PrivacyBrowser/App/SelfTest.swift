@@ -134,6 +134,7 @@ final class SelfTest {
             try await dialogTeardown(repository)
             try await passwordAutoFill(repository)
             try await cookieImport(repository)
+            try await profileSync(repository)
             try await lockDuringLaunch(repository)
             try await quitFromFocusedPage(repository)
             try await forcedSealAtQuit(repository)
@@ -1575,6 +1576,108 @@ final class SelfTest {
               third.contains("hostonly=imported-hostonly-value") && third.contains("live=imported-live-value")
                   && !third.contains("session="), third)
         try await manager.delete(profile.id)
+    }
+
+    // MARK: Profile sync (cookies and settings between two devices)
+
+    /// Two devices, one after the other, through a sync folder: device B is a vault bootstrapped
+    /// from this one (same master password) in a folder of its own, with its own ProfileManager.
+    /// Cookies of A (one imported while the profile was stopped, one a page set) reach B's store
+    /// before its first page loads; B's change and deletion come back to A the same way; the
+    /// settings changed on both devices end as the newer ones, the older kept as a conflict copy.
+    private func profileSync(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("profile sync checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-sync-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let server = folder.appendingPathComponent("server")
+        let transport = LocalDirectorySyncTransport(directory: server)
+        let start = URL(string: "http://sync.selftest.invalid/pb-cookies")!
+        let profile = try repository.create(name: "Cookie sync", configuration: ProfileConfiguration(
+            startURL: start, proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), matchProxyLocation: false))
+        let configName = "profile/\(profile.id.uuidString)/config"
+        var messages: [String] = []
+        let managerA = ProfileManager(repository: repository)
+        managerA.onError = { messages.append($0) }
+
+        func pageText(_ manager: ProfileManager) async -> String {
+            guard let tab = manager.session(for: profile.id)?.windowControllers.first?.selectedTab else { return "" }
+            _ = await waitUntil(timeout: 15) { !tab.isLoading && tab.url == start }
+            return (try? await js(tab.webView, "return document.body ? document.body.innerText : '';")) as? String ?? ""
+        }
+        func setCookies(_ manager: ProfileManager, _ cookies: [String]) async {
+            guard let webView = manager.session(for: profile.id)?.windowControllers.first?.selectedTab?.webView else { return }
+            _ = try? await js(webView, "for (const c of cookies) document.cookie = c; return document.cookie;", ["cookies": cookies])
+        }
+        func names(_ jar: CookieJarDocument) -> [String] { jar.cookies.map { "\($0.cookie.name)=\($0.cookie.value)" }.sorted() }
+
+        // Device A. Stopped: an imported cookie waits for the launch; then a page sets a
+        // persistent cookie and a session one.
+        let future = Date().addingTimeInterval(30 * 86_400)
+        _ = try await managerA.importCookies([ImportedCookie(name: "queued", value: "from-a-import", domain: "sync.selftest.invalid",
+                                                             hostOnly: true, expires: future)], into: profile.id)
+        try await managerA.launch(profile.id)
+        let firstA = await pageText(managerA)
+        let atLaunch = try repository.cookieJar(for: profile.id)
+        check("profile sync: a cookie imported while the profile was stopped goes into the synced cookies at its launch",
+              firstA.contains("queued=from-a-import") && names(atLaunch) == ["queued=from-a-import"], "\(firstA) \(names(atLaunch))")
+        await setCookies(managerA, ["page=from-a-page; max-age=2592000; path=/", "session=a-session; path=/"])
+        try await managerA.stop(profile.id)
+        let recorded = try repository.cookieJar(for: profile.id)
+        check("profile sync: at stop the run's persistent cookies are recorded for sync, its session cookies not",
+              names(recorded) == ["page=from-a-page", "queued=from-a-import"], "\(names(recorded))")
+        let pushed = try await SyncEngine(repository: repository, transport: transport).sync()
+        var visible: [String] = []
+        for file in (try? FileManager.default.contentsOfDirectory(atPath: server.path)) ?? [] {
+            let blob = (try? Data(contentsOf: server.appendingPathComponent(file))) ?? Data()
+            visible += ["from-a-page", "from-a-import", "sync.selftest.invalid"].filter { blob.range(of: Data($0.utf8)) != nil }
+        }
+        check("profile sync: the cookies are uploaded encrypted (no name, value or domain readable in the sync folder)",
+              pushed.pushed.contains("profile/\(profile.id.uuidString)/cookies") && visible.isEmpty, "\(pushed.pushed) \(visible)")
+
+        // Device B: set up from the sync folder, its first launch of the profile.
+        let repoB = try ProfileRepository(vault: await SyncEngine.bootstrap(transport: transport, root: folder.appendingPathComponent("B"),
+                                                                            password: "self-test"))
+        _ = try await SyncEngine(repository: repoB, transport: transport).sync()
+        let managerB = ProfileManager(repository: repoB)
+        managerB.onError = { messages.append($0) }
+        try await managerB.launch(profile.id)
+        let firstB = await pageText(managerB)
+        check("profile sync: on the other device the synced cookies are in the store before its first page loads (not the session cookie)",
+              firstB.contains("queued=from-a-import") && firstB.contains("page=from-a-page") && !firstB.contains("session="), firstB)
+        await setCookies(managerB, ["page=from-b-page; max-age=2592000; path=/", "queued=; max-age=0; path=/"])
+        try await managerB.stop(profile.id)
+        _ = try await SyncEngine(repository: repoB, transport: transport).sync()
+
+        // Back on A: B's change and deletion, before the first page.
+        _ = try await SyncEngine(repository: repository, transport: transport).sync()
+        try await managerA.launch(profile.id)
+        let secondA = await pageText(managerA)
+        check("profile sync: a change and a deletion made on the other device reach the store before the first page loads",
+              secondA.contains("page=from-b-page") && !secondA.contains("queued="), secondA)
+        try await managerA.stop(profile.id)
+
+        // Settings changed on both devices, B's later: B's win on both, A's kept as a copy.
+        let now = Date()
+        for (repo, zone, time) in [(repository, "Europe/Paris", now - 60), (repoB, "Asia/Tokyo", now)] {
+            let stored = try repo.loadConfiguration(profile.id)
+            var edited = stored
+            edited.timeZoneIdentifier = zone
+            try repo.saveConfiguration(edited.savingEdit(over: stored, at: time), for: profile.id)
+        }
+        _ = try await SyncEngine(repository: repository, transport: transport).sync()
+        let conflict = try await SyncEngine(repository: repoB, transport: transport).sync()
+        _ = try await SyncEngine(repository: repository, transport: transport).sync()
+        let copy = repoB.directory(for: profile.id).appendingPathComponent("config.bin.conflict")
+        let zones = [try repository.loadConfiguration(profile.id).timeZoneIdentifier, try repoB.loadConfiguration(profile.id).timeZoneIdentifier]
+        check("profile sync: settings changed on two devices — the newer win on both, the older kept as a conflict copy",
+              zones == ["Asia/Tokyo", "Asia/Tokyo"] && conflict.resolvedConflicts == [configName]
+                  && FileManager.default.fileExists(atPath: copy.path),
+              "\(zones) \(conflict.resolvedConflicts)")
+        check("profile sync: no errors reported", messages.isEmpty, "\(messages)")
+        try await managerA.delete(profile.id)
     }
 
     /// The values of the inputs `selectors` in the page.

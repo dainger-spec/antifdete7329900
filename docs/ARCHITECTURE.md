@@ -85,6 +85,8 @@ profile key (random 256-bit per profile, stored only wrapped)
    ├─ HKDF "history"           → history.bin                   (AAD "history:v1:<uuid>")
    ├─ HKDF "bookmarks"         → bookmarks.bin                 (AAD "bookmarks:v1:<uuid>")
    ├─ HKDF "cookie-import"     → cookies-import.bin            (AAD "cookie-import:v1:<uuid>")
+   ├─ HKDF "cookies"           → cookies.bin                   (AAD "cookies:v1:<uuid>")
+   ├─ HKDF "cookie-baseline"   → cookies-baseline.bin          (AAD "cookie-baseline:v1:<uuid>")
    └─ HKDF "webdata-archive", salt = random per archive → webdata.pbsa chunk key
 ```
 
@@ -111,6 +113,9 @@ Application Support/PrivacyBrowser/      (0700)
     config.bin                    AES-GCM(profile key, ProfileConfiguration JSON)
     passwords.bin                 AES-GCM(password key, [PasswordEntry] JSON: origin, user name, password, note, dates)
     cookies-import.bin            AES-GCM(cookie-import key, [ImportedCookie] JSON)   [only while imported cookies wait for the next launch]
+    cookies.bin                   AES-GCM(cookies key, CookieJarDocument JSON)        [persistent cookies, synced; with cookie sync on]
+    cookies-baseline.bin          AES-GCM(cookie-baseline key, CookieBaseline JSON)   [this Mac only: the store at the last record or apply]
+    config.bin.conflict, passwords.bin.conflict   the other device's version after a sync conflict (encrypted as the file)
     history.bin                   AES-GCM(history key, HistoryDocument JSON)          [not for ephemeral profiles]
     bookmarks.bin                 AES-GCM(bookmarks key, BookmarkDocument JSON)
     webdata.pbsa                  streaming encrypted archive of WebKit's data dirs
@@ -165,7 +170,15 @@ At launch the profile key also opens the password vault, the history and the boo
 into its cookie store before the first window opens (`CookieImporter` reads and checks export
 files in BrowserCore; `CookieStoreImport` sets them, reads the store back to find refused ones,
 and has the store write its cookies to disk). Stopping a profile also has its cookie store write
-to disk before the data is sealed. History changes are saved encrypted after a 3 s debounce, off the main
+to disk before the data is sealed.
+
+With cookie sync on (the profile's default), the store and the synced cookies (`cookies.bin`,
+`CookieJarDocument`) meet at both ends of a run (`CookieStoreSync`, `ProfileManager`): at launch,
+before the queued imports and the first window, the synced document — merged by sync with the
+other devices' — is applied to the store, and the imported cookies are then recorded into it;
+at stop, before the seal, what the run changed in the store since the launch (the local
+`cookies-baseline.bin`) is recorded as changes of that time. Sync itself never touches a live
+store: it runs only while no profile does. See SYNC_FORMAT.md § Cookies. History changes are saved encrypted after a 3 s debounce, off the main
 thread; `BrowserSession.shutDown()` flushes them synchronously before the data store is
 released.
 
@@ -248,8 +261,8 @@ configs read as the default generation).
 
 | Layer | How | Where it runs |
 |---|---|---|
-| Core (crypto, vault, profiles, archive, layout, history, bookmarks, sync, HTTP transport, UA presets, proxy location) | XCTest, 63 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
-| Tunnel protocols (STUN/TURN against RFC 5769 vectors, IPv4/IPv6 UDP packets, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy, several profiles through one router) | XCTest, 30 tests | Linux and macOS, every push |
+| Core (crypto, vault, profiles, archive, layout, history, bookmarks, passwords, cookie import, sync incl. cookies and settings conflicts, HTTP transport, UA presets, proxy location) | XCTest, 109 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| Tunnel protocols (STUN/TURN against RFC 5769 vectors, IPv4/IPv6 UDP packets, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy, several profiles through one router) | XCTest, 32 tests | Linux and macOS, every push |
 | Packet-tunnel extension | builds against the macOS SDK and is laid out as a system extension, plists linted, provider class checked (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner. Its router runs on a raw utun interface opened as root (`--utun-relay`, `UTunDevice`) against real WebKit, inside the leak check | macOS 26 runner, every push |
 | JS shims (logic, CreepJS-style shape checks) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages) | Linux, every push |
 | App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 26 runner, every push |

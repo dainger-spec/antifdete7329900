@@ -78,6 +78,18 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// of the same site, `WebOrigin.site`). Origins, `scheme://host[:port]`.
     public var passwordNeverSaveSites: [String]
 
+    /// Sync this profile's persistent cookies with the other devices, when sync is set up
+    /// (`cookies.bin`, merged per cookie). Session cookies never sync, nor does anything of an
+    /// ephemeral profile. Default on; older configurations decode as on.
+    public var syncCookies: Bool
+
+    /// When the user last changed these settings (the editor, "Never for This Website", the
+    /// passwords' excluded websites); not what the browser keeps for itself (the proxy location).
+    /// When two devices changed a profile's settings, sync keeps the newer ones and the other
+    /// device's as `config.bin.conflict`. Nil: not edited since the profile was created, or
+    /// rewritten by an older build.
+    public var settingsModifiedAt: Date?
+
     /// Set by the app for one launch, never stored: the relay in the packet tunnel that carries
     /// this profile's WebRTC through its SOCKS5 proxy. Nil when the tunnel is not available.
     public var webRTCRelay: WebRTCRelay?
@@ -97,7 +109,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 lastProxyLocation: ProxyLocation? = nil,
                 warnOnProxyIPChange: Bool = false,
                 passwordAutoFill: Bool = true,
-                passwordNeverSaveSites: [String] = []) {
+                passwordNeverSaveSites: [String] = [],
+                syncCookies: Bool = true,
+                settingsModifiedAt: Date? = nil) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -114,7 +128,12 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.warnOnProxyIPChange = warnOnProxyIPChange
         self.passwordAutoFill = passwordAutoFill
         self.passwordNeverSaveSites = passwordNeverSaveSites
+        self.syncCookies = syncCookies
+        self.settingsModifiedAt = settingsModifiedAt
     }
+
+    /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
+    public var syncsCookies: Bool { syncCookies && !ephemeral }
 
     /// A new profile seeded from a generation: the generation supplies the UA (by reference,
     /// via `deviceGenerationID`) and its suggested defaults.
@@ -192,6 +211,29 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         return edited
     }
 
+    /// What to store for the editor's version of a stored configuration: what the browser keeps
+    /// for itself as `stored` has it (`keepingStoredState(of:)`), and `settingsModifiedAt` moved
+    /// to `time` only when a setting changed (saving an unchanged editor is no newer edit).
+    public func savingEdit(over stored: ProfileConfiguration?, at time: Date = Date()) -> ProfileConfiguration {
+        var edited = keepingStoredState(of: stored)
+        edited.settingsModifiedAt = stored?.settingsModifiedAt
+        if !edited.hasSameSettings(as: stored) { edited.settingsModifiedAt = time }
+        return edited
+    }
+
+    /// The same settings: equal but for what the browser keeps for itself (the proxy location
+    /// found at a launch) and when they were last changed.
+    func hasSameSettings(as other: ProfileConfiguration?) -> Bool {
+        func settings(_ configuration: ProfileConfiguration) -> ProfileConfiguration {
+            var settings = configuration
+            settings.settingsModifiedAt = nil
+            settings.lastProxyLocation = nil
+            settings.webRTCRelay = nil
+            return settings
+        }
+        return other.map { settings($0) == settings(self) } ?? false
+    }
+
     /// This launch's lookup, or else the last location found for the same proxy.
     public func proxyLocation(lookedUp: ProxyLocation?) -> ProxyLocation? {
         guard needsProxyLocation, let proxy else { return nil }
@@ -213,7 +255,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
-             matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites
+             matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
+             syncCookies, settingsModifiedAt
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -240,6 +283,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         warnOnProxyIPChange = try c.decodeIfPresent(Bool.self, forKey: .warnOnProxyIPChange) ?? defaults.warnOnProxyIPChange
         passwordAutoFill = try c.decodeIfPresent(Bool.self, forKey: .passwordAutoFill) ?? defaults.passwordAutoFill
         passwordNeverSaveSites = try c.decodeIfPresent([String].self, forKey: .passwordNeverSaveSites) ?? defaults.passwordNeverSaveSites
+        syncCookies = try c.decodeIfPresent(Bool.self, forKey: .syncCookies) ?? defaults.syncCookies
+        settingsModifiedAt = try? c.decodeIfPresent(Date.self, forKey: .settingsModifiedAt)
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -262,6 +307,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(warnOnProxyIPChange, forKey: .warnOnProxyIPChange)
         try c.encode(passwordAutoFill, forKey: .passwordAutoFill)
         try c.encode(passwordNeverSaveSites, forKey: .passwordNeverSaveSites)
+        try c.encode(syncCookies, forKey: .syncCookies)
+        try c.encodeIfPresent(settingsModifiedAt, forKey: .settingsModifiedAt)
     }
 
     public var historyPolicy: HistoryStore.Policy {

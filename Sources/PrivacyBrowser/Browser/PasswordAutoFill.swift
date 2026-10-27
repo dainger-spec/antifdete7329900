@@ -440,6 +440,7 @@ final class ProfilePasswordSettings {
         var configuration = try repository.loadConfiguration(profileID)
         guard !PasswordMatching.isNeverSaved(origin, sites: configuration.passwordNeverSaveSites) else { return }
         configuration.passwordNeverSaveSites.append(origin.serialized)
+        configuration.settingsModifiedAt = Date()
         try repository.saveConfiguration(configuration, for: profileID)
     }
 }

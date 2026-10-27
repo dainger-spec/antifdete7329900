@@ -57,6 +57,8 @@
 "cookies.reason.unsupportedFile" = "Not a cookie export but a file of another kind: %@";
 "cookies.reason.wrongFieldCount" = "%ld fields instead of 7 tab-separated ones";
 "cookies.summary" = "%1$ld of %2$ld entries can be imported";
+"cookies.sync.saveFailed" = "The synced cookies of “%@” could not be saved; this run’s cookie changes will not reach your other devices.";
+"cookies.sync.unreadable" = "The synced cookies of “%@” could not be read; cookies were not synced at this launch.";
 "cookies.title" = "Import Cookies — %@";
 "cookies.where.entry" = "Entry %1$ld (line %2$ld)";
 "cookies.where.file" = "File";
@@ -110,7 +112,11 @@
 "editor.section.network" = "Network";
 "editor.section.passwords" = "Passwords";
 "editor.section.privacy" = "Privacy";
+"editor.section.sync" = "Sync";
 "editor.startURL" = "Start URL";
+"editor.sync.cookies" = "Sync cookies with other devices";
+"editor.sync.footer" = "With sync set up (More → Sync… in the Profiles window), a profile’s settings, passwords, bookmarks and history sync, encrypted. With this on, so do its persistent cookies (session cookies never), merged cookie by cookie: the newer change wins. They reach the other device at its next launch of the profile, before the first page loads. Settings changed on two devices: the newer ones win and the other device’s are kept as a conflict copy.";
+"editor.sync.footer.ephemeral" = "An ephemeral profile keeps no website data, so it has no cookies to sync.";
 "editor.title.edit" = "Edit Profile";
 "editor.title.new" = "New Profile";
 "editor.tz" = "Time zone";

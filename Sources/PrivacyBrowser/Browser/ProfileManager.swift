@@ -2,6 +2,7 @@ import BrowserCore
 import CryptoKit
 import Foundation
 import os
+import WebKit
 
 /// Launches, stops and deletes profiles; owns the running `BrowserSession`s.
 ///
@@ -9,8 +10,9 @@ import os
 /// ```
 /// launch: unwrap profile key → decrypt config, passwords, history, bookmarks
 ///         → decrypt WebKit data (webdata.pbsa → WebKit dirs)
-///         → create WKWebsiteDataStore(forIdentifier:) + proxy → open window(s)
-/// stop:   write cookies to disk → close windows/tabs → flush history → release data store → archive + encrypt WebKit dirs
+///         → create WKWebsiteDataStore(forIdentifier:) + proxy
+///         → synced cookies (cookies.bin) and queued imported cookies into the store → open window(s)
+/// stop:   write cookies to disk → record them for sync → close windows/tabs → flush history → release data store → archive + encrypt WebKit dirs
 ///         → WKWebsiteDataStore.remove(forIdentifier:) → drop profile key
 /// ```
 /// Any number of profiles can run at once; each has its own data store and proxy.
@@ -178,8 +180,9 @@ final class ProfileManager: ObservableObject {
             if !configuration.ephemeral { _ = try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
             throw error
         }
-        // Cookies imported while the profile was stopped: into its store before the first page loads.
-        await applyQueuedCookies(of: id, name: summary.name, to: session)
+        // Synced cookies, and cookies imported while the profile was stopped: into its store
+        // before the first page loads.
+        await prepareCookies(of: id, summary: summary, syncs: stored.syncsCookies, session: session)
         session.onAllWindowsClosed = { [weak self] in
             // Return to the Profiles window right away; sealing then runs in the background and
             // flips the row to "Encrypting…" via busyProfileIDs.
@@ -347,7 +350,14 @@ final class ProfileManager: ObservableObject {
         let ephemeral = session.configuration.ephemeral
         // Cookies set in the last moments (by a page, or imported) are written before the data is
         // sealed: CFNetwork would write them later, after the archive was made.
-        if !ephemeral, let store = session.dataStore { await CookieStoreImport.flush(store.httpCookieStore) }
+        if !ephemeral, let store = session.dataStore {
+            await CookieStoreImport.flush(store.httpCookieStore)
+            // What this run changed, for sync (the settings as they are now: sync may have been
+            // turned off while it ran).
+            if let key, (try? repository.loadConfiguration(id, key: key))?.syncsCookies == true {
+                await recordSyncedCookies(of: id, in: store.httpCookieStore)
+            }
+        }
         session.shutDown()
         // `session` is now the last reference; it is released when this scope ends, but its
         // data store reference was already dropped in shutDown().
@@ -376,7 +386,8 @@ final class ProfileManager: ObservableObject {
         await waitWhileBusy()
     }
 
-    private func waitWhileBusy() async {
+    /// Returns when no profile is launching or being sealed.
+    func waitWhileBusy() async {
         while !busyProfileIDs.isEmpty {
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
@@ -444,6 +455,73 @@ final class ProfileManager: ObservableObject {
         // Starting or being encrypted: its store is about to exist or to go.
         guard !busyProfileIDs.contains(id), !isShuttingDown else { throw CookieImportError.busy }
         return .queued(try repository.queueImportedCookies(cookies, for: id))
+    }
+
+    // MARK: Synced cookies
+
+    /// At launch, before the first page loads. With cookie sync on: what the store changed since
+    /// it was last recorded (a run that ended without a stop) is recorded as changes of that
+    /// time, the earliest they can be — with nothing recorded yet (sync just turned on), as old
+    /// as can be: they fill in what the synced cookies lack, and any synced change wins over
+    /// them. Then the document (with what sync brought from the other devices) is applied to the
+    /// store, then the cookies imported while the profile was stopped go in and are recorded as
+    /// changes of now. With sync off, the profile keeps no synced cookies (`clearSyncedCookies`).
+    private func prepareCookies(of id: UUID, summary: ProfileSummary, syncs: Bool, session: BrowserSession) async {
+        guard syncs else {
+            try? repository.clearSyncedCookies(for: id)
+            await applyQueuedCookies(of: id, name: summary.name, to: session)
+            return
+        }
+        guard let store = session.dataStore?.httpCookieStore else { return }
+        var synced: (loaded: CookieJarDocument, jar: CookieJarDocument, baseline: [ImportedCookie])?
+        do {
+            let loaded = try repository.cookieJar(for: id)
+            let baseline = try repository.cookieBaseline(for: id)
+            let jar = loaded.recording(store: await CookieStoreSync.persistentCookies(in: store), baseline: baseline.cookies,
+                                       at: baseline.savedAt)
+            let applied = await CookieStoreSync.apply(jar, to: store)
+            log.notice("Synced cookies at launch: \(applied.set) set, \(applied.deleted) deleted, \(applied.refused.count) refused")
+            synced = (loaded, jar, await CookieStoreSync.persistentCookies(in: store))
+        } catch {
+            log.error("Could not read the synced cookies of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            onError?(String(format: L("cookies.sync.unreadable"), summary.name))
+        }
+        await applyQueuedCookies(of: id, name: summary.name, to: session)
+        guard let synced else { return }
+        let now = Date()
+        let current = await CookieStoreSync.persistentCookies(in: store)
+        saveSyncedCookies(of: id, name: summary.name, loaded: synced.loaded,
+                          jar: synced.jar.recording(store: current, baseline: synced.baseline, at: now),
+                          baseline: CookieBaseline(cookies: current, savedAt: now))
+    }
+
+    /// At stop: what the run changed, as changes of now.
+    private func recordSyncedCookies(of id: UUID, in store: WKHTTPCookieStore) async {
+        let name = (try? repository.summary(for: id).name) ?? ""
+        do {
+            let loaded = try repository.cookieJar(for: id)
+            let baseline = try repository.cookieBaseline(for: id)
+            let now = Date()
+            let current = await CookieStoreSync.persistentCookies(in: store)
+            // Nothing recorded yet (sync turned on while it ran): as at launch, as old as can be.
+            let since = baseline.savedAt == .distantPast ? .distantPast : now
+            saveSyncedCookies(of: id, name: name, loaded: loaded, jar: loaded.recording(store: current, baseline: baseline.cookies, at: since),
+                              baseline: CookieBaseline(cookies: current, savedAt: now))
+        } catch {
+            log.error("Could not read the synced cookies of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            onError?(String(format: L("cookies.sync.unreadable"), name))
+        }
+    }
+
+    /// The document only when it changed: rewriting it unchanged would make sync upload it again.
+    private func saveSyncedCookies(of id: UUID, name: String, loaded: CookieJarDocument, jar: CookieJarDocument, baseline: CookieBaseline) {
+        do {
+            if jar != loaded { try repository.saveCookieJar(jar, for: id) }
+            try repository.saveCookieBaseline(baseline, for: id)
+        } catch {
+            log.error("Could not save the synced cookies of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            onError?(String(format: L("cookies.sync.saveFailed"), name))
+        }
     }
 
     private func applyQueuedCookies(of id: UUID, name: String, to session: BrowserSession) async {

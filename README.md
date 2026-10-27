@@ -85,7 +85,7 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 163 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 170 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
@@ -94,7 +94,9 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   AutoFill (save, update, never, suggestions and fill, sign-in by script, sign-up, frames of
   another and of the same site, nothing for a password a page script wrote), cookie import
   (a damaged Netscape file, queued for a stopped profile and applied before its first page,
-  a cut-off JSON into a running one, persistence across stop and launch), tabs, history,
+  a cut-off JSON into a running one, persistence across stop and launch), profile sync between
+  two vaults (cookies recorded at stop and launch, applied before the first page on the other
+  device, a change and a deletion coming back, settings newer-wins with a conflict copy), tabs, history,
   bookmarks, the
   device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
@@ -150,7 +152,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
    and waits until every profile is sealed.
 9. **Sync (optional):** **More → Sync…** offers a folder (local-only) or a server (client
-   for the documented API; no server is included). Stop all profiles before syncing.
+   for the documented API; no server is included). Stop all profiles before syncing. A
+   profile's settings, passwords, bookmarks, history and persistent cookies sync, encrypted;
+   another Mac gets the cookies at its next launch of the profile, before the first page
+   (**⋯ → Edit…** → **Sync cookies with other devices** turns that off for a profile).
 
 ## What is implemented, and how
 
@@ -178,6 +183,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Cookie import into a profile | **⋯ → Import Cookies…**: JSON (EditThisCookie, Cookie-Editor, Puppeteer/DevTools, Playwright, Selenium, Chrome and Firefox database exports, JSON Lines) and Netscape `cookies.txt`. Damaged files import whatever is readable (bad bytes, a broken or cut-off JSON entry or a malformed line cost only that cookie); the report lists every other entry with its line and reason (public-suffix domain, expired, `__Host-` rules, …). A running profile gets them at once (and the store is read back for any WebKit refused), a stopped one at its next launch before the first page loads (queued encrypted). **Checked by the self-test** end to end through the proxy |
 | App Sandbox | Default build; entitlements in `Resources/PrivacyBrowser.entitlements` (documented in the limitations doc, §9); container migration. **Sandbox enforcement and migration verified in CI** |
 | Encrypted sync client | Engine with CAS writes, per-record merges for bookmarks and history, tombstones; folder transport; HTTP transport for a documented API |
+| Profile sync: cookies and settings | A profile's persistent cookies sync as `cookies.bin` (encrypted with the profile key), merged cookie by cookie — the newer change wins, deletions included; recorded when the profile stops, applied at its next launch before the first page loads, imported cookies joining at that launch. Settings changed on two Macs: the newer edit wins, the other kept as `config.bin.conflict`. Session and partitioned cookies, and ephemeral profiles, never sync ([docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md)). **Checked by the self-test** with a second vault set up from the sync folder, and by unit tests |
 
 ### Approximated (the platform offers no native API)
 
@@ -196,9 +202,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 
 - True engine-level iOS WebKit (private APIs or bundled core required). TLS ClientHello, real GPU renderer, full font set, touch behavior remain Mac.
 - Per-profile `Accept-Language` header (JS navigator.language is spoofed).
-- Sync server (only the client and its API spec), syncing of WebKit website data, and
-  per-entry merging of passwords (concurrent edits keep the remote version plus a
-  `.conflict` copy).
+- Sync server (only the client and its API spec), syncing of WebKit website data other than
+  cookies (localStorage, IndexedDB, caches), and per-entry merging of passwords (concurrent
+  edits keep the remote version plus a `.conflict` copy). Synced data reaches a running profile
+  only at its next launch.
 - Session restore, tab drag-and-drop between windows, find-in-page, extensions, and
   content blocking (`WKContentRuleList` would be the native route).
 
@@ -212,7 +219,7 @@ Sources/
     Vault/                         MasterVault (key hierarchy), DeviceSettings
     Profiles/                      ProfileConfiguration, ProfileRepository
     Passwords/                     PasswordVault, PasswordMatching (site rules), PublicSuffixList
-    Cookies/                       CookieImporter (JSON and Netscape readers, checks, report)
+    Cookies/                       CookieImporter (JSON and Netscape readers, checks, report), CookieJar (synced cookies, merge)
     Library/                       HistoryStore, BookmarkStore (mergeable, tombstones)
     Archive/                       encrypted chunk stream, directory archiver, WebKitDataLayout
     Sync/                          envelope/codec, engine, SyncTransport contract

@@ -12,6 +12,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var phase: Phase
     @Published private(set) var profiles: [ProfileSummary] = []
     @Published private(set) var isWorking = false
+    /// A sync is running: launches wait for it (it replaces the profiles' files on disk).
+    private var isSyncing = false
     @Published var errorMessage: String?
     /// A profile whose password manager should open (from "Passwords…" in a browser window).
     @Published var passwordsRequest: ProfileSummary?
@@ -228,7 +230,10 @@ final class AppModel: ObservableObject {
     func updateProfile(_ id: UUID, name: String, configuration: ProfileConfiguration) throws {
         guard let repository else { return }
         let stored = try? repository.loadConfiguration(id)
-        try repository.saveConfiguration(configuration.keepingStoredState(of: stored), for: id)
+        let saved = configuration.savingEdit(over: stored)
+        try repository.saveConfiguration(saved, for: id)
+        // Cookie sync off: the synced cookies go, here and (at the next sync) on the other devices.
+        if !saved.syncsCookies { try repository.clearSyncedCookies(for: id) }
         if try repository.summary(for: id).name != name {
             try repository.rename(id, to: name)
         }
@@ -241,6 +246,8 @@ final class AppModel: ObservableObject {
     }
 
     func launch(_ id: UUID) async {
+        // A launch reads the files sync replaces (settings, synced cookies): after the sync.
+        while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
         await perform { try await self.manager?.launch(id) }
         refresh()
     }
@@ -289,7 +296,9 @@ final class AppModel: ObservableObject {
     func removeNeverSavedSite(_ site: String, for id: UUID) throws {
         guard let repository else { return }
         var configuration = try repository.loadConfiguration(id)
+        guard configuration.passwordNeverSaveSites.contains(site) else { return }
         configuration.passwordNeverSaveSites.removeAll { $0 == site }
+        configuration.settingsModifiedAt = Date()
         try repository.saveConfiguration(configuration, for: id)
     }
 
@@ -333,13 +342,21 @@ final class AppModel: ObservableObject {
 
     /// Only allowed while no profile is running, because incoming changes replace files on disk.
     func syncNow() async {
-        guard let repository, let manager, let target = deviceSettings.syncTarget else { return }
+        guard let repository, let manager, let target = deviceSettings.syncTarget, !isSyncing else { return }
         guard !manager.hasRunningProfiles else {
             showError("Stop all profiles before syncing.")
             return
         }
         isWorking = true
         defer { isWorking = false }
+        isSyncing = true
+        defer { isSyncing = false }
+        // A profile still starting or being encrypted reads and writes its synced cookies: after it.
+        await manager.waitWhileBusy()
+        guard !manager.hasRunningProfiles else {
+            showError("Stop all profiles before syncing.")
+            return
+        }
         var scopedFolder: URL?
         defer { scopedFolder?.stopAccessingSecurityScopedResource() }
         let status: DeviceSettings.SyncStatus

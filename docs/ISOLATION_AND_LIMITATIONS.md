@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 163/163 checks in both builds):
+(macOS 26, 170/170 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -42,6 +42,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy and credentials) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported or stored, and turning it off, or replacing the proxy, while a lookup is under way leaves no new IP stored and nothing reported |
 | Password AutoFill | in a profile window on the self-test proxy's sign-in pages: the page world has no `window.webkit` and no trace of the script; a password a page script wrote and submitted is not offered; a typed sign-in is offered (Save, saved with its user name), a new password for it as Update, nothing anywhere on the site after Never for This Website; a login field lists the site's saved login and choosing it fills both fields with `input` and `change` (and `:autofill` where WebKit allows the world); a filled-in login submitted again asks nothing; a sign-in by script (fields removed after the button's click) and a sign-up form (new password = confirmation) are offered; a frame of another site is offered none, a frame of the same site its logins under a header naming it. Synthesized key events do not reach the page on the CI runner, so typing is stood in for by marking the fields typed inside the isolated world (reported by the self-test); real clicks and keys are used where they arrive |
 | Cookie import | a Netscape file with CRLF, comments, an HttpOnly line and damaged bytes: the five readable cookies are read, the four other lines reported (field count, public suffix, expired, damaged text); into a stopped profile they are queued encrypted (no cookie value in the file) and put into its store at launch before the start page is requested: the request carries the host-only, domain, HttpOnly and session cookies, not the Secure one or another path's over http; the store holds each with the file's attributes; a cut-off JSON export's complete entry goes into the running profile at once and the next request carries it; after a stop (sealed) and a launch the persistent imported cookies are back and the session cookie is not |
+| Profile sync (two devices) | a second vault bootstrapped from a sync folder with the master password stands in for another Mac: a cookie imported into the stopped profile on A joins the synced cookies at its launch, a page's persistent cookie at its stop (its session cookie not); the folder holds no cookie name, value or domain; on B the start page's first request already carries both; B's change of one and deletion of the other reach A's store before its first page; settings changed on both, B's later: B's on both Macs, A's kept as `config.bin.conflict` |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
@@ -261,6 +262,7 @@ storage and network (§1, §4).
 | Profile settings (proxy credentials and so on) | encrypted (`config.bin`) | decrypted only during launch and edit | in memory |
 | Saved passwords | encrypted (`passwords.bin`) | decrypted on demand | in memory |
 | Imported cookies for a stopped profile | encrypted (`cookies-import.bin`) until its next launch puts them into the website data | — | in WebKit's cookie store (as the profile's other cookies) |
+| Synced cookies (persistent cookies, with cookie sync on) | encrypted (`cookies.bin`; its local baseline `cookies-baseline.bin`) | encrypted | encrypted; written at launch and stop |
 | History | encrypted (`history.bin`); ephemeral profiles: never written | encrypted | in memory, saved encrypted (debounced, ≤ 3 s) |
 | Bookmarks | encrypted (`bookmarks.bin`) | encrypted | in memory, saved encrypted on every change |
 | Sync target and token | encrypted (`settings.bin`, not synced) | in memory | — |
@@ -590,8 +592,34 @@ until the profile stops, as in the browser they came from; for an ephemeral prof
 cookies last for that run only.
 
 **Limits.** Domains in Unicode (IDN) are refused rather than converted; a value in a legacy encoding
-(Windows-1251, Latin-1) shows as damaged bytes; the queue is local to this Mac (not synced); a
-profile that is starting or being encrypted asks to try again a moment later.
+(Windows-1251, Latin-1) shows as damaged bytes; the queue itself is local to this Mac (with cookie
+sync on, the cookies join the synced ones at the profile's next launch, §8b); a profile that is
+starting or being encrypted asks to try again a moment later.
+
+## 8b. Profile sync: cookies and settings
+
+With sync set up (**More → Sync…**), a profile's settings, passwords, bookmarks, history and —
+with **Sync cookies with other devices** on (the default; never for an ephemeral profile) — its
+persistent cookies sync between Macs, encrypted with the profile's key inside the sync envelope
+(the server or folder sees no cookie name, value or domain). Format and rules:
+[SYNC_FORMAT.md](SYNC_FORMAT.md).
+
+- **Cookies** merge cookie by cookie (name, domain, path): the newer change wins, deletions
+  included, and both devices end with the same set. A device records what a run changed when
+  the profile stops (before its data is sealed), and applies the synced cookies when it launches,
+  before the first page loads; cookies imported into a stopped profile are recorded at that
+  launch, after the synced ones went in. Session cookies never sync; partitioned (CHIPS) cookies
+  neither (WebKit cannot set them in their partition elsewhere). Turning the switch off empties the
+  synced cookies on every device at the next sync; the cookie stores keep what they hold.
+- **Settings** changed on two devices: the newer edit wins (the time of the last change made in
+  the editor or the passwords' "Never" list), and the other device's version is kept next to it
+  as `config.bin.conflict`, encrypted. A difference only in what the browser stores for itself
+  (the proxy's location found at a launch) is no conflict.
+- **Not synced:** localStorage, IndexedDB, caches and service workers, so a site that keeps its
+  sign-in there rather than in a cookie is signed in on one Mac only. Changes reach another Mac
+  only through a sync with every profile stopped, and at its next launch of the profile; a
+  profile running on two Macs at once diverges until each has stopped and synced (then the
+  later change of each cookie wins — the one recorded at the later stop).
 
 ## 9. App Sandbox
 
@@ -642,7 +670,7 @@ locations.
 - Websites in one profile reading another profile's cookies, storage, history or bookmarks.
 - Casual IP and location leaks: fail-closed proxy, WebRTC off, geolocation denied.
 - A sync server or sync folder learning profile names, settings, passwords, history,
-  bookmarks or browsing data.
+  bookmarks, cookies or browsing data.
 - Other sandboxed apps reading the app's data (App Sandbox).
 
 **Does not protect against:**
