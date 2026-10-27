@@ -209,27 +209,31 @@ public enum WarmUpLinkPolicy {
     /// The links of `links` the robot may click on `page` (shown in a viewport of `viewport`).
     public static func candidates(_ links: [WarmUpLink], on page: URL, kind: WarmUpPlan.Page.Kind,
                                   viewport: (width: Double, height: Double)) -> [WarmUpLink] {
-        let pageSite = site(of: page)
-        return links.filter { link in
-            guard let url = URL(string: link.href, relativeTo: page)?.absoluteURL,
-                  let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
-                  let host = url.host, !host.isEmpty else { return false }
-            // The same page (a fragment) is no visit.
-            if sameDocument(url, page) { return false }
-            switch kind {
-            case .address: guard site(of: url) == pageSite else { return false }
-            case .search: guard site(of: url) != pageSite else { return false }
-            }
-            let target = link.target.lowercased()
-            guard ["", "_self", "_top", "_parent"].contains(target), !link.download else { return false }
-            guard !fileExtensions.contains(url.pathExtension.lowercased()) else { return false }
-            let words = (link.text + " " + url.path + " " + (url.query ?? "")).lowercased()
-            guard !riskyWords.contains(where: words.contains) else { return false }
-            guard link.text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 else { return false }
-            // Wholly in view and large enough to aim at.
-            return link.width >= 8 && link.height >= 8 && link.x >= 0 && link.y >= 0
-                && link.x + link.width <= viewport.width && link.y + link.height <= viewport.height
+        links.filter { allows($0, on: page, kind: kind, viewport: viewport) }
+    }
+
+    /// Whether the robot may click `link` itself (another link to the same address may still be
+    /// refused: one opening a new window, or downloading).
+    public static func allows(_ link: WarmUpLink, on page: URL, kind: WarmUpPlan.Page.Kind,
+                              viewport: (width: Double, height: Double)) -> Bool {
+        guard let url = URL(string: link.href, relativeTo: page)?.absoluteURL,
+              let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = url.host, !host.isEmpty else { return false }
+        // The same page (a fragment) is no visit.
+        if sameDocument(url, page) { return false }
+        switch kind {
+        case .address: guard site(of: url) == site(of: page) else { return false }
+        case .search: guard site(of: url) != site(of: page) else { return false }
         }
+        let target = link.target.lowercased()
+        guard ["", "_self", "_top", "_parent"].contains(target), !link.download else { return false }
+        guard !fileExtensions.contains(url.pathExtension.lowercased()) else { return false }
+        let words = (link.text + " " + url.path + " " + (url.query ?? "")).lowercased()
+        guard !riskyWords.contains(where: words.contains) else { return false }
+        guard link.text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 else { return false }
+        // Wholly in view and large enough to aim at.
+        return link.width >= 8 && link.height >= 8 && link.x >= 0 && link.y >= 0
+            && link.x + link.width <= viewport.width && link.y + link.height <= viewport.height
     }
 
     /// The site (`WebOrigin.site`: the registrable domain, or the host itself for an IP address

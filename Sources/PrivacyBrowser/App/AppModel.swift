@@ -297,10 +297,17 @@ final class AppModel: ObservableObject {
         } catch {
             showError(error.localizedDescription)
         }
+        // Starting or being encrypted (a launch or a stop under way): let that finish first.
+        while manager.busyProfileIDs.contains(id) { try? await Task.sleep(nanoseconds: 100_000_000) }
         if !manager.isRunning(id) { await launch(id) }
         // The manager of this unlock: a Lock while the profile started ends it.
         guard let current = self.manager, current === manager, current.isRunning(id) else { return false }
-        return current.startWarmUp(id, plan: plan)
+        guard current.startWarmUp(id, plan: plan) else {
+            let name = profiles.first { $0.id == id }?.name ?? ""
+            showError(String(format: L("warmup.error.notStarted"), name))
+            return false
+        }
+        return true
     }
 
     /// Whether `password` is the master password (asked before saved passwords are shown).

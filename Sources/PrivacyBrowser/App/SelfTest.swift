@@ -1718,6 +1718,7 @@ final class SelfTest {
             var referer: String
             var cookie: String
             var userAgent: String
+            var time: Double
         }
         func proxyLog() async -> [LogEntry] {
             guard let webView = manager.session(for: profile.id)?.frontmostWindow?.selectedTab?.webView,
@@ -1755,9 +1756,15 @@ final class SelfTest {
                   && log.filter { !$0.path.contains("/event/") }.allSatisfy { $0.userAgent == userAgent },
               "\(pagesServed) cookie(b)=\(requestB?.cookie ?? "-") ua=\(userAgent)")
         let loaded = visits.filter { $0.outcome == .loaded }
-        check("warm-up: it stays on each page between the plan's times (plus half again on the page of the followed link)",
-              loaded.count == 3 && loaded.allSatisfy { $0.dwell >= 3 && $0.dwell <= 3.5 * 1.5 + 0.01 },
-              "\(visits.map(\.dwell))")
+        // Measured at the proxy: from a page's request to its followed link's (the plan's 3-3.5 s,
+        // then reading and clicking), and from there to the next page (half of it, then the pause).
+        func requested(_ name: String) -> Double? { log.first { $0.path == "/pb-warmup/\(name)" }?.time }
+        func span(_ from: String, _ to: String) -> Double? { requested(to).flatMap { end in requested(from).map { end - $0 } } }
+        let onPage = ["a", "b", "c"].map { span($0, "\($0)-next") }
+        let onFollowed = [span("a-next", "b"), span("b-next", "broken")]
+        check("warm-up: it stays on each page between the plan's times, and half as long on the page of the followed link (as measured at the proxy)",
+              onPage.allSatisfy { ($0 ?? 0) >= 3 && ($0 ?? 99) <= 10 } && onFollowed.allSatisfy { ($0 ?? 0) >= 1.5 },
+              "on pages \(onPage) on followed pages \(onFollowed)")
         let events = Set(log.compactMap { entry -> String? in
             entry.path.hasPrefix("/pb-warmup/event/\(run)/") ? String(entry.path.dropFirst("/pb-warmup/event/\(run)/".count)) : nil
         })
@@ -1772,14 +1779,13 @@ final class SelfTest {
                   && !log.contains { refused.contains($0.path) }
                   && loaded.allSatisfy { $0.followed?.path == "\($0.url.path)-next" && $0.followedOutcome == .loaded },
               "\(referers.filter { $0.key.hasSuffix("-next") }) refused requested: \(log.map(\.path).filter(refused.contains))")
-        var traces: String?
-        if let webView = manager.session(for: profile.id)?.frontmostWindow?.selectedTab?.webView {
-            traces = try? await js(webView, """
-                return [typeof window.webkit, Object.getOwnPropertyNames(window).filter((n) => /warm|robot/i.test(n)).join(',')].join('|');
-                """) as? String
-        }
-        check("warm-up: the page world shows nothing of the robot (no window.webkit, no globals of its own)",
-              traces == "undefined|", traces ?? "nil")
+        // Each page reports what its own world sees (window.webkit, robot-like globals) at its first
+        // scroll and, through the next page, at the click that left it: "undefined-" is nothing.
+        let probes = events.filter { $0.contains("globals-") }
+        check("warm-up: while it scrolls and clicks, the pages' own world shows nothing of the robot (no window.webkit, no globals)",
+              ["a", "b", "c"].allSatisfy { events.contains("\($0)-globals-undefined-") && events.contains("\($0)-next-clickglobals-\($0)-undefined-") }
+                  && probes.allSatisfy { $0.hasSuffix("-undefined-") },
+              "\(probes.sorted())")
         let history = manager.session(for: profile.id)?.library.historyEntries(matching: "pb-warmup").map(\.url) ?? []
         var stored: [String] = []
         // Read in its own scope: a store held past this point would keep the stop below from sealing.
@@ -1789,18 +1795,20 @@ final class SelfTest {
                   && ["pbwarm_a", "pbwarm_b", "pbwarm_c", "pbwarm_a_next"].allSatisfy(stored.contains),
               "history=\(history) cookies=\(stored.sorted())")
 
-        // Stopped by the user while on a page: nothing more is requested.
+        // Stopped by the user while on a page whose next one is due within a second and a half:
+        // three seconds later it still has not been asked for.
         let long = WarmUpPlan(addresses: [page("s1"), page("s2")].joined(separator: "\n"), scroll: false, followLinks: false)
-        robot.limits.dwellOverride = 30...30
+        robot.limits.dwellOverride = 1...1
+        robot.limits.pauseOverride = 0.3...0.3
         manager.startWarmUp(profile.id, plan: long)
         _ = await waitUntil(timeout: 20) { robot.visits.first?.outcome == .loaded }
-        let before = await proxyLog().count
         robot.stop()
-        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
         let after = await proxyLog()
-        check("warm-up: Stop ends the run at once; no further page is requested",
-              robot.state == .stopped(.byUser) && !after.contains { $0.path == "/pb-warmup/s2" } && after.count <= before + 1,
-              "state=\(robot.state) before=\(before) after=\(after.map(\.path))")
+        check("warm-up: Stop ends the run at once; the next page is never requested",
+              robot.state == .stopped(.byUser) && after.contains { $0.path == "/pb-warmup/s1" } && !after.contains { $0.path == "/pb-warmup/s2" },
+              "state=\(robot.state) requested=\(after.map(\.path))")
+        robot.limits.dwellOverride = 30...30
 
         // Its tab closed by the user.
         manager.startWarmUp(profile.id, plan: long)
@@ -1821,15 +1829,20 @@ final class SelfTest {
             controller.closeTab(at: index) // answers the dialog
         }
 
-        // The profile stopped during a run: the robot stops first, and the data seals as usual.
+        // The profile stopped during a run: the robot is stopped first — while the session still
+        // has its data store, before anything of the stop waits — and the data seals as usual.
         manager.startWarmUp(profile.id, plan: long)
         _ = await waitUntil(timeout: 20) { robot.visits.first?.outcome == .loaded }
+        weak var stoppingSession = manager.session(for: profile.id)
+        let stopping = Task { @MainActor in try await manager.stop(profile.id) }
+        for _ in 0..<5 where robot.state == .running { await Task.yield() }
+        let stoppedFirst = robot.state == .stopped(.profileStopped) && stoppingSession?.dataStore != nil
         var sealError: String?
-        do { try await manager.stop(profile.id) } catch { sealError = String(describing: error) }
-        check("warm-up: stopping the profile stops its run first; the profile's data is sealed as usual",
-              robot.state == .stopped(.profileStopped) && sealError == nil && !manager.isRunning(profile.id)
+        do { try await stopping.value } catch { sealError = String(describing: error) }
+        check("warm-up: stopping the profile stops its run first (its store still there); the profile's data is sealed as usual",
+              stoppedFirst && sealError == nil && !manager.isRunning(profile.id)
                   && !webKitDataDirectoriesExist(profile.id) && messages.isEmpty,
-              "state=\(robot.state) seal=\(sealError ?? "ok") messages=\(messages)")
+              "stoppedFirst=\(stoppedFirst) state=\(robot.state) seal=\(sealError ?? "ok") messages=\(messages)")
         try await manager.delete(profile.id)
     }
 

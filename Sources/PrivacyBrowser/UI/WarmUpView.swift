@@ -48,7 +48,7 @@ private struct WarmUpPanel: View {
                 } else {
                     Button(L("warmup.start")) { start() }
                         .keyboardShortcut(.defaultAction)
-                        .disabled(starting || reading.pages.isEmpty)
+                        .disabled(starting || reading.pages.isEmpty || model.isBusy(profile.id))
                 }
             }
         }

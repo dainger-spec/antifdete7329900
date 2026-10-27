@@ -244,7 +244,10 @@ WarmUpRobot (main actor, one Task per run; tab and session held weakly)
 ```
 
 The robot never replaces the tab's delegates (they authenticate the proxy, record history and
-handle downloads); it watches the tab instead. It ends itself when its tab's `host` is gone, the
+handle downloads); it watches the tab instead, and sets the tab's `refusesDownloads` for the run
+(a response the tab would save fails as a load). Its writes to a visit check that the run is
+still the current one, and its scripts end at once on Stop, so a run stopped mid-await never
+touches the next run's state. It ends itself when its tab's `host` is gone, the
 session's data store is gone, or the tab has a dialog waiting. ISOLATION_AND_LIMITATIONS.md §8c.
 
 ## Tabs

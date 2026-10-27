@@ -149,6 +149,17 @@ final class WarmUpLinkPolicyTests: XCTestCase {
         XCTAssertEqual(allowed.map(\.text), ["Story one", "About us", "Explicit self"])
     }
 
+    func testEachLinkIsJudgedByItselfNotByItsAddress() {
+        let page = URL(string: "https://www.example.com/")!
+        let plain = link("/story/42", "Story 42")
+        let newWindow = link("/story/42", "Story 42 in a new window", target: "_blank")
+        let download = link("/story/42", "Story 42 as a file", download: true)
+        XCTAssertTrue(WarmUpLinkPolicy.allows(plain, on: page, kind: .address, viewport: viewport))
+        XCTAssertFalse(WarmUpLinkPolicy.allows(newWindow, on: page, kind: .address, viewport: viewport))
+        XCTAssertFalse(WarmUpLinkPolicy.allows(download, on: page, kind: .address, viewport: viewport))
+        XCTAssertEqual(WarmUpLinkPolicy.candidates([newWindow, plain, download], on: page, kind: .address, viewport: viewport), [plain])
+    }
+
     func testOnSearchResultsOnlyLinksToOtherSites() {
         let page = URL(string: "https://duckduckgo.com/?q=weather")!
         let links = [

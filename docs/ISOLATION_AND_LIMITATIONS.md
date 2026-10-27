@@ -43,7 +43,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Password AutoFill | in a profile window on the self-test proxy's sign-in pages: the page world has no `window.webkit` and no trace of the script; a password a page script wrote and submitted is not offered; a typed sign-in is offered (Save, saved with its user name), a new password for it as Update, nothing anywhere on the site after Never for This Website; a login field lists the site's saved login and choosing it fills both fields with `input` and `change` (and `:autofill` where WebKit allows the world); a filled-in login submitted again asks nothing; a sign-in by script (fields removed after the button's click) and a sign-up form (new password = confirmation) are offered; a frame of another site is offered none, a frame of the same site its logins under a header naming it. Synthesized key events do not reach the page on the CI runner, so typing is stood in for by marking the fields typed inside the isolated world (reported by the self-test); real clicks and keys are used where they arrive |
 | Cookie import | a Netscape file with CRLF, comments, an HttpOnly line and damaged bytes: the five readable cookies are read, the four other lines reported (field count, public suffix, expired, damaged text); into a stopped profile they are queued encrypted (no cookie value in the file) and put into its store at launch before the start page is requested: the request carries the host-only, domain, HttpOnly and session cookies, not the Secure one or another path's over http; the store holds each with the file's attributes; a cut-off JSON export's complete entry goes into the running profile at once and the next request carries it; after a stop (sealed) and a launch the persistent imported cookies are back and the session cookie is not |
 | Profile sync (two devices) | a second vault bootstrapped from a sync folder with the master password stands in for another Mac: a cookie imported into the stopped profile on A joins the synced cookies at its launch, a page's persistent cookie at its stop (its session cookie not); the folder holds no cookie name, value or domain; on B the start page's first request already carries both; B's change of one and deletion of the other reach A's store before its first page; settings changed on both, B's later: B's on both Macs, A's kept as `config.bin.conflict` |
-| Session warm-up robot | through the app's launch path behind the self-test proxy, with short waits: a plan of three pages, a `javascript:` line (skipped) and a page the proxy closes unanswered (reported, the robot goes on) is visited in order in a new tab of the profile; the requests carry the profile's User-Agent and the cookies the pages before set; each page is stayed on for the plan's time and scrolled (the pages see trusted scroll events); from each page only the plain same-site link is followed, with the page as Referer — never the sign-out, other-site, file or new-window links next to it; the page world has no `window.webkit` and no robot global; history and the pages' cookies are kept; Stop ends a run with no further request; closing its tab, a page's alert and stopping the profile each stop it, and the profile's data then seals as usual. Whether wheel and mouse events reached the page or the script fallback was used is reported |
+| Session warm-up robot | through the app's launch path behind the self-test proxy, with short waits: a plan of three pages, a `javascript:` line (skipped) and a page the proxy closes unanswered (reported, the robot goes on) is visited in order in a new tab of the profile; the requests carry the profile's User-Agent and the cookies the pages before set; at the proxy, each page's followed link comes at least the plan's time after the page, and the next page at least half that after the followed one; each page is scrolled (the pages see trusted scroll events); from each page only the plain same-site link is followed, with the page as Referer — never the sign-out, other-site, file or new-window links next to it; while the robot scrolls and clicks, each page's own world sees no `window.webkit` and no robot global; history and the pages' cookies are kept; Stop during a page ends the run before its next page is requested; closing its tab and a page's alert stop it; stopping the profile stops it first (while its store is still there), and the profile's data then seals as usual. Whether wheel and mouse events reached the page or the script fallback was used is reported |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
@@ -634,15 +634,17 @@ only, at most 50; other lines are listed with the reason and skipped). For each 
   the profile's history and their cookies into its store (and sync with the profile's cookies);
 - stays a **random time** between the plan's two times (5–15 s by default, 2–300 s allowed), then
   waits 1–3 s before the next page;
-- **scrolls** now and then (about every four seconds, mostly down, sometimes back up), in
-  flicks of slowing wheel steps;
+- **scrolls** now and then (about every four seconds, at most six times per page, never in the
+  last second; mostly down, sometimes back up), in flicks of slowing wheel steps;
 - optionally **follows one link** before leaving: a plain link in view (`WarmUpLinkPolicy`) — on
   the same site for the user's addresses, to another site from the search results — never one
   opening a new window or a download, one to a file (`.zip`, `.pdf`, …) or one whose text or
-  address speaks of signing out, deleting, buying, paying, ordering, subscribing or downloading;
-  it stays on that page half as long.
+  address speaks of signing out, deleting, buying, paying, ordering, subscribing or downloading,
+  nor one hidden (by its own or an ancestor's opacity or visibility) or covered by something
+  else; each link is judged by itself, `<base target>` included; it stays on that page half as long.
 
-Nothing is typed or submitted. A page that does not load is reported and skipped; one still
+Nothing is typed or submitted, and nothing is downloaded: while a run drives its tab, a response
+the browser would save as a file fails as a load instead. A page that does not load is reported and skipped; one still
 loading after 30 s is left as it is.
 
 **How it acts, and what a page can see.** The robot reads pages (scroll position, links) in a
@@ -655,7 +657,16 @@ pointer move was seen to reach that very link); these events are trusted. Otherw
 front, or a WebKit that does not take the events — it scrolls with `scrollBy` from its world
 (the page sees the scrolling, with trusted `scroll` events, but no `wheel`) and clicks with the
 link's `click()`, an **untrusted** click a page can tell apart. The sheet's run does not say which
-was used; the self-test reports it. It loads a page only while its tab is the one shown, because
+was used; the self-test reports it. On the CI runner (macOS 26) the wheel events reached the pages
+but synthesized pointer events did not, through any of the three ways tried (Quartz events and
+AppKit events to the view, AppKit events to the window): there every followed link was clicked
+with `click()`.
+
+**User activation.** WebKit runs every script an app sends into a page as if the user had just
+interacted (`callAsyncJavaScript` forces a user gesture), in any content world. The robot's reads
+(scroll position, links) therefore mark the page as activated: `navigator.userActivation` reports
+`hasBeenActive` even on a page the robot only scrolled with the wheel, where a visitor's would not
+(wheel scrolling is no activation). It loads a page only while its tab is the one shown, because
 a page loading in a tab out of sight has no window (outer size 0×0), which no visitor's has; it
 waits meanwhile.
 

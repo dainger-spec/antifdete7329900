@@ -37,9 +37,10 @@ checks.
 (`pbwarm_<name>=<id>`), is tall enough to scroll, and has, in view, one plain link to the same site
 (`Next article` → `/pb-warmup/<name>-next`) next to links the robot must never follow (sign-out,
 another site, a file, a new window); a page-world listener reports the page's scroll, wheel and
-click events and whether they were trusted (`/pb-warmup/event/<id>/<name>-<what>`). `<name>` `alert`
+click events and whether they were trusted (`/pb-warmup/event/<id>/<name>-<what>`), and what its page
+world can see of a robot (`window.webkit`, globals named like one) at its first scroll and click. `<name>` `alert`
 shows an alert; `broken` closes the connection without an answer (a page that does not load). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
-User-Agent headers.
+User-Agent headers and the time it came.
 """
 import argparse
 import base64
@@ -92,13 +93,19 @@ def warmup_page(name: str, run: str) -> bytes:
     # The links again every few paragraphs: some are in view wherever the page is scrolled to.
     filler = "".join((links if i % 5 == 4 else "") + f"<p>Paragraph {i} of the warm-up page {esc(name)}.</p>"
                      for i in range(120))
+    # What the page world can see of a robot: window.webkit and globals named like one
+    # ("undefined-" when nothing), reported at the first scroll and, through localStorage, by the
+    # next page for the click that left this one.
     script = (
         "<script>(() => { const run = " + json.dumps(run) + ", name = " + json.dumps(name) + "; const seen = {};"
         " const report = (what) => { if (seen[what]) return; seen[what] = true;"
         " fetch('/pb-warmup/event/' + encodeURIComponent(run) + '/' + encodeURIComponent(name) + '-' + what); };"
-        " addEventListener('scroll', (e) => report(e.isTrusted ? 'scroll' : 'scroll-untrusted'), {passive: true});"
+        " const probe = () => typeof window.webkit + '-' + Object.getOwnPropertyNames(window).filter((n) => /warm|robot/i.test(n)).join('_');"
+        " try { const last = localStorage.getItem('pbwarm-click'); if (last) { localStorage.removeItem('pbwarm-click'); report('clickglobals-' + last); } } catch (e) {}"
+        " addEventListener('scroll', (e) => { report(e.isTrusted ? 'scroll' : 'scroll-untrusted'); report('globals-' + probe()); }, {passive: true});"
         " addEventListener('wheel', (e) => report(e.isTrusted ? 'wheel' : 'wheel-untrusted'), {passive: true});"
-        " document.addEventListener('click', (e) => report(e.isTrusted ? 'click' : 'click-untrusted'), true);"
+        " document.addEventListener('click', (e) => { report(e.isTrusted ? 'click' : 'click-untrusted');"
+        " try { localStorage.setItem('pbwarm-click', name + '-' + probe()); } catch (e) {} }, true);"
         + (" setTimeout(() => alert('PB warm-up'), 300);" if name == "alert" else "")
         + " })();</script>"
     )
@@ -160,7 +167,8 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
     elif plain_path.startswith("/pb-warmup/"):
         with SERVED_LOCK:
             WARMUP_LOG.append({"path": plain_path, "query": query, "referer": header(request, "Referer"),
-                               "cookie": header(request, "Cookie"), "userAgent": header(request, "User-Agent")})
+                               "cookie": header(request, "Cookie"), "userAgent": header(request, "User-Agent"),
+                               "time": time.time()})
         name = plain_path[len("/pb-warmup/"):]
         run = parse_qs(query).get("run", [""])[0]
         if name == "broken":

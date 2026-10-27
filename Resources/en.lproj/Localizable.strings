@@ -353,6 +353,7 @@
 "unlock.vault.test" = "This looks like a test vault: it was created by the CI migration check (password “migration-check”), not by the app.";
 "warmup.addresses" = "Web addresses, one per line";
 "warmup.dwell" = "On each page";
+"warmup.error.notStarted" = "The warm-up could not start in “%@”: the profile needs an open window, and no warm-up may already be running in it.";
 "warmup.explanation" = "The robot opens these pages one after the other in a tab of this profile — with its proxy, cookies and identity, as when you browse — stays on each for a random time, scrolls, and if you like follows one plain link. What the pages leave (cookies, history) stays with the profile. Nothing is typed, submitted or bought.";
 "warmup.followLinks" = "Follow one link on each page (on the same site; from the search, a result)";
 "warmup.note" = "The search uses DuckDuckGo, as the address bar. The robot works in its own tab and waits while another tab is shown; closing its tab, stopping the profile or a page asking a question stops it.";

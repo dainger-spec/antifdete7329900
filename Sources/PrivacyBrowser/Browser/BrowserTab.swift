@@ -68,6 +68,9 @@ final class BrowserTab: NSObject {
     /// instead), and why the last one did: the warm-up robot tells a failed visit by them.
     private(set) var failedNavigations = 0
     private(set) var lastNavigationError: String?
+    /// Set while the warm-up robot drives this tab: what would be downloaded is refused instead
+    /// (a response WebKit cannot show fails as a load), so a run never saves a file.
+    var refusesDownloads = false
 
     /// Password AutoFill in this tab: suggestions, filling, the save question.
     private(set) lazy var passwords = TabPasswordAutoFill(tab: self, vault: context.passwordVault,
@@ -222,7 +225,7 @@ extension BrowserTab: WKNavigationDelegate {
         let scheme = navigationAction.request.url?.scheme?.lowercased() ?? ""
         let flags = navigationAction.modifierFlags
         if navigationAction.shouldPerformDownload {
-            decisionHandler(.download)
+            decisionHandler(refusesDownloads ? .cancel : .download)
         } else if navigationAction.navigationType == .linkActivated,
                   flags.contains(.command) || navigationAction.buttonNumber == 2,
                   ["http", "https"].contains(scheme) {
@@ -248,7 +251,7 @@ extension BrowserTab: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        decisionHandler(navigationResponse.canShowMIMEType ? .allow : .download)
+        decisionHandler(navigationResponse.canShowMIMEType ? .allow : refusesDownloads ? .cancel : .download)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {

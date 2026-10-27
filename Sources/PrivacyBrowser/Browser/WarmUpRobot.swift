@@ -102,6 +102,7 @@ final class WarmUpRobot: ObservableObject {
         guard !pages.isEmpty, let controller = session.frontmostWindow,
               let tab = controller.addTab(url: URL(string: "about:blank"), select: true) else { return false }
         controller.window?.makeKeyAndOrderFront(nil)
+        tab.refusesDownloads = true
         run += 1
         let current = run
         self.session = session
@@ -123,10 +124,23 @@ final class WarmUpRobot: ObservableObject {
         guard isRunning else { return }
         task?.cancel()
         task = nil
-        tab = nil
-        session = nil
+        release()
         setState(.stopped(reason))
         log.notice("Warm-up stopped: \(String(describing: reason), privacy: .public)")
+    }
+
+    /// Gives the tab back to the user (downloads as usual) and lets go of it.
+    private func release() {
+        tab?.refusesDownloads = false
+        tab = nil
+        session = nil
+    }
+
+    /// Changes visit `index` of run `run`; nothing once that run has ended (its last awaits can
+    /// still come back after a Stop, when `visits` may already be the next run's).
+    private func update(_ index: Int, run: Int, _ change: (inout WarmUpVisit) -> Void) {
+        guard isCurrent(run), visits.indices.contains(index) else { return }
+        change(&visits[index])
     }
 
     private func setState(_ state: State) {
@@ -143,13 +157,15 @@ final class WarmUpRobot: ObservableObject {
             visits.append(WarmUpVisit(id: index, url: page.url, kind: page.kind))
             onProgress?()
             guard let tab = liveTab(run) else { return }
-            guard let outcome = await load(page.url, in: tab, run: run) else { return }
-            visits[index].outcome = outcome
-            visits[index].title = tab.webView.title ?? ""
+            guard let outcome = await load(page.url, in: tab, run: run), isCurrent(run) else { return }
+            update(index, run: run) {
+                $0.outcome = outcome
+                $0.title = tab.webView.title ?? ""
+            }
             // A page that did not load is left at once (its error page is no visit).
             if !isFailure(outcome) {
                 let dwell = dwellTime(plan, using: &generator)
-                visits[index].dwell = dwell
+                update(index, run: run) { $0.dwell = dwell }
                 guard await stay(dwell, scroll: plan.scroll, visit: index, run: run, using: &generator) else { return }
                 if plan.followLinks {
                     guard await follow(on: page, visit: index, plan: plan, run: run, using: &generator) else { return }
@@ -162,8 +178,7 @@ final class WarmUpRobot: ObservableObject {
         }
         guard isCurrent(run) else { return }
         task = nil
-        tab = nil
-        session = nil
+        release()
         setState(.finished)
         log.notice("Warm-up finished")
     }
@@ -243,7 +258,7 @@ final class WarmUpRobot: ObservableObject {
             guard await wait(0.1, run: run), let tab = liveTab(run) else { return nil }
             if tab.failedNavigations != failuresBefore {
                 // The error page loads in its place: wait for it, the message is already known.
-                _ = await waitWhileLoading(tab, run: run, limit: 3)
+                guard await waitWhileLoading(tab, run: run, limit: 3) else { return nil }
                 return .failed(tab.lastNavigationError ?? "")
             }
             started = started || tab.isLoading || tab.url != urlBefore
@@ -275,7 +290,7 @@ final class WarmUpRobot: ObservableObject {
                 guard await wait(gesture.at - Date().timeIntervalSince(begun), run: run), let tab = liveTab(run) else { return false }
                 // A tab the user put aside (another tab selected) has no window to scroll in.
                 guard tab.isSelected else { continue }
-                if await self.scroll(gesture, in: tab, run: run) { visits[visit].scrolls += 1 }
+                if await self.scroll(gesture, in: tab, run: run) { update(visit, run: run) { $0.scrolls += 1 } }
             }
         }
         return await wait(dwell - Date().timeIntervalSince(begun), run: run)
@@ -286,9 +301,10 @@ final class WarmUpRobot: ObservableObject {
         var room: Double
     }
 
-    /// One gesture; true when the page scrolled.
+    /// One gesture; true when the page scrolled (its position moved: a page growing as it loads
+    /// is no scroll).
     private func scroll(_ gesture: WarmUpTiming.Gesture, in tab: BrowserTab, run: Int) async -> Bool {
-        guard let before = await position(in: tab) else { return false }
+        guard let before = await position(in: tab), liveTab(run) != nil else { return false }
         let down = gesture.deltas.reduce(0, +) > 0
         // Nothing to scroll that way (a short page, or already at the end).
         if down ? before.room < 4 : before.y < 4 { return false }
@@ -296,22 +312,24 @@ final class WarmUpRobot: ObservableObject {
             for delta in gesture.deltas {
                 guard sendWheel(delta, to: tab.webView), await wait(gesture.interval, run: run) else { break }
             }
-            guard isCurrent(run) else { return false }
             // The wheel's scrolling may still be running: give it a moment.
-            _ = await wait(0.25, run: run)
-            if let after = await position(in: tab), after != before {
+            guard await wait(0.25, run: run) else { return false }
+            let after = await position(in: tab)
+            guard liveTab(run) != nil else { return false }
+            if let after, after.y != before.y {
                 scrollInput = .native
                 return true
             }
-            guard isCurrent(run) else { return false }
             log.notice("Wheel events did not scroll the page; scrolling from the robot's script world")
         }
         scrollInput = .script
         for delta in gesture.deltas {
+            guard liveTab(run) != nil else { return false }
             _ = await script("window.scrollBy(0, delta); return true;", ["delta": delta], in: tab)
             guard await wait(gesture.interval, run: run) else { return false }
         }
-        return await position(in: tab).map { $0 != before } ?? false
+        let after = await position(in: tab)
+        return liveTab(run) != nil && after.map { $0.y != before.y } == true
     }
 
     private func position(in tab: BrowserTab) async -> ScrollPosition? {
@@ -359,25 +377,29 @@ final class WarmUpRobot: ObservableObject {
     private func follow(on page: WarmUpPlan.Page, visit: Int, plan: WarmUpPlan, run: Int,
                         using generator: inout some RandomNumberGenerator) async -> Bool {
         guard let tab = liveTab(run) else { return false }
-        guard tab.isSelected, let pageURL = tab.url, let found = await links(in: tab) else { return true }
-        let allowed = Set(WarmUpLinkPolicy.candidates(found.links.map(\.link), on: pageURL, kind: page.kind,
-                                                      viewport: (found.width, found.height)).map(\.href))
-        guard let choice = found.links.filter({ allowed.contains($0.link.href) }).randomElement(using: &generator) else { return true }
-        let target = URL(string: choice.link.href, relativeTo: pageURL)?.absoluteURL
-        visits[visit].followed = target
+        guard tab.isSelected, let pageURL = tab.url else { return true }
+        let found = await links(in: tab)
+        guard liveTab(run) != nil else { return false }
+        guard let found else { return true }
+        // Each link judged by itself: the same address may also be on a link that opens a new
+        // window or downloads.
+        let viewport = (width: found.width, height: found.height)
+        let allowed = found.links.filter { WarmUpLinkPolicy.allows($0.link, on: pageURL, kind: page.kind, viewport: viewport) }
+        guard let choice = allowed.randomElement(using: &generator) else { return true }
         let failures = tab.failedNavigations
         let before = tab.url
         // A point inside the link, not always its middle.
         let point = CGPoint(x: choice.link.x + choice.link.width * Double.random(in: 0.3...0.7, using: &generator),
                             y: choice.link.y + choice.link.height * Double.random(in: 0.35...0.65, using: &generator))
-        guard await click(choice, at: point, in: tab, run: run, using: &generator) else { return isCurrent(run) }
+        guard await click(choice, at: point, in: tab, run: run, using: &generator) else { return liveTab(run) != nil }
+        update(visit, run: run) { $0.followed = URL(string: choice.link.href, relativeTo: pageURL)?.absoluteURL }
         guard let outcome = await waitForPage(in: tab, failuresBefore: failures, urlBefore: before, run: run, startTimeout: 5) else {
             return false
         }
-        visits[visit].followedOutcome = outcome
+        update(visit, run: run) { $0.followedOutcome = outcome }
         if isFailure(outcome) { return true }
         let dwell = dwellTime(plan, using: &generator) / 2
-        visits[visit].dwell += dwell
+        update(visit, run: run) { $0.dwell += dwell }
         return await stay(dwell, scroll: plan.scroll, visit: visit, run: run, using: &generator)
     }
 
@@ -394,11 +416,16 @@ final class WarmUpRobot: ObservableObject {
               const r = a.getBoundingClientRect();
               if (r.width < 1 || r.height < 1 || r.bottom <= 0 || r.top >= height || r.right <= 0 || r.left >= width) continue;
               const style = getComputedStyle(a);
-              if (style.visibility !== 'visible' || style.pointerEvents === 'none' || Number(style.opacity) < 0.1) continue;
+              if (style.visibility !== 'visible' || style.pointerEvents === 'none') continue;
+              // Hidden by an ancestor too (opacity is not inherited; a link no one can see is a trap).
+              if (a.checkVisibility ? !a.checkVisibility({opacityProperty: true, visibilityProperty: true})
+                                    : (() => { for (let e = a; e; e = e.parentElement) if (Number(getComputedStyle(e).opacity) < 0.1) return true; return false; })()) continue;
               const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
               if (!top || (top !== a && !a.contains(top))) continue;
               const text = (a.innerText || a.getAttribute('aria-label') || a.title || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
-              out.push({index, link: {href: a.href, text, target: a.target || '', download: a.hasAttribute('download'),
+              // The window it opens in: its own target, else the page's <base target>.
+              const target = a.hasAttribute('target') ? a.target : ((document.querySelector('base[target]') || {}).target || '');
+              out.push({index, link: {href: a.href, text, target, download: a.hasAttribute('download'),
                                       x: r.left, y: r.top, width: r.width, height: r.height}});
             }
             return JSON.stringify({links: out, width, height});
@@ -407,9 +434,11 @@ final class WarmUpRobot: ObservableObject {
         return try? JSONDecoder().decode(PageLinks.self, from: data)
     }
 
-    /// How mouse events are handed to the web view: to the view itself, or to its window (which
-    /// passes them on as it does the system's).
+    /// How mouse events are handed to the web view: made from Quartz events (as the wheel's) and
+    /// given to the view, made by AppKit and given to the view, or to its window (which passes
+    /// them on as it does the system's).
     private enum Route: CaseIterable {
+        case quartz
         case view
         case window
     }
@@ -430,26 +459,31 @@ final class WarmUpRobot: ObservableObject {
                                               {capture: true, once: true});
                     return true;
                     """, [:], in: tab)
+                guard liveTab(run) != nil else { return false }
                 send(.mouseMoved, at: location, to: webView, via: route)
                 guard await wait(Double.random(in: 0.15...0.4, using: &generator), run: run) else { return false }
                 let reached = await script(find + """
                      const seen = globalThis.warmUpPointer;
                      return !!seen && seen.trusted && !!seen.target && (seen.target === a || a.contains(seen.target));
                     """, arguments, in: tab) as? Bool
-                guard isCurrent(run) else { return false }
+                guard liveTab(run) != nil else { return false }
                 if reached == true {
                     send(.leftMouseDown, at: location, to: webView, via: route)
-                    guard await wait(Double.random(in: 0.06...0.14, using: &generator), run: run) else { return false }
+                    // The button always comes up again, even when the run ends meanwhile.
+                    let held = await wait(Double.random(in: 0.06...0.14, using: &generator), run: run)
                     send(.leftMouseUp, at: location, to: webView, via: route)
+                    guard held else { return false }
                     clickInput = .native
                     return true
                 }
             }
             log.notice("The pointer's events did not reach the link; clicking from the robot's script world")
         }
+        guard liveTab(run) != nil else { return false }
         let clicked = await script(find + " a.click(); return true;", arguments, in: tab) as? Bool
+        guard liveTab(run) != nil else { return false }
         if clicked == true { clickInput = .script }
-        return clicked == true && isCurrent(run)
+        return clicked == true
     }
 
     /// Where the viewport point `point` (CSS pixels) is in the web view's window.
@@ -462,11 +496,7 @@ final class WarmUpRobot: ObservableObject {
     }
 
     private func send(_ type: NSEvent.EventType, at location: NSPoint, to webView: WKWebView, via route: Route) {
-        guard let window = webView.window,
-              let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
-                                             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                                             context: nil, eventNumber: 0, clickCount: type == .mouseMoved ? 0 : 1,
-                                             pressure: type == .leftMouseDown ? 1 : 0) else { return }
+        guard let window = webView.window, let event = mouseEvent(type, at: location, in: window, quartz: route == .quartz) else { return }
         if route == .window {
             window.sendEvent(event)
             return
@@ -479,23 +509,82 @@ final class WarmUpRobot: ObservableObject {
         }
     }
 
+    private func mouseEvent(_ type: NSEvent.EventType, at location: NSPoint, in window: NSWindow, quartz: Bool) -> NSEvent? {
+        guard quartz else {
+            return NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
+                                      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                      context: nil, eventNumber: 0, clickCount: type == .mouseMoved ? 0 : 1,
+                                      pressure: type == .leftMouseDown ? 1 : 0)
+        }
+        let quartzType: CGEventType
+        switch type {
+        case .leftMouseDown: quartzType = .leftMouseDown
+        case .leftMouseUp: quartzType = .leftMouseUp
+        default: quartzType = .mouseMoved
+        }
+        let onScreen = window.convertPoint(toScreen: location)
+        // Quartz puts the origin at the top left of the main screen.
+        let mainHeight = NSScreen.screens.first?.frame.height ?? window.frame.maxY
+        guard let event = CGEvent(mouseEventSource: nil, mouseType: quartzType,
+                                  mouseCursorPosition: CGPoint(x: onScreen.x, y: mainHeight - onScreen.y), mouseButton: .left) else { return nil }
+        event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))
+        event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowNumber))
+        if quartzType != .mouseMoved { event.setIntegerValueField(.mouseEventClickState, value: 1) }
+        return NSEvent(cgEvent: event)
+    }
+
     // MARK: Scripts in the robot's world
 
-    /// Runs `body` in the robot's content world of the tab's main frame; nil when it fails or
-    /// does not answer within `limits.scriptTimeout` (a page busy, or gone).
+    /// Runs `body` in the robot's content world of the tab's main frame; nil when it fails, does
+    /// not answer within `limits.scriptTimeout` (a page busy, or gone) or the run is stopped
+    /// meanwhile (the answer is not waited for).
     private func script(_ body: String, _ arguments: [String: Any], in tab: BrowserTab) async -> Any? {
         let timeout = limits.scriptTimeout
-        return await withCheckedContinuation { (continuation: CheckedContinuation<Any?, Never>) in
-            var answered = false
-            let answer: (Any?) -> Void = { value in
-                guard !answered else { return }
-                answered = true
-                continuation.resume(returning: value)
+        let answer = OneAnswer()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Any?, Never>) in
+                answer.wait(continuation)
+                tab.webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: Self.world) { result in
+                    answer.give(try? result.get())
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { answer.give(nil) }
             }
-            tab.webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: Self.world) { result in
-                answer(try? result.get())
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { answer(nil) }
+        } onCancel: {
+            answer.give(nil)
         }
+    }
+}
+
+/// The first answer of a script, from whichever comes first: the page, the timeout, a Stop.
+private final class OneAnswer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Any?, Never>?
+    private var given = false
+    private var early: Any?
+
+    func wait(_ continuation: CheckedContinuation<Any?, Never>) {
+        lock.lock()
+        guard !given else {
+            let value = early
+            lock.unlock()
+            continuation.resume(returning: value)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func give(_ value: Any?) {
+        lock.lock()
+        guard !given else {
+            lock.unlock()
+            return
+        }
+        given = true
+        let continuation = self.continuation
+        self.continuation = nil
+        if continuation == nil { early = value }
+        lock.unlock()
+        continuation?.resume(returning: value)
     }
 }
