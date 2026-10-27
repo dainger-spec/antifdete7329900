@@ -1808,7 +1808,8 @@ final class SelfTest {
 
         // An address that only jumps within the page shown (the same page with a fragment): WebKit
         // makes no new page for it, so nothing commits; the robot takes it as visited once the tab
-        // shows that address instead of waiting out its load time.
+        // shows that page instead of waiting out its load time. The page then rewrites `#part` to
+        // `#/part`, as a single-page app's router might.
         let jump = WarmUpPlan(addresses: [page("f"), page("f") + "#part"].joined(separator: "\n"), scroll: false, followLinks: false)
         robot.limits.dwellOverride = 1...1
         robot.limits.pauseOverride = 0.2...0.2
@@ -1816,9 +1817,11 @@ final class SelfTest {
         manager.startWarmUp(profile.id, plan: jump)
         let jumped = await waitUntil(timeout: 20) { robot.state != .running }
         let jumpTime = Date().timeIntervalSince(jumpStarted)
-        check("warm-up: an address that only jumps within the page shown counts as visited at once (no new page comes for it)",
-              jumped && robot.state == .finished && robot.visits.map(\.outcome) == [.loaded, .loaded] && jumpTime < 10,
-              "state=\(robot.state) \(robot.visits.map(\.outcome)) in \(String(format: "%.1f", jumpTime)) s")
+        let jumpShown = manager.session(for: profile.id)?.frontmostWindow?.selectedTab?.url
+        check("warm-up: an address that only jumps within the page shown counts as visited at once (no new page comes for it), also when the page rewrites the fragment",
+              jumped && robot.state == .finished && robot.visits.map(\.outcome) == [.loaded, .loaded] && jumpTime < 10
+                  && jumpShown?.fragment == "/part",
+              "state=\(robot.state) \(robot.visits.map(\.outcome)) in \(String(format: "%.1f", jumpTime)) s shown=\(jumpShown?.absoluteString ?? "nil")")
 
         // Stopped by the user while on a page whose next one is due within a second and a half:
         // three seconds later it still has not been asked for.

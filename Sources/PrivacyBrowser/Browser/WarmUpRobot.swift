@@ -246,8 +246,13 @@ final class WarmUpRobot: ObservableObject {
         let failures = tab.failedNavigations
         let before = tab.url
         let navigation = tab.load(url)
+        // The tab shows a load it is asked for at once, as WebKit writes the address. WebKit only
+        // jumps within the page shown, with no new page to come, for another fragment of that page.
+        let jump = tab.url.flatMap { asked in
+            asked.fragment != nil && asked != before && WebAddress.isSameDocument(asked, before) ? asked : nil
+        }
         return await waitForPage(in: tab, failuresBefore: failures, urlBefore: before,
-                                 own: navigation.map { (navigation: $0, url: url) }, run: run)
+                                 own: navigation.map { (navigation: $0, jump: jump) }, run: run)
     }
 
     /// Waits for a navigation of `tab` to start and its page to load (or fail, or take longer
@@ -258,7 +263,7 @@ final class WarmUpRobot: ObservableObject {
     /// own load starts. Taken for the page, that moment is the likely reason a run's first page was
     /// at times never scrolled.
     private func waitForPage(in tab: BrowserTab, failuresBefore: Int, urlBefore: URL?,
-                             own: (navigation: WKNavigation, url: URL)? = nil,
+                             own: (navigation: WKNavigation, jump: URL?)? = nil,
                              run: Int, startTimeout: TimeInterval? = nil) async -> WarmUpVisit.Outcome? {
         let begun = Date()
         var started = false
@@ -271,11 +276,12 @@ final class WarmUpRobot: ObservableObject {
             }
             if let own {
                 // Its page committed; or the load ended without one (it failed — the error page is
-                // counted above — or another load took its place); or it only jumped within the
-                // page shown (a fragment: no new page commits) and the tab shows the address asked for.
+                // counted above — or another load took its place); or, a jump within the page shown
+                // (no new page commits for it), the tab shows that page, whatever the fragment became.
                 let ended = tab.hasCommitted(own.navigation) || tab.hasAbandoned(own.navigation)
+                let jumped = own.jump.map { WebAddress.isSameDocument(tab.url, $0) } ?? false
                 started = started || ended || tab.isLoading
-                if ended || WebAddress.isSameAddress(tab.url, own.url), !tab.isLoading { return .loaded }
+                if ended || jumped, !tab.isLoading { return .loaded }
             } else {
                 // A link the page followed: the URL changes when its load starts.
                 started = started || tab.isLoading || tab.url != urlBefore

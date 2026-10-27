@@ -243,12 +243,7 @@ public enum WarmUpLinkPolicy {
     }
 
     static func sameDocument(_ a: URL, _ b: URL) -> Bool {
-        func strip(_ url: URL) -> String {
-            var components = URLComponents(url: url, resolvingAgainstBaseURL: true)
-            components?.fragment = nil
-            return components?.url?.absoluteString ?? url.absoluteString
-        }
-        return strip(a) == strip(b)
+        WebAddress.isSameDocument(a, b)
     }
 }
 

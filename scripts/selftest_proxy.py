@@ -38,7 +38,8 @@ checks.
 (`Next article` → `/pb-warmup/<name>-next`) next to links the robot must never follow (sign-out,
 another site, a file, a new window); a page-world listener reports the page's scroll, wheel and
 click events and whether they were trusted (`/pb-warmup/event/<id>/<name>-<what>`), and what its page
-world can see of a robot (`window.webkit`, globals named like one) at its first scroll and click. `<name>` `alert`
+world can see of a robot (`window.webkit`, globals named like one) at its first scroll and click; a
+jump to a fragment `#x` is rewritten to `#/x`, as a single-page app's router might. `<name>` `alert`
 shows an alert; `broken` closes the connection without an answer (a page that does not load). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
 User-Agent headers and the time it came.
 """
@@ -106,6 +107,8 @@ def warmup_page(name: str, run: str) -> bytes:
         " addEventListener('wheel', (e) => report(e.isTrusted ? 'wheel' : 'wheel-untrusted'), {passive: true});"
         " document.addEventListener('click', (e) => { report(e.isTrusted ? 'click' : 'click-untrusted');"
         " try { localStorage.setItem('pbwarm-click', name + '-' + probe()); } catch (e) {} }, true);"
+        " addEventListener('hashchange', () => { if (location.hash && !location.hash.startsWith('#/'))"
+        " history.replaceState(history.state, '', '#/' + location.hash.slice(1)); });"
         + (" setTimeout(() => alert('PB warm-up'), 300);" if name == "alert" else "")
         + " })();</script>"
     )
