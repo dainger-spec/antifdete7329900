@@ -597,7 +597,9 @@ final class SelfTest {
 
     /// A page opened in a background tab (⌘-click) measures the window its tab belongs to — the
     /// shown tab's viewport, the window's outer size and position — not a 0×0 view outside any
-    /// window (what headless browsers report); also after the window is resized.
+    /// window (what headless browsers report). A tab that was shown and then left behind keeps
+    /// following its window when the window is resized and moved (a view taken out of the window
+    /// would keep the frame WebKit cached for it).
     private func backgroundTabGeometry(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             info("background tab checks skipped (need the self-test proxy to serve pages)")
@@ -640,10 +642,20 @@ final class SelfTest {
         check("tabs: a background tab measures its window as the shown tab does (viewport, outer size, position), not 0×0",
               before.back != nil && before.back == before.front && parts.count == 6 && parts[0] > 0 && parts[1] > 0 && parts[2] > 0 && parts[3] > 0,
               "shown \(before.front ?? "nil"), background \(before.back ?? "nil")")
+        // The background tab shown once, then left behind the first again.
+        if let backIndex = controller.tabs.firstIndex(where: { $0 === back }),
+           let frontIndex = controller.tabs.firstIndex(where: { $0 === front }) {
+            controller.selectTab(at: backIndex)
+            controller.selectTab(at: frontIndex)
+        }
         controller.window?.setContentSize(NSSize(width: 900, height: 600))
+        if let origin = controller.window?.frame.origin {
+            controller.window?.setFrameOrigin(NSPoint(x: origin.x + 40, y: origin.y - 30))
+        }
         let after = await measure()
-        check("tabs: a background tab follows its window when the window is resized",
-              after.back != nil && after.back == after.front && after.back != before.back && after.back?.hasPrefix("900x") == true,
+        check("tabs: a tab shown, then left behind, follows its window when the window is resized and moved",
+              after.back != nil && after.back == after.front && after.back != before.back && after.back?.hasPrefix("900x") == true
+                  && front.isSelected && !back.isSelected,
               "shown \(after.front ?? "nil"), background \(after.back ?? "nil")")
         let visibility = (try? await js(back.webView, "return document.visibilityState;")) as? String
         info("background tab: document.visibilityState = \(visibility ?? "nil") (Safari: hidden)")
@@ -674,6 +686,10 @@ final class SelfTest {
         out.blob = await ask(blobWorker, blobWorker);
         const urlWorker = new Worker('/pb-scopes/worker.js');
         out.url = await ask(urlWorker, urlWorker);
+        out.quota = String((await navigator.storage.estimate()).quota);
+        const quotaCode = "onmessage = () => navigator.storage.estimate().then((e) => postMessage(String(e.quota)));";
+        const quotaWorker = new Worker(URL.createObjectURL(new Blob([quotaCode], { type: 'text/javascript' })));
+        out.blobQuota = await ask(quotaWorker, quotaWorker);
         if (typeof SharedWorker === 'function') {
           const shared = new SharedWorker('/pb-scopes/shared.js');
           out.shared = await ask(shared, shared.port);
@@ -709,7 +725,8 @@ final class SelfTest {
     /// running profile's workers can carry another's (reported for comparison).
     private func engineTimeZone(_ repository: ProfileRepository) async throws {
         info("process pools: a pool per profile \(ProfileProcessPool.isAvailable ? "available" : "NOT available"), "
-             + "its time zone override \(ProfileProcessPool.supportsTimeZoneOverride ? "available" : "NOT available") in this WebKit")
+             + "its time zone override \(ProfileProcessPool.supportsTimeZoneOverride ? "available" : "NOT available") in this WebKit "
+             + "(\(ProfileProcessPool.availability))")
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             info("time zone scope checks skipped (need the self-test proxy to serve the worker scripts)")
             return
@@ -755,6 +772,8 @@ final class SelfTest {
             info("time zone scopes (\(label)): \(report)")
             check("time zone (\(label)): the page, a frame and a worker made from a blob run in the profile's zone",
                   ["window", "frame", "blob"].allSatisfy { scopes[$0] == expected }, report)
+            check("time zone (\(label)): a worker made from a blob reports the page's storage quota (Safari's)",
+                  scopes["quota"] != nil && scopes["blobQuota"] == scopes["quota"], report)
             guard profile.session.timeZoneByEngine else {
                 info("time zone (\(label)): in the shim — workers loaded from a URL, shared and service workers keep the Mac's zone")
                 continue
@@ -771,6 +790,28 @@ final class SelfTest {
                           value == expected, "\(value) vs \(expected)")
                 }
             }
+        }
+
+        // A zone given by a link name (Asia/Calcutta for Asia/Kolkata): the engine names it by its
+        // primary id, and the shim must not take over for the name alone.
+        if ProfileProcessPool.supportsTimeZoneOverride {
+            let profile = try repository.create(name: "Zone link", configuration: ProfileConfiguration(
+                timeZoneIdentifier: "Asia/Calcutta", ephemeral: true))
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            defer { tab.tearDown(); session.shutDown() }
+            try await PageLoader.load(tab.webView, url: scopesPage)
+            let linked = try await js(tab.webView, """
+                const report = () => [Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset()].join('|');
+                const worker = new Worker('/pb-scopes/worker.js');
+                const inWorker = await Promise.race([new Promise((resolve) => { worker.onmessage = (e) => resolve(String(e.data).split('|').slice(0, 2).join('|')); worker.postMessage('report'); }),
+                                                     new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000))]);
+                return [report(), inWorker, \(Self.dateShape)].join('#');
+                """) as? String ?? "nil"
+            let parts = linked.components(separatedBy: "#")
+            check("time zone (Asia/Calcutta, a link): in the engine, no shim — the page and a worker from a URL agree",
+                  session.timeZoneByEngine && parts.count == 3 && parts[0] == parts[1] && parts[0].hasSuffix("|-330") && parts[2] == nativeShape,
+                  linked)
         }
 
         // For comparison, the same two User-Agents in WebKit's shared pool (every profile before

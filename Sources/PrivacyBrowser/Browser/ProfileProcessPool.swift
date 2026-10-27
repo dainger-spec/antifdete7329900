@@ -37,12 +37,27 @@ enum ProfileProcessPool {
     private static let configurationClass = NSClassFromString("_WKProcessPoolConfiguration") as? NSObject.Type
     private static let poolClass: AnyClass? = NSClassFromString("WKProcessPool")
     private static let timeZoneSetter = NSSelectorFromString("setTimeZoneOverride:")
+    /// `+[WKProcessPool _processPoolWithConfiguration:]`: newer WebKit only (not macOS 26.6).
     private static let factory = NSSelectorFromString("_processPoolWithConfiguration:")
+    /// `-[WKProcessPool _initWithConfiguration:]`, the designated initializer since macOS 10.10.
+    private static let initializer = NSSelectorFromString("_initWithConfiguration:")
+    private static let allocator = NSSelectorFromString("alloc")
 
     /// This WebKit can give a profile a pool of its own.
     static var isAvailable: Bool {
         guard configurationClass != nil, let poolClass else { return false }
-        return class_getClassMethod(poolClass, factory) != nil
+        return class_getClassMethod(poolClass, factory) != nil || class_getInstanceMethod(poolClass, initializer) != nil
+    }
+
+    /// Which of the private pieces this WebKit has (self-test information).
+    static var availability: String {
+        let pieces: [(String, Bool)] = [
+            ("_WKProcessPoolConfiguration", configurationClass != nil),
+            ("timeZoneOverride", configurationClass?.instancesRespond(to: timeZoneSetter) == true),
+            ("+_processPoolWithConfiguration:", poolClass.map { class_getClassMethod($0, factory) != nil } ?? false),
+            ("-_initWithConfiguration:", poolClass.map { class_getInstanceMethod($0, initializer) != nil } ?? false),
+        ]
+        return pieces.map { "\($0.0) \($0.1 ? "yes" : "no")" }.joined(separator: ", ")
     }
 
     /// This WebKit can run a pool's processes in a time zone of its choosing.
@@ -53,8 +68,7 @@ enum ProfileProcessPool {
     /// A new pool for a profile, its processes in `timeZone` (an IANA identifier) when this WebKit
     /// allows it. Nil without the SPI: the profile then uses WebKit's shared pool.
     static func make(timeZone: String?) -> Pool? {
-        guard !isDisabledForTesting, isAvailable, let configurationClass, let poolClass,
-              let method = class_getClassMethod(poolClass, factory) else { return nil }
+        guard !isDisabledForTesting, isAvailable, let configurationClass, let poolClass else { return nil }
         let configuration = configurationClass.init()
         var applied: String?
         // WebKit ignores a zone ICU does not know (`WTF::setTimeZoneOverride` returns false): the
@@ -63,11 +77,29 @@ enum ProfileProcessPool {
             configuration.setValue(timeZone, forKey: "timeZoneOverride")
             applied = configuration.value(forKey: "timeZoneOverride") as? String
         }
-        // +[WKProcessPool _processPoolWithConfiguration:]: an autoreleased pool.
-        typealias Factory = @convention(c) (AnyObject, Selector, AnyObject) -> Unmanaged<AnyObject>?
-        let makePool = unsafeBitCast(method_getImplementation(method), to: Factory.self)
-        guard let pool = makePool(poolClass as AnyObject, factory, configuration)?.takeUnretainedValue() as? NSObject else { return nil }
+        guard let pool = makePool(poolClass, configuration) else { return nil }
         return Pool(processPool: pool, timeZone: applied)
+    }
+
+    private static func makePool(_ poolClass: AnyClass, _ configuration: NSObject) -> NSObject? {
+        if let method = class_getClassMethod(poolClass, factory) {
+            // +[WKProcessPool _processPoolWithConfiguration:]: an autoreleased pool.
+            typealias Factory = @convention(c) (AnyObject, Selector, AnyObject) -> Unmanaged<AnyObject>?
+            let make = unsafeBitCast(method_getImplementation(method), to: Factory.self)
+            return make(poolClass as AnyObject, factory, configuration)?.takeUnretainedValue() as? NSObject
+        }
+        // [[WKProcessPool alloc] _initWithConfiguration:], with ARC's init rules by hand: alloc returns
+        // the instance retained, the initializer takes it over and returns the pool retained (or nil,
+        // having released it).
+        guard let allocMethod = class_getClassMethod(poolClass, allocator),
+              let initMethod = class_getInstanceMethod(poolClass, initializer) else { return nil }
+        typealias Alloc = @convention(c) (AnyObject, Selector) -> UnsafeMutableRawPointer?
+        typealias Initializer = @convention(c) (UnsafeMutableRawPointer, Selector, AnyObject) -> UnsafeMutableRawPointer?
+        let alloc = unsafeBitCast(method_getImplementation(allocMethod), to: Alloc.self)
+        let initialize = unsafeBitCast(method_getImplementation(initMethod), to: Initializer.self)
+        guard let allocated = alloc(poolClass as AnyObject, allocator),
+              let pool = initialize(allocated, initializer, configuration) else { return nil }
+        return Unmanaged<AnyObject>.fromOpaque(pool).takeRetainedValue() as? NSObject
     }
 
     /// Web views made from `configuration` (and the popups WebKit makes from theirs) run in `pool`.

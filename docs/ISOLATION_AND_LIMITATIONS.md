@@ -25,7 +25,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | SOCKS5 proxy | the hostname is sent to the proxy (`ATYP=3`, remote DNS) |
 | Fail-closed | with the proxy unreachable, loads fail ("Could not connect to the server") instead of going direct |
 | Tabs, history, bookmarks | tab open/close/reopen/select, visits and titles recorded, bookmark toggle persisted encrypted |
-| Background tabs | a page opened behind the shown tab (⌘-click) measures what the shown tab does: viewport, the window's outer size and position — not 0×0 — and follows the window when it is resized |
+| Background tabs | a page opened behind the shown tab (⌘-click) measures what the shown tab does: viewport, the window's outer size and position — not 0×0; a tab shown and then left behind still does after the window is resized and moved |
 | Window lifecycle (crash fix) | closing one of two windows keeps the profile running; closing the last reports "all closed" once, on a later run-loop turn; `shutDown()` twice is safe |
 | Crash-recovery sealing | leftover website data from a crashed run is archived and deleted WITHOUT `WKWebsiteDataStore.remove(forIdentifier:)` (which aborted on an unknown id), then restores cleanly |
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |

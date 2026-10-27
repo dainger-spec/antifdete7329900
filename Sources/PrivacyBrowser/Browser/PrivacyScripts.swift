@@ -179,10 +179,13 @@ function patchWindow(w) {
   try { patchToString(w); } catch (e) {}
   if (CONFIG.device) { try { patchDevice(w, CONFIG.device); } catch (e) {} }
   // With the profile's process pool in its zone, Date and Intl are the engine's own; a realm whose
-  // engine does not report the zone (a process the override did not reach) gets the shim.
-  const zoneShim = !!CONFIG.timeZone && !(CONFIG.engineTimeZone && engineReportsZone(w, CONFIG.timeZone));
-  if (zoneShim) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
-  if (zoneShim || CONFIG.device) { try { hookWorkers(w); } catch (e) {} }
+  // engine does not report the zone (a process the override did not reach) gets the shim. Workers
+  // made from a blob start with this script either way: it decides there for itself, and they
+  // need the storage quota too.
+  if (CONFIG.timeZone && !(CONFIG.engineTimeZone && engineReportsZone(w, CONFIG.timeZone))) {
+    try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {}
+  }
+  if (CONFIG.timeZone || CONFIG.device) { try { hookWorkers(w); } catch (e) {} }
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
   if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
   if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
@@ -322,11 +325,23 @@ function overrideGetter(w, obj, name, value) {
 }
 
 // ---- Time zone --------------------------------------------------------------------------------
-// Whether this realm's engine already runs in TZ: its default zone is the one Intl names for TZ.
+// Whether this realm's engine already runs in TZ: its default zone is the one Intl names for TZ,
+// or, for a link (Asia/Calcutta, which the engine names by its primary Asia/Kolkata), a zone with
+// the same rules and names over the zone's history.
+const ZONE_PROBES = [-2208988800000, -880000000000, 0, 631152000000, 1262304000000, 1705320000000, 1721044800000];
 function engineReportsZone(w, TZ) {
   try {
     const DTF = w.Intl.DateTimeFormat;
-    return new DTF().resolvedOptions().timeZone === new DTF(undefined, { timeZone: TZ }).resolvedOptions().timeZone;
+    if (new DTF().resolvedOptions().timeZone === new DTF(undefined, { timeZone: TZ }).resolvedOptions().timeZone) return true;
+    const options = { era: 'short', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
+                      second: 'numeric', hourCycle: 'h23', timeZoneName: 'long' };
+    const engine = new DTF('en-US', options);
+    options.timeZone = TZ;
+    const wanted = new DTF('en-US', options);
+    for (let i = 0; i < ZONE_PROBES.length; i++) {
+      if (engine.format(ZONE_PROBES[i]) !== wanted.format(ZONE_PROBES[i])) return false;
+    }
+    return true;
   } catch (e) { return false; }
 }
 

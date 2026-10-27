@@ -261,10 +261,11 @@ windows be merged and needs one `NSWindow` per tab.
 - `BrowserTab` owns one `WKWebView` and is its navigation, UI and download delegate. It talks
   to its window through the `BrowserTabHost` protocol: state changes, new-tab requests,
   close requests, attention for dialogs.
-- The selected tab's web view is the only one in the view hierarchy; others stay alive
-  off-screen, sized like the shown one (also after a resize or when the tab strip appears), and
-  answer WebKit's window-frame question with their own window's frame. A page in a background tab
-  therefore measures the viewport and window it will be shown in, as in Safari, not 0×0.
+- Every tab's web view is in the window, filling the web area; only the selected one is shown,
+  the others are hidden (not visible to WebKit: `document.visibilityState` 'hidden', throttled).
+  A page in a background tab therefore measures the viewport, window and screen it will be shown
+  in, as in Safari — not 0×0 — and WebKit keeps its window frame current when the window moves or
+  is resized (a view taken out of the window would keep the frame WebKit cached for it).
 - `window.open` / `target=_blank` become tabs created from the configuration WebKit supplies.
   ⌘-click and middle-click open background tabs with the profile's standard configuration.
 - ⌘W closes the tab: `BrowserWindow.performClose` intercepts menu-initiated closes. The

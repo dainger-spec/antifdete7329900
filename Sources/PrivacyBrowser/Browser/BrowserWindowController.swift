@@ -209,7 +209,6 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     func windowDidResize(_ notification: Notification) {
         fitAddressField()
-        sizeHiddenTabs()
     }
 
     private func toolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
@@ -235,30 +234,38 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let index = afterSelected && !tabs.isEmpty ? selectedIndex + 1 : tabs.count
         tabs.insert(tab, at: index)
         if !select && index <= selectedIndex { selectedIndex += 1 }
+        attach(tab)
         if select || tabs.count == 1 {
             if let url { tab.load(url) }
             selectTab(at: index)
             if url == nil && configuration == nil { focusAddressBar() }
-            sizeHiddenTabs()
         } else {
             refreshChrome()
-            // A tab opened behind (⌘-click) has the shown tab's size before its page starts loading.
-            sizeHiddenTabs()
+            // Laid out before its page starts loading (the tab strip may just have appeared).
+            window?.contentView?.layoutSubtreeIfNeeded()
             if let url { tab.load(url) }
         }
         return tab
     }
 
-    /// Tabs not shown keep the size of the one shown: a page in a background tab measures the
-    /// viewport it will be shown in, as in Safari, not a 0×0 view (what headless browsers report).
-    /// Their window frame comes from `BrowserTab` (the window the tab belongs to).
-    private func sizeHiddenTabs() {
-        // The tab strip may just have appeared (second tab): lay out before measuring.
-        window?.contentView?.layoutSubtreeIfNeeded()
-        let bounds = NSRect(origin: .zero, size: webContainer.bounds.size)
-        for tab in tabs where tab.webView.superview !== webContainer && tab.webView.frame != bounds {
-            tab.webView.frame = bounds
-        }
+    /// Every tab's web view is in the window, filling the web area; only the selected one is shown.
+    /// A tab behind the shown one (⌘-click, or the one the user left) thus has its window, screen
+    /// and size, as in Safari: its page measures the viewport and window it will be shown in — not
+    /// a 0×0 view outside any window, what headless browsers report — and WebKit keeps its window
+    /// frame current when the window is moved or resized (a view taken out of the window would keep
+    /// the frame it had then). Hidden, the page is not visible to WebKit (`document.visibilityState`
+    /// 'hidden', timers throttled), as a background tab's.
+    private func attach(_ tab: BrowserTab) {
+        let webView = tab.webView
+        webView.isHidden = true
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        webContainer.addSubview(webView)
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: webContainer.topAnchor),
+            webView.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+            webView.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
+        ])
     }
 
     func selectTab(at index: Int) {
@@ -266,17 +273,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         selectedTab?.passwords.closeSuggestions()
         selectedIndex = index
         let webView = tabs[index].webView
-        if webView.superview !== webContainer {
-            webContainer.subviews.forEach { $0.removeFromSuperview() }
-            webView.translatesAutoresizingMaskIntoConstraints = false
-            webContainer.addSubview(webView)
-            NSLayoutConstraint.activate([
-                webView.topAnchor.constraint(equalTo: webContainer.topAnchor),
-                webView.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
-                webView.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
-                webView.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
-            ])
-        }
+        // Shown before the others are hidden: a hidden first responder hands focus on to the next view.
+        webView.isHidden = false
+        for tab in tabs where tab.webView !== webView { tab.webView.isHidden = true }
         refreshChrome()
         if webView.url != nil { window?.makeFirstResponder(webView) }
     }

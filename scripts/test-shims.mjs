@@ -287,6 +287,13 @@ test('time zone: an engine already in the profile zone keeps its own Date and In
   assert.equal(run(w, SHAPE), vm.runInContext(SHAPE, vm.createContext({})));
   assert.equal(run(w, 'Intl.DateTimeFormat().resolvedOptions().timeZone'), host);
 });
+test('time zone: an engine in the zone a link names (US/Eastern) keeps its own Date and Intl', () => {
+  // The harness runs with TZ=America/New_York; US/Eastern is a link to it.
+  const host = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (host !== 'America/New_York') return;
+  const w = makeWindow({ ...base, timeZone: 'US/Eastern', engineTimeZone: true });
+  assert.equal(run(w, SHAPE), vm.runInContext(SHAPE, vm.createContext({})));
+});
 test('time zone: a realm whose engine reports another zone still gets the shim', () => {
   const w = makeWindow({ ...base, timeZone: 'Asia/Tokyo', engineTimeZone: true });
   assert.notEqual(run(w, SHAPE), vm.runInContext(SHAPE, vm.createContext({})));
