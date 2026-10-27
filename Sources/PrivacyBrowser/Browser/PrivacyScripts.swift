@@ -77,7 +77,8 @@ enum PrivacyScripts {
         }
     }
 
-    static func shimConfiguration(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false) -> ShimConfiguration {
+    static func shimConfiguration(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false,
+                                  storageQuotaByEngine: Bool = false) -> ShimConfiguration {
         let webRTC: String
         var relay: ShimConfiguration.Relay?
         switch configuration.webRTCRouting {
@@ -110,7 +111,8 @@ enum PrivacyScripts {
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, engineTimeZone: timeZoneByEngine, geolocation: geolocation,
                                  webRTC: webRTC, webRTCRelay: relay, device: device,
                                  safariObject: configuration.deviceGeneration.platform == .macOS,
-                                 storageQuota: safariStorageQuota(for: configuration.deviceGeneration.platform))
+                                 // The data store reports Safari's quota itself: nothing to replace.
+                                 storageQuota: storageQuotaByEngine ? nil : safariStorageQuota(for: configuration.deviceGeneration.platform))
     }
 
     /// navigator.storage.estimate().quota in Safari, before WebKit rounds it up: a browser's origin
@@ -130,17 +132,20 @@ enum PrivacyScripts {
         return CGSize(width: device.screenWidth, height: device.screenHeight)
     }
 
-    static func makeUserContentController(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false) -> WKUserContentController {
+    static func makeUserContentController(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false,
+                                          storageQuotaByEngine: Bool = false) -> WKUserContentController {
         let controller = WKUserContentController()
-        controller.addUserScript(WKUserScript(source: source(for: configuration, timeZoneByEngine: timeZoneByEngine),
+        controller.addUserScript(WKUserScript(source: source(for: configuration, timeZoneByEngine: timeZoneByEngine,
+                                                             storageQuotaByEngine: storageQuotaByEngine),
                                               injectionTime: .atDocumentStart,
                                               forMainFrameOnly: false,
                                               in: .page))
         return controller
     }
 
-    static func source(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false) -> String {
-        let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration, timeZoneByEngine: timeZoneByEngine)),
+    static func source(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false, storageQuotaByEngine: Bool = false) -> String {
+        let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration, timeZoneByEngine: timeZoneByEngine,
+                                                                             storageQuotaByEngine: storageQuotaByEngine)),
                                 encoding: .utf8)) ?? "{}"
         return "(function install(CONFIG) {\n" + shimBody + "\n})(" + json + ");"
     }
@@ -180,12 +185,11 @@ function patchWindow(w) {
   if (CONFIG.device) { try { patchDevice(w, CONFIG.device); } catch (e) {} }
   // With the profile's process pool in its zone, Date and Intl are the engine's own; a realm whose
   // engine does not report the zone (a process the override did not reach) gets the shim. Workers
-  // made from a blob start with this script either way: it decides there for itself, and they
-  // need the storage quota too.
-  if (CONFIG.timeZone && !(CONFIG.engineTimeZone && engineReportsZone(w, CONFIG.timeZone))) {
-    try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {}
-  }
-  if (CONFIG.timeZone || CONFIG.device) { try { hookWorkers(w); } catch (e) {} }
+  // made from a blob start with this script when they need anything of it: the zone (the engine's
+  // is process-wide, so a realm in it has workers in it), the device's values or the quota.
+  const zoneShim = !!CONFIG.timeZone && !(CONFIG.engineTimeZone && engineReportsZone(w, CONFIG.timeZone));
+  if (zoneShim) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
+  if (zoneShim || CONFIG.device || CONFIG.storageQuota) { try { hookWorkers(w); } catch (e) {} }
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
   if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
   if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }

@@ -481,6 +481,8 @@ test('storage quota: Safari\'s instead of the app default', async () => {
   assert.equal(await run(w, `navigator.storage.estimate().then((e) => [e.quota, e.usage].join())`), '82463372084,1234');
   const plain = makeWindow(base);
   assert.equal(await run(plain, `navigator.storage.estimate().then((e) => e.quota)`), 1048576000);
+  // A store with Safari's quota in WebKit (SafariStorageQuota): no storageQuota, estimate() untouched.
+  assert.match(run(plain, `Function.prototype.toString.call(StorageManager.prototype.estimate)`), /illegal/);
 });
 
 test('geolocation fixed: position objects without own properties', async () => {

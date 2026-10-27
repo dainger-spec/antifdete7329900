@@ -41,7 +41,6 @@ enum ProfileProcessPool {
     private static let factory = NSSelectorFromString("_processPoolWithConfiguration:")
     /// `-[WKProcessPool _initWithConfiguration:]`, the designated initializer since macOS 10.10.
     private static let initializer = NSSelectorFromString("_initWithConfiguration:")
-    private static let allocator = NSSelectorFromString("alloc")
 
     /// This WebKit can give a profile a pool of its own.
     static var isAvailable: Bool {
@@ -88,18 +87,8 @@ enum ProfileProcessPool {
             let make = unsafeBitCast(method_getImplementation(method), to: Factory.self)
             return make(poolClass as AnyObject, factory, configuration)?.takeUnretainedValue() as? NSObject
         }
-        // [[WKProcessPool alloc] _initWithConfiguration:], with ARC's init rules by hand: alloc returns
-        // the instance retained, the initializer takes it over and returns the pool retained (or nil,
-        // having released it).
-        guard let allocMethod = class_getClassMethod(poolClass, allocator),
-              let initMethod = class_getInstanceMethod(poolClass, initializer) else { return nil }
-        typealias Alloc = @convention(c) (AnyObject, Selector) -> UnsafeMutableRawPointer?
-        typealias Initializer = @convention(c) (UnsafeMutableRawPointer, Selector, AnyObject) -> UnsafeMutableRawPointer?
-        let alloc = unsafeBitCast(method_getImplementation(allocMethod), to: Alloc.self)
-        let initialize = unsafeBitCast(method_getImplementation(initMethod), to: Initializer.self)
-        guard let allocated = alloc(poolClass as AnyObject, allocator),
-              let pool = initialize(allocated, initializer, configuration) else { return nil }
-        return Unmanaged<AnyObject>.fromOpaque(pool).takeRetainedValue() as? NSObject
+        // [[WKProcessPool alloc] _initWithConfiguration:] (macOS 26.6 has no factory).
+        return WebKitObjects.make(poolClass, "_initWithConfiguration:", configuration)
     }
 
     /// Web views made from `configuration` (and the popups WebKit makes from theirs) run in `pool`.

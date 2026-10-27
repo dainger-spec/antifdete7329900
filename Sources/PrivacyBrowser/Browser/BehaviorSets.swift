@@ -16,14 +16,18 @@ import WebKit
 /// class's navigator and screen values (see `PrivacyScripts`).
 @MainActor
 enum BehaviorSets {
-    /// `timeZoneByEngine`: the profile's process pool already runs in its time zone (`BrowserSession`).
-    static func makeUserContentController(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false) -> WKUserContentController {
+    /// `timeZoneByEngine`: the profile's process pool already runs in its time zone;
+    /// `storageQuotaByEngine`: its data store already reports Safari's quota (`BrowserSession`).
+    static func makeUserContentController(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false,
+                                          storageQuotaByEngine: Bool = false) -> WKUserContentController {
         switch configuration.deviceGeneration.behaviorSetID {
         case DeviceGenerations.desktopBehavior, DeviceGenerations.mobileBehavior:
-            return PrivacyScripts.makeUserContentController(for: configuration, timeZoneByEngine: timeZoneByEngine)
+            return PrivacyScripts.makeUserContentController(for: configuration, timeZoneByEngine: timeZoneByEngine,
+                                                            storageQuotaByEngine: storageQuotaByEngine)
         default:
             // Unknown behaviour set (e.g. a profile from a newer build): fall back to the shims.
-            return PrivacyScripts.makeUserContentController(for: configuration, timeZoneByEngine: timeZoneByEngine)
+            return PrivacyScripts.makeUserContentController(for: configuration, timeZoneByEngine: timeZoneByEngine,
+                                                            storageQuotaByEngine: storageQuotaByEngine)
         }
     }
 }

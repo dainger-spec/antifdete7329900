@@ -11,7 +11,8 @@ import WebKit
 ///     cookies, localStorage/sessionStorage, IndexedDB, Cache API, service workers, the HTTP
 ///     disk cache, HSTS state, and credentials for that store separately from every other
 ///     store, and serves it through a separate network *session*.
-///   * Ephemeral profiles use `WKWebsiteDataStore.nonPersistent()` (in-memory only).
+///   * Ephemeral profiles use a non-persistent store (in-memory only). Both kinds get Safari's
+///     storage quota where WebKit allows it (`SafariStorageQuota`).
 ///   * Every web view of this profile — every tab of every window, and `window.open` popups,
 ///     which WebKit creates from the opener's configuration — uses this data store, and the
 ///     profile's own process pool where WebKit allows it (`ProfileProcessPool`: the profile's time
@@ -46,6 +47,9 @@ final class BrowserSession {
     /// The engine runs this profile's pages and workers in `configuration.timeZoneIdentifier` (its
     /// pool's time zone override); the shim then leaves `Date` and `Intl` alone.
     let timeZoneByEngine: Bool
+    /// The data store reports Safari's storage quota itself (`SafariStorageQuota`); the shim then
+    /// leaves `navigator.storage.estimate()` alone.
+    let storageQuotaByEngine: Bool
     private let userContentController: WKUserContentController
     /// Receives the AutoFill script's messages (registered in its own content world only).
     private let passwordHandler = PasswordAutoFillHandler()
@@ -68,17 +72,20 @@ final class BrowserSession {
         // `.nonPersistent()` needs WebKit initialized but does not initialize it, and an ephemeral
         // profile can be the first WebKit use after unlock (see `ensureWebKitInitialized`).
         WebDataStoreVault.ensureWebKitInitialized()
+        let platform = configuration.deviceGeneration.platform
         let store: WKWebsiteDataStore = configuration.ephemeral
-            ? .nonPersistent()
-            : WebDataStoreVault.makeStore(for: profileID)
+            ? SafariStorageQuota.makeStore(identifier: nil, platform: platform) ?? .nonPersistent()
+            : WebDataStoreVault.makeStore(for: profileID, platform: platform)
         // Applies to all network loads of this data store. Empty only when no proxy is configured.
         store.proxyConfigurations = proxies
         self.dataStore = store
         let pool = ProfileProcessPool.make(timeZone: configuration.timeZoneIdentifier)
         self.processPool = pool?.processPool
         self.timeZoneByEngine = pool?.timeZone != nil
+        self.storageQuotaByEngine = SafariStorageQuota.isApplied(to: store)
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
-        self.userContentController = BehaviorSets.makeUserContentController(for: configuration, timeZoneByEngine: timeZoneByEngine)
+        self.userContentController = BehaviorSets.makeUserContentController(for: configuration, timeZoneByEngine: timeZoneByEngine,
+                                                                            storageQuotaByEngine: storageQuotaByEngine)
         if configuration.proxy != nil {
             // Loads WebKit would otherwise make outside the proxy (see ContentRules).
             if let blocker = ContentRules.dnsPrefetchBlocker {
@@ -248,5 +255,38 @@ enum WebKitPreferences {
         guard object.responds(to: selector), let method = class_getInstanceMethod(type(of: object), selector) else { return nil }
         typealias Getter = @convention(c) (NSObject, Selector) -> Bool
         return unsafeBitCast(method_getImplementation(method), to: Getter.self)(object, selector)
+    }
+}
+
+/// Objects of WebKit's private classes made with their private initializers (`_WKProcessPoolConfiguration`,
+/// `_WKWebsiteDataStoreConfiguration`, …): `[[cls alloc] initializer]` or `[[cls alloc] initializer:argument]`,
+/// called through their implementations with ARC's init rules by hand — alloc returns the instance
+/// retained, the initializer takes it over and returns the object retained (or nil, having released
+/// it). Nil when this WebKit has neither the class nor the initializer.
+enum WebKitObjects {
+    private static let allocator = NSSelectorFromString("alloc")
+
+    static func make(_ className: String, _ initializer: String, _ argument: AnyObject? = nil) -> NSObject? {
+        guard let cls = NSClassFromString(className) else { return nil }
+        return make(cls, initializer, argument)
+    }
+
+    static func make(_ cls: AnyClass, _ initializer: String, _ argument: AnyObject? = nil) -> NSObject? {
+        let selector = NSSelectorFromString(initializer)
+        guard let allocMethod = class_getClassMethod(cls, allocator),
+              let initMethod = class_getInstanceMethod(cls, selector) else { return nil }
+        typealias Alloc = @convention(c) (AnyObject, Selector) -> UnsafeMutableRawPointer?
+        typealias Initializer = @convention(c) (UnsafeMutableRawPointer, Selector) -> UnsafeMutableRawPointer?
+        typealias InitializerWithArgument = @convention(c) (UnsafeMutableRawPointer, Selector, AnyObject) -> UnsafeMutableRawPointer?
+        let alloc = unsafeBitCast(method_getImplementation(allocMethod), to: Alloc.self)
+        guard let allocated = alloc(cls as AnyObject, allocator) else { return nil }
+        let initialized: UnsafeMutableRawPointer?
+        if let argument {
+            initialized = unsafeBitCast(method_getImplementation(initMethod), to: InitializerWithArgument.self)(allocated, selector, argument)
+        } else {
+            initialized = unsafeBitCast(method_getImplementation(initMethod), to: Initializer.self)(allocated, selector)
+        }
+        guard let initialized else { return nil }
+        return Unmanaged<AnyObject>.fromOpaque(initialized).takeRetainedValue() as? NSObject
     }
 }

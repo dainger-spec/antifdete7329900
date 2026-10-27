@@ -220,6 +220,9 @@ final class SelfTest {
         var sessionA: BrowserSession? = try inSharedPool { try makeSession(repository, a, key: keyA) }
         check("time zone: a profile in WebKit's shared pool keeps the zone in the shim",
               sessionA?.processPool == nil && sessionA?.timeZoneByEngine == false)
+        info("storage quota: Safari's quota in WebKit \(SafariStorageQuota.isAvailable ? "available" : "NOT available") here")
+        check("storage quota: a persistent profile's store has Safari's quota where WebKit allows it (restored below from the same directories)",
+              sessionA?.storageQuotaByEngine == SafariStorageQuota.isAvailable)
         var webA: WKWebView? = WKWebView(frame: .zero, configuration: sessionA!.makeWebViewConfiguration())
         webA!.customUserAgent = "PrivacyBrowserSelfTest/1.0"
         // A UI delegate, as every tab has (BrowserTab): without one WebKit answers no permission query.
@@ -690,6 +693,8 @@ final class SelfTest {
         const quotaCode = "onmessage = () => navigator.storage.estimate().then((e) => postMessage(String(e.quota)));";
         const quotaWorker = new Worker(URL.createObjectURL(new Blob([quotaCode], { type: 'text/javascript' })));
         out.blobQuota = await ask(quotaWorker, quotaWorker);
+        const urlQuotaWorker = new Worker('/pb-scopes/quota.js');
+        out.urlQuota = await ask(urlQuotaWorker, urlQuotaWorker);
         if (typeof SharedWorker === 'function') {
           const shared = new SharedWorker('/pb-scopes/shared.js');
           out.shared = await ask(shared, shared.port);
@@ -705,6 +710,11 @@ final class SelfTest {
           out.service = await settle(new Promise((resolve) => {
             channel.port1.onmessage = (e) => resolve(String(e.data));
             registration.active.postMessage('report', [channel.port2]);
+          }));
+          const quotaChannel = new MessageChannel();
+          out.serviceQuota = await settle(new Promise((resolve) => {
+            quotaChannel.port1.onmessage = (e) => resolve(String(e.data));
+            registration.active.postMessage('quota', [quotaChannel.port2]);
           }));
         } catch (e) {
           out.service = 'unavailable: ' + (e && e.message);
@@ -774,6 +784,21 @@ final class SelfTest {
                   ["window", "frame", "blob"].allSatisfy { scopes[$0] == expected }, report)
             check("time zone (\(label)): a worker made from a blob reports the page's storage quota (Safari's)",
                   scopes["quota"] != nil && scopes["blobQuota"] == scopes["quota"], report)
+            // Safari's quota in the data store itself: every scope reports it, URL and service workers too.
+            check("storage quota (\(label)): a non-persistent store has Safari's quota where WebKit allows it",
+                  profile.session.storageQuotaByEngine == SafariStorageQuota.isAvailable)
+            if profile.session.storageQuotaByEngine {
+                let safariQuota = String(format: "%.0f", PrivacyScripts.safariStorageQuota(
+                    for: profile.session.configuration.deviceGeneration.platform).rounded(.up))
+                check("storage quota (\(label)): Safari's, set in WebKit — the page, a blob and a URL worker",
+                      ["quota", "blobQuota", "urlQuota"].allSatisfy { scopes[$0] == safariQuota }, "\(report) vs \(safariQuota)")
+                let serviceQuota = scopes["serviceQuota"] ?? "nil"
+                if serviceQuota == "nil" || ["timeout", "error", "unavailable"].contains(where: { serviceQuota.hasPrefix($0) }) {
+                    info("storage quota (\(label)): the service worker gave no answer here: \(serviceQuota)")
+                } else {
+                    check("storage quota (\(label)): Safari's in a service worker", serviceQuota == safariQuota, "\(serviceQuota) vs \(safariQuota)")
+                }
+            }
             guard profile.session.timeZoneByEngine else {
                 info("time zone (\(label)): in the shim — workers loaded from a URL, shared and service workers keep the Mac's zone")
                 continue
