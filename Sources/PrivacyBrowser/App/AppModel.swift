@@ -257,6 +257,23 @@ final class AppModel: ObservableObject {
         return try manager.passwordVault(for: id)
     }
 
+    // MARK: Cookie import
+
+    /// Reads a cookie export chosen in the file panel (a security-scoped URL), off the main thread.
+    func readCookieFile(_ url: URL) async -> CookieImportReport {
+        await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            return CookieImporter.read(contentsOf: url)
+        }.value
+    }
+
+    /// Imports cookies into a profile: now if it runs, else at its next launch.
+    func importCookies(_ cookies: [ImportedCookie], into id: UUID) async throws -> ProfileManager.CookieImportOutcome {
+        guard let manager else { throw CoreError.vaultNotFound }
+        return try await manager.importCookies(cookies, into: id)
+    }
+
     /// Whether `password` is the master password (asked before saved passwords are shown).
     func verifyMasterPassword(_ password: String) async -> Bool {
         guard let vault = repository?.vault else { return false }

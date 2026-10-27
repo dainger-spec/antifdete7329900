@@ -84,6 +84,7 @@ profile key (random 256-bit per profile, stored only wrapped)
    ├─ HKDF "passwords"         → passwords.bin                 (AAD "passwords:v1:<uuid>")
    ├─ HKDF "history"           → history.bin                   (AAD "history:v1:<uuid>")
    ├─ HKDF "bookmarks"         → bookmarks.bin                 (AAD "bookmarks:v1:<uuid>")
+   ├─ HKDF "cookie-import"     → cookies-import.bin            (AAD "cookie-import:v1:<uuid>")
    └─ HKDF "webdata-archive", salt = random per archive → webdata.pbsa chunk key
 ```
 
@@ -109,6 +110,7 @@ Application Support/PrivacyBrowser/      (0700)
   profiles/<uuid>/
     config.bin                    AES-GCM(profile key, ProfileConfiguration JSON)
     passwords.bin                 AES-GCM(password key, [PasswordEntry] JSON: origin, user name, password, note, dates)
+    cookies-import.bin            AES-GCM(cookie-import key, [ImportedCookie] JSON)   [only while imported cookies wait for the next launch]
     history.bin                   AES-GCM(history key, HistoryDocument JSON)          [not for ephemeral profiles]
     bookmarks.bin                 AES-GCM(bookmarks key, BookmarkDocument JSON)
     webdata.pbsa                  streaming encrypted archive of WebKit's data dirs
@@ -159,7 +161,11 @@ Ephemeral profiles skip the seal/unseal steps because `nonPersistent()` stores w
 nothing to disk; their history is memory-only.
 
 At launch the profile key also opens the password vault, the history and the bookmarks
-(`ProfileLibrary`). History changes are saved encrypted after a 3 s debounce, off the main
+(`ProfileLibrary`), and cookies imported while the profile was stopped (`cookies-import.bin`) go
+into its cookie store before the first window opens (`CookieImporter` reads and checks export
+files in BrowserCore; `CookieStoreImport` sets them, reads the store back to find refused ones,
+and has the store write its cookies to disk). Stopping a profile also has its cookie store write
+to disk before the data is sealed. History changes are saved encrypted after a 3 s debounce, off the main
 thread; `BrowserSession.shutDown()` flushes them synchronously before the data store is
 released.
 

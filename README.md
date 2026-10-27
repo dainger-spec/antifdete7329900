@@ -85,14 +85,16 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 157 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 163 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
   profiles launched and loading at once, the ping-load blocker, the proxy-location time zone,
   launches that wait only briefly on the lookup through the proxy, the exit-IP warning, password
   AutoFill (save, update, never, suggestions and fill, sign-in by script, sign-up, frames of
-  another and of the same site, nothing for a password a page script wrote), tabs, history,
+  another and of the same site, nothing for a password a page script wrote), cookie import
+  (a damaged Netscape file, queued for a stopped profile and applied before its first page,
+  a cut-off JSON into a running one, persistence across stop and launch), tabs, history,
   bookmarks, the
   device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
@@ -141,10 +143,13 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    - **⋯ → Passwords…** (master password first) shows, edits, adds and deletes saved passwords,
      and the websites they are never saved for. **⋯ → Edit…** → **AutoFill user names and passwords**
      turns it off for a profile.
-7. **Stop**, or closing the last window, saves history and encrypts the profile's website
+7. **Cookies:** **⋯ → Import Cookies…** reads a JSON or Netscape `cookies.txt` export, shows
+   what can be imported and why the rest cannot (with line numbers), then imports into that
+   profile: at once when it runs, otherwise when it next starts.
+8. **Stop**, or closing the last window, saves history and encrypts the profile's website
    data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
    and waits until every profile is sealed.
-8. **Sync (optional):** **More → Sync…** offers a folder (local-only) or a server (client
+9. **Sync (optional):** **More → Sync…** offers a folder (local-only) or a server (client
    for the documented API; no server is included). Stop all profiles before syncing.
 
 ## What is implemented, and how
@@ -169,7 +174,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Stable window lifecycle | closing a profile window never quits or crashes the app (use-after-free fixed); verified by the self-test |
 | Encryption at rest of everything the app writes | AES-256-GCM; Argon2id (64 MiB, t=3, p=4; older PBKDF2 vaults upgraded on unlock) → vault key → HKDF per purpose |
 | Password storage under a key derived from the user's password | Per-profile vault (`passwords.bin`, AES-GCM under a key derived from the profile key); the manager asks for the master password before it shows anything |
-| Password AutoFill, Safari's behaviour | Save / Update / Never after a sign-in the user typed; suggestions under login fields of the site (registrable domain, Public Suffix List), filled only on choice, with `input` and `change` as Safari; two-step sign-ins, sign-ins by script, sign-up forms; no https login on an http page; never into hidden fields or a frame of another site. **Checked by the self-test** in a profile window (save, update, never, suggestions and fill, sign-in by script, sign-up, frames); on the CI runner, which gives the window no keyboard focus, typing is stood in for by marking the fields typed inside the isolated world |
+| Password AutoFill, Safari's behaviour | Save / Update / Never after a sign-in the user typed; suggestions under login fields of the site (registrable domain, Public Suffix List), filled only on choice, with `input` and `change` as Safari; two-step sign-ins, sign-ins by script, sign-up forms; no https login on an http page; never into hidden fields or a frame of another site. **Checked by the self-test** in a profile window (save, update, never, suggestions and fill, sign-in by script, sign-up, frames); on the CI runner, where synthesized key events do not reach the page, typing is stood in for by marking the fields typed inside the isolated world |
+| Cookie import into a profile | **⋯ → Import Cookies…**: JSON (EditThisCookie, Cookie-Editor, Puppeteer/DevTools, Playwright, Selenium, Chrome and Firefox database exports, JSON Lines) and Netscape `cookies.txt`. Damaged files import whatever is readable (bad bytes, a broken or cut-off JSON entry or a malformed line cost only that cookie); the report lists every other entry with its line and reason (public-suffix domain, expired, `__Host-` rules, …). A running profile gets them at once (and the store is read back for any WebKit refused), a stopped one at its next launch before the first page loads (queued encrypted). **Checked by the self-test** end to end through the proxy |
 | App Sandbox | Default build; entitlements in `Resources/PrivacyBrowser.entitlements` (documented in the limitations doc, §9); container migration. **Sandbox enforcement and migration verified in CI** |
 | Encrypted sync client | Engine with CAS writes, per-record merges for bookmarks and history, tombstones; folder transport; HTTP transport for a documented API |
 
@@ -206,6 +212,7 @@ Sources/
     Vault/                         MasterVault (key hierarchy), DeviceSettings
     Profiles/                      ProfileConfiguration, ProfileRepository
     Passwords/                     PasswordVault, PasswordMatching (site rules), PublicSuffixList
+    Cookies/                       CookieImporter (JSON and Netscape readers, checks, report)
     Library/                       HistoryStore, BookmarkStore (mergeable, tombstones)
     Archive/                       encrypted chunk stream, directory archiver, WebKitDataLayout
     Sync/                          envelope/codec, engine, SyncTransport contract

@@ -131,6 +131,8 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
 - Passwords are not merged per entry yet: concurrent edits on two devices resolve to the
   remote file, and the local one is kept as `passwords.bin.conflict`. Adding tombstones
   to `PasswordVault` would allow the same merge as bookmarks.
+- `cookies-import.bin` (cookies imported into a stopped profile, until its next launch) is not
+  synced: it is applied on the Mac it was imported on.
 - `PasswordEntry.lastUsedAt` (when AutoFill last filled the login) and the configuration's
   `passwordAutoFill` / `passwordNeverSaveSites` are optional fields: an older build reads the
   files and drops them when it rewrites one (a login then loses its last-used date, a profile

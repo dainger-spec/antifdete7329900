@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 157/157 checks in both builds):
+(macOS 26, 163/163 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -40,7 +40,8 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Several SOCKS5 profiles at once | three profiles behind three SOCKS5 proxies, one with username/password authentication, are launched together through the app's launch path and load at the same time: each page arrives through its own proxy, by name, with its own credentials; after one stops the others keep loading through theirs; wrong or missing SOCKS5 credentials fail closed |
 | Launch speed | with a location remembered for the proxy, a launch waits at most 1 s for a 4 s lookup (the lookup finishes in the background, and its new time zone is remembered and noted for the next launch); with nothing remembered it waits at most 3 s |
 | Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy and credentials) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported or stored, and turning it off, or replacing the proxy, while a lookup is under way leaves no new IP stored and nothing reported |
-| Password AutoFill | in a profile window on the self-test proxy's sign-in pages: the page world has no `window.webkit` and no trace of the script; a password a page script wrote and submitted is not offered; a typed sign-in is offered (Save, saved with its user name), a new password for it as Update, nothing anywhere on the site after Never for This Website; a login field lists the site's saved login and choosing it fills both fields with `input` and `change` (and `:autofill` where WebKit allows the world); a filled-in login submitted again asks nothing; a sign-in by script (fields removed after the button's click) and a sign-up form (new password = confirmation) are offered; a frame of another site is offered none, a frame of the same site its logins under a header naming it. The runner gives the window no keyboard focus, so typing is stood in for by marking the fields typed inside the isolated world (reported by the self-test); real clicks and keys are used where they arrive |
+| Password AutoFill | in a profile window on the self-test proxy's sign-in pages: the page world has no `window.webkit` and no trace of the script; a password a page script wrote and submitted is not offered; a typed sign-in is offered (Save, saved with its user name), a new password for it as Update, nothing anywhere on the site after Never for This Website; a login field lists the site's saved login and choosing it fills both fields with `input` and `change` (and `:autofill` where WebKit allows the world); a filled-in login submitted again asks nothing; a sign-in by script (fields removed after the button's click) and a sign-up form (new password = confirmation) are offered; a frame of another site is offered none, a frame of the same site its logins under a header naming it. Synthesized key events do not reach the page on the CI runner, so typing is stood in for by marking the fields typed inside the isolated world (reported by the self-test); real clicks and keys are used where they arrive |
+| Cookie import | a Netscape file with CRLF, comments, an HttpOnly line and damaged bytes: the five readable cookies are read, the four other lines reported (field count, public suffix, expired, damaged text); into a stopped profile they are queued encrypted (no cookie value in the file) and put into its store at launch before the start page is requested: the request carries the host-only, domain, HttpOnly and session cookies, not the Secure one or another path's over http; the store holds each with the file's attributes; a cut-off JSON export's complete entry goes into the running profile at once and the next request carries it; after a stop (sealed) and a launch the persistent imported cookies are back and the session cookie is not |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
@@ -259,6 +260,7 @@ storage and network (§1, §4).
 | Profile list (names) | encrypted (`index.bin`) | in memory | in memory |
 | Profile settings (proxy credentials and so on) | encrypted (`config.bin`) | decrypted only during launch and edit | in memory |
 | Saved passwords | encrypted (`passwords.bin`) | decrypted on demand | in memory |
+| Imported cookies for a stopped profile | encrypted (`cookies-import.bin`) until its next launch puts them into the website data | — | in WebKit's cookie store (as the profile's other cookies) |
 | History | encrypted (`history.bin`); ephemeral profiles: never written | encrypted | in memory, saved encrypted (debounced, ≤ 3 s) |
 | Bookmarks | encrypted (`bookmarks.bin`) | encrypted | in memory, saved encrypted on every change |
 | Sync target and token | encrypted (`settings.bin`, not synced) | in memory | — |
@@ -537,6 +539,59 @@ that the document is the one the user focused and that `location.origin` is the 
 **Storage.** Entries: origin, user name, password, note, changed and last-used dates. The
 "Never" websites and the switch are in the profile's encrypted configuration. The password
 manager asks for the master password (one Argon2id derivation) each time it is opened.
+
+## 8a. Cookie import
+
+**⋯ → Import Cookies…** imports a cookie export into one profile. Formats: JSON (an array, an
+object with `cookies` as Playwright's `storageState` and the DevTools protocol write it, a single
+object, or JSON Lines; field names of EditThisCookie, Cookie-Editor, Puppeteer, Playwright,
+Selenium and of Chrome's and Firefox's cookie databases, matched without regard to case, `_` or
+`-`) and Netscape `cookies.txt` (curl, wget, yt-dlp and extensions; `#HttpOnly_` lines).
+
+**Damaged files.** Everything importable is imported, the rest is reported with its place in the
+file and the reason, before anything is imported:
+- Text: UTF-8 with or without BOM (also a BOM at the start of a later line, from files joined
+  together), UTF-16 with a BOM or recognised by its zero bytes, UTF-32 with a BOM. Bytes that are
+  not valid text spoil only the cookie they are in ("damaged bytes").
+- Files of another kind are named instead of being read as text: a browser's SQLite cookie
+  database, Safari's binary cookies, a Selenium pickle, an archive, a web page.
+- Netscape: read line by line (CRLF too); an empty value without its tab and fields separated by
+  spaces are accepted; a line without seven fields is reported (eight: a tab in the value).
+- JSON: also inside a string (AdsPower, Multilogin), under a wrapper (`{"result": {"cookies":
+  …}}`, `{"data": […]}`) and as JSON Lines. When the file does not parse as a whole, each cookie
+  object it still holds is read on its own (trailing commas tolerated): a broken entry, a cut-off
+  end or text around the JSON costs only what it touches; the report names the damaged line.
+- Each cookie is checked as a browser checks it: name and value characters (`;`, `=` in a name,
+  control characters), 4096 bytes for name and value, a valid ASCII domain that is not a public
+  suffix for a domain cookie (`.com`, `.co.uk`, `.github.io`: Public Suffix List), a path starting
+  under 1024 bytes (a missing or relative one is `/`), an expiry that can be read and is not past
+  (seconds, milliseconds, microseconds, Chrome's 1601-based time — also in yt-dlp's cookies.txt —,
+  HTTP dates and ISO 8601; the DevTools protocol's `null` for "never" is 400 days, the most a
+  browser keeps one), and the `__Secure-`/`__Host-` rules. Spaces around a name or value are
+  dropped. The same cookie (name, domain, path) twice: the later one is imported, the earlier one
+  listed as replaced.
+- Refused with their own reason: a Chrome database row with an encrypted value (it would otherwise
+  arrive empty and overwrite the real cookie), and partitioned (CHIPS) cookies: WebKit has no
+  public way to set one in its partition, and without it the cookie would reach more sites.
+
+**Into which store, and when.** A running profile gets the cookies at once. WebKit's
+`setCookie` reports nothing, so the store is read back afterwards and every cookie WebKit did not
+keep (missing, or with another value) is listed. A cookie that is not HttpOnly cannot replace an
+HttpOnly one in WebKit (it keeps the old one, silently), so the import deletes the old one first.
+CFNetwork keeps new cookies in memory and writes them to disk later, so after an import, and when
+any profile stops before its data is sealed, the cookie store is asked to write them now
+(`WKHTTPCookieStore`'s `_flushCookiesToDiskWithCompletionHandler:`, WebKit's own call; used only
+where this WebKit has it, as the private `WKPreferences` in §2). Without it, cookies set in the
+last moments before a stop could miss the sealed archive; the self-test found exactly that for
+imported cookies. A stopped profile's website data is sealed (§3), so its cookies are queued,
+encrypted with the profile's key, and put into its store at its next launch, before its first page
+loads (they then show in the start page's request); the queue is removed. Session cookies live
+until the profile stops, as in the browser they came from; for an ephemeral profile all imported
+cookies last for that run only.
+
+**Limits.** Domains in Unicode (IDN) are refused rather than converted; a value in a legacy encoding
+(Windows-1251, Latin-1) shows as damaged bytes; the queue is local to this Mac (not synced); a
+profile that is starting or being encrypted asks to try again a moment later.
 
 ## 9. App Sandbox
 

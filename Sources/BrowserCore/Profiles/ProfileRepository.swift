@@ -57,6 +57,8 @@ struct ProfileIndex: Codable, Equatable {
 /// profiles/<uuid>/history.bin      AEAD(historyKey, HistoryDocument JSON)
 /// profiles/<uuid>/bookmarks.bin    AEAD(bookmarksKey, BookmarkDocument JSON)
 /// profiles/<uuid>/webdata.pbsa     encrypted archive of the WebKit data store (app layer)
+/// profiles/<uuid>/cookies-import.bin AEAD(cookieImportKey, [ImportedCookie] JSON): imported while
+///                                  the profile was stopped, applied at its next launch (not synced)
 /// ```
 /// Profile names are only readable after unlock. Profile configurations are only
 /// decrypted when launched or edited.
@@ -199,6 +201,42 @@ public final class ProfileRepository: @unchecked Sendable {
 
     public func bookmarkStore(for id: UUID, key: SymmetricKey) throws -> BookmarkStore {
         try BookmarkStore(file: BookmarkStore.file(url: bookmarksURL(for: id), profileID: id, profileKey: key))
+    }
+
+    // MARK: Imported cookies waiting for the next launch
+
+    func importedCookiesURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("cookies-import.bin") }
+
+    private func importedCookiesFile(for id: UUID) throws -> EncryptedDocumentFile<[ImportedCookie]> {
+        EncryptedDocumentFile(url: importedCookiesURL(for: id),
+                              key: try profileKey(for: id).derive(info: "cookie-import", salt: id.rawBytes),
+                              aad: "cookie-import:v1:\(id.uuidString)")
+    }
+
+    /// Keeps cookies imported into a stopped profile until its next launch puts them into its
+    /// cookie store (its website data is sealed while it is stopped). Added to those queued before;
+    /// a later cookie replaces an earlier one with the same name, domain and path. Returns how
+    /// many are queued now.
+    @discardableResult
+    public func queueImportedCookies(_ cookies: [ImportedCookie], for id: UUID) throws -> Int {
+        _ = try summary(for: id)
+        let file = try importedCookiesFile(for: id)
+        var queued = try file.load() ?? []
+        let incoming = Set(cookies.map(\.identity))
+        queued.removeAll { incoming.contains($0.identity) }
+        queued += cookies
+        try file.save(queued)
+        return queued.count
+    }
+
+    /// The cookies queued for the profile's next launch (none: empty).
+    public func importedCookiesForLaunch(_ id: UUID) throws -> [ImportedCookie] {
+        try importedCookiesFile(for: id).load() ?? []
+    }
+
+    /// Drops the queue once the launch has put the cookies into the profile's store.
+    public func clearImportedCookies(_ id: UUID) {
+        try? FileManager.default.removeItem(at: importedCookiesURL(for: id))
     }
 
     // MARK: Sync support (raw encrypted files; see SyncEngine)

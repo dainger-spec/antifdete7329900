@@ -133,6 +133,7 @@ final class SelfTest {
             try await windowLifecycle(repository)
             try await dialogTeardown(repository)
             try await passwordAutoFill(repository)
+            try await cookieImport(repository)
             try await lockDuringLaunch(repository)
             try await quitFromFocusedPage(repository)
             try await forcedSealAtQuit(repository)
@@ -1466,6 +1467,114 @@ final class SelfTest {
               sameSiteListed && AutoFillPanel.current?.titles == ["ann"] && AutoFillPanel.current?.header?.contains("www.selftest.invalid") == true,
               "\(TabPasswordAutoFill.testFocusLog) \(AutoFillPanel.current?.titles ?? []) \(AutoFillPanel.current?.header ?? "nil")")
         AutoFillPanel.current?.dismiss()
+    }
+
+    // MARK: Cookie import
+
+    /// Cookie import end to end, through the self-test proxy's `/pb-cookies` (which shows the
+    /// request's Cookie header): a damaged Netscape file is read — every readable cookie, every
+    /// other line reported with its reason —; into a stopped profile the cookies are queued,
+    /// encrypted, and put into its store at launch before the first page loads (the start page's
+    /// request carries them, HttpOnly ones too, a Secure one or another path's not over http);
+    /// a cut-off JSON export's complete entries go into the running profile at once; persistent
+    /// imported cookies survive a stop (sealed) and a launch, the session cookie does not.
+    private func cookieImport(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("cookie import checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let start = URL(string: "http://cookies.selftest.invalid/pb-cookies")!
+        let profile = try repository.create(name: "Cookie import", configuration: ProfileConfiguration(
+            startURL: start, proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        let future = Int(Date().timeIntervalSince1970) + 30 * 86_400
+
+        // A Netscape file with CRLF, comments, an HttpOnly line and four lines that cannot be imported.
+        var file = Data([
+            "# Netscape HTTP Cookie File",
+            "cookies.selftest.invalid\tFALSE\t/\tFALSE\t\(future)\thostonly\timported-hostonly-value",
+            "#HttpOnly_.selftest.invalid\tTRUE\t/\tFALSE\t\(future)\thttponly\timported-httponly-value",
+            "cookies.selftest.invalid\tFALSE\t/\tFALSE\t0\tsession\timported-session-value",
+            ".selftest.invalid\tTRUE\t/\tTRUE\t\(future)\tsecureonly\timported-secure-value",
+            "cookies.selftest.invalid\tFALSE\t/elsewhere\tFALSE\t\(future)\tpathonly\timported-path-value",
+            "broken\tline",
+            ".com\tTRUE\t/\tFALSE\t\(future)\tsuffix\tv",
+            "cookies.selftest.invalid\tFALSE\t/\tFALSE\t1600000000\texpired\tv",
+            "cookies.selftest.invalid\tFALSE\t/\tFALSE\t\(future)\tdamaged\tv",
+        ].joined(separator: "\r\n").utf8)
+        file += Data([0xC3, 0x28]) + Data("\r\n".utf8)
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("pb-cookies-\(UUID().uuidString).txt")
+        try file.write(to: path)
+        defer { try? FileManager.default.removeItem(at: path) }
+        let report = CookieImporter.read(contentsOf: path)
+        let problems = report.problems.map { "\($0.location) \($0.reason)" }
+        check("cookie import: a damaged Netscape file — every readable cookie is read, every other line reported with its reason",
+              report.format == .netscape && report.cookies.map(\.name) == ["hostonly", "httponly", "session", "secureonly", "pathonly"]
+                  && report.problems.map(\.location) == [.line(7), .line(8), .line(9), .line(10)]
+                  && report.problems.map(\.reason).first == .wrongFieldCount(2)
+                  && report.problems.map(\.reason).last == .damagedText,
+              "\(report.cookies.map(\.name)) \(problems)")
+
+        // Stopped: queued, encrypted, for the next launch.
+        let queued = try await manager.importCookies(report.cookies, into: profile.id)
+        let queueFile = repository.directory(for: profile.id).appendingPathComponent("cookies-import.bin")
+        let onDisk = (try? Data(contentsOf: queueFile)) ?? Data()
+        check("cookie import: into a stopped profile the cookies are queued, encrypted, for its next launch",
+              queued == .queued(5) && !onDisk.isEmpty && onDisk.range(of: Data("imported-httponly-value".utf8)) == nil,
+              "\(queued) \(onDisk.count) bytes")
+
+        // Launch: in the store before the start page is requested.
+        func pageText() async -> String {
+            guard let tab = manager.session(for: profile.id)?.windowControllers.first?.selectedTab else { return "" }
+            _ = await waitUntil(timeout: 15) { !tab.isLoading && tab.url == start }
+            return (try? await js(tab.webView, "return document.body ? document.body.innerText : '';")) as? String ?? ""
+        }
+        try await manager.launch(profile.id)
+        let first = await pageText()
+        check("cookie import: at launch, before the first page loads: its request carries them (HttpOnly too), not a Secure one or another path's over http",
+              first.contains("hostonly=imported-hostonly-value") && first.contains("httponly=imported-httponly-value")
+                  && first.contains("session=imported-session-value") && !first.contains("secureonly") && !first.contains("pathonly"),
+              first)
+        // Read in its own scope: a reference to the store held past this point would keep WebKit
+        // from releasing it, and the stop below could not seal it.
+        var stored: [HTTPCookie] = []
+        if let store = manager.session(for: profile.id)?.dataStore { stored = await cookies(in: store) }
+        let byName = Dictionary(stored.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+        check("cookie import: the store holds them as the file said (host-only, domain, HttpOnly, Secure, session, path), and the queue is gone",
+              byName["hostonly"]?.domain == "cookies.selftest.invalid" && byName["httponly"]?.domain == ".selftest.invalid"
+                  && byName["httponly"]?.isHTTPOnly == true && byName["secureonly"]?.isSecure == true
+                  && byName["session"]?.isSessionOnly == true && byName["pathonly"]?.path == "/elsewhere"
+                  && !FileManager.default.fileExists(atPath: queueFile.path) && messages.isEmpty,
+              "\(stored.map { "\($0.name)@\($0.domain)\($0.path) httpOnly=\($0.isHTTPOnly) secure=\($0.isSecure) session=\($0.isSessionOnly)" }) \(messages)")
+
+        // Running: a cut-off JSON export, at once.
+        let json = """
+        [
+          {"name": "live", "value": "imported-live-value", "domain": "cookies.selftest.invalid", "hostOnly": true,
+           "path": "/", "expirationDate": \(future), "sameSite": "lax", "httpOnly": false, "secure": false},
+          {"name": "cut", "value": "x", "dom
+        """
+        let jsonReport = CookieImporter.read(Data(json.utf8))
+        let live = try await manager.importCookies(jsonReport.cookies, into: profile.id)
+        manager.session(for: profile.id)?.windowControllers.first?.selectedTab?.webView.reload()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        let second = await pageText()
+        check("cookie import: a cut-off JSON export's complete entries go into the running profile at once",
+              jsonReport.cookies.map(\.name) == ["live"] && jsonReport.problems.contains { $0.reason == .cutOff }
+                  && live == .applied(stored: 1, refused: []) && second.contains("live=imported-live-value"),
+              "\(live) \(second)")
+
+        info("cookie import: WebKit can write cookies to disk on request: \(CookieStoreImport.canFlush)")
+        // Stop (sealed) and launch: persistent imported cookies kept, the session cookie gone.
+        try await manager.stop(profile.id)
+        try await manager.launch(profile.id)
+        let third = await pageText()
+        check("cookie import: imported persistent cookies survive a stop and a launch; the session cookie does not",
+              third.contains("hostonly=imported-hostonly-value") && third.contains("live=imported-live-value")
+                  && !third.contains("session="), third)
+        try await manager.delete(profile.id)
     }
 
     /// The values of the inputs `selectors` in the page.

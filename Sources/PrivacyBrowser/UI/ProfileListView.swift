@@ -27,6 +27,7 @@ struct ProfileListView: View {
     @EnvironmentObject private var model: AppModel
     @State private var editing: ProfileEditorView.Target?
     @State private var passwordsFor: ProfileSummary?
+    @State private var importingCookiesFor: ProfileSummary?
     @State private var pendingDelete: ProfileSummary?
     @State private var changingPassword = false
     @State private var showingSync = false
@@ -57,6 +58,7 @@ struct ProfileListView: View {
         }
         .sheet(item: $editing) { target in ProfileEditorView(target: target) }
         .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
+        .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
         // "Passwords…" in a browser window's AutoFill list.
         .onReceive(model.$passwordsRequest.compactMap { $0 }) { profile in
             passwordsFor = profile
@@ -113,6 +115,7 @@ struct ProfileListView: View {
                                    onLibrary: { model.manager?.showLibrary(profile.id, section: .bookmarks) },
                                    onEdit: { editing = .existing(profile) },
                                    onPasswords: { passwordsFor = profile },
+                                   onImportCookies: { importingCookiesFor = profile },
                                    onDelete: { pendingDelete = profile })
                     }
                 }
@@ -146,6 +149,7 @@ private struct ProfileRow: View {
     let onLibrary: () -> Void
     let onEdit: () -> Void
     let onPasswords: () -> Void
+    let onImportCookies: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -180,6 +184,7 @@ private struct ProfileRow: View {
                 }
                 Button(L("profiles.row.edit"), action: onEdit)
                 Button(L("profiles.row.passwords"), action: onPasswords)
+                Button(L("profiles.row.importCookies"), action: onImportCookies)
                 Divider()
                 Button(L("profiles.row.delete"), role: .destructive, action: onDelete)
             } label: { Image(systemName: "ellipsis") }

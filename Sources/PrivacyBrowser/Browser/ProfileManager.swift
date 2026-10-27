@@ -10,7 +10,7 @@ import os
 /// launch: unwrap profile key → decrypt config, passwords, history, bookmarks
 ///         → decrypt WebKit data (webdata.pbsa → WebKit dirs)
 ///         → create WKWebsiteDataStore(forIdentifier:) + proxy → open window(s)
-/// stop:   close windows/tabs → flush history → release data store → archive + encrypt WebKit dirs
+/// stop:   write cookies to disk → close windows/tabs → flush history → release data store → archive + encrypt WebKit dirs
 ///         → WKWebsiteDataStore.remove(forIdentifier:) → drop profile key
 /// ```
 /// Any number of profiles can run at once; each has its own data store and proxy.
@@ -178,6 +178,8 @@ final class ProfileManager: ObservableObject {
             if !configuration.ephemeral { _ = try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
             throw error
         }
+        // Cookies imported while the profile was stopped: into its store before the first page loads.
+        await applyQueuedCookies(of: id, name: summary.name, to: session)
         session.onAllWindowsClosed = { [weak self] in
             // Return to the Profiles window right away; sealing then runs in the background and
             // flips the row to "Encrypting…" via busyProfileIDs.
@@ -343,6 +345,9 @@ final class ProfileManager: ObservableObject {
 
         session.onAllWindowsClosed = nil
         let ephemeral = session.configuration.ephemeral
+        // Cookies set in the last moments (by a page, or imported) are written before the data is
+        // sealed: CFNetwork would write them later, after the archive was made.
+        if !ephemeral, let store = session.dataStore { await CookieStoreImport.flush(store.httpCookieStore) }
         session.shutDown()
         // `session` is now the last reference; it is released when this scope ends, but its
         // data store reference was already dropped in shutDown().
@@ -411,6 +416,54 @@ final class ProfileManager: ObservableObject {
     /// Called by sync when a profile was deleted on another device.
     func removeWebData(for id: UUID) async {
         await webDataVault.deleteData(profileID: id)
+    }
+
+    // MARK: Cookie import
+
+    enum CookieImportOutcome: Equatable {
+        /// Into the running profile's store now; `refused`: those WebKit did not keep.
+        case applied(stored: Int, refused: [ImportedCookie])
+        /// The profile is stopped (its website data is sealed): queued, encrypted, for its next
+        /// launch; `queued` counts all waiting cookies.
+        case queued(Int)
+    }
+
+    enum CookieImportError: LocalizedError {
+        case busy
+        var errorDescription: String? { L("cookies.error.busy") }
+    }
+
+    /// Imports `cookies` into a profile: at once when it runs, else at its next launch, before
+    /// its first page loads.
+    func importCookies(_ cookies: [ImportedCookie], into id: UUID) async throws -> CookieImportOutcome {
+        if let store = sessions[id]?.dataStore {
+            let result = await CookieStoreImport.apply(cookies, to: store.httpCookieStore)
+            log.notice("Imported \(result.stored) cookies into a running profile, \(result.refused.count) refused")
+            return .applied(stored: result.stored, refused: result.refused)
+        }
+        // Starting or being encrypted: its store is about to exist or to go.
+        guard !busyProfileIDs.contains(id), !isShuttingDown else { throw CookieImportError.busy }
+        return .queued(try repository.queueImportedCookies(cookies, for: id))
+    }
+
+    private func applyQueuedCookies(of id: UUID, name: String, to session: BrowserSession) async {
+        let queued: [ImportedCookie]
+        do {
+            queued = try repository.importedCookiesForLaunch(id)
+        } catch {
+            log.error("Could not read the cookies queued for \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            repository.clearImportedCookies(id)
+            onError?(String(format: L("cookies.launch.unreadable"), name))
+            return
+        }
+        guard !queued.isEmpty, let store = session.dataStore else { return }
+        let result = await CookieStoreImport.apply(queued, to: store.httpCookieStore)
+        repository.clearImportedCookies(id)
+        log.notice("Applied \(result.stored) imported cookies at launch, \(result.refused.count) refused")
+        if !result.refused.isEmpty {
+            onError?(String(format: L("cookies.launch.refused"), result.refused.count, name,
+                            result.refused.prefix(5).map { "\($0.name) (\($0.domain))" }.joined(separator: ", ")))
+        }
     }
 
     // MARK: Passwords

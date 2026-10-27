@@ -30,10 +30,13 @@ can tell which requests reached the proxy, e.g. that a beacon did not).
 `/pb-login` is a sign-in form for the password AutoFill checks (`?signup=1`: a new password and
 its confirmation; `?spa=1`: no form, a button whose script removes the fields, as a sign-in by
 fetch does; `?autofocus=1`), and `/pb-frame?src=<url>` a page with that URL in an iframe.
+`/pb-cookies` shows the request's `Cookie` header (`PB-COOKIES cookie=...`), for the cookie import
+checks.
 """
 import argparse
 import base64
 import functools
+import html
 import json
 import socket
 import struct
@@ -98,6 +101,12 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         body, content_type = json.dumps(answer_json).encode(), "application/json"
     elif plain_path == "/pb-served.json":
         body, content_type = json.dumps(served).encode(), "application/json"
+    elif plain_path == "/pb-cookies":
+        cookie = next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
+                       if line.lower().startswith("cookie:")), "")
+        body = (f"<!doctype html><html><head><title>PB cookies</title></head>"
+                f"<body>PB-COOKIES cookie={html.escape(cookie)}</body></html>").encode()
+        content_type = "text/html; charset=utf-8"
     elif plain_path == "/pb-login":
         body, content_type = login_page({key: values[0] for key, values in parse_qs(query).items()}), "text/html; charset=utf-8"
     elif plain_path == "/pb-frame":
