@@ -1640,6 +1640,7 @@ final class SelfTest {
         let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
         try await PageLoader.load(plain, html: page, baseURL: origin)
         let reference = Self.flatten(try await js(plain, probe) as? [String: Any] ?? [:])
+        let plainStacks = Self.jsonStrings(try await js(plain, Self.stacksScript) as? String)
         writeSurface(reference, name: "plain")
         func string(_ probe: [String: String], _ key: String) -> String { probe[key] ?? "nil" }
 
@@ -1687,6 +1688,13 @@ final class SelfTest {
             let tab = BrowserTab(configuration: tabConfiguration, context: session.tabContext)
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
             let probed = Self.flatten(try await js(tab.webView, probe) as? [String: Any] ?? [:])
+            // A page provoking an error in a member the shim may replace sees the stack a plain web
+            // view gives, or the shim's frames show (P0-4). Information: what JavaScriptCore prints.
+            let stacks = Self.jsonStrings(try await js(tab.webView, Self.stacksScript) as? String)
+            let stacksDiffer = stacks.keys.sorted().filter { stacks[$0] != plainStacks[$0] }
+            info("surface (\(generationID)): error stacks of members the shim may replace "
+                 + (stacksDiffer.isEmpty ? "as in a plain web view (\(stacks.count) members)"
+                    : "differ: " + stacksDiffer.map { "\($0): \(stacks[$0] ?? "nil") vs \(plainStacks[$0] ?? "nil")" }.joined(separator: "; ")))
             // A mobile profile is compared with a plain web view set up as that device's Safari.
             var baseline = reference
             if platform != .macOS { baseline = try await deviceReference(platform, probe: probe) }
@@ -1874,6 +1882,36 @@ final class SelfTest {
         info("remote workers with WebKit's own User-Agent instead of the profile's, \(rounds) fresh iPhone profiles per setting: "
              + settings.indices.map { "\(settings[$0].name) \(lost[$0])/\(rounds)" + (other[$0] > 0 ? " (another or none: \(other[$0]))" : "") }
                 .joined(separator: ", "))
+    }
+
+    /// The stack of the TypeError a page provokes in members the shim may replace (a wrong
+    /// receiver), as `e.stack` prints it, per member: a getter, a method, a promise's rejection.
+    private static let stacksScript = """
+        const members = {
+          'Navigator.platform': () => Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.call({}),
+          'Navigator.maxTouchPoints': () => Object.getOwnPropertyDescriptor(Navigator.prototype, 'maxTouchPoints').get.call({}),
+          'Screen.width': () => Object.getOwnPropertyDescriptor(Screen.prototype, 'width').get.call({}),
+          'ScreenOrientation.type': () => Object.getOwnPropertyDescriptor(ScreenOrientation.prototype, 'type').get.call({}),
+          'window.outerWidth': () => Object.getOwnPropertyDescriptor(window, 'outerWidth').get.call({}),
+          'Date.getTimezoneOffset': () => Date.prototype.getTimezoneOffset.call({}),
+          'StorageManager.estimate': () => StorageManager.prototype.estimate.call({}),
+        };
+        const out = {};
+        for (const [name, provoke] of Object.entries(members)) {
+          try {
+            const result = provoke();
+            out[name] = result && typeof result.then === 'function'
+              ? await result.then(() => 'resolved', (e) => String(e && e.stack)) : 'no error';
+          } catch (e) {
+            out[name] = String(e && e.stack);
+          }
+        }
+        return JSON.stringify(out);
+        """
+
+    /// A JSON object of strings (a script's answer); empty when it is not one.
+    private static func jsonStrings(_ text: String?) -> [String: String] {
+        (try? JSONSerialization.jsonObject(with: Data((text ?? "{}").utf8))) as? [String: String] ?? [:]
     }
 
     /// The probe from the app bundle (build-app.sh copies it), else from PB_SELFTEST_PROBE.
