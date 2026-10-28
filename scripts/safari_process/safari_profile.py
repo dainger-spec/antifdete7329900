@@ -96,8 +96,14 @@ def dev_launch(profile, url=None, http_proxy=None, https_proxy=None, binary=SAFA
     profile = os.path.abspath(os.path.expanduser(profile))
     pid = dev_pid(profile)
     if pid:
+        state = _state(profile)
+        if (http_proxy or https_proxy) and (http_proxy, https_proxy) != (state.get("http_proxy"), state.get("https_proxy")):
+            raise RuntimeError(f"profile already running (pid {pid}) with http_proxy={state.get('http_proxy')!r}, "
+                               f"https_proxy={state.get('https_proxy')!r}; a proxy is fixed at launch: dev-quit it first")
         if url:
-            send_url(pid, url)
+            code, output = send_url(pid, url)
+            if code or not output.startswith("sent"):
+                raise RuntimeError(f"could not hand it the URL: {output}")
         return pid, None
     if not os.path.exists(binary):
         raise FileNotFoundError(f"{binary} is not on this Mac")
@@ -214,8 +220,8 @@ def main():
     args = parser.parse_args()
 
     if args.command == "dev-launch":
-        pid, _ = dev_launch(args.profile, args.url, args.http_proxy, args.https_proxy)
-        print(f"profile {args.profile}: pid {pid}")
+        pid, process = dev_launch(args.profile, args.url, args.http_proxy, args.https_proxy)
+        print(f"profile {args.profile}: {'started' if process else 'already running'}, pid {pid}")
     elif args.command == "dev-open":
         print(dev_open(args.profile, args.url)[1])
     elif args.command == "dev-quit":

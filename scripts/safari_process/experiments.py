@@ -17,13 +17,16 @@ Events are used only to hand a URL to a process started from its executable, and
 (System Events) only to create the web apps through Safari's File > Add to Dock.
 
 --setup-hosts, --trust and the other-user experiment use sudo (/etc/hosts entries, a throwaway CA
-trusted in the System keychain, a throwaway macOS user): meant for disposable CI runners.
+trusted in the System keychain, a throwaway macOS user): meant for disposable CI runners. Between
+experiments every Safari-family process is asked to quit by PID and then ended; sudo is used there
+only for another user's processes.
 """
 import argparse
 import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -158,19 +161,30 @@ def browser_pids():
 
 
 def quit_all():
-    """Asks Safari to quit (flushes its stores), then ends every Safari, web app and copy left."""
-    if pids("Safari.app/Contents/MacOS/Safari"):
-        sh(["osascript", "-e", f'tell application id "{SAFARI_ID}" to quit'], timeout=15)
-        for _ in range(20):
-            if not pids("Safari.app/Contents/MacOS/Safari"):
-                break
-            time.sleep(0.5)
-    for signal in ("-TERM", "-KILL"):
+    """Asks every Safari-family process to quit (by PID, so each saves its stores), then ends the
+    ones left. Returns the PIDs that survived, which make that experiment's relaunch unreliable."""
+    for pid in browser_pids():
+        send_url(pid, "--quit")
+    for _ in range(20):
+        if not browser_pids():
+            break
+        time.sleep(0.5)
+    for sig in (signal.SIGTERM, signal.SIGKILL):
         left = browser_pids()
         if not left:
             break
-        sh(["sudo", "-n", "kill", signal] + [str(p) for p in left])
-        time.sleep(3 if signal == "-TERM" else 1)
+        for pid in left:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+            except PermissionError:  # another user's process (other-user experiment): sudo on CI
+                sh(["sudo", "-n", "kill", f"-{sig.value}", str(pid)])
+        time.sleep(3 if sig == signal.SIGTERM else 1)
+    survivors = browser_pids()
+    if survivors:
+        log(f"WARNING: processes still running after quit: {survivors}")
+    return survivors
 
 
 # ---------------------------------------------------------------------------------------------
@@ -617,9 +631,11 @@ def summarize_tls(records):
     return out
 
 
-def verdict(inst, insts, seeded, final, relaunch):
+def verdict(inst, insts, seeded, final, relaunch, writers):
+    """`writers`: the instances of this experiment that wrote their markers. Isolation is only
+    tested when another one did."""
     own_kinds = ["httpOnlyCookie", "scriptCookie", "localStorage", "indexedDB"]
-    result = {"reported": bool(final or seeded)}
+    result = {"reported": bool(final or seeded), "peers_that_wrote": sorted(w for w in writers if w != inst)}
     if seeded and seeded.get("tags"):
         result["wrote_own_markers"] = {k: inst in seeded["tags"][k] for k in own_kinds}
     # Two processes on one store need not see each other's fresh writes at once (each keeps its
@@ -636,7 +652,7 @@ def verdict(inst, insts, seeded, final, relaunch):
         # same store are listed apart (they say which store this instance uses).
         result["sees_markers_of"] = [t for t in foreign if t in insts]
         result["also_sees_earlier"] = [t for t in foreign if t not in insts]
-        result["isolated_from_other_instances"] = not result["sees_markers_of"]
+        result["isolated_from_other_instances"] = (not result["sees_markers_of"]) if result["peers_that_wrote"] else None
     return result
 
 
@@ -692,12 +708,16 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
     for inst in insts:
         peers = [p for p in insts if p != inst]
         url = run_url(reports, inst, 1, True, peers, tls_port, inst in spec.get("navtls", []))
+        reports.set_current(inst, url)
         result["launch"][inst] = launchers[inst].start(url)
         log(f"[{inst}] launch: {json.dumps(result['launch'][inst], default=str)[:1500]}")
         pre = reports.wait(inst, "pre", timeout=launchers[inst].wait)
         log(f"[{inst}] pre: {pre.get('tags') if pre else 'NO REPORT'}")
         time.sleep(2)
         result.setdefault("pids_after_launch", {})[inst] = browser_pids()
+    for inst in insts:
+        if not reports.wait(inst, "pre", timeout=0):
+            reports.release(f"{inst}:seeded")  # its peers' pages stop waiting for it
     finals = {inst: reports.wait(inst, "final", timeout=150 if reports.wait(inst, "pre", timeout=0) else 0)
               for inst in insts}
     for inst in insts:
@@ -717,13 +737,15 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
         }
     for launcher in launchers.values():
         launcher.stop()
-    quit_all()
+    result["survivors_after_run1"] = quit_all()
 
     # Run 2: each instance alone, launched the same way: are its own markers still there?
     for inst in insts:
         if not result["instances"][inst]["pre"]:
             continue
-        result["relaunch"][inst] = launchers[inst].start(run_url(reports, inst, 2, False, [], None))
+        url = run_url(reports, inst, 2, False, [], None)
+        reports.set_current(inst, url)
+        result["relaunch"][inst] = launchers[inst].start(url)
         result["instances"][inst]["relaunch"] = reports.wait(inst, "pre", run="2", timeout=launchers[inst].wait)
         time.sleep(1)
         launchers[inst].stop()
@@ -741,12 +763,13 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
         else:
             code, output = sh(f"find {path} -newer {shlex.quote(marker)} -type f 2>&1 | grep -v -E '/(Logs|tmp)/' | head -60")
         result["written"][label] = output.splitlines()
+    writers = {p for p in insts if (result["instances"][p]["seeded"] or {}).get("tags")}
     for label, lines in result["written"].items():
         if label.startswith("home of") or label.startswith("Web app") or label.startswith("Safari container"):
             log(f"written since start, {label}: {json.dumps(lines[:80])}")
     for inst in insts:
         info = result["instances"][inst]
-        info["verdict"] = verdict(inst, insts, info["seeded"], info["final"], info.get("relaunch"))
+        info["verdict"] = verdict(inst, insts, info["seeded"], info["final"], info.get("relaunch"), writers)
         # Distinct page loads that reported for this instance in run 1: more than one means the
         # page also ran somewhere else (a tab restored into another process, for example).
         info["page_loads"] = sorted({r.get("page") for r in reports.reports
@@ -868,7 +891,9 @@ def comparison_table(results, reference):
                 name, inst, (launch.get("command") or launch.get("error") or "")[:70].replace("|", "\\|"),
                 ",".join(map(str, new_pids)) if new_pids else "none",
                 ("all" if wrote and all(wrote.values()) else json.dumps(wrote)) if wrote else "no report",
-                ", ".join(v.get("sees_markers_of", [])) or ("none" if "sees_markers_of" in v else "no report"),
+                ", ".join(v.get("sees_markers_of", [])) or ("no report" if "sees_markers_of" not in v
+                                                             else "none" if v.get("peers_that_wrote")
+                                                             else "n/a (no peer wrote)"),
                 ("all" if relaunch and all(relaunch.values()) else json.dumps(relaunch)) if relaunch else "no report",
                 tls_info.get("ja4") or "not captured", same_hello, same_h2,
                 "yes" if info.get("proxied") else "no", apis]) + " |")

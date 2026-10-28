@@ -174,6 +174,40 @@ class Reports(unittest.TestCase):
             server.close()
 
 
+class StalePages(unittest.TestCase):
+    def test_restored_page_is_sent_to_the_current_launch_without_markers(self):
+        server = harness.ReportServer()
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        try:
+            run1, run2 = server.url("/run?inst=wa&run=1&seed=1"), server.url("/run?inst=wa&run=2&seed=0")
+            server.set_plan("A", run1)
+            first = opener.open(run1)
+            self.assertIn("sp_http_wa=wa", first.headers.get("Set-Cookie", ""))
+            server.set_plan("A", run2)
+            with self.assertRaises(urllib.error.HTTPError) as stale:
+                opener.open(run1)  # the run-1 tab, reopened by the relaunched web app
+            self.assertEqual(stale.exception.code, 302)
+            self.assertEqual(stale.exception.headers["Location"], run2)
+            self.assertIsNone(stale.exception.headers.get("Set-Cookie"))
+            self.assertEqual(opener.open(server.url("/current?inst=wa")).read().decode(), run2)
+            # Another instance of the same web app (a later experiment) takes over its pages too.
+            server.set_plan("A", server.url("/run?inst=pa&run=1&seed=1"))
+            self.assertIn("inst=pa", opener.open(server.url("/current?inst=wa")).read().decode())
+            # Instances outside web apps follow set_current.
+            server.set_current("s2", server.url("/run?inst=s2&run=2&seed=0"))
+            with self.assertRaises(urllib.error.HTTPError):
+                opener.open(server.url("/run?inst=s2&run=1&seed=1"))
+            server.release("gone:seeded")
+            self.assertEqual(opener.open(server.url("/await?event=gone:seeded&timeout=1")).status, 200)
+        finally:
+            server.close()
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
 class HPACKFallback(unittest.TestCase):
     def test_static_and_literal_names(self):
         # :method GET (0x82), :scheme https (0x87), :path / (0x84), :authority literal with indexing

@@ -545,7 +545,11 @@ RUN_PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><title>sp-run</t
     // A web app may reopen the page it showed last instead of its start page: go where this
     // instance's current launch is planned to go.
     const planned = await fetch(`/current?inst=${encodeURIComponent(inst)}`, { cache: 'no-store' }).then((r) => r.text());
-    if (planned && new URL(planned).searchParams.get('run') !== run) { location.replace(planned); return; }
+    const plannedParams = planned ? new URL(planned).searchParams : null;
+    if (plannedParams && (plannedParams.get('inst') !== inst || plannedParams.get('run') !== run)) {
+      location.replace(planned);
+      return;
+    }
     await report('pre', { ...(await read()), env: env() });
     log('pre reported');
     if (seed) {
@@ -597,7 +601,11 @@ def marker_tags(cookie_header, document_cookie, local_storage, indexed_db):
 
 class ReportServer:
     def __init__(self, port=0):
-        self.events, self.reports, self.plan, self.plan_by_inst, self.window_props = set(), [], {}, {}, {}
+        self.events, self.reports, self.window_props = set(), [], {}
+        # What each launch is planned to run: per web app name (its start page redirects there), per
+        # instance, and which web app an instance ran in. A page that is not the current plan of its
+        # instance or app (a tab restored from an earlier run) is sent to the current one, unseeded.
+        self.plan, self.plan_by_inst, self.app_of_inst = {}, {}, {}
         self.condition = threading.Condition()
         owner = self
 
@@ -620,6 +628,12 @@ class ReportServer:
                 query = dict(urllib.parse.parse_qsl(url.query))
                 if url.path == "/run":
                     inst = query.get("inst", "x")
+                    current = owner.current(inst)
+                    if current and not owner.is_current(current, inst, query.get("run", "1")):
+                        owner._record({"inst": inst, "run": query.get("run", "1"), "phase": "stale-navigation",
+                                       "redirect": current})
+                        self._send(302, "text/plain", b"", [("Location", current)])
+                        return
                     extra = []
                     if query.get("seed") == "1":
                         extra.append(("Set-Cookie", f"sp_http_{inst}={inst}; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax"))
@@ -642,9 +656,7 @@ class ReportServer:
                                 f"</head><body><h1>SPWA-{name}</h1></body></html>").encode()
                         self._send(200, "text/html; charset=utf-8", page)
                 elif url.path == "/current":
-                    with owner.condition:
-                        target = owner.plan_by_inst.get(query.get("inst", ""), "")
-                    self._send(200, "text/plain", target.encode())
+                    self._send(200, "text/plain", owner.current(query.get("inst", "")).encode())
                 elif url.path == "/await":
                     event, timeout = query.get("event", ""), float(query.get("timeout", "60"))
                     with owner.condition:
@@ -687,14 +699,37 @@ class ReportServer:
         return f"http://127.0.0.1:{self.port}{path}"
 
     def set_plan(self, name, target):
+        """The next launch of web app `name` runs `target`."""
         with self.condition:
-            if target:
-                self.plan[name] = target
-                inst = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(target).query)).get("inst")
-                if inst:
-                    self.plan_by_inst[inst] = target
-            else:
+            if not target:
                 self.plan.pop(name, None)
+                return
+            self.plan[name] = target
+            inst = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(target).query)).get("inst")
+            if inst:
+                self.app_of_inst[inst] = name
+                self.plan_by_inst[inst] = target
+
+    def set_current(self, inst, target):
+        """Instance `inst`'s current launch runs `target` (set before every launch)."""
+        with self.condition:
+            self.plan_by_inst[inst] = target
+
+    def current(self, inst):
+        with self.condition:
+            app = self.app_of_inst.get(inst)
+            return (self.plan.get(app) if app else None) or self.plan_by_inst.get(inst, "")
+
+    @staticmethod
+    def is_current(target, inst, run):
+        query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(target).query))
+        return query.get("inst") == inst and query.get("run", "1") == str(run)
+
+    def release(self, event):
+        """Marks an event as happened, e.g. a peer that never started, so pages stop waiting for it."""
+        with self.condition:
+            self.events.add(event)
+            self.condition.notify_all()
 
     def wait(self, inst, phase, run="1", timeout=60):
         deadline = time.time() + timeout
