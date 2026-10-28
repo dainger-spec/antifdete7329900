@@ -308,6 +308,15 @@ function getter(name, impl) {
   return asNative(Object.getOwnPropertyDescriptor({ get [name]() { return ReflectApply(impl, this, []); } }, name).get);
 }
 
+// Whether the native accessor `get` (side-effect free) refuses `receiver`. A replacement then
+// returns the native call itself, in tail position: in strict code JavaScriptCore drops the
+// caller's frame for a tail call, so the error's stack is the one a page calling the native
+// directly gets, with no frame of this script (whose frames name it as a user script).
+function refused(get, receiver) {
+  try { ReflectApply(get, receiver, []); } catch (e) { return true; }
+  return false;
+}
+
 function patchToString(w) {
   const proto = w.Function.prototype;
   const native = proto.toString;
@@ -383,8 +392,10 @@ function overrideGetter(w, obj, name, value) {
   const native = Object.getOwnPropertyDescriptor(holder, name);
   const Interface = holder === obj ? null : holder.constructor;
   const get = getter(name, function () {
-    if (native && native.get) native.get.call(this); // enforces the receiver like the engine
-    else if (Interface && !(this instanceof Interface)) {
+    if (native && native.get) {
+      // A receiver the engine refuses gets the engine's own error (refused).
+      if (refused(native.get, this)) return ReflectApply(native.get, this, []);
+    } else if (Interface && !(this instanceof Interface)) {
       throw new w.TypeError('The ' + Interface.name + '.' + name + ' getter can only be used on instances of ' + Interface.name);
     }
     return value;
@@ -614,8 +625,12 @@ function patchStorageQuota(w, quota) {
   const estimate = Manager && Manager.prototype.estimate;
   if (typeof estimate !== 'function') return;
   const APP_QUOTA = 1048576000;
+  // The realm's own manager, taken before any page script ran. Any other receiver gets the engine's
+  // answer as it is, a rejection with no frame of ours included (refused).
+  const own = w.navigator && w.navigator.storage;
   define(Manager.prototype, 'estimate', method('estimate', 0, function () {
-    return estimate.apply(this, arguments).then((result) => {
+    if (this !== own) return ReflectApply(estimate, this, arguments);
+    return ReflectApply(estimate, this, arguments).then((result) => {
       if (result && typeof result.quota === 'number' && result.quota <= APP_QUOTA) {
         result.quota = Math.ceil(result.quota * (quota / APP_QUOTA));
       }
@@ -1100,7 +1115,8 @@ function hookChildWindows(w) {
     Object.defineProperty(Ctor.prototype, prop, {
       configurable: true, enumerable: descriptor.enumerable, set: descriptor.set,
       get: getter(prop, function () {
-        const value = descriptor.get.call(this);
+        if (refused(descriptor.get, this)) return ReflectApply(descriptor.get, this, []);
+        const value = ReflectApply(descriptor.get, this, []);
         try { patchWindow(toWindow(value)); } catch (e) {}
         return value;
       })
@@ -1112,19 +1128,24 @@ function hookChildWindows(w) {
   hook(w.HTMLObjectElement, 'contentWindow', (v) => v);
   // A new page's first, blank document runs no user script: the page gets the window from these
   // two before anything else could patch it.
+  // A receiver open refuses (another object; another origin's window), the window's own document
+  // accessor refuses too, without side effects: open then answers it itself (refused).
   const nativeOpen = w.open;
+  const windowBrand = (Object.getOwnPropertyDescriptor(w, 'document') || {}).get;
   if (nativeOpen) {
     define(w, 'open', method('open', 0, function (...args) {
+      if (windowBrand && refused(windowBrand, this)) return ReflectApply(nativeOpen, this, args);
       return contained(ReflectApply(nativeOpen, this, args));
     }));
   }
   // document.open with three arguments opens a window too (with fewer it rewrites the document).
   const documentProto = w.Document && w.Document.prototype;
   const nativeDocumentOpen = documentProto && Object.prototype.hasOwnProperty.call(documentProto, 'open') ? documentProto.open : null;
+  const documentBrand = documentProto && (Object.getOwnPropertyDescriptor(documentProto, 'URL') || {}).get;
   if (nativeDocumentOpen) {
     define(documentProto, 'open', method('open', 0, function (...args) {
-      const result = ReflectApply(nativeDocumentOpen, this, args);
-      return args.length > 2 ? contained(result) : result;
+      if (args.length <= 2 || (documentBrand && refused(documentBrand, this))) return ReflectApply(nativeDocumentOpen, this, args);
+      return contained(ReflectApply(nativeDocumentOpen, this, args));
     }));
   }
 }

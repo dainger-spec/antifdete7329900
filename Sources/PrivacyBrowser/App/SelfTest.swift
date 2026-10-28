@@ -554,7 +554,8 @@ final class SelfTest {
     /// is documented to carry them. The page is on a host only the proxy resolves, so a request
     /// the proxy did not see went around it or nowhere. AVFoundation plays the media (an HLS
     /// stream, an MP4 file), not WebKit's own loader: a profile without a proxy, asking the
-    /// listener directly, shows whether this WebKit asks for them at all.
+    /// listener directly, shows whether this WebKit asks for them at all (a page in a web view
+    /// outside a window asked for none, CI run 219).
     private func streamsThroughProxy(_ repository: ProfileRepository, httpPort: Int, socksPort: Int) async throws {
         let script = """
             const result = {};
@@ -592,9 +593,16 @@ final class SelfTest {
             let run = "\(index)-\(UUID().uuidString.prefix(8))"
             let profile = try repository.create(name: "Streams \(index)", configuration: ProfileConfiguration(proxy: item.proxy, ephemeral: true))
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
-            let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
-            try await PageLoader.load(webView, url: URL(string: "\(item.base)/streams-page")!)
-            let text = try await js(webView, script, ["base": item.base, "run": run]) as? String ?? "{}"
+            // In a window, shown: WebKit loads no media for a page that is not visible.
+            let page = URL(string: "\(item.base)/streams-page")!
+            let controller = session.openWindow(url: page)
+            guard let tab = controller.selectedTab,
+                  await waitUntil(timeout: 20, { !tab.isLoading && tab.webView.url == page }) else {
+                check("proxy (\(item.label)): the streams page opens in a profile window", false)
+                session.shutDown()
+                continue
+            }
+            let text = try await js(tab.webView, script, ["base": item.base, "run": run]) as? String ?? "{}"
             session.shutDown()
             let result = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
             let served = result["served"] as? [String] ?? []
@@ -1681,12 +1689,12 @@ final class SelfTest {
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
             let probed = Self.flatten(try await js(tab.webView, probe) as? [String: Any] ?? [:])
             // A page provoking an error in a member the shim may replace sees the stack a plain web
-            // view gives, or the shim's frames show (P0-4). Information: what JavaScriptCore prints.
+            // view gives: no frame of the shim, whose frames WebKit names as a user script's (P0-4).
             let stacks = Self.jsonStrings(try await js(tab.webView, Self.stacksScript) as? String)
             let stacksDiffer = stacks.keys.sorted().filter { stacks[$0] != plainStacks[$0] }
-            info("surface (\(generationID)): error stacks of members the shim may replace "
-                 + (stacksDiffer.isEmpty ? "as in a plain web view (\(stacks.count) members)"
-                    : "differ: " + stacksDiffer.map { "\($0): \(stacks[$0] ?? "nil") vs \(plainStacks[$0] ?? "nil")" }.joined(separator: "; ")))
+            check("surface (\(generationID)): an error a page provokes in what the shim replaces has a plain web view's stack",
+                  !stacks.isEmpty && stacksDiffer.isEmpty,
+                  stacksDiffer.map { "\($0): \(stacks[$0] ?? "nil") vs \(plainStacks[$0] ?? "nil")" }.joined(separator: "; "))
             // A mobile profile is compared with a plain web view set up as that device's Safari.
             var baseline = reference
             if platform != .macOS { baseline = try await deviceReference(platform, probe: probe) }
@@ -1878,6 +1886,7 @@ final class SelfTest {
 
     /// The stack of the TypeError a page provokes in members the shim may replace (a wrong
     /// receiver), as `e.stack` prints it, per member: a getter, a method, a promise's rejection.
+    /// The last four are replaced in every profile, the default one included.
     private static let stacksScript = """
         const members = {
           'Navigator.platform': () => Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.call({}),
@@ -1887,6 +1896,10 @@ final class SelfTest {
           'window.outerWidth': () => Object.getOwnPropertyDescriptor(window, 'outerWidth').get.call({}),
           'Date.getTimezoneOffset': () => Date.prototype.getTimezoneOffset.call({}),
           'StorageManager.estimate': () => StorageManager.prototype.estimate.call({}),
+          'HTMLIFrameElement.contentWindow': () => Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get.call({}),
+          'window.open': () => window.open.call({}),
+          'Document.open': () => Document.prototype.open.call({}, 'about:blank', 'x', ''),
+          'Function.toString': () => Function.prototype.toString.call({}),
         };
         const out = {};
         for (const [name, provoke] of Object.entries(members)) {

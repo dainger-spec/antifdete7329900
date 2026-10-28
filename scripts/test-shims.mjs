@@ -303,8 +303,10 @@ function makeWindow(config, parentContext, form = FORM, prepare = null) {
   vm.runInContext(ENGINE_WORKERS, context);
   if (prepare) prepare(context);
   if (form === 'none') return context;
+  // Named as WebKit names a user script's frames in a stack.
   vm.runInContext(form === 'worker' ? `(${oneLineInstall()})(${JSON.stringify(config)});`
-                                    : `(function install(CONFIG) {\n${body}\n})(${JSON.stringify(config)});`, context);
+                                    : `(function install(CONFIG) {\n${body}\n})(${JSON.stringify(config)});`, context,
+                  { filename: 'user-script:1' });
   return context;
 }
 
@@ -659,6 +661,26 @@ test('iPhone profile: MediaSource removed where the engine still has it, Managed
   assert.equal(run(iPad, `typeof MediaSource`), 'function');
   // An engine that leaves it out already: nothing to do.
   assert.equal(run(makeWindow({ ...base, device: iPhone }), `'MediaSource' in globalThis`), false);
+});
+
+test('no frame of the shim in the stack of an error a page provokes in what it replaced (JavaScriptCore)', () => {
+  // A receiver the engine refuses: the replacement returns the native call in tail position, which
+  // JavaScriptCore runs without the caller's frame. V8 has no proper tail calls: there the frame
+  // shows, and no engine this shim runs in is V8.
+  if (!JSC) return;
+  const engine = (context) => vm.runInContext(`
+    globalThis.HTMLIFrameElement = class HTMLIFrameElement {
+      get contentWindow() { if (!(this instanceof HTMLIFrameElement)) throw new TypeError('illegal invocation'); return null; } };`, context);
+  const w = makeWindow({ ...base, device: iPhone, storageQuota: 0.6 * 128 * 2 ** 30 }, undefined, FORM, engine);
+  const stacks = run(w, `[
+    () => Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.call({}),
+    () => Object.getOwnPropertyDescriptor(Navigator.prototype, 'maxTouchPoints').get.call({}),
+    () => Object.getOwnPropertyDescriptor(Screen.prototype, 'width').get.call({}),
+    () => Object.getOwnPropertyDescriptor(ScreenOrientation.prototype, 'type').get.call({}),
+    () => typeof HTMLIFrameElement === 'function' ? Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get.call({}) : 0,
+    () => Function.prototype.toString.call({}),
+  ].map((provoke) => { try { provoke(); return 'no error'; } catch (e) { return String(e.stack); } })`);
+  for (const stack of stacks) assert.ok(stack !== 'no error' && !stack.includes('user-script'), stack);
 });
 
 test('iPad profile: the Mac platform (desktop websites), the iPad touch points and screen', () => {
