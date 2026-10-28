@@ -180,9 +180,12 @@ final class ProfileSyncTests: XCTestCase {
         try await SyncEngine(repository: repository, transport: transport).sync()
     }
 
+    /// One expiry for every cookie of a test: a cookie made again a second later is the same
+    /// cookie, not a changed one (a test that crossed a second boundary failed the merge).
+    private let expiry = Date().addingTimeInterval(30 * 86_400).rounded
+
     private func cookie(_ name: String, _ value: String) -> ImportedCookie {
-        ImportedCookie(name: name, value: value, domain: "site.test", hostOnly: false,
-                       expires: Date().addingTimeInterval(30 * 86_400).rounded, secure: true)
+        ImportedCookie(name: name, value: value, domain: "site.test", hostOnly: false, expires: expiry, secure: true)
     }
 
     private func record(_ repository: ProfileRepository, _ id: UUID, store: [ImportedCookie], at time: Date) throws {
