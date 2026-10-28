@@ -494,9 +494,7 @@ extension BrowserTab: WKUIDelegate {
         if let top = GeolocationPermission.site(of: webView.url) { geolocationAsked.insert(top) }
         decisionHandler(.deny)
         // A PermissionStatus the page holds reads the state again ('denied') and fires 'change'.
-        if webView.responds(to: GeolocationPermission.permissionChanged) {
-            _ = webView.perform(GeolocationPermission.permissionChanged, with: "geolocation", with: origin)
-        }
+        GeolocationPermission.announceChange(of: "geolocation", for: origin)
     }
 
     /// The state navigator.permissions.query reports (`WKUIDelegatePrivate`): for geolocation,

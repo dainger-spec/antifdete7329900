@@ -10,16 +10,26 @@ import WebKit
 /// implements; `BrowserTab` answers them). The answers are a user's who said no: the request is
 /// denied, and the site's state is 'prompt' until a page of it asked, 'denied' after (until the tab
 /// shows another page), and a PermissionStatus the page holds is told of the change
-/// (`-[WKWebView _permissionChanged:forOrigin:]`). Every other permission is answered 'prompt',
+/// (`+[WKWebView _permissionChanged:forOrigin:]`). WebKit asks only for a page in view: a request
+/// from a page out of sight waits until it is shown, as in Safari. Every other permission is answered 'prompt',
 /// what WebKit reports for them with a delegate that does not answer (the self-test compares them).
 ///
 /// PLATFORM LIMITATION: private API, and nothing to detect: WebKit calls the delegate methods it
 /// knows. One it does not call costs only the state after a request ('prompt' instead of
 /// 'denied'): on the Mac WebKit denies a request its delegate leaves unanswered by itself.
 enum GeolocationPermission {
-    /// `-[WKWebView _permissionChanged:forOrigin:]`, where this WebKit has it: a page's
-    /// PermissionStatus objects read the state again and fire 'change' when it differs.
+    /// `+[WKWebView _permissionChanged:forOrigin:]` (a class method; macOS 26.6.2 has it): the
+    /// PermissionStatus objects of the origin's pages read the state again and fire 'change' when
+    /// it differs.
     static let permissionChanged = NSSelectorFromString("_permissionChanged:forOrigin:")
+
+    /// Tells the pages of `origin` that `name`'s state may have changed, where WebKit can.
+    @MainActor
+    static func announceChange(of name: String, for origin: WKSecurityOrigin) {
+        let webViewClass: AnyObject = WKWebView.self
+        guard webViewClass.responds(to: permissionChanged) else { return }
+        _ = webViewClass.perform(permissionChanged, with: name, with: origin)
+    }
 
     /// A site as its permission state is kept: the origin's scheme, host and port (0 for the
     /// scheme's default, as `WKSecurityOrigin` gives it).

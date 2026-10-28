@@ -882,9 +882,9 @@ final class SelfTest {
 
     /// A profile that denies geolocation (the default) gets WebKit's own answer, not the shim's: the
     /// tab's UI delegate denies the request and reports the state (`GeolocationPermission`). Checked in
-    /// a profile tab on the self-test proxy's page (127.0.0.1, a secure context): WebKit's
-    /// PERMISSION_DENIED, 'prompt' until the page asked and 'denied' after, 'prompt' again on the next
-    /// page, and every other permission as a plain WKWebView reports it.
+    /// a profile window on the self-test proxy's page (127.0.0.1, a secure context; WebKit asks only
+    /// for a page in view): WebKit's PERMISSION_DENIED, 'prompt' until the page asked and 'denied'
+    /// after, 'prompt' again on the next page, and every other permission as a plain WKWebView reports it.
     private func geolocationInEngine(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             info("geolocation checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
@@ -902,9 +902,13 @@ final class SelfTest {
 
         let profile = try repository.create(name: "Geolocation", configuration: ProfileConfiguration(ephemeral: true))
         let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
-        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
-        defer { tab.tearDown(); session.shutDown() }
-        try await PageLoader.load(tab.webView, url: page)
+        defer { session.shutDown() }
+        let controller = session.openWindow(url: page)
+        guard let tab = controller.selectedTab,
+              await waitUntil(timeout: 20, { !tab.isLoading && tab.webView.url?.path == "/pb-scopes/page" }) else {
+            check("geolocation: a profile window opens the page", false)
+            return
+        }
         let states = try await js(tab.webView, Self.permissionStatesScript) as? String ?? "nil"
         check("permissions: a profile tab reports every permission as a plain WKWebView does", states == plainStates,
               "\(states) vs \(plainStates)")
@@ -921,8 +925,12 @@ final class SelfTest {
               result["before"] as? String == "prompt,true,0" && result["after"] as? String == "denied", text)
         info("geolocation: a PermissionStatus held from before reads \(result["held"] ?? "nil"), 'change' fired \(result["changes"] ?? "nil") time(s); "
              + "WebKit asked the tab \(tab.geolocationRequestsAnswered) time(s) for the position, \(tab.permissionQueriesAnswered) for a state")
-        try await PageLoader.load(tab.webView, url: page)
-        let next = try await js(tab.webView, "return (await navigator.permissions.query({ name: 'geolocation' })).state;") as? String
+        // Through the tab's own navigation (its delegate sees the new page), not PageLoader's.
+        let nextPage = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page?next=1")!
+        tab.webView.load(URLRequest(url: nextPage))
+        let loaded = await waitUntil(timeout: 20) { !tab.isLoading && tab.webView.url == nextPage }
+        var next: String? = "not loaded"
+        if loaded { next = try await js(tab.webView, "return (await navigator.permissions.query({ name: 'geolocation' })).state;") as? String }
         check("geolocation: the next page starts at 'prompt' again", next == "prompt", next ?? "nil")
     }
 
