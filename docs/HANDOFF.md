@@ -31,7 +31,7 @@ Rules from the owner:
 | `claude/safari-parity-p1-quota` | P1-1: Safari's storage quota in the data store | done, CI green (210/210) |
 | `claude/safari-parity-p0-workers` | P0-3: shim into blob workers as one line, no eval (CSP / Trusted Types safe) | done, CI green (215/215) |
 | `claude/safari-parity-p1-geolocation` | P1-2: geolocation denied by WebKit itself, the tab's UI delegate answers permission state | done, CI run 210 green (222/222) |
-| `claude/safari-parity-p1-webrtc` | P1-3: WebRTC escape routes, plus the WebTransport leak fix | **last commit 39b06ee, CI not yet checked** |
+| `claude/safari-parity-p1-webrtc` | P1-3: WebRTC escape routes, plus the WebTransport leak fix | done, CI runs 213–215 green (236/236) |
 
 ## P1-3 state (`claude/safari-parity-p1-webrtc`)
 
@@ -67,23 +67,12 @@ Regression found and handled in commit 39b06ee:
   report the profile's UA, with and without a proxy. Each profile runs in its own pool via
   the time zone Europe/Berlin.
 
-**First thing to do:** read the CI result for 39b06ee (macOS job, self-test step):
-1. **Time-zone checks** ("a shared/service worker runs in the profile's zone, with its own
-   profile's User-Agent") must pass in both builds.
-   - If they still fail, the cause is not the encoded-transform switch. Look at the other
-     changes in 1749618.
-2. **"WebTransport (with a proxy): shared and service workers report the profile's
-   User-Agent"**.
-   - If it fails, the `WebTransportEnabled` switch has the same side effect and a different
-     mechanism is needed. A JS-only removal would leave URL and service workers able to
-     leak.
-3. **Expected count: 236 checks.** The leak check must be green.
-
-Then finish the P1-3 docs:
-- in `docs/ISOLATION_AND_LIMITATIONS.md`: the §0 header count, and §0 rows for the WebRTC
-  escape routes (workers, sandboxed frames, popups);
-- the README check count;
-- remove the "follow once CI has run" note.
+**Result (CI runs 213–215, 39b06ee):** 236/236 in all six self-test runs.
+- The remote-worker UA checks passed 24/24 in the time-zone test with the encoded-transform switch
+  reverted (they had failed in 4 of 8 profile runs with it).
+- The new check with WebTransport off passed 12/12, so that switch has no such effect.
+- The leak check is green.
+- The P1-3 docs carry these values.
 
 ## Full plan with status
 
@@ -98,7 +87,7 @@ each item since.
 | P0-4 | Measurements: worker scopes, background tabs, quota in workers | mostly done. **Open:** check whether the shim's wrapper frames show up in `e.stack` |
 | P1-1 | Native storage quota through `_WKWebsiteDataStoreConfiguration`. Safari reports 82 GB; WebKit gave 1000 MiB in URL and service workers | done (`claude/safari-parity-p1-quota`) |
 | P1-2 | Geolocation denied by WebKit through `WKUIDelegatePrivate`, instead of about 20 replaced functions | done (`claude/safari-parity-p1-geolocation`) |
-| P1-3 | WebRTC routes around relay-only (worker canary, sandboxed frames, popups), plus the WebTransport proxy leak | nearly done, see above |
+| P1-3 | WebRTC routes around relay-only (worker canary, sandboxed frames, popups), plus the WebTransport proxy leak | done |
 | P1-4 | iPhone/iPad profiles, see below | not started |
 | P2 | Measure TLS/HTTP2 through the proxy and gate those checks on it; "inert" WebRTC; small differences from Safari in the live comparison (`errorStack`, `windowOwnCount`); leak check for WebSocket and HLS | not started |
 

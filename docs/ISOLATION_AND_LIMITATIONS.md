@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26.6.2, 222/222 checks in both builds):
+(macOS 26.6.2, 236/236 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -21,7 +21,8 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | JS shims under JavaScriptCore | time zone (offset, `Intl`, local getters; in WebKit's shared pool, as without the engine override below), fixed geolocation, WebRTC removed, WebRTC relay-only |
 | Time zone in the engine | where WebKit has the process pool's time zone override (the self-test logs which private pieces it found; macOS 26.6.2 has `_WKProcessPoolConfiguration.timeZoneOverride` and `-[WKProcessPool _initWithConfiguration:]`, not the newer `+_processPoolWithConfiguration:`), two profiles in different zones running at once each report their own zone in the page, a frame, workers made from a blob and loaded from a URL, and shared and service workers that answer; `Date` and `Intl` are the engine's own (no shim); each profile has a pool of its own, and its shared and service workers carry its own User-Agent (what the same workers report in WebKit's shared pool is logged) |
 | Storage quota in the engine | where WebKit has `_WKWebsiteDataStoreConfiguration` (macOS 26.6.2 has it), a persistent profile's store is made with Safari's quota: the page, workers made from a blob and loaded from a URL, and the service worker report 82 463 372 084 (macOS generation) or 41 231 686 042 (iPhone generation), and the store opens again from the same directories. An ephemeral profile keeps WebKit's in-memory store; the shim reports Safari's figure in its pages and blob workers |
-| WebRTC off (default) | switched off in the engine (`_peerConnectionEnabled` is false): the window has no `RTC*` interface at all |
+| WebRTC off (default) | switched off in the engine (`_peerConnectionEnabled` is false). Without the shim WebKit then leaves the encoded transforms, a setting of their own (`RTCEncodedAudioFrame`, `RTCEncodedVideoFrame`, `RTCRtpScriptTransform` in the window; those and `RTCRtpScriptTransformer`, `RTCTransformEvent`, `onrtctransform` in a dedicated worker); the shim removes the window's three, so the window has no `RTC*` interface at all, and a default profile installs no worker hook |
+| WebRTC relay-only: escape routes | no worker (blob, URL, shared, service) has `RTCPeerConnection`; peer connections made from frames sandboxed without scripts (empty, `srcdoc`, a same-origin URL, by index or `contentWindow`), from an ordinary frame by index, and from popups (`window.open`, `document.open(url, name, features)`, and one opened after the page broke `Object.defineProperty`) are all relay-only with no host or srflx candidate against public STUN servers, where a plain WKWebView gathers a srflx one |
 | HTTP CONNECT proxy | `http://` is tunnelled via `CONNECT`; an `.invalid` host loads, so it was resolved by the proxy |
 | SOCKS5 proxy | the hostname is sent to the proxy (`ATYP=3`, remote DNS) |
 | Fail-closed | with the proxy unreachable, loads fail ("Could not connect to the server") instead of going direct |
@@ -36,7 +37,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Geolocation (deny, the default) | WebKit's own, in a profile window: `getCurrentPosition` and `watchPosition` get the engine's `PERMISSION_DENIED` ("User denied Geolocation"), the answer of the tab's UI delegate; the engine's `PermissionStatus` reads 'prompt' until the page asks and 'denied' after, and one the page held from before is told (it reads 'denied' and fires 'change' once); the next page starts at 'prompt' and stays so when another tab of the site asks; every other permission reads as in a plain WKWebView |
 | Proxy: IPv6, unresolvable host | an HTTP proxy on `[::1]` tunnels the load; a proxy whose host does not resolve fails closed |
 | Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the packet tunnel cannot carry it (§5) |
-| Proxy: WebTransport | a proxied profile has no `WebTransport` in the page or in its blob, URL, shared and service workers: it is off in the engine, since WebKit sends its QUIC around the proxy (the leak check measured it, §4); a profile without a proxy has it in all of them, as Safari |
+| Proxy: WebTransport | a proxied profile has no `WebTransport` in the page or in its blob, URL, shared and service workers: it is off in the engine, since WebKit sends its QUIC around the proxy (the leak check measured it, §4); a profile without a proxy has it in all of them, as Safari. With and without the proxy the profile's shared and service workers report its own User-Agent (CI runs 213–215: 12/12) |
 | Packet tunnel | a build without the network extension reports it (the tunnel sheet says what a signed build needs), and proxied profiles keep WebRTC off. The tunnel's TURN server and SOCKS5 relay are measured by the leak check instead ([TUNNEL.md](TUNNEL.md)) |
 | Proxy: dns-prefetch leak | an `<a ping>` (the load type WebKit gives dns-prefetch) reaches neither the proxy nor the network; a fetch to the same origin does |
 | Proxy: 407 without credentials | the launch is refused ("needs credentials") and the data is sealed again; nothing opens, directly or otherwise |
@@ -458,7 +459,9 @@ The profile setting:
   and `onrtctransform`), which have a setting of their own, `WebRTCEncodedTransformEnabled`,
   also off in Lockdown Mode and one of WebKit's features on macOS 26.6.2. It stays on: with it
   switched off that way, shared and service workers reported WebKit's default User-Agent instead
-  of the profile's in 4 of 8 profile runs (CI runs 211 and 212). The document-start user script
+  of the profile's in 4 of 8 profile runs (CI runs 211 and 212), against 0 of 12 with it on (runs
+  213–215); WebTransport's switch, made the same way, showed nothing of the kind (12/12). The
+  document-start user script
   removes those three from the window, as in an engine built without WebRTC; dedicated workers
   keep theirs, which do nothing without a peer connection. Where WebKit kept peer connections (it
   lacks the property), the script removes every `RTC*` interface from the window and from workers
@@ -490,8 +493,10 @@ otherwise it is closed and the page gets null, as for a blocked popup. Checked o
 a relay-only profile's peer connections made from frames sandboxed without scripts (empty,
 `srcdoc`, a same-origin URL, reached by index or by `contentWindow`) and from an ordinary frame
 reached by index are all relay-only and gather no host or srflx candidate against public STUN
-servers, where a plain WKWebView gathers a srflx one. A cross-origin frame is patched by its own
-copy and cannot be inspected from the page anyway.
+servers, where a plain WKWebView gathers a srflx one. So are popups from `window.open` and from
+`document.open(url, name, features)`, and one opened after the page broke `Object.defineProperty`
+(it came patched). A cross-origin frame is patched by its own copy and cannot be inspected from
+the page anyway.
 
 ## 6. Time zone, geolocation, user agent
 

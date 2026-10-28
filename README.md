@@ -98,7 +98,7 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 222 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 236 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
