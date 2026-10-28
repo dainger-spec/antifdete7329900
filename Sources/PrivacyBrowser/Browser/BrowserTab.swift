@@ -497,9 +497,11 @@ extension BrowserTab: WKUIDelegate {
         GeolocationPermission.announceChange(of: "geolocation", for: origin)
     }
 
-    /// The state navigator.permissions.query reports (`WKUIDelegatePrivate`): for geolocation,
-    /// 'prompt' until a page of the site asked for the position, then 'denied'; for every other
-    /// permission 'prompt', which WebKit reports for them when a delegate does not answer.
+    /// A permission's state as WebKit reads it from the embedder (`WKUIDelegatePrivate`): for
+    /// geolocation 'denied' once a page of the site asked for the position, else 'prompt'; for every
+    /// other permission 'prompt', which WebKit reports for them when a delegate does not answer.
+    /// A fresh navigator.permissions.query gets WebKit's own rule on top ('denied' only to a document
+    /// that asked); a PermissionStatus the page holds takes this answer as it is when told of a change.
     @objc(_webView:queryPermission:forOrigin:completionHandler:)
     func answerPermissionQuery(_ webView: WKWebView, name: String, origin: WKSecurityOrigin,
                                completionHandler: @escaping (WKPermissionDecision) -> Void) {
