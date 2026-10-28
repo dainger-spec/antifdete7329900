@@ -250,23 +250,32 @@ class ExecBinary(Launcher):
 
 
 class CopiedSafari(Launcher):
-    """A copy of Safari.app outside the system volume, as is or with another bundle identifier and
-    an ad-hoc signature."""
+    """A copy of Safari.app outside the system volume. Three variants, each meeting a different
+    wall: "identical" (bit for bit, Apple's signature intact), "stripped" (new bundle identifier,
+    ad-hoc signature, no entitlements: no Apple-only rights, no sandbox) and "entitled" (new
+    bundle identifier, ad-hoc signature that keeps Safari's entitlements, restricted ones included)."""
     wait = 45
 
-    def __init__(self, resign):
-        self.resign = resign
+    def __init__(self, variant):
+        self.variant = variant
 
     def prepare(self, work):
-        name = "SafariCopyResigned.app" if self.resign else "SafariCopy.app"
-        self.app = os.path.join(work, name)
+        self.app = os.path.join(work, f"SafariCopy-{self.variant}.app")
+        shutil.rmtree(self.app, ignore_errors=True)
         self.notes = {"copy": sh(["ditto", SAFARI_APP, self.app], timeout=300)}
-        if self.resign:
+        if self.variant != "identical":
             plist = os.path.join(self.app, "Contents", "Info.plist")
             self.notes["identifier"] = sh(["/usr/libexec/PlistBuddy", "-c",
-                                           "Set :CFBundleIdentifier dev.local.SafariCopyResigned", plist])
+                                           f"Set :CFBundleIdentifier dev.local.SafariCopy.{self.variant}", plist])
+            # --force without --entitlements drops the entitlements of everything it signs.
             self.notes["codesign"] = sh(["codesign", "--force", "--deep", "--sign", "-", self.app], timeout=300)
+            if self.variant == "entitled":
+                entitlements = os.path.join(work, "safari-entitlements.plist")
+                sh(f"codesign -d --entitlements - --xml {SAFARI_APP} > {shlex.quote(entitlements)}")
+                self.notes["codesign_entitled"] = sh(["codesign", "--force", "--sign", "-", "--entitlements",
+                                                      entitlements, self.app], timeout=120)
         self.notes["verify"] = sh(["codesign", "--verify", "--verbose=2", self.app], timeout=120)
+        self.notes["signature"] = sh(f"codesign -dvv {shlex.quote(self.app)} 2>&1 | grep -E 'Identifier|Signature|flags|Team'")[1]
 
     def start(self, url):
         code, output = sh(["open", "-n", "-a", self.app, url], timeout=30)
@@ -413,9 +422,11 @@ def experiment_specs(work_root, reports, proxy):
                           ("g5", ExecBinary(SAFARI_DEV_BIN, os.path.join(work_root, "sfwd", "home-g5")))],
         },
         "copy": {
-            "about": "A copy of Safari.app run from another folder, unchanged and with a new bundle identifier "
-                     "and an ad-hoc signature: does macOS run it at all (launch constraints, AMFI)?",
-            "instances": [("c6", CopiedSafari(resign=False)), ("r6", CopiedSafari(resign=True))],
+            "about": "A copy of Safari.app run from another folder: bit-identical (launch constraints?), with a new "
+                     "bundle identifier and an ad-hoc signature without entitlements (runs as an unsandboxed, "
+                     "unentitled Safari with its own data?), and with Safari's entitlements kept (AMFI?).",
+            "instances": [("c6", CopiedSafari("identical")), ("r6", CopiedSafari("stripped")),
+                          ("k6", CopiedSafari("entitled"))],
         },
         "other-user": {
             "about": "Safari as another macOS user (created with sysadminctl) started from this user's GUI "
