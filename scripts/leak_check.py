@@ -38,8 +38,9 @@ profile without a proxy as the control:
 
 Both proxies run on this machine, so the address a site sees is the same either way; what counts
 is whether the traffic passed through the proxy. Measured on macOS 26 (CI): HTTP/3 without a
-proxy, HTTP/2 through either proxy (CFNetwork does not use QUIC with a data store's proxy), and a
-STUN request around the proxy while WebRTC was allowed. Exit code 1 only if a proxied profile
+proxy, HTTP/2 through either proxy (CFNetwork does not use QUIC with a data store's proxy), a
+STUN request around the proxy while WebRTC was allowed, and WebTransport's QUIC datagrams around
+both proxies while it was on (so it is off in proxied profiles now). Exit code 1 only if a proxied profile
 leaked (or a page was shown the relay's address): a site or STUN server being down makes the
 result inconclusive (a warning), never a leak.
 """

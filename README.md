@@ -126,7 +126,9 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   permission states and storage quota, TLS/JA3/JA4 and HTTP/2 via tls.peet.ws;
 - the leak check (`scripts/leak_check.py`): profiles behind real forwarding proxies on the
   runner, and one without a proxy as the control. QUIC/HTTP/3 stays on the proxy (HTTP/2 through
-  it, HTTP/3 without it); WebRTC is off in proxied profiles without the tunnel. Through the
+  it, HTTP/3 without it); WebRTC is off in proxied profiles without the tunnel, and WebTransport,
+  which WebKit sends around a data store's proxy (`tcpdump` counts its QUIC datagrams), is off in
+  every proxied profile. Through the
   tunnel's relay (run on the runner, since CI cannot load the extension), a page gets relay
   candidates at the proxy's address only, and a data channel through the proxy. Fails on any
   request seen going around a proxy;
@@ -225,6 +227,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 
 - True engine-level iOS WebKit (private APIs or bundled core required). TLS ClientHello, real GPU renderer, full font set, touch behavior remain Mac.
 - Per-profile `Accept-Language` header (JS navigator.language is spoofed).
+- WebTransport with a proxy: WebKit opens its QUIC sockets without the data store's proxy, so a
+  proxied profile has it off in the engine, where Safari has it.
 - Sync server (only the client and its API spec), syncing of WebKit website data other than
   cookies (localStorage, IndexedDB, caches), and per-entry merging of passwords (concurrent
   edits keep the remote version plus a `.conflict` copy). Synced data reaches a running profile
