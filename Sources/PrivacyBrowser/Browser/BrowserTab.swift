@@ -82,6 +82,9 @@ final class BrowserTab: NSObject {
     var refusesDownloads = false
     /// Sites that asked for the position in the page this tab shows (`GeolocationPermission`).
     private var geolocationAsked: Set<String> = []
+    /// How often WebKit asked this tab for the position and for a permission's state (self-test).
+    private(set) var geolocationRequestsAnswered = 0
+    private(set) var permissionQueriesAnswered = 0
 
     /// Password AutoFill in this tab: suggestions, filling, the save question.
     private(set) lazy var passwords = TabPasswordAutoFill(tab: self, vault: context.passwordVault,
@@ -486,13 +489,12 @@ extension BrowserTab: WKUIDelegate {
     @objc(_webView:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:)
     func answerGeolocationRequest(_ webView: WKWebView, origin: WKSecurityOrigin, frame: WKFrameInfo,
                                   decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        geolocationRequestsAnswered += 1
         geolocationAsked.insert(GeolocationPermission.site(origin))
         if let top = GeolocationPermission.site(of: webView.url) { geolocationAsked.insert(top) }
         decisionHandler(.deny)
         // A PermissionStatus the page holds reads the state again ('denied') and fires 'change'.
-        if webView.responds(to: GeolocationPermission.permissionChanged) {
-            _ = webView.perform(GeolocationPermission.permissionChanged, with: "geolocation", with: origin)
-        }
+        GeolocationPermission.announceChange(of: "geolocation", for: origin)
     }
 
     /// The state navigator.permissions.query reports (`WKUIDelegatePrivate`): for geolocation,
@@ -501,6 +503,7 @@ extension BrowserTab: WKUIDelegate {
     @objc(_webView:queryPermission:forOrigin:completionHandler:)
     func answerPermissionQuery(_ webView: WKWebView, name: String, origin: WKSecurityOrigin,
                                completionHandler: @escaping (WKPermissionDecision) -> Void) {
+        permissionQueriesAnswered += 1
         let asked = name == "geolocation" && geolocationAsked.contains(GeolocationPermission.site(origin))
         completionHandler(asked ? .deny : .prompt)
     }
