@@ -676,7 +676,16 @@ def run_reference(tls, out_dir, tls_port):
             result["error"] = "safaridriver did not start"
             return result
         driver = WebDriver(f"http://127.0.0.1:{port}")
-        capabilities = driver.start()
+        for attempt in range(3):
+            # A first session on a fresh runner sometimes fails with a 500 while Safari starts.
+            try:
+                capabilities = driver.start()
+                break
+            except Exception as exc:  # noqa: BLE001
+                result.setdefault("start_errors", []).append(str(exc)[:200])
+                time.sleep(10)
+        else:
+            return result
         result["browserVersion"] = capabilities.get("browserVersion")
         try:
             try:
