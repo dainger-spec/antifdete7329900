@@ -53,6 +53,11 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// bookmarks (explicit user data) are still saved, encrypted.
     public var ephemeral: Bool
 
+    /// Opt-in: open this profile's windows via Safari.framework (AppController path)
+    /// instead of the in-process WKWebView. Requires the safari-framework-path build.
+    /// Default off; older configurations decode as off.
+    public var useSafariChrome: Bool
+
     /// NATIVE: `WKPreferences.isFraudulentWebsiteWarningEnabled`. Safe Browsing lookups
     /// are made by WebKit outside the per-profile proxy, so default is off.
     public var safeBrowsingEnabled: Bool
@@ -101,6 +106,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 timeZoneIdentifier: String? = nil,
                 webRTCPolicy: WebRTCPolicy = .disabled,
                 ephemeral: Bool = false,
+                useSafariChrome: Bool = false,
                 safeBrowsingEnabled: Bool = false,
                 historyEnabled: Bool = true,
                 historyRetentionDays: Int? = 90,
@@ -119,6 +125,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.timeZoneIdentifier = timeZoneIdentifier
         self.webRTCPolicy = webRTCPolicy
         self.ephemeral = ephemeral
+        self.useSafariChrome = useSafariChrome
         self.safeBrowsingEnabled = safeBrowsingEnabled
         self.historyEnabled = historyEnabled
         self.historyRetentionDays = historyRetentionDays
@@ -253,7 +260,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
+        case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral, useSafariChrome,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
              syncCookies, settingsModifiedAt
@@ -271,6 +278,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         timeZoneIdentifier = try c.decodeIfPresent(String.self, forKey: .timeZoneIdentifier)
         webRTCPolicy = try c.decodeIfPresent(WebRTCPolicy.self, forKey: .webRTCPolicy) ?? defaults.webRTCPolicy
         ephemeral = try c.decodeIfPresent(Bool.self, forKey: .ephemeral) ?? defaults.ephemeral
+        useSafariChrome = try c.decodeIfPresent(Bool.self, forKey: .useSafariChrome) ?? defaults.useSafariChrome
         safeBrowsingEnabled = try c.decodeIfPresent(Bool.self, forKey: .safeBrowsingEnabled) ?? defaults.safeBrowsingEnabled
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? defaults.historyEnabled
         historyRetentionDays = c.contains(.historyRetentionDays)
@@ -298,6 +306,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encodeIfPresent(timeZoneIdentifier, forKey: .timeZoneIdentifier)
         try c.encode(webRTCPolicy, forKey: .webRTCPolicy)
         try c.encode(ephemeral, forKey: .ephemeral)
+        try c.encode(useSafariChrome, forKey: .useSafariChrome)
         try c.encode(safeBrowsingEnabled, forKey: .safeBrowsingEnabled)
         try c.encode(historyEnabled, forKey: .historyEnabled)
         try c.encode(historyRetentionDays, forKey: .historyRetentionDays)
