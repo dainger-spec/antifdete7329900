@@ -14,7 +14,8 @@ final class BrowserWindow: NSWindow {
     var keepsHeight = false
 
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
-        guard keepsHeight, let visible = screen?.visibleFrame else { return super.constrainFrameRect(frameRect, to: screen) }
+        guard keepsHeight else { return super.constrainFrameRect(frameRect, to: screen) }
+        guard let visible = (screen ?? self.screen ?? NSScreen.main)?.visibleFrame else { return frameRect }
         var frame = frameRect
         if frame.maxY > visible.maxY { frame.origin.y = visible.maxY - frame.height }
         return frame
@@ -113,6 +114,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         window.backgroundColor = Theme.NS.toolbar
         buildInterface(in: window)
         WebContentAppearance.shared.follow(webContainer)
+        // The device's viewport again, now that the toolbar is in (AppKit also fitted the window to
+        // the screen while making it, before it kept its height).
+        if let viewport { window.setContentSize(viewport) }
         window.center()
         // @Published emits before the value changes; read the store on the next main-actor turn.
         libraryObservation = library.$bookmarks.sink { [weak self] _ in
