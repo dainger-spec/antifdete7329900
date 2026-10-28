@@ -7,6 +7,8 @@ checked against the device.
     # accept the certificate warning, follow the link the page shows (accept the warning again if
     # Safari asks), and keep the second page in view until it reads "sent".
     python3 scripts/device_reference.py --compare scripts/reference/iphone-ios26.json surface-iphone.json
+    # If the page could not send its result, it shows it with a Copy button: save it in a file, then
+    python3 scripts/device_reference.py --import result.json --name iphone-ios26
 
 Two pages on two ports, with one certificate made for this run (openssl):
 1. `--port`: the device's TLS and HTTP/2, as a server sees them. This listener speaks just enough
@@ -333,7 +335,22 @@ PAGE = """<!doctype html>
 <title>PB device reference</title></head>
 <body style="font: 17px -apple-system, sans-serif; margin: 16px">
 <p id="status">Measuring… keep this page in view.</p>
+<div id="fallback" hidden>
+<p>The result did not reach the Mac. Copy it, save it as a .json file there and run
+<code>device_reference.py --import FILE --name NAME</code>.</p>
+<p><button id="copy" type="button" style="font-size: 17px">Copy</button> <span id="copied"></span></p>
+<textarea id="json" readonly style="width: 100%; height: 50vh; font: 12px ui-monospace, monospace"></textarea>
+</div>
 <div style="height: 3000px"></div>
+<script>
+// Before the measuring script: an error there, even one that stops it from parsing, still shows.
+window.addEventListener('error', (e) => {
+  document.getElementById('status').textContent += ' | error: ' + e.message + ' (line ' + e.lineno + ')';
+});
+window.addEventListener('unhandledrejection', (e) => {
+  document.getElementById('status').textContent += ' | unhandled: ' + String(e.reason);
+});
+</script>
 <script>
 const probe = function () {
 __PROBE__
@@ -345,6 +362,36 @@ const sizes = () => ({
   visualViewport: window.visualViewport ? Math.round(visualViewport.width) + 'x' + Math.round(visualViewport.height) : 'none',
   documentClient: document.documentElement.clientWidth + 'x' + document.documentElement.clientHeight,
 });
+const statusLine = document.getElementById('status');
+// Every step: its name on the page before it runs (a screenshot shows where it stopped), a time
+// limit after which it reads "timeout" and the measurement goes on, and its duration in the result.
+const STEP_TIMEOUT = 4000;
+const steps = [];
+const errorText = (e) => 'error: ' + ((e && e.name) || 'Error') + ': ' + ((e && e.message) || String(e));
+// Lets the status line paint before a step that may block (requestAnimationFrame alone stalls in a
+// hidden page).
+const painted = () => new Promise((resolve) => {
+  setTimeout(resolve, 100);
+  requestAnimationFrame(() => setTimeout(resolve, 0));
+});
+const step = async (name, run, limit = STEP_TIMEOUT) => {
+  statusLine.textContent = 'step: ' + name + '…';
+  await painted();
+  const started = performance.now();
+  let outcome = 'ok', timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(run),
+      new Promise((resolve) => { timer = setTimeout(() => { outcome = 'timeout'; resolve('timeout'); }, limit); }),
+    ]);
+  } catch (e) {
+    outcome = errorText(e);
+    return outcome;
+  } finally {
+    clearTimeout(timer);
+    steps.push({ step: name, ms: Math.round(performance.now() - started), outcome });
+  }
+};
 // MediaCapabilities and WebCodecs answer asynchronously: supported/smooth/powerEfficient, or why not.
 const asyncCodecs = async () => {
   const video = (contentType) => ({ type: 'file', video: { contentType, width: 1920, height: 1080, bitrate: 8000000, framerate: 30 } });
@@ -354,45 +401,74 @@ const asyncCodecs = async () => {
   };
   const out = { decodingInfo: {}, videoDecoder: {} };
   for (const [name, type] of Object.entries(configs)) {
-    try {
+    out.decodingInfo[name] = await step('codecs ' + name + ' decodingInfo', async () => {
       const info = await navigator.mediaCapabilities.decodingInfo(video(type));
-      out.decodingInfo[name] = [info.supported, info.smooth, info.powerEfficient].map((b) => (b ? 'y' : 'n')).join('');
-    } catch (e) { out.decodingInfo[name] = 'error: ' + e.name; }
+      return [info.supported, info.smooth, info.powerEfficient].map((b) => (b ? 'y' : 'n')).join('');
+    });
   }
   const codecs = { h264: 'avc1.640028', hevc: 'hvc1.1.6.L120.B0', av1: 'av01.0.08M.08', vp9: 'vp09.00.40.08', vp8: 'vp8' };
   for (const [name, codec] of Object.entries(codecs)) {
-    try {
+    out.videoDecoder[name] = await step('codecs ' + name + ' VideoDecoder.isConfigSupported', async () => {
+      if (typeof VideoDecoder === 'undefined') return 'absent';
       const answer = await VideoDecoder.isConfigSupported({ codec, codedWidth: 1920, codedHeight: 1080 });
-      out.videoDecoder[name] = answer.supported ? 'y' : 'n';
-    } catch (e) { out.videoDecoder[name] = typeof VideoDecoder === 'undefined' ? 'absent' : 'error: ' + e.name; }
+      return answer.supported ? 'y' : 'n';
+    });
   }
   return out;
 };
+const showResult = (out, why) => {
+  statusLine.textContent = 'not sent: ' + why;
+  const area = document.getElementById('json');
+  area.value = JSON.stringify(out, null, 1);
+  document.getElementById('fallback').hidden = false;
+  document.getElementById('copy').onclick = async () => {
+    let done = false;
+    try { await navigator.clipboard.writeText(area.value); done = true; } catch (e) {}
+    if (!done) {
+      area.focus();
+      area.select();
+      try { done = document.execCommand('copy'); } catch (e) {}
+    }
+    document.getElementById('copied').textContent = done ? 'copied' : 'select the text and copy it';
+  };
+};
 (async () => {
-  const out = { atLoad: sizes() };
-  try { out.probe = probe(); } catch (e) { out.probe = { error: String(e) }; }
+  const out = { steps };
+  out.atLoad = await step('sizes at load', sizes);
+  // The probe is synchronous: an exception goes in the result, and the rest still runs.
+  out.probe = await step('probe', () => {
+    try { return probe(); } catch (e) { return { error: errorText(e) }; }
+  });
   const media = (query) => matchMedia(query).matches;
-  out.media = {
+  out.media = await step('media queries', () => ({
     resolution: [1, 2, 3].filter((r) => media('(resolution: ' + r + 'dppx)')),
     pointerCoarse: media('(pointer: coarse)'), pointerFine: media('(pointer: fine)'),
     hoverNone: media('(hover: none)'), portrait: media('(orientation: portrait)'),
     deviceWidth: [320, 375, 390, 393, 402, 414, 428, 430, 440, 744, 768, 810, 820, 834, 1024]
       .filter((w) => media('(device-width: ' + w + 'px)')),
-  };
+  }));
   out.codecs = await asyncCodecs();
-  out.worker = await new Promise((resolve) => {
+  out.worker = await step('worker', () => new Promise((resolve, reject) => {
     const code = "postMessage([navigator.platform, navigator.hardwareConcurrency, navigator.userAgent, navigator.languages.join(',')].join('|'))";
     const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
     worker.onmessage = (e) => resolve(String(e.data));
-    worker.onerror = () => resolve('error');
-    setTimeout(() => resolve('timeout'), 3000);
+    worker.onerror = (e) => reject(new Error(e.message || 'worker error'));
+  }));
+  await step('scroll, then wait for the bars', async () => {
+    window.scrollTo(0, 400);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   });
-  window.scrollTo(0, 400);
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-  out.afterScroll = sizes();
-  const response = await fetch('result?name=' + encodeURIComponent(__NAME__), { method: 'POST', body: JSON.stringify(out) });
-  document.getElementById('status').textContent = response.ok ? 'sent' : 'not sent: ' + response.status;
-})();
+  out.afterScroll = await step('sizes after scrolling', sizes);
+  const controller = window.AbortController ? new AbortController() : null;
+  const sent = await step('send (POST)', async () => {
+    const response = await fetch('result?name=' + encodeURIComponent(__NAME__),
+      { method: 'POST', body: JSON.stringify(out), signal: controller ? controller.signal : undefined });
+    return response.ok ? 'sent' : 'HTTP ' + response.status;
+  }, 8000);
+  if (sent === 'timeout' && controller) controller.abort();
+  if (sent === 'sent') statusLine.textContent = 'sent';
+  else showResult(out, sent);
+})().catch((e) => { statusLine.textContent = 'stopped: ' + errorText(e); });
 </script></body></html>
 """
 
@@ -424,6 +500,9 @@ def summary(name, result):
     print(f"  outer {result.get('atLoad', {}).get('outer')}, screen position {result.get('atLoad', {}).get('screenPosition')}")
     print(f"  media {json.dumps(result.get('media'))}")
     print(f"  worker {result.get('worker')}")
+    slow = [f"{s.get('step')} {s.get('outcome')} ({s.get('ms')} ms)" for s in result.get("steps", [])
+            if s.get("outcome") != "ok" or s.get("ms", 0) > 1000]
+    print(f"  steps {len(result.get('steps', []))}; not ok or slow: {'; '.join(slow) or 'none'}")
     for key in ["MediaSource", "ManagedMediaSource", "Notification", "document.fullscreenEnabled",
                 "Element.prototype.webkitRequestFullscreen", "PushManager", "ApplePaySession", "window.ontouchstart"]:
         print(f"  features.{key} = {probe.get('features', {}).get(key)}")
@@ -511,12 +590,33 @@ def compare(path_a, path_b):
     return 0
 
 
+def import_result(path, name):
+    """Saves a result the page showed (it could not send it) as the reference <name>; the TLS and
+    HTTP/2 the server noted are not in it."""
+    with open(path, encoding="utf-8") as handle:
+        result = json.load(handle)
+    if not isinstance(result, dict) or "probe" not in result:
+        print(f"DEVICE-REFERENCE import: {path} is not a result the measurement page shows (no \"probe\")")
+        return 1
+    result.setdefault("network", {})
+    result["imported"] = os.path.basename(path)
+    os.makedirs(REFERENCE_DIR, exist_ok=True)
+    out = os.path.join(REFERENCE_DIR, name + ".json")
+    with open(out, "w", encoding="utf-8") as handle:
+        json.dump(result, handle, indent=1, sort_keys=True)
+    summary(name, result)
+    print(f"DEVICE-REFERENCE written: {os.path.relpath(out, ROOT)} (imported; no TLS or HTTP/2 noted)")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--name", help="reference name, e.g. iphone-ios26, ipad-ipados26 or mac-safari")
     parser.add_argument("--port", type=int, default=8443, help="the TLS/HTTP/2 page; the measurement page is on the next port")
     parser.add_argument("--probe", default=PROBE)
     parser.add_argument("--compare", nargs=2, metavar="JSON", help="print where two references differ, and exit")
+    parser.add_argument("--import", dest="import_path", metavar="JSON",
+                        help="save a result the page showed (Copy) as the reference --name, and exit")
     parser.add_argument("--verbose", action="store_true",
                         help="print every connection: address, ALPN, TLS errors, the response given")
     parser.add_argument("--cert", nargs=2, metavar=("CERT", "KEY"),
@@ -526,6 +626,8 @@ def main():
         return compare(*args.compare)
     if not args.name or not all(c.isalnum() or c in "-_." for c in args.name):
         parser.error("--name: letters, digits, '-', '_' and '.' only")
+    if args.import_path:
+        return import_result(args.import_path, args.name)
 
     with open(args.probe, encoding="utf-8") as handle:
         page = PAGE.replace("__PROBE__", handle.read()).replace("__NAME__", json.dumps(args.name)).encode()
