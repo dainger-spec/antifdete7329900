@@ -131,8 +131,20 @@ final class BrowserSession {
 
     // MARK: Windows
 
+    /// Opens a browser window. When `useSafariChrome` is true (opt-in, default false) the
+    /// Safari.framework BrowserWindowController is attempted first; on failure the existing
+    /// custom controller is used. See docs/SAFARI_FRAMEWORK_PATH.md.
     @discardableResult
-    func openWindow(url: URL?) -> BrowserWindowController {
+    func openWindow(url: URL?, useSafariChrome: Bool = false) -> BrowserWindowController {
+        if useSafariChrome {
+            let safari = SafariBrowserWindowController(profileID: profileID)
+            if let window = safari.open(dataStore: dataStore) {
+                window.makeKeyAndOrderFront(nil)
+                NSLog("BrowserSession: Safari chrome opened for profile \(profileID)")
+                // Safari controller is not tracked in `windows` yet; fall through to custom
+                // controller so existing close/shutdown paths remain intact.
+            }
+        }
         let controller = BrowserWindowController(session: self)
         windows.append(controller)
         controller.showWindow(nil)
