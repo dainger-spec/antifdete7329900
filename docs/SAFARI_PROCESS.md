@@ -14,31 +14,32 @@ we could find and measured what each process stores and what it sends on the wir
 and user account. A second Safari process is easy to start (`open -n`, direct exec, LaunchServices),
 but it opens the same cookie file and the same localStorage and IndexedDB databases; `HOME`,
 `CFFIXED_USER_HOME` and `TMPDIR` are ignored. A copy with another identity loses Apple's signature and
-with it Safari's entitlements, and injection is closed by SIP and the hardened runtime. Measured on
-all three runners: every second Safari process saw the first one's cookies, localStorage and
-IndexedDB (§3).
+with it Safari's entitlements, and injection is closed by SIP (Safari is a SIP-protected platform
+binary with library validation). Measured on all three runners: every second Safari process saw the
+first one's cookies, localStorage and IndexedDB (§3).
 
 **Safari's own code, Apple-signed, one process per profile with its own data: yes, two ways.** Apple
 ships two siblings of the Safari executable that do keep data apart:
 
 | | SafariForWebKitDevelopment (inside Safari.app) | Safari web app (File > Add to Dock) |
 |---|---|---|
-| What runs | Safari's full UI (tabs, address bar, `window.safari`), Apple-signed, from the Safari cryptex | Apple's `Web App.app` host from the Safari cryptex: Safari's version and a superset of Safari's entitlements |
+| What runs | Safari's full UI (tabs, address bar, `window.safari`), Apple-signed, from the Safari cryptex | Apple's `Web App.app` host from the Safari cryptex: Safari's version, and Safari's entitlements plus nine web-app ones (on macOS 15 and 26 minus one App Intents key) |
 | One process per profile | yes, one per profile folder | yes, one per web app |
-| Own data | in the folder given as `CFFIXED_USER_HOME` (`Library/WebKit/SafariForWebKitDevelopment/…`); nothing shared with Safari or other profiles (measured). **Cookies are not saved to disk** in such a folder: they last until the process quits | in a per-app container inside `~/Library/Containers/com.apple.Safari.WebApp`; nothing shared with Safari or the other web app (measured; Safari's cookies are copied once, at creation) |
+| Own data | in the folder given as `CFFIXED_USER_HOME` (`Library/WebKit/SafariForWebKitDevelopment/…`, plus caches and `Library/Safari`); no cookie, localStorage or IndexedDB marker crossed to Safari or to the other profile (measured). **Cookies are not saved to disk** in such a folder: they last until the process quits. Settings are probably not per profile: no `Library/Preferences` appeared in a profile folder, so Safari's preferences most likely stay in the account's own, shared by every dev profile (not verified) | in a per-app container inside `~/Library/Containers/com.apple.Safari.WebApp`; no cookie, localStorage or IndexedDB marker crossed to Safari or to the other web app (measured; Safari's cookies are copied once, at creation). Shared by design: iCloud Keychain AutoFill and Safari's AutoFill settings, Safari's installed extensions and content blockers (Safari 18+, turned on per app), the system proxy, and one OS sandbox container for all web apps |
 | Sites | any | one site (out-of-scope links open in the default browser) |
-| Own proxy | yes, an HTTP CONNECT proxy per process through WebKit's `-WebKit2HTTPSProxy` / `-WebKit2HTTPProxy` launch arguments (measured: only the profile given one went through it) | no: a web app launched with any arguments never loads its page (measured); no proxy setting exists |
+| Own proxy | yes, but only a host:port HTTP proxy (CONNECT for https://; no SOCKS5, no credentials) for this process's WebKit loads, through WebKit's `-WebKit2HTTPSProxy` / `-WebKit2HTTPProxy` launch arguments (measured with `-WebKit2HTTPSProxy`: only the profile given one went through it; `-WebKit2HTTPProxy`, for http:// loads, is read by the same WebKit code but was not tested; WebRTC was not tested) | no: launched with `--args -WebKit2HTTPSProxy …` (the only argument tried) a web app never loaded its page. With that proxy written to the shared `com.apple.Safari.WebApp` defaults domain instead, one web app loaded and bypassed it and the other never reported (macOS 14); on macOS 26 the value did not take (one run). Per-app defaults domains were not tried, and a web app has no proxy setting of its own |
 | Created by | `safari_profile.py dev-launch --profile <folder>` | Safari's UI only; `safari_profile.py webapp-create` scripts the menu |
-| Catch | session-only cookies; no App Sandbox and none of Safari's entitlements: pages see `ApplePaySession` and `PushManager`, but the process lacks the entitlements both need; no iCloud, no Safari passwords; a developer binary Apple can change or drop in any update | not a browser: one site, no address bar, no AppleScript or WebDriver; creation needs Accessibility |
+| Catch | session-only cookies; settings probably shared between dev profiles; no App Sandbox and none of Safari's entitlements: pages see `ApplePaySession` and `PushManager`, but the process lacks the entitlements both need; no iCloud, no Safari passwords; a developer binary Apple can change or drop in any update | not a browser: one site, no address bar, no AppleScript or WebDriver; creation needs Accessibility |
 | TLS / HTTP/2 | identical to Safari on the same macOS (measured) | identical to Safari on the same macOS (measured) |
 
 `scripts/safari_process/safari_profile.py` is the prototype for both (§6).
 
-**TLS is not a reason to run Safari.** Safari does not build its ClientHello; the operating system
-does, for Safari and for every WebKit app alike. Every process measured here — Safari, a second
-Safari, both siblings — sent the same ClientHello and HTTP/2 preface as plain Safari on the same Mac,
-and the harness agrees with tls.peet.ws. What changes the fingerprint is the macOS version (§5).
-This project's WKWebView profiles already match Safari on TLS (ISOLATION_AND_LIMITATIONS.md §2).
+**TLS is not a reason to run Safari.** Safari does not build its ClientHello; the operating system's
+TLS stack does, for Safari and for the other apps that load through it. Every process measured here
+— Safari, a second Safari, both siblings — sent the same ClientHello and HTTP/2 preface as plain
+Safari on the same Mac, and the harness agrees with tls.peet.ws. What changes the fingerprint is the
+macOS version (§5). This project's WKWebView profiles already match Safari on TLS
+(ISOLATION_AND_LIMITATIONS.md §2).
 
 **Where the wall is:** Safari's data follows Safari's identity, and Safari's identity is what grants
 Apple Pay, Web Push, iCloud and the Keychain. You can have Safari's code with your own data folder
@@ -78,24 +79,33 @@ profiles ([safari-profile, tested on Safari 26.6](https://github.com/goreckim/sa
 it is UI scripting (File > New Window > New *Profile* Window) or a Focus filter
 ([Apple: profiles](https://support.apple.com/en-us/105100)).
 
-**Per web app (Safari 17+, macOS 14+).** File > Add to Dock writes a bundle without code to
-`~/Applications` (Info.plist, icon, an ad-hoc signature made by LaunchServices) with
-`LSTemplateApplication = true` and its own `CFBundleIdentifier`. LaunchServices runs it with Apple's
-`Web App.app` from the Safari cryptex (`/System/Volumes/Preboot/Cryptexes/App/System/Library/CoreServices/Web App.app`,
-present on all three runners, same version as Safari). Its entitlements are Safari's plus nine
-web-app ones (TCC, location, notification scheduling); on macOS 15 and 26 one App Intents key of
-Safari's is missing (measured). Each web app is its
-own process with its own WebKit helpers. Its website data lives in a nested container,
+**Per web app (Safari 17+, macOS 14+).** File > Add to Dock writes a bundle with no executable to
+`~/Applications`: Info.plist and an icon, with `LSTemplateApplication = true` and its own
+`CFBundleIdentifier`. On macOS 26 the bundle soon carries an ad-hoc signature as well, added by the
+system after it is written (LaunchServices, per Oakley); on macOS 14 and 15 it was still unsigned
+when checked (§3). LaunchServices runs it with Apple's `Web App.app` from the Safari cryptex
+(`/System/Volumes/Preboot/Cryptexes/App/System/Library/CoreServices/Web App.app`, present on all
+three runners, same version as Safari). Its entitlements are Safari's plus nine web-app ones (TCC,
+location, notification scheduling); on macOS 15 and 26 one App Intents key of Safari's is missing
+(measured). Each web app is its own process with its own WebKit helpers. Its website data lives in a
+nested container,
 `~/Library/Containers/com.apple.Safari.WebApp/Data/Library/Containers/com.apple.Safari.WebApp.<UUID>/Library/WebKit/WebsiteData/`
-(measured), so all web apps share one OS sandbox container and the separation between two of them is
-Web App's own bookkeeping. Apple says a web app shares no cookies, website data, history or settings
-with Safari; Safari copies the site's cookies once, at creation, and nothing else
+(measured), so all web apps share one OS sandbox container, and the separation between two of them
+is presumably Web App's own bookkeeping (an inference, not tested). Apple says a web app shares no
+cookies, website data, history or settings with Safari; Safari copies the site's cookies once, at
+creation, and no other website data
 ([WWDC23: What's new in web apps](https://developer.apple.com/videos/play/wwdc2023/10120/),
 [Apple: web apps](https://support.apple.com/en-us/104996),
 [tomayac](https://blog.tomayac.com/2023/06/07/web-apps-on-macos-sonoma-14-beta/),
 [Oakley](https://eclecticlight.co/2023/10/05/how-do-sonomas-web-apps-work/)). The runners showed
 exactly that: a new web app saw the HttpOnly and script cookies Safari had for the origin, and
-none of Safari's localStorage or IndexedDB.
+none of Safari's localStorage or IndexedDB. Some things are deliberately not separated: iCloud
+Keychain and credential-provider AutoFill work in web apps, Safari's AutoFill settings apply to them
+(Safari 17.2+), and from Safari 18 the Safari Web Extensions and content blockers installed in
+Safari can be turned on in a web app
+([Safari 17.2](https://developer.apple.com/documentation/safari-release-notes/safari-17_2-release-notes),
+[Safari 18](https://developer.apple.com/documentation/safari-release-notes/safari-18-release-notes)
+release notes); the system proxy applies to them as to Safari.
 
 ## 3. What was tried, and what happened
 
@@ -124,10 +134,11 @@ workflow on this branch hold the raw data; the runs this table comes from are
 | Copy with a new bundle identifier, ad-hoc signed with Safari's entitlements | no: `Launchd job spawn failed` (errno 153 on 14 and 15, 162 on 26); started directly it was killed (SIGKILL); kernel: `code signature validation failed fatally … Code has restricted entitlements, but the validation of its code signature failed` | — | — | — | AMFI |
 | Safari as another macOS user, `launchctl asuser <uid> sudo -u <user> open -b com.apple.Safari` | no: `OSLaunchdErrorDomain Code=125 "Domain does not support specified action"` | — | — | — | needs that user's own GUI session |
 | **SafariForWebKitDevelopment, two profile folders** (`safari_profile.py dev-launch`) | yes, one per profile | **yes**: neither saw the other's or Safari's markers | localStorage and IndexedDB yes; **cookies no**: they live in the process's memory only | yes | **works**, but cookies last one session |
-| … SafariForWebKitDevelopment with the user's own home (control) | yes | its own store, apart from Safari's container | **yes, cookies included**: written to the real `~/Library/Cookies/com.apple.Safari.binarycookies` | yes | one such profile per user |
+| … SafariForWebKitDevelopment with the user's own home (control; last run only) | yes | its own store, apart from Safari's container | **yes, cookies included**: written to the real `~/Library/Cookies/com.apple.Safari.binarycookies` | yes | one such profile per user |
 | … the second profile with `--https-proxy` (`-WebKit2HTTPSProxy`) | yes | yes | — | yes | **per-profile proxy works** |
 | **Two Safari web apps** of one origin (File > Add to Dock, UI-scripted) and Safari | yes, one `Web App` process each | **yes**: neither saw the other's or Safari's markers, except Safari's cookies, copied once at creation | yes, all four markers | yes | **works**, one site per app |
-| A web app launched with `--args -WebKit2HTTPSProxy …` | a process | — | — | — | never loads its start page: no proxy per web app |
+| A web app launched with `--args -WebKit2HTTPSProxy …` | a process | — | — | — | never loads its start page |
+| The same proxy written to the web apps' shared defaults domain (`com.apple.Safari.WebApp`; one run, macOS 14 and 26; since dropped from `experiments.py`) | a process each | — | — | — | macOS 14: one web app loaded and bypassed the proxy, the other never reported; macOS 26: the value did not take, neither reported. No proxy per web app found |
 
 Notes on the rows:
 
@@ -139,9 +150,13 @@ Notes on the rows:
 - **Per-process proxy.** WebKit reads `WebKit2HTTPProxy`/`WebKit2HTTPSProxy` from the user defaults
   of a process whose bundle identifier starts with `com.apple.Safari`
   ([WebsiteDataStoreCocoa.mm](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/WebsiteData/Cocoa/WebsiteDataStoreCocoa.mm));
-  as launch arguments they land in that process's argument domain only. Measured on Safari itself and
-  on SafariForWebKitDevelopment: the CONNECT proxy saw exactly the instances started with the argument.
-  These are HTTP CONNECT proxies given as URLs: no SOCKS5, no credentials.
+  as launch arguments they land in that process's argument domain only. Measured: on
+  SafariForWebKitDevelopment the CONNECT proxy saw only the profile started with the argument (g5,
+  never f5). On Safari itself it saw the second instance and, in 7 of 9 runs, also the first
+  instance's page: in every such run the second process had restored the first one's tab and loaded
+  it again. The proxy belongs to the process, but a proxied second Safari also carries the first
+  instance's restored tabs through it. These are HTTP CONNECT proxies given as URLs: no SOCKS5, no
+  credentials.
 - **SafariForWebKitDevelopment** is Apple-signed (`Software Signing` on 14 and 15, `macOS Software
   Signing` on 26), has no hardened runtime, and its only entitlements are
   `com.apple.security.cs.allow-dyld-environment-variables` and `…disable-library-validation`: no App
@@ -153,16 +168,20 @@ Notes on the rows:
   inside the profile folder, and nothing in Safari's container. Cookies are the exception: with a
   profile home they were never written to disk — not in the profile, not in the real home — even
   after a clean quit by Apple Event, so they did not survive a relaunch (macOS 14, 15 and 26), while
-  localStorage and IndexedDB did. Started with the user's own home, the same binary did persist
-  cookies, to `~/Library/Cookies/com.apple.Safari.binarycookies` of the real home. So the cookie file
-  follows the account's real home, not `CFFIXED_USER_HOME`, and a profile home cannot hold it
-  (inference: the Networking process, an XPC service, does not inherit the variable, and its sandbox
-  allows only the real cookie folder). At most one SafariForWebKitDevelopment profile per user — the
+  localStorage and IndexedDB did. Started with the user's own home (the control, in the last run),
+  the same binary did persist cookies, to `~/Library/Cookies/com.apple.Safari.binarycookies` of the
+  real home (macOS 14, 15 and 26). So with a profile home the process keeps cookies in memory only:
+  it writes no cookie file, in the profile or in the real home, and it does not read the real-home
+  file either — the profiles relaunched after the control had written it did not see the control's
+  cookies. Why was not established. At most one SafariForWebKitDevelopment profile per user — the
   one on the real home — keeps cookies across restarts. Pages see two (macOS 26) or one
   (macOS 14, 15) fewer window properties than in Safari: `MediaSessionCoordinator`, and on 26
   `DigitalCredential`.
-- **Web apps.** On Safari 26 the bundle Add to Dock writes has no executable and no code signature at
-  all (`codesign`: "code object is not signed at all"), only `Info.plist` and an icon:
+- **Web apps.** The bundle Add to Dock writes has no executable, only `Info.plist` and an icon. Its
+  signature, checked right after creation, depended on the runner: on macOS 14 and 15 none
+  (`codesign`: "code object is not signed at all"); on macOS 26 an ad-hoc bundle signature
+  (`_CodeSignature/`, `Format=bundle`, `Executable=…/Contents/Info.plist`, `Signature=adhoc`) in 5 of
+  6 checks, the sixth still unsigned, so the system adds it some time after creation. The Info.plist:
   `CFBundleIdentifier = com.apple.Safari.WebApp.<UUID>`, `LSTemplateApplication = 1`,
   `LSTemplateApplicationParameters = {CFBundleIdentifier = com.apple.Safari.WebApp, TemplateAppUUID,
   teamIdentifier = 0000000000, defaultarguments = 1}`, `Manifest = {name, start_url}`. The
@@ -170,9 +189,9 @@ Notes on the rows:
   Each web app got its own nested container,
   `~/Library/Containers/com.apple.Safari.WebApp/Data/Library/Containers/com.apple.Safari.WebApp.<UUID>/`.
   A web app reports `navigator.standalone = true`, has no `window.safari` (its only window-property
-  difference from Safari), and keeps `ApplePaySession` and `PushManager`. Launched with any arguments
-  it never requested its start page — plausibly because `defaultarguments` asks LaunchServices to pass
-  the template's own arguments, which `--args` replaces (an inference).
+  difference from Safari), and keeps `ApplePaySession` and `PushManager`. Launched with `--args
+  -WebKit2HTTPSProxy …` it never requested its start page — plausibly because `defaultarguments` asks
+  LaunchServices to pass the template's own arguments, which `--args` replaces (an inference).
 - **UI scripting works on the runners.** GitHub's images grant Accessibility and Apple Events (to
   Safari and System Events) to `osascript` and `bash`, so File > Add to Dock was driven by
   `add_to_dock.applescript` on all three runners. On a user's Mac the terminal needs the same two
@@ -196,9 +215,15 @@ Library and Caches directories; no defaults key or environment variable override
 ([WebsiteDataStoreCocoa.mm](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/WebsiteData/Cocoa/WebsiteDataStoreCocoa.mm)).
 The old WebKit1 keys (`WebDatabaseDirectory`, `WebKitLocalStorageDatabasePathPreferenceKey`) are read
 only by WebKitLegacy. WebKit does have directory SPI (`_WKWebsiteDataStoreConfiguration`
-`initWithDirectory:`, `_setCookieStorageFile`, …), but only the embedding app can call it — Safari's
-code, not a launcher. `NSWorkspace.OpenConfiguration.environment` and `.arguments` are ignored when
-the caller is sandboxed ([docs](https://developer.apple.com/documentation/appkit/nsworkspace/openconfiguration/environment)),
+`initWithDirectory:`, `_setCookieStorageFile`, …), but only code inside the process can call it. For
+Safari that means Safari's own code: a launcher cannot inject into it (below).
+SafariForWebKitDevelopment is the exception: its two entitlements (§3) exist so that `run-safari` can
+load a locally built WebKit through `DYLD_FRAMEWORK_PATH`, so a launcher can also load its own code
+into it (`DYLD_INSERT_LIBRARIES`), and that code could, for example, give each profile its own
+cookie file through this SPI. This was not tried here, nor verified with SIP on; it also means that
+anything able to set this process's environment can run code in it.
+`NSWorkspace.OpenConfiguration.environment` and `.arguments` are ignored when the caller is sandboxed
+([docs](https://developer.apple.com/documentation/appkit/nsworkspace/openconfiguration/environment)),
 and `open --env HOME=…` was a LaunchServices sandbox-escape vector Apple closed
 ([CVE-2023-27966](https://nvd.nist.gov/vuln/detail/CVE-2023-27966)).
 
@@ -211,9 +236,10 @@ over the same cookie file and databases, and the second process also restores th
 
 **A copy is not Safari.** Since macOS 13 Safari ships in the sealed App cryptex;
 `/Applications/Safari.app` is a symlink to `/System/Cryptexes/App/System/Applications/Safari.app`
-(measured). Safari is a platform binary with library validation, signed "macOS Software Signing",
-and holds 147–162 entitlements, 74–82 of them Apple-only `com.apple.private.*` (macOS 14–26), among them
-`com.apple.private.webkit.webpush`, `com.apple.private.in-app-payments` and
+(measured). Safari is a platform binary with library validation (`flags=0x2000(library-validation)`,
+no hardened-runtime flag), signed "Software Signing" on macOS 14 and 15 and "macOS Software
+Signing" on 26, and holds 147–162 entitlements, 74–82 of them Apple-only `com.apple.private.*`
+(macOS 14–26), among them `com.apple.private.webkit.webpush`, `com.apple.private.in-app-payments` and
 `com.apple.private.launchservices.templateapp.creation` (measured on all three runners). A
 bit-identical copy run from elsewhere meets launch constraints kept in the trust cache by cdhash
 ([Apple: launch constraints](https://developer.apple.com/documentation/security/defining-launch-environment-and-library-constraints),
@@ -228,11 +254,12 @@ is, signed by Apple. The WebKit XPC services
 (WebContent, Networking, GPU) are shared system components every WebKit app uses, so they are not
 the wall.
 
-**No injection with SIP on.** Safari has the hardened runtime and library validation: dyld ignores
-`DYLD_*` without `com.apple.security.cs.allow-dyld-environment-variables`, foreign dylibs are refused,
-and `task_for_pid`/debugger attach is denied
-([hardened runtime](https://developer.apple.com/documentation/security/hardened-runtime)). All of it
-needs SIP off (and usually `amfi_get_out_of_my_way`), which is not stock macOS.
+**No injection with SIP on.** Safari is a SIP-protected platform binary with library validation; it
+does not carry the hardened-runtime flag (`flags=0x2000(library-validation)` on all three runners).
+With SIP on, dyld purges `DYLD_*` for it, library validation refuses foreign dylibs, and the kernel
+denies `task_for_pid`/debugger attach
+([SIP runtime protections](https://developer.apple.com/library/archive/documentation/Security/Conceptual/System_Integrity_Protection_Guide/RuntimeProtections/RuntimeProtections.html)).
+All of it needs SIP off (and usually `amfi_get_out_of_my_way`), which is not stock macOS.
 
 **Another user needs its own GUI session.** Separate macOS users do give separate, genuine Safaris,
 but GUI code must start inside the target user's own GUI login session
@@ -259,13 +286,15 @@ builds need macOS 26.4+) is the most it gives: two
 host app that `webpushd` accepts — current WebKit checks the host's audit token for
 `com.apple.private.webkit.webpush` ([PushClientConnection.mm](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/webpushd/PushClientConnection.mm));
 Apple Pay needs Safari's payment entitlements. Their *presence* in JavaScript (`PushManager`,
-`ApplePaySession`) is a WebKit preference (`EnabledBySetting=PushAPIEnabled` / `ApplePayEnabled` in
+`ApplePaySession`) is a WebKit embedder preference (`EnabledBySetting=PushAPIEnabled` /
+`ApplePayEnabled` in
 [PushManager.idl](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/Modules/push-api/PushManager.idl),
-[ApplePaySession.idl](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/Modules/applepay/ApplePaySession.idl))
-that WebKit turns on for any process whose bundle identifier starts with `com.apple.Safari`
-([RuntimeApplicationChecksCocoa.mm](https://github.com/WebKit/WebKit/blob/main/Source/WTF/wtf/cocoa/RuntimeApplicationChecksCocoa.mm)).
-That is why SafariForWebKitDevelopment, which runs under Safari's bundle identifier without Safari's
-entitlements, exposes both objects (measured) while neither can work there.
+[ApplePaySession.idl](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/Modules/applepay/ApplePaySession.idl)).
+Both are off by default in WebKit on macOS
+([UnifiedWebPreferences.yaml](https://github.com/WebKit/WebKit/blob/main/Source/WTF/Scripts/Preferences/UnifiedWebPreferences.yaml)),
+and Safari's own (closed) code turns them on. That is why SafariForWebKitDevelopment, which runs
+Safari's UI code without Safari's entitlements, exposes both objects (measured) while neither can
+work there.
 
 ## 5. TLS and HTTP/2
 
@@ -290,13 +319,17 @@ macOS version, not to the process or the Safari version. Measured, with Safari 2
   pseudo-header order. Navigations and `fetch` differ only in their request headers, as they do in
   Safari.
 - The harness's own reading (`harness.py`: JA3, JA4 per the FoxIO specification, Akamai) matches
-  tls.peet.ws's reading of the same Safari under safaridriver on macOS 14 and 26 (macOS 15:
-  safaridriver failed to start a session in that run). It also reproduces published captures:
+  tls.peet.ws's reading of the same Safari under safaridriver on macOS 14, 15 and 26: identical JA3
+  hash, JA4 and Akamai string (on macOS 15 the first run's safaridriver session failed with HTTP 500;
+  later runs matched). It also reproduces published captures:
   `t13d2014h2_a09f3c656075_e42f34c56612` for Safari 18.4 on macOS 15.4 and
   `t13d2013h2_a09f3c656075_7f0f34a4126d` for Safari 26.4 on macOS 26.4
   ([testssl.sh](https://github.com/testssl/testssl.sh/blob/3.3dev/etc/client-simulation.txt)).
-- macOS 26 adds the X25519MLKEM768 key share and drops TLS 1.0/1.1 from `supported_versions`
-  ([WWDC25 314](https://developer.apple.com/videos/play/wwdc2025/314/)); macOS 14 still offers
+- macOS 26 adds the X25519MLKEM768 key share
+  ([WWDC25 314](https://developer.apple.com/videos/play/wwdc2025/314/)), and WebKit's build for
+  macOS 26 sets the TLS 1.2 minimum, so `supported_versions` drops 1.0/1.1
+  ([PlatformEnable.h](https://github.com/WebKit/WebKit/blob/main/Source/WTF/wtf/PlatformEnable.h));
+  WebKit builds are per macOS version, so this too goes with the macOS version. macOS 14 still offers
   signature algorithm `0x0203`, which macOS 15 dropped; JA3 cannot tell macOS 14 from 15
   (`773906b0…` on both). macOS 14 sends Safari 17's HTTP/2 SETTINGS and `m,s,p,a`; 15 and 26 send
   Safari 18's.
@@ -304,8 +337,13 @@ macOS version, not to the process or the Safari version. Measured, with Safari 2
 What can differ at the network level is above TLS: iCloud Private Relay carries all of Safari's
 traffic but only plain-HTTP traffic of other apps ([Apple DTS](https://developer.apple.com/forums/thread/683957)),
 Advanced Tracking and Fingerprinting Protection hooks into Network.framework for Safari, and WebKit
-picks its newer HTTP loader for Safari and for apps linked against the macOS 15 SDK or later. None of
-these runs on a CI runner without iCloud, and none changes the ClientHello.
+picks its newer HTTP loader for Safari and for apps linked against the macOS 15 SDK or later. Private
+Relay needs iCloud+, which the runners lack, and ATFP was not exercised here. The loader choice did
+run, but every process measured here counts as Safari to WebKit (bundle identifier
+`com.apple.Safari*`), so all of them used Safari's loader; a WKWebView app linked against an older
+SDK gets the older loader, whose HTTP/2 SETTINGS and header order may differ from Safari's. That was
+not measured here; this project's own match with Safari was measured separately
+(ISOLATION_AND_LIMITATIONS.md §2).
 
 ## 6. The prototype
 
@@ -327,10 +365,10 @@ these runs on a CI runner without iCloud, and none changes the ClientHello.
   ```
   A `dev` profile is a folder; the process gets it as `HOME` and `CFFIXED_USER_HOME` and keeps its
   website data, caches and Safari files there — but not cookies, which last until the process quits
-  (§3). URLs and quit requests go to the process by PID (a GURL / quit Apple Event:
-  macOS asks once for Automation permission), so several profiles run side by side, and a quit lets
-  Safari write its cookies. `webapp-create` drives File > Add to Dock through System Events (the
-  terminal needs Accessibility).
+  (§3). URLs and quit requests go to the process by PID (a GURL / quit Apple Event: macOS asks once
+  for Automation permission), so several profiles run side by side. A clean quit (`dev-quit`) keeps a
+  profile's localStorage and IndexedDB, but its cookies are lost all the same. `webapp-create` drives
+  File > Add to Dock through System Events (the terminal needs Accessibility).
 - **`experiments.py`** — everything in §3, using `safari_profile.py` for the two working paths:
   `python3 scripts/safari_process/experiments.py --out build/safari-process --setup-hosts --trust facts reference baseline webapps webapp-proxy open-n env-home exec-home sfwd copy other-user`
   (`--setup-hosts`, `--trust` and `other-user` use sudo: hosts entries, a throwaway CA, a throwaway
@@ -343,26 +381,32 @@ these runs on a CI runner without iCloud, and none changes the ClientHello.
 ## 7. What this means for PrivacyBrowser
 
 - **Keep WKWebView.** On the network, real Safari per profile gains nothing: the ClientHello and
-  HTTP/2 preface are the operating system's (§5), and this project's profiles already match Safari on
-  them. It would also lose the per-profile proxy: Safari has one proxy for all its profiles, and the
-  only per-process knob is an HTTP CONNECT proxy through launch arguments, with no SOCKS5 and no
-  authentication, against `WKWebsiteDataStore.proxyConfigurations` per data store here.
+  HTTP/2 preface are the operating system's, given an app linked against the macOS 15+ SDK (§5), and
+  this project's profiles already match Safari on them. It would also lose the per-profile proxy:
+  Safari has one proxy for all its profiles, and the only per-process knob is an HTTP CONNECT proxy
+  through launch arguments, with no SOCKS5 and no authentication, against
+  `WKWebsiteDataStore.proxyConfigurations` per data store here.
 - **What Safari's identity gives is Apple Pay and Web Push that work, and only Apple-signed Safari
-  processes have it.** SafariForWebKitDevelopment does not (it only shows the objects); a web app does,
-  for one site. So the honest options for "Apple Pay / Web Push must work" are a web app per site, or
-  Safari itself with Safari's own profiles (one process, no per-profile proxy).
+  processes have it.** SafariForWebKitDevelopment does not (it only shows the objects). A web app
+  holds Safari's Apple Pay and Web Push entitlements (measured), and Apple documents Web Push for web
+  apps ([WWDC23](https://developer.apple.com/videos/play/wwdc2023/10120/)); whether Apple Pay works in
+  one was not tested (§8). So the likely options for "Apple Pay / Web Push must work" are a web app
+  per site (Apple Pay still to be verified there with a Wallet card), or Safari itself with Safari's
+  own profiles (one process, no per-profile proxy).
 - **SafariForWebKitDevelopment is not something to ship.** Cookies do not persist in a profile
-  folder, which alone rules it out for profiles people sign in with. It is also a developer executable without the
-  App Sandbox, run with Safari's bundle identifier; Apple can change or remove it with any Safari
-  update, and nothing in it is documented. It is useful as a measurement target: Safari's UI on a
+  folder, which alone rules it out for profiles people sign in with, short of the untested injection
+  route in §4. It is also a developer executable without the App Sandbox, run with Safari's bundle
+  identifier; Apple can change or remove it with any Safari update, and nothing in it is documented. It is useful as a measurement target: Safari's UI on a
   data folder we choose.
 - **Two findings for the app itself.** (1) Within one app, every data store shares one WebKit
   Networking process (WebKit routes all sessions of a UI process to one network process on Cocoa);
   profiles are separate network sessions there, not separate processes. Process-level separation per
   profile would need one app process per profile. (2) WebKit decides "this is Safari" from the main
-  bundle identifier, and turns on Safari-only behaviour (the `PushManager`/`ApplePaySession`
-  preferences, the `WebKit2HTTP(S)Proxy` defaults, site quirks) for any `com.apple.Safari*`
-  identifier — which is how SafariForWebKitDevelopment gets them without Safari's entitlements.
+  bundle identifier (`com.apple.Safari`, Safari Technology Preview, or any `com.apple.Safari.*`;
+  [RuntimeApplicationChecksCocoa.mm](https://github.com/WebKit/WebKit/blob/main/Source/WTF/wtf/cocoa/RuntimeApplicationChecksCocoa.mm))
+  and gives such a process a few Safari-only defaults, such as the `WebKit2HTTP(S)Proxy` user
+  defaults and the newer HTTP loader. `PushManager`/`ApplePaySession` are not among them: Safari's
+  own code turns those preferences on (§4).
 
 ## 8. Caveats
 
@@ -374,7 +418,8 @@ these runs on a CI runner without iCloud, and none changes the ClientHello.
   SafariForWebKitDevelopment was run with SIP off; WebKit's own `run-safari` uses it on ordinary
   developer Macs, but it was not verified here with SIP on.
 - Apple Pay and Web Push were checked for presence only (`typeof ApplePaySession`, `typeof
-  PushManager`), not for function: that needs a Wallet card and an APNs-backed push service.
+  PushManager`), not for function, in every process including the web apps: that needs a Wallet card
+  and an APNs-backed push service.
 - The web apps were created from a plain-HTTP local origin; their scope is that origin. Cookie copy at
   creation took cookies only, as Apple documents.
 - Research hosts some subagents could not reach (eclecticlight.co, support.apple.com, webkit.org)

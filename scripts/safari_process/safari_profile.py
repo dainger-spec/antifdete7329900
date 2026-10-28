@@ -10,10 +10,10 @@ Apple ships two siblings that can, and this script drives both:
           run-safari uses it). It runs Safari's full UI (windows, tabs, address bar) without the App
           Sandbox, so CFFIXED_USER_HOME decides where its data goes: website data in
           <profile>/Library/WebKit/SafariForWebKitDevelopment/, Safari's own files under
-          <profile>/Library/Safari. Cookies are the exception: their file follows the account's real
-          home, so in a profile folder they last only until the process quits (on the runners:
-          macOS 14, 15, 26). It has none of Safari's entitlements: no Apple Pay or Web Push that
-          works, no iCloud, no Safari passwords from the Keychain. WebKit's per-process proxy
+          <profile>/Library/Safari. Cookies are the exception: in a profile folder they are kept in
+          memory only and last until the process quits (on the runners: macOS 14, 15, 26). It has
+          none of Safari's entitlements: no Apple Pay or Web Push that works, no iCloud, no Safari
+          passwords from the Keychain. WebKit's per-process proxy
           defaults (-WebKit2HTTPProxy / -WebKit2HTTPSProxy, HTTP CONNECT proxies only) apply to it.
 
   webapp  A Safari web app (File > Add to Dock): Apple's "Web App" host from the Safari cryptex, with
@@ -30,7 +30,8 @@ Apple ships two siblings that can, and this script drives both:
 
 URLs reach a running `dev` profile through a GURL Apple Event addressed to its PID (all of them
 share Safari's bundle identifier, so they cannot be told apart by name); the first use asks for
-Automation permission. Quitting goes the same way, so cookies are written before the process ends.
+Automation permission. Quitting goes the same way; a clean quit keeps website data, but in a profile
+folder cookies are lost even then.
 """
 import argparse
 import json
@@ -139,8 +140,8 @@ def dev_open(profile, url):
 
 
 def dev_quit(profile, timeout=15):
-    """Asks the profile's process to quit (it saves its cookies on the way out); terminates it after
-    `timeout` seconds. Returns None if it was not running, else how it ended."""
+    """Asks the profile's process to quit cleanly (in a profile folder its cookies are lost even so);
+    terminates it after `timeout` seconds. Returns None if it was not running, else how it ended."""
     profile = os.path.abspath(os.path.expanduser(profile))
     pid = dev_pid(profile)
     if not pid:
@@ -165,7 +166,7 @@ def webapp_bundle(name):
 
 def webapp_create(name, url, wait=30):
     """Opens `url` in Safari and adds it to the Dock as a web app called `name` (File > Add to Dock).
-    Safari copies the site's cookies into the new app; nothing else is shared afterwards.
+    Safari copies the site's cookies into the new app; no other website data is shared afterwards.
     Returns the bundle's path."""
     subprocess.run(["open", "-b", "com.apple.Safari", url], check=True, timeout=30)
     time.sleep(5)
