@@ -817,10 +817,12 @@ final class SelfTest {
     /// watchPosition's answers (code, message, the interface, own properties), the state after and
     /// how often a PermissionStatus held from before fired 'change'.
     private static let geolocationScript = """
+        const visible = document.visibilityState;
         const status = await navigator.permissions.query({ name: 'geolocation' });
         let changes = 0;
         status.onchange = () => { changes++; };
         const before = [status.state, status instanceof PermissionStatus, Object.getOwnPropertyNames(status).length].join();
+        if (visible !== 'visible') return JSON.stringify({ visible, before });
         const ask = (method) => new Promise((resolve) => {
           const timer = setTimeout(() => resolve('timeout'), 5000);
           navigator.geolocation[method](() => { clearTimeout(timer); resolve('position'); }, (e) => {
@@ -832,7 +834,7 @@ final class SelfTest {
         const watched = await ask('watchPosition');
         await new Promise((resolve) => setTimeout(resolve, 500));
         const after = (await navigator.permissions.query({ name: 'geolocation' })).state;
-        return JSON.stringify({ before, current, watched, after, held: status.state, changes });
+        return JSON.stringify({ visible, before, current, watched, after, held: status.state, changes });
         """
 
     /// Methods of WebKit's classes and of WKUIDelegatePrivate whose names mention permissions or
@@ -882,10 +884,12 @@ final class SelfTest {
         """
 
     /// A profile that denies geolocation (the default) gets WebKit's own answer, not the shim's: the
-    /// tab's UI delegate denies the request and reports the state (`GeolocationPermission`). Checked in
-    /// a profile window on the self-test proxy's page (127.0.0.1, a secure context; WebKit asks only
-    /// for a page in view): WebKit's PERMISSION_DENIED, 'prompt' until the page asked and 'denied'
-    /// after, 'prompt' again on the next page, and every other permission as a plain WKWebView reports it.
+    /// tab's UI delegate denies the request and answers for the state (`GeolocationPermission`).
+    /// Checked in a profile window on the self-test proxy's page (127.0.0.1, a secure context; WebKit
+    /// asks only for a page in view): WebKit's PERMISSION_DENIED from the tab, the engine's 'prompt'
+    /// then 'denied', a PermissionStatus held from before told of it (the tab's part: WebKit applies
+    /// its per-document rule to fresh queries itself), 'prompt' again on the next page, which stays
+    /// so when another tab of the site asks, and every other permission as a plain WKWebView reports it.
     private func geolocationInEngine(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             info("geolocation checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
@@ -919,20 +923,54 @@ final class SelfTest {
         let text = try await js(tab.webView, Self.geolocationScript) as? String ?? "{}"
         let result = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
         info("geolocation in the engine: \(text)")
+        guard result["visible"] as? String == "visible" else {
+            info("geolocation request checks skipped: the profile window is out of sight (a locked screen, a sleeping "
+                 + "display or an app in full screen), and WebKit asks only for a page in view")
+            return
+        }
         let denied = "1,User denied Geolocation,true,0"
-        check("geolocation: getCurrentPosition and watchPosition get WebKit's own PERMISSION_DENIED",
-              result["current"] as? String == denied && result["watched"] as? String == denied, text)
-        check("geolocation: 'prompt' until the page asks, 'denied' after, on the engine's own PermissionStatus",
+        check("geolocation: getCurrentPosition and watchPosition get WebKit's own PERMISSION_DENIED, the tab's answer",
+              result["current"] as? String == denied && result["watched"] as? String == denied && tab.geolocationRequestsAnswered >= 1,
+              "\(text); the tab was asked \(tab.geolocationRequestsAnswered) time(s)")
+        check("geolocation: the engine's own PermissionStatus reads 'prompt' until the page asks, 'denied' after",
               result["before"] as? String == "prompt,true,0" && result["after"] as? String == "denied", text)
-        info("geolocation: a PermissionStatus held from before reads \(result["held"] ?? "nil"), 'change' fired \(result["changes"] ?? "nil") time(s); "
-             + "WebKit asked the tab \(tab.geolocationRequestsAnswered) time(s) for the position, \(tab.permissionQueriesAnswered) for a state")
+        check("geolocation: a PermissionStatus held from before is told: it reads 'denied', 'change' fired once",
+              result["held"] as? String == "denied" && result["changes"] as? Int == 1, text)
+        info("geolocation: WebKit asked the tab \(tab.geolocationRequestsAnswered) time(s) for the position, "
+             + "\(tab.permissionQueriesAnswered) for a state")
         // Through the tab's own navigation (its delegate sees the new page), not PageLoader's.
         let nextPage = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page?next=1")!
         tab.webView.load(URLRequest(url: nextPage))
         let loaded = await waitUntil(timeout: 20) { !tab.isLoading && tab.webView.url == nextPage }
         var next: String? = "not loaded"
-        if loaded { next = try await js(tab.webView, "return (await navigator.permissions.query({ name: 'geolocation' })).state;") as? String }
+        if loaded {
+            next = try await js(tab.webView, """
+                window.pbHeld = await navigator.permissions.query({ name: 'geolocation' });
+                window.pbChanges = 0;
+                pbHeld.onchange = () => { pbChanges++; };
+                return pbHeld.state;
+                """) as? String
+        }
         check("geolocation: the next page starts at 'prompt' again", next == "prompt", next ?? "nil")
+        // The tab's record of the request went with the page it was made from: another tab of the
+        // site asking (every page of the site is told) leaves the status this page holds at 'prompt'.
+        let otherPage = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page?other=1")!
+        guard loaded, let other = controller.addTab(url: otherPage),
+              await waitUntil(timeout: 20, { !other.isLoading && other.webView.url == otherPage }) else {
+            check("geolocation: a second tab of the site opens", false)
+            return
+        }
+        let otherAnswer = try await js(other.webView, """
+            return await new Promise((resolve) => {
+              setTimeout(() => resolve('timeout'), 5000);
+              navigator.geolocation.getCurrentPosition(() => resolve('position'), (e) => resolve('error ' + e.code));
+            });
+            """) as? String ?? "nil"
+        try await Task.sleep(nanoseconds: 500_000_000)
+        let held = try await js(tab.webView, "return [pbHeld.state, pbChanges].join();") as? String ?? "nil"
+        check("geolocation: when another tab of the site asks, the status the first tab's next page holds stays 'prompt'",
+              other.geolocationRequestsAnswered >= 1 && held == "prompt,0",
+              "other tab: \(otherAnswer), asked \(other.geolocationRequestsAnswered) time(s); held here: \(held)")
     }
 
     // MARK: WebRTC escape routes

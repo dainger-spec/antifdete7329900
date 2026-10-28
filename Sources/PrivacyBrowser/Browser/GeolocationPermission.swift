@@ -5,18 +5,23 @@ import WebKit
 /// meets the engine's own `getCurrentPosition`, `GeolocationPositionError` and `PermissionStatus`,
 /// and the shim leaves `navigator.geolocation` and `navigator.permissions` alone (`PrivacyScripts`).
 ///
-/// WebKit asks the UI delegate whether a frame may have the position and what state
-/// `navigator.permissions.query` reports for a site (`WKUIDelegatePrivate`, the methods Safari
-/// implements; `BrowserTab` answers them). The answers are a user's who said no: the request is
-/// denied, and the site's state is 'prompt' until a page of it asked, 'denied' after (until the tab
-/// shows another page), and a PermissionStatus the page holds is told of the change
-/// (`+[WKWebView _permissionChanged:forOrigin:]`). WebKit asks only for a page in view: a request
-/// from a page out of sight waits until it is shown, as in Safari. Every other permission is answered 'prompt',
-/// what WebKit reports for them with a delegate that does not answer (the self-test compares them).
+/// WebKit asks the UI delegate whether a frame may have the position and what state a site's
+/// permission has (`WKUIDelegatePrivate`, the methods Safari implements; `BrowserTab` answers them).
+/// The answers are a user's who said no: the request is denied, and the site's state is 'denied'
+/// once a page of it asked (until the tab shows another page), 'prompt' before. WebKit adds its own
+/// rule for a fresh `navigator.permissions.query` (macOS 26: 'denied' only to a document that asked,
+/// with or without these answers); a PermissionStatus the page already holds reads the delegate's
+/// answer as it is when told of a change (`+[WKWebView _permissionChanged:forOrigin:]`), so it turns
+/// 'denied' and fires 'change' instead of staying 'prompt'. WebKit asks only for a page in view: a
+/// request from a page out of sight waits until it is shown, as in Safari. Every other permission is
+/// answered 'prompt', what WebKit reports for them with a delegate that does not answer (the
+/// self-test compares them).
 ///
 /// PLATFORM LIMITATION: private API, and nothing to detect: WebKit calls the delegate methods it
-/// knows. One it does not call costs only the state after a request ('prompt' instead of
-/// 'denied'): on the Mac WebKit denies a request its delegate leaves unanswered by itself.
+/// knows, and on the Mac denies a request no delegate answers. The answer is per tab and site, not
+/// per document: a status a frame of the site's page holds turns 'denied' when the page asks, where a
+/// fresh query in that frame says 'prompt'. WebKit before macOS 26 reports a geolocation 'denied'
+/// as 'prompt'.
 enum GeolocationPermission {
     /// `+[WKWebView _permissionChanged:forOrigin:]` (a class method; macOS 26.6.2 has it): the
     /// PermissionStatus objects of the origin's pages read the state again and fire 'change' when
