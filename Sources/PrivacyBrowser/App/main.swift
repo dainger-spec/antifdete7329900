@@ -28,6 +28,11 @@ MainActor.assumeIsolated {
         Localization.applyProcessLanguage()
         WebContentLanguage.decide(nil)
         SiteCapture.start(arguments: arguments)
+    } else if arguments.contains("--page-speed") {
+        // Page-load timing in profile windows, next to Safari (PageSpeed.swift, scripts/page_speed.py).
+        Localization.applyProcessLanguage()
+        WebContentLanguage.decide(nil)
+        PageSpeed.start(arguments: arguments)
     } else {
         // Russian by default (English fallback); must be set before AppKit builds its menus.
         Localization.applyProcessLanguage()

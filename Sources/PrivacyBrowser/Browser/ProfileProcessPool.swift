@@ -76,6 +76,8 @@ enum ProfileProcessPool {
             configuration.setValue(timeZone, forKey: "timeZoneOverride")
             applied = configuration.value(forKey: "timeZoneOverride") as? String
         }
+        // `--page-speed` only: one of the pool's settings changed to measure it (empty otherwise).
+        MeasurementFactors.apply(MeasurementFactors.poolSettings, to: configuration)
         guard let pool = makePool(poolClass, configuration) else { return nil }
         return Pool(processPool: pool, timeZone: applied)
     }

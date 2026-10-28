@@ -88,12 +88,15 @@ final class BrowserSession {
         self.processPool = pool?.processPool
         self.timeZoneByEngine = pool?.timeZone != nil
         // Before the pool launches a process: WebKit hands the list over when it starts one.
-        self.deviceFontsByEngine = platform != .macOS && pool.map { DeviceFontRestriction.restrict($0.processPool) } == true
+        self.deviceFontsByEngine = platform != .macOS && !MeasurementFactors.has("fontAllowlist")
+            && pool.map { DeviceFontRestriction.restrict($0.processPool) } == true
         self.storageQuotaByEngine = !configuration.ephemeral && SafariStorageQuota.isApplied(to: store, platform: platform)
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
         self.userContentController = BehaviorSets.makeUserContentController(for: configuration, timeZoneByEngine: timeZoneByEngine,
                                                                             storageQuotaByEngine: storageQuotaByEngine)
-        if configuration.proxy != nil {
+        // `--page-speed` only (`MeasurementFactors`): the shims left out, or the ping-load list added.
+        if MeasurementFactors.has("shims") { userContentController.removeAllUserScripts() }
+        if configuration.proxy != nil || MeasurementFactors.has("contentRules") {
             // Loads WebKit would otherwise make outside the proxy (see ContentRules).
             if let blocker = ContentRules.dnsPrefetchBlocker {
                 userContentController.add(blocker)
@@ -103,8 +106,10 @@ final class BrowserSession {
             }
         }
         passwordHandler.session = self
-        PasswordAutoFill.install(in: userContentController, handler: passwordHandler,
-                                 testHooks: CommandLine.arguments.contains("--self-test"))
+        if !MeasurementFactors.has("autofill") {
+            PasswordAutoFill.install(in: userContentController, handler: passwordHandler,
+                                     testHooks: CommandLine.arguments.contains("--self-test"))
+        }
     }
 
     var windowCount: Int { windows.count }
@@ -153,7 +158,9 @@ final class BrowserSession {
         // shows those by default, and a font list is among the strongest fingerprints). There is no
         // public switch; this is the WKPreferences property Safari turns off, set only when this
         // WebKit has it.
-        WebKitPreferences.setBool(webConfiguration.preferences, "_setShouldAllowUserInstalledFonts:", false)
+        if !MeasurementFactors.has("userFonts") {
+            WebKitPreferences.setBool(webConfiguration.preferences, "_setShouldAllowUserInstalledFonts:", false)
+        }
         // WebRTC off (the default, and with a proxy the tunnel cannot carry: `webRTCRouting`) is switched off
         // in the engine, as Lockdown Mode does: no RTC interface in any frame, nothing for a page to
         // reach before the shim runs. The shim's removal stays as the fallback for a WebKit without

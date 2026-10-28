@@ -52,6 +52,8 @@ enum SafariStorageQuota {
         configuration.setValue(NSNumber(value: originRatio), forKey: "originQuotaRatio")
         configuration.setValue(NSNumber(value: totalRatio), forKey: "totalQuotaRatio")
         configuration.setValue(NSNumber(value: standardVolumeCapacity(for: platform)), forKey: "standardVolumeCapacity")
+        // `--page-speed` only: one of the store's settings changed to measure it (empty otherwise).
+        MeasurementFactors.apply(MeasurementFactors.storeSettings, to: configuration)
         return WebKitObjects.make(WKWebsiteDataStore.self, "_initWithConfiguration:", configuration) as? WKWebsiteDataStore
     }
 

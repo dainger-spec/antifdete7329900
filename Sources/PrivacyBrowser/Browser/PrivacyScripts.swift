@@ -51,6 +51,10 @@ enum PrivacyScripts {
         var safariObject: Bool
         /// The per-origin storage quota Safari reports (`safariStorageQuota`), before rounding.
         var storageQuota: Double?
+        /// `--page-speed` only (`MeasurementFactors`): parts of the shim left out, and whether it notes
+        /// what it installed. Nil, so not in the script, otherwise.
+        var measurementOff: [String]? = nil
+        var measurementTrace: Bool? = nil
 
         struct Relay: Encodable {
             var urls: [String]
@@ -124,11 +128,15 @@ enum PrivacyScripts {
                            screenWidth: 820, screenHeight: 1180, devicePixelRatio: scale, orientation: "portrait-primary",
                            missingInterfaces: [])
         }
-        return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, engineTimeZone: timeZoneByEngine, geolocation: geolocation,
-                                 webRTC: webRTC, webRTCRelay: relay, device: device,
-                                 safariObject: configuration.deviceGeneration.platform == .macOS,
-                                 // The data store reports Safari's quota itself: nothing to replace.
-                                 storageQuota: storageQuotaByEngine ? nil : safariStorageQuota(for: configuration.deviceGeneration.platform))
+        var shim = ShimConfiguration(timeZone: configuration.timeZoneIdentifier, engineTimeZone: timeZoneByEngine, geolocation: geolocation,
+                                     webRTC: webRTC, webRTCRelay: relay, device: device,
+                                     safariObject: configuration.deviceGeneration.platform == .macOS,
+                                     // The data store reports Safari's quota itself: nothing to replace.
+                                     storageQuota: storageQuotaByEngine ? nil : safariStorageQuota(for: configuration.deviceGeneration.platform))
+        let partsOff = MeasurementFactors.shimPartsOff
+        if !partsOff.isEmpty { shim.measurementOff = partsOff }
+        if MeasurementFactors.traceShim { shim.measurementTrace = true }
+        return shim
     }
 
     /// navigator.storage.estimate().quota in Safari, before WebKit rounds it up: a browser's origin
@@ -225,13 +233,16 @@ function acquireRegistry() {
 function patchWindow(w) {
   if (!w || patched.has(w)) return;
   patched.add(w);
-  try { patchToString(w); } catch (e) {}
+  // `--page-speed` only: parts left out to measure their cost (empty otherwise).
+  const off = CONFIG.measurementOff || [];
+  const on = (part) => off.indexOf(part) < 0;
+  if (on('toString')) { try { patchToString(w); } catch (e) {} }
   if (CONFIG.device) { try { patchDevice(w, CONFIG.device); } catch (e) {} }
   // With the profile's process pool in its zone, Date and Intl are the engine's own; a realm whose
   // engine does not report the zone (a process the override did not reach) gets the shim. Workers
   // made from a blob start with this script when they need anything of it: the zone (the engine's
   // is process-wide, so a realm in it has workers in it), the device's values or the quota.
-  const zoneShim = !!CONFIG.timeZone && !(CONFIG.engineTimeZone && engineReportsZone(w, CONFIG.timeZone));
+  const zoneShim = on('tzShim') && !!CONFIG.timeZone && !(CONFIG.engineTimeZone && engineReportsZone(w, CONFIG.timeZone));
   if (zoneShim) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
   // WebRTC 'disabled' where the engine kept peer connections (RTCPeerConnection in a window,
   // RTCDataChannel, which only they make, in a worker): their interfaces go here and in workers made
@@ -239,7 +250,15 @@ function patchWindow(w) {
   // engine keeps beside peer connections it switched off (a setting of their own) go in this realm
   // only, by patchWebRTC: without a peer connection they do nothing, so no reason to rewrite workers.
   const rtcByShim = (CONFIG.webRTC || 'disabled') === 'disabled' && ('RTCPeerConnection' in w || 'RTCDataChannel' in w);
-  if (zoneShim || CONFIG.device || CONFIG.storageQuota || rtcByShim) { try { hookWorkers(w); } catch (e) {} }
+  const workers = on('workerHooks') && !!(zoneShim || CONFIG.device || CONFIG.storageQuota || rtcByShim);
+  if (workers) { try { hookWorkers(w); } catch (e) {} }
+  if (CONFIG.measurementTrace && !IS_WORKER) {
+    try {
+      Object.defineProperty(w, Symbol.for('pb.measurement'), { configurable: true, value: {
+        toString: on('toString'), zoneShim, workers, frames: on('frameHooks'),
+        engineReportsZone: CONFIG.timeZone ? engineReportsZone(w, CONFIG.timeZone) : null } });
+    } catch (e) {}
+  }
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
   if (IS_WORKER) { // no window, geolocation, peer connection or frames in a worker
     if (rtcByShim) { try { patchWebRTC(w, 'disabled'); } catch (e) {} }
@@ -250,7 +269,7 @@ function patchWindow(w) {
   const geo = CONFIG.geolocation || { mode: 'deny' };
   if (geo.mode !== 'engine') { try { patchGeolocation(w, geo); } catch (e) {} }
   try { patchWebRTC(w, CONFIG.webRTC || 'disabled', CONFIG.webRTCRelay); } catch (e) {}
-  try { hookChildWindows(w); } catch (e) {}
+  if (on('frameHooks')) { try { hookChildWindows(w); } catch (e) {} }
 }
 
 // ---- Functions that look native -------------------------------------------------------------
