@@ -118,8 +118,12 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   the engine where WebKit has the override (two profiles in different zones at once, in the page,
   frames and every kind of worker), Safari's storage quota in a saved profile's store (the page,
   every kind of worker), blob workers under a strict CSP and under Trusted Types (no violation
-  report beyond the page's own), the device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
-  the forced seal, and the window-lifecycle regression;
+  report beyond the page's own), the device-generation UA path, iPhone and iPad profiles (the
+  engine's pixel ratio, Safari's feature set there, the window as the device's viewport, compared
+  key by key with a plain web view set up as that device's Safari), error stacks of what the shim
+  replaces against a plain web view's, a WebSocket, an HLS stream and an MP4 file through HTTP
+  CONNECT and SOCKS5 proxies, beacons from `pagehide`, crash-recovery sealing, dialogs, Lock
+  during launch, ⌘Q and the forced seal, and the window-lifecycle regression;
 - the surface comparison with the runner's real Safari (`scripts/safari_reference.py`): every
   key that measures the engine or the Mac is identical; what differs is the set of features
   Safari alone enables (listed in `docs/ISOLATION_AND_LIMITATIONS.md` §2);

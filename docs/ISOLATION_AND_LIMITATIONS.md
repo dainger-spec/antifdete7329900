@@ -32,13 +32,17 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Crash-recovery sealing | leftover website data from a crashed run is archived and deleted WITHOUT `WKWebsiteDataStore.remove(forIdentifier:)` (which aborted on an unknown id), then restores cleanly |
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
-| Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks; an iPhone profile reports its device class's navigator and screen values; user-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
+| Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks. An iPhone or iPad profile measures the same as a plain web view set up as that device's Safari (its pixel ratio, its feature set), `MediaSource` on an iPhone apart (removed by the shim, §2). It reports its device class's navigator and screen values, its pixel ratio is the engine's own (`devicePixelRatio` 3 or 2, the resolution media queries agreeing), and Fullscreen, MediaSource, Notification and `screen.orientation` are as Safari on that device has them. User-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
+| Error stacks | an error a page provokes in what the shim replaces (a wrong receiver for: the navigator, screen and orientation getters, `outerWidth`, `contentWindow`, `window.open`, `document.open`, `Function.prototype.toString`, a rejected `estimate()`) has the stack a plain web view gives, with no frame of the shim's, in a macOS, an iPhone and an iPad profile (CI run 221; before the fix each showed a `@user-script:` frame, run 220) |
+| Remote workers' User-Agent | the profile's own in its shared and service workers, or WebKit's bare default where WebKit's race left a worker without one (§2), never another profile's. Fresh iPhone profiles, 6 per setting and pass, CI runs 218–221 (8 passes, 48 profiles per setting): WebKit's own in 12 as shipped, 14 with Notification on, 11 with encoded transforms off |
 | Shims in workers and frames | a worker made from a blob runs in the profile's zone, stays strict and keeps its line numbers, also on a page whose CSP has no `'unsafe-eval'`, `connect-src 'self'` and a `report-uri`: the site receives no violation report beyond the page's own controls (a blocked image, which is reported; an eval in a worker of its own, which the CSP blocks there — macOS 26.6.2 reports a page's violations, not a worker's), and the worker still reports the profile's zone, strict mode and the page's line numbers; with Trusted Types required, a worker from a `TrustedScriptURL`, or under the page's default policy, starts from the page's own URL; a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
 | Geolocation (deny, the default) | WebKit's own, in a profile window: `getCurrentPosition` and `watchPosition` get the engine's `PERMISSION_DENIED` ("User denied Geolocation"), the answer of the tab's UI delegate; the engine's `PermissionStatus` reads 'prompt' until the page asks and 'denied' after, and one the page held from before is told (it reads 'denied' and fires 'change' once); the next page starts at 'prompt' and stays so when another tab of the site asks; every other permission reads as in a plain WKWebView |
 | Proxy: IPv6, unresolvable host | an HTTP proxy on `[::1]` tunnels the load; a proxy whose host does not resolve fails closed |
 | Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the packet tunnel cannot carry it (§5) |
 | Proxy: WebTransport | a proxied profile has no `WebTransport` in the page or in its blob, URL, shared and service workers: it is off in the engine, since WebKit sends its QUIC around the proxy (the leak check measured it, §4); a profile without a proxy has it in all of them, as Safari. With and without the proxy the profile's shared and service workers report its own User-Agent (CI runs 213–215: 12/12) |
 | Packet tunnel | a build without the network extension reports it (the tunnel sheet says what a signed build needs), and proxied profiles keep WebRTC off. The tunnel's TURN server and SOCKS5 relay are measured by the leak check instead ([TUNNEL.md](TUNNEL.md)) |
+| Proxy: WebSocket and media | in an HTTP CONNECT and a SOCKS5 profile, a WebSocket, an HLS stream (playlist and segment) and an MP4 file that a `<video>` plays (AVFoundation, not WebKit's loader) all reach the proxy, from a page on a host only the proxy resolves; a profile without a proxy loads the same streams (the control). Measured in a shown window: WebKit loads no media for a page that is not visible (CI run 221) |
+| Proxy: beacons | `navigator.sendBeacon`, also from `pagehide` as the page goes away, reaches the proxy |
 | Proxy: dns-prefetch leak | an `<a ping>` (the load type WebKit gives dns-prefetch) reaches neither the proxy nor the network; a fetch to the same origin does |
 | Proxy: 407 without credentials | the launch is refused ("needs credentials") and the data is sealed again; nothing opens, directly or otherwise |
 | Proxy: `Accept-Language` | the header the proxy sees is the language the app decided at its first launch (`de-DE,de;q=0.9` in the self-test) |
@@ -185,9 +189,9 @@ handed the worker its pages' one. Then the worker reports WebKit's bare default,
 shared worker's sees the difference.
 
 - **It is WebKit's.** The self-test counts it over fresh iPhone profiles, each in a pool of its
-  own: 6 per setting, two passes, CI runs 218 and 219. With the engine settings as shipped: 4 of
-  24. With Notification left on: 4 of 24. With encoded transforms off: 4 of 24. The CI logs show it
-  since run 193 too, in profiles without any engine switch of the app's. The cause in WebKit was not
+  own: 6 per setting and pass, 8 passes in CI runs 218–221. With the engine settings as shipped:
+  12 of 48. With Notification left on: 14 of 48. With encoded transforms off: 11 of 48. The CI logs
+  show it since run 193 too, in profiles without any engine switch of the app's. The cause in WebKit was not
   found. The self-test's checks accept the profile's User-Agent or WebKit's bare one, and fail on
   any other, such as another profile's.
 - **Safari 26's WebKit (branches 7622–7624)** takes a shared worker's User-Agent from the worker
@@ -223,10 +227,16 @@ or HTTP signals, and leave measurable inconsistencies — fingerprinting pages f
 itself ("Canvas: Spoofed", "Fingerprinting Resistance: Detected"). They also mainly serve
 to defeat fraud and abuse detection, which is not a goal here. What the shims *do* replace
 (time zone, geolocation, WebRTC, and the navigator/screen values of a mobile generation) is
-replaced the way the engine defines it — accessors on the prototypes, strict methods with
+replaced the way the engine defines it: accessors on the prototypes, strict methods with
 only `length` and `name`, the native receiver errors, and a `Function.prototype.toString`
-that prints them as native code even from a fresh iframe — so the replacement itself is not
-the thing a page notices; the inconsistencies listed above still are. CI compares a macOS
+that prints them as native code even from a fresh iframe. A receiver the engine refuses gets
+the engine's own error with the stack a direct call gives. The replacement returns the native
+call in tail position, which JavaScriptCore runs without the replacement's frame (WebKit names
+a user script's frames `@user-script:N`; CI run 220 found one in each such error, run 221 none).
+So the replacement itself is not the thing a page notices; the inconsistencies listed above
+still are. Errors that come from arguments (`window.open('http://[')`), and those of the
+non-default shims (the time zone without the engine's override, fixed geolocation,
+relay-only WebRTC), still carry the shim's frame. CI compares a macOS
 profile's whole measured surface with this Mac's real Safari (`scripts/safari_reference.py`,
 results below).
 The honest options for real separation between identities are outside the browser:
@@ -395,6 +405,17 @@ WebSocket, fetch/XHR, media and service-worker loads of that store.
 CONNECT, optionally TLS to the proxy, with or without username/password, plus a
 per-profile bypass list. The CONNECT tunnelling, remote DNS for SOCKS5, and fail-closed
 behaviour are verified by the self-test (§0).
+
+**TLS and HTTP/2 are the profile's own through the proxy.** The leak check loads tls.peet.ws in
+each proxied profile through its proxy. The ClientHello (JA4 `t13d2013h2_a09f3c656075_7f0f34a4126d`
+on macOS 26.6.2, the cipher and extension lists), the HTTP/2 SETTINGS and frames (Akamai) and the
+header order and values equal those of the profile without a proxy (CI runs 218–221, both proxy
+kinds and the relay profiles). The proxy only tunnels the connection. The TCP SYN the site sees is
+the proxy's, by design. A difference fails the check.
+
+**WebSocket and media go through the proxy too.** The self-test checks a WebSocket, an HLS stream
+and an MP4 file that a `<video>` plays (AVFoundation, which does not use WebKit's own loader) in
+an HTTP CONNECT and a SOCKS5 profile (§0).
 
 **QUIC / HTTP/3 stays on the proxy.** With a data store proxy, WebKit's network stack does not
 use HTTP/3: measured on every push by `scripts/leak_check.py`, which runs real forwarding

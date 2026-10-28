@@ -143,7 +143,9 @@ Mac, open the printed URL in Safari on the iPhone, and replace the estimates in
   - fail on any other UA, such as another profile's.
 - `remoteWorkerRace` counts the race over 6 fresh iPhone profiles each: as shipped, with
   Notification on, and with encoded transforms off.
-  - That last switch made it frequent in runs 211–212 (4 of 8). It stays reverted.
+  - Runs 218–221 (8 passes): 12, 14 and 11 of 48. The settings make no difference.
+  - Runs 211–212 had blamed the encoded-transform switch (4 of 8 failing then). It stays reverted
+    anyway.
   - After any new engine switch, compare these counts.
 
 P2 (02612c6, 3529a37):
@@ -151,16 +153,21 @@ P2 (02612c6, 3529a37):
   proxy. JA4, ciphers, extensions, Akamai frames and header order and values must equal the
   profile's without a proxy, or it exits 1.
 - **Beacons.** A `pagehide` beacon reaches the proxy (self-test).
-- **WebSocket and media.** A WebSocket, an HLS stream and an MP4 in HTTP CONNECT and SOCKS5
-  profiles must reach the proxy (self-test, with a no-proxy control). AVFoundation plays media,
-  not WebKit's loader, so this is a real question.
+- **WebSocket and media.** A WebSocket, an HLS stream (playlist and segment) and an MP4 in HTTP
+  CONNECT and SOCKS5 profiles reach the proxy (CI run 221, with a no-proxy control). AVFoundation
+  plays media, not WebKit's loader, so it had to be measured. It needs a shown window: WebKit
+  loads no media for a page that is not visible.
+- **WebKit's default data store.** It stays closed: with it opened (a `WKWebView` from
+  `WKWebViewConfiguration()` whose store is left unset), session cookies outlived a profile's
+  stop (runs 218–219, fixed 220). `BrowserSession.makeWebViewConfiguration` never leaves the
+  store unset.
 - **Not done on purpose.** "Inert" WebRTC would replace the engine's guarantee (no
   `RTCPeerConnection`) with a JS one. The original analysis advised against it.
 - **Live-compare differences that stay.**
   - `errorStack` and `webdriver` come from the harness (safaridriver against our capture).
   - `windowOwnCount` follows from Apple Pay, Web Push and WebRTC, which WKWebView cannot match.
 
-P0-4's open point, the shim's frames in `e.stack`, has a fix in e860267. The shim tests pass under JavaScriptCore; the self-test check first runs in CI run 221:
+P0-4's open point, the shim's frames in `e.stack`, is fixed (e860267). CI run 220 found a `@user-script:` frame in each provoked error; run 221 finds none in the macOS, iPhone and iPad profiles:
 - **What leaked.** A replacement that called the native first to check its receiver left its
   frame (`user-script:N`, as WebKit names it) in the native's error. That held in every profile:
   the `contentWindow`/`contentDocument` getters, `window.open` and `document.open`.
