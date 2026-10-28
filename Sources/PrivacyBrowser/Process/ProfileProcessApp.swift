@@ -345,6 +345,9 @@ final class ProfileProcessRuntime {
         case "killSelf":
             kill(getpid(), SIGKILL)
             return "unreachable"
+        case "reportedLanguage":
+            // What this process's WebKit makes of `argument` (as Safari's would).
+            return WebContentLanguage.reported(argument ?? "")
         case "quit":
             // ⌘Q in this process: the profile is sealed before it exits (`QuitCoordinator`).
             DispatchQueue.main.async { NSApp.terminate(nil) }

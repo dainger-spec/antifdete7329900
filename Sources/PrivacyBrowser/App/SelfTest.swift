@@ -3466,23 +3466,28 @@ final class SelfTest {
 
             // Language, locale and time zone: each process its proxy country's.
             let marker = String(UUID().uuidString.prefix(8))
+            var reportedLanguages: [UUID: String] = [:]
             for (profile, process) in [(de, deProcess), (jp, jpProcess)] {
+                // As the profile's WebKit reports the country's language, as Safari's would ("ja-JP" → "ja").
+                let reported = (try? await process.test("reportedLanguage", profile.language)) ?? profile.language
+                reportedLanguages[profile.id] = reported
                 let site = "http://\(profile.name.lowercased()).selftest.invalid"
                 _ = try await process.test("load", "\(site)/pb-process")
                 let body = try await process.test("evaluate", "return document.body ? document.body.innerText : '';")
                 let acceptLanguage = body.components(separatedBy: "accept-language=").dropFirst().first?
                     .components(separatedBy: .whitespaces).first ?? "nil"
+                let header = acceptLanguage == reported || acceptLanguage.hasPrefix(reported + ",")
                 check("\(label(profile)): its page came through its own proxy with the proxy country's Accept-Language",
-                      body.contains("listener=\(profile.port) ") && acceptLanguage.hasPrefix(profile.language), body)
+                      body.contains("listener=\(profile.port) ") && header, "\(body) (expected \(reported))")
                 _ = try await process.test("load", "\(site)/pb-scopes/page")
                 let text = try await process.test("evaluate", Self.processLocaleScript(profile.language))
                 let values = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: String] ?? [:]
-                info("\(label(profile)): Accept-Language \(acceptLanguage); "
+                info("\(label(profile)): given \(profile.language), WebKit reports \(reported); Accept-Language \(acceptLanguage); "
                      + values.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "; "))
                 check("\(label(profile)): navigator.language(s) is the proxy country's language",
-                      values["language"] == profile.language && values["languages"] == profile.language, text)
+                      values["language"] == reported && values["languages"] == reported, "\(text) (expected \(reported))")
                 check("\(label(profile)): Intl's default locale (DateTimeFormat, NumberFormat) is that language",
-                      values["dateLocale"] == profile.language && values["numberLocale"] == profile.language, text)
+                      values["dateLocale"] == reported && values["numberLocale"] == reported, "\(text) (expected \(reported))")
                 let numbers = values["number"] != nil && values["number"] == values["numberExpected"]
                 let dates = values["date"] != nil && values["date"] == values["dateExpected"] && values["date"] != values["dateEnglish"]
                 let dateTimes = values["dateTime"] != nil && values["dateTime"] == values["dateTimeExpected"]
@@ -3563,7 +3568,7 @@ final class SelfTest {
                       restored == "\(expected)|\(expected)", restored)
                 let language = try await process.test("evaluate", "return navigator.language + '|' + Intl.DateTimeFormat().resolvedOptions().timeZone;")
                 check("\(label(profile)): the next launch runs in the same language and time zone",
-                      language == "\(profile.language)|\(profile.zone)", language)
+                      language == "\(reportedLanguages[profile.id] ?? profile.language)|\(profile.zone)", language)
             }
 
             // The last window, and ⌘Q in the profile's process: each seals before its process exits.

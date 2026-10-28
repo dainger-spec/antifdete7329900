@@ -179,7 +179,10 @@ live in ordinary memory).
   - `AppleLocale` = that language's `<language>_<REGION>`, e.g. `ja_JP`.
 
   So `Accept-Language`, `navigator.language(s)`, `Intl`'s default locale and default date and
-  number formatting follow the profile. "The first profile decides the language" and the
+  number formatting follow the profile. WebKit reports the list as Apple minimizes it
+  (`[NSLocale minimizedLanguagesFromLanguages:]`, called from WTF's `platformUserPreferredLanguages`
+  in `LanguageCF.cpp`): `de-DE` stays `de-DE` (header `de-DE,de;q=0.9`), `ja-JP` becomes `ja`
+  (header `ja`). Safari on a Mac with that language reports the same, since it is the same WebKit. "The first profile decides the language" and the
   `launch.languageFixed` warning do not apply in this mode. In the one-process mode nothing
   changes.
 - **Time zone and fonts.** As today: the profile's own process pool

@@ -70,6 +70,20 @@ enum WebContentLanguage {
         log.info("Websites see the languages \(decided?.joined(separator: ",") ?? "", privacy: .public) for this run")
     }
 
+    /// What WebKit reports for `language` at the head of its list (`navigator.language`,
+    /// `Accept-Language`): it runs the list through `[NSLocale minimizedLanguagesFromLanguages:]`
+    /// (WTF `LanguageCF.cpp` `platformUserPreferredLanguages`, `LanguageCocoa.mm`), as in Safari,
+    /// so "ja-JP" is reported as "ja" while "de-DE" stays. `language` itself where this macOS has
+    /// no such method.
+    static func reported(_ language: String) -> String {
+        let selector = NSSelectorFromString("minimizedLanguagesFromLanguages:")
+        guard let method = class_getClassMethod(NSLocale.self, selector) else { return language }
+        typealias Minimize = @convention(c) (AnyObject, Selector, NSArray) -> Unmanaged<NSArray>?
+        let minimize = unsafeBitCast(method_getImplementation(method), to: Minimize.self)
+        let minimized = minimize(NSLocale.self as AnyObject, selector, [language] as NSArray)?.takeUnretainedValue() as? [String]
+        return minimized?.first?.replacingOccurrences(of: "_", with: "-") ?? language
+    }
+
     /// The `AppleLocale` of a language tag with a region: "ja-JP" → "ja_JP"; nil without a region.
     static func appleLocale(for language: String) -> String? {
         let parts = language.split(separator: "-").map(String.init)
