@@ -294,6 +294,23 @@ class DevProfile(Launcher):
                 f"{files.splitlines()}; in the real home: {real.splitlines()}")
 
 
+class DevRealHome(Launcher):
+    """SafariForWebKitDevelopment with this user's own home: the control for cookie persistence."""
+    wait = 60
+
+    def start(self, url):
+        self.process = subprocess.Popen([SAFARI_DEV_BIN], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        time.sleep(6)
+        gurl = send_url(self.process.pid, url) if self.process.poll() is None else None
+        return {"command": SAFARI_DEV_BIN + " (own home)", "pid": self.process.pid, "gurl": gurl}
+
+    def stop(self):
+        quit_pid(self.process)
+        found = sh("find ~/Library/HTTPStorages ~/Library/Cookies ~/Library/WebKit/SafariForWebKitDevelopment "
+                   "-maxdepth 2 2>&1 | grep -i -E 'cookie|HTTPStorages/' | head -20")[1]
+        log(f"dev profile with the real home quit; cookie-related files: {found.splitlines()}")
+
+
 class CopiedSafari(Launcher):
     """A copy of Safari.app outside the system volume. Three variants, each meeting a different
     wall: "identical" (bit for bit, Apple's signature intact), "stripped" (new bundle identifier,
@@ -354,6 +371,11 @@ class CopiedSafari(Launcher):
         info["crash_reports"] = sh("ls -t ~/Library/Logs/DiagnosticReports 2>/dev/null | head -5")[1].splitlines()
         for key, value in self.notes.items():
             log(f"copy {self.variant} {key}: {json.dumps(value)[:600]}")
+        alive = [p for p in running if sh(["kill", "-0", str(p)])[0] == 0]
+        log(f"copy {self.variant}: open exit {code} {output[:400]}; pids {running}, alive after 5 s: {alive}; "
+            f"exec: {json.dumps(info.get('exec'))[:600]}")
+        log(f"copy {self.variant} system log:\n  " + "\n  ".join(l for l in info["log"] if l.strip())[-3000:])
+        log(f"copy {self.variant} crash reports: {info['crash_reports']}")
         return info
 
 
@@ -458,13 +480,6 @@ def experiment_specs(work_root, reports, proxy):
                      "B without: does a web app take a proxy of its own?",
             "instances": [("pa", WebApp("A", reports, proxy_args(proxy))), ("pb", WebApp("B", reports))],
         },
-        "webapp-defaults-proxy": {
-            "about": "WebKit's HTTPS proxy default written into the web apps' shared preferences domain "
-                     "(com.apple.Safari.WebApp, in their one sandbox container), then both web apps launched "
-                     "without arguments: one proxy for one web app, or for all of them?",
-            "instances": [("da", WebApp("A", reports)), ("db", WebApp("B", reports))],
-            "setup": "webapp-defaults", "proxy_port": proxy.port,
-        },
         "open-n": {
             "about": "`open -n` asks LaunchServices for a NEW instance of an app that is already running. Does a "
                      "second Safari process start, does it get its own storage, and does the per-process proxy "
@@ -486,11 +501,13 @@ def experiment_specs(work_root, reports, proxy):
             "about": "SafariForWebKitDevelopment, the second executable inside Safari.app (WebKit's run-safari "
                      "uses it), twice, each with its own CFFIXED_USER_HOME: Safari's UI without Safari's sandbox "
                      "container. Isolated? Which Safari-only APIs remain? The second gets WebKit's per-process "
-                     "HTTPS proxy default as an argument.",
+                     "HTTPS proxy default as an argument; a third runs with this user's own home, as the control "
+                     "for whether cookies persist.",
             "instances": [("s5", OpenSafari()),
                           ("f5", DevProfile(os.path.join(work_root, "sfwd", "home-f5"))),
                           ("g5", DevProfile(os.path.join(work_root, "sfwd", "home-g5"),
-                                            https_proxy=f"http://127.0.0.1:{proxy.port}"))],
+                                            https_proxy=f"http://127.0.0.1:{proxy.port}")),
+                          ("h5", DevRealHome())],
         },
         "copy": {
             "about": "A copy of Safari.app run from another folder: bit-identical (launch constraints?), with a new "
@@ -654,20 +671,6 @@ def setup_webapps(spec, result):
     log("lsregister: " + "\n".join(result["lsregister"][:20]))
 
 
-WEB_APP_PREFS = "~/Library/Containers/com.apple.Safari.WebApp/Data/Library/Preferences/com.apple.Safari.WebApp"
-
-
-def web_app_defaults_proxy(port):
-    """Writes (port) or removes (None) WebKit2HTTPSProxy in the web apps' preferences domain."""
-    if port:
-        outcome = sh(f"defaults write {WEB_APP_PREFS} WebKit2HTTPSProxy http://127.0.0.1:{port}")
-    else:
-        outcome = sh(f"defaults delete {WEB_APP_PREFS} WebKit2HTTPSProxy")
-    sh("killall cfprefsd")
-    log(f"web app defaults WebKit2HTTPSProxy={'http://127.0.0.1:%s' % port if port else '(removed)'}: {outcome}; "
-        f"now: {sh(f'defaults read {WEB_APP_PREFS} WebKit2HTTPSProxy')}")
-
-
 def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
     log(f"\n=== {name}: {spec['about']}")
     quit_all()
@@ -678,8 +681,6 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
         launcher.prepare(work)
     if spec.get("setup") == "webapps":
         setup_webapps(spec, result)
-    if spec.get("setup") == "webapp-defaults":
-        web_app_defaults_proxy(spec["proxy_port"])
     marker = os.path.join(work, ".start")
     open(marker, "w").close()
     time.sleep(1.1)
@@ -727,9 +728,6 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
         time.sleep(1)
         launchers[inst].stop()
         quit_all()
-
-    if spec.get("setup") == "webapp-defaults":
-        web_app_defaults_proxy(None)
 
     # Where did the instances write? (Containers of other apps may be hidden from this process.)
     result["written"] = {}
