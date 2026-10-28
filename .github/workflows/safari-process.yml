@@ -25,7 +25,7 @@ jobs:
       matrix:
         os: [macos-14, macos-15, macos-26]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Harness tests
@@ -37,10 +37,10 @@ jobs:
       - name: Enable safaridriver (reference measurement only)
         run: sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
       - name: Experiments
-        timeout-minutes: 35
+        timeout-minutes: 50
         run: |
           build/venv/bin/python scripts/safari_process/experiments.py --out build/safari-process \
-            --setup-hosts --trust facts reference baseline open-n env-home exec-home
+            --setup-hosts --trust facts reference baseline webapps open-n env-home exec-home sfwd copy other-user
       - uses: actions/upload-artifact@v4
         if: always()
         with:

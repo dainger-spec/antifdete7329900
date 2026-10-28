@@ -372,12 +372,13 @@ def capture_h2(conn):
             body = payload
             if flags & 0x8:  # PADDED
                 body = body[1:len(body) - body[0]]
-            if flags & 0x20:  # PRIORITY
+            headers_priority = ""
+            if flags & 0x20:  # PRIORITY: listed with the frame, not in the Akamai PRIORITY field
                 dep, weight = struct.unpack(">IB", body[:5])
-                priorities.append(f"{stream_id}:{(dep >> 31) & 1}:{dep & 0x7FFFFFFF}:{weight + 1}")
+                headers_priority = f" priority={(dep >> 31) & 1}:{dep & 0x7FFFFFFF}:{weight + 1}"
                 body = body[5:]
             block, stream = body, stream_id
-            frames.append(f"HEADERS[{stream_id}]")
+            frames.append(f"HEADERS[{stream_id}]{headers_priority}")
             if flags & 0x4:
                 break
         elif frame_type == 0x9:
@@ -534,9 +535,10 @@ RUN_PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><title>sp-run</t
     referrer: document.referrer,
     historyLength: history.length,
   });
+  const page = Math.random().toString(36).slice(2, 10);
   const report = (phase, data) => fetch('/report', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
-    body: JSON.stringify({ inst, run, phase, ...data }),
+    body: JSON.stringify({ inst, run, phase, page, ...data }),
   });
   try {
     await report('pre', { ...(await read()), env: env() });

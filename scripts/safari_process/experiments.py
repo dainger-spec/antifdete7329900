@@ -641,9 +641,17 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
                        [(f"home of {inst}", launchers[inst].home) for inst in insts if launchers[inst].home]:
         code, output = sh(f"find {path} -newer {shlex.quote(marker)} -type f 2>&1 | grep -v -E '/(Logs|tmp)/' | head -60")
         result["written"][label] = output.splitlines()
+    for label, lines in result["written"].items():
+        log(f"written since start, {label}: {json.dumps(lines[:25])}")
     for inst in insts:
         info = result["instances"][inst]
         info["verdict"] = verdict(inst, insts, info["seeded"], info["final"], info.get("relaunch"))
+        # Distinct page loads that reported for this instance in run 1: more than one means the
+        # page also ran somewhere else (a tab restored into another process, for example).
+        info["page_loads"] = sorted({r.get("page") for r in reports.reports
+                                     if r.get("inst") == inst and str(r.get("run")) == "1" and r.get("page")})
+        env = (info.get("pre") or {}).get("env") or {}
+        log(f"[{inst}] page loads in run 1: {len(info['page_loads'])}; env: {json.dumps(env)}")
         log(f"[{inst}] verdict: {json.dumps(info['verdict'])}")
         log(f"[{inst}] tls: {json.dumps({k: v for k, v in (info['tls'] or {}).items() if k != 'shape'})}")
         if info["proxied"]:
