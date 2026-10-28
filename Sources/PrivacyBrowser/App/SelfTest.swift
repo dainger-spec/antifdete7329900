@@ -1303,40 +1303,32 @@ final class SelfTest {
                 check("WebTransport: off in the engine with a proxy (its QUIC would go around it), in the page and every worker",
                       enabled == false && inPage == "undefined" && answered.count >= 2 && answered.allSatisfy { $0 == "undefined" }, detail)
             }
-            try await checkRemoteUserAgents("WebTransport (\(label))", remote, page: userAgent)
+            checkRemoteUserAgents("WebTransport (\(label))", remote, page: userAgent)
         }
     }
 
-    /// What WebKit reports for a page with no custom User-Agent and no application name, measured
-    /// once. A shared or service worker reports it when WebKit has not handed the worker the
-    /// User-Agent of its pool's pages: a race of WebKit's own, seen with none of the app's settings
-    /// (`remoteWorkerRace`; docs/ISOLATION_AND_LIMITATIONS.md §2).
-    private var webKitDefaultUserAgent: String?
-
-    private func defaultUserAgent() async throws -> String {
-        if let webKitDefaultUserAgent { return webKitDefaultUserAgent }
-        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        try await PageLoader.load(view, html: "<title>User-Agent</title>", baseURL: URL(string: "http://ua.selftest.invalid/")!)
-        let value = try await js(view, "return navigator.userAgent;") as? String ?? "nil"
-        webKitDefaultUserAgent = value
-        return value
-    }
+    /// WebKit's own User-Agent on a Mac, with no application name (frozen since Safari 14). A shared
+    /// or service worker reports it when WebKit has not handed the worker the User-Agent of its
+    /// pool's pages: a race of WebKit's own, seen with none of the app's settings (`remoteWorkerRace`;
+    /// docs/ISOLATION_AND_LIMITATIONS.md §2). Written out, not measured: a web view made with the
+    /// default configuration would open WebKit's default persistent data store, which the app never
+    /// uses.
+    private static let webKitDefaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
 
     /// How the User-Agents a page's shared and service workers report (`remoteWorkerUserAgentsScript`,
     /// one per line) compare with the page's: all the page's; some WebKit's own (its race); or another.
     private enum RemoteUserAgents { case page, webKitDefault, other }
 
-    private func remoteUserAgents(_ remote: String, page userAgent: String) async throws -> RemoteUserAgents {
+    private func remoteUserAgents(_ remote: String, page userAgent: String) -> RemoteUserAgents {
         let reported = remote.components(separatedBy: "\n")
         if reported.allSatisfy({ $0 == userAgent }) { return .page }
-        let plain = try await defaultUserAgent()
-        return reported.allSatisfy { $0 == userAgent || $0 == plain } ? .webKitDefault : .other
+        return reported.allSatisfy { $0 == userAgent || $0 == Self.webKitDefaultUserAgent } ? .webKitDefault : .other
     }
 
     /// The remote workers carry the profile's User-Agent, or WebKit's own where its race left them
     /// without one (counted and logged) — never another profile's.
-    private func checkRemoteUserAgents(_ label: String, _ remote: String, page userAgent: String) async throws {
-        let kind = try await remoteUserAgents(remote, page: userAgent)
+    private func checkRemoteUserAgents(_ label: String, _ remote: String, page userAgent: String) {
+        let kind = remoteUserAgents(remote, page: userAgent)
         check("\(label): shared and service workers report the profile's User-Agent (or WebKit's own: its race), never another",
               kind != .other, "\(remote.replacingOccurrences(of: "\n", with: " | ")) vs \(userAgent)")
         if kind == .webKitDefault {
@@ -1521,7 +1513,7 @@ final class SelfTest {
                     // WebKit's own where its race left the worker without one — never another profile's.
                     let parts = value.components(separatedBy: "|")
                     let zone = parts.prefix(2).joined(separator: "|"), reported = parts.dropFirst(2).joined(separator: "|")
-                    let kind = try await remoteUserAgents(reported, page: userAgent)
+                    let kind = remoteUserAgents(reported, page: userAgent)
                     check("time zone (\(label)): \(name) runs in the profile's zone, with its own profile's User-Agent (or WebKit's own: its race)",
                           zone == "\(profile.zone)|\(profile.offset)" && kind != .other, "\(value) vs \(expected)")
                     if kind == .webKitDefault { info("time zone (\(label)): \(name) reports WebKit's own User-Agent (WebKit's race)") }
@@ -1840,7 +1832,7 @@ final class SelfTest {
         try await PageLoader.load(tab.webView, url: URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!)
         let userAgent = try await js(tab.webView, "return navigator.userAgent;") as? String ?? "nil"
         let remote = try await js(tab.webView, Self.remoteWorkerUserAgentsScript) as? String ?? "nil"
-        try await checkRemoteUserAgents("surface (\(name))", remote, page: userAgent)
+        checkRemoteUserAgents("surface (\(name))", remote, page: userAgent)
     }
 
     /// How often WebKit leaves a fresh profile's shared and service workers with its own User-Agent
@@ -1869,7 +1861,7 @@ final class SelfTest {
                 try await PageLoader.load(tab.webView, url: page)
                 let userAgent = try await js(tab.webView, "return navigator.userAgent;") as? String ?? "nil"
                 let remote = try await js(tab.webView, Self.remoteWorkerUserAgentsScript) as? String ?? "nil"
-                switch try await remoteUserAgents(remote, page: userAgent) {
+                switch remoteUserAgents(remote, page: userAgent) {
                 case .page: break
                 case .webKitDefault: lost[index] += 1
                 case .other: other[index] += 1

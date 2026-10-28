@@ -8,6 +8,18 @@ import WebKit
 /// Window subclass so that File ▸ Close (⌘W) closes the current tab while the window's
 /// close button still closes the whole window.
 final class BrowserWindow: NSWindow {
+    /// A mobile generation's window keeps the device's viewport whatever the screen. AppKit would
+    /// shorten a window taller than the visible screen, and the page would then measure a viewport
+    /// no such device has. The title bar stays on screen; the bottom may run past it.
+    var keepsHeight = false
+
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        guard keepsHeight, let visible = screen?.visibleFrame else { return super.constrainFrameRect(frameRect, to: screen) }
+        var frame = frameRect
+        if frame.maxY > visible.maxY { frame.origin.y = visible.maxY - frame.height }
+        return frame
+    }
+
     override func performClose(_ sender: Any?) {
         if sender is NSMenuItem, let controller = windowController as? BrowserWindowController, controller.tabCount > 1 {
             controller.closeSelectedTab()
@@ -74,7 +86,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let window = BrowserWindow(contentRect: NSRect(origin: .zero, size: contentSize),
                                    styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                    backing: .buffered, defer: false)
-        if let viewport { window.contentMaxSize = viewport }
+        if let viewport {
+            window.contentMaxSize = viewport
+            window.keepsHeight = true
+        }
         window.isReleasedWhenClosed = false
         // Never saved as restorable state at quit: AppKit would write the title — the profile's
         // name — to ~/Library/Saved Application State in plaintext.
