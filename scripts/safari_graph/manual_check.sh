@@ -86,7 +86,7 @@ echo "$(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersio
 head -1 "$OUT/sip.txt"
 echo "-- Safari.framework in our process, per run (hardened-runtime exception, +env: Safari's staged frameworks):"
 awk '/^=================== run: / { if (line != "") print line; line = $3 }
-     /^GRAPH (safari_framework_loaded|window_attempt|safari_main|safari_main_windows)=/ {
+     /^GRAPH (safari_framework_loaded|safari_framework_is_users|window_attempt|safari_main|safari_main_windows|uncaught_exception)=/ {
          sub(/^GRAPH /, ""); line = line "  " $0 }
      /^run .* exit: / { line = line "  exit=" $NF }
      END { if (line != "") print line }' "$OUT/probe/probe.log" 2>/dev/null

@@ -34,6 +34,7 @@ Rules from the owner:
 | `claude/safari-parity-p1-webrtc` | P1-3: WebRTC escape routes, plus the WebTransport leak fix | done, CI runs 213–215 green (236/236) |
 | `claude/safari-parity-p1-ios` | P1-4: iPhone/iPad profiles; P2: TLS/HTTP2 parity, beacons, WebSocket and media through the proxy; P0-4: shim frames in `e.stack`; iOS fonts in the engine | done, CI run 230 green; PR #2 into the default branch (`main` does not exist), contains PR #1 |
 | `claude/process-per-profile` | A process per profile, stage 1: design and a minimal end-to-end mode behind a setting (off by default) | done, CI run 243 green (294/294 in each build: 264 + 30 new; Safari reference 449 keys identical); stage 2 not started |
+| `claude/safari-graph-spike` | SPIKE: can we load `Safari.framework` in our process and use Safari's interface instead of WKWebView? From `claude/process-per-profile` | done, CI runs 261–264 green; **NO-GO** on the interface (`docs/SAFARI_GRAPH_SPIKE.md`); ships only the compatibility gate + WKWebView fallback behind a flag |
 
 ## P1-3 state (`claude/safari-parity-p1-webrtc`)
 
@@ -248,6 +249,28 @@ device setting, off by default. **Stage 2 is not to be started** without the own
   `WebContentLanguage.reported` gives what it makes of a language, and the checks expect that.
 - **Another session works on `claude/safari-parity-p1-ios`** (PR #2: the device reference in
   Safari on CI). This branch starts at `c025ece`; rebase it once PR #2 is merged.
+
+## Safari.framework in our process (`claude/safari-graph-spike`)
+
+The owner's question: load the system `Safari.framework` in our process and use Safari's interface
+instead of our WKWebView chrome? Answer in `docs/SAFARI_GRAPH_SPIKE.md`, measured in CI runs 261–264
+(macOS 26 and macOS 15, SIP off), with a SIP-on manual check (`scripts/safari_graph/manual_check.sh`,
+Russian instructions `scripts/safari_graph/MANUAL_CHECK.ru.md`).
+
+- **NO-GO on the interface.** Safari.framework and its stack *load* into our ordinary unsandboxed
+  hardened-runtime process with no entitlement exception (no code-signing wall), but Safari's own
+  `SafariMain()` loads its menu, runs `-[AppController awakeFromNib]`, then aborts inside WebKit at
+  `-[WKWebViewConfiguration _setShouldRelaxThirdPartyCookieBlocking:]` during its web-extension setup.
+  No window, no page. Safari's UI needs Safari's identity (private entitlements, undocumented
+  version-locked classes), unreachable for a third party.
+- **What ships** (off by default, unsandboxed-only, behind `-PBSafariGraph YES` / `--safari-graph`):
+  `SafariGraph` — a compatibility gate (version, build match, child-process load check, classes) that
+  falls back to WKWebView, and `--safari-graph-selftest` (20/20 in runs 262–264). Both first-window
+  call sites go through it; with the flag off they are unchanged.
+- **The gate is where a future supported Safari-embedding interface would plug in.** Keep the
+  `safari-graph` CI job watching macOS 26 and 15. A side finding (§10): on macOS 15 with Safari 26 the
+  engine WKWebView runs (20621) is older than Safari's (20624); decide whether to declare the engine's
+  own version there.
 
 ## What is left
 

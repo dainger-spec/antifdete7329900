@@ -164,6 +164,33 @@ static void reportImages(void) {
     emit(@"images", hits.count ? [hits componentsJoinedByString:@","] : @"<none>");
 }
 
+// Which Safari.framework build this process mapped, and whether it is the user's Safari: on an older
+// macOS with a newer Safari, a plain process gets the base system's older copy.
+static void reportSafariBuild(void) {
+    NSString *image = nil;
+    uint32_t count = _dyld_image_count();
+    for (uint32_t i = 0; i < count; i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (!name) { continue; }
+        NSString *path = [NSString stringWithUTF8String:name];
+        if ([path containsString:@"/Safari.framework/"]) { image = path; }
+    }
+    NSURL *app = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.apple.Safari"]
+        ?: [NSURL fileURLWithPath:@"/Applications/Safari.app"];
+    NSString *appBuild = [[NSBundle bundleWithURL:app] objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"?";
+    emit(@"safari_app_build", appBuild);
+    if (!image) {
+        emit(@"safari_framework_build", @"<not mapped>");
+        emit(@"safari_framework_is_users", @"no");
+        return;
+    }
+    NSRange range = [image rangeOfString:@"/Safari.framework/"];
+    NSString *bundlePath = [image substringToIndex:range.location + @"/Safari.framework".length];
+    NSString *build = [[NSBundle bundleWithPath:bundlePath] objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"?";
+    emit(@"safari_framework_build", [NSString stringWithFormat:@"%@ (%@)", build, bundlePath]);
+    emit(@"safari_framework_is_users", [build isEqualToString:appBuild] ? @"yes" : @"no");
+}
+
 // The DYLD variables as this process sees them: dyld prunes them for a hardened-runtime process
 // that lacks com.apple.security.cs.allow-dyld-environment-variables.
 static void reportEnvironment(void) {
@@ -402,6 +429,7 @@ int main(int argc, const char *argv[]) {
         emit(@"staged_loaded", stagedOK.count ? [stagedOK componentsJoinedByString:@","] : @"<none>");
         emit(@"staged_failed", stagedFailed.count ? [stagedFailed componentsJoinedByString:@","] : @"<none>");
         reportImages();
+        reportSafariBuild();
         if (safariLoaded) { reportClassPresence(); }
 
         if (jsonPath) {

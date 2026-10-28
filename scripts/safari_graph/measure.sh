@@ -180,17 +180,18 @@ ui_attempts() {  # ui_attempts LABEL BINARY MODE
 }
 
 # The configurations to try the UI in: the first where any Safari.framework loaded, and the first where
-# Safari's own staged one did (an older macOS with a newer Safari from the App cryptex).
+# the user's own Safari did (on an older macOS with a newer Safari, a plain process gets the base
+# system's older copy; the user's comes only with Safari's staged frameworks).
 first_loaded=""; first_staged=""
 for config in $CONFIGS; do
     label="${config%%|*}"
     runlog="$OUT_DIR/run-$label.log"
     if [ -z "$first_loaded" ] && grep -q '^GRAPH safari_framework_loaded=yes' "$runlog" 2>/dev/null; then first_loaded="$config"; fi
-    if [ -z "$first_staged" ] && grep -qE '^GRAPH staged_loaded=(.*,)?Safari(,|$)' "$runlog" 2>/dev/null; then first_staged="$config"; fi
+    if [ -z "$first_staged" ] && grep -q '^GRAPH safari_framework_is_users=yes' "$runlog" 2>/dev/null; then first_staged="$config"; fi
 done
 log ""
 if [ "${GRAPH_UI:-1}" != "1" ]; then
-    log "== UI attempts off (GRAPH_UI=0); Safari.framework loaded in: ${first_loaded%%|*}; Safari's staged one in: ${first_staged%%|*} =="
+    log "== UI attempts off (GRAPH_UI=0); Safari.framework loaded in: ${first_loaded%%|*}; the user's Safari in: ${first_staged%%|*} =="
 elif [ -z "$first_loaded" ]; then
     log "== UI attempts skipped: Safari.framework loaded in no configuration =="
 else
@@ -217,7 +218,7 @@ fi
 
 log ""
 log "== summary =="
-grep -hE '^(=================== run: |== UI attempts|GRAPH (safari_framework_loaded|staged_loaded|staged_failed|env_DYLD_VERSIONED_FRAMEWORK_PATH|window_attempt|safari_main[a-z_]*|uncaught_exception)=|run .* exit: |screenshot: |== crash report|  (exception|termination|application-specific)|-- no crash report)' "$LOG" \
+grep -hE '^(=================== run: |== UI attempts|GRAPH (safari_framework_loaded|safari_framework_build|safari_framework_is_users|staged_loaded|staged_failed|env_DYLD_VERSIONED_FRAMEWORK_PATH|window_attempt|safari_main[a-z_]*|uncaught_exception)=|run .* exit: |screenshot: |== crash report|  (exception|termination|application-specific)|-- no crash report)' "$LOG" \
     | tee "$OUT_DIR/summary.txt" || true
 log "== probe matrix complete =="
 exit 0
