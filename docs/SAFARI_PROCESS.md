@@ -25,11 +25,11 @@ ships two siblings of the Safari executable that do keep data apart:
 |---|---|---|
 | What runs | Safari's full UI (tabs, address bar, `window.safari`), Apple-signed, from the Safari cryptex | Apple's `Web App.app` host from the Safari cryptex: Safari's version and a superset of Safari's entitlements |
 | One process per profile | yes, one per profile folder | yes, one per web app |
-| Own data | in the folder given as `CFFIXED_USER_HOME` (`Library/WebKit/SafariForWebKitDevelopment/…`); nothing shared with Safari or other profiles (measured) | in a per-app container inside `~/Library/Containers/com.apple.Safari.WebApp`; nothing shared with Safari or the other web app (measured; Safari's cookies are copied once, at creation) |
+| Own data | in the folder given as `CFFIXED_USER_HOME` (`Library/WebKit/SafariForWebKitDevelopment/…`); nothing shared with Safari or other profiles (measured). **Cookies are not saved to disk** in such a folder: they last until the process quits | in a per-app container inside `~/Library/Containers/com.apple.Safari.WebApp`; nothing shared with Safari or the other web app (measured; Safari's cookies are copied once, at creation) |
 | Sites | any | one site (out-of-scope links open in the default browser) |
 | Own proxy | yes, an HTTP CONNECT proxy per process through WebKit's `-WebKit2HTTPSProxy` / `-WebKit2HTTPProxy` launch arguments (measured: only the profile given one went through it) | no: a web app launched with any arguments never loads its page (measured); no proxy setting exists |
 | Created by | `safari_profile.py dev-launch --profile <folder>` | Safari's UI only; `safari_profile.py webapp-create` scripts the menu |
-| Catch | no App Sandbox and none of Safari's entitlements: pages see `ApplePaySession` and `PushManager`, but the process lacks the entitlements both need; no iCloud, no Safari passwords; a developer binary Apple can change or drop in any update | not a browser: one site, no address bar, no AppleScript or WebDriver; creation needs Accessibility |
+| Catch | session-only cookies; no App Sandbox and none of Safari's entitlements: pages see `ApplePaySession` and `PushManager`, but the process lacks the entitlements both need; no iCloud, no Safari passwords; a developer binary Apple can change or drop in any update | not a browser: one site, no address bar, no AppleScript or WebDriver; creation needs Accessibility |
 | TLS / HTTP/2 | identical to Safari on the same macOS (measured) | identical to Safari on the same macOS (measured) |
 
 `scripts/safari_process/safari_profile.py` is the prototype for both (§6).
@@ -116,10 +116,11 @@ unless a row says otherwise.
 | Safari's executable started directly with another home; URL by a PID-addressed Apple Event | yes | **no**: same container | yes (shared) | yes | the environment is ignored |
 | A second Safari with `--args -WebKit2HTTPSProxy http://127.0.0.1:<port>` | yes | no (shared) | — | yes | **per-process proxy works**: only that process's HTTPS went through the proxy |
 | Bit-identical copy of Safari.app run from another folder | yes (SIP is off on the runners) | **no**: it used Safari's own container and saw everything Safari had stored | yes (shared) | — | same identity, same data |
-| Copy with a new bundle identifier, ad-hoc signed without entitlements | macOS 14: `Launchd job spawn failed` (errno 153); macOS 26: a process, but it never loaded a page | — | — | — | does not run as a browser |
-| Copy with a new bundle identifier, ad-hoc signed with Safari's entitlements | `Launchd job spawn failed` (errno 153 on 14, 162 on 26) | — | — | — | refused |
+| Copy with a new bundle identifier, ad-hoc signed without entitlements | macOS 14: `Launchd job spawn failed` (errno 153); macOS 26: started, then crashed within seconds; kernel: `AppleMobileFileIntegrity _process_matches_constraint: Requirement not satisfied: Constraint not matched` | — | — | — | launch constraints |
+| Copy with a new bundle identifier, ad-hoc signed with Safari's entitlements | no: `Launchd job spawn failed` (errno 153 on 14, 162 on 26); started directly it was killed (SIGKILL); kernel: `code signature validation failed fatally … Code has restricted entitlements, but the validation of its code signature failed` | — | — | — | AMFI |
 | Safari as another macOS user, `launchctl asuser <uid> sudo -u <user> open -b com.apple.Safari` | no: `OSLaunchdErrorDomain Code=125 "Domain does not support specified action"` | — | — | — | needs that user's own GUI session |
-| **SafariForWebKitDevelopment, two profile folders** (`safari_profile.py dev-launch`) | yes, one per profile | **yes**: neither saw the other's or Safari's markers | localStorage and IndexedDB yes; **cookies no** (COOKIE_NOTE) | yes | **works**, cookies are per session |
+| **SafariForWebKitDevelopment, two profile folders** (`safari_profile.py dev-launch`) | yes, one per profile | **yes**: neither saw the other's or Safari's markers | localStorage and IndexedDB yes; **cookies no**: they live in the process's memory only | yes | **works**, but cookies last one session |
+| … SafariForWebKitDevelopment with the user's own home (control) | yes | its own store, apart from Safari's container | **yes, cookies included**: written to the real `~/Library/Cookies/com.apple.Safari.binarycookies` | yes | one such profile per user |
 | … the second profile with `--https-proxy` (`-WebKit2HTTPSProxy`) | yes | yes | — | yes | **per-profile proxy works** |
 | **Two Safari web apps** of one origin (File > Add to Dock, UI-scripted) and Safari | yes, one `Web App` process each | **yes**: neither saw the other's or Safari's markers, except Safari's cookies, copied once at creation | yes, all four markers | yes | **works**, one site per app |
 | A web app launched with `--args -WebKit2HTTPSProxy …` | a process | — | — | — | never loads its start page: no proxy per web app |
@@ -145,7 +146,15 @@ Notes on the rows:
   `CFFIXED_USER_HOME=<profile>` it wrote `Library/WebKit/SafariForWebKitDevelopment/WebsiteData/…`
   (LocalStorage, IndexedDB, ResourceLoadStatistics), `Library/Caches/SafariForWebKitDevelopment/WebKit/…`
   (NetworkCache, HSTS, CacheStorage), `Library/Safari/SafariTabs.db` and `Library/HTTPStorages/…`
-  inside the profile folder, and nothing in Safari's container. Pages see two (macOS 26) or one
+  inside the profile folder, and nothing in Safari's container. Cookies are the exception: with a
+  profile home they were never written to disk — not in the profile, not in the real home — even
+  after a clean quit by Apple Event, so they did not survive a relaunch (macOS 14, 15 and 26), while
+  localStorage and IndexedDB did. Started with the user's own home, the same binary did persist
+  cookies, to `~/Library/Cookies/com.apple.Safari.binarycookies` of the real home. So the cookie file
+  follows the account's real home, not `CFFIXED_USER_HOME`, and a profile home cannot hold it
+  (inference: the Networking process, an XPC service, does not inherit the variable, and its sandbox
+  allows only the real cookie folder). At most one SafariForWebKitDevelopment profile per user — the
+  one on the real home — keeps cookies across restarts. Pages see two (macOS 26) or one
   (macOS 14, 15) fewer window properties than in Safari: `MediaSessionCoordinator`, and on 26
   `DigitalCredential`.
 - **Web apps.** On Safari 26 the bundle Add to Dock writes has no executable and no code signature at
@@ -166,10 +175,12 @@ Notes on the rows:
   permissions.
 - **Copies.** `ditto` was refused copying Safari.app out of the cryptex (`Operation not permitted` on
   `Contents`); `cp -R` worked. The bit-identical copy kept Apple's signature and Safari's identifier,
-  and with SIP off it ran — as Safari, in Safari's container. Both re-signed copies were refused at
-  spawn (`RBSRequestErrorDomain Code=5 "Launch failed"`, `NSPOSIXErrorDomain` 153 or 162, "Launchd
-  job spawn failed"), except that on macOS 26 the copy without entitlements started a process that
-  never loaded a page.
+  and with SIP off it ran — as Safari, in Safari's container. Both re-signed copies failed even with
+  SIP off: the one that kept Safari's entitlements was killed by AMFI at exec ("Code has restricted
+  entitlements, but the validation of its code signature failed"; through LaunchServices:
+  `RBSRequestErrorDomain Code=5 "Launch failed"`, "Launchd job spawn failed", errno 153 on macOS 14,
+  162 on 26); the one without entitlements was refused at spawn on macOS 14 and, on 26, started and
+  crashed within seconds after AMFI logged "Constraint not matched" launch-constraint failures.
 
 ## 4. The walls
 
@@ -204,9 +215,12 @@ bit-identical copy run from elsewhere meets launch constraints kept in the trust
 ([Apple: launch constraints](https://developer.apple.com/documentation/security/defining-launch-environment-and-library-constraints),
 [Oakley](https://eclecticlight.co/2023/10/24/where-safari-hides-and-bundled-apps-crash/)). A copy with
 another bundle ID needs a new signature; an ad-hoc signature cannot carry restricted entitlements
-— AMFI refuses them ([Apple DTS](https://developer.apple.com/forums/thread/791996)) — so it either does
-not start or starts as an unentitled, unsandboxed program: Safari's UI without what makes Safari
-Safari. That is SafariForWebKitDevelopment, which Apple already signs. The WebKit XPC services
+— AMFI refuses them ([Apple DTS](https://developer.apple.com/forums/thread/791996)). Measured even with
+SIP off: the copy that kept Safari's entitlements was killed at exec ("Code has restricted
+entitlements, but the validation of its code signature failed"), and the one without them failed
+launch constraints and crashed. A bit-identical copy ran (SIP off) but was simply Safari again, in
+Safari's container. Safari's UI without Safari's identity is what SafariForWebKitDevelopment already
+is, signed by Apple. The WebKit XPC services
 (WebContent, Networking, GPU) are shared system components every WebKit app uses, so they are not
 the wall.
 
@@ -307,8 +321,9 @@ these runs on a CI runner without iCloud, and none changes the ClientHello.
   python3 scripts/safari_process/safari_profile.py webapp-create "Shop A" https://shop.example
   python3 scripts/safari_process/safari_profile.py webapp-launch "Shop A"
   ```
-  A `dev` profile is a folder; the process gets it as `HOME` and `CFFIXED_USER_HOME` and keeps
-  everything there. URLs and quit requests go to the process by PID (a GURL / quit Apple Event:
+  A `dev` profile is a folder; the process gets it as `HOME` and `CFFIXED_USER_HOME` and keeps its
+  website data, caches and Safari files there — but not cookies, which last until the process quits
+  (§3). URLs and quit requests go to the process by PID (a GURL / quit Apple Event:
   macOS asks once for Automation permission), so several profiles run side by side, and a quit lets
   Safari write its cookies. `webapp-create` drives File > Add to Dock through System Events (the
   terminal needs Accessibility).
@@ -332,7 +347,8 @@ these runs on a CI runner without iCloud, and none changes the ClientHello.
   processes have it.** SafariForWebKitDevelopment does not (it only shows the objects); a web app does,
   for one site. So the honest options for "Apple Pay / Web Push must work" are a web app per site, or
   Safari itself with Safari's own profiles (one process, no per-profile proxy).
-- **SafariForWebKitDevelopment is not something to ship.** It is a developer executable without the
+- **SafariForWebKitDevelopment is not something to ship.** Cookies do not persist in a profile
+  folder, which alone rules it out for profiles people sign in with. It is also a developer executable without the
   App Sandbox, run with Safari's bundle identifier; Apple can change or remove it with any Safari
   update, and nothing in it is documented. It is useful as a measurement target: Safari's UI on a
   data folder we choose.

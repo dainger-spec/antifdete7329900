@@ -10,8 +10,10 @@ Apple ships two siblings that can, and this script drives both:
           run-safari uses it). It runs Safari's full UI (windows, tabs, address bar) without the App
           Sandbox, so CFFIXED_USER_HOME decides where its data goes: website data in
           <profile>/Library/WebKit/SafariForWebKitDevelopment/, Safari's own files under
-          <profile>/Library/Safari. It has none of Safari's entitlements: no Apple Pay or Web Push
-          that works, no iCloud, no Safari passwords from the Keychain. WebKit's per-process proxy
+          <profile>/Library/Safari. Cookies are the exception: their file follows the account's real
+          home, so in a profile folder they last only until the process quits (on the runners:
+          macOS 14, 15, 26). It has none of Safari's entitlements: no Apple Pay or Web Push that
+          works, no iCloud, no Safari passwords from the Keychain. WebKit's per-process proxy
           defaults (-WebKit2HTTPProxy / -WebKit2HTTPSProxy, HTTP CONNECT proxies only) apply to it.
 
   webapp  A Safari web app (File > Add to Dock): Apple's "Web App" host from the Safari cryptex, with
