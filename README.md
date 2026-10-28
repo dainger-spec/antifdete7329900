@@ -1,5 +1,7 @@
 # PrivacyBrowser — multi-profile WebKit browser prototype for macOS
 
+> **Work in progress (Safari parity):** the next agent should start with [docs/HANDOFF.md](docs/HANDOFF.md): branch state, what is unfinished, the owner's rules.
+
 A Swift/SwiftUI + AppKit browser that runs several isolated profiles at once on the
 system WebKit engine (`WKWebView`), with tabs, per-profile history and bookmarks, and the
 App Sandbox enabled. Each profile has its own website data store, proxy, user agent, time
