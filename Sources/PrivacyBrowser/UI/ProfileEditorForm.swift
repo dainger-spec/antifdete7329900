@@ -37,13 +37,9 @@ struct ProfileEditorForm: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Picker(L("editor.tabs"), selection: $tab) {
-                ForEach(Tab.allCases) { Text(L($0.titleKey)).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 24)
-            .padding(.bottom, 14)
+            LumenTabBar(items: Tab.allCases, selection: $tab, label: L("editor.tabs")) { L($0.titleKey) }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 14)
             Rectangle().fill(Theme.divider).frame(height: 1)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
