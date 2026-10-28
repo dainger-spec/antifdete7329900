@@ -192,9 +192,15 @@ function patchWindow(w) {
   // is process-wide, so a realm in it has workers in it), the device's values or the quota.
   const zoneShim = !!CONFIG.timeZone && !(CONFIG.engineTimeZone && engineReportsZone(w, CONFIG.timeZone));
   if (zoneShim) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
-  if (zoneShim || CONFIG.device || CONFIG.storageQuota) { try { hookWorkers(w); } catch (e) {} }
+  // WebRTC 'disabled' where the engine could not switch it off: its interfaces go here and in
+  // workers made from a blob (RTCDataChannel and the transform interfaces are exposed to workers).
+  const rtcByShim = (CONFIG.webRTC || 'disabled') === 'disabled' && rtcNames(w).length > 0;
+  if (zoneShim || CONFIG.device || CONFIG.storageQuota || rtcByShim) { try { hookWorkers(w); } catch (e) {} }
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
-  if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
+  if (IS_WORKER) { // no window, geolocation, peer connection or frames in a worker
+    if (rtcByShim) { try { patchWebRTC(w, 'disabled'); } catch (e) {} }
+    return;
+  }
   if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
   // 'engine': WebKit denies geolocation and reports the permission's state (GeolocationPermission).
   const geo = CONFIG.geolocation || { mode: 'deny' };
@@ -759,13 +765,18 @@ function sequenceOf(items) {
 const RTC_MEMBERS = ['bundlePolicy', 'certificates', 'iceCandidatePoolSize', 'iceServers', 'iceTransportPolicy',
                      'rtcpMuxPolicy', 'targetLatency'];
 
+// The WebRTC interfaces a realm has (none where the engine has WebRTC off).
+function rtcNames(w) {
+  return Object.getOwnPropertyNames(w).filter((n) => /^(webkit)?RTC[A-Z]/.test(n));
+}
+
 function patchWebRTC(w, policy, relay) {
   if (policy === 'unrestricted') return;
   const names = ['RTCPeerConnection', 'webkitRTCPeerConnection'];
   if (policy === 'disabled') {
     // The engine has WebRTC switched off already (BrowserSession); where it could not be, every
     // RTC interface is removed, as in an engine built without WebRTC: no property remains.
-    for (const name of Object.getOwnPropertyNames(w).filter((n) => /^(webkit)?RTC[A-Z]/.test(n))) {
+    for (const name of rtcNames(w)) {
       try { delete w[name]; } catch (e) {}
       if (Object.prototype.hasOwnProperty.call(w, name)) {
         try { Object.defineProperty(w, name, { value: undefined, writable: false, configurable: false }); } catch (e) {}

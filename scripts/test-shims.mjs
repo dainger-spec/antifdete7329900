@@ -327,6 +327,8 @@ function runWorker(script, { codeGeneration = true } = {}) {
                             get hardwareConcurrency() { illegal(this, WorkerNavigator); return 8; } }
     class StorageManager { estimate() { illegal(this, StorageManager); return Promise.resolve({ quota: 1048576000, usage: 0 }); } }
     globalThis.StorageManager = StorageManager;
+    // WebKit exposes RTCDataChannel to workers (Exposed=(Window,Worker)), RTCPeerConnection not.
+    Object.defineProperty(globalThis, 'RTCDataChannel', { value: function RTCDataChannel() {}, writable: true, configurable: true });
     var navigator = Object.create(WorkerNavigator.prototype);
     Object.defineProperty(navigator, 'storage', { value: new StorageManager() });
     var messages = [];
@@ -699,6 +701,16 @@ test('WebRTC disabled: removed without a trace', () => {
   assert.equal(run(w, `'RTCPeerConnection' in window`), false);
   // Every RTC interface, not only the constructors a page would call first.
   assert.equal(run(w, `Object.getOwnPropertyNames(window).filter((n) => /^(webkit)?RTC/.test(n)).join()`), '');
+});
+
+test('WebRTC disabled where the engine kept it: workers made from a blob lose its interfaces too', () => {
+  // A macOS profile with zone and quota in the engine needs nothing else in a worker; with WebRTC
+  // left on by the engine its workers still get the shim, for RTCDataChannel.
+  const w = makeWindow({ geolocation: { mode: 'engine' }, webRTC: 'disabled' });
+  assert.equal(run(w, 'typeof RTCPeerConnection'), 'undefined');
+  const worker = blobWorker(w, JSON.stringify(["postMessage([typeof RTCDataChannel, typeof RTCPeerConnection].join())"]));
+  assert.deepEqual(runWorker(worker.script).messages(), ['undefined,undefined']);
+  assert.deepEqual(runWorker("postMessage([typeof RTCDataChannel, typeof RTCPeerConnection].join())").messages(), ['function,undefined']);
 });
 
 test('WebRTC relayOnly', () => {

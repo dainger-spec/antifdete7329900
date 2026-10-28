@@ -125,6 +125,7 @@ final class SelfTest {
             try await engineTimeZone(repository)
             try await workersUnderCSP(repository)
             try await geolocationInEngine(repository)
+            try await webRTCEscapeRoutes(repository)
             try await deviceGenerations(repository)
             try await fingerprintSurface(repository)
             try await recoverySealing(repository)
@@ -889,6 +890,146 @@ final class SelfTest {
         try await PageLoader.load(tab.webView, url: page)
         let next = try await js(tab.webView, "return (await navigator.permissions.query({ name: 'geolocation' })).state;") as? String
         check("geolocation: the next page starts at 'prompt' again", next == "prompt", next ?? "nil")
+    }
+
+    // MARK: WebRTC escape routes
+
+    /// `gather(PC)`: the policy a peer connection made from `PC` reports, and the kinds of ICE
+    /// candidate it gathers against public STUN servers — 'relay:none' where only a relay may be
+    /// used (none is configured).
+    private static let gatherFunction = """
+        const gather = async (PC) => {
+          if (typeof PC !== 'function') return 'no constructor: ' + typeof PC;
+          const pc = new PC({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], iceTransportPolicy: 'all' });
+          const policy = pc.getConfiguration().iceTransportPolicy;
+          const types = [];
+          const done = new Promise((resolve) => {
+            const timer = setTimeout(resolve, 4000);
+            pc.onicecandidate = (e) => {
+              if (!e.candidate) { clearTimeout(timer); resolve(); return; }
+              const type = / typ (\\w+)/.exec(e.candidate.candidate);
+              if (type && !types.includes(type[1])) types.push(type[1]);
+            };
+          });
+          pc.createDataChannel('pb');
+          await pc.setLocalDescription(await pc.createOffer());
+          await done;
+          pc.close();
+          return policy + ':' + (types.sort().join('+') || 'none');
+        };
+
+        """
+
+    /// The page's own peer connection and those of frames it makes: sandboxed without allow-scripts
+    /// (no script of the frame's own runs there) — empty, srcdoc, a same-origin URL — reached by
+    /// index or by contentWindow, and an ordinary frame reached by index.
+    private static let escapeRoutesScript = gatherFunction + """
+        const out = {};
+        out.window = await gather(window.RTCPeerConnection);
+        const frame = (sandboxed, setup) => new Promise((resolve) => {
+          const element = document.createElement('iframe');
+          if (sandboxed) element.setAttribute('sandbox', 'allow-same-origin');
+          if (setup) {
+            setup(element);
+            const timer = setTimeout(() => resolve(element), 3000);
+            element.onload = () => { clearTimeout(timer); resolve(element); };
+          }
+          document.body.appendChild(element);
+          if (!setup) resolve(element);
+        });
+        await frame(true);
+        out.sandboxedByIndex = await gather(window[window.length - 1].RTCPeerConnection);
+        await frame(true, (element) => { element.srcdoc = '<p>pb</p>'; });
+        out.sandboxedSrcdoc = await gather(window[window.length - 1].RTCPeerConnection);
+        await frame(true, (element) => { element.src = '/pb-scopes/page'; });
+        out.sandboxedURL = await gather(window[window.length - 1].RTCPeerConnection);
+        const reached = await frame(true);
+        out.sandboxedContentWindow = await gather(reached.contentWindow.RTCPeerConnection);
+        await frame(false);
+        out.frameByIndex = await gather(window[window.length - 1].RTCPeerConnection);
+        return JSON.stringify(out);
+        """
+
+    /// `typeof RTCPeerConnection, typeof RTCDataChannel` in each kind of worker the page can make.
+    private static let rtcWorkersScript = """
+        const settle = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000))]);
+        const ask = (worker, port) => settle(new Promise((resolve) => {
+          port.onmessage = (e) => resolve(String(e.data));
+          worker.onerror = () => resolve('error');
+          port.postMessage('rtc');
+        }));
+        const out = {};
+        const code = "onmessage = () => postMessage([typeof RTCPeerConnection, typeof RTCDataChannel].join())";
+        const blob = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+        out.blob = await ask(blob, blob);
+        const dedicated = new Worker('/pb-scopes/rtc.js');
+        out.url = await ask(dedicated, dedicated);
+        if (typeof SharedWorker === 'function') {
+          const shared = new SharedWorker('/pb-scopes/rtc-shared.js');
+          out.shared = await ask(shared, shared.port);
+        }
+        try {
+          await settle(navigator.serviceWorker.register('/pb-scopes/sw.js'));
+          const registration = await settle(navigator.serviceWorker.ready);
+          if (!registration || registration === 'timeout' || !registration.active) throw new Error('no active service worker');
+          const channel = new MessageChannel();
+          out.service = await settle(new Promise((resolve) => {
+            channel.port1.onmessage = (e) => resolve(String(e.data));
+            registration.active.postMessage('rtc', [channel.port2]);
+          }));
+        } catch (e) {
+          out.service = 'unavailable: ' + (e && e.message);
+        }
+        return JSON.stringify(out);
+        """
+
+    /// Where a page could reach a peer connection the shim does not hold, in a relay-only profile
+    /// (WebRTC on in the engine; the shim keeps every connection on the relay, docs/TUNNEL.md):
+    /// workers, where WebKit exposes no RTCPeerConnection (a canary for a WebKit that would), and
+    /// frames sandboxed without allow-scripts, where no script of the frame's own runs — the shim's
+    /// copy included — while their parent can reach their constructors. Each connection reports
+    /// its policy and gathers against public STUN servers; a plain WKWebView shows what gathering
+    /// finds here without the shim.
+    private func webRTCEscapeRoutes(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("WebRTC escape route checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let page = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!
+        let plainConfiguration = WKWebViewConfiguration()
+        plainConfiguration.websiteDataStore = .nonPersistent()
+        let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
+        try await PageLoader.load(plain, url: page)
+        let control = try await js(plain, Self.gatherFunction + "return await gather(window.RTCPeerConnection);") as? String ?? "nil"
+        info("WebRTC without the shim (a plain WKWebView, policy:candidates): \(control)")
+
+        let profile = try repository.create(name: "WebRTC relay-only", configuration: ProfileConfiguration(
+            webRTCPolicy: .relayOnly, ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+        defer { tab.tearDown(); session.shutDown() }
+        try await PageLoader.load(tab.webView, url: page)
+        guard try await js(tab.webView, "return typeof RTCPeerConnection;") as? String == "function" else {
+            info("WebRTC escape route checks skipped: a relay-only profile has no RTCPeerConnection here")
+            return
+        }
+        let workersText = try await js(tab.webView, Self.rtcWorkersScript) as? String ?? "{}"
+        let workers = (try? JSONSerialization.jsonObject(with: Data(workersText.utf8))) as? [String: String] ?? [:]
+        info("WebRTC in workers (RTCPeerConnection, RTCDataChannel): \(workersText)")
+        let answered = workers.values.filter { value in !["timeout", "error", "unavailable"].contains { value.hasPrefix($0) } }
+        check("WebRTC: no worker has RTCPeerConnection (a WebKit exposing it there would let a page around the relay)",
+              answered.count >= 2 && answered.allSatisfy { $0.hasPrefix("undefined,") }, workersText)
+        let text = try await js(tab.webView, Self.escapeRoutesScript) as? String ?? "{}"
+        let routes = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: String] ?? [:]
+        info("WebRTC in a relay-only profile (policy:candidates): \(text)")
+        for (route, name) in [("window", "the page"), ("frameByIndex", "a frame reached by index"),
+                              ("sandboxedByIndex", "a frame sandboxed without scripts, reached by index"),
+                              ("sandboxedSrcdoc", "a sandboxed srcdoc frame"),
+                              ("sandboxedURL", "a sandboxed frame of a same-origin URL"),
+                              ("sandboxedContentWindow", "a sandboxed frame reached by contentWindow")] {
+            let value = routes[route] ?? "nil"
+            check("WebRTC relay-only: \(name) gets a relay-only connection, no host or srflx candidate", value == "relay:none", value)
+        }
     }
 
     // MARK: Time zone in the engine
