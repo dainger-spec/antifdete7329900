@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26.6.2, 236/236 checks in both builds):
+(macOS 26.6.2, 262/262 checks in both builds, CI run 223):
 
 | Claim | Self-test result |
 |---|---|
@@ -33,6 +33,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
 | Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks. An iPhone or iPad profile measures the same as a plain web view set up as that device's Safari (its pixel ratio, its feature set), `MediaSource` on an iPhone apart (removed by the shim, §2). It reports its device class's navigator and screen values, its pixel ratio is the engine's own (`devicePixelRatio` 3 or 2, the resolution media queries agreeing), and Fullscreen, MediaSource, Notification and `screen.orientation` are as Safari on that device has them. User-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
+| iPhone window | an iPhone profile's page measures 390 × 739 (`innerWidth` × `innerHeight`) under a 390 × 844 screen, with one tab and with two (the tab strip adds to the window). The window keeps that height on a screen too short for it: the runner's visible screen is 674 points high, and its bottom runs past it (CI run 223) |
 | Error stacks | an error a page provokes in what the shim replaces (a wrong receiver for: the navigator, screen and orientation getters, `outerWidth`, `contentWindow`, `window.open`, `document.open`, `Function.prototype.toString`, a rejected `estimate()`) has the stack a plain web view gives, with no frame of the shim's, in a macOS, an iPhone and an iPad profile (CI run 221; before the fix each showed a `@user-script:` frame, run 220) |
 | Remote workers' User-Agent | the profile's own in its shared and service workers, or WebKit's bare default where WebKit's race left a worker without one (§2), never another profile's. Fresh iPhone profiles, 6 per setting and pass, CI runs 218–221 (8 passes, 48 profiles per setting): WebKit's own in 12 as shipped, 14 with Notification on, 11 with encoded transforms off |
 | Shims in workers and frames | a worker made from a blob runs in the profile's zone, stays strict and keeps its line numbers, also on a page whose CSP has no `'unsafe-eval'`, `connect-src 'self'` and a `report-uri`: the site receives no violation report beyond the page's own controls (a blocked image, which is reported; an eval in a worker of its own, which the CSP blocks there — macOS 26.6.2 reports a page's violations, not a worker's), and the worker still reports the profile's zone, strict mode and the page's line numbers; with Trusted Types required, a worker from a `TrustedScriptURL`, or under the page's default policy, starts from the page's own URL; a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
@@ -600,6 +601,9 @@ on the declared device: the screen less the status bar and Safari's own bars.
   a worker's navigator.
 - **Tabs.** A second tab adds the tab strip to the window, so the page keeps its viewport, as on
   the phone.
+- **Small screens.** On a screen with less visible height than the window (about 790 points for an
+  iPhone), the window keeps its height; its title bar stays on screen and its bottom runs past it.
+  AppKit would otherwise shorten it, and the page would measure a viewport no such device has.
 - **Other values.** `outerWidth`/`outerHeight` report the screen. The pixel ratio is the engine's
   own. The navigator/screen values are accessors on the prototypes.
 - **Still the Mac's.** The media queries `device-width`, `pointer` and `hover`, touch events,
