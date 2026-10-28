@@ -108,11 +108,68 @@ the HTTP/2 preface. No WebDriver drives these pages. Runners: macOS 14.8.9 (Safa
 (Safari 26.6.1), 26.6.2 (Safari 26.6.2), all Apple silicon. The results were the same on all three
 unless a row says otherwise.
 
-RESULTS_TABLE
+| What was launched | Separate process | Own storage | Survives a relaunch | ClientHello and HTTP/2 = Safari's | Verdict |
+|---|---|---|---|---|---|
+| Safari, `open -b com.apple.Safari <url>` | — | Safari's container | yes | (the reference) | reference |
+| A second Safari: `open -n -b com.apple.Safari` | yes: a new UI process with its own Networking process | **no**: it saw the first one's HttpOnly and script cookies, localStorage and IndexedDB at once, and reopened its tabs | yes (shared) | yes | not a profile |
+| A second Safari with other `HOME`, `CFFIXED_USER_HOME`, `TMPDIR` (`open -n --env …`) | yes | **no**: same container; nothing was written under the other home | yes (shared) | yes | the environment is ignored |
+| Safari's executable started directly with another home; URL by a PID-addressed Apple Event | yes | **no**: same container | yes (shared) | yes | the environment is ignored |
+| A second Safari with `--args -WebKit2HTTPSProxy http://127.0.0.1:<port>` | yes | no (shared) | — | yes | **per-process proxy works**: only that process's HTTPS went through the proxy |
+| Bit-identical copy of Safari.app run from another folder | yes (SIP is off on the runners) | **no**: it used Safari's own container and saw everything Safari had stored | yes (shared) | — | same identity, same data |
+| Copy with a new bundle identifier, ad-hoc signed without entitlements | macOS 14: `Launchd job spawn failed` (errno 153); macOS 26: a process, but it never loaded a page | — | — | — | does not run as a browser |
+| Copy with a new bundle identifier, ad-hoc signed with Safari's entitlements | `Launchd job spawn failed` (errno 153 on 14, 162 on 26) | — | — | — | refused |
+| Safari as another macOS user, `launchctl asuser <uid> sudo -u <user> open -b com.apple.Safari` | no: `OSLaunchdErrorDomain Code=125 "Domain does not support specified action"` | — | — | — | needs that user's own GUI session |
+| **SafariForWebKitDevelopment, two profile folders** (`safari_profile.py dev-launch`) | yes, one per profile | **yes**: neither saw the other's or Safari's markers | localStorage and IndexedDB yes; **cookies no** (COOKIE_NOTE) | yes | **works**, cookies are per session |
+| … the second profile with `--https-proxy` (`-WebKit2HTTPSProxy`) | yes | yes | — | yes | **per-profile proxy works** |
+| **Two Safari web apps** of one origin (File > Add to Dock, UI-scripted) and Safari | yes, one `Web App` process each | **yes**: neither saw the other's or Safari's markers, except Safari's cookies, copied once at creation | yes, all four markers | yes | **works**, one site per app |
+| A web app launched with `--args -WebKit2HTTPSProxy …` | a process | — | — | — | never loads its start page: no proxy per web app |
 
 Notes on the rows:
 
-RESULTS_NOTES
+- **Second processes share everything.** In every `open -n`, `--env` and direct-exec run the new
+  process's first report already listed the other instance's HttpOnly cookie, script cookie,
+  localStorage key and IndexedDB key; Safari's container files (`WebKit/WebsiteData/Default/…`,
+  `Safari/SafariTabs.db`) were the ones written, and the alternative home stayed empty. The second
+  process also reopened the first one's tab, so that tab's page ran in both.
+- **Per-process proxy.** WebKit reads `WebKit2HTTPProxy`/`WebKit2HTTPSProxy` from the user defaults
+  of a process whose bundle identifier starts with `com.apple.Safari`
+  ([WebsiteDataStoreCocoa.mm](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/WebsiteData/Cocoa/WebsiteDataStoreCocoa.mm));
+  as launch arguments they land in that process's argument domain only. Measured on Safari itself and
+  on SafariForWebKitDevelopment: the CONNECT proxy saw exactly the instances started with the argument.
+  These are HTTP CONNECT proxies given as URLs: no SOCKS5, no credentials.
+- **SafariForWebKitDevelopment** is Apple-signed (`Software Signing` on 14 and 15, `macOS Software
+  Signing` on 26), has no hardened runtime, and its only entitlements are
+  `com.apple.security.cs.allow-dyld-environment-variables` and `…disable-library-validation`: no App
+  Sandbox. Its main bundle is Safari.app, so it runs as `com.apple.Safari` with Safari's UI
+  (`window.safari`, Safari's User-Agent, `ApplePaySession` and `PushManager` present). With
+  `CFFIXED_USER_HOME=<profile>` it wrote `Library/WebKit/SafariForWebKitDevelopment/WebsiteData/…`
+  (LocalStorage, IndexedDB, ResourceLoadStatistics), `Library/Caches/SafariForWebKitDevelopment/WebKit/…`
+  (NetworkCache, HSTS, CacheStorage), `Library/Safari/SafariTabs.db` and `Library/HTTPStorages/…`
+  inside the profile folder, and nothing in Safari's container. Pages see two (macOS 26) or one
+  (macOS 14, 15) fewer window properties than in Safari: `MediaSessionCoordinator`, and on 26
+  `DigitalCredential`.
+- **Web apps.** On Safari 26 the bundle Add to Dock writes has no executable and no code signature at
+  all (`codesign`: "code object is not signed at all"), only `Info.plist` and an icon:
+  `CFBundleIdentifier = com.apple.Safari.WebApp.<UUID>`, `LSTemplateApplication = 1`,
+  `LSTemplateApplicationParameters = {CFBundleIdentifier = com.apple.Safari.WebApp, TemplateAppUUID,
+  teamIdentifier = 0000000000, defaultarguments = 1}`, `Manifest = {name, start_url}`. The
+  registration is kept in `~/Library/Application Support/com.apple.LaunchServicesTemplateApp.dv/HashesV1`.
+  Each web app got its own nested container,
+  `~/Library/Containers/com.apple.Safari.WebApp/Data/Library/Containers/com.apple.Safari.WebApp.<UUID>/`.
+  A web app reports `navigator.standalone = true`, has no `window.safari` (its only window-property
+  difference from Safari), and keeps `ApplePaySession` and `PushManager`. Launched with any arguments
+  it never requested its start page — plausibly because `defaultarguments` asks LaunchServices to pass
+  the template's own arguments, which `--args` replaces (an inference).
+- **UI scripting works on the runners.** GitHub's images grant Accessibility and Apple Events (to
+  Safari and System Events) to `osascript` and `bash`, so File > Add to Dock was driven by
+  `add_to_dock.applescript` on all three runners. On a user's Mac the terminal needs the same two
+  permissions.
+- **Copies.** `ditto` was refused copying Safari.app out of the cryptex (`Operation not permitted` on
+  `Contents`); `cp -R` worked. The bit-identical copy kept Apple's signature and Safari's identifier,
+  and with SIP off it ran — as Safari, in Safari's container. Both re-signed copies were refused at
+  spawn (`RBSRequestErrorDomain Code=5 "Launch failed"`, `NSPOSIXErrorDomain` 153 or 162, "Launchd
+  job spawn failed"), except that on macOS 26 the copy without entitlements started a process that
+  never loaded a page.
 
 ## 4. The walls
 
