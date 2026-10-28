@@ -37,6 +37,10 @@ final class ProfileManager: ObservableObject {
     /// The packet tunnel that carries proxied profiles' WebRTC (when it is on).
     private let tunnel = TunnelManager.shared
     private var sessions: [UUID: BrowserSession] = [:]
+    /// Profiles running in a process of their own (docs/PROCESS_PER_PROFILE.md).
+    private var processes: [UUID: ProfileProcess] = [:]
+    /// New launches start the profile in a process of its own (the device setting; off by default).
+    var processPerProfile = false
     /// Profile keys are held only while the profile runs (needed to seal on stop).
     private var keys: [UUID: SymmetricKey] = [:]
     /// The password vault a launch opened, until its session holds it (`passwordVault(for:)`).
@@ -86,12 +90,12 @@ final class ProfileManager: ObservableObject {
         self.webDataVault = WebDataStoreVault(repository: repository)
     }
 
-    var hasRunningProfiles: Bool { !sessions.isEmpty }
+    var hasRunningProfiles: Bool { !sessions.isEmpty || !processes.isEmpty }
 
     /// A profile is running, launching or being sealed: Lock / Quit must wait for it.
-    var hasActivity: Bool { !sessions.isEmpty || !busyProfileIDs.isEmpty }
+    var hasActivity: Bool { !sessions.isEmpty || !processes.isEmpty || !busyProfileIDs.isEmpty }
 
-    func isRunning(_ id: UUID) -> Bool { sessions[id] != nil }
+    func isRunning(_ id: UUID) -> Bool { sessions[id] != nil || processes[id] != nil }
 
     // MARK: Launch
 
@@ -101,7 +105,15 @@ final class ProfileManager: ObservableObject {
             session.bringToFront()
             return
         }
+        if let process = processes[id] {
+            process.activate()
+            return
+        }
         guard !busyProfileIDs.contains(id) else { return }
+        if processPerProfile {
+            try await launchInOwnProcess(id)
+            return
+        }
         busyProfileIDs.insert(id)
         defer { busyProfileIDs.remove(id) }
 
@@ -282,7 +294,7 @@ final class ProfileManager: ObservableObject {
                                          stored: ProfileConfiguration, runningZone: String?) {
         // Lock or Quit under way: nothing is written, and nothing is shown over the lock screen.
         guard latestLaunch[id] == token, !isShuttingDown else { return }
-        let running = sessions[id] != nil && launchTokens[id] == token
+        let running = isRunning(id) && launchTokens[id] == token
         if result.proxyRequiresCredentials, running, let proxy = stored.proxy {
             onError?(String(format: L("launch.proxyNeedsCredentialsStopped"), proxy.host))
             Task { await stopReportingErrors(id) }
@@ -295,8 +307,9 @@ final class ProfileManager: ObservableObject {
             onError?(String(format: L("launch.proxyZoneChanged"), name, zone))
         }
         // The run's language was decided without this answer (the first profile of a run that got
-        // none in time leaves websites the user's own languages): say so.
-        if running, stored.needsProxyLocation {
+        // none in time leaves websites the user's own languages): say so. A profile in a process of
+        // its own had its own language decided at its launch.
+        if running, stored.needsProxyLocation, processes[id] == nil {
             noteLanguageMismatch(for: id, wanted: result.location?.webLanguage)
         }
     }
@@ -323,6 +336,7 @@ final class ProfileManager: ObservableObject {
     /// Opens another window in an already running profile.
     func openNewWindow(_ id: UUID) {
         sessions[id]?.openWindow(url: nil)
+        processes[id]?.openWindow()
     }
 
     func showLibrary(_ id: UUID, section: LibraryView.Section) {
@@ -344,9 +358,167 @@ final class ProfileManager: ObservableObject {
     /// Profiles already told, once per run, that their WebRTC is off.
     private var webRTCOffNoted: Set<UUID> = []
 
+    // MARK: A process per profile
+
+    /// The profile's own process, while it runs in one (self-test hook).
+    func profileProcess(for id: UUID) -> ProfileProcess? { processes[id] }
+
+    /// The launch in a process of the profile's own (docs/PROCESS_PER_PROFILE.md): this process
+    /// keeps the vault, the lookup through the proxy and the configuration; the profile's process
+    /// gets the profile key alone, decrypts its web data while the lookup runs, then sets its
+    /// language and locale, pool, store and window from the configuration it is sent.
+    private func launchInOwnProcess(_ id: UUID) async throws {
+        busyProfileIDs.insert(id)
+        defer { busyProfileIDs.remove(id) }
+        let summary = try repository.summary(for: id)
+        let key = try repository.profileKey(for: id)
+        let stored = try repository.loadConfiguration(id, key: key)
+        if let proxy = stored.proxy {
+            do { try proxy.validate() } catch { throw LaunchError.invalidProxy(host: proxy.host) }
+        }
+        let token = UUID()
+        latestLaunch[id] = token
+        var lookupTask: Task<ProxyGeoLookup.Result, Never>?
+        if stored.needsProxyLookup {
+            lookupsInFlight.insert(token)
+            lookupTask = Task {
+                let result = await self.lookUpProxyLocation(stored)
+                self.lookupsInFlight.remove(token)
+                return result
+            }
+        }
+        let process = try await ProfileProcessHost.shared.launch(profileID: id, profileName: summary.name, key: key,
+                                                                 vaultRoot: repository.root, ephemeral: stored.ephemeral)
+        var lookup: ProxyGeoLookup.Result?
+        var runningZone: String?
+        do {
+            try await process.waitUntilPrepared()
+            if let lookupTask {
+                let wait = !stored.needsProxyLocation ? 0
+                    : stored.rememberedProxyLocation == nil ? Self.firstLookupWait : min(Self.firstLookupWait, Self.rememberedLookupWait)
+                lookup = await Self.value(of: lookupTask, within: wait)
+            }
+            let location = stored.proxyLocation(lookedUp: lookup?.location)
+            // Lock or Quit began meanwhile: the process seals what it decrypted.
+            if isShuttingDown {
+                try await finishWithoutStarting(id, process, key: key)
+                return
+            }
+            if lookup?.proxyRequiresCredentials == true, let proxy = stored.proxy {
+                try await finishWithoutStarting(id, process, key: key)
+                throw LaunchError.proxyNeedsCredentials(host: proxy.host)
+            }
+            if let lookup { proxyLookupFinished(lookup, for: id, name: summary.name, stored: stored) }
+            var configuration = stored.applying(location)
+            // Stage 1: the packet tunnel stays here (WebRTC behind a proxy is off), and AutoFill is
+            // off there (passwords.bin keeps one writer: the password manager here).
+            configuration.webRTCRelay = nil
+            configuration.passwordAutoFill = false
+            runningZone = configuration.timeZoneIdentifier
+            let language = location?.webLanguage
+            try await process.start(configuration: configuration, language: language,
+                                    locale: language.flatMap(WebContentLanguage.appleLocale(for:)))
+        } catch let error as LaunchError {
+            throw error
+        } catch {
+            try? await finishWithoutStarting(id, process, key: key)
+            throw error
+        }
+        processes[id] = process
+        keys[id] = key
+        launchTokens[id] = token
+        runningProfileIDs.insert(id)
+        process.onExit = { [weak self, weak process] exit in
+            guard let self, let process else { return }
+            self.profileProcessExited(id, process, exit)
+        }
+        try? repository.markLaunched(id)
+        if lookup == nil, let lookupTask {
+            let zone = runningZone
+            let pending = UUID()
+            lookupsInFlight.insert(pending)
+            Task { [weak self] in
+                let result = await lookupTask.value
+                self?.proxyLookupFinishedLate(result, for: id, name: summary.name, token: token, stored: stored, runningZone: zone)
+                self?.lookupsInFlight.remove(pending)
+            }
+        }
+    }
+
+    /// A launch that ends before its window: the process seals and exits; if it cannot, this
+    /// process seals what it left.
+    private func finishWithoutStarting(_ id: UUID, _ process: ProfileProcess, key: SymmetricKey) async throws {
+        let sealed = await process.stop()
+        if !sealed {
+            try await recoverProfileData(id, key: key)
+        }
+    }
+
+    private func stopProcess(_ id: UUID, _ process: ProfileProcess) async throws {
+        warmUpRobots[id]?.stop(.profileStopped)
+        launchTokens[id] = nil
+        let key = keys.removeValue(forKey: id)
+        runningProfileIDs.remove(id)
+        busyProfileIDs.insert(id)
+        defer { busyProfileIDs.remove(id) }
+        // The process seals its data and exits; one that could not (or did not answer, and was
+        // force-quit) leaves its data to this process.
+        let sealed = await process.stop()
+        if !sealed, let key {
+            try await recoverProfileData(id, key: key)
+        }
+    }
+
+    /// The profile's process ended on its own: its last window closed, ⌘Q in it, or a crash.
+    private func profileProcessExited(_ id: UUID, _ process: ProfileProcess, _ exit: ProfileProcess.Exit) {
+        // Stopped from here: `stopProcess` took it already.
+        guard processes[id] === process else { return }
+        processes[id] = nil
+        launchTokens[id] = nil
+        runningProfileIDs.remove(id)
+        let key = keys.removeValue(forKey: id)
+        if exit == .sealed {
+            onReturnToProfiles?()
+            return
+        }
+        let name = (try? repository.summary(for: id).name) ?? ""
+        log.error("The process of \(id.uuidString, privacy: .public) ended without sealing (\(String(describing: exit), privacy: .public))")
+        busyProfileIDs.insert(id)
+        Task { @MainActor in
+            defer { self.busyProfileIDs.remove(id) }
+            do {
+                try await self.recoverProfileData(id, key: key)
+                self.onError?(String(format: L("process.crashed"), name))
+            } catch {
+                self.onError?(String(format: L("process.crashedNotSealed"), name, error.localizedDescription))
+            }
+        }
+    }
+
+    /// Seals what a profile process left unencrypted, as unlock-time recovery does: the store is no
+    /// longer used by anyone, so the directories are archived and deleted without WebKit.
+    private func recoverProfileData(_ id: UUID, key: SymmetricKey?) async throws {
+        guard let key = key ?? (try? repository.profileKey(for: id)) else { return }
+        // WebKit's processes of the instance that ended go with it; give them a moment to (a file
+        // still being written fails an archive pass: tried again).
+        for attempt in 1...3 {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            do {
+                try await webDataVault.seal(profileID: id, key: key, activeStore: false)
+                return
+            } catch where attempt < 3 {
+                log.notice("Sealing what the process of \(id.uuidString, privacy: .public) left failed (attempt \(attempt)): \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
     // MARK: Stop
 
     func stop(_ id: UUID) async throws {
+        if let process = processes.removeValue(forKey: id) {
+            try await stopProcess(id, process)
+            return
+        }
         guard let session = sessions.removeValue(forKey: id) else { return }
         // First of all, before anything waits: the robot must not act in a session going away
         // (a tab it opened now would get no store, proxy or scripts of the profile).
@@ -406,7 +578,7 @@ final class ProfileManager: ObservableObject {
     }
 
     func stopAll() async {
-        let ids = Array(sessions.keys)
+        let ids = Array(sessions.keys) + Array(processes.keys)
         await withTaskGroup(of: Void.self) { group in
             for id in ids {
                 group.addTask { @MainActor in await self.stopReportingErrors(id) }
@@ -426,7 +598,7 @@ final class ProfileManager: ObservableObject {
     // MARK: Delete
 
     func delete(_ id: UUID) async throws {
-        if sessions[id] != nil {
+        if isRunning(id) {
             // WebKit must release the store first: remove(forIdentifier:) fails while it is in use.
             try? await stop(id)
         }
@@ -460,6 +632,7 @@ final class ProfileManager: ObservableObject {
     /// cannot start (already running, nothing to visit).
     @discardableResult
     func startWarmUp(_ id: UUID, plan: WarmUpPlan) -> Bool {
+        // Not yet in a profile's own process (stage 2, docs/PROCESS_PER_PROFILE.md).
         guard !isShuttingDown, let session = sessions[id] else { return false }
         return warmUpRobot(for: id).start(plan, in: session)
     }
@@ -482,6 +655,8 @@ final class ProfileManager: ObservableObject {
     /// Imports `cookies` into a profile: at once when it runs, else at its next launch, before
     /// its first page loads.
     func importCookies(_ cookies: [ImportedCookie], into id: UUID) async throws -> CookieImportOutcome {
+        // A profile in its own process takes them at its next launch in this process (stage 2).
+        guard processes[id] == nil else { throw CookieImportError.busy }
         if let store = sessions[id]?.dataStore {
             let result = await CookieStoreImport.apply(cookies, to: store.httpCookieStore)
             log.notice("Imported \(result.stored) cookies into a running profile, \(result.refused.count) refused")
@@ -593,7 +768,7 @@ final class ProfileManager: ObservableObject {
 
     /// Seals WebKit data left unencrypted by a crash or forced quit. Run after unlock.
     func recoverUnsealedProfiles() async {
-        for summary in repository.list() where sessions[summary.id] == nil {
+        for summary in repository.list() where !isRunning(summary.id) && !busyProfileIDs.contains(summary.id) {
             guard !isShuttingDown else { break }
             guard !WebDataStoreVault.discoverDirectories(for: summary.id).isEmpty else { continue }
             log.notice("Re-sealing unencrypted WebKit data of \(summary.id.uuidString, privacy: .public)")

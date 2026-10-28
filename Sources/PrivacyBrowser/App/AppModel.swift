@@ -162,6 +162,7 @@ final class AppModel: ObservableObject {
         self.repository = repository
         self.manager = manager
         deviceSettings = (try? DeviceSettings.load(from: vault)) ?? DeviceSettings()
+        manager.processPerProfile = deviceSettings.processPerProfile ?? false
         phase = .unlocked
         refresh()
         Task { await manager.recoverUnsealedProfiles() }
@@ -430,6 +431,21 @@ final class AppModel: ObservableObject {
         }
         try? updateDeviceSettings { $0.lastSync = status }
         refresh()
+    }
+
+    // MARK: A process per profile (beta)
+
+    /// New launches start each profile in a process of its own (docs/PROCESS_PER_PROFILE.md).
+    /// Device-local, off by default; profiles already running keep the mode they started in.
+    var processPerProfile: Bool { deviceSettings.processPerProfile ?? false }
+
+    func setProcessPerProfile(_ on: Bool) {
+        do {
+            try updateDeviceSettings { $0.processPerProfile = on }
+            manager?.processPerProfile = on
+        } catch {
+            showError(error.localizedDescription)
+        }
     }
 
     private func updateDeviceSettings(_ change: (inout DeviceSettings) -> Void) throws {

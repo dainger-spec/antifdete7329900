@@ -26,7 +26,9 @@ import WebKit
 /// when `ProfileManager.recoverUnsealedProfiles` re-seals it.
 @MainActor
 final class WebDataStoreVault {
-    private let repository: ProfileRepository
+    /// Where the archives are: the launcher's vault, or one profile's in its own process
+    /// (docs/PROCESS_PER_PROFILE.md), which has no repository.
+    private let locations: ProfileFileLocations
     private let log = Logger(subsystem: "PrivacyBrowser", category: "WebDataStoreVault")
 
     /// Set when the app quits (`ProfileManager.prepareForQuit`): a live store WebKit still holds
@@ -37,8 +39,12 @@ final class WebDataStoreVault {
     /// Seconds to wait before each attempt to seal a live store (self-test hook).
     var retryDelays: [UInt64] = [1, 2, 3, 5, 8]
 
-    init(repository: ProfileRepository) {
-        self.repository = repository
+    init(locations: ProfileFileLocations) {
+        self.locations = locations
+    }
+
+    convenience init(repository: ProfileRepository) {
+        self.init(locations: repository.locations)
     }
 
     enum VaultError: LocalizedError {
@@ -63,7 +69,7 @@ final class WebDataStoreVault {
     /// Written by `forceSeal`: the archive is the profile's data, and WebKit directories found
     /// later were written after that seal (see `discardResidueAfterForcedSeal`).
     func forcedSealMarkerURL(for profileID: UUID) -> URL {
-        repository.directory(for: profileID).appendingPathComponent("webdata.forced")
+        locations.directory(for: profileID).appendingPathComponent("webdata.forced")
     }
 
     /// Layout of the running process (sandboxed or not).
@@ -161,7 +167,7 @@ final class WebDataStoreVault {
             log.notice("Using unsealed WebKit data left by a previous run for profile \(profileID.uuidString, privacy: .public)")
             return
         }
-        let archive = repository.webDataArchiveURL(for: profileID)
+        let archive = locations.webDataArchiveURL(for: profileID)
         guard FileManager.default.fileExists(atPath: archive.path) else { return }
         _ = try await Task.detached(priority: .userInitiated) {
             try EncryptedDirectoryArchive.unseal(from: archive, key: key) { label in
@@ -189,7 +195,7 @@ final class WebDataStoreVault {
     /// usually not even initialized yet at that point; see `ensureWebKitInitialized`).
     @discardableResult
     func seal(profileID: UUID, key: SymmetricKey, activeStore: Bool = true) async throws -> SealResult {
-        let archive = repository.webDataArchiveURL(for: profileID)
+        let archive = locations.webDataArchiveURL(for: profileID)
         let layout = Self.layout
         var result = SealResult()
         // Recovery after a forced seal: the directories are what WebKit wrote after that seal,
@@ -244,7 +250,7 @@ final class WebDataStoreVault {
     /// exit is residue: the marker, written before the deletion, makes the next launch or unlock
     /// discard it instead of preferring it over this archive as it would crash leftovers.
     private func forceSeal(profileID: UUID, key: SymmetricKey, result: SealResult) async throws -> SealResult {
-        let archive = repository.webDataArchiveURL(for: profileID)
+        let archive = locations.webDataArchiveURL(for: profileID)
         let marker = forcedSealMarkerURL(for: profileID)
         let layout = Self.layout
         var result = result

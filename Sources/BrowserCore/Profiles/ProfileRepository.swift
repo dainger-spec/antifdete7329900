@@ -82,15 +82,17 @@ public final class ProfileRepository: @unchecked Sendable {
     // MARK: Paths
 
     public var root: URL { vault.root }
+    /// The profiles' file names, shared with a profile's own process (`SingleProfileFiles`).
+    public var locations: ProfileFileLocations { ProfileFileLocations(root: root) }
     var indexURL: URL { root.appendingPathComponent("index.bin") }
-    public var profilesDirectory: URL { root.appendingPathComponent("profiles", isDirectory: true) }
+    public var profilesDirectory: URL { locations.profilesDirectory }
 
     public func directory(for id: UUID) -> URL {
-        profilesDirectory.appendingPathComponent(id.uuidString, isDirectory: true)
+        locations.directory(for: id)
     }
 
-    func configURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("config.bin") }
-    public func webDataArchiveURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("webdata.pbsa") }
+    func configURL(for id: UUID) -> URL { locations.configURL(for: id) }
+    public func webDataArchiveURL(for id: UUID) -> URL { locations.webDataArchiveURL(for: id) }
 
     // MARK: Queries
 
@@ -319,9 +321,9 @@ public final class ProfileRepository: @unchecked Sendable {
         }
     }
 
-    func passwordsURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("passwords.bin") }
-    func historyURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("history.bin") }
-    func bookmarksURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("bookmarks.bin") }
+    func passwordsURL(for id: UUID) -> URL { locations.passwordsURL(for: id) }
+    func historyURL(for id: UUID) -> URL { locations.historyURL(for: id) }
+    func bookmarksURL(for id: UUID) -> URL { locations.bookmarksURL(for: id) }
 
     func url(of file: ProfileSyncFile, for id: UUID) -> URL {
         switch file {

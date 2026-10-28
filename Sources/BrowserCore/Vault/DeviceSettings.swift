@@ -41,10 +41,13 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
 
     public var syncTarget: SyncTarget?
     public var lastSync: SyncStatus?
+    /// Each profile runs in a process of its own (docs/PROCESS_PER_PROFILE.md). Off (nil) by default.
+    public var processPerProfile: Bool?
 
-    public init(syncTarget: SyncTarget? = nil, lastSync: SyncStatus? = nil) {
+    public init(syncTarget: SyncTarget? = nil, lastSync: SyncStatus? = nil, processPerProfile: Bool? = nil) {
         self.syncTarget = syncTarget
         self.lastSync = lastSync
+        self.processPerProfile = processPerProfile
     }
 }
 

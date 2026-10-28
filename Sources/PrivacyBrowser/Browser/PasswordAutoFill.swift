@@ -413,21 +413,31 @@ private final class Once {
 @MainActor
 final class ProfilePasswordSettings {
     let profileName: String
-    private let profileID: UUID
-    private let repository: ProfileRepository
     private let launchConfiguration: ProfileConfiguration
+    /// The stored settings as they are now; nil where they cannot change while the profile runs.
+    private let load: (() throws -> ProfileConfiguration)?
+    /// Stores changed settings; nil where this process may not (a profile's own process,
+    /// docs/PROCESS_PER_PROFILE.md: the launcher writes them).
+    private let save: ((ProfileConfiguration) throws -> Void)?
     /// Opens the profile's password manager ("Passwords…" in the suggestions); nil where there is none.
     var showManager: (() -> Void)?
 
-    init(repository: ProfileRepository, profileID: UUID, profileName: String, launchConfiguration: ProfileConfiguration) {
-        self.repository = repository
-        self.profileID = profileID
+    init(profileName: String, launchConfiguration: ProfileConfiguration,
+         load: (() throws -> ProfileConfiguration)?, save: ((ProfileConfiguration) throws -> Void)?) {
         self.profileName = profileName
         self.launchConfiguration = launchConfiguration
+        self.load = load
+        self.save = save
+    }
+
+    convenience init(repository: ProfileRepository, profileID: UUID, profileName: String, launchConfiguration: ProfileConfiguration) {
+        self.init(profileName: profileName, launchConfiguration: launchConfiguration,
+                  load: { try repository.loadConfiguration(profileID) },
+                  save: { try repository.saveConfiguration($0, for: profileID) })
     }
 
     private var current: ProfileConfiguration {
-        (try? repository.loadConfiguration(profileID)) ?? launchConfiguration
+        (try? load?()) ?? launchConfiguration
     }
 
     var autoFill: Bool { current.passwordAutoFill }
@@ -437,10 +447,11 @@ final class ProfilePasswordSettings {
     }
 
     func neverSave(_ origin: WebOrigin) throws {
-        var configuration = try repository.loadConfiguration(profileID)
+        guard let load, let save else { throw CoreError.invalidConfiguration("this profile's settings are changed in the Profiles window") }
+        var configuration = try load()
         guard !PasswordMatching.isNeverSaved(origin, sites: configuration.passwordNeverSaveSites) else { return }
         configuration.passwordNeverSaveSites.append(origin.serialized)
         configuration.settingsModifiedAt = Date()
-        try repository.saveConfiguration(configuration, for: profileID)
+        try save(configuration)
     }
 }

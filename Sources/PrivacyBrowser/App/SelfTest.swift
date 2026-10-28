@@ -34,8 +34,8 @@ final class SelfTest {
         setvbuf(stdout, nil, _IOLBF, 0)
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 360) {
-            print("SELFTEST TIMEOUT after 360 s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 540) {
+            print("SELFTEST TIMEOUT after 540 s")
             exit(3)
         }
         Task { @MainActor in
@@ -148,6 +148,7 @@ final class SelfTest {
             try await lockDuringLaunch(repository)
             try await quitFromFocusedPage(repository)
             try await forcedSealAtQuit(repository)
+            try await processPerProfile(repository)
         } catch {
             check("self-test ran without unexpected errors", false, String(describing: error))
         }
@@ -3373,6 +3374,365 @@ final class SelfTest {
         _ = try? await vault.seal(profileID: profile.id, key: key)
         await vault.deleteData(profileID: profile.id)
         try repository.delete(profile.id)
+    }
+
+    // MARK: A process per profile
+
+    /// docs/PROCESS_PER_PROFILE.md, stage 1, as the app runs it with the setting on: two profiles
+    /// behind SOCKS5 proxies in two countries (DE, JP), launched by `ProfileManager`, each in a
+    /// process of its own that LaunchServices starts and that gets only its profile's key over the
+    /// launcher's socket, both ends checked. Each runs in its proxy country's language and locale
+    /// (the header at the proxy, navigator, `Intl`'s default locale and formatting) and time zone
+    /// (its page and a worker loaded from a URL). Stop seals and the next launch restores; the last
+    /// window and ⌘Q in the profile's process seal; a process killed with SIGKILL leaves its data
+    /// to the launcher, which seals it; Quit seals both. Whatever is not the launch's own process
+    /// gets no key, and a socket that is not this app's launcher is never told anything.
+    private func processPerProfile(_ repository: ProfileRepository) async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let dePort = environment["PB_SELFTEST_SOCKS2_PROXY_PORT"].flatMap(Int.init),
+              let jpPort = environment["PB_SELFTEST_SOCKS_JP_PROXY_PORT"].flatMap(Int.init) else {
+            info("process per profile: skipped (PB_SELFTEST_SOCKS2_PROXY_PORT / PB_SELFTEST_SOCKS_JP_PROXY_PORT not set)")
+            return
+        }
+        let mode = AppEnvironment.isSandboxed ? "sandboxed" : "unsandboxed"
+        let services = ProxyGeoLookup.services
+        ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json")!,
+                                         timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        defer { ProxyGeoLookup.services = services }
+        let host = ProfileProcessHost.shared
+        host.selfTest = true
+        let started = Date()
+
+        struct Profile { let name: String; let id: UUID; let port: Int; let language: String; let zone: String; let offset: Int }
+        var profiles: [Profile] = []
+        for (name, port, language, zone, offset) in [("DE", dePort, "de-DE", "Europe/Berlin", -60), ("JP", jpPort, "ja-JP", "Asia/Tokyo", -540)] {
+            let created = try repository.create(name: "Process \(name)", configuration: ProfileConfiguration(
+                proxy: ProxySettings(kind: .socks5, host: "127.0.0.1", port: port)))
+            profiles.append(Profile(name: name, id: created.id, port: port, language: language, zone: zone, offset: offset))
+        }
+        let de = profiles[0], jp = profiles[1]
+        let manager = ProfileManager(repository: repository)
+        manager.processPerProfile = true
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        func label(_ profile: Profile? = nil) -> String {
+            "process per profile (\(mode)\(profile.map { ", \($0.name)" } ?? ""))"
+        }
+        func archived(_ profile: Profile) -> Bool {
+            FileManager.default.fileExists(atPath: repository.webDataArchiveURL(for: profile.id).path)
+        }
+        func ended(_ process: ProfileProcess) -> Bool { process.runningApplication?.isTerminated ?? true }
+        /// The profile's launch through the app's launch path; nil (and a failure saying what blocked
+        /// it) when it does not start.
+        func launch(_ profile: Profile) async -> ProfileProcess? {
+            let begun = Date()
+            do {
+                try await manager.launch(profile.id)
+            } catch {
+                check("\(label(profile)): launches in a process of its own", false,
+                      "BLOCKED: \(error.localizedDescription); refusals: \(host.refusals)")
+                return nil
+            }
+            guard let process = manager.profileProcess(for: profile.id) else {
+                check("\(label(profile)): launches in a process of its own", false, "BLOCKED: no process; messages: \(messages)")
+                return nil
+            }
+            info(String(format: "\(label(profile)): launched in %.2f s (pid \(process.processIdentifier))", Date().timeIntervalSince(begun)))
+            return process
+        }
+        defer { info(String(format: "\(label()): the group took %.1f s", Date().timeIntervalSince(started))) }
+
+        do {
+            guard let deProcess = await launch(de), let jpProcess = await launch(jp) else {
+                info("\(label()): BLOCKED — the blocker is in the failure above; the options are in docs/PROCESS_PER_PROFILE.md (Launch)")
+                await finishProcessPerProfile(manager, repository, profiles.map(\.id))
+                return
+            }
+            let pids = [deProcess.processIdentifier, jpProcess.processIdentifier]
+            let launchedPIDs = [deProcess, jpProcess].map { $0.runningApplication?.processIdentifier ?? -1 }
+            let separate = pids[0] != pids[1] && !pids.contains(getpid()) && pids.allSatisfy { $0 > 0 }
+            check("\(label()): each profile runs in a process of its own, the one LaunchServices started",
+                  separate && launchedPIDs == pids, "\(pids), LaunchServices \(launchedPIDs), launcher \(getpid())")
+            info("\(label()): launcher pid \(getpid()); DE pid \(pids[0]) (parent \(Self.parentPID(of: pids[0]).map(String.init) ?? "?")), "
+                 + "JP pid \(pids[1]) (parent \(Self.parentPID(of: pids[1]).map(String.init) ?? "?"))")
+            if let path = host.socketPath {
+                var attributes = stat()
+                let permissions = stat(path, &attributes) == 0 ? attributes.st_mode & 0o777 : 0
+                check("\(label()): the launcher's socket is this user's alone (0600)", permissions == 0o600, String(permissions, radix: 8))
+                info("\(label()): launcher socket \(path)")
+            }
+
+            // Language, locale and time zone: each process its proxy country's.
+            let marker = String(UUID().uuidString.prefix(8))
+            for (profile, process) in [(de, deProcess), (jp, jpProcess)] {
+                let site = "http://\(profile.name.lowercased()).selftest.invalid"
+                _ = try await process.test("load", "\(site)/pb-process")
+                let body = try await process.test("evaluate", "return document.body ? document.body.innerText : '';")
+                let acceptLanguage = body.components(separatedBy: "accept-language=").dropFirst().first?
+                    .components(separatedBy: .whitespaces).first ?? "nil"
+                check("\(label(profile)): its page came through its own proxy with the proxy country's Accept-Language",
+                      body.contains("listener=\(profile.port) ") && acceptLanguage.hasPrefix(profile.language), body)
+                _ = try await process.test("load", "\(site)/pb-scopes/page")
+                let text = try await process.test("evaluate", Self.processLocaleScript(profile.language))
+                let values = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: String] ?? [:]
+                info("\(label(profile)): Accept-Language \(acceptLanguage); "
+                     + values.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "; "))
+                check("\(label(profile)): navigator.language(s) is the proxy country's language",
+                      values["language"] == profile.language && values["languages"] == profile.language, text)
+                check("\(label(profile)): Intl's default locale (DateTimeFormat, NumberFormat) is that language",
+                      values["dateLocale"] == profile.language && values["numberLocale"] == profile.language, text)
+                let numbers = values["number"] != nil && values["number"] == values["numberExpected"]
+                let dates = values["date"] != nil && values["date"] == values["dateExpected"] && values["date"] != values["dateEnglish"]
+                let dateTimes = values["dateTime"] != nil && values["dateTime"] == values["dateTimeExpected"]
+                check("\(label(profile)): numbers and dates format by default as in that locale (not as in en-US)",
+                      numbers && dates && dateTimes, text)
+                let zone = "\(profile.zone)|\(profile.offset)"
+                let workerZone = values["worker"]?.hasPrefix(zone + "|") ?? false
+                check("\(label(profile)): the page and a worker loaded from a URL run in the proxy's time zone",
+                      values["zone"] == zone && workerZone, text)
+                let stored = try await process.test("evaluate", Self.processStoreScript("\(profile.name)-\(marker)"))
+                check("\(label(profile)): stores localStorage and IndexedDB", stored == "stored", stored)
+                let footprint = (try? await process.test("footprint")).flatMap(Double.init)
+                info("\(label(profile)): the profile's own process uses \(footprint.map { String(format: "%.0f MB", $0 / 1_048_576) } ?? "?") "
+                     + "(its WebKit processes come on top)")
+            }
+
+            // Who gets a key: the launch's own process, once.
+            let own = await host.answerToOwnHello()
+            check("\(label()): another process of this app that the launcher did not start gets no launch",
+                  own.hasPrefix("reject: not a process this launcher started"), own)
+            if let token = host.issueTestLaunch(boundTo: jpProcess) {
+                let stolen = (try? await deProcess.test("requestKey", token)) ?? "no answer"
+                host.withdrawTestLaunch(token)
+                check("\(label()): a launch's token from another profile's process: refused (the launch is bound to its process)",
+                      stolen.hasPrefix("reject: that launch belongs to another process"), stolen)
+            } else {
+                check("\(label()): a launch's token from another profile's process: refused", false, "no test launch")
+            }
+            let reused = (try? await deProcess.test("requestKey", deProcess.launchToken)) ?? "no answer"
+            check("\(label()): a launch's token used again: refused (one key per launch)",
+                  reused.hasPrefix("reject: the key of that launch was already handed over"), reused)
+            let unknown = (try? await deProcess.test("requestKey", ProfileProcessHost.randomToken())) ?? "no answer"
+            check("\(label()): an unknown token: refused", unknown.hasPrefix("reject: no launch with that token"), unknown)
+            if let path = host.socketPath {
+                let foreign = await Self.foreignProcessAnswer(path)
+                if foreign.hasPrefix("could not run") {
+                    info("\(label()): a process that is not this app could not be started here (\(foreign))")
+                } else {
+                    check("\(label()): a process that is not this app (nc) is refused before it can ask",
+                          foreign.contains("its code is not this app"), foreign)
+                }
+            }
+            let fake = await foreignLauncherHeard()
+            if fake.hasPrefix("could not run") {
+                info("\(label()): a socket of a process that is not this app could not be made here (\(fake))")
+            } else {
+                check("\(label()): a profile process never talks to a launcher socket that is not this app's",
+                      fake == "nothing", fake)
+            }
+
+            // Stop: the profile's process seals, the launcher waits.
+            try await manager.stop(de.id)
+            let deStopped = deProcess.exit == .sealed && ended(deProcess) && !manager.isRunning(de.id)
+            check("\(label(de)): Stop — its process sealed the data and exited, and the launcher waited for it",
+                  deStopped && !webKitDataDirectoriesExist(de.id) && archived(de),
+                  "exit \(String(describing: deProcess.exit)), directories \(webKitDataDirectoriesExist(de.id))")
+
+            // kill -9: the launcher seals what the process left.
+            _ = try? await jpProcess.test("killSelf", timeout: 5)
+            let recovered = await waitUntil(timeout: 90) { !manager.isRunning(jp.id) && !manager.busyProfileIDs.contains(jp.id) }
+            let crashed = recovered && jpProcess.exit == .crashed && ended(jpProcess)
+            check("\(label(jp)): kill -9 — the launcher sees it end without a seal and seals what it left",
+                  crashed && !webKitDataDirectoriesExist(jp.id) && archived(jp),
+                  "exit \(String(describing: jpProcess.exit)), directories \(webKitDataDirectoriesExist(jp.id)), messages \(messages)")
+            check("\(label(jp)): kill -9 — the user is told", messages.contains { $0.contains("Process JP") }, messages.joined(separator: " | "))
+
+            // The next launch restores what each stored (DE sealed at Stop, JP by the launcher).
+            guard let deAgain = await launch(de), let jpAgain = await launch(jp) else {
+                await finishProcessPerProfile(manager, repository, profiles.map(\.id))
+                return
+            }
+            for (profile, process) in [(de, deAgain), (jp, jpAgain)] {
+                _ = try await process.test("load", "http://\(profile.name.lowercased()).selftest.invalid/pb-scopes/page")
+                let restored = try await process.test("evaluate", Self.processReadScript)
+                let expected = "\(profile.name)-\(marker)"
+                check("\(label(profile)): its localStorage and IndexedDB are back at the next launch "
+                      + "(\(profile.id == de.id ? "sealed at Stop" : "sealed by the launcher after kill -9"))",
+                      restored == "\(expected)|\(expected)", restored)
+                let language = try await process.test("evaluate", "return navigator.language + '|' + Intl.DateTimeFormat().resolvedOptions().timeZone;")
+                check("\(label(profile)): the next launch runs in the same language and time zone",
+                      language == "\(profile.language)|\(profile.zone)", language)
+            }
+
+            // The last window, and ⌘Q in the profile's process: each seals before its process exits.
+            _ = try await deAgain.test("closeWindows")
+            let closed = await waitUntil(timeout: 90) { !manager.isRunning(de.id) && deAgain.hasExited }
+            let closedSealed = closed && deAgain.exit == .sealed && ended(deAgain)
+            check("\(label(de)): its last window closed — its process sealed and exited",
+                  closedSealed && !webKitDataDirectoriesExist(de.id),
+                  "exit \(String(describing: deAgain.exit)), directories \(webKitDataDirectoriesExist(de.id))")
+            _ = try await jpAgain.test("quit")
+            let quit = await waitUntil(timeout: 90) { !manager.isRunning(jp.id) && jpAgain.hasExited }
+            let quitSealed = quit && jpAgain.exit == .sealed && ended(jpAgain)
+            check("\(label(jp)): ⌘Q in its process — sealed before it exited",
+                  quitSealed && !webKitDataDirectoriesExist(jp.id),
+                  "exit \(String(describing: jpAgain.exit)), directories \(webKitDataDirectoriesExist(jp.id))")
+
+            // Quit with both running (⌘Q in the launcher: AppModel.lock(forQuit:)).
+            guard let deLast = await launch(de), let jpLast = await launch(jp) else {
+                await finishProcessPerProfile(manager, repository, profiles.map(\.id))
+                return
+            }
+            manager.prepareForQuit()
+            await manager.shutDown()
+            let bothSealed = deLast.exit == .sealed && jpLast.exit == .sealed && ended(deLast) && ended(jpLast)
+            let nothingLeft = !manager.hasActivity && !webKitDataDirectoriesExist(de.id) && !webKitDataDirectoriesExist(jp.id)
+            check("\(label()): Quit with both running — both processes sealed and exited before the launcher went on",
+                  bothSealed && nothingLeft,
+                  "DE \(String(describing: deLast.exit)), JP \(String(describing: jpLast.exit))")
+        } catch {
+            check("\(label()): ran without unexpected errors", false, String(describing: error))
+        }
+        await finishProcessPerProfile(manager, repository, profiles.map(\.id))
+    }
+
+    /// Stops whatever still runs and deletes the group's profiles and their data.
+    private func finishProcessPerProfile(_ manager: ProfileManager, _ repository: ProfileRepository, _ ids: [UUID]) async {
+        manager.prepareForQuit()
+        await manager.shutDown()
+        let vault = WebDataStoreVault(repository: repository)
+        for id in ids {
+            await vault.deleteData(profileID: id)
+            try? repository.delete(id)
+        }
+    }
+
+    /// The page's language, `Intl`'s default locales, default number and date formatting next to
+    /// the same for `language` (and en-US), and the time zone of the page and of a worker loaded
+    /// from a URL (`zone|offset of 2024-01-15|User-Agent`).
+    private static func processLocaleScript(_ language: String) -> String {
+        """
+        const expected = '\(language)';
+        const date = new Date(Date.UTC(2024, 0, 15, 12));
+        const out = {
+          language: navigator.language,
+          languages: navigator.languages.join(','),
+          dateLocale: Intl.DateTimeFormat().resolvedOptions().locale,
+          numberLocale: Intl.NumberFormat().resolvedOptions().locale,
+          zone: Intl.DateTimeFormat().resolvedOptions().timeZone + '|' + date.getTimezoneOffset(),
+          number: (1234567.891).toLocaleString(),
+          numberExpected: new Intl.NumberFormat(expected).format(1234567.891),
+          date: date.toLocaleDateString(),
+          dateExpected: date.toLocaleDateString(expected),
+          dateEnglish: date.toLocaleDateString('en-US'),
+          dateTime: date.toLocaleString(),
+          dateTimeExpected: date.toLocaleString(expected),
+        };
+        const worker = new Worker('/pb-scopes/worker.js');
+        out.worker = await Promise.race([
+          new Promise((resolve) => {
+            worker.onmessage = (e) => resolve(String(e.data));
+            worker.onerror = (e) => resolve('error ' + ((e && e.message) || 'loading the script'));
+            worker.postMessage('report');
+          }),
+          new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000))]);
+        return JSON.stringify(out);
+        """
+    }
+
+    /// Stores `value` in localStorage and, committed, in IndexedDB.
+    private static func processStoreScript(_ value: String) -> String {
+        """
+        const value = '\(value)';
+        localStorage.setItem('pb-process', value);
+        await new Promise((resolve, reject) => {
+          const open = indexedDB.open('pb-process', 1);
+          open.onupgradeneeded = () => open.result.createObjectStore('kv');
+          open.onerror = () => reject(open.error);
+          open.onsuccess = () => {
+            const transaction = open.result.transaction('kv', 'readwrite');
+            transaction.objectStore('kv').put(value, 'value');
+            transaction.oncomplete = () => { open.result.close(); resolve(); };
+            transaction.onerror = () => reject(transaction.error);
+          };
+        });
+        return 'stored';
+        """
+    }
+
+    /// `localStorage|IndexedDB` as `processStoreScript` left them.
+    private static let processReadScript = """
+        const stored = localStorage.getItem('pb-process');
+        const fromDatabase = await new Promise((resolve) => {
+          const open = indexedDB.open('pb-process', 1);
+          open.onupgradeneeded = () => open.result.createObjectStore('kv');
+          open.onerror = () => resolve('error');
+          open.onsuccess = () => {
+            const database = open.result;
+            if (!database.objectStoreNames.contains('kv')) { resolve('none'); return; }
+            const request = database.transaction('kv').objectStore('kv').get('value');
+            request.onsuccess = () => { resolve(String(request.result)); database.close(); };
+            request.onerror = () => resolve('error');
+          };
+        });
+        return stored + '|' + fromDatabase;
+        """
+
+    /// The parent of `pid` (1 when launchd started it), when this process may ask.
+    private static func parentPID(of pid: pid_t) -> pid_t? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.size
+        var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&name, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        return info.kp_eproc.e_ppid
+    }
+
+    /// What the launcher tells a process that is not this app (`/usr/bin/nc -U`) on its socket.
+    private static func foreignProcessAnswer(_ path: String) async -> String {
+        await Task.detached { () -> String in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
+            process.arguments = ["-U", path]
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = FileHandle.nullDevice
+            process.standardInput = FileHandle.nullDevice
+            do { try process.run() } catch { return "could not run nc: \(error.localizedDescription)" }
+            let deadline = Date().addingTimeInterval(10)
+            while process.isRunning && Date() < deadline { usleep(50_000) }
+            if process.isRunning { process.terminate() }
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            return data.count > 4 ? String(decoding: data.dropFirst(4), as: UTF8.self) : "nothing (\(data.count) bytes)"
+        }.value
+    }
+
+    /// A launcher socket made by a process that is not this app (`/usr/bin/nc -lU`): asked whether
+    /// it started this process (`ProfileProcessClient.assignment`, a profile process's first step),
+    /// this process must not say a word to it. Returns what it heard ("nothing").
+    private func foreignLauncherHeard() async -> String {
+        let path = ProcessSocket.directory.appendingPathComponent("\(ProcessSocket.prefix)99999\(Int.random(in: 100...999)).sock").path
+        let listener = Process()
+        listener.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
+        listener.arguments = ["-lU", path]
+        let output = Pipe()
+        listener.standardOutput = output
+        listener.standardError = FileHandle.nullDevice
+        listener.standardInput = FileHandle.nullDevice
+        do { try listener.run() } catch { return "could not run nc: \(error.localizedDescription)" }
+        defer { unlink(path) }
+        guard await waitUntil(timeout: 5, { FileManager.default.fileExists(atPath: path) }) else {
+            listener.terminate()
+            return "could not run nc: no socket at \(path)"
+        }
+        try? await Task.sleep(nanoseconds: 300_000_000) // bound, then listening
+        let assignment = ProfileProcessClient.assignment()
+        assignment?.connection.close()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        listener.terminate()
+        listener.waitUntilExit()
+        let heard = output.fileHandleForReading.readDataToEndOfFile()
+        if assignment != nil { return "assigned by \(assignment?.socketPath ?? "?")" }
+        return heard.isEmpty ? "nothing" : "heard \(heard.count) bytes: \(String(decoding: heard, as: UTF8.self))"
     }
 
     // MARK: Helpers

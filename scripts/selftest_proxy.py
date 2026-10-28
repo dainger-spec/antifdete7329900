@@ -11,7 +11,7 @@ itself with a page that reports how the request arrived, e.g.
 `.invalid` hostname can only load at all if it was not resolved locally.
 
     python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 \
-        --socks2 18084 --socks-auth 18085
+        --socks2 18084 --socks-auth 18085 --socks-jp 18086
 
 `--http-auth` is an HTTP CONNECT proxy that answers 407 until the request carries
 `Proxy-Authorization: Basic pb-user:pb-pass`, then reports `via=connect-auth`.
@@ -19,7 +19,9 @@ itself with a page that reports how the request arrived, e.g.
 (a profile whose proxy host is an IPv6 literal); it reports `via=connect6`.
 `--socks2` is a second SOCKS5 proxy, and `--socks-auth` one that accepts only username/password
 authentication (RFC 1929) with pb-user2:pb-pass2: several profiles behind different SOCKS5
-proxies at once. Every page names the port of the listener that served it (`listener=...`).
+proxies at once. `--socks-jp` is one more SOCKS5 proxy whose `/pb-geo.json` answers as an exit in
+Japan (`"country": "JP"`, `Asia/Tokyo`, `203.0.113.81`): two profiles, each in a process of its own,
+with proxies in two countries. Every page names the port of the listener that served it (`listener=...`).
 
 Pages also report the request's `Accept-Language` header (`accept-language=...`), the path
 `/pb-geo.json` answers like a geolocation service (`{"ip": "203.0.113.7", "timezone":
@@ -89,6 +91,9 @@ def read_until_blank_line(conn: socket.socket) -> bytes:
 
 
 GEO_ANSWER = b'{"ip":"203.0.113.7","country":"DE","timezone":"Europe/Berlin"}'
+GEO_ANSWER_JP = b'{"ip":"203.0.113.81","country":"JP","timezone":"Asia/Tokyo"}'
+# Listener ports whose lookups answer as Japan (`--socks-jp`).
+JP_LISTENERS: set = set()
 SERVED: list = []
 SERVED_LOCK = threading.Lock()
 WARMUP_LOG: list = []
@@ -206,7 +211,8 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         served = list(SERVED)
     if plain_path == "/pb-geo.json":
         params = {key: values[0] for key, values in parse_qs(query).items()}
-        answer_json = json.loads(GEO_ANSWER)
+        listener = next((part.split("=", 1)[1] for part in via.split() if part.startswith("listener=")), "")
+        answer_json = json.loads(GEO_ANSWER_JP if listener.isdigit() and int(listener) in JP_LISTENERS else GEO_ANSWER)
         answer_json["ip"] = params.get("ip", answer_json["ip"])
         answer_json["timezone"] = params.get("tz", answer_json["timezone"])
         time.sleep(min(float(params.get("delay", "0")), 30))
@@ -439,6 +445,7 @@ def main() -> None:
     parser.add_argument("--http6", type=int, default=None)
     parser.add_argument("--socks2", type=int, default=None)
     parser.add_argument("--socks-auth", type=int, default=None)
+    parser.add_argument("--socks-jp", type=int, default=None)
     args = parser.parse_args()
     threading.Thread(target=serve, args=(args.http, handle_http), daemon=True).start()
     if args.http_auth:
@@ -450,6 +457,10 @@ def main() -> None:
                          daemon=True).start()
     if args.socks_auth:
         threading.Thread(target=serve, args=(args.socks_auth, functools.partial(handle_socks, listener=args.socks_auth, auth=True)),
+                         daemon=True).start()
+    if args.socks_jp:
+        JP_LISTENERS.add(args.socks_jp)
+        threading.Thread(target=serve, args=(args.socks_jp, functools.partial(handle_socks, listener=args.socks_jp)),
                          daemon=True).start()
     serve(args.socks, functools.partial(handle_socks, listener=args.socks))
 

@@ -46,8 +46,10 @@ enum WebContentLanguage {
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "WebContentLanguage")
 
     /// Call before the first WebKit process launches, i.e. before the first `BrowserSession` is
-    /// created. Only the first call counts; WebKit has read the list after it.
-    static func decide(_ language: String?) {
+    /// created. Only the first call counts; WebKit has read the list after it. `locale` (e.g.
+    /// "ja_JP") also becomes this process's `AppleLocale`: a profile's own process sets both, as a
+    /// launch with `-AppleLanguages` and `-AppleLocale` would (docs/PROCESS_PER_PROFILE.md).
+    static func decide(_ language: String?, locale: String? = nil) {
         guard decided == nil else {
             if let language, decided?.first != language {
                 log.notice("Websites keep seeing \(decided?.first ?? "?", privacy: .public) instead of \(language, privacy: .public) until the app is quit: WebKit's language is set once per run")
@@ -55,16 +57,24 @@ enum WebContentLanguage {
             return
         }
         let languages = languages(for: language)
-        if !languages.isEmpty {
+        if !languages.isEmpty || locale != nil {
             // The argument domain: this run only, never written to the app's preferences on disk
             // (the same way WebKit overrides it in its own processes). It also hides the app's UI
             // language from WebKit, which reads the same key.
             var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
-            arguments["AppleLanguages"] = languages
+            if !languages.isEmpty { arguments["AppleLanguages"] = languages }
+            if let locale { arguments["AppleLocale"] = locale }
             UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         }
         decided = UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? []
         log.info("Websites see the languages \(decided?.joined(separator: ",") ?? "", privacy: .public) for this run")
+    }
+
+    /// The `AppleLocale` of a language tag with a region: "ja-JP" → "ja_JP"; nil without a region.
+    static func appleLocale(for language: String) -> String? {
+        let parts = language.split(separator: "-").map(String.init)
+        guard parts.count >= 2, let region = parts.last, region.count == 2 else { return nil }
+        return "\(parts[0])_\(region.uppercased())"
     }
 
     /// The list WebKit is given: the proxy country's language, else the user's own languages.

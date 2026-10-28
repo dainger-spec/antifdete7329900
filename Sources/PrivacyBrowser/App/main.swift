@@ -31,6 +31,11 @@ MainActor.assumeIsolated {
     } else {
         // Russian by default (English fallback); must be set before AppKit builds its menus.
         Localization.applyProcessLanguage()
+        // An instance a launcher of this app started for one profile runs that profile alone
+        // (docs/PROCESS_PER_PROFILE.md); any other is the launcher.
+        if let assignment = ProfileProcessClient.assignment() {
+            ProfileProcessApp.run(assignment)
+        }
         PrivacyBrowserApp.main()
     }
 }

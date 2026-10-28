@@ -111,7 +111,9 @@ struct ProfileListView: View {
             openSync: { showingSync = true },
             syncNow: model.syncTarget == nil ? nil : { Task { await model.syncNow() } },
             openTunnel: { showingTunnel = true },
-            changePassword: { changingPassword = true })
+            changePassword: { changingPassword = true },
+            processPerProfile: model.processPerProfile,
+            setProcessPerProfile: { on in model.setProcessPerProfile(on) })
     }
 }
 
@@ -216,6 +218,9 @@ struct ProfileActions {
     var syncNow: (() -> Void)?
     var openTunnel: () -> Void = {}
     var changePassword: () -> Void = {}
+    /// The device setting "each profile in a process of its own" (docs/PROCESS_PER_PROFILE.md).
+    var processPerProfile = false
+    var setProcessPerProfile: (Bool) -> Void = { _ in }
 }
 
 // MARK: - The screen
@@ -284,6 +289,8 @@ struct ProfilesScreen: View {
                     .disabled(actions.syncNow == nil)
                 Divider()
                 Button(L("profiles.menu.tunnel"), action: actions.openTunnel)
+                Toggle(L("profiles.menu.processPerProfile"),
+                       isOn: Binding(get: { actions.processPerProfile }, set: actions.setProcessPerProfile))
                 Divider()
                 Button(L("profiles.menu.changePassword"), action: actions.changePassword)
             } label: {
