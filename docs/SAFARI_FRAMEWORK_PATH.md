@@ -43,6 +43,14 @@ exception, but `-[BrowserWindowController init]` raises (`NSInvalidArgumentExcep
 on the systems measured the path falls back to the usual window; the self-test's *Safari chrome*
 checks record the reason on every CI run, and are what to read before relying on this setting.
 
+Measured in CI ([run 275](https://github.com/dainger-spec/antifdete7329900/actions/runs/40788112937),
+macOS 26.6.2, Safari 26.6.2, unsandboxed build): Safari.framework loads; `_newWindowWithFrontmostProfile:`
+returns nil; `-[BrowserWindowController init]` raises `NSInvalidArgumentException:
+-[NSDocumentController frontmostBrowserDocument]: unrecognized selector` (Safari's window controller
+expects Safari's own document controller). The exception is caught, the profile opens in the usual
+window, no Safari window stays open, and the app's delegate and main menu are unchanged; the whole
+self-test passes (186/186 unsandboxed, 187/187 sandboxed, where nothing is tried).
+
 ## Safety
 
 - Every call into Safari's code runs in Objective-C inside `@try` (`Sources/SafariBridge`): an
