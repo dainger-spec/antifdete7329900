@@ -137,3 +137,72 @@ jobs:
         run: |
           echo "::error::the UI snapshot step failed (a capture was not written or a click did not reach its button); see its log"
           exit 1
+
+  safari-graph:
+    name: SAFARI_GRAPH spike — Safari.framework in our process (${{ matrix.os }})
+    # Research measurements for docs/SAFARI_GRAPH_SPIKE.md: can this app load the system Safari UI
+    # frameworks in its own process instead of its WKWebView chrome? Kept apart from the main job so the
+    # main self-test is exactly as before. The load probe runs on both runners (SIP is on, as on a stock
+    # Mac); the app, its new-mode self-test and the surface comparison need the current SDK (macOS 26).
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: How Safari is put together here (SIP, versions, where its frameworks are, what it links)
+        run: |
+          set +e
+          sw_vers
+          echo "== SIP"; csrutil status
+          echo "== Safari.app"; ls -la /Applications/Safari.app
+          SAFARI_APP="$(cd /Applications/Safari.app 2>/dev/null && pwd -P)"; echo "resolved: $SAFARI_APP"
+          defaults read "$SAFARI_APP/Contents/Info.plist" CFBundleShortVersionString
+          defaults read "$SAFARI_APP/Contents/Info.plist" CFBundleVersion
+          echo "== Safari's executable links (how it brings its UI up)"; otool -L "$SAFARI_APP/Contents/MacOS/Safari" | head -40
+          echo "== Safari's executable size"; ls -la "$SAFARI_APP/Contents/MacOS/"
+          echo "== Safari's entitlements (what a third-party process does not have)"
+          codesign -d --entitlements - --xml "$SAFARI_APP" 2>/dev/null | grep -o '<key>[^<]*</key>' | sed 's/<[^>]*>//g'
+          echo "== Safari's signature"; codesign -dvvv "$SAFARI_APP" 2>&1 | grep -v '^Hash\|^CandidateCDHash\|^CDHash' | head -30
+          for root in /System/Library/StagedFrameworks/Safari /System/Cryptexes/App/System/Library/StagedFrameworks/Safari; do
+            echo "== $root"; ls -la "$root" 2>&1 | head -40
+          done
+          for fw in /System/Library/StagedFrameworks/Safari/Safari.framework /System/Cryptexes/App/System/Library/StagedFrameworks/Safari/Safari.framework; do
+            if [ -e "$fw" ]; then
+              echo "== $fw"; ls -la "$fw" "$fw/Versions" 2>&1 | head -20
+              bin="$fw/Versions/A/Safari"; [ -e "$bin" ] || bin="$fw/Safari"
+              echo "-- signature of $bin"; codesign -dvvv "$bin" 2>&1 | grep -v '^Hash\|^CandidateCDHash\|^CDHash' | head -30
+              echo "-- what it links"; otool -L "$bin" 2>&1 | head -60
+            fi
+          done
+          exit 0
+      - name: Load probe — Safari.framework under each hardened-runtime exception in turn
+        run: GRAPH_STRICT=1 scripts/safari_graph/measure.sh build/safari-graph
+      - name: Build the unsandboxed app (SANDBOX=0)
+        if: matrix.os == 'macos-26'
+        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: New-mode self-test — the gate, a window, a page, language and time zone, two profiles
+        if: matrix.os == 'macos-26'
+        run: |
+          PB_SELFTEST_SURFACE_OUT="$PWD/build/surface-graph" \
+            build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --safari-graph-selftest
+      - name: New-mode profile against this Mac's Safari (scripts/safari_reference.py, reported)
+        if: matrix.os == 'macos-26'
+        run: |
+          sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
+          python3 scripts/safari_reference.py --compare build/surface-graph/surface-graph-macos.json --out build/safari-surface-graph.json
+          code=$?
+          if [ "$code" = "2" ]; then echo "::warning::Safari could not be driven on this runner; surface not compared"; exit 0; fi
+          if [ "$code" != "0" ]; then echo "::warning::the new-mode surface differs from Safari in a must-match key (see the log)"; fi
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: safari-graph-${{ matrix.os }}
+          path: |
+            build/safari-graph
+            build/surface-graph
+            build/safari-surface-graph.json
+          if-no-files-found: ignore

@@ -212,7 +212,7 @@ final class ProfileManager: ObservableObject {
         runningProfileIDs.insert(id)
         // This launch's lookup (also one made only for the exit IP), else what was found before.
         session.exitLocation = lookup?.location ?? stored.rememberedProxyLocation
-        session.openWindow(url: configuration.startURL)
+        SafariGraph.openFirstWindow(for: session, url: configuration.startURL)
         try? repository.markLaunched(id)
         if lookup == nil, let lookupTask {
             let runningZone = configuration.timeZoneIdentifier

@@ -8,6 +8,12 @@ MainActor.assumeIsolated {
     let arguments = CommandLine.arguments
     if arguments.contains("--self-test") {
         SelfTest.start()
+    } else if arguments.contains("--safari-graph-selftest") {
+        // The SAFARI_GRAPH spike's own checks (docs/SAFARI_GRAPH_SPIKE.md), apart from the main self-test.
+        SelfTest.startSafariGraph()
+    } else if arguments.contains("--safari-graph-load-check") {
+        // The spike's compatibility gate loads Safari.framework here, in a child, never in the app.
+        SafariGraph.runLoadCheck(arguments: arguments)
     } else if arguments.contains("--selftest-write-vault") {
         SelfTest.migrationStep(write: true)
     } else if arguments.contains("--selftest-read-vault") {

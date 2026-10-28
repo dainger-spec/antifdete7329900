@@ -3883,3 +3883,175 @@ private final class PageLoader: NSObject, WKNavigationDelegate {
         finish(.failure(error))
     }
 }
+
+// MARK: - SAFARI_GRAPH spike (docs/SAFARI_GRAPH_SPIKE.md)
+
+@MainActor
+extension SelfTest {
+    /// `PrivacyBrowser --safari-graph-selftest` (unsandboxed build): the new mode's own checks, in a
+    /// process of their own so the main self-test is untouched. The compatibility gate's live answer
+    /// on this Mac and its fallback, a window opened through the gate, a page loaded in it, the run's
+    /// language and each profile's time zone, two profiles' storage kept apart, and the window's
+    /// fingerprint surface for scripts/safari_reference.py.
+    static func startSafariGraph() {
+        setvbuf(stdout, nil, _IOLBF, 0)
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
+            print("SAFARI-GRAPH SELFTEST TIMEOUT after 300 s")
+            exit(3)
+        }
+        Task { @MainActor in
+            let test = SelfTest()
+            await test.runSafariGraph()
+            print("SAFARI-GRAPH SELFTEST \(test.failures == 0 ? "PASSED" : "FAILED"): \(test.passes) passed, \(test.failures) failed")
+            exit(test.failures == 0 ? 0 : 1)
+        }
+        app.run()
+    }
+
+    private static let graphTitle = "PB safari-graph"
+    private static let graphPage = "<!doctype html><html><head><meta charset='utf-8'><title>\(SelfTest.graphTitle)</title></head><body>safari-graph</body></html>"
+    private static let graphWriteStorage = """
+        localStorage.setItem('pb', token);
+        await new Promise((resolve, reject) => {
+          const req = indexedDB.open('pb', 1);
+          req.onupgradeneeded = () => req.result.createObjectStore('s');
+          req.onerror = () => reject(req.error);
+          req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction('s', 'readwrite');
+            tx.objectStore('s').put(token, 'k');
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => reject(tx.error);
+          };
+        });
+        return true;
+        """
+
+    private func runSafariGraph() async {
+        info("sandboxed=\(AppEnvironment.isSandboxed) macOS \(ProcessInfo.processInfo.operatingSystemVersionString), Safari \(HostSafari.version)")
+        guard !AppEnvironment.isSandboxed else {
+            check("safari-graph: runs in the unsandboxed build only", false, "this build is sandboxed")
+            return
+        }
+        // As a profile's own process does: one language and locale for the run, before WebKit starts.
+        WebContentLanguage.decide("de-DE", locale: "de_DE")
+        info("web content languages: \(WebContentLanguage.decided ?? [])")
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-safari-graph-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        do {
+            let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "safari-graph", iterations: 10_000))
+            try await safariGraph(repository)
+        } catch {
+            check("safari-graph: the group ran to the end", false, "\(error)")
+        }
+    }
+
+    private func safariGraph(_ repository: ProfileRepository) async throws {
+        // 1. The gate's live answer on this Mac: the measurement the spike is about.
+        let gate = SafariGraph.evaluate()
+        info("safari-graph: gate on this Mac: \(gate.summary)")
+        info("safari-graph: Safari.framework binary: \(SafariGraph.locateSafariFrameworkBinary() ?? "not found")")
+        check("safari-graph: the gate decides, with a reason", !gate.summary.isEmpty)
+        // A failing gate takes the fallback.
+        let forced = SafariGraph.evaluate(forceFallback: true)
+        check("safari-graph: a failing gate falls back to WKWebView",
+              !forced.usesSafariFramework && forced.summary.contains("forced"), forced.summary)
+        // The version gate: the measured major passes, a release nobody measured does not.
+        let versions = ["26.0": true, "26.6.2": true, "27.0": false, "18.6": false, "": false, "beta": false]
+        let wrong = versions.filter { SafariGraph.isSupported(safariVersion: $0.key) != $0.value }.map { $0.key }.sorted()
+        check("safari-graph: the version gate takes the measured Safari only (majors \(SafariGraph.supportedSafariMajors.sorted()))",
+              wrong.isEmpty, "wrong for: \(wrong)")
+        info("safari-graph: this Mac's Safari \(HostSafari.version) passes the version gate: \(SafariGraph.isSupported(safariVersion: HostSafari.version))")
+
+        // 2. Two profiles in the new mode, a time zone each; their windows opened through the gate.
+        let a = try repository.create(name: "Graph A", configuration: ProfileConfiguration(timeZoneIdentifier: "Europe/Berlin", ephemeral: true))
+        let b = try repository.create(name: "Graph B", configuration: ProfileConfiguration(timeZoneIdentifier: "Asia/Tokyo", ephemeral: true))
+        let sessionA = try makeSession(repository, a.id, key: repository.profileKey(for: a.id))
+        let sessionB = try makeSession(repository, b.id, key: repository.profileKey(for: b.id))
+        defer {
+            sessionA.shutDown()
+            sessionB.shutDown()
+        }
+        let (windowA, backendA) = SafariGraph.openWindow(for: sessionA, url: nil)
+        let (windowB, backendB) = SafariGraph.openWindow(for: sessionB, url: nil)
+        info("safari-graph: windows' backend: A \(backendA.summary); B \(backendB.summary)")
+        check("safari-graph: a window opens through the gate (profile A)", windowA.window != nil && windowA.selectedTab != nil)
+        check("safari-graph: a window opens through the gate (profile B)", windowB.window != nil && windowB.selectedTab != nil)
+        guard let tabA = await loadGraphPage(in: windowA), let tabB = await loadGraphPage(in: windowB) else {
+            check("safari-graph: the page loads in both windows", false)
+            return
+        }
+        check("safari-graph: the page loads in the window (A)", try await js(tabA.webView, "return document.title;") as? String == Self.graphTitle)
+        check("safari-graph: the page loads in the window (B)", try await js(tabB.webView, "return document.title;") as? String == Self.graphTitle)
+
+        // 3. The run's language, and each profile's own time zone.
+        let language = try await js(tabA.webView, "return navigator.language;") as? String
+        check("safari-graph: navigator.language is the run's language", language == WebContentLanguage.reported("de-DE"), language ?? "nil")
+        let locale = try await js(tabA.webView, "return Intl.DateTimeFormat().resolvedOptions().locale;") as? String
+        check("safari-graph: Intl's default locale follows the language", locale?.hasPrefix("de") == true, locale ?? "nil")
+        let zoneA = try await js(tabA.webView, "return Intl.DateTimeFormat().resolvedOptions().timeZone;") as? String
+        let zoneB = try await js(tabB.webView, "return Intl.DateTimeFormat().resolvedOptions().timeZone;") as? String
+        check("safari-graph: profile A's time zone", zoneA == "Europe/Berlin", zoneA ?? "nil")
+        check("safari-graph: profile B's time zone", zoneB == "Asia/Tokyo", zoneB ?? "nil")
+        let offsetB = try await js(tabB.webView, "return new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset();") as? Int
+        check("safari-graph: profile B's UTC offset is Tokyo's", offsetB == -540, offsetB.map { "\($0)" } ?? "nil")
+        info("safari-graph: time zone in the engine: A \(sessionA.timeZoneByEngine), B \(sessionB.timeZoneByEngine)")
+
+        // 4. The two profiles' storage kept apart: cookies, localStorage, IndexedDB.
+        let token = UUID().uuidString
+        check("safari-graph: profile A writes localStorage and IndexedDB",
+              try await js(tabA.webView, Self.graphWriteStorage, ["token": token]) as? Bool == true)
+        let cookie = HTTPCookie(properties: [.domain: "selftest.invalid", .path: "/", .name: "pbgraph", .value: token,
+                                             .secure: "TRUE", .expires: Date().addingTimeInterval(3_600)])!
+        if let storeA = sessionA.dataStore { await setCookie(cookie, in: storeA) }
+        check("safari-graph: profile A reads its own localStorage",
+              try await js(tabA.webView, "return localStorage.getItem('pb') ?? 'null';") as? String == token)
+        check("safari-graph: profile A reads its own IndexedDB", try await js(tabA.webView, Self.readIndexedDB) as? String == token)
+        check("safari-graph: isolation, localStorage not shared",
+              try await js(tabB.webView, "return localStorage.getItem('pb') ?? 'null';") as? String == "null")
+        check("safari-graph: isolation, IndexedDB not shared", try await js(tabB.webView, Self.readIndexedDB) as? String == "missing")
+        var cookiesA: [HTTPCookie] = []
+        if let storeA = sessionA.dataStore { cookiesA = await cookies(in: storeA) }
+        var cookiesB: [HTTPCookie] = []
+        if let storeB = sessionB.dataStore { cookiesB = await cookies(in: storeB) }
+        check("safari-graph: profile A keeps its cookie", cookiesA.contains { $0.name == "pbgraph" && $0.value == token })
+        check("safari-graph: isolation, cookies not shared", !cookiesB.contains { $0.name == "pbgraph" })
+
+        // 5. What a page measures of a profile in the new mode, for scripts/safari_reference.py.
+        try await graphSurface(repository)
+    }
+
+    /// Loads the spike's page in the window's tab with an origin (selftest.invalid), as a tab loads a
+    /// page, and waits for it.
+    private func loadGraphPage(in controller: BrowserWindowController) async -> BrowserTab? {
+        guard let tab = controller.selectedTab else { return nil }
+        tab.startsEmpty = false
+        tab.webView.loadHTMLString(Self.graphPage, baseURL: origin)
+        let loaded = await waitUntil(timeout: 20) { !tab.isLoading && tab.webView.url?.host == "selftest.invalid" }
+        return loaded ? tab : nil
+    }
+
+    /// The new mode's profile as a page measures it, written next to the main self-test's surfaces as
+    /// `surface-graph-macos.json`: a macOS profile, WebRTC as the engine has it and the host's time
+    /// zone, like the surface the main comparison with Safari already uses.
+    private func graphSurface(_ repository: ProfileRepository) async throws {
+        guard let probe = Self.loadProbe() else {
+            check("safari-graph surface: fingerprint_probe.js found", false)
+            return
+        }
+        let profile = try repository.create(name: "Graph surface", configuration: ProfileConfiguration(webRTCPolicy: .unrestricted, ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let (controller, _) = SafariGraph.openWindow(for: session, url: nil)
+        guard let tab = await loadGraphPage(in: controller) else {
+            check("safari-graph surface: the probe page loads in the new-mode window", false)
+            return
+        }
+        let surface = Self.flatten(try await js(tab.webView, probe) as? [String: Any] ?? [:])
+        check("safari-graph surface: the probe ran in the new-mode window (\(surface.count) keys)", surface.count > 50)
+        info("safari-graph surface: UA \(surface["ua"] ?? "nil")")
+        writeSurface(surface, name: "graph-macos")
+    }
+}
