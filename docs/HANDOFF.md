@@ -33,7 +33,7 @@ Rules from the owner:
 | `claude/safari-parity-p1-geolocation` | P1-2: geolocation denied by WebKit itself, the tab's UI delegate answers permission state | done, CI run 210 green (222/222) |
 | `claude/safari-parity-p1-webrtc` | P1-3: WebRTC escape routes, plus the WebTransport leak fix | done, CI runs 213–215 green (236/236) |
 | `claude/safari-parity-p1-ios` | P1-4: iPhone/iPad profiles; P2: TLS/HTTP2 parity, beacons, WebSocket and media through the proxy; P0-4: shim frames in `e.stack`; iOS fonts in the engine | done, CI run 230 green; PR #2 into the default branch (`main` does not exist), contains PR #1 |
-| `claude/process-per-profile` | A process per profile, stage 1: design and a minimal end-to-end mode behind a setting (off by default) | see *A process per profile* below |
+| `claude/process-per-profile` | A process per profile, stage 1: design and a minimal end-to-end mode behind a setting (off by default) | done, CI run 243 green (294/294 in each build: 264 + 30 new; Safari reference 449 keys identical); stage 2 not started |
 
 ## P1-3 state (`claude/safari-parity-p1-webrtc`)
 
@@ -242,7 +242,12 @@ device setting, off by default. **Stage 2 is not to be started** without the own
 - **Off in a profile's process (stage 2):** AutoFill, the packet tunnel, cookie import while it
   runs, sync of running profiles, warm-up, the launcher's Library for it.
 - **Self-test:** the group *process per profile* (both builds), with the self-test proxy's
-  `--socks-jp` listener (answers lookups as Japan) next to `--socks2` (Germany).
+  `--socks-jp` listener (answers lookups as Japan) next to `--socks2` (Germany). Results of CI run
+  243 and the stage-2 list: `docs/PROCESS_PER_PROFILE.md`.
+- **WebKit reports `ja` for `ja-JP`** (`[NSLocale minimizedLanguagesFromLanguages:]`, as in Safari);
+  `WebContentLanguage.reported` gives what it makes of a language, and the checks expect that.
+- **Another session works on `claude/safari-parity-p1-ios`** (PR #2: the device reference in
+  Safari on CI). This branch starts at `c025ece`; rebase it once PR #2 is merged.
 
 ## What is left
 

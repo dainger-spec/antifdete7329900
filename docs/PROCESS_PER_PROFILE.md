@@ -228,6 +228,18 @@ SOCKS5 listeners, one answering lookups as Germany (`--socks2`) and one as Japan
 
 A launch that the sandbox or LaunchServices blocks fails the group with `BLOCKED: <why>`.
 
+**CI run 243 (macOS 26, both builds): all 30 checks of the group pass, and the other 264.** Nothing
+was blocked under the App Sandbox:
+- The launcher listened in the container (`~/Library/Containers/dev.local.PrivacyBrowser/Data/tmp/`)
+  sandboxed, and in the per-user `$TMPDIR` unsandboxed.
+- Each profile process was started by LaunchServices (parent PID 1). Launch to `started` took
+  0.5–1.1 s; each process used 37 MB, its WebKit processes not counted.
+- DE: `Accept-Language: de-DE,de;q=0.9`, `de-DE` in `navigator` and `Intl`, `1.234.567,891`,
+  `15.1.2024`, Europe/Berlin in the page and a URL worker.
+- JP: `ja` (WebKit's minimized form), `1,234,567.891`, `2024/1/15`, Asia/Tokyo.
+- After `kill -9` the launcher had sealed the data 2.5 s later, and the next launch restored it.
+- The whole group takes about 22 s per build.
+
 ## Stage 2 (not started)
 
 1. **Passwords.** AutoFill in the profile process: suggestions and saves as requests to the
@@ -258,3 +270,14 @@ A launch that the sandbox or LaunchServices blocks fails the group with `BLOCKED
    - The number of profile processes as a setting.
    - A watchdog for a profile process that stops answering.
    - Crash reports per profile.
+   - The whole cost of a profile process (its WebKit network, GPU and web content processes, not
+     only its own 37 MB), measured from outside the app.
+10. **The lookup's own request.** The launcher's lookup through a profile's proxy (ipinfo.io, …)
+    carries the launcher's `Accept-Language` (URLSession's default: the app's languages, the UI
+    language until a profile decides it), not the profile's; the CI log shows `de-DE` sent through
+    the Japanese proxy. It is the same in the one-process mode. Sending the profile's language, or
+    none, is a small change, left for the owner.
+11. **An instance started by hand while a launch starts** (`open -n` on the app) can take that
+    launch's hello. It never gets the key (another PID), and the launch fails; the profile is not
+    opened, and that instance starts as a launcher. A profile process could instead refuse to
+    become a launcher once a launcher answered it at all.
