@@ -40,7 +40,7 @@ jobs:
         timeout-minutes: 50
         run: |
           build/venv/bin/python scripts/safari_process/experiments.py --out build/safari-process \
-            --setup-hosts --trust facts reference baseline webapps webapp-proxy open-n env-home exec-home sfwd copy other-user
+            --setup-hosts --trust facts reference baseline webapps webapp-proxy webapp-defaults-proxy open-n env-home exec-home sfwd copy other-user
       - uses: actions/upload-artifact@v4
         if: always()
         with:

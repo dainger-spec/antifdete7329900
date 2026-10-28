@@ -458,6 +458,13 @@ def experiment_specs(work_root, reports, proxy):
                      "B without: does a web app take a proxy of its own?",
             "instances": [("pa", WebApp("A", reports, proxy_args(proxy))), ("pb", WebApp("B", reports))],
         },
+        "webapp-defaults-proxy": {
+            "about": "WebKit's HTTPS proxy default written into the web apps' shared preferences domain "
+                     "(com.apple.Safari.WebApp, in their one sandbox container), then both web apps launched "
+                     "without arguments: one proxy for one web app, or for all of them?",
+            "instances": [("da", WebApp("A", reports)), ("db", WebApp("B", reports))],
+            "setup": "webapp-defaults", "proxy_port": proxy.port,
+        },
         "open-n": {
             "about": "`open -n` asks LaunchServices for a NEW instance of an app that is already running. Does a "
                      "second Safari process start, does it get its own storage, and does the per-process proxy "
@@ -647,6 +654,20 @@ def setup_webapps(spec, result):
     log("lsregister: " + "\n".join(result["lsregister"][:20]))
 
 
+WEB_APP_PREFS = "~/Library/Containers/com.apple.Safari.WebApp/Data/Library/Preferences/com.apple.Safari.WebApp"
+
+
+def web_app_defaults_proxy(port):
+    """Writes (port) or removes (None) WebKit2HTTPSProxy in the web apps' preferences domain."""
+    if port:
+        outcome = sh(f"defaults write {WEB_APP_PREFS} WebKit2HTTPSProxy http://127.0.0.1:{port}")
+    else:
+        outcome = sh(f"defaults delete {WEB_APP_PREFS} WebKit2HTTPSProxy")
+    sh("killall cfprefsd")
+    log(f"web app defaults WebKit2HTTPSProxy={'http://127.0.0.1:%s' % port if port else '(removed)'}: {outcome}; "
+        f"now: {sh(f'defaults read {WEB_APP_PREFS} WebKit2HTTPSProxy')}")
+
+
 def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
     log(f"\n=== {name}: {spec['about']}")
     quit_all()
@@ -657,6 +678,8 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
         launcher.prepare(work)
     if spec.get("setup") == "webapps":
         setup_webapps(spec, result)
+    if spec.get("setup") == "webapp-defaults":
+        web_app_defaults_proxy(spec["proxy_port"])
     marker = os.path.join(work, ".start")
     open(marker, "w").close()
     time.sleep(1.1)
@@ -704,6 +727,9 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
         time.sleep(1)
         launchers[inst].stop()
         quit_all()
+
+    if spec.get("setup") == "webapp-defaults":
+        web_app_defaults_proxy(None)
 
     # Where did the instances write? (Containers of other apps may be hidden from this process.)
     result["written"] = {}
