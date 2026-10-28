@@ -76,7 +76,10 @@ enum PrivacyScripts {
             var hardwareConcurrency: Int
             var screenWidth: Int
             var screenHeight: Int
-            var devicePixelRatio: Double
+            /// nil: the engine reports the device's own (`deviceScaleFactor(for:)`, set on each tab).
+            var devicePixelRatio: Double?
+            /// screen.orientation.type: the device held upright, as its window is.
+            var orientation: String
         }
     }
 
@@ -100,17 +103,18 @@ enum PrivacyScripts {
             geolocation = .init(mode: "fixed", latitude: latitude, longitude: longitude, accuracy: accuracy)
         }
         let device: ShimConfiguration.Device?
+        let scale = deviceScaleFactorByEngine ? nil : deviceScaleFactor(for: configuration).map(Double.init)
         switch configuration.deviceGeneration.platform {
         case .macOS:
             device = nil
         case .iOS:
             device = .init(platform: "iPhone", maxTouchPoints: 5, hardwareConcurrency: 4,
-                           screenWidth: 390, screenHeight: 844, devicePixelRatio: 3)
+                           screenWidth: 390, screenHeight: 844, devicePixelRatio: scale, orientation: "portrait-primary")
         case .iPadOS:
             // iPad Safari shows desktop websites by default: the Mac's UA and platform, with the
             // iPad's touch points and screen (how a page tells an iPad from a Mac).
             device = .init(platform: nil, maxTouchPoints: 5, hardwareConcurrency: 8,
-                           screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2)
+                           screenWidth: 820, screenHeight: 1180, devicePixelRatio: scale, orientation: "portrait-primary")
         }
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, engineTimeZone: timeZoneByEngine, geolocation: geolocation,
                                  webRTC: webRTC, webRTCRelay: relay, device: device,
@@ -128,6 +132,21 @@ enum PrivacyScripts {
         let gigabyte = 1024.0 * 1024.0 * 1024.0
         return 0.6 * (platform == .macOS ? 128 : 64) * gigabyte
     }
+
+    /// The declared device's pixel ratio for a mobile generation (an iPhone's 3, an iPad's 2), nil
+    /// for macOS. Each tab sets it in WebKit where it can (`BrowserTab`): devicePixelRatio, the
+    /// resolution media queries and image candidates then agree, as no JS getter can make them.
+    static func deviceScaleFactor(for configuration: ProfileConfiguration) -> CGFloat? {
+        switch configuration.deviceGeneration.platform {
+        case .macOS: return nil
+        case .iOS: return 3
+        case .iPadOS: return 2
+        }
+    }
+
+    /// `-[WKWebView _setOverrideDeviceScaleFactor:]` (private; macOS 26.6.2 has it).
+    static let deviceScaleFactorSelector = NSSelectorFromString("_setOverrideDeviceScaleFactor:")
+    static let deviceScaleFactorByEngine = class_getInstanceMethod(WKWebView.self, deviceScaleFactorSelector) != nil
 
     /// The declared device's screen in points for a mobile generation (the browser window is
     /// sized to it, so inner sizes never exceed the screen the page is told about); nil for macOS.
@@ -313,7 +332,13 @@ function patchDevice(w, device) {
     overrideGetter(w, s, 'availWidth', device.screenWidth); // iOS has no menu bar or Dock
     overrideGetter(w, s, 'availHeight', device.screenHeight);
   }
-  overrideGetter(w, w, 'devicePixelRatio', device.devicePixelRatio);
+  if (device.devicePixelRatio) overrideGetter(w, w, 'devicePixelRatio', device.devicePixelRatio);
+  // The device upright, as its window is (matchMedia's orientation follows the window natively).
+  const orientation = w.ScreenOrientation && w.ScreenOrientation.prototype;
+  if (orientation && 'type' in orientation) {
+    overrideGetter(w, orientation, 'type', device.orientation);
+    overrideGetter(w, orientation, 'angle', 0);
+  }
   // On iOS the window is the screen; inner sizes stay what the web view really is.
   overrideGetter(w, w, 'outerWidth', device.screenWidth);
   overrideGetter(w, w, 'outerHeight', device.screenHeight);

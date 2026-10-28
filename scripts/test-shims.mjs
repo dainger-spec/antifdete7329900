@@ -190,6 +190,11 @@ function makeWindow(config, parentContext, form = FORM, prepare = null) {
     var navigator = Object.assign(Object.create(Navigator.prototype), { geolocation: new Geolocation(), permissions: new Permissions(), storage: new StorageManager() });
     class Screen { get width() { illegal(this, Screen); return 1728; } get height() { illegal(this, Screen); return 1117; }
                    get availWidth() { illegal(this, Screen); return 1728; } get availHeight() { illegal(this, Screen); return 1079; } }
+    // As WebKit on a Mac: the screen held as the Mac's is, landscape.
+    globalThis.ScreenOrientation = class ScreenOrientation {
+      get type() { illegal(this, ScreenOrientation); return 'landscape-primary'; } get angle() { illegal(this, ScreenOrientation); return 0; } };
+    Object.defineProperty(Screen.prototype, 'orientation', { get() { illegal(this, Screen); return orientation; }, enumerable: true, configurable: true });
+    const orientation = Object.create(ScreenOrientation.prototype);
     var screen = new Screen();
     Object.defineProperty(globalThis, 'devicePixelRatio', { get() { return 2; }, set(v) {}, enumerable: true, configurable: true });
     Object.defineProperty(globalThis, 'outerWidth', { get() { return 1200; }, set(v) {}, enumerable: true, configurable: true });
@@ -527,7 +532,8 @@ const probeLies = `
   try { Reflect.setPrototypeOf(apiFunction, Object.create(apiFunction)); ('x' in apiFunction); throw new TypeError(); } catch (e) { if (!(e instanceof TypeError)) lies.push('failed at reflect set proto'); }
   return lies;
 })`;
-const iPhone = { platform: 'iPhone', maxTouchPoints: 5, hardwareConcurrency: 4, screenWidth: 390, screenHeight: 844, devicePixelRatio: 3 };
+const iPhone = { platform: 'iPhone', maxTouchPoints: 5, hardwareConcurrency: 4, screenWidth: 390, screenHeight: 844, devicePixelRatio: 3,
+                 orientation: 'portrait-primary' };
 const everything = { geolocation: { mode: 'fixed', latitude: 1, longitude: 2, accuracy: 3 }, webRTC: 'relayOnly', timeZone: 'Europe/Berlin', device: iPhone, storageQuota: 0.6 * 128 * 2 ** 30 };
 const wrappers = [
   ['Function.prototype.toString'], ['Date.prototype.getTimezoneOffset', 'Date'], ['Date.prototype.getHours', 'Date'],
@@ -627,8 +633,22 @@ test('iPhone profile: device values, as getters on the prototypes', () => {
   assert.throws(() => run(w, `Screen.prototype.width`), (e) => e.name === 'TypeError');
 });
 
+test('iPhone profile: held upright; the pixel ratio left to the engine where it sets it', () => {
+  const w = makeWindow({ ...base, device: iPhone });
+  assert.equal(run(w, `[screen.orientation.type, screen.orientation.angle].join()`), 'portrait-primary,0');
+  assert.throws(() => run(w, `ScreenOrientation.prototype.type`), (e) => e.name === 'TypeError');
+  assert.ok(run(w, `Function.prototype.toString.call(Object.getOwnPropertyDescriptor(ScreenOrientation.prototype, 'type').get)`).includes('[native code]'));
+  // Without a ratio in the configuration (BrowserTab sets it in WebKit) the window's getter is the engine's.
+  const { devicePixelRatio, ...byEngine } = iPhone;
+  const e = makeWindow({ ...base, device: byEngine });
+  assert.equal(run(e, `devicePixelRatio`), 2);
+  assert.equal(run(e, `Object.getOwnPropertyDescriptor(window, 'devicePixelRatio').get.toString().includes('return 2')`), true);
+  assert.equal(run(e, `[screen.width, outerWidth, screen.orientation.type].join()`), '390,390,portrait-primary');
+  assert.equal(run(makeWindow(base), `screen.orientation.type`), 'landscape-primary');
+});
+
 test('iPad profile: the Mac platform (desktop websites), the iPad touch points and screen', () => {
-  const iPad = { maxTouchPoints: 5, hardwareConcurrency: 8, screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2 };
+  const iPad = { maxTouchPoints: 5, hardwareConcurrency: 8, screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2, orientation: 'portrait-primary' };
   const w = makeWindow({ ...base, device: iPad });
   assert.equal(run(w, surface), JSON.stringify(['MacIntel', 5, 8, 'en-US', ['en-US'], 'undefined', 820, 1180, 820, 1180, 2, 820, 1180]));
   // navigator.platform is not replaced at all: still the harness's own getter.

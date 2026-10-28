@@ -109,6 +109,7 @@ final class BrowserSession {
 
     var tabContext: BrowserTabContext {
         BrowserTabContext(profileName: profileName, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version),
+                          deviceScaleFactor: PrivacyScripts.deviceScaleFactor(for: configuration),
                           passwordVault: passwordVault, passwordSettings: passwordSettings, library: library,
                           proxyCredential: configuration.proxy.flatMap { proxy in
                               proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
@@ -125,9 +126,19 @@ final class BrowserSession {
         webConfiguration.preferences.isFraudulentWebsiteWarningEnabled = configuration.safeBrowsingEnabled
         // Popups only in response to a user gesture.
         webConfiguration.preferences.javaScriptCanOpenWindowsAutomatically = false
-        // As Safari: the Fullscreen API is available (a WKWebView has it off by default, which a
-        // page sees as document.fullscreenEnabled === undefined).
-        webConfiguration.preferences.isElementFullscreenEnabled = true
+        // As Safari on the declared device (MDN browser-compat-data, Safari on iOS): the Fullscreen
+        // API on a Mac and an iPad, not on an iPhone (a WKWebView has it off by default, which a page
+        // sees as document.fullscreenEnabled === undefined); MediaSource on an iPad, not on an iPhone,
+        // where ManagedMediaSource alone remains; and no Notification on either outside a web app
+        // saved to the home screen.
+        let platform = configuration.deviceGeneration.platform
+        webConfiguration.preferences.isElementFullscreenEnabled = platform != .iOS
+        if platform == .iOS {
+            WebKitPreferences.setBool(webConfiguration.preferences, "_setMediaSourceEnabled:", false)
+        }
+        if platform != .macOS {
+            WebKitPreferences.setFeature(webConfiguration.preferences, "NotificationsEnabled", false)
+        }
         // As Safari: pages see the system's fonts only, not the ones the user installed (a WKWebView
         // shows those by default, and a font list is among the strongest fingerprints). There is no
         // public switch; this is the WKPreferences property Safari turns off, set only when this

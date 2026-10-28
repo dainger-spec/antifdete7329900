@@ -1546,11 +1546,15 @@ final class SelfTest {
              "webkitObject", "webdriver", "doNotTrack"].contains(key) || key.hasPrefix("webgl.")
                 || (key.hasPrefix("features.") && key != "features.safari") // window.safari is added on purpose (macOS)
         }.sorted()
-        for generationID in [DeviceGenerations.defaultID, "ios-26"] {
+        for generationID in [DeviceGenerations.defaultID, "ios-26", "ipados-26"] {
+            let platform = DeviceGenerations.resolved(id: generationID).platform
             // WebRTC left as the engine has it: its removal (the default policy) is checked by the
-            // shim checks and would otherwise be the one deliberate difference here.
+            // shim checks and would otherwise be the one deliberate difference here. A mobile
+            // generation runs in a pool of its own (a time zone), so its remote workers' User-Agent
+            // is the profile's alone (below).
             let profile = try repository.create(name: "Surface \(generationID)", configuration: ProfileConfiguration(
-                webRTCPolicy: .unrestricted, ephemeral: true, deviceGenerationID: generationID))
+                timeZoneIdentifier: platform == .macOS ? nil : "Europe/Berlin", webRTCPolicy: .unrestricted, ephemeral: true,
+                deviceGenerationID: generationID))
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
             let tabConfiguration = session.makeWebViewConfiguration()
             check("surface (\(generationID)): user-installed fonts hidden from pages, as in Safari",
@@ -1558,20 +1562,24 @@ final class SelfTest {
             let tab = BrowserTab(configuration: tabConfiguration, context: session.tabContext)
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
             let probed = Self.flatten(try await js(tab.webView, probe) as? [String: Any] ?? [:])
+            // A mobile profile is compared with a plain web view set up as that device's Safari.
+            var baseline = reference
+            if platform != .macOS { baseline = try await deviceReference(platform, probe: probe) }
             // Safari's quota (82 463 372 084 on any Mac), not the 1000 MiB WebKit gives an app that is not a browser.
             let quota = try await js(tab.webView, "return (await navigator.storage.estimate()).quota;") as? NSNumber
             let safariQuota = PrivacyScripts.safariStorageQuota(for: DeviceGenerations.resolved(id: generationID).platform).rounded(.up)
             check("surface (\(generationID)): storage quota is Safari's",
                   quota?.doubleValue == safariQuota, "\(quota?.stringValue ?? "nil") vs \(String(format: "%.0f", safariQuota))")
+            if platform != .macOS { try await mobileDevice(platform, tab: tab) }
             tab.tearDown()
             session.shutDown()
             try repository.delete(profile.id)
 
-            let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone"
+            let name = platform == .macOS ? "macOS" : platform == .iOS ? "iPhone" : "iPad"
             writeSurface(probed, name: name.lowercased())
-            let differing = engineKeys.filter { string(probed, $0) != string(reference, $0) }
+            let differing = engineKeys.filter { string(probed, $0) != string(baseline, $0) }
             check("surface (\(name)): engine and hardware signals as in a plain web view (\(engineKeys.count) keys)",
-                  differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
+                  differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(baseline, $0))" }.joined(separator: "; "))
             // The shim adds no noise and no visible wrappers: toString, length and own properties
             // of the rendering functions are the engine's own.
             let renderingNatives = probed.filter { $0.key.hasPrefix("natives.") && ($0.key.contains("Canvas") || $0.key.contains("WebGL")
@@ -1586,18 +1594,77 @@ final class SelfTest {
             if name == "macOS" {
                 for key in ["ua", "platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
                             "timeZone", "tzOffset", "dateString"] where key != "ua" {
-                    check("surface (macOS): native \(key)", string(probed, key) == string(reference, key),
-                          "\(string(probed, key)) vs \(string(reference, key))")
+                    check("surface (macOS): native \(key)", string(probed, key) == string(baseline, key),
+                          "\(string(probed, key)) vs \(string(baseline, key))")
                 }
                 check("surface (macOS): the UA is this Mac's Safari",
                       string(probed, "ua").hasSuffix("Version/\(HostSafari.version) Safari/605.1.15"), string(probed, "ua"))
-            } else {
+            } else if name == "iPhone" {
                 check("surface (iPhone): navigator", string(probed, "platform") == "iPhone" && string(probed, "maxTouchPoints") == "5"
                       && string(probed, "hardwareConcurrency") == "4" && string(probed, "standalone") == "false",
                       "\(string(probed, "platform")) \(string(probed, "maxTouchPoints")) \(string(probed, "hardwareConcurrency")) \(string(probed, "standalone"))")
                 check("surface (iPhone): screen", string(probed, "screen") == "390x844x390x844x3", string(probed, "screen"))
+            } else {
+                check("surface (iPad): navigator", string(probed, "platform") == "MacIntel" && string(probed, "maxTouchPoints") == "5"
+                      && string(probed, "hardwareConcurrency") == "8",
+                      "\(string(probed, "platform")) \(string(probed, "maxTouchPoints")) \(string(probed, "hardwareConcurrency"))")
+                check("surface (iPad): screen", string(probed, "screen") == "820x1180x820x1180x2", string(probed, "screen"))
+            }
+            if platform != .macOS {
+                // As MDN's browser-compat-data has Safari on iOS: Fullscreen and MediaSource on an
+                // iPad only, ManagedMediaSource on both, Notification only in a web app on the home screen.
+                let expected: [String: String] = [
+                    "features.MediaSource": platform == .iOS ? "undefined" : "function",
+                    "features.ManagedMediaSource": "function",
+                    "features.Notification": "undefined",
+                    "features.document.fullscreenEnabled": platform == .iOS ? "undefined" : "boolean",
+                    "features.Element.prototype.webkitRequestFullscreen": platform == .iOS ? "undefined" : "function",
+                    "orientation": "portrait-primary"]
+                let wrong = expected.filter { string(probed, $0.key) != $0.value }
+                check("surface (\(name)): Fullscreen, MediaSource, Notification and orientation as Safari on that device has them",
+                      wrong.isEmpty, wrong.map { "\($0.key): \(string(probed, $0.key)) vs \($0.value)" }.sorted().joined(separator: "; "))
             }
         }
+    }
+
+    /// A plain web view set up as `platform`'s Safari is (BrowserSession, stated again here) and
+    /// with its pixel ratio: what a mobile profile's engine signals are compared with.
+    private func deviceReference(_ platform: DeviceGeneration.Platform, probe: String) async throws -> [String: String] {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.preferences.isElementFullscreenEnabled = platform != .iOS
+        if platform == .iOS { WebKitPreferences.setBool(configuration.preferences, "_setMediaSourceEnabled:", false) }
+        WebKitPreferences.setFeature(configuration.preferences, "NotificationsEnabled", false)
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        if PrivacyScripts.deviceScaleFactorByEngine,
+           let method = class_getInstanceMethod(WKWebView.self, PrivacyScripts.deviceScaleFactorSelector) {
+            typealias Setter = @convention(c) (NSObject, Selector, CGFloat) -> Void
+            unsafeBitCast(method_getImplementation(method), to: Setter.self)(view, PrivacyScripts.deviceScaleFactorSelector,
+                                                                             platform == .iOS ? 3 : 2)
+        }
+        try await PageLoader.load(view, html: page, baseURL: origin)
+        return Self.flatten(try await js(view, probe) as? [String: Any] ?? [:])
+    }
+
+    /// A mobile profile's pixel ratio from the engine — devicePixelRatio and the resolution media
+    /// queries agree, which a JS getter cannot make them — and the profile's User-Agent in its
+    /// shared and service workers (its engine settings must not cost it that; see BrowserSession).
+    private func mobileDevice(_ platform: DeviceGeneration.Platform, tab: BrowserTab) async throws {
+        let name = platform == .iOS ? "iPhone" : "iPad"
+        let ratio = platform == .iOS ? 3 : 2
+        let media = try await js(tab.webView, "return [devicePixelRatio, matchMedia('(resolution: \(ratio)dppx)').matches, "
+                                 + "matchMedia('(-webkit-device-pixel-ratio: \(ratio))').matches].join();") as? String ?? "nil"
+        if PrivacyScripts.deviceScaleFactorByEngine {
+            check("surface (\(name)): the pixel ratio is the engine's own, and the media queries agree", media == "\(ratio),true,true", media)
+        } else {
+            info("surface (\(name)): this WebKit has no _setOverrideDeviceScaleFactor:, the shim reports the pixel ratio: \(media)")
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else { return }
+        try await PageLoader.load(tab.webView, url: URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!)
+        let userAgent = try await js(tab.webView, "return navigator.userAgent;") as? String ?? "nil"
+        let remote = try await js(tab.webView, Self.remoteWorkerUserAgentsScript) as? String ?? "nil"
+        check("surface (\(name)): shared and service workers report the profile's User-Agent",
+              remote == "\(userAgent)\n\(userAgent)", "\(remote.replacingOccurrences(of: "\n", with: " | ")) vs \(userAgent)")
     }
 
     /// The probe from the app bundle (build-app.sh copies it), else from PB_SELFTEST_PROBE.

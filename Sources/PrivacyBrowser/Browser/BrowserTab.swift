@@ -23,6 +23,8 @@ protocol BrowserTabHost: AnyObject {
 struct BrowserTabContext {
     let profileName: String
     let userAgent: String?
+    /// The declared device's pixel ratio (a mobile generation), set in WebKit for the tab.
+    var deviceScaleFactor: CGFloat? = nil
     let passwordVault: PasswordVault
     /// AutoFill on or off, and the sites passwords are never saved for, as they are now.
     let passwordSettings: ProfilePasswordSettings
@@ -98,6 +100,12 @@ final class BrowserTab: NSObject {
         // FINGERPRINTING LIMITATION: navigator.platform/vendor, the supported feature set and the
         // TLS/HTTP2 fingerprint still identify WebKit on macOS; a non-WebKit UA is inconsistent.
         webView.customUserAgent = context.userAgent
+        // The declared device's pixel ratio in the engine (PrivacyScripts.deviceScaleFactor).
+        if let scale = context.deviceScaleFactor, PrivacyScripts.deviceScaleFactorByEngine,
+           let method = class_getInstanceMethod(WKWebView.self, PrivacyScripts.deviceScaleFactorSelector) {
+            typealias Setter = @convention(c) (NSObject, Selector, CGFloat) -> Void
+            unsafeBitCast(method_getImplementation(method), to: Setter.self)(webView, PrivacyScripts.deviceScaleFactorSelector, scale)
+        }
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
         webView.navigationDelegate = self
