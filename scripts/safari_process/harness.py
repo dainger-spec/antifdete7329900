@@ -532,6 +532,7 @@ RUN_PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><title>sp-run</t
     notification: typeof window.Notification === 'function' ? Notification.permission : 'absent',
     windowSafari: typeof window.safari,
     ownWindowProps: Object.getOwnPropertyNames(window).length,
+    windowProps: Object.getOwnPropertyNames(window).sort(),
     referrer: document.referrer,
     historyLength: history.length,
   });
@@ -541,6 +542,10 @@ RUN_PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><title>sp-run</t
     body: JSON.stringify({ inst, run, phase, page, ...data }),
   });
   try {
+    // A web app may reopen the page it showed last instead of its start page: go where this
+    // instance's current launch is planned to go.
+    const planned = await fetch(`/current?inst=${encodeURIComponent(inst)}`, { cache: 'no-store' }).then((r) => r.text());
+    if (planned && new URL(planned).searchParams.get('run') !== run) { location.replace(planned); return; }
     await report('pre', { ...(await read()), env: env() });
     log('pre reported');
     if (seed) {
@@ -592,7 +597,7 @@ def marker_tags(cookie_header, document_cookie, local_storage, indexed_db):
 
 class ReportServer:
     def __init__(self, port=0):
-        self.events, self.reports, self.plan = set(), [], {}
+        self.events, self.reports, self.plan, self.plan_by_inst, self.window_props = set(), [], {}, {}, {}
         self.condition = threading.Condition()
         owner = self
 
@@ -636,6 +641,10 @@ class ReportServer:
                         page = (f"<!doctype html><html><head><meta charset='utf-8'><title>SPWA-{name}</title>"
                                 f"</head><body><h1>SPWA-{name}</h1></body></html>").encode()
                         self._send(200, "text/html; charset=utf-8", page)
+                elif url.path == "/current":
+                    with owner.condition:
+                        target = owner.plan_by_inst.get(query.get("inst", ""), "")
+                    self._send(200, "text/plain", target.encode())
                 elif url.path == "/await":
                     event, timeout = query.get("event", ""), float(query.get("timeout", "60"))
                     with owner.condition:
@@ -681,6 +690,9 @@ class ReportServer:
         with self.condition:
             if target:
                 self.plan[name] = target
+                inst = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(target).query)).get("inst")
+                if inst:
+                    self.plan_by_inst[inst] = target
             else:
                 self.plan.pop(name, None)
 

@@ -227,8 +227,8 @@ class ExecBinary(Launcher):
     """Runs an executable directly (no LaunchServices) with its own HOME/CFFIXED_USER_HOME, then
     hands it the URL with a GURL Apple Event addressed to its PID."""
 
-    def __init__(self, binary, home, wait=60):
-        self.binary, self.home, self.wait = binary, home, wait
+    def __init__(self, binary, home, wait=60, args=None):
+        self.binary, self.home, self.wait, self.args = binary, home, wait, args or []
 
     def start(self, url):
         os.makedirs(self.home + "/tmp", exist_ok=True)
@@ -236,10 +236,11 @@ class ExecBinary(Launcher):
         if not os.path.exists(self.binary):
             return {"command": self.binary, "error": "no such executable"}
         out = open(os.path.join(self.home, "stdout.log"), "a")
-        self.process = subprocess.Popen([self.binary], env=env, stdout=out, stderr=subprocess.STDOUT)
+        self.process = subprocess.Popen([self.binary] + self.args, env=env, stdout=out, stderr=subprocess.STDOUT)
         time.sleep(6)
         alive = self.process.poll() is None
-        info = {"command": f"HOME=CFFIXED_USER_HOME={self.home} {self.binary}", "pid": self.process.pid,
+        info = {"command": f"HOME=CFFIXED_USER_HOME={self.home} {self.binary} {' '.join(self.args)}".strip(),
+                "pid": self.process.pid,
                 "alive_after_6s": alive, "exit": self.process.poll()}
         if alive:
             info["gurl"] = send_url(self.process.pid, url)
@@ -247,6 +248,20 @@ class ExecBinary(Launcher):
             info["stdout"] = open(os.path.join(self.home, "stdout.log")).read()[-2000:]
             info["log"] = sh(CONSTRAINT_LOG, timeout=120)[1].splitlines()
         return info
+
+    def stop(self):
+        quit_pid(self.process)
+
+
+def quit_pid(process):
+    """Asks a process started directly to quit (it saves its cookies on the way out), then ends it."""
+    if not process or process.poll() is not None:
+        return
+    send_url(process.pid, "--quit")
+    try:
+        process.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        process.terminate()
 
 
 class CopiedSafari(Launcher):
@@ -262,7 +277,9 @@ class CopiedSafari(Launcher):
     def prepare(self, work):
         self.app = os.path.join(work, f"SafariCopy-{self.variant}.app")
         shutil.rmtree(self.app, ignore_errors=True)
-        self.notes = {"copy": sh(["ditto", SAFARI_APP, self.app], timeout=300)}
+        # /Applications/Safari.app is a symlink into the App cryptex: copy what it points to.
+        self.notes = {"source": os.path.realpath(SAFARI_APP),
+                      "copy": sh(["ditto", os.path.realpath(SAFARI_APP), self.app], timeout=300)}
         if self.variant != "identical":
             plist = os.path.join(self.app, "Contents", "Info.plist")
             self.notes["identifier"] = sh(["/usr/libexec/PlistBuddy", "-c",
@@ -286,7 +303,11 @@ class CopiedSafari(Launcher):
         if not running:
             # Straight exec, to see the kernel's answer rather than LaunchServices'.
             binary = os.path.join(self.app, "Contents", "MacOS", "Safari")
-            proc = subprocess.Popen([binary], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            try:
+                proc = subprocess.Popen([binary], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            except OSError as exc:
+                info["exec"] = {"error": str(exc)}
+                return info
             time.sleep(5)
             info["exec"] = {"exit": proc.poll()}
             if proc.poll() is None:
@@ -389,12 +410,16 @@ def experiment_specs(work_root, reports, proxy):
         },
         "webapps": {
             "about": "Two Safari web apps (File > Add to Dock, macOS 14+) for the same origin, created by UI "
-                     "scripting, plus Safari itself. Web app A gets WebKit's per-process HTTPS proxy default "
-                     "as a launch argument (-WebKit2HTTPSProxy). Separate processes? Separate data? Safari's "
-                     "TLS? Safari-only APIs (ApplePaySession, PushManager)?",
-            "instances": [("s8", OpenSafari()), ("wa", WebApp("A", reports, proxy_args(proxy))),
-                          ("wb", WebApp("B", reports))],
+                     "scripting, plus Safari itself. Separate processes? Separate data, from Safari and from each "
+                     "other? Safari's TLS? Safari-only APIs (ApplePaySession, PushManager)?",
+            "instances": [("s8", OpenSafari()), ("wa", WebApp("A", reports)), ("wb", WebApp("B", reports))],
             "setup": "webapps",
+        },
+        "webapp-proxy": {
+            "about": "Web app A (created by the webapps experiment) launched with WebKit's per-process HTTPS "
+                     "proxy default as a launch argument (`open <bundle> --args -WebKit2HTTPSProxy …`), web app "
+                     "B without: does a web app take a proxy of its own?",
+            "instances": [("pa", WebApp("A", reports, proxy_args(proxy))), ("pb", WebApp("B", reports))],
         },
         "open-n": {
             "about": "`open -n` asks LaunchServices for a NEW instance of an app that is already running. Does a "
@@ -416,10 +441,12 @@ def experiment_specs(work_root, reports, proxy):
         "sfwd": {
             "about": "SafariForWebKitDevelopment, the second executable inside Safari.app (WebKit's run-safari "
                      "uses it), twice, each with its own CFFIXED_USER_HOME: Safari's UI without Safari's sandbox "
-                     "container. Isolated? Which Safari-only APIs remain?",
+                     "container. Isolated? Which Safari-only APIs remain? The second gets WebKit's per-process "
+                     "HTTPS proxy default as an argument.",
             "instances": [("s5", OpenSafari()),
                           ("f5", ExecBinary(SAFARI_DEV_BIN, os.path.join(work_root, "sfwd", "home-f5"))),
-                          ("g5", ExecBinary(SAFARI_DEV_BIN, os.path.join(work_root, "sfwd", "home-g5")))],
+                          ("g5", ExecBinary(SAFARI_DEV_BIN, os.path.join(work_root, "sfwd", "home-g5"),
+                                            args=proxy_args(proxy)))],
         },
         "copy": {
             "about": "A copy of Safari.app run from another folder: bit-identical (launch constraints?), with a new "
@@ -561,6 +588,10 @@ def setup_webapps(spec, result):
                 shutil.rmtree(launcher.bundle, ignore_errors=True)
             created = launcher.create()
             log(f"[{inst}] web app created: {created} {json.dumps(launcher.notes.get('add_to_dock'))}")
+            for key in ("bundle_id", "bundle_files", "info_plist", "codesign"):
+                if key in launcher.notes:
+                    value = launcher.notes[key]
+                    log(f"[{inst}] web app {key}:\n" + ("\n".join(value) if isinstance(value, list) else str(value)))
             if not created:
                 log(f"[{inst}] UI: {json.dumps(launcher.notes.get('ui'))}")
             quit_all()
@@ -568,10 +599,15 @@ def setup_webapps(spec, result):
     result["web_app_container"] = sh("ls -la ~/Library/Containers/com.apple.Safari.WebApp/Data/Library 2>&1; "
                                      "find ~/Library/Containers/com.apple.Safari.WebApp/Data/Library -maxdepth 4 "
                                      "-type d 2>&1 | head -60")[1].splitlines()
-    result["template_app_vault"] = sh("ls -la ~/Library/Application\\ Support/com.apple.LaunchServicesTemplateApp.dv 2>&1")[1]
     result["lsregister"] = sh("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/"
                               "Support/lsregister -dump 2>/dev/null | grep -n -E 'SPWA-|com.apple.Safari.WebApp' | head -40",
                               timeout=120)[1].splitlines()
+    result["template_app_vault"] = sh("ls -laO ~/Library/Application\\ Support/ 2>&1 | grep -i template; "
+                                      "ls -la ~/Library/Application\\ Support/com.apple.LaunchServicesTemplateApp.dv 2>&1")[1]
+    result["web_app_containers"] = sh("ls ~/Library/Containers/com.apple.Safari.WebApp/Data/Library/Containers/ 2>&1")[1]
+    log("template app vault: " + result["template_app_vault"])
+    log("per-web-app containers: " + result["web_app_containers"])
+    log("lsregister: " + "\n".join(result["lsregister"][:20]))
 
 
 def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
@@ -618,9 +654,9 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
             "tls": summarize_tls(tls.for_host(f"{inst}.{TLS_DOMAIN}")),
             "proxied": [h for h in proxy.hosts()[proxy_before:] if f"{inst}.{TLS_DOMAIN}" in h],
         }
-    quit_all()
     for launcher in launchers.values():
         launcher.stop()
+    quit_all()
 
     # Run 2: each instance alone, launched the same way: are its own markers still there?
     for inst in insts:
@@ -629,8 +665,8 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
         result["relaunch"][inst] = launchers[inst].start(run_url(reports, inst, 2, False, [], None))
         result["instances"][inst]["relaunch"] = reports.wait(inst, "pre", run="2", timeout=launchers[inst].wait)
         time.sleep(1)
-        quit_all()
         launchers[inst].stop()
+        quit_all()
 
     # Where did the instances write? (Containers of other apps may be hidden from this process.)
     result["written"] = {}
@@ -639,10 +675,14 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
                         ("~/Library/Safari", "~/Library/Safari"), ("~/Library/WebKit", "~/Library/WebKit"),
                         ("~/Library/Caches", "~/Library/Caches")] + \
                        [(f"home of {inst}", launchers[inst].home) for inst in insts if launchers[inst].home]:
-        code, output = sh(f"find {path} -newer {shlex.quote(marker)} -type f 2>&1 | grep -v -E '/(Logs|tmp)/' | head -60")
+        if label.startswith("home of"):
+            code, output = sh(f"find {shlex.quote(path)} -maxdepth 5 -type d 2>&1 | sed 's|^{path}||' | head -80")
+        else:
+            code, output = sh(f"find {path} -newer {shlex.quote(marker)} -type f 2>&1 | grep -v -E '/(Logs|tmp)/' | head -60")
         result["written"][label] = output.splitlines()
     for label, lines in result["written"].items():
-        log(f"written since start, {label}: {json.dumps(lines[:25])}")
+        if label.startswith("home of") or label.startswith("Web app") or label.startswith("Safari container"):
+            log(f"written since start, {label}: {json.dumps(lines[:80])}")
     for inst in insts:
         info = result["instances"][inst]
         info["verdict"] = verdict(inst, insts, info["seeded"], info["final"], info.get("relaunch"))
@@ -650,8 +690,20 @@ def run_experiment(name, spec, reports, tls, proxy, out_dir, tls_port):
         # page also ran somewhere else (a tab restored into another process, for example).
         info["page_loads"] = sorted({r.get("page") for r in reports.reports
                                      if r.get("inst") == inst and str(r.get("run")) == "1" and r.get("page")})
-        env = (info.get("pre") or {}).get("env") or {}
+        env = dict((info.get("pre") or {}).get("env") or {})
+        props = env.pop("windowProps", None)
+        if props is not None:
+            reports.window_props.setdefault(inst, props)
+            base = reports.window_props.get("s1")
+            if base is not None and inst != "s1":
+                info["window_props_diff"] = {"only_here": sorted(set(props) - set(base)),
+                                             "only_in_safari": sorted(set(base) - set(props))}
+                log(f"[{inst}] window properties vs Safari s1: {json.dumps(info['window_props_diff'])}")
         log(f"[{inst}] page loads in run 1: {len(info['page_loads'])}; env: {json.dumps(env)}")
+        apps = [r for r in reports.reports if r.get("phase") == "app-start" and r.get("planned", "") and
+                f"inst={inst}&" in (r.get("planned") or "")]
+        if isinstance(launchers[inst], WebApp):
+            log(f"[{inst}] web app start page requests: {len(apps)}")
         log(f"[{inst}] verdict: {json.dumps(info['verdict'])}")
         log(f"[{inst}] tls: {json.dumps({k: v for k, v in (info['tls'] or {}).items() if k != 'shape'})}")
         if info["proxied"]:
