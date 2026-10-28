@@ -34,6 +34,7 @@ struct ProfileDraft {
     var warnOnProxyIPChange = false
     var webRTC: WebRTCPolicy = .disabled
     var ephemeral = false
+    var useSafariChrome = false
     var safeBrowsing = false
     var historyEnabled = true
     /// 0 = keep forever.
@@ -85,6 +86,7 @@ struct ProfileDraft {
         warnOnProxyIPChange = c.warnOnProxyIPChange
         webRTC = c.webRTCPolicy
         ephemeral = c.ephemeral
+        useSafariChrome = c.useSafariChrome
         safeBrowsing = c.safeBrowsingEnabled
         historyEnabled = c.historyEnabled
         historyRetentionDays = c.historyRetentionDays ?? 0
@@ -168,6 +170,7 @@ struct ProfileDraft {
         configuration.warnOnProxyIPChange = warnOnProxyIPChange
         configuration.webRTCPolicy = webRTC
         configuration.ephemeral = ephemeral
+        configuration.useSafariChrome = useSafariChrome
         configuration.safeBrowsingEnabled = safeBrowsing
         configuration.historyEnabled = historyEnabled
         configuration.historyRetentionDays = historyRetentionDays == 0 ? nil : historyRetentionDays

@@ -302,6 +302,7 @@ struct ProfileEditorForm: View {
             }
             EditorDivider()
             EditorToggle(L("editor.safeBrowsing"), isOn: $draft.safeBrowsing)
+            EditorToggle("Safari chrome (experimental)", detail: "Open windows via Safari.framework instead of the built-in view. Requires the safari-framework-path build.", isOn: $draft.useSafariChrome)
             EditorNote(L("editor.privacy.footer"))
         }
     }
