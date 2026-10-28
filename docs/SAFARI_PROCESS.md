@@ -105,8 +105,12 @@ IndexedDB), waits until every other process of the experiment has written its ma
 again; each process is then quit and launched again alone, to see whether its markers persisted. A
 local TLS server records every connection's ClientHello and, with a throwaway CA the runner trusts,
 the HTTP/2 preface. No WebDriver drives these pages. Runners: macOS 14.8.9 (Safari 26.6), 15.7.9
-(Safari 26.6.1), 26.6.2 (Safari 26.6.2), all Apple silicon. The results were the same on all three
-unless a row says otherwise.
+(Safari 26.6.1), 26.6.2 (Safari 26.6.2), all Apple silicon. The results were the same on all three,
+and in every round, unless a row says otherwise. The job logs of the "Safari process experiments"
+workflow on this branch hold the raw data; the runs this table comes from are
+[40744245384](https://github.com/dainger-spec/antifdete7329900/actions/runs/40744245384),
+[40747713223](https://github.com/dainger-spec/antifdete7329900/actions/runs/40747713223) and
+[40751872846](https://github.com/dainger-spec/antifdete7329900/actions/runs/40751872846).
 
 | What was launched | Separate process | Own storage | Survives a relaunch | ClientHello and HTTP/2 = Safari's | Verdict |
 |---|---|---|---|---|---|
