@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26.6.2, 210/210 checks in both builds):
+(macOS 26.6.2, 215/215 checks in both builds):
 
 | Claim | Self-test result |
 |---|---|
@@ -32,7 +32,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
 | Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks; an iPhone profile reports its device class's navigator and screen values; user-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
-| Shims in workers and frames | a worker made from a blob runs in the profile's zone, stays strict and keeps its line numbers, also on a page whose CSP has no `'unsafe-eval'`, `connect-src 'self'` and a `report-uri`: the site receives no violation report beyond the page's own controls (a blocked image, an eval in a worker of its own, which the CSP blocks there); with Trusted Types required, a worker from a `TrustedScriptURL`, or under the page's default policy, starts from the page's own URL; a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
+| Shims in workers and frames | a worker made from a blob runs in the profile's zone, stays strict and keeps its line numbers, also on a page whose CSP has no `'unsafe-eval'`, `connect-src 'self'` and a `report-uri`: the site receives no violation report beyond the page's own controls (a blocked image, which is reported; an eval in a worker of its own, which the CSP blocks there — macOS 26.6.2 reports a page's violations, not a worker's), and the worker still reports the profile's zone, strict mode and the page's line numbers; with Trusted Types required, a worker from a `TrustedScriptURL`, or under the page's default policy, starts from the page's own URL; a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
 | Proxy: IPv6, unresolvable host | an HTTP proxy on `[::1]` tunnels the load; a proxy whose host does not resolve fails closed |
 | Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the packet tunnel cannot carry it (§5) |
 | Packet tunnel | a build without the network extension reports it (the tunnel sheet says what a signed build needs), and proxied profiles keep WebRTC off. The tunnel's TURN server and SOCKS5 relay are measured by the leak check instead ([TUNNEL.md](TUNNEL.md)) |
