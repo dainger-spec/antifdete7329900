@@ -9,7 +9,8 @@ import SwiftUI
 /// full-size content) and captured with its AppKit controls. Pictures cannot show whether the
 /// controls under the transparent title bar still take clicks, so that is checked too: a click is
 /// posted onto the header's New Profile button, and one onto the sidebar's Lock button as the
-/// control. Exit code 0 when every capture was written and both clicks arrived.
+/// control. Every capture also checks that no tab or segment label is cut (`LabelCheck`). Exit code
+/// 0 when every capture was written, both clicks arrived and every label fits.
 @MainActor
 enum UISnapshots {
     static func start(arguments: [String]) {
@@ -43,6 +44,7 @@ enum UISnapshots {
             return 1
         }
         NSApp.activate(ignoringOtherApps: true)
+        TabBarLayoutLog.shared = TabBarLayoutLog()
         let rows = sampleRows()
         let clicks = ClickLog()
         var actions = ProfileActions()
@@ -93,7 +95,27 @@ enum UISnapshots {
         for (name, sample, tab, isNew, error) in editors {
             problems += await Shot(name: name, size: ProfileEditorForm.size, titled: false) {
                 EditorPreview(draft: sample, tab: tab, isNew: isNew, error: error)
-            }.capture(into: folder)
+            }.capture(into: folder) { _ in
+                await LabelCheck.tabBar(in: name, expected: ProfileEditorForm.Tab.allCases.map { L($0.titleKey) },
+                                  width: ProfileEditorForm.size.width - 48)
+            }
+        }
+        // LabelCheck's controls: the editor's old segmented tabs as they were (a picture to compare
+        // with, its verdict only reported: on Russian the outer labels were cut), and the same
+        // squeezed to 200 pt, which the check must report as cut.
+        let tabTitles = ProfileEditorForm.Tab.allCases.map { L($0.titleKey) }
+        problems += await Shot(name: "check-old-segmented-tabs", size: CGSize(width: ProfileEditorForm.size.width, height: 64),
+                               titled: false, checksLabels: false) {
+            SegmentedTabsSample(titles: tabTitles, width: ProfileEditorForm.size.width - 48)
+        }.capture(into: folder) { window in
+            await LabelCheck.segmentedControls(in: "check-old-segmented-tabs", root: window.contentView?.superview ?? window.contentView ?? NSView(),
+                                         mode: .report)
+        }
+        problems += await Shot(name: "check-cut-control", size: CGSize(width: 260, height: 64), titled: false, checksLabels: false) {
+            SegmentedTabsSample(titles: tabTitles, width: 200)
+        }.capture(into: folder) { window in
+            await LabelCheck.segmentedControls(in: "check-cut-control", root: window.contentView?.superview ?? window.contentView ?? NSView(),
+                                         mode: .expectCut)
         }
         // The other sheets, as they open.
         let model = AppModel()
@@ -235,6 +257,11 @@ enum UISnapshots {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             problems += capture(window, name: "browser-tabs", into: folder)
             window.close()
+            // The library window (bookmarks and history), with its segmented switch.
+            let navigation = LibraryNavigation()
+            problems += await Shot(name: "library", size: CGSize(width: 620, height: 460)) {
+                LibraryView(library: library, navigation: navigation, open: { _ in })
+            }.capture(into: folder)
             return problems
         } catch {
             print("FAIL browser window snapshot: \(error)")
@@ -333,12 +360,15 @@ private struct Shot {
     let name: String
     let size: CGSize
     var titled = true
+    var checksLabels = true
     let content: () -> AnyView
 
-    init<V: View>(name: String, size: CGSize, titled: Bool = true, @ViewBuilder content: @escaping () -> V) {
+    init<V: View>(name: String, size: CGSize, titled: Bool = true, checksLabels: Bool = true,
+                  @ViewBuilder content: @escaping () -> V) {
         self.name = name
         self.size = size
         self.titled = titled
+        self.checksLabels = checksLabels
         self.content = { AnyView(content()) }
     }
 
@@ -351,6 +381,7 @@ private struct Shot {
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: 60, y: 60), size: size),
                               styleMask: style, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        TabBarLayoutLog.shared?.reset()
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         Theme.applyChrome(to: window)
@@ -374,6 +405,7 @@ private struct Shot {
             print("FAIL no bitmap for \(name)")
             problems += 1
         }
+        if checksLabels { problems += LabelCheck.segmentedControls(in: name, root: frameView) }
         if let extra { problems += await extra(window) }
         window.orderOut(nil)
         window.close()
@@ -393,6 +425,97 @@ private struct Shot {
             print("FAIL could not write \(url.path): \(error)")
             return 1
         }
+    }
+}
+
+/// No label of a tab bar or a segmented control is cut, in the language the snapshots run in.
+@MainActor
+private enum LabelCheck {
+    enum Mode {
+        /// A cut label is a problem.
+        case check
+        /// Only says what it finds (the old tabs, kept as a picture).
+        case report
+        /// The control: a cut label must be found, or the check itself is broken.
+        case expectCut
+    }
+
+    /// Each NSSegmentedControl in the window is at least as wide as its labels need (its intrinsic
+    /// width: with equal-width segments, the longest label times the count).
+    static func segmentedControls(in shot: String, root: NSView, mode: Mode = .check) -> Int {
+        var cut = 0
+        let controls = segmented(in: root)
+        for control in controls {
+            let labels = (0..<control.segmentCount).map { control.label(forSegment: $0) ?? "" }
+            let needed = control.intrinsicContentSize.width
+            let has = control.frame.width
+            let fits = needed <= has + 0.5
+            if !fits { cut += 1 }
+            let verdict = mode == .report ? "INFO" : (fits ? "PASS" : (mode == .expectCut ? "PASS" : "FAIL"))
+            print("\(verdict) \(fits ? "labels fit" : "label cut") in \(shot): segmented [\(labels.joined(separator: " | "))] "
+                  + "needs \(Int(needed.rounded(.up))) pt, has \(Int(has))")
+        }
+        switch mode {
+        case .check: return cut
+        case .report: return 0
+        case .expectCut:
+            if cut == 0 {
+                print("FAIL the label check missed the cut control in \(shot) (\(controls.count) segmented controls found)")
+                return 1
+            }
+            print("PASS the label check finds a cut label (control)")
+            return 0
+        }
+    }
+
+    /// Every label of the shot's LumenTabBar was laid out, none narrower than its text; also says
+    /// whether the row fits in `width` without scrolling.
+    static func tabBar(in shot: String, expected: [String], width: CGFloat) -> Int {
+        let laidOut = TabBarLayoutLog.shared?.widths ?? [:]
+        var problems = 0
+        var total: CGFloat = 0
+        for text in expected {
+            let needed = ceil((text as NSString).size(withAttributes: [.font: LumenTabBar<Int>.labelFont]).width)
+            total += needed + 2 * LumenTabBar<Int>.horizontalPadding
+            guard let has = laidOut[text] else {
+                print("FAIL label cut in \(shot): tab \"\(text)\" was not laid out")
+                problems += 1
+                continue
+            }
+            if needed > has + 0.5 {
+                print("FAIL label cut in \(shot): tab \"\(text)\" needs \(Int(needed)) pt, has \(Int(has))")
+                problems += 1
+            }
+        }
+        total += CGFloat(expected.count - 1) * 4 + 4
+        if problems == 0 {
+            print("PASS labels fit in \(shot): tabs [\(expected.joined(separator: " | "))], row \(Int(total)) of \(Int(width)) pt"
+                  + (total > width ? " (scrolls)" : ""))
+        }
+        return problems
+    }
+
+    private static func segmented(in view: NSView) -> [NSSegmentedControl] {
+        (view as? NSSegmentedControl).map { [$0] } ?? view.subviews.flatMap { segmented(in: $0) }
+    }
+}
+
+/// The editor's tabs as a segmented picker, as they were before LumenTabBar (LabelCheck's controls).
+private struct SegmentedTabsSample: View {
+    let titles: [String]
+    let width: CGFloat
+    @State private var selection = 0
+
+    var body: some View {
+        Picker(L("editor.tabs"), selection: $selection) {
+            ForEach(Array(titles.enumerated()), id: \.offset) { Text(verbatim: $0.element).tag($0.offset) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: width)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.raised)
+        .tint(Theme.accentFill)
     }
 }
 

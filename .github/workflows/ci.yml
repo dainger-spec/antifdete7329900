@@ -24,12 +24,16 @@ jobs:
         with:
           node-version: 22
       - run: TZ=America/New_York node scripts/test-shims.mjs
+      # Every test again on the shim as a worker's blob gets it: one line, made by the shim from its
+      # own text (a mistake there would break the page's workers, not only the shim).
+      - run: TZ=America/New_York SHIM_FORM=worker node scripts/test-shims.mjs
       # The same tests under JavaScriptCore, the engine Safari runs: own-property order, error
       # messages and function text differ from V8 in ways a page can see.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.2.23
       - run: TZ=America/New_York bun scripts/test-shims.mjs
+      - run: TZ=America/New_York SHIM_FORM=worker bun scripts/test-shims.mjs
 
   macos:
     name: macOS build, core tests, WebKit self-test
@@ -49,14 +53,17 @@ jobs:
         run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: UI snapshots for design review, and clicks through the transparent title bar
         # The app's screens rendered with sample data (UISnapshots.swift) in both UI languages, uploaded
-        # as the ui-snapshots artifact. A click that does not reach its button fails the job at the end.
+        # as the ui-snapshots artifact. A click that does not reach its button, or a tab or segment
+        # label cut short, fails the job at the end (UI snapshot checks).
         id: ui
         continue-on-error: true
         timeout-minutes: 8
         run: |
+          set -o pipefail
           status=0
+          mkdir -p build/ui-snapshots
           for lang in en ru; do
-            PRIVACYBROWSER_LANG=$lang build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --render-ui-snapshots "$PWD/build/ui-snapshots/$lang" || status=1
+            PRIVACYBROWSER_LANG=$lang build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --render-ui-snapshots "$PWD/build/ui-snapshots/$lang" 2>&1 | tee "build/ui-snapshots/$lang.log" || status=1
           done
           exit $status
       - uses: actions/upload-artifact@v4
@@ -85,14 +92,25 @@ jobs:
       - name: Compare the fingerprint surface with this Mac's real Safari (safaridriver)
         run: |
           sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
-          python3 scripts/safari_reference.py --compare build/surface-unsandboxed/surface-macos.json --out build/safari-surface.json
-          code=$?
+          code=0
+          python3 scripts/safari_reference.py --compare build/surface-unsandboxed/surface-macos.json --out build/safari-surface.json || code=$?
           if [ "$code" = "2" ]; then echo "::warning::Safari could not be driven on this runner; surface not compared"; exit 0; fi
+          exit $code
+      - name: Device reference pages in Safari (safaridriver)
+        # scripts/device_reference.py as a device opens it: the TLS/HTTP/2 page, its link, the
+        # measurement page until "sent", and the JSON written. A runner where Safari cannot be driven
+        # (or the certificate trusted) only warns.
+        if: always()
+        timeout-minutes: 6
+        run: |
+          code=0
+          python3 scripts/device_reference_safari.py --out build/device-reference-safari.json || code=$?
+          if [ "$code" = "2" ]; then echo "::warning::Safari could not be driven for the device reference pages"; exit 0; fi
           exit $code
       - name: Leak check — does QUIC or WebRTC go around a profile's proxy?
         # Real forwarding proxies on this runner and a profile without one as the control; see
-        # scripts/leak_check.py. Fails only on traffic seen going around a proxy (a site that is
-        # down makes it inconclusive, not red).
+        # scripts/leak_check.py. Fails on traffic seen going around a proxy, or on a TLS/HTTP2
+        # fingerprint that changes through one (a site that is down makes it inconclusive, not red).
         if: always()
         timeout-minutes: 10
         run: python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/leaks
@@ -112,6 +130,7 @@ jobs:
             build/surface-sandboxed
             build/surface-unsandboxed
             build/safari-surface.json
+            build/device-reference-safari.json
             build/live
             build/leaks
           if-no-files-found: ignore
@@ -129,7 +148,22 @@ jobs:
           name: PrivacyBrowser.app
           path: build/sandboxed/PrivacyBrowser.app
       - name: UI snapshot checks
-        if: always() && steps.ui.outcome == 'failure'
+        # No tab or segment label cut, in either language: every editor tab bar and segmented
+        # control reported PASS, and the check found its deliberately cut control.
+        if: always() && steps.ui.outcome != 'skipped'
         run: |
-          echo "::error::the UI snapshot step failed (a capture was not written or a click did not reach its button); see its log"
-          exit 1
+          status=0
+          for lang in en ru; do
+            log="build/ui-snapshots/$lang.log"
+            if [ ! -f "$log" ]; then echo "::error::no snapshot log for $lang"; status=1; continue; fi
+            grep -E "^(PASS|FAIL|INFO) .*(label|labels) " "$log" | sed "s/^/[$lang] /"
+            while IFS= read -r line; do echo "::error::[$lang] $line"; status=1; done < <(grep "^FAIL label cut" "$log")
+            tabs=$(grep -c "^PASS labels fit in editor-.*: tabs" "$log" || true)
+            [ "$tabs" -ge 5 ] || { echo "::error::[$lang] only $tabs editor tab bars checked"; status=1; }
+            grep -q "^PASS the label check finds a cut label" "$log" || { echo "::error::[$lang] the label check's control did not run or missed"; status=1; }
+          done
+          if [ "${{ steps.ui.outcome }}" = failure ]; then
+            echo "::error::the UI snapshot step failed (a capture was not written, a click did not reach its button, or a label is cut); see its log"
+            status=1
+          fi
+          exit $status

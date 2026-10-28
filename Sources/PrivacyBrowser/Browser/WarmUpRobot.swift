@@ -19,8 +19,9 @@ import WebKit
 ///   front, or the events did not reach the page) it scrolls with `scrollBy` from its world —
 ///   pages then see the scrolling but no wheel — and clicks with the link's `click()`, an
 ///   untrusted click. Which way it last went is reported (`scrollInput`, `clickInput`).
-/// * It loads a page only while its tab is the one shown: a page loading in a tab out of sight
-///   has no window (outer size 0×0), which a visitor's never has.
+/// * It loads a page only while its tab is the one shown: a page loading in a tab out of sight is
+///   hidden (`document.visibilityState`) and cannot be scrolled with the wheel, which is not how a
+///   visitor reads it.
 ///
 /// It stops by itself when its tab is closed, when the profile stops (`ProfileManager.stop`
 /// cancels it first, before the store is released: the robot holds its tab and session only
@@ -70,7 +71,7 @@ final class WarmUpRobot: ObservableObject {
     @Published private(set) var scrollInput: Input?
     @Published private(set) var clickInput: Input?
     /// Its tab is not the one shown (the user selected another): the next page waits for it, as a
-    /// page loading out of sight sees no window.
+    /// page loading out of sight is hidden.
     @Published private(set) var waitingForTab = false
     var limits = Limits()
     /// Told when the state changes or the next page begins (the profile list shows the run).

@@ -14,7 +14,8 @@ import WebKit
 ///   * per-profile proxies (HTTP CONNECT, SOCKS5 with remote DNS) and fail-closed behaviour,
 ///   * several SOCKS5 profiles launched and loading at once, each through its own proxy,
 ///   * launches that wait only briefly on the lookup through the proxy, and the exit-IP warning,
-///   * the tab model with history recording and bookmarks.
+///   * the tab model with history recording and bookmarks, and the geometry background tabs see,
+///   * the time zone set in the engine (the profile's own process pool) in every scope a page reaches.
 ///
 /// Proxy checks need `scripts/selftest_proxy.py` and the env vars
 /// `PB_SELFTEST_HTTP_PROXY_PORT` / `PB_SELFTEST_SOCKS_PROXY_PORT` (and for the concurrent SOCKS5
@@ -33,8 +34,8 @@ final class SelfTest {
         setvbuf(stdout, nil, _IOLBF, 0)
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
-            print("SELFTEST TIMEOUT after 300 s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 360) {
+            print("SELFTEST TIMEOUT after 360 s")
             exit(3)
         }
         Task { @MainActor in
@@ -121,8 +122,15 @@ final class SelfTest {
             let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
             try await firstWebKitUse(repository) // must run before anything else touches WebKit
             try await storageIsolationAndShims(repository)
+            try await engineTimeZone(repository)
+            try await workersUnderCSP(repository)
+            try await geolocationInEngine(repository)
+            try await webRTCEscapeRoutes(repository)
+            try await webTransportWithAProxy(repository)
             try await deviceGenerations(repository)
             try await fingerprintSurface(repository)
+            try await remoteWorkerRace(repository)
+            try await mobileWindowViewport(repository)
             try await recoverySealing(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
@@ -130,6 +138,7 @@ final class SelfTest {
             try await socksProfilesSideBySide(repository)
             try await proxyLookupAndExitIP(repository)
             try await tabsAndLibrary(repository)
+            try await backgroundTabGeometry(repository)
             try await windowLifecycle(repository)
             try await dialogTeardown(repository)
             try await passwordAutoFill(repository)
@@ -210,9 +219,16 @@ final class SelfTest {
         let keyB = try repository.profileKey(for: b)
         let token = UUID().uuidString
 
-        // --- Profile A, first run: write data, check shims.
+        // --- Profile A, first run: write data, check shims. In WebKit's shared pool, as a WebKit
+        // without the process pool's time zone override runs it: the time zone is the shim's here
+        // (engineTimeZone checks the engine's); A's relaunch below runs in a pool of its own.
         try await vault.prepareForLaunch(profileID: a, key: keyA)
-        var sessionA: BrowserSession? = try makeSession(repository, a, key: keyA)
+        var sessionA: BrowserSession? = try inSharedPool { try makeSession(repository, a, key: keyA) }
+        check("time zone: a profile in WebKit's shared pool keeps the zone in the shim",
+              sessionA?.processPool == nil && sessionA?.timeZoneByEngine == false)
+        info("storage quota: Safari's quota in WebKit \(SafariStorageQuota.isAvailable ? "available" : "NOT available") here")
+        check("storage quota: a persistent profile's store has Safari's quota where WebKit allows it (restored below from the same directories)",
+              sessionA?.storageQuotaByEngine == SafariStorageQuota.isAvailable)
         var webA: WKWebView? = WKWebView(frame: .zero, configuration: sessionA!.makeWebViewConfiguration())
         webA!.customUserAgent = "PrivacyBrowserSelfTest/1.0"
         // A UI delegate, as every tab has (BrowserTab): without one WebKit answers no permission query.
@@ -220,6 +236,10 @@ final class SelfTest {
         retainedDelegates.append(uiDelegate) // the web view holds its UI delegate weakly
         webA!.uiDelegate = uiDelegate
         try await PageLoader.load(webA!, html: page, baseURL: origin)
+        // What the page sees of the store made from the configuration (not just the flag): Safari's figure.
+        let quotaA = try await js(webA!, "return (await navigator.storage.estimate()).quota;") as? NSNumber
+        check("storage quota: the persistent store reports Safari's quota in the page",
+              quotaA?.doubleValue == PrivacyScripts.safariStorageQuota(for: .macOS).rounded(.up), quotaA?.stringValue ?? "nil")
 
         check("shim: getTimezoneOffset in Asia/Tokyo",
               try await js(webA!, "return new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset();") as? Int == -540)
@@ -447,6 +467,9 @@ final class SelfTest {
         check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
               served.contains("/fetch-allowed") && !served.contains("/ping-blocked"), served.joined(separator: ","))
         info("proxy: a beacon \(served.contains("/beacon") ? "still reaches" : "does not reach") the proxy (beacons are fetches, not pings)")
+        check("proxy: a beacon sent as the page goes away (pagehide) goes through the proxy, as Safari sends it",
+              served.contains("/beacon-pagehide"), served.joined(separator: ","))
+        try await streamsThroughProxy(repository, httpPort: httpPort, socksPort: socksPort)
 
         // A proxy that answers 407: the profile's credentials are sent, wrong ones fail closed.
         // Loaded in a BrowserTab, whose navigation delegate answers the proxy's challenge.
@@ -514,11 +537,94 @@ final class SelfTest {
             document.body.appendChild(a);
             a.click();
             navigator.sendBeacon('/beacon', 'x');
+            addEventListener('pagehide', () => navigator.sendBeacon('/beacon-pagehide', 'x'));
             await fetch('/fetch-allowed');
             await new Promise((resolve) => setTimeout(resolve, 1500));
             return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();
             """) as? [String] ?? []
-        return served
+        // Leaving the page sends its pagehide beacon (the host does not resolve: only the proxy
+        // can have received it).
+        try await PageLoader.load(webView, url: URL(string: "http://proxied.selftest.invalid/ping-page?after=1")!)
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        let after = try await js(webView, "return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();") as? [String] ?? []
+        return served + after.filter { !served.contains($0) }
+    }
+
+    /// A WebSocket and media in a proxied profile go through its proxy, as the data store's proxy
+    /// is documented to carry them. The page is on a host only the proxy resolves, so a request
+    /// the proxy did not see went around it or nowhere. AVFoundation plays the media (an HLS
+    /// stream, an MP4 file), not WebKit's own loader: a profile without a proxy, asking the
+    /// listener directly, shows whether this WebKit asks for them at all (a page in a web view
+    /// outside a window asked for none, CI run 219).
+    private func streamsThroughProxy(_ repository: ProfileRepository, httpPort: Int, socksPort: Int) async throws {
+        let script = """
+            const result = {};
+            result.webSocket = await new Promise((resolve) => {
+              let socket;
+              try { socket = new WebSocket(base.replace(/^http/, 'ws') + '/pb-ws/' + run); } catch (e) { resolve('threw ' + e.name); return; }
+              socket.onopen = () => resolve('open');
+              socket.onerror = () => resolve('error');
+              setTimeout(() => resolve('timeout'), 5000);
+            });
+            const play = (src) => {
+              const video = document.createElement('video');
+              video.muted = true;
+              video.preload = 'auto';
+              document.body.appendChild(video);
+              video.src = src;
+              video.load();
+              video.play().catch(() => {});
+              return video;
+            };
+            result.hls = document.createElement('video').canPlayType('application/vnd.apple.mpegurl');
+            const videos = [play(base + '/pb-hls/' + run + '/stream.m3u8'), play(base + '/pb-media/' + run + '/clip.mp4')];
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+            result.media = videos.map((v) => [v.networkState, v.readyState, v.error ? v.error.code : 0].join()).join(' ');
+            result.served = await (await fetch(base + '/pb-served.json', { cache: 'no-store' })).json();
+            return JSON.stringify(result);
+            """
+        let cases: [(label: String, proxy: ProxySettings?, base: String)] = [
+            ("without a proxy", nil, "http://127.0.0.1:\(httpPort)"),
+            ("HTTP CONNECT", ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), "http://proxied.selftest.invalid"),
+            ("SOCKS5", ProxySettings(kind: .socks5, host: "127.0.0.1", port: socksPort), "http://proxied.selftest.invalid"),
+        ]
+        var control: (hls: Bool, mp4: Bool) = (false, false)
+        for (index, item) in cases.enumerated() {
+            let run = "\(index)-\(UUID().uuidString.prefix(8))"
+            let profile = try repository.create(name: "Streams \(index)", configuration: ProfileConfiguration(proxy: item.proxy, ephemeral: true))
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            // In a window, shown: WebKit loads no media for a page that is not visible.
+            let page = URL(string: "\(item.base)/streams-page")!
+            let controller = session.openWindow(url: page)
+            guard let tab = controller.selectedTab,
+                  await waitUntil(timeout: 20, { !tab.isLoading && tab.webView.url == page }) else {
+                check("proxy (\(item.label)): the streams page opens in a profile window", false)
+                session.shutDown()
+                continue
+            }
+            let text = try await js(tab.webView, script, ["base": item.base, "run": run]) as? String ?? "{}"
+            session.shutDown()
+            let result = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+            let served = result["served"] as? [String] ?? []
+            let webSocket = served.contains("/pb-ws/\(run)")
+            let hls = served.contains("/pb-hls/\(run)/stream.m3u8"), segment = served.contains("/pb-hls/\(run)/seg0.ts")
+            let mp4 = served.contains("/pb-media/\(run)/clip.mp4")
+            info("streams (\(item.label)): WebSocket \(result["webSocket"] ?? "nil"), \(webSocket ? "seen" : "not seen") by the listener; "
+                 + "HLS (canPlayType '\(result["hls"] ?? "")'): playlist \(hls ? "asked" : "not asked"), segment \(segment ? "asked" : "not asked"); "
+                 + "MP4 \(mp4 ? "asked" : "not asked"); media state \(result["media"] ?? "nil")")
+            guard item.proxy != nil else {
+                control = (hls, mp4)
+                continue
+            }
+            check("proxy (\(item.label)): a WebSocket goes through the proxy", webSocket, text)
+            for (name, measured, reached) in [("an HLS stream", control.hls, hls), ("an MP4 file", control.mp4, mp4)] {
+                if measured {
+                    check("proxy (\(item.label)): \(name) a <video> plays (AVFoundation) goes through the proxy", reached, text)
+                } else {
+                    info("proxy (\(item.label)): \(name) not checked — without a proxy this WebKit asked for none either")
+                }
+            }
+        }
     }
 
     /// Loads `url` in an ephemeral profile using `proxy`. Returns the page text, or nil if the load failed.
@@ -586,6 +692,902 @@ final class SelfTest {
         controller.close()
     }
 
+    // MARK: Background tabs
+
+    /// A page opened in a background tab (⌘-click) measures the window its tab belongs to — the
+    /// shown tab's viewport, the window's outer size and position — not a 0×0 view outside any
+    /// window (what headless browsers report). A tab that was shown and then left behind keeps
+    /// following its window when the window is resized and moved (a view taken out of the window
+    /// would keep the frame WebKit cached for it).
+    private func backgroundTabGeometry(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("background tab checks skipped (need the self-test proxy to serve pages)")
+            return
+        }
+        let profile = try repository.create(name: "Background tab", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let controller = session.openWindow(url: URL(string: "http://proxied.selftest.invalid/front")!)
+        guard let front = controller.selectedTab else {
+            check("tabs: a window opens with its tab", false)
+            return
+        }
+        let frontLoaded = await waitUntil(timeout: 20) { !front.isLoading && front.webView.title?.hasPrefix("PB proxied") == true }
+        // ⌘-click in the shown page: its tab's host opens the link in a tab behind it.
+        controller.tab(front, openInBackground: URLRequest(url: URL(string: "http://proxied.selftest.invalid/back")!))
+        guard let back = controller.tabs.first(where: { $0 !== front }) else {
+            check("tabs: ⌘-click opens a background tab", false)
+            return
+        }
+        let backLoaded = await waitUntil(timeout: 20) { !back.isLoading && back.webView.title?.hasPrefix("PB proxied") == true }
+        check("tabs: ⌘-click loads the page in a tab behind the shown one", frontLoaded && backLoaded && front.isSelected && !back.isSelected,
+              "front loaded \(frontLoaded), background loaded \(backLoaded), background shown \(back.isSelected)")
+
+        let geometry = "return [innerWidth, innerHeight, outerWidth, outerHeight, screenX, screenY].join('x');"
+        // Both tabs' measurements once they agree: WebKit hands a view's new size to its page asynchronously.
+        func measure() async -> (front: String?, back: String?) {
+            var values: (front: String?, back: String?) = (nil, nil)
+            let deadline = Date().addingTimeInterval(5)
+            repeat {
+                values = ((try? await js(front.webView, geometry)) as? String, (try? await js(back.webView, geometry)) as? String)
+                if values.front != nil && values.front == values.back { break }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            } while Date() < deadline
+            return values
+        }
+        let before = await measure()
+        let parts = (before.back ?? "").split(separator: "x").compactMap { Int($0) }
+        check("tabs: a background tab measures its window as the shown tab does (viewport, outer size, position), not 0×0",
+              before.back != nil && before.back == before.front && parts.count == 6 && parts[0] > 0 && parts[1] > 0 && parts[2] > 0 && parts[3] > 0,
+              "shown \(before.front ?? "nil"), background \(before.back ?? "nil")")
+        // The background tab shown once, then left behind the first again.
+        if let backIndex = controller.tabs.firstIndex(where: { $0 === back }),
+           let frontIndex = controller.tabs.firstIndex(where: { $0 === front }) {
+            controller.selectTab(at: backIndex)
+            controller.selectTab(at: frontIndex)
+        }
+        controller.window?.setContentSize(NSSize(width: 900, height: 600))
+        if let origin = controller.window?.frame.origin {
+            controller.window?.setFrameOrigin(NSPoint(x: origin.x + 40, y: origin.y - 30))
+        }
+        let after = await measure()
+        check("tabs: a tab shown, then left behind, follows its window when the window is resized and moved",
+              after.back != nil && after.back == after.front && after.back != before.back && after.back?.hasPrefix("900x") == true
+                  && front.isSelected && !back.isSelected,
+              "shown \(after.front ?? "nil"), background \(after.back ?? "nil")")
+        let visibility = (try? await js(back.webView, "return document.visibilityState;")) as? String
+        info("background tab: document.visibilityState = \(visibility ?? "nil") (Safari: hidden)")
+    }
+
+    // MARK: Workers under a strict CSP
+
+    /// What the self-test proxy's `/pb-csp/page` makes of blob workers: the profile's zone, strict
+    /// mode and line numbers in one, and the controls (an eval in a worker of the page's own, which
+    /// the CSP blocks, and a blocked image).
+    private static let cspWorkersScript = """
+        const run = (code) => new Promise((resolve) => {
+          const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+          worker.onmessage = (e) => resolve(String(e.data));
+          worker.onerror = (e) => { e.preventDefault(); resolve('error line ' + e.lineno); };
+          setTimeout(() => resolve('timeout'), 5000);
+        });
+        const zone = await run("'use strict'\\npostMessage([Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset(), (function () { return this === undefined; })()].join())");
+        const line = await run('\\n\\nthrow new Error("x")');
+        const control = await run("let r; try { eval('/*pb-control*/1'); r = 'eval ran'; } catch (e) { r = e.name; } postMessage(r);");
+        new Image().src = 'http://127.0.0.2:9/pb-control.png';
+        return JSON.stringify({ zone, line, control });
+        """
+
+    /// The same with Trusted Types required: a worker from a TrustedScriptURL, one from a string
+    /// under the page's default policy (and the URL the policy is shown), and the controls (a string
+    /// into an HTML sink, a blocked image).
+    private static let trustedTypesWorkersScript = """
+        if (typeof trustedTypes === 'undefined') return JSON.stringify({ unavailable: true });
+        const run = (url) => new Promise((resolve) => {
+          const worker = new Worker(url);
+          worker.onmessage = (e) => resolve(String(e.data));
+          worker.onerror = (e) => { e.preventDefault(); resolve('error ' + e.message); };
+          setTimeout(() => resolve('timeout'), 5000);
+        }).catch((e) => 'threw ' + e.name);
+        const code = "postMessage([Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset()].join())";
+        const policy = trustedTypes.createPolicy('pbtest', { createScriptURL: (u) => u });
+        const trusted = await run(policy.createScriptURL(URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))));
+        try { document.createElement('div').innerHTML = '<b>pb-control</b>'; } catch (e) {}
+        const seen = [];
+        trustedTypes.createPolicy('default', { createScriptURL: (u) => { seen.push(u); return u; } });
+        const own = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+        const viaDefault = await run(own);
+        new Image().src = 'http://127.0.0.2:9/pb-control.png';
+        return JSON.stringify({ trusted, viaDefault, defaultSaw: seen.length === 1 && seen[0] === own ? 'the page URL' : seen.join(' ') });
+        """
+
+    /// The shim in workers made from a blob, on a page under the CSP a site that collects violation
+    /// reports sends (`/pb-csp/page`: no 'unsafe-eval', connect-src 'self', report-uri). The shim goes
+    /// into the worker as code and reads nothing back, so the site gets no report a page in Safari
+    /// would not cause. Checked against controls the page causes itself, which show that reports
+    /// arrive (the image's must; whether WebKit reports a worker's violations is logged). The worker
+    /// still runs in the profile's zone (the shim's: WebKit's shared pool), strict, with the page's
+    /// line numbers. With Trusted Types required, a worker from a TrustedScriptURL, or under a
+    /// default policy, is made from the page's own URL, as in Safari.
+    private func workersUnderCSP(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("worker CSP checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let profile = try repository.create(name: "Workers under CSP", configuration: ProfileConfiguration(
+            timeZoneIdentifier: "Asia/Tokyo", ephemeral: true))
+        let session = try inSharedPool { try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id)) }
+        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+        defer { tab.tearDown(); session.shutDown() }
+        for trustedTypes in [false, true] {
+            let label = trustedTypes ? "Trusted Types" : "strict CSP"
+            let run = UUID().uuidString
+            try await PageLoader.load(tab.webView, url: URL(string: "http://127.0.0.1:\(httpPort)/pb-csp/page?run=\(run)\(trustedTypes ? "&tt=1" : "")")!)
+            let text: String
+            do {
+                text = try await js(tab.webView, trustedTypes ? Self.trustedTypesWorkersScript : Self.cspWorkersScript) as? String ?? "{}"
+            } catch {
+                check("workers (\(label)): the page's script ran", false, String(describing: error))
+                continue
+            }
+            let result = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+            if result["unavailable"] != nil {
+                info("workers (\(label)): no trustedTypes in this WebKit, checks skipped")
+                continue
+            }
+            // Each report is a request of its own: wait for the image's, then a moment for any after it.
+            var reports = try await cspReports(tab.webView, run: run)
+            for _ in 0..<16 where !reports.contains(where: Self.isImageControl) {
+                try await Task.sleep(nanoseconds: 500_000_000)
+                reports = try await cspReports(tab.webView, run: run)
+            }
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            reports = try await cspReports(tab.webView, run: run)
+            // Besides the image, the page's other control: at most one report of its directive (with
+            // its sample, where WebKit sends one). Anything else came from the shim.
+            let controlDirective = trustedTypes ? "require-trusted-types-for" : "script-src"
+            var controlReported = false
+            var unexpected: [String] = []
+            for report in reports where !Self.isImageControl(report) {
+                let sample = report["script-sample"] as? String ?? ""
+                if !controlReported && Self.directive(of: report).hasPrefix(controlDirective) && (sample.isEmpty || sample.contains("pb-control")) {
+                    controlReported = true
+                } else {
+                    unexpected.append(Self.describe(report))
+                }
+            }
+            let summary = reports.map(Self.describe).joined(separator: "; ")
+            info("workers (\(label)): \(text); reports: \(summary.isEmpty ? "none" : summary)")
+            check("workers (\(label)): the site receives no violation report beyond the page's own controls",
+                  reports.contains(where: Self.isImageControl) && unexpected.isEmpty,
+                  "unexpected: \(unexpected.joined(separator: "; ")); all: \(summary)")
+            if trustedTypes {
+                let started = { (value: Any?) -> Bool in
+                    guard let value = value as? String else { return false }
+                    return !["threw", "timeout", "error"].contains(where: { value.hasPrefix($0) })
+                }
+                check("workers (Trusted Types): a worker from a TrustedScriptURL starts, as does one under a default policy, which is shown the page's own URL",
+                      started(result["trusted"]) && started(result["viaDefault"]) && result["defaultSaw"] as? String == "the page URL", text)
+            } else {
+                info("workers (strict CSP): the profile runs in WebKit's shared pool, the zone in the shim: \(!session.timeZoneByEngine); "
+                     + "a worker's own eval reported by WebKit: \(controlReported)")
+                check("workers (strict CSP): a blob worker runs in the profile's zone, strict, with the page's line numbers",
+                      result["zone"] as? String == "Asia/Tokyo,-540,true" && result["line"] as? String == "error line 3", text)
+                check("workers (strict CSP): the page's CSP applies in its blob workers (their own eval is blocked)",
+                      result["control"] as? String == "EvalError", text)
+            }
+        }
+    }
+
+    /// The CSP violation reports the self-test proxy received for `run`.
+    private func cspReports(_ webView: WKWebView, run: String) async throws -> [[String: Any]] {
+        let text = try await js(webView, "return await (await fetch('/pb-csp/reports.json?run=' + run, { cache: 'no-store' })).text();",
+                                ["run": run]) as? String ?? "[]"
+        return (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [[String: Any]] ?? []
+    }
+
+    private static func directive(of report: [String: Any]) -> String {
+        report["effective-directive"] as? String ?? report["violated-directive"] as? String ?? ""
+    }
+
+    private static func isImageControl(_ report: [String: Any]) -> Bool {
+        directive(of: report).hasPrefix("img-src") && (report["blocked-uri"] as? String ?? "").contains("127.0.0.2")
+    }
+
+    private static func describe(_ report: [String: Any]) -> String {
+        [directive(of: report), report["blocked-uri"] as? String ?? "-", report["script-sample"] as? String ?? "",
+         report["source-file"] as? String ?? ""].joined(separator: " ")
+    }
+
+    // MARK: Geolocation in the engine
+
+    /// What a page sees of geolocation: the permission's state, then getCurrentPosition's and
+    /// watchPosition's answers (code, message, the interface, own properties), the state after and
+    /// how often a PermissionStatus held from before fired 'change'.
+    private static let geolocationScript = """
+        const visible = document.visibilityState;
+        const status = await navigator.permissions.query({ name: 'geolocation' });
+        let changes = 0;
+        status.onchange = () => { changes++; };
+        const before = [status.state, status instanceof PermissionStatus, Object.getOwnPropertyNames(status).length].join();
+        if (visible !== 'visible') return JSON.stringify({ visible, before });
+        const ask = (method) => new Promise((resolve) => {
+          const timer = setTimeout(() => resolve('timeout'), 5000);
+          navigator.geolocation[method](() => { clearTimeout(timer); resolve('position'); }, (e) => {
+            clearTimeout(timer);
+            resolve([e.code, e.message, e instanceof GeolocationPositionError, Object.getOwnPropertyNames(e).length].join());
+          });
+        });
+        const current = await ask('getCurrentPosition');
+        const watched = await ask('watchPosition');
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const after = (await navigator.permissions.query({ name: 'geolocation' })).state;
+        return JSON.stringify({ visible, before, current, watched, after, held: status.state, changes });
+        """
+
+    /// Methods of WebKit's classes and of WKUIDelegatePrivate whose names mention permissions or
+    /// geolocation: what this WebKit offers an embedder (self-test information).
+    private static func permissionSelectors() -> String {
+        let wanted = { (name: String) in name.range(of: "ermission", options: .caseInsensitive) != nil
+            || name.range(of: "eolocation", options: .caseInsensitive) != nil }
+        var found: [String] = []
+        for name in ["WKWebView", "WKWebsiteDataStore", "WKProcessPool", "WKPreferences", "WKWebViewConfiguration"] {
+            guard let cls = NSClassFromString(name) else { continue }
+            let targets: [(String, AnyClass?)] = [("-", cls), ("+", object_getClass(cls))]
+            for (kind, target) in targets {
+                guard let target else { continue }
+                var count: UInt32 = 0
+                guard let methods = class_copyMethodList(target, &count) else { continue }
+                defer { free(methods) }
+                for index in 0..<Int(count) {
+                    let selector = NSStringFromSelector(method_getName(methods[index]))
+                    if wanted(selector) { found.append("\(kind)[\(name) \(selector)]") }
+                }
+            }
+        }
+        if let delegateProtocol = objc_getProtocol("WKUIDelegatePrivate") {
+            for required in [true, false] {
+                var count: UInt32 = 0
+                guard let list = protocol_copyMethodDescriptionList(delegateProtocol, required, true, &count) else { continue }
+                defer { free(list) }
+                for index in 0..<Int(count) {
+                    if let selector = list[index].name, wanted(NSStringFromSelector(selector)) {
+                        found.append("WKUIDelegatePrivate \(NSStringFromSelector(selector))")
+                    }
+                }
+            }
+        } else {
+            found.append("(no WKUIDelegatePrivate protocol object)")
+        }
+        return found.isEmpty ? "none" : found.joined(separator: ", ")
+    }
+
+    /// The state of each permission a page can query (or the error).
+    private static let permissionStatesScript = """
+        const out = [];
+        for (const name of ['geolocation', 'notifications', 'camera', 'microphone', 'persistent-storage', 'screen-wake-lock', 'midi', 'clipboard-read']) {
+          try { out.push(name + '=' + (await navigator.permissions.query({ name })).state); } catch (e) { out.push(name + '=error ' + e.name); }
+        }
+        return out.join(';');
+        """
+
+    /// A profile that denies geolocation (the default) gets WebKit's own answer, not the shim's: the
+    /// tab's UI delegate denies the request and answers for the state (`GeolocationPermission`).
+    /// Checked in a profile window on the self-test proxy's page (127.0.0.1, a secure context; WebKit
+    /// asks only for a page in view): WebKit's PERMISSION_DENIED from the tab, the engine's 'prompt'
+    /// then 'denied', a PermissionStatus held from before told of it (the tab's part: WebKit applies
+    /// its per-document rule to fresh queries itself), 'prompt' again on the next page, which stays
+    /// so when another tab of the site asks, and every other permission as a plain WKWebView reports it.
+    private func geolocationInEngine(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("geolocation checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let page = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!
+        let plainConfiguration = WKWebViewConfiguration()
+        plainConfiguration.websiteDataStore = .nonPersistent()
+        let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
+        let plainDelegate = SelfTestUIDelegate()
+        retainedDelegates.append(plainDelegate) // the web view holds its UI delegate weakly
+        plain.uiDelegate = plainDelegate
+        try await PageLoader.load(plain, url: page)
+        let plainStates = try await js(plain, Self.permissionStatesScript) as? String ?? "nil"
+
+        let profile = try repository.create(name: "Geolocation", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let controller = session.openWindow(url: page)
+        guard let tab = controller.selectedTab,
+              await waitUntil(timeout: 20, { !tab.isLoading && tab.webView.url?.path == "/pb-scopes/page" }) else {
+            check("geolocation: a profile window opens the page", false)
+            return
+        }
+        let states = try await js(tab.webView, Self.permissionStatesScript) as? String ?? "nil"
+        check("permissions: a profile tab reports every permission as a plain WKWebView does", states == plainStates,
+              "\(states) vs \(plainStates)")
+        let mode = PrivacyScripts.shimConfiguration(for: session.configuration).geolocation.mode
+        check("geolocation: a profile that denies it leaves it to WebKit (no shim)", mode == "engine", mode)
+        info("WebKit's private methods about permissions here: \(Self.permissionSelectors())")
+        let text = try await js(tab.webView, Self.geolocationScript) as? String ?? "{}"
+        let result = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+        info("geolocation in the engine: \(text)")
+        guard result["visible"] as? String == "visible" else {
+            info("geolocation request checks skipped: the profile window is out of sight (a locked screen, a sleeping "
+                 + "display or an app in full screen), and WebKit asks only for a page in view")
+            return
+        }
+        let denied = "1,User denied Geolocation,true,0"
+        check("geolocation: getCurrentPosition and watchPosition get WebKit's own PERMISSION_DENIED, the tab's answer",
+              result["current"] as? String == denied && result["watched"] as? String == denied && tab.geolocationRequestsAnswered >= 1,
+              "\(text); the tab was asked \(tab.geolocationRequestsAnswered) time(s)")
+        check("geolocation: the engine's own PermissionStatus reads 'prompt' until the page asks, 'denied' after",
+              result["before"] as? String == "prompt,true,0" && result["after"] as? String == "denied", text)
+        check("geolocation: a PermissionStatus held from before is told: it reads 'denied', 'change' fired once",
+              result["held"] as? String == "denied" && result["changes"] as? Int == 1, text)
+        info("geolocation: WebKit asked the tab \(tab.geolocationRequestsAnswered) time(s) for the position, "
+             + "\(tab.permissionQueriesAnswered) for a state")
+        // Through the tab's own navigation (its delegate sees the new page), not PageLoader's.
+        let nextPage = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page?next=1")!
+        tab.webView.load(URLRequest(url: nextPage))
+        let loaded = await waitUntil(timeout: 20) { !tab.isLoading && tab.webView.url == nextPage }
+        var next: String? = "not loaded"
+        if loaded {
+            next = try await js(tab.webView, """
+                window.pbHeld = await navigator.permissions.query({ name: 'geolocation' });
+                window.pbChanges = 0;
+                pbHeld.onchange = () => { pbChanges++; };
+                return pbHeld.state;
+                """) as? String
+        }
+        check("geolocation: the next page starts at 'prompt' again", next == "prompt", next ?? "nil")
+        // The tab's record of the request went with the page it was made from: another tab of the
+        // site asking (every page of the site is told) leaves the status this page holds at 'prompt'.
+        let otherPage = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page?other=1")!
+        guard loaded, let other = controller.addTab(url: otherPage),
+              await waitUntil(timeout: 20, { !other.isLoading && other.webView.url == otherPage }) else {
+            check("geolocation: a second tab of the site opens", false)
+            return
+        }
+        let otherAnswer = try await js(other.webView, """
+            return await new Promise((resolve) => {
+              setTimeout(() => resolve('timeout'), 5000);
+              navigator.geolocation.getCurrentPosition(() => resolve('position'), (e) => resolve('error ' + e.code));
+            });
+            """) as? String ?? "nil"
+        try await Task.sleep(nanoseconds: 500_000_000)
+        let held = try await js(tab.webView, "return [pbHeld.state, pbChanges].join();") as? String ?? "nil"
+        check("geolocation: when another tab of the site asks, the status the first tab's next page holds stays 'prompt'",
+              other.geolocationRequestsAnswered >= 1 && held == "prompt,0",
+              "other tab: \(otherAnswer), asked \(other.geolocationRequestsAnswered) time(s); held here: \(held)")
+    }
+
+    // MARK: WebRTC escape routes
+
+    /// `gather(PC)`: the policy a peer connection made from `PC` reports, and the kinds of ICE
+    /// candidate it gathers against public STUN servers — 'relay:none' where only a relay may be
+    /// used (none is configured).
+    private static let gatherFunction = """
+        const gather = async (PC) => {
+          if (typeof PC !== 'function') return 'no constructor: ' + typeof PC;
+          const pc = new PC({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], iceTransportPolicy: 'all' });
+          const policy = pc.getConfiguration().iceTransportPolicy;
+          const types = [];
+          const done = new Promise((resolve) => {
+            const timer = setTimeout(resolve, 4000);
+            pc.onicecandidate = (e) => {
+              if (!e.candidate) { clearTimeout(timer); resolve(); return; }
+              const type = / typ (\\w+)/.exec(e.candidate.candidate);
+              if (type && !types.includes(type[1])) types.push(type[1]);
+            };
+          });
+          pc.createDataChannel('pb');
+          await pc.setLocalDescription(await pc.createOffer());
+          await done;
+          pc.close();
+          return policy + ':' + (types.sort().join('+') || 'none');
+        };
+
+        """
+
+    /// The page's own peer connection and those of frames it makes: sandboxed without allow-scripts
+    /// (no script of the frame's own runs there) — empty, srcdoc, a same-origin URL — reached by
+    /// index or by contentWindow, and an ordinary frame reached by index.
+    private static let escapeRoutesScript = gatherFunction + """
+        const out = {};
+        out.window = await gather(window.RTCPeerConnection);
+        const frame = (sandboxed, setup) => new Promise((resolve) => {
+          const element = document.createElement('iframe');
+          if (sandboxed) element.setAttribute('sandbox', 'allow-same-origin');
+          if (setup) {
+            setup(element);
+            const timer = setTimeout(() => resolve(element), 3000);
+            element.onload = () => { clearTimeout(timer); resolve(element); };
+          }
+          document.body.appendChild(element);
+          if (!setup) resolve(element);
+        });
+        await frame(true);
+        out.sandboxedByIndex = await gather(window[window.length - 1].RTCPeerConnection);
+        await frame(true, (element) => { element.srcdoc = '<p>pb</p>'; });
+        out.sandboxedSrcdoc = await gather(window[window.length - 1].RTCPeerConnection);
+        await frame(true, (element) => { element.src = '/pb-scopes/page'; });
+        out.sandboxedURL = await gather(window[window.length - 1].RTCPeerConnection);
+        const reached = await frame(true);
+        out.sandboxedContentWindow = await gather(reached.contentWindow.RTCPeerConnection);
+        await frame(false);
+        out.frameByIndex = await gather(window[window.length - 1].RTCPeerConnection);
+        return JSON.stringify(out);
+        """
+
+    /// The RTC interfaces of the window and of a worker made from a blob, and whether that worker
+    /// has onrtctransform: `window names|worker names|true or false`.
+    private static let rtcLeftScript = """
+        const rtc = /^(webkit)?RTC[A-Z]/;
+        const code = "postMessage([Object.getOwnPropertyNames(self).filter((n) => /^(webkit)?RTC[A-Z]/.test(n)).join(' '), 'onrtctransform' in self].join('|'))";
+        const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+        const inWorker = await new Promise((resolve) => {
+          worker.onmessage = (e) => resolve(String(e.data));
+          worker.onerror = () => resolve('error');
+          setTimeout(() => resolve('timeout'), 4000);
+        });
+        return Object.getOwnPropertyNames(window).filter((n) => rtc.test(n)).join(' ') + '|' + inWorker;
+        """
+
+    /// `typeof` of each of `names` (an argument: "RTCPeerConnection,RTCDataChannel") in each kind of
+    /// worker the page can make, comma-separated per worker (the self-test proxy's /pb-scopes/types.js).
+    private static let workerTypesScript = """
+        const settle = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000))]);
+        const ask = (worker, port) => settle(new Promise((resolve) => {
+          port.onmessage = (e) => resolve(String(e.data));
+          worker.onerror = () => resolve('error');
+          port.postMessage('types:' + names);
+        }));
+        const out = {};
+        const code = "onmessage = (e) => postMessage(e.data.slice(6).split(',').map((name) => typeof self[name]).join())";
+        const blob = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+        out.blob = await ask(blob, blob);
+        const dedicated = new Worker('/pb-scopes/types.js');
+        out.url = await ask(dedicated, dedicated);
+        if (typeof SharedWorker === 'function') {
+          const shared = new SharedWorker('/pb-scopes/types-shared.js');
+          out.shared = await ask(shared, shared.port);
+        }
+        try {
+          await settle(navigator.serviceWorker.register('/pb-scopes/sw.js'));
+          const registration = await settle(navigator.serviceWorker.ready);
+          if (!registration || registration === 'timeout' || !registration.active) throw new Error('no active service worker');
+          const channel = new MessageChannel();
+          out.service = await settle(new Promise((resolve) => {
+            channel.port1.onmessage = (e) => resolve(String(e.data));
+            registration.active.postMessage('types:' + names, [channel.port2]);
+          }));
+        } catch (e) {
+          out.service = 'unavailable: ' + (e && e.message);
+        }
+        return JSON.stringify(out);
+        """
+
+    /// Where a page could reach a peer connection the shim does not hold, in a relay-only profile
+    /// (WebRTC on in the engine; the shim keeps every connection on the relay, docs/TUNNEL.md):
+    /// workers, where WebKit exposes no RTCPeerConnection (a canary for a WebKit that would),
+    /// frames sandboxed without allow-scripts, where no script of the frame's own runs — the shim's
+    /// copy included — while their parent can reach their constructors, and popups, whose first
+    /// document runs no user script. Each connection reports its policy and gathers against public
+    /// STUN servers; a plain WKWebView shows what gathering finds here without the shim. First, what
+    /// WebKit itself leaves with WebRTC off as a profile has it.
+    private func webRTCEscapeRoutes(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("WebRTC escape route checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let page = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!
+        let plainConfiguration = WKWebViewConfiguration()
+        plainConfiguration.websiteDataStore = .nonPersistent()
+        let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
+        try await PageLoader.load(plain, url: page)
+        let control = try await js(plain, Self.gatherFunction + "return await gather(window.RTCPeerConnection);") as? String ?? "nil"
+        info("WebRTC without the shim (a plain WKWebView, policy:candidates): \(control)")
+        // WebRTC off in the engine as a profile has it (peer connections), without the shim: what
+        // WebKit itself leaves — the encoded transforms, a setting of their own (BrowserSession).
+        let offConfiguration = WKWebViewConfiguration()
+        offConfiguration.websiteDataStore = .nonPersistent()
+        WebKitPreferences.setBool(offConfiguration.preferences, "_setPeerConnectionEnabled:", false)
+        let off = WKWebView(frame: .zero, configuration: offConfiguration)
+        try await PageLoader.load(off, url: page)
+        let left = try await js(off, Self.rtcLeftScript) as? String ?? "nil"
+        info("WebRTC off in the engine, without the shim (window | a blob worker | onrtctransform there): \(left); "
+             + "WebRTCEncodedTransformEnabled \(WebKitPreferences.feature("WebRTCEncodedTransformEnabled") == nil ? "is not" : "is") among WebKit's features")
+
+        let profile = try repository.create(name: "WebRTC relay-only", configuration: ProfileConfiguration(
+            webRTCPolicy: .relayOnly, ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        // In a window, as the user's tabs are: popups open as its tabs.
+        let controller = session.openWindow(url: page)
+        guard let tab = controller.selectedTab,
+              await waitUntil(timeout: 20, { !tab.isLoading && tab.webView.url?.path == "/pb-scopes/page" }) else {
+            check("WebRTC escape routes: a relay-only profile window opens the page", false)
+            return
+        }
+        guard try await js(tab.webView, "return typeof RTCPeerConnection;") as? String == "function" else {
+            info("WebRTC escape route checks skipped: a relay-only profile has no RTCPeerConnection here")
+            return
+        }
+        let workersText = try await js(tab.webView, Self.workerTypesScript, ["names": "RTCPeerConnection,RTCDataChannel"]) as? String ?? "{}"
+        let workers = (try? JSONSerialization.jsonObject(with: Data(workersText.utf8))) as? [String: String] ?? [:]
+        info("WebRTC in workers (RTCPeerConnection, RTCDataChannel): \(workersText)")
+        let answered = workers.values.filter { value in !["timeout", "error", "unavailable"].contains { value.hasPrefix($0) } }
+        check("WebRTC: no worker has RTCPeerConnection (a WebKit exposing it there would let a page around the relay)",
+              answered.count >= 2 && answered.allSatisfy { $0.hasPrefix("undefined,") }, workersText)
+        let text = try await js(tab.webView, Self.escapeRoutesScript) as? String ?? "{}"
+        let routes = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: String] ?? [:]
+        info("WebRTC in a relay-only profile (policy:candidates): \(text)")
+        for (route, name) in [("window", "the page"), ("frameByIndex", "a frame reached by index"),
+                              ("sandboxedByIndex", "a frame sandboxed without scripts, reached by index"),
+                              ("sandboxedSrcdoc", "a sandboxed srcdoc frame"),
+                              ("sandboxedURL", "a sandboxed frame of a same-origin URL"),
+                              ("sandboxedContentWindow", "a sandboxed frame reached by contentWindow")] {
+            let value = routes[route] ?? "nil"
+            check("WebRTC relay-only: \(name) gets a relay-only connection, no host or srflx candidate", value == "relay:none", value)
+        }
+        // Popups the page gets before any user script ran in them (WebKit runs none in a new page's
+        // first, blank document): an ordinary one, which shows that popups open here, one from
+        // document.open with three arguments, and one opened after the page broke a built-in that
+        // patching it uses (it must come patched or not at all). A script each: the app's user
+        // gesture lasts until the script first waits, and the constructor is read at once.
+        var popups: [String: String] = [:]
+        for (route, opener) in [("ordinary", "window.open('', 'pbOrdinary', 'width=320,height=240')"),
+                                ("documentOpen", "document.open('', 'pbDocumentOpen', 'width=320,height=240')"),
+                                ("brokenPatch", "(() => { const define = Object.defineProperty; Object.defineProperty = () => { throw new TypeError('broken'); }; "
+                                    + "try { return window.open('', 'pbBroken', 'width=320,height=240'); } finally { Object.defineProperty = define; } })()")] {
+            popups[route] = try await js(tab.webView, Self.gatherFunction + """
+                const popup = \(opener);
+                const result = popup ? await gather(popup.RTCPeerConnection) : 'blocked';
+                try { if (popup) popup.close(); } catch (e) {}
+                return result;
+                """) as? String ?? "nil"
+        }
+        info("WebRTC in popups of a relay-only profile (policy:candidates, or blocked): \(popups)")
+        guard popups["ordinary"] != "blocked" else {
+            info("popup checks skipped: popups do not open here")
+            return
+        }
+        check("WebRTC relay-only: a popup from window.open gets a relay-only connection", popups["ordinary"] == "relay:none",
+              popups["ordinary"] ?? "nil")
+        check("WebRTC relay-only: a popup from document.open with three arguments gets a relay-only connection",
+              popups["documentOpen"] == "relay:none", popups["documentOpen"] ?? "nil")
+        check("WebRTC relay-only: a popup opened after the page broke what patching it uses comes patched or not at all",
+              popups["brokenPatch"] == "relay:none" || popups["brokenPatch"] == "blocked", popups["brokenPatch"] ?? "nil")
+    }
+
+    // MARK: WebTransport with a proxy
+
+    /// WebKit opens WebTransport's QUIC sockets outside the data store's proxy (the leak check
+    /// measures it), so a proxied profile has it off in the engine (`BrowserSession`): not in its
+    /// pages, nor in any worker they make. A profile without a proxy keeps it, as Safari. The page
+    /// is the self-test proxy's on 127.0.0.1, a secure context (WebTransport is exposed only there).
+    /// Each profile runs in a pool of its own (a time zone), so its shared and service workers show
+    /// whether the switch costs them the profile's User-Agent, as switching a WebKit feature did once.
+    private func webTransportWithAProxy(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("WebTransport checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let page = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!
+        let key = BrowserSession.webTransportFeature
+        let plainConfiguration = WKWebViewConfiguration()
+        plainConfiguration.websiteDataStore = .nonPersistent()
+        let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
+        try await PageLoader.load(plain, url: page)
+        let control = try await js(plain, "return typeof WebTransport;") as? String ?? "nil"
+        info("WebTransport in a plain WKWebView: \(control); WebKit's feature \(key): "
+             + (WebKitPreferences.feature(key).map { String(describing: $0) } ?? "not listed"))
+        guard control == "function" else {
+            info("WebTransport checks skipped: this WebKit has no WebTransport here")
+            return
+        }
+        for proxy in [ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), nil] {
+            let label = proxy == nil ? "without a proxy" : "with a proxy"
+            let profile = try repository.create(name: "WebTransport \(label)", configuration: ProfileConfiguration(
+                proxy: proxy, timeZoneIdentifier: "Europe/Berlin", ephemeral: true))
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            defer { tab.tearDown(); session.shutDown() }
+            try await PageLoader.load(tab.webView, url: page)
+            let userAgent = try await js(tab.webView, "return navigator.userAgent;") as? String ?? "nil"
+            let remote = try await js(tab.webView, Self.remoteWorkerUserAgentsScript) as? String ?? "nil"
+            let enabled = WebKitPreferences.isFeatureEnabled(tab.webView.configuration.preferences, key)
+            let inPage = try await js(tab.webView, "return typeof WebTransport;") as? String ?? "nil"
+            let workersText = try await js(tab.webView, Self.workerTypesScript, ["names": "WebTransport"]) as? String ?? "{}"
+            let workers = (try? JSONSerialization.jsonObject(with: Data(workersText.utf8))) as? [String: String] ?? [:]
+            let answered = workers.values.filter { $0 == "function" || $0 == "undefined" }
+            let detail = "feature \(enabled.map { "\($0)" } ?? "nil"), page \(inPage), workers \(workersText)"
+            info("WebTransport \(label): \(detail)")
+            if proxy == nil {
+                check("WebTransport: a profile without a proxy has it in the page and its workers, as Safari",
+                      enabled != false && inPage == "function" && answered.count >= 2 && answered.allSatisfy { $0 == "function" }, detail)
+            } else {
+                check("WebTransport: off in the engine with a proxy (its QUIC would go around it), in the page and every worker",
+                      enabled == false && inPage == "undefined" && answered.count >= 2 && answered.allSatisfy { $0 == "undefined" }, detail)
+            }
+            checkRemoteUserAgents("WebTransport (\(label))", remote, page: userAgent)
+        }
+    }
+
+    /// WebKit's own User-Agent on a Mac, with no application name (frozen since Safari 14). A shared
+    /// or service worker reports it when WebKit has not handed the worker the User-Agent of its
+    /// pool's pages: a race of WebKit's own, seen with none of the app's settings (`remoteWorkerRace`;
+    /// docs/ISOLATION_AND_LIMITATIONS.md §2). Written out, not measured: a web view made with the
+    /// default configuration would open WebKit's default persistent data store, which the app never
+    /// uses.
+    private static let webKitDefaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+
+    /// How the User-Agents a page's shared and service workers report (`remoteWorkerUserAgentsScript`,
+    /// one per line) compare with the page's: all the page's; some WebKit's own (its race); or another.
+    private enum RemoteUserAgents { case page, webKitDefault, other }
+
+    private func remoteUserAgents(_ remote: String, page userAgent: String) -> RemoteUserAgents {
+        let reported = remote.components(separatedBy: "\n")
+        if reported.allSatisfy({ $0 == userAgent }) { return .page }
+        return reported.allSatisfy { $0 == userAgent || $0 == Self.webKitDefaultUserAgent } ? .webKitDefault : .other
+    }
+
+    /// The remote workers carry the profile's User-Agent, or WebKit's own where its race left them
+    /// without one (counted and logged) — never another profile's.
+    private func checkRemoteUserAgents(_ label: String, _ remote: String, page userAgent: String) {
+        let kind = remoteUserAgents(remote, page: userAgent)
+        check("\(label): shared and service workers report the profile's User-Agent (or WebKit's own: its race), never another",
+              kind != .other, "\(remote.replacingOccurrences(of: "\n", with: " | ")) vs \(userAgent)")
+        if kind == .webKitDefault {
+            info("\(label): a remote worker reports WebKit's own User-Agent (WebKit's race): \(remote.replacingOccurrences(of: "\n", with: " | "))")
+        }
+    }
+
+    /// navigator.userAgent of a shared worker and of the service worker (the self-test proxy's
+    /// `/pb-scopes/shared.js` and `/pb-scopes/sw.js` answer with `zone|offset|User-Agent`), a line each.
+    private static let remoteWorkerUserAgentsScript = """
+        const settle = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000))]);
+        const userAgent = (report) => String(report).split('|').slice(2).join('|');
+        const shared = new SharedWorker('/pb-scopes/shared.js');
+        const fromShared = await settle(new Promise((resolve) => {
+          shared.port.onmessage = (e) => resolve(userAgent(e.data));
+          shared.port.postMessage('report');
+        }));
+        let fromService;
+        try {
+          await settle(navigator.serviceWorker.register('/pb-scopes/sw.js'));
+          const registration = await settle(navigator.serviceWorker.ready);
+          if (!registration || registration === 'timeout' || !registration.active) throw new Error('no active service worker');
+          const channel = new MessageChannel();
+          fromService = await settle(new Promise((resolve) => {
+            channel.port1.onmessage = (e) => resolve(userAgent(e.data));
+            registration.active.postMessage('report', [channel.port2]);
+          }));
+        } catch (e) {
+          fromService = 'unavailable: ' + (e && e.message);
+        }
+        return fromShared + '\\n' + fromService;
+        """
+
+    // MARK: Time zone in the engine
+
+    /// What a page reports of each scope it reaches: its own window, a frame, workers made from a
+    /// blob and from a URL, a shared and a service worker (`zone|offset of 2024-01-15|User-Agent`;
+    /// the scripts are the self-test proxy's `/pb-scopes/…`), and the shape of `Date` and `Intl`.
+    private static let scopesScript = """
+        const report = (g) => [g.Intl.DateTimeFormat().resolvedOptions().timeZone,
+          new g.Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset(), g.navigator.userAgent].join('|');
+        const settle = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000))]);
+        const ask = (worker, port) => settle(new Promise((resolve) => {
+          port.onmessage = (e) => resolve(String(e.data));
+          worker.onerror = (e) => resolve('error ' + ((e && e.message) || 'loading the script'));
+          port.postMessage('report');
+        }));
+        const out = {};
+        out.window = report(window);
+        const frame = document.createElement('iframe');
+        document.body.appendChild(frame);
+        out.frame = report(frame.contentWindow);
+        frame.remove();
+        const code = "onmessage = () => postMessage([Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset(), navigator.userAgent].join('|'));";
+        const blobWorker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+        out.blob = await ask(blobWorker, blobWorker);
+        const urlWorker = new Worker('/pb-scopes/worker.js');
+        out.url = await ask(urlWorker, urlWorker);
+        out.quota = String((await navigator.storage.estimate()).quota);
+        const quotaCode = "onmessage = () => navigator.storage.estimate().then((e) => postMessage(String(e.quota)));";
+        const quotaWorker = new Worker(URL.createObjectURL(new Blob([quotaCode], { type: 'text/javascript' })));
+        out.blobQuota = await ask(quotaWorker, quotaWorker);
+        const urlQuotaWorker = new Worker('/pb-scopes/quota.js');
+        out.urlQuota = await ask(urlQuotaWorker, urlQuotaWorker);
+        if (typeof SharedWorker === 'function') {
+          const shared = new SharedWorker('/pb-scopes/shared.js');
+          out.shared = await ask(shared, shared.port);
+        } else {
+          out.shared = 'unavailable: no SharedWorker';
+        }
+        try {
+          if (!navigator.serviceWorker) throw new Error('no navigator.serviceWorker');
+          await settle(navigator.serviceWorker.register('/pb-scopes/sw.js'));
+          const registration = await settle(navigator.serviceWorker.ready);
+          if (!registration || registration === 'timeout' || !registration.active) throw new Error('no active service worker');
+          const channel = new MessageChannel();
+          out.service = await settle(new Promise((resolve) => {
+            channel.port1.onmessage = (e) => resolve(String(e.data));
+            registration.active.postMessage('report', [channel.port2]);
+          }));
+          const quotaChannel = new MessageChannel();
+          out.serviceQuota = await settle(new Promise((resolve) => {
+            quotaChannel.port1.onmessage = (e) => resolve(String(e.data));
+            registration.active.postMessage('quota', [quotaChannel.port2]);
+          }));
+        } catch (e) {
+          out.service = 'unavailable: ' + (e && e.message);
+        }
+        out.shape = \(dateShape);
+        return JSON.stringify(out);
+        """
+
+    /// `Date` and `Intl.DateTimeFormat` as a page inspects them: the shim's replacements differ from
+    /// the engine's own in their own properties' order (docs/ISOLATION_AND_LIMITATIONS.md §2).
+    private static let dateShape = "[Function.prototype.toString.call(Date), Object.getOwnPropertyNames(Date).join(), "
+        + "Object.getOwnPropertyNames(Intl.DateTimeFormat).join()].join('|')"
+
+    /// Where WebKit allows it, a profile runs in a process pool of its own whose processes are in the
+    /// profile's time zone (`ProfileProcessPool`). Checked for two profiles in different zones running
+    /// at once, in every scope a page reaches, with `Date` and `Intl` the engine's own (no shim). A
+    /// pool's shared and service workers carry its pages' User-Agent: in WebKit's shared pool one
+    /// running profile's workers can carry another's (reported for comparison).
+    private func engineTimeZone(_ repository: ProfileRepository) async throws {
+        info("process pools: a pool per profile \(ProfileProcessPool.isAvailable ? "available" : "NOT available"), "
+             + "its time zone override \(ProfileProcessPool.supportsTimeZoneOverride ? "available" : "NOT available") in this WebKit "
+             + "(\(ProfileProcessPool.availability))")
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("time zone scope checks skipped (need the self-test proxy to serve the worker scripts)")
+            return
+        }
+        // Straight from the self-test proxy's listener: 127.0.0.1 is a secure context (service workers).
+        let scopesPage = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!
+        let plainConfiguration = WKWebViewConfiguration()
+        plainConfiguration.websiteDataStore = .nonPersistent()
+        let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
+        try await PageLoader.load(plain, url: scopesPage)
+        let nativeShape = try await js(plain, "return \(Self.dateShape);") as? String
+
+        struct Running { let id: UUID; let zone: String; let offset: Int; let session: BrowserSession; let tab: BrowserTab }
+        var running: [Running] = []
+        defer { running.forEach { $0.tab.tearDown(); $0.session.shutDown() } }
+        // An iPhone and a macOS profile at once: different zones, and different User-Agents. Persistent,
+        // as a user's profiles are (their stores get Safari's storage quota); deleted at the end.
+        for (zone, offset, generation) in [("Asia/Tokyo", -540, "ios-26"), ("America/New_York", 300, DeviceGenerations.defaultID)] {
+            var configuration = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: generation))
+            configuration.timeZoneIdentifier = zone
+            let profile = try repository.create(name: "Zone \(zone)", configuration: configuration)
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            running.append(Running(id: profile.id, zone: zone, offset: offset, session: session,
+                                   tab: BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)))
+        }
+        for profile in running { try await PageLoader.load(profile.tab.webView, url: scopesPage) }
+        if ProfileProcessPool.isAvailable {
+            let pools = running.map { ProfileProcessPool.pool(of: $0.tab.webView.configuration) }
+            check("process pools: each running profile has a pool of its own",
+                  zip(pools, running).allSatisfy { $0.0 != nil && $0.0 === $0.1.session.processPool } && pools[0] !== pools[1])
+        }
+        if ProfileProcessPool.supportsTimeZoneOverride {
+            check("time zone: set in the profile's process pool where WebKit has the override",
+                  running.allSatisfy { $0.session.timeZoneByEngine })
+        }
+        for profile in running {
+            let label = profile.zone
+            let userAgent = try await js(profile.tab.webView, "return navigator.userAgent;") as? String ?? "nil"
+            let expected = "\(profile.zone)|\(profile.offset)|\(userAgent)"
+            let text = try await js(profile.tab.webView, Self.scopesScript) as? String ?? "{}"
+            let scopes = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: String] ?? [:]
+            let report = scopes.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "; ")
+            info("time zone scopes (\(label)): \(report)")
+            check("time zone (\(label)): the page, a frame and a worker made from a blob run in the profile's zone",
+                  ["window", "frame", "blob"].allSatisfy { scopes[$0] == expected }, report)
+            check("time zone (\(label)): a worker made from a blob reports the page's storage quota (Safari's)",
+                  scopes["quota"] != nil && scopes["blobQuota"] == scopes["quota"], report)
+            // Safari's quota in the data store itself: every scope reports it, URL and service workers too.
+            check("storage quota (\(label)): a persistent store has Safari's quota in WebKit where WebKit allows it",
+                  profile.session.storageQuotaByEngine == SafariStorageQuota.isAvailable)
+            if profile.session.storageQuotaByEngine {
+                let safariQuota = String(format: "%.0f", PrivacyScripts.safariStorageQuota(
+                    for: profile.session.configuration.deviceGeneration.platform).rounded(.up))
+                check("storage quota (\(label)): Safari's, set in WebKit — the page, a blob and a URL worker",
+                      ["quota", "blobQuota", "urlQuota"].allSatisfy { scopes[$0] == safariQuota }, "\(report) vs \(safariQuota)")
+                let serviceQuota = scopes["serviceQuota"] ?? "nil"
+                if serviceQuota == "nil" || ["timeout", "error", "unavailable"].contains(where: { serviceQuota.hasPrefix($0) }) {
+                    info("storage quota (\(label)): the service worker gave no answer here: \(serviceQuota)")
+                } else {
+                    check("storage quota (\(label)): Safari's in a service worker", serviceQuota == safariQuota, "\(serviceQuota) vs \(safariQuota)")
+                }
+            }
+            guard profile.session.timeZoneByEngine else {
+                info("time zone (\(label)): in the shim — workers loaded from a URL, shared and service workers keep the Mac's zone")
+                continue
+            }
+            check("time zone (\(label)): in the engine — Date and Intl are its own, no shim", scopes["shape"] == nativeShape,
+                  "\(scopes["shape"] ?? "nil") vs \(nativeShape ?? "nil")")
+            check("time zone (\(label)): a worker loaded from a URL runs in the profile's zone", scopes["url"] == expected, report)
+            for (scope, name) in [("shared", "a shared worker"), ("service", "a service worker")] {
+                let value = scopes[scope] ?? "nil"
+                if ["unavailable", "timeout", "error"].contains(where: { value.hasPrefix($0) }) {
+                    info("time zone (\(label)): \(name) gave no answer here: \(value)")
+                } else {
+                    // zone|offset|User-Agent: the zone exactly; the User-Agent the profile's, or
+                    // WebKit's own where its race left the worker without one — never another profile's.
+                    let parts = value.components(separatedBy: "|")
+                    let zone = parts.prefix(2).joined(separator: "|"), reported = parts.dropFirst(2).joined(separator: "|")
+                    let kind = remoteUserAgents(reported, page: userAgent)
+                    check("time zone (\(label)): \(name) runs in the profile's zone, with its own profile's User-Agent (or WebKit's own: its race)",
+                          zone == "\(profile.zone)|\(profile.offset)" && kind != .other, "\(value) vs \(expected)")
+                    if kind == .webKitDefault { info("time zone (\(label)): \(name) reports WebKit's own User-Agent (WebKit's race)") }
+                }
+            }
+        }
+        // The persistent profiles' data goes, as a deleted profile's does.
+        let vault = WebDataStoreVault(repository: repository)
+        for profile in running {
+            profile.tab.tearDown()
+            profile.session.shutDown()
+            await vault.deleteData(profileID: profile.id)
+        }
+        running.removeAll()
+
+        // A zone given by a link name (Asia/Calcutta for Asia/Kolkata): the engine names it by its
+        // primary id, and the shim must not take over for the name alone.
+        if ProfileProcessPool.supportsTimeZoneOverride {
+            let profile = try repository.create(name: "Zone link", configuration: ProfileConfiguration(
+                timeZoneIdentifier: "Asia/Calcutta", ephemeral: true))
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            defer { tab.tearDown(); session.shutDown() }
+            try await PageLoader.load(tab.webView, url: scopesPage)
+            let linked = try await js(tab.webView, """
+                const report = () => [Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset()].join('|');
+                const worker = new Worker('/pb-scopes/worker.js');
+                const inWorker = await Promise.race([new Promise((resolve) => { worker.onmessage = (e) => resolve(String(e.data).split('|').slice(0, 2).join('|')); worker.postMessage('report'); }),
+                                                     new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000))]);
+                return [report(), inWorker, \(Self.dateShape)].join('#');
+                """) as? String ?? "nil"
+            let parts = linked.components(separatedBy: "#")
+            check("time zone (Asia/Calcutta, a link): in the engine, no shim — the page and a worker from a URL agree",
+                  session.timeZoneByEngine && parts.count == 3 && parts[0] == parts[1] && parts[0].hasSuffix("|-330") && parts[2] == nativeShape,
+                  linked)
+        }
+
+        // For comparison, the same two User-Agents in WebKit's shared pool (every profile before
+        // pools of their own): the iPhone profile's shared worker reports the User-Agent of the page
+        // that set one last, the macOS profile's.
+        var inShared: [BrowserTab] = []
+        var sharedSessions: [BrowserSession] = []
+        defer {
+            inShared.forEach { $0.tearDown() }
+            sharedSessions.forEach { $0.shutDown() }
+        }
+        for generation in ["ios-26", DeviceGenerations.defaultID] {
+            var configuration = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: generation))
+            configuration.ephemeral = true
+            let profile = try repository.create(name: "Shared pool \(generation)", configuration: configuration)
+            let session = try inSharedPool { try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id)) }
+            sharedSessions.append(session)
+            inShared.append(BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext))
+        }
+        // Information only: a failure here must not end the self-test.
+        for tab in inShared { try? await PageLoader.load(tab.webView, url: scopesPage) }
+        let iPhoneUA = (try? await js(inShared[0].webView, "return navigator.userAgent;")) as? String ?? "nil"
+        let workerUA = (try? await js(inShared[0].webView, """
+            if (typeof SharedWorker !== 'function') return 'no SharedWorker';
+            const shared = new SharedWorker('/pb-scopes/shared.js');
+            return await Promise.race([new Promise((resolve) => { shared.port.onmessage = (e) => resolve(String(e.data).split('|')[2]); shared.port.postMessage('report'); }),
+                                       new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000))]);
+            """)) as? String ?? "nil"
+        info("shared pool: the iPhone profile's shared worker reports \(workerUA == iPhoneUA ? "its own User-Agent" : "another User-Agent: \(workerUA)")")
+    }
+
     // MARK: Device generations (version-aware UA reaches the page)
 
     /// A profile tagged with a device generation must apply that generation's self-declared
@@ -638,6 +1640,7 @@ final class SelfTest {
         let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
         try await PageLoader.load(plain, html: page, baseURL: origin)
         let reference = Self.flatten(try await js(plain, probe) as? [String: Any] ?? [:])
+        let plainStacks = Self.jsonStrings(try await js(plain, Self.stacksScript) as? String)
         writeSurface(reference, name: "plain")
         func string(_ probe: [String: String], _ key: String) -> String { probe[key] ?? "nil" }
 
@@ -666,32 +1669,69 @@ final class SelfTest {
              "webkitObject", "webdriver", "doNotTrack"].contains(key) || key.hasPrefix("webgl.")
                 || (key.hasPrefix("features.") && key != "features.safari") // window.safari is added on purpose (macOS)
         }.sorted()
-        for generationID in [DeviceGenerations.defaultID, "ios-26"] {
+        // What an iPhone or iPad profile's font allowlist is made of (DeviceFontRestriction).
+        let fontsStarted = Date()
+        let allowlist = DeviceFontRestriction.allowlist
+        let milliseconds = Int(Date().timeIntervalSince(fontsStarted) * 1000)
+        let macFaces = DeviceFontRestriction.macFaces
+        let macOnlyHere = macFaces.filter { IOSFonts.macOnlyFaces.contains($0.fullName) }.count
+        let hiddenFamilies = DeviceFonts.hiddenFamilies(macFaces).joined(separator: ", ")
+        info("fonts (iPhone/iPad): \(DeviceFontRestriction.availability); this Mac has \(macFaces.count) faces, \(macOnlyHere) of "
+             + "the \(IOSFonts.macOnlyFaces.count) Apple lists as only a Mac's (found by full name); allowlist \(allowlist.count) names, "
+             + "read in \(milliseconds) ms (0: read earlier); hidden families: \(hiddenFamilies)")
+        for generationID in [DeviceGenerations.defaultID, "ios-26", "ipados-26"] {
+            let platform = DeviceGenerations.resolved(id: generationID).platform
             // WebRTC left as the engine has it: its removal (the default policy) is checked by the
-            // shim checks and would otherwise be the one deliberate difference here.
+            // shim checks and would otherwise be the one deliberate difference here. A mobile
+            // generation runs in a pool of its own (a time zone), so its remote workers' User-Agent
+            // is the profile's alone (below).
             let profile = try repository.create(name: "Surface \(generationID)", configuration: ProfileConfiguration(
-                webRTCPolicy: .unrestricted, ephemeral: true, deviceGenerationID: generationID))
+                timeZoneIdentifier: platform == .macOS ? nil : "Europe/Berlin", webRTCPolicy: .unrestricted, ephemeral: true,
+                deviceGenerationID: generationID))
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            // Interfaces the device's Safari lacks, removed on purpose where the engine keeps them, and
+            // the fonts it lacks, which the pool's font allowlist hides (checked below).
+            let fontsByEngine = session.deviceFontsByEngine
+            let removed = Set((PrivacyScripts.shimConfiguration(for: session.configuration).device?.missingInterfaces ?? [])
+                .map { "features.\($0)" } + (fontsByEngine ? ["fonts"] : []))
             let tabConfiguration = session.makeWebViewConfiguration()
             check("surface (\(generationID)): user-installed fonts hidden from pages, as in Safari",
                   WebKitPreferences.bool(tabConfiguration.preferences, "_shouldAllowUserInstalledFonts") == false)
             let tab = BrowserTab(configuration: tabConfiguration, context: session.tabContext)
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
             let probed = Self.flatten(try await js(tab.webView, probe) as? [String: Any] ?? [:])
+            // A page provoking an error in a member the shim may replace sees the stack a plain web
+            // view gives: no frame of the shim, whose frames WebKit names as a user script's (P0-4).
+            let stacks = Self.jsonStrings(try await js(tab.webView, Self.stacksScript) as? String)
+            let stacksDiffer = stacks.keys.sorted().filter { stacks[$0] != plainStacks[$0] }
+            check("surface (\(generationID)): an error a page provokes in what the shim replaces has a plain web view's stack",
+                  !stacks.isEmpty && stacksDiffer.isEmpty,
+                  stacksDiffer.map { "\($0): \(stacks[$0] ?? "nil") vs \(plainStacks[$0] ?? "nil")" }.joined(separator: "; "))
+            // A mobile profile is compared with a plain web view set up as that device's Safari.
+            var baseline = reference
+            if platform != .macOS { baseline = try await deviceReference(platform, probe: probe) }
             // Safari's quota (82 463 372 084 on any Mac), not the 1000 MiB WebKit gives an app that is not a browser.
             let quota = try await js(tab.webView, "return (await navigator.storage.estimate()).quota;") as? NSNumber
             let safariQuota = PrivacyScripts.safariStorageQuota(for: DeviceGenerations.resolved(id: generationID).platform).rounded(.up)
             check("surface (\(generationID)): storage quota is Safari's",
                   quota?.doubleValue == safariQuota, "\(quota?.stringValue ?? "nil") vs \(String(format: "%.0f", safariQuota))")
+            if platform != .macOS { try await mobileDevice(platform, tab: tab) }
+            if platform == .iOS {
+                // A world the shim never runs in shows the engine's own choice.
+                let byEngine = try await js(tab.webView, "return typeof MediaSource;", world: .defaultClient) as? String ?? "nil"
+                info("surface (iPhone): MediaSource in the engine itself: \(byEngine) — "
+                     + (byEngine == "undefined" ? "_setMediaSourceEnabled: leaves it out" : "WebKit keeps it, the shim removes it from the page"))
+            }
             tab.tearDown()
             session.shutDown()
             try repository.delete(profile.id)
 
-            let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone"
+            let name = platform == .macOS ? "macOS" : platform == .iOS ? "iPhone" : "iPad"
             writeSurface(probed, name: name.lowercased())
-            let differing = engineKeys.filter { string(probed, $0) != string(reference, $0) }
-            check("surface (\(name)): engine and hardware signals as in a plain web view (\(engineKeys.count) keys)",
-                  differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
+            let keys = engineKeys.filter { !removed.contains($0) }
+            let differing = keys.filter { string(probed, $0) != string(baseline, $0) }
+            check("surface (\(name)): engine and hardware signals as in a plain web view (\(keys.count) keys)",
+                  differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(baseline, $0))" }.joined(separator: "; "))
             // The shim adds no noise and no visible wrappers: toString, length and own properties
             // of the rendering functions are the engine's own.
             let renderingNatives = probed.filter { $0.key.hasPrefix("natives.") && ($0.key.contains("Canvas") || $0.key.contains("WebGL")
@@ -706,18 +1746,221 @@ final class SelfTest {
             if name == "macOS" {
                 for key in ["ua", "platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
                             "timeZone", "tzOffset", "dateString"] where key != "ua" {
-                    check("surface (macOS): native \(key)", string(probed, key) == string(reference, key),
-                          "\(string(probed, key)) vs \(string(reference, key))")
+                    check("surface (macOS): native \(key)", string(probed, key) == string(baseline, key),
+                          "\(string(probed, key)) vs \(string(baseline, key))")
                 }
                 check("surface (macOS): the UA is this Mac's Safari",
                       string(probed, "ua").hasSuffix("Version/\(HostSafari.version) Safari/605.1.15"), string(probed, "ua"))
-            } else {
+            } else if name == "iPhone" {
                 check("surface (iPhone): navigator", string(probed, "platform") == "iPhone" && string(probed, "maxTouchPoints") == "5"
                       && string(probed, "hardwareConcurrency") == "4" && string(probed, "standalone") == "false",
                       "\(string(probed, "platform")) \(string(probed, "maxTouchPoints")) \(string(probed, "hardwareConcurrency")) \(string(probed, "standalone"))")
                 check("surface (iPhone): screen", string(probed, "screen") == "390x844x390x844x3", string(probed, "screen"))
+            } else {
+                check("surface (iPad): navigator", string(probed, "platform") == "MacIntel" && string(probed, "maxTouchPoints") == "5"
+                      && string(probed, "hardwareConcurrency") == "8",
+                      "\(string(probed, "platform")) \(string(probed, "maxTouchPoints")) \(string(probed, "hardwareConcurrency"))")
+                check("surface (iPad): screen", string(probed, "screen") == "820x1180x820x1180x2", string(probed, "screen"))
+            }
+            if platform != .macOS {
+                // As MDN's browser-compat-data has Safari on iOS: Fullscreen and MediaSource on an
+                // iPad only, ManagedMediaSource on both, Notification only in a web app on the home screen.
+                let expected: [String: String] = [
+                    "features.MediaSource": platform == .iOS ? "undefined" : "function",
+                    "features.ManagedMediaSource": "function",
+                    "features.Notification": "undefined",
+                    "features.document.fullscreenEnabled": platform == .iOS ? "undefined" : "boolean",
+                    "features.Element.prototype.webkitRequestFullscreen": platform == .iOS ? "undefined" : "function",
+                    "orientation": "portrait-primary"]
+                let wrong = expected.filter { string(probed, $0.key) != $0.value }
+                check("surface (\(name)): Fullscreen, MediaSource, Notification and orientation as Safari on that device has them",
+                      wrong.isEmpty, wrong.map { "\($0.key): \(string(probed, $0.key)) vs \($0.value)" }.sorted().joined(separator: "; "))
+                deviceFonts(name, probed: probed, plain: baseline, byEngine: fontsByEngine)
             }
         }
+    }
+
+    /// An iPhone or iPad profile's pages find the fonts Safari on the device has: families a Mac has
+    /// and iOS only offers for download are not found (those this Mac has, as a plain web view
+    /// shows), ones both systems have are, and `cursive` is the device's Snell Roundhand.
+    private func deviceFonts(_ name: String, probed: [String: String], plain: [String: String], byEngine: Bool) {
+        guard byEngine else {
+            info("surface (\(name)): no font allowlist, pages see this Mac's fonts (\(DeviceFontRestriction.availability))")
+            return
+        }
+        func presence(_ surface: [String: String]) -> [String: Bool] {
+            var found: [String: Bool] = [:]
+            for item in (surface["fontFamilies.present"] ?? "").split(separator: ",") {
+                let parts = item.split(separator: ":")
+                if parts.count == 2 { found[String(parts[0])] = parts[1] == "y" }
+            }
+            return found
+        }
+        let inProfile = presence(probed), inPlain = presence(plain)
+        // Only on a Mac by Apple's list (IOSFonts), and on both systems.
+        let macOnly = ["Monaco", "Comic Sans MS", "Arial Unicode MS", "Tahoma", "Lucida Grande", "Geneva", "Andale Mono",
+                       "Apple Chancery", "Webdings"]
+        let onBoth = ["Helvetica Neue", "Menlo", "Georgia", "Verdana", "Futura", "Gill Sans", "Palatino", "Courier New",
+                      "Times New Roman", "Snell Roundhand"]
+        let testable = macOnly.filter { inPlain[$0] == true }
+        let wrong = testable.filter { inProfile[$0] != false } + onBoth.filter { inProfile[$0] != true || inPlain[$0] != true }
+        let cursive = (probed["fontFamilies.generics"] ?? "").split(separator: ",").first { $0.hasPrefix("cursive=") }.map(String.init) ?? "nil"
+        check("surface (\(name)): fonts as on the device: \(testable.count) families only a Mac has are not found, "
+              + "\(onBoth.count) both have are, cursive is Snell Roundhand",
+              testable.count >= 5 && wrong.isEmpty && cursive.hasSuffix("=Snell Roundhand"),
+              "wrong: \(wrong.joined(separator: ", ")); \(cursive); profile: \(probed["fontFamilies.present"] ?? "nil")")
+    }
+
+    /// An iPhone profile's window is the viewport Safari leaves a page on the phone: as wide as the
+    /// screen the page is told about and lower than it (equal ones are a desktop browser's device
+    /// emulation), whatever the number of tabs — the tab strip adds to the window instead.
+    private func mobileWindowViewport(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("mobile window checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let page = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!
+        let profile = try repository.create(name: "iPhone window", configuration: ProfileConfiguration(
+            ephemeral: true, deviceGenerationID: "ios-26"))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let controller = session.openWindow(url: page)
+        guard let first = controller.selectedTab,
+              await waitUntil(timeout: 20, { !first.isLoading && first.webView.url?.path == "/pb-scopes/page" }) else {
+            check("mobile window: an iPhone profile window opens the page", false)
+            return
+        }
+        let sizes = "return [innerWidth, innerHeight, outerWidth, outerHeight, screen.width, screen.height].join();"
+        let one = try await js(first.webView, sizes) as? String ?? "nil"
+        let nextPage = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page?tab=2")!
+        guard let second = controller.addTab(url: nextPage),
+              await waitUntil(timeout: 20, { !second.isLoading && second.webView.url == nextPage }) else {
+            check("mobile window: a second tab opens", false)
+            return
+        }
+        try await Task.sleep(nanoseconds: 300_000_000) // the window's new frame laid out
+        let two = try await js(second.webView, sizes) as? String ?? "nil"
+        info("mobile window (iPhone, inner × outer × screen): one tab \(one), two tabs \(two); "
+             + "estimated viewport \(PrivacyScripts.deviceViewportSize(for: session.configuration).map { "\(Int($0.width))x\(Int($0.height))" } ?? "nil")")
+        let values = one.split(separator: ",").compactMap { Int($0) }
+        check("mobile window: as wide as the iPhone's screen and lower than it, as Safari's viewport on the phone",
+              values.count == 6 && values[0] == values[4] && values[1] < values[5] && values[1] > values[5] / 2, one)
+        check("mobile window: a second tab leaves the page's viewport as it was", one == two, "\(one) vs \(two)")
+    }
+
+    /// A plain web view set up as `platform`'s Safari is (BrowserSession, stated again here) and
+    /// with its pixel ratio: what a mobile profile's engine signals are compared with.
+    private func deviceReference(_ platform: DeviceGeneration.Platform, probe: String) async throws -> [String: String] {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.preferences.isElementFullscreenEnabled = platform != .iOS
+        if platform == .iOS { WebKitPreferences.setBool(configuration.preferences, "_setMediaSourceEnabled:", false) }
+        WebKitPreferences.setFeature(configuration.preferences, "NotificationsEnabled", false)
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        if PrivacyScripts.deviceScaleFactorByEngine,
+           let method = class_getInstanceMethod(WKWebView.self, PrivacyScripts.deviceScaleFactorSelector) {
+            typealias Setter = @convention(c) (NSObject, Selector, CGFloat) -> Void
+            unsafeBitCast(method_getImplementation(method), to: Setter.self)(view, PrivacyScripts.deviceScaleFactorSelector,
+                                                                             platform == .iOS ? 3 : 2)
+        }
+        try await PageLoader.load(view, html: page, baseURL: origin)
+        return Self.flatten(try await js(view, probe) as? [String: Any] ?? [:])
+    }
+
+    /// A mobile profile's pixel ratio from the engine — devicePixelRatio and the resolution media
+    /// queries agree, which a JS getter cannot make them — and the profile's User-Agent in its
+    /// shared and service workers (its engine settings must not cost it that; see BrowserSession).
+    private func mobileDevice(_ platform: DeviceGeneration.Platform, tab: BrowserTab) async throws {
+        let name = platform == .iOS ? "iPhone" : "iPad"
+        let ratio = platform == .iOS ? 3 : 2
+        let media = try await js(tab.webView, "return [devicePixelRatio, matchMedia('(resolution: \(ratio)dppx)').matches, "
+                                 + "matchMedia('(-webkit-device-pixel-ratio: \(ratio))').matches].join();") as? String ?? "nil"
+        if PrivacyScripts.deviceScaleFactorByEngine {
+            check("surface (\(name)): the pixel ratio is the engine's own, and the media queries agree", media == "\(ratio),true,true", media)
+        } else {
+            info("surface (\(name)): this WebKit has no _setOverrideDeviceScaleFactor:, the shim reports the pixel ratio: \(media)")
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else { return }
+        try await PageLoader.load(tab.webView, url: URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!)
+        let userAgent = try await js(tab.webView, "return navigator.userAgent;") as? String ?? "nil"
+        let remote = try await js(tab.webView, Self.remoteWorkerUserAgentsScript) as? String ?? "nil"
+        checkRemoteUserAgents("surface (\(name))", remote, page: userAgent)
+    }
+
+    /// How often WebKit leaves a fresh profile's shared and service workers with its own User-Agent
+    /// instead of the profile's (the checks allow that race, never another profile's User-Agent):
+    /// fresh iPhone profiles, each in a pool of its own, with the engine settings as shipped, with
+    /// Notification left on, and with WebRTC's encoded transforms off — the switch CI runs 211–212
+    /// saw it with in 4 of 8 profiles. Information: whether a setting of the app's makes it frequent.
+    private func remoteWorkerRace(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else { return }
+        let page = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!
+        let settings: [(name: String, apply: (WKWebViewConfiguration) -> Void)] = [
+            ("as shipped", { _ in }),
+            ("Notification on", { WebKitPreferences.setFeature($0.preferences, "NotificationsEnabled", true) }),
+            ("encoded transforms off", { WebKitPreferences.setFeature($0.preferences, "WebRTCEncodedTransformEnabled", false) }),
+        ]
+        let rounds = 6
+        var lost = Array(repeating: 0, count: settings.count), other = Array(repeating: 0, count: settings.count)
+        for round in 0..<rounds {
+            for index in settings.indices {
+                let profile = try repository.create(name: "Race \(round).\(index)", configuration: ProfileConfiguration(
+                    timeZoneIdentifier: "Europe/Berlin", ephemeral: true, deviceGenerationID: "ios-26"))
+                let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+                let configuration = session.makeWebViewConfiguration()
+                settings[index].apply(configuration)
+                let tab = BrowserTab(configuration: configuration, context: session.tabContext)
+                try await PageLoader.load(tab.webView, url: page)
+                let userAgent = try await js(tab.webView, "return navigator.userAgent;") as? String ?? "nil"
+                let remote = try await js(tab.webView, Self.remoteWorkerUserAgentsScript) as? String ?? "nil"
+                switch remoteUserAgents(remote, page: userAgent) {
+                case .page: break
+                case .webKitDefault: lost[index] += 1
+                case .other: other[index] += 1
+                }
+                tab.tearDown()
+                session.shutDown()
+                try repository.delete(profile.id)
+            }
+        }
+        info("remote workers with WebKit's own User-Agent instead of the profile's, \(rounds) fresh iPhone profiles per setting: "
+             + settings.indices.map { "\(settings[$0].name) \(lost[$0])/\(rounds)" + (other[$0] > 0 ? " (another or none: \(other[$0]))" : "") }
+                .joined(separator: ", "))
+    }
+
+    /// The stack of the TypeError a page provokes in members the shim may replace (a wrong
+    /// receiver), as `e.stack` prints it, per member: a getter, a method, a promise's rejection.
+    /// The last four are replaced in every profile, the default one included.
+    private static let stacksScript = """
+        const members = {
+          'Navigator.platform': () => Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.call({}),
+          'Navigator.maxTouchPoints': () => Object.getOwnPropertyDescriptor(Navigator.prototype, 'maxTouchPoints').get.call({}),
+          'Screen.width': () => Object.getOwnPropertyDescriptor(Screen.prototype, 'width').get.call({}),
+          'ScreenOrientation.type': () => Object.getOwnPropertyDescriptor(ScreenOrientation.prototype, 'type').get.call({}),
+          'window.outerWidth': () => Object.getOwnPropertyDescriptor(window, 'outerWidth').get.call({}),
+          'Date.getTimezoneOffset': () => Date.prototype.getTimezoneOffset.call({}),
+          'StorageManager.estimate': () => StorageManager.prototype.estimate.call({}),
+          'HTMLIFrameElement.contentWindow': () => Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get.call({}),
+          'window.open': () => window.open.call({}),
+          'Document.open': () => Document.prototype.open.call({}, 'about:blank', 'x', ''),
+          'Function.toString': () => Function.prototype.toString.call({}),
+        };
+        const out = {};
+        for (const [name, provoke] of Object.entries(members)) {
+          try {
+            const result = provoke();
+            out[name] = result && typeof result.then === 'function'
+              ? await result.then(() => 'resolved', (e) => String(e && e.stack)) : 'no error';
+          } catch (e) {
+            out[name] = String(e && e.stack);
+          }
+        }
+        return JSON.stringify(out);
+        """
+
+    /// A JSON object of strings (a script's answer); empty when it is not one.
+    private static func jsonStrings(_ text: String?) -> [String: String] {
+        (try? JSONSerialization.jsonObject(with: Data((text ?? "{}").utf8))) as? [String: String] ?? [:]
     }
 
     /// The probe from the app bundle (build-app.sh copies it), else from PB_SELFTEST_PROBE.
@@ -2133,6 +3376,13 @@ final class SelfTest {
     }
 
     // MARK: Helpers
+
+    /// Runs `body` with profiles started in WebKit's shared pool (the time zone in the shim).
+    private func inSharedPool<T>(_ body: () throws -> T) rethrows -> T {
+        ProfileProcessPool.isDisabledForTesting = true
+        defer { ProfileProcessPool.isDisabledForTesting = false }
+        return try body()
+    }
 
     private func makeSession(_ repository: ProfileRepository, _ id: UUID, key: SymmetricKey) throws -> BrowserSession {
         let configuration = try repository.loadConfiguration(id, key: key)

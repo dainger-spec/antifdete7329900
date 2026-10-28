@@ -37,13 +37,9 @@ struct ProfileEditorForm: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Picker(L("editor.tabs"), selection: $tab) {
-                ForEach(Tab.allCases) { Text(L($0.titleKey)).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 24)
-            .padding(.bottom, 14)
+            LumenTabBar(items: Tab.allCases, selection: $tab, label: L("editor.tabs")) { L($0.titleKey) }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 14)
             Rectangle().fill(Theme.divider).frame(height: 1)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -159,13 +155,18 @@ struct ProfileEditorForm: View {
         return VStack(alignment: .leading, spacing: 14) {
             EditorRow(L("editor.generation")) {
                 Picker(L("editor.generation"), selection: $draft.deviceGenerationID) {
-                    ForEach(DeviceGenerations.all) { Text(L($0.nameKey)).tag($0.id) }
+                    ForEach(DeviceGenerations.selectable(hostSafariVersion: HostSafari.version, current: draft.deviceGenerationID)) {
+                        Text(L($0.nameKey)).tag($0.id)
+                    }
                 }
                 .labelsHidden()
                 .fixedSize()
             }
+            if !generation.isOfEngine(hostSafariVersion: HostSafari.version) {
+                EditorNote(String(format: L("editor.generation.otherRelease"), HostSafari.version ?? "?"), tone: .warning)
+            }
             if !generation.matchesEngine {
-                EditorNote(L("editor.generation.inconsistent"), tone: .warning)
+                EditorNote(L("editor.generation.mobileLimits"), tone: .warning)
             }
             EditorDivider()
             EditorToggle(L("editor.ua.useCustom"), isOn: $draft.customUserAgent)

@@ -26,11 +26,14 @@ enum HostSafari {
 /// The language websites see: the `Accept-Language` header, `navigator.language(s)` and the
 /// default locale of JavaScript's `Intl` and `Date` formatting.
 ///
-/// PLATFORM LIMITATION: WebKit takes it from this process's `AppleLanguages` once, when it
-/// launches its first web or network process, and gives that list to every process — every
-/// profile — for the rest of the run (`AuxiliaryProcessProxy::platformOverrideLanguages`). There
-/// is no public per-web-view setting (a content rule list's `modify-headers` action only applies
-/// for Safari web extensions). So the first profile launched in a run decides: the language of
+/// PLATFORM LIMITATION: WebKit hands each process this process's `AppleLanguages` when it launches
+/// it (`AuxiliaryProcessProxy::populateOverrideLanguagesLaunchOptions`), and on macOS every profile
+/// shares one network process, where CFNetwork writes `Accept-Language` with the list it was
+/// launched with; a later list never reaches it (`WebProcessPool::setOverrideLanguages` updates
+/// network processes only on libsoup ports). There is no public per-web-view setting (a content
+/// rule list's `modify-headers` action needs the private `_activeContentRuleListActionPatterns`
+/// and misses loads the network process starts). Docs §6. So the first profile launched in a run
+/// decides: the language of
 /// its proxy's country when that is known (`ProfileConfiguration.matchProxyLocation`), otherwise
 /// the user's own languages — the list Safari on this Mac uses, not the app's UI language (which
 /// `Localization.applyProcessLanguage` keeps in the app's own domain). The JavaScript shim never

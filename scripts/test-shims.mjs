@@ -10,9 +10,152 @@ import assert from 'node:assert/strict';
 const swift = readFileSync(new URL('../Sources/PrivacyBrowser/Browser/PrivacyScripts.swift', import.meta.url), 'utf8');
 const body = swift.split('static let shimBody = #"""')[1].split('"""#')[0];
 
+// SHIM_FORM=worker runs every test on the shim as a worker's blob gets it: one line of code, made
+// by the shim itself (oneLine in PrivacyScripts.swift) from its own text.
+const FORM = process.env.SHIM_FORM === 'worker' ? 'worker' : 'page';
+
+// Blobs, blob: URLs, workers and Trusted Types as WebKit has them, as far as the worker hook uses
+// them. A Blob converts its parts as a WebIDL sequence (through their @@iterator, `next` read once,
+// `return` on an error), holds UTF-8 bytes (a string of char codes 0-255) and slices them; a worker
+// records the script it would run; with Trusted Types enforced (engine.tt.enforced) a string URL
+// goes through the default policy or is a violation. Like the engine's C++, none of it calls a
+// built-in a page can replace.
+const ENGINE_WORKERS = String.raw`(() => {
+  const engine = globalThis.__engine;
+  const reflectApply = Reflect.apply, NativeTypeError = TypeError, NativeString = String, objectCreate = Object.create, defineProperty = Object.defineProperty;
+  const uncurry = (f) => (self, ...args) => reflectApply(f, self, args);
+  const weakHas = uncurry(WeakMap.prototype.has), weakGet = uncurry(WeakMap.prototype.get), weakSet = uncurry(WeakMap.prototype.set);
+  const mapGet = uncurry(Map.prototype.get), mapSet = uncurry(Map.prototype.set), mapDelete = uncurry(Map.prototype.delete), mapHas = uncurry(Map.prototype.has);
+  const slice = uncurry(String.prototype.slice), lower = uncurry(String.prototype.toLowerCase), wellFormed = uncurry(String.prototype.toWellFormed);
+  const fromCharCode = String.fromCharCode, nativeEncode = encodeURIComponent, nativeDecode = decodeURIComponent, nativeEscape = escape, nativeUnescape = unescape;
+  const append = (list, value) => { defineProperty(list, list.length, { __proto__: null, value, writable: true, enumerable: true, configurable: true }); };
+  const toText = (v) => { if (typeof v === 'symbol') throw new NativeTypeError('Cannot convert a symbol to a string'); return NativeString(v); };
+  const encode = (s) => nativeUnescape(nativeEncode(wellFormed(s)));
+  const decode = (b) => nativeDecode(nativeEscape(b));
+  const bytesOf = (view) => { let out = ''; for (let k = 0; k < view.length; k++) out += fromCharCode(view[k]); return out; };
+  const blobs = new WeakMap();
+  const sequenceOf = (value) => {
+    if (value === undefined) return '';
+    if (value === null || (typeof value !== 'object' && typeof value !== 'function')) throw new NativeTypeError('Value is not a sequence');
+    const method = value[Symbol.iterator];
+    if (typeof method !== 'function') throw new NativeTypeError('Value is not a sequence');
+    const iterator = reflectApply(method, value, []);
+    if (iterator === null || (typeof iterator !== 'object' && typeof iterator !== 'function')) throw new NativeTypeError('Iterator is not an object');
+    const next = iterator.next;
+    let bytes = '';
+    for (;;) {
+      const result = reflectApply(next, iterator, []);
+      if (result === null || (typeof result !== 'object' && typeof result !== 'function')) throw new NativeTypeError('Iterator result is not an object');
+      if (result.done) return bytes;
+      const item = result.value;
+      try {
+        bytes += weakHas(blobs, item) ? weakGet(blobs, item).bytes
+          : item instanceof ArrayBuffer ? bytesOf(new Uint8Array(item))
+          : ArrayBuffer.isView(item) ? bytesOf(new Uint8Array(item.buffer, item.byteOffset, item.byteLength))
+          : encode(toText(item));
+      } catch (e) {
+        const close = iterator.return;
+        if (close !== undefined && close !== null) { try { reflectApply(close, iterator, []); } catch (ignored) {} }
+        throw e;
+      }
+    }
+  };
+  const data = (blob) => { if (!weakHas(blobs, blob)) throw new NativeTypeError('The Blob.size getter can only be used on instances of Blob'); return weakGet(blobs, blob); };
+  const Blob = class Blob {
+    constructor(...args) {
+      const bytes = sequenceOf(args[0]);
+      let type = '';
+      const options = args[1];
+      if (options !== undefined && options !== null) {
+        if (typeof options !== 'object' && typeof options !== 'function') throw new NativeTypeError('Type error');
+        options.endings; // read before type: WebIDL dictionary members in order
+        if (options.type !== undefined) type = lower(toText(options.type));
+      }
+      weakSet(blobs, this, { bytes, type });
+    }
+    get size() { return data(this).bytes.length; }
+    get type() { return data(this).type; }
+    slice(...args) {
+      const d = data(this), size = d.bytes.length;
+      const at = (v, fallback) => v === undefined ? fallback : v < 0 ? Math.max(size + Math.trunc(v), 0) : Math.min(Math.trunc(v), size);
+      const start = at(args[0], 0), end = at(args[1], size);
+      const piece = objectCreate(Blob.prototype);
+      weakSet(blobs, piece, { bytes: slice(d.bytes, start, Math.max(start, end)), type: args[2] === undefined ? '' : lower(toText(args[2])) });
+      return piece;
+    }
+  };
+  const File = class File extends Blob { constructor(...args) { super(args[0], args[2]); } };
+  const urls = new Map();
+  let serial = 0;
+  const URL = class URL {
+    static createObjectURL(...args) {
+      if (args.length === 0) throw new NativeTypeError('Not enough arguments');
+      if (!weakHas(blobs, args[0])) throw new NativeTypeError('Argument 1 is not a Blob or a MediaSource');
+      const url = 'blob:https://page.test/' + (++serial);
+      mapSet(urls, url, args[0]);
+      return url;
+    }
+    static revokeObjectURL(...args) {
+      if (args.length === 0) throw new NativeTypeError('Not enough arguments');
+      mapDelete(urls, toText(args[0]));
+    }
+  };
+  Object.defineProperty(URL.createObjectURL, 'length', { value: 1 });
+  Object.defineProperty(URL.revokeObjectURL, 'length', { value: 1 });
+  const trusted = new WeakMap(), policies = new WeakMap();
+  let defaultPolicy = null;
+  const TrustedScriptURL = class TrustedScriptURL { toString() { return weakGet(trusted, this); } };
+  const TrustedTypePolicy = class TrustedTypePolicy {
+    createScriptURL(input, ...rest) {
+      const rules = weakGet(policies, this);
+      const made = objectCreate(TrustedScriptURL.prototype);
+      weakSet(trusted, made, toText(reflectApply(rules.createScriptURL, rules, [toText(input), rest[0], rest[1]])));
+      return made;
+    }
+  };
+  const TrustedTypePolicyFactory = class TrustedTypePolicyFactory {
+    createPolicy(name, rules) {
+      const policy = objectCreate(TrustedTypePolicy.prototype);
+      weakSet(policies, policy, rules);
+      if (name === 'default') defaultPolicy = policy;
+      return policy;
+    }
+    isScriptURL(value) { return weakHas(trusted, value); }
+    get defaultPolicy() { return defaultPolicy; }
+  };
+  engine.tt = { enforced: false, violations: [] };
+  const compliant = (value, sink) => {
+    if (weakHas(trusted, value)) return weakGet(trusted, value);
+    const text = toText(value);
+    if (!engine.tt.enforced) return text;
+    if (defaultPolicy !== null) {
+      const rules = weakGet(policies, defaultPolicy);
+      const made = reflectApply(rules.createScriptURL, rules, [text, 'TrustedScriptURL', sink]);
+      if (made !== undefined && made !== null) return toText(made);
+    }
+    append(engine.tt.violations, sink + '|' + text);
+    throw new NativeTypeError('This assignment requires a TrustedScriptURL');
+  };
+  engine.workers = [];
+  const workerClass = (kind) => ({ [kind]: class {
+    constructor(...args) {
+      if (args.length === 0) throw new NativeTypeError('Not enough arguments');
+      const url = compliant(args[0], kind + ' constructor');
+      const blob = mapGet(urls, url);
+      append(engine.workers, { kind, raw: args[0], url, options: args[1], script: blob ? decode(weakGet(blobs, blob).bytes) : null });
+    }
+  } })[kind];
+  engine.urls = { has: (url) => mapHas(urls, url) };
+  const expose = { Blob, File, URL, Worker: workerClass('Worker'), SharedWorker: workerClass('SharedWorker'),
+                   TrustedScriptURL, TrustedTypePolicy, TrustedTypePolicyFactory, trustedTypes: objectCreate(TrustedTypePolicyFactory.prototype) };
+  for (const name of Object.keys(expose)) Object.defineProperty(globalThis, name, { value: expose[name], writable: true, configurable: true });
+})();`;
+
 // A realm shaped like a WebKit window: navigator and screen values are accessors on the
 // prototypes that reject other receivers; window attributes are own accessors.
-function makeWindow(config, parentContext) {
+// `prepare(context)` shapes the engine before the shim runs (an engine with WebRTC off, a window
+// open() makes); form 'none' leaves the shim out (a new page's first document).
+function makeWindow(config, parentContext, form = FORM, prepare = null) {
   const context = vm.createContext({});
   vm.runInContext(`
     var window = globalThis;
@@ -47,6 +190,11 @@ function makeWindow(config, parentContext) {
     var navigator = Object.assign(Object.create(Navigator.prototype), { geolocation: new Geolocation(), permissions: new Permissions(), storage: new StorageManager() });
     class Screen { get width() { illegal(this, Screen); return 1728; } get height() { illegal(this, Screen); return 1117; }
                    get availWidth() { illegal(this, Screen); return 1728; } get availHeight() { illegal(this, Screen); return 1079; } }
+    // As WebKit on a Mac: the screen held as the Mac's is, landscape.
+    globalThis.ScreenOrientation = class ScreenOrientation {
+      get type() { illegal(this, ScreenOrientation); return 'landscape-primary'; } get angle() { illegal(this, ScreenOrientation); return 0; } };
+    Object.defineProperty(Screen.prototype, 'orientation', { get() { illegal(this, Screen); return orientation; }, enumerable: true, configurable: true });
+    const orientation = Object.create(ScreenOrientation.prototype);
     var screen = new Screen();
     Object.defineProperty(globalThis, 'devicePixelRatio', { get() { return 2; }, set(v) {}, enumerable: true, configurable: true });
     Object.defineProperty(globalThis, 'outerWidth', { get() { return 1200; }, set(v) {}, enumerable: true, configurable: true });
@@ -152,8 +300,62 @@ function makeWindow(config, parentContext) {
   context.Function = vm.runInContext('Function', context);
   context.parent = parentContext || context;
   context.top = parentContext ? parentContext.top : context;
-  vm.runInContext(`(function install(CONFIG) {\n${body}\n})(${JSON.stringify(config)});`, context);
+  vm.runInContext(ENGINE_WORKERS, context);
+  if (prepare) prepare(context);
+  if (form === 'none') return context;
+  // Named as WebKit names a user script's frames in a stack.
+  vm.runInContext(form === 'worker' ? `(${oneLineInstall()})(${JSON.stringify(config)});`
+                                    : `(function install(CONFIG) {\n${body}\n})(${JSON.stringify(config)});`, context,
+                  { filename: 'user-script:1' });
   return context;
+}
+
+// The shim as one line, `function install(CONFIG) {…}`: what a page's shim puts in front of a
+// worker's blob (a worker made in a page with the shim in its page form), without the configuration.
+let oneLineText = null;
+function oneLineInstall() {
+  if (oneLineText === null) {
+    const config = { geolocation: { mode: 'deny' }, webRTC: 'disabled', timeZone: 'UTC' };
+    const w = makeWindow(config, undefined, 'page');
+    const script = vm.runInContext("new Worker(URL.createObjectURL(new Blob(['0']))); __engine.workers[0].script", w);
+    const tail = `)(${JSON.stringify(config)});0`;
+    assert.ok(script.startsWith('(function install(CONFIG) {') && script.endsWith(tail), 'worker bootstrap: ' + String(script).slice(0, 80));
+    oneLineText = script.slice(1, script.length - tail.length);
+  }
+  return oneLineText;
+}
+
+// A realm shaped like a WebKit worker (WorkerGlobalScope, WorkerNavigator, postMessage), with a
+// window's Blob, URL and Worker (nested workers), running `script` as a worker runs its blob.
+// codeGeneration false: no eval or Function from strings, as under a CSP without 'unsafe-eval' (V8).
+function runWorker(script, { codeGeneration = true } = {}) {
+  const context = vm.createContext({}, codeGeneration ? {} : { codeGeneration: { strings: false } });
+  vm.runInContext(String.raw`
+    globalThis.WorkerGlobalScope = class WorkerGlobalScope { static [Symbol.hasInstance](o) { return o === globalThis; } };
+    var self = globalThis;
+    const illegal = (o, C) => { if (!(o instanceof C)) throw new TypeError('illegal invocation'); };
+    class WorkerNavigator { get platform() { illegal(this, WorkerNavigator); return 'MacIntel'; }
+                            get hardwareConcurrency() { illegal(this, WorkerNavigator); return 8; } }
+    class StorageManager { estimate() { illegal(this, StorageManager); return Promise.resolve({ quota: 1048576000, usage: 0 }); } }
+    globalThis.StorageManager = StorageManager;
+    // WebKit exposes RTCDataChannel to workers (Exposed=(Window,Worker)), RTCPeerConnection not; the
+    // encoded transforms (a setting of their own) to dedicated workers, with their onrtctransform.
+    for (const name of ['RTCDataChannel', 'RTCEncodedAudioFrame', 'RTCEncodedVideoFrame', 'RTCRtpScriptTransformer', 'RTCTransformEvent']) {
+      Object.defineProperty(globalThis, name, { value: { [name]: function () {} }[name], writable: true, configurable: true });
+    }
+    Object.defineProperty(Object.getPrototypeOf(globalThis), 'onrtctransform', { get() { return null; }, set(v) {}, enumerable: true, configurable: true });
+    var navigator = Object.create(WorkerNavigator.prototype);
+    Object.defineProperty(navigator, 'storage', { value: new StorageManager() });
+    var messages = [];
+    var postMessage = (m) => { messages.push(m); };
+    Object.defineProperty(globalThis, '__engine', { value: {} });
+  `, context);
+  vm.runInContext(ENGINE_WORKERS, context);
+  context.Function = vm.runInContext('Function', context);
+  let error = null;
+  try { vm.runInContext(script, context, { filename: 'blob:worker' }); } catch (e) { error = e; }
+  const line = error ? Number((/blob:worker:(\d+)/.exec(String(error.stack)) || [])[1]) : null;
+  return { context, error, line, messages: () => Array.from(vm.runInContext('messages', context)) };
 }
 
 const run = (w, code) => vm.runInContext(code, w);
@@ -163,7 +365,7 @@ let failures = 0;
 function test(name, fn) {
   Promise.resolve().then(fn).then(
     () => console.log(`ok   ${name}`),
-    (e) => { failures++; console.log(`FAIL ${name}\n     ${e.message}`); });
+    (e) => { failures++; console.log(`FAIL ${name}\n     ${e.message}`); if (process.env.SHIM_DEBUG) console.log(e.stack); });
 }
 const nativeText = (name) => run(makeWindow({ geolocation: { mode: 'deny' }, webRTC: 'unrestricted' }),
                                  'Function.prototype.toString.call(Array.prototype.push)').replace('push', name);
@@ -277,6 +479,30 @@ test('no time zone configured → Date untouched', () => {
   assert.equal(run(w, `Date.toString()`), nativeText('Date'));
 });
 
+// ---- Time zone: an engine that already runs in the zone ---------------------------------------
+// The profile's process pool can set the zone in the engine (ProfileProcessPool): Date and Intl
+// then stay the engine's own, and a realm whose engine reports another zone still gets the shim.
+const SHAPE = "[Object.getOwnPropertyNames(Date).join(), Object.getOwnPropertyNames(Intl.DateTimeFormat).join()].join('|')";
+test('time zone: an engine already in the profile zone keeps its own Date and Intl', () => {
+  const host = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const w = makeWindow({ ...base, timeZone: host, engineTimeZone: true });
+  assert.equal(run(w, SHAPE), vm.runInContext(SHAPE, vm.createContext({})));
+  assert.equal(run(w, 'Intl.DateTimeFormat().resolvedOptions().timeZone'), host);
+});
+test('time zone: an engine in the zone a link names (US/Eastern) keeps its own Date and Intl', () => {
+  // The harness runs with TZ=America/New_York; US/Eastern is a link to it.
+  const host = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (host !== 'America/New_York') return;
+  const w = makeWindow({ ...base, timeZone: 'US/Eastern', engineTimeZone: true });
+  assert.equal(run(w, SHAPE), vm.runInContext(SHAPE, vm.createContext({})));
+});
+test('time zone: a realm whose engine reports another zone still gets the shim', () => {
+  const w = makeWindow({ ...base, timeZone: 'Asia/Tokyo', engineTimeZone: true });
+  assert.notEqual(run(w, SHAPE), vm.runInContext(SHAPE, vm.createContext({})));
+  assert.equal(run(w, `new Date('2024-01-15T12:00:00Z').getTimezoneOffset()`), -540);
+  assert.equal(run(w, 'Intl.DateTimeFormat().resolvedOptions().timeZone'), 'Asia/Tokyo');
+});
+
 // ---- Looks native (what CreepJS inspects) --------------------------------------------------
 // Each wrapper: `length` and `name` only, no prototype, not constructible, caller/arguments throw,
 // prints as native code — also through the Function.prototype.toString of another frame.
@@ -308,7 +534,8 @@ const probeLies = `
   try { Reflect.setPrototypeOf(apiFunction, Object.create(apiFunction)); ('x' in apiFunction); throw new TypeError(); } catch (e) { if (!(e instanceof TypeError)) lies.push('failed at reflect set proto'); }
   return lies;
 })`;
-const iPhone = { platform: 'iPhone', maxTouchPoints: 5, hardwareConcurrency: 4, screenWidth: 390, screenHeight: 844, devicePixelRatio: 3 };
+const iPhone = { platform: 'iPhone', maxTouchPoints: 5, hardwareConcurrency: 4, screenWidth: 390, screenHeight: 844, devicePixelRatio: 3,
+                 orientation: 'portrait-primary', missingInterfaces: ['MediaSource'] };
 const everything = { geolocation: { mode: 'fixed', latitude: 1, longitude: 2, accuracy: 3 }, webRTC: 'relayOnly', timeZone: 'Europe/Berlin', device: iPhone, storageQuota: 0.6 * 128 * 2 ** 30 };
 const wrappers = [
   ['Function.prototype.toString'], ['Date.prototype.getTimezoneOffset', 'Date'], ['Date.prototype.getHours', 'Date'],
@@ -330,6 +557,7 @@ const wrappers = [
   ['Object.getOwnPropertyDescriptor(GeolocationPositionError.prototype, "code").get', 'GeolocationPositionError', 'code'],
   ['GeolocationPosition.prototype.toJSON', 'GeolocationPosition'],
   ['RTCPeerConnection.prototype.setConfiguration', 'RTCPeerConnection'], ['window.open'],
+  ['URL.createObjectURL'], ['URL.revokeObjectURL'],
 ];
 test('wrappers look native, from the window and from a frame', () => {
   const top = makeWindow(everything);
@@ -407,8 +635,56 @@ test('iPhone profile: device values, as getters on the prototypes', () => {
   assert.throws(() => run(w, `Screen.prototype.width`), (e) => e.name === 'TypeError');
 });
 
+test('iPhone profile: held upright; the pixel ratio left to the engine where it sets it', () => {
+  const w = makeWindow({ ...base, device: iPhone });
+  assert.equal(run(w, `[screen.orientation.type, screen.orientation.angle].join()`), 'portrait-primary,0');
+  assert.throws(() => run(w, `ScreenOrientation.prototype.type`), (e) => e.name === 'TypeError');
+  assert.ok(run(w, `Function.prototype.toString.call(Object.getOwnPropertyDescriptor(ScreenOrientation.prototype, 'type').get)`).includes('[native code]'));
+  // Without a ratio in the configuration (BrowserTab sets it in WebKit) the window's getter is the engine's.
+  const { devicePixelRatio, ...byEngine } = iPhone;
+  const e = makeWindow({ ...base, device: byEngine });
+  assert.equal(run(e, `devicePixelRatio`), 2);
+  assert.equal(run(e, `Object.getOwnPropertyDescriptor(window, 'devicePixelRatio').get.toString().includes('return 2')`), true);
+  assert.equal(run(e, `[screen.width, outerWidth, screen.orientation.type].join()`), '390,390,portrait-primary');
+  assert.equal(run(makeWindow(base), `screen.orientation.type`), 'landscape-primary');
+});
+
+test('iPhone profile: MediaSource removed where the engine still has it, ManagedMediaSource kept', () => {
+  // As WebKit on a Mac: MediaSource exposed, ManagedMediaSource derived from it.
+  const engine = (context) => vm.runInContext(`
+    globalThis.MediaSource = class MediaSource { constructor() { throw new TypeError('Illegal constructor'); } };
+    globalThis.ManagedMediaSource = class ManagedMediaSource extends MediaSource {};`, context);
+  const w = makeWindow({ ...base, device: iPhone }, undefined, FORM, engine);
+  assert.equal(run(w, `['MediaSource' in globalThis, typeof MediaSource, typeof ManagedMediaSource, Object.getPrototypeOf(ManagedMediaSource).name].join()`),
+               'false,undefined,function,MediaSource');
+  const iPad = makeWindow({ ...base, device: { ...iPhone, platform: undefined, missingInterfaces: [] } }, undefined, FORM, engine);
+  assert.equal(run(iPad, `typeof MediaSource`), 'function');
+  // An engine that leaves it out already: nothing to do.
+  assert.equal(run(makeWindow({ ...base, device: iPhone }), `'MediaSource' in globalThis`), false);
+});
+
+test('no frame of the shim in the stack of an error a page provokes in what it replaced (JavaScriptCore)', () => {
+  // A receiver the engine refuses: the replacement returns the native call in tail position, which
+  // JavaScriptCore runs without the caller's frame. V8 has no proper tail calls: there the frame
+  // shows, and no engine this shim runs in is V8.
+  if (!JSC) return;
+  const engine = (context) => vm.runInContext(`
+    globalThis.HTMLIFrameElement = class HTMLIFrameElement {
+      get contentWindow() { if (!(this instanceof HTMLIFrameElement)) throw new TypeError('illegal invocation'); return null; } };`, context);
+  const w = makeWindow({ ...base, device: iPhone, storageQuota: 0.6 * 128 * 2 ** 30 }, undefined, FORM, engine);
+  const stacks = run(w, `[
+    () => Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.call({}),
+    () => Object.getOwnPropertyDescriptor(Navigator.prototype, 'maxTouchPoints').get.call({}),
+    () => Object.getOwnPropertyDescriptor(Screen.prototype, 'width').get.call({}),
+    () => Object.getOwnPropertyDescriptor(ScreenOrientation.prototype, 'type').get.call({}),
+    () => typeof HTMLIFrameElement === 'function' ? Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get.call({}) : 0,
+    () => Function.prototype.toString.call({}),
+  ].map((provoke) => { try { provoke(); return 'no error'; } catch (e) { return String(e.stack); } })`);
+  for (const stack of stacks) assert.ok(stack !== 'no error' && !stack.includes('user-script'), stack);
+});
+
 test('iPad profile: the Mac platform (desktop websites), the iPad touch points and screen', () => {
-  const iPad = { maxTouchPoints: 5, hardwareConcurrency: 8, screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2 };
+  const iPad = { maxTouchPoints: 5, hardwareConcurrency: 8, screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2, orientation: 'portrait-primary' };
   const w = makeWindow({ ...base, device: iPad });
   assert.equal(run(w, surface), JSON.stringify(['MacIntel', 5, 8, 'en-US', ['en-US'], 'undefined', 820, 1180, 820, 1180, 2, 820, 1180]));
   // navigator.platform is not replaced at all: still the harness's own getter.
@@ -457,6 +733,23 @@ test('storage quota: Safari\'s instead of the app default', async () => {
   assert.equal(await run(w, `navigator.storage.estimate().then((e) => [e.quota, e.usage].join())`), '82463372084,1234');
   const plain = makeWindow(base);
   assert.equal(await run(plain, `navigator.storage.estimate().then((e) => e.quota)`), 1048576000);
+  // A store with Safari's quota in WebKit (SafariStorageQuota): no storageQuota, estimate() untouched.
+  assert.match(run(plain, `Function.prototype.toString.call(StorageManager.prototype.estimate)`), /illegal/);
+});
+
+test('geolocation answered by the engine: geolocation and permissions are the engine\'s own', () => {
+  // WebKit denies the request and reports the state (BrowserTab, GeolocationPermission): no wrapper.
+  const w = makeWindow({ ...base, geolocation: { mode: 'engine' } });
+  const accessor = (C, name) => `Object.getOwnPropertyDescriptor(${C}.prototype, "${name}").get`;
+  for (const expr of ['Geolocation.prototype.getCurrentPosition', 'Geolocation.prototype.watchPosition', 'Geolocation.prototype.clearWatch',
+                      'Permissions.prototype.query', accessor('PermissionStatus', 'state'), accessor('PermissionStatus', 'name'),
+                      accessor('GeolocationPositionError', 'code'), accessor('GeolocationPositionError', 'message'),
+                      ...['latitude', 'longitude', 'altitude', 'accuracy', 'altitudeAccuracy', 'heading', 'speed'].map((k) => accessor('GeolocationCoordinates', k)),
+                      accessor('GeolocationPosition', 'coords'), accessor('GeolocationPosition', 'timestamp'),
+                      'GeolocationCoordinates.prototype.toJSON', 'GeolocationPosition.prototype.toJSON']) {
+    assert.ok(!run(w, `Function.prototype.toString.call(${expr})`).includes('[native code]'), expr);
+  }
+  assert.ok(run(makeWindow(base), 'Function.prototype.toString.call(Geolocation.prototype.getCurrentPosition)').includes('[native code]'));
 });
 
 test('geolocation fixed: position objects without own properties', async () => {
@@ -478,6 +771,34 @@ test('WebRTC disabled: removed without a trace', () => {
   assert.equal(run(w, `Object.getOwnPropertyNames(window).filter((n) => /^(webkit)?RTC/.test(n)).join()`), '');
 });
 
+const WORKER_RTC = "postMessage([typeof RTCDataChannel, typeof RTCPeerConnection, typeof RTCEncodedVideoFrame, typeof RTCRtpScriptTransformer, "
+                 + "typeof RTCTransformEvent, 'onrtctransform' in self].join())";
+
+test('WebRTC disabled where the engine kept it: workers made from a blob lose its interfaces too', () => {
+  // A macOS profile with zone and quota in the engine needs nothing else in a worker; with WebRTC
+  // left on by the engine its workers still get the shim, for RTCDataChannel and the transforms.
+  const w = makeWindow({ geolocation: { mode: 'engine' }, webRTC: 'disabled' });
+  assert.equal(run(w, 'typeof RTCPeerConnection'), 'undefined');
+  const worker = blobWorker(w, JSON.stringify([WORKER_RTC]));
+  assert.deepEqual(runWorker(worker.script).messages(), ['undefined,undefined,undefined,undefined,undefined,false']);
+  assert.deepEqual(runWorker(WORKER_RTC).messages(), ['function,undefined,function,function,function,true']);
+});
+
+test('WebRTC disabled with peer connections off in the engine: its leftovers go, workers stay the engine\'s', () => {
+  // WebKit's peer-connection setting leaves the encoded transforms, a setting of their own: the
+  // shim removes them from the window, and a profile that needs nothing else rewrites no worker.
+  const peerConnectionsOff = (context) => vm.runInContext(`
+    for (const name of Object.getOwnPropertyNames(globalThis)) if (/^(webkit)?RTC[A-Z]/.test(name)) delete globalThis[name];
+    for (const name of ['RTCRtpScriptTransform', 'RTCEncodedAudioFrame', 'RTCEncodedVideoFrame']) globalThis[name] = { [name]: function () {} }[name];
+  `, context);
+  const w = makeWindow({ geolocation: { mode: 'engine' }, webRTC: 'disabled' }, undefined, FORM, peerConnectionsOff);
+  assert.equal(run(w, `Object.getOwnPropertyNames(window).filter((n) => /^(webkit)?RTC/.test(n)).join()`), '');
+  const code = 'postMessage(1)';
+  assert.equal(blobWorker(w, JSON.stringify([code])).script, code);
+  // The same profile where the engine kept peer connections: its workers get the shim.
+  assert.notEqual(blobWorker(makeWindow({ geolocation: { mode: 'engine' }, webRTC: 'disabled' }), JSON.stringify([code])).script, code);
+});
+
 test('WebRTC relayOnly', () => {
   const w = makeWindow({ ...base, webRTC: 'relayOnly' });
   assert.equal(run(w, `new RTCPeerConnection({ iceServers: [], iceTransportPolicy: 'all' }).config.iceTransportPolicy`), 'relay');
@@ -485,6 +806,55 @@ test('WebRTC relayOnly', () => {
   assert.equal(run(w, `(() => { const p = new RTCPeerConnection(); p.setConfiguration({ iceTransportPolicy: 'all' }); return p.config.iceTransportPolicy; })()`), 'relay');
   assert.equal(run(w, `new webkitRTCPeerConnection({}).config.iceTransportPolicy`), 'relay');
   assert.equal(run(w, `new RTCPeerConnection() instanceof RTCPeerConnection`), true);
+});
+
+// A window open() (or document.open with three arguments) makes: a new page's first document, which
+// no user script runs in, as the engine has it.
+const opening = (config) => (context) => {
+  const popup = () => makeWindow(config, undefined, 'none');
+  context.open = function open() { return popup(); };
+  Object.defineProperty(context, '__engineOpen', { value: context.open });
+  vm.runInContext('globalThis.Document = class Document {}; globalThis.document = new Document();', context);
+  context.Document.prototype.open = function open(...args) { return args.length > 2 ? popup() : this; };
+};
+
+test('WebRTC relay-only: a popup comes patched, from open() and from document.open with three arguments', () => {
+  for (const policy of ['relayOnly', 'tunnel']) {
+    const config = { ...base, webRTC: policy, webRTCRelay: { urls: ['turn:192.0.2.10:3478?transport=udp'], username: 'u', credential: 'c' } };
+    const w = makeWindow(config, undefined, FORM, opening(config));
+    for (const opener of [`open('', 'a', '')`, `document.open('', 'b', '')`]) {
+      assert.equal(run(w, `new (${opener}).RTCPeerConnection({ iceTransportPolicy: 'all' }).config.iceTransportPolicy`), 'relay', `${policy} ${opener}`);
+    }
+    assert.equal(run(w, `document.open() === document && document.open('a', 'b') === document`), true, 'document.open with fewer arguments');
+    assert.ok(run(w, 'Function.prototype.toString.call(Document.prototype.open)').includes('[native code]'));
+  }
+});
+
+test('WebRTC relay-only: a popup the patch cannot reach is closed, and the page gets null', () => {
+  // The page breaks what patching the new window uses before it opens one; it may get the window
+  // patched, never with the engine's own constructor.
+  const config = { ...base, webRTC: 'relayOnly' };
+  const w = makeWindow(config, undefined, FORM, opening(config));
+  for (const breakIt of ['Object.defineProperty = () => { throw new TypeError(); }', 'WeakSet.prototype.has = () => true',
+                         'Object.getOwnPropertyDescriptor = () => undefined', 'WeakMap.prototype.set = () => {}']) {
+    const policy = run(w, `(() => {
+      const saved = [Object.defineProperty, WeakSet.prototype.has, Object.getOwnPropertyDescriptor, WeakMap.prototype.set];
+      let popup;
+      try { ${breakIt}; popup = open('', 'x', ''); } finally {
+        [Object.defineProperty, WeakSet.prototype.has, Object.getOwnPropertyDescriptor, WeakMap.prototype.set] = saved;
+      }
+      return popup === null ? 'null' : new popup.RTCPeerConnection({ iceTransportPolicy: 'all' }).config.iceTransportPolicy;
+    })()`);
+    assert.ok(policy === 'null' || policy === 'relay', `${breakIt}: ${policy}`);
+  }
+  // Nor does the page get the engine's open by replacing call and apply.
+  assert.equal(run(w, `(() => {
+    const seen = [], call = Function.prototype.call, apply = Function.prototype.apply;
+    Function.prototype.call = function (...args) { seen.push(this); return Reflect.apply(this, args[0], args.slice(1)); };
+    Function.prototype.apply = function (self, args) { seen.push(this); return Reflect.apply(this, self, args || []); };
+    try { open('', 'y', ''); } finally { Function.prototype.call = call; Function.prototype.apply = apply; }
+    return seen.includes(__engineOpen);
+  })()`), false);
 });
 
 test('WebRTC through the tunnel: the relay is the only ICE server, the page sees its own configuration', () => {
@@ -617,6 +987,201 @@ test('WebRTC through the tunnel: the validating connection never gathers', () =>
 test('WebRTC unrestricted', () => {
   const w = makeWindow({ ...base, webRTC: 'unrestricted' });
   assert.equal(run(w, `new RTCPeerConnection({ iceTransportPolicy: 'all' }).config.iceTransportPolicy`), 'all');
+});
+
+// ---- Workers made from a blob ------------------------------------------------------------------
+// The page's blob reaches the engine as [its directives, the shim on one line, the rest]: no eval
+// (blocked and reported under a CSP without 'unsafe-eval'), nothing read back (connect-src), and
+// the page's strict mode and line numbers kept — each script is also run as the engine runs the
+// page's own blob, for comparison.
+const ZONE_REPORT = "postMessage([Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset(), (function () { return this === undefined; })()].join())";
+const tokyo = { ...base, timeZone: 'Asia/Tokyo' };
+const LINE_BREAKS = new RegExp('\\r\\n|[\\n\\r' + String.fromCharCode(0x2028, 0x2029) + ']');
+const lineCount = (text) => text.split(LINE_BREAKS).length;
+// What the page's next worker is made with, for Blob parts given as an expression in the page.
+function blobWorker(w, parts, kind = 'Worker') {
+  const index = run(w, '__engine.workers.length');
+  run(w, `new ${kind}(URL.createObjectURL(new Blob(${parts}, { type: 'text/javascript' })))`);
+  return run(w, `__engine.workers[${index}]`);
+}
+
+test('workers: the shim goes into a blob worker as one line of code, without eval', () => {
+  const w = makeWindow(tokyo);
+  const code = "'use strict'\n" + ZONE_REPORT;
+  const worker = blobWorker(w, JSON.stringify([code]));
+  assert.equal(lineCount(worker.script), lineCount(code));
+  assert.ok(!/\beval\s*\(/.test(worker.script), 'no eval');
+  // As under a CSP without 'unsafe-eval' (V8 can forbid code from strings in a realm).
+  const worker2 = runWorker(worker.script, { codeGeneration: false });
+  assert.equal(worker2.error, null);
+  assert.deepEqual(worker2.messages(), ['Asia/Tokyo,-540,true']);
+});
+
+test('workers: the page\'s directives stay first; its lines and strict mode are its own', () => {
+  const w = makeWindow(tokyo);
+  const strict = "postMessage(String((function () { return this === undefined; })()))";
+  const cases = [
+    ["'use strict'\n" + strict],
+    ['"use strict";' + strict],
+    ["/* licence\n */\n// comment\n'use strict';\r\n" + strict],
+    ["'use strict' + 1;\n" + strict], // no directive: sloppy, as the engine runs it
+    ["'use str", "ict';\n", strict],  // the directive across parts
+    ['\n\n' + strict],
+    [strict],
+    ["'use strict'\n\nthrow new Error('x')"],
+    ["\n\nthrow new Error('x')"],
+    ["'use strict'"],                // nothing but a directive, with no ; or line break after it
+    ["'use strict'  "],
+  ];
+  for (const parts of cases) {
+    const own = runWorker(parts.join(''));
+    const worker = blobWorker(w, JSON.stringify(parts));
+    const hooked = runWorker(worker.script);
+    assert.deepEqual([hooked.messages(), hooked.line], [own.messages(), own.line], JSON.stringify(parts));
+    assert.equal(lineCount(worker.script), lineCount(parts.join('')), JSON.stringify(parts));
+  }
+});
+
+test('workers: a blob not made from strings gets the shim first', () => {
+  const w = makeWindow(tokyo);
+  const worker = blobWorker(w, `[new Uint8Array([${Array.from(ZONE_REPORT, (c) => c.charCodeAt(0)).join()}])]`);
+  assert.ok(worker.script.startsWith('(function install(CONFIG)'));
+  assert.deepEqual(runWorker(worker.script).messages(), ['Asia/Tokyo,-540,false']);
+});
+
+test('workers: the configuration goes in without a line break', () => {
+  const w = makeWindow({ ...tokyo, note: 'a' + String.fromCharCode(0x2028, 0x2029) });
+  const worker = blobWorker(w, JSON.stringify([ZONE_REPORT]));
+  assert.equal(lineCount(worker.script), 1);
+  assert.deepEqual(runWorker(worker.script).messages(), ['Asia/Tokyo,-540,false']);
+});
+
+test('workers: a blob worker\'s own blob workers get the same shim', () => {
+  const w = makeWindow(tokyo);
+  const code = 'new Worker(URL.createObjectURL(new Blob([' + JSON.stringify(ZONE_REPORT) + '])));';
+  const outer = blobWorker(w, JSON.stringify([code]));
+  const realm = runWorker(outer.script);
+  assert.equal(realm.error, null);
+  const inner = vm.runInContext('__engine.workers[0].script', realm.context);
+  assert.equal(inner.slice(0, -ZONE_REPORT.length), outer.script.slice(0, -code.length));
+  assert.deepEqual(runWorker(inner).messages(), ['Asia/Tokyo,-540,false']);
+});
+
+test('workers: the URL is converted once, as the engine converts it', () => {
+  const w = makeWindow(tokyo);
+  assert.equal(run(w, `(() => {
+    const url = URL.createObjectURL(new Blob(['1']));
+    let calls = 0;
+    new Worker({ toString() { calls++; return url; } });
+    let error = '';
+    try { new Worker(Symbol()); } catch (e) { error = e.constructor.name; }
+    return [calls, __engine.workers[0].script.startsWith('(function install'), error].join();
+  })()`), '1,true,TypeError');
+});
+
+test('workers: a TrustedScriptURL, or any URL under a default policy, reaches the engine as given', () => {
+  const w = makeWindow(tokyo);
+  assert.equal(run(w, `(() => {
+    const policy = trustedTypes.createPolicy('page', { createScriptURL: (u) => u });
+    const url = URL.createObjectURL(new Blob(['1']));
+    const trusted = policy.createScriptURL(url);
+    new Worker(trusted);
+    const first = __engine.workers[0];
+    __engine.tt.enforced = true;
+    const seen = [];
+    trustedTypes.createPolicy('default', { createScriptURL: (u) => { seen.push(u); return u; } });
+    const url2 = URL.createObjectURL(new Blob(['2']));
+    new Worker(url2);
+    const second = __engine.workers[1];
+    return [first.raw === trusted, first.script, seen.join() === url2, second.url === url2, second.script, __engine.tt.violations.length].join();
+  })()`), 'true,1,true,true,2,0');
+});
+
+test('workers: a revoked URL fails as the engine\'s would', () => {
+  const w = makeWindow(tokyo);
+  assert.equal(run(w, `(() => {
+    const url = URL.createObjectURL(new Blob(['1']));
+    new Worker(url);
+    const replacement = __engine.workers[0].url;
+    URL.revokeObjectURL(url);
+    new Worker(url);
+    const again = __engine.workers[1];
+    const other = URL.createObjectURL(new Blob(['2']));
+    URL.revokeObjectURL(other);
+    new Worker(other);
+    return [replacement !== url, __engine.urls.has(replacement), again.url === replacement, again.script, __engine.workers[2].url === other, __engine.workers[2].script].join();
+  })()`), 'true,false,true,,true,');
+});
+
+test('workers: a shared worker is made from the same blob for the same URL', () => {
+  const w = makeWindow(tokyo);
+  assert.equal(run(w, `(() => {
+    const url = URL.createObjectURL(new Blob(['onconnect = () => {};']));
+    new SharedWorker(url, 'a');
+    new SharedWorker(url, 'a');
+    return [__engine.workers[0].url === __engine.workers[1].url, __engine.workers[0].url !== url, __engine.workers[1].options].join();
+  })()`), 'true,true,a');
+});
+
+test('workers: built-ins a page replaced are not what the worker hook calls', () => {
+  const made = (tamper) => {
+    const w = makeWindow(tokyo);
+    if (tamper) {
+      run(w, `(() => {
+        const boom = function () { throw new Error('page code ran'); };
+        const define = Object.defineProperty;
+        const replace = [[String.prototype, ['charCodeAt', 'slice', 'indexOf', 'replace', 'toLowerCase', 'toString']], [RegExp.prototype, ['exec', 'test']],
+          [Map.prototype, ['get', 'set', 'has', 'delete', 'forEach']], [WeakMap.prototype, ['get', 'set', 'has']], [Reflect, ['construct', 'apply']],
+          [Function.prototype, ['call', 'apply', 'bind']], [JSON, ['stringify', 'parse']], [Object, ['create', 'defineProperty', 'getPrototypeOf', 'getOwnPropertyDescriptor']],
+          [Array.prototype, ['push', 'slice', 'join']]];
+        for (let i = 0; i < replace.length; i++) for (let k = 0; k < replace[i][1].length; k++) replace[i][0][replace[i][1][k]] = boom;
+        // The engine reads a page's own options object (type, endings) through these, as it should;
+        // setting them, or reading the iterator members, on an object of the hook's would be the hook.
+        for (const name of ['type', 'endings']) define(Object.prototype, name, { __proto__: null, get() {}, set: boom, configurable: true });
+        for (const name of ['next', 'done', 'value', 'return']) define(Object.prototype, name, { __proto__: null, get: boom, set: boom, configurable: true });
+        globalThis.String = boom;
+      })()`);
+    }
+    return blobWorker(w, "['\\'use strict\\';\\n" + ZONE_REPORT.replace(/'/g, "\\'") + "']");
+  };
+  const clean = made(false), tampered = made(true);
+  assert.equal(tampered.script, clean.script);
+  assert.deepEqual(runWorker(tampered.script).messages(), ['Asia/Tokyo,-540,true']);
+});
+
+test('Blob keeps the engine\'s shape, and File still inherits from it', () => {
+  const shape = `[Blob.name, Blob.length, Object.getOwnPropertyNames(Blob).join(), Object.getPrototypeOf(File) === Blob,
+    Blob.prototype.constructor === Blob, new Blob(['ab']) instanceof Blob, new Blob(['ab']).size, new File(['a'], 'f') instanceof Blob,
+    (() => { class B extends Blob {} const b = new B(['xyz']); return b instanceof B && b.size === 3 && b.constructor === B; })(),
+    (() => { try { Blob(); } catch (e) { return e.constructor.name; } })(),
+    (() => { try { new Blob(5); } catch (e) { return e.message; } })(),
+    (() => { try { new Blob({}); } catch (e) { return e.message; } })(),
+    Object.getOwnPropertyDescriptor(window, 'Blob').enumerable, Object.getOwnPropertyDescriptor(Blob, 'prototype').writable].join('|')`;
+  const w = makeWindow(tokyo);
+  assert.equal(run(w, shape), run(makeWindow(base), shape));
+  assert.equal(run(w, 'Function.prototype.toString.call(Blob)'), nativeText('Blob'));
+  assert.equal(run(w, 'Function.prototype.toString.call(Worker)'), nativeText('Worker'));
+  assert.equal(run(w, 'Object.getOwnPropertyNames(Worker).join()'), run(makeWindow(base), 'Object.getOwnPropertyNames(Worker).join()'));
+});
+
+test('Blob reads the page\'s parts as the engine reads them', () => {
+  const probe = `(() => {
+    const log = [];
+    const parts = ['a', { toString() { log.push('toString'); return 'b'; } }];
+    const proxy = new Proxy(parts, { get(t, k, r) { log.push('get ' + String(k)); return Reflect.get(t, k, r); } });
+    const b1 = new Blob(proxy);
+    let i = 0;
+    const iterable = { get [Symbol.iterator]() { log.push('@@iterator'); return function () {
+      return { get next() { log.push('next'); return () => ({ get done() { log.push('done'); return i >= 2; }, get value() { log.push('value'); return 'v' + i++; } }); },
+               get return() { log.push('return'); return () => { log.push('closed'); return {}; }; } };
+    }; } };
+    const b2 = new Blob(iterable);
+    const failing = { *[Symbol.iterator]() { try { yield 'x'; yield { toString() { throw new Error('part'); } }; yield 'never'; } finally { log.push('finally'); } } };
+    let error = '';
+    try { new Blob(failing); } catch (e) { error = e.message; }
+    return [log.join(), b1.size, b2.size, error].join('|');
+  })()`;
+  assert.equal(run(makeWindow(tokyo), probe), run(makeWindow(base), probe));
 });
 
 process.on('beforeExit', () => {

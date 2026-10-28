@@ -11,9 +11,12 @@ import WebKit
 ///     cookies, localStorage/sessionStorage, IndexedDB, Cache API, service workers, the HTTP
 ///     disk cache, HSTS state, and credentials for that store separately from every other
 ///     store, and serves it through a separate network *session*.
-///   * Ephemeral profiles use `WKWebsiteDataStore.nonPersistent()` (in-memory only).
+///   * Ephemeral profiles use `WKWebsiteDataStore.nonPersistent()` (in-memory only). Persistent
+///     stores get Safari's storage quota where WebKit allows it (`SafariStorageQuota`).
 ///   * Every web view of this profile — every tab of every window, and `window.open` popups,
-///     which WebKit creates from the opener's configuration — uses this data store.
+///     which WebKit creates from the opener's configuration — uses this data store, and the
+///     profile's own process pool where WebKit allows it (`ProfileProcessPool`: the profile's time
+///     zone in the engine, and its own service and shared workers).
 ///
 /// PLATFORM LIMITATIONS:
 ///   * All profiles share one WebKit networking process (separate sessions inside it). This
@@ -39,6 +42,19 @@ final class BrowserSession {
     }
 
     private(set) var dataStore: WKWebsiteDataStore?
+    /// The profile's own WebKit process pool (`ProfileProcessPool`); nil: WebKit's shared pool.
+    private(set) var processPool: NSObject?
+    /// The engine runs this profile's pages and workers in `configuration.timeZoneIdentifier` (its
+    /// pool's time zone override); the shim then leaves `Date` and `Intl` alone.
+    let timeZoneByEngine: Bool
+    /// The data store reports Safari's storage quota itself (`SafariStorageQuota`); the shim then
+    /// leaves `navigator.storage.estimate()` alone.
+    let storageQuotaByEngine: Bool
+    /// An iPhone or iPad profile's pages find only the fonts Safari on that device has (its pool's
+    /// font allowlist, `DeviceFontRestriction`).
+    let deviceFontsByEngine: Bool
+    /// WebKit's key for WebTransport among its features (`WebKitPreferences.setFeature`).
+    static let webTransportFeature = "WebTransportEnabled"
     private let userContentController: WKUserContentController
     /// Receives the AutoFill script's messages (registered in its own content world only).
     private let passwordHandler = PasswordAutoFillHandler()
@@ -61,14 +77,22 @@ final class BrowserSession {
         // `.nonPersistent()` needs WebKit initialized but does not initialize it, and an ephemeral
         // profile can be the first WebKit use after unlock (see `ensureWebKitInitialized`).
         WebDataStoreVault.ensureWebKitInitialized()
+        let platform = configuration.deviceGeneration.platform
         let store: WKWebsiteDataStore = configuration.ephemeral
             ? .nonPersistent()
-            : WebDataStoreVault.makeStore(for: profileID)
+            : WebDataStoreVault.makeStore(for: profileID, platform: platform)
         // Applies to all network loads of this data store. Empty only when no proxy is configured.
         store.proxyConfigurations = proxies
         self.dataStore = store
+        let pool = ProfileProcessPool.make(timeZone: configuration.timeZoneIdentifier)
+        self.processPool = pool?.processPool
+        self.timeZoneByEngine = pool?.timeZone != nil
+        // Before the pool launches a process: WebKit hands the list over when it starts one.
+        self.deviceFontsByEngine = platform != .macOS && pool.map { DeviceFontRestriction.restrict($0.processPool) } == true
+        self.storageQuotaByEngine = !configuration.ephemeral && SafariStorageQuota.isApplied(to: store, platform: platform)
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
-        self.userContentController = BehaviorSets.makeUserContentController(for: configuration)
+        self.userContentController = BehaviorSets.makeUserContentController(for: configuration, timeZoneByEngine: timeZoneByEngine,
+                                                                            storageQuotaByEngine: storageQuotaByEngine)
         if configuration.proxy != nil {
             // Loads WebKit would otherwise make outside the proxy (see ContentRules).
             if let blocker = ContentRules.dnsPrefetchBlocker {
@@ -90,6 +114,7 @@ final class BrowserSession {
 
     var tabContext: BrowserTabContext {
         BrowserTabContext(profileName: profileName, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version),
+                          deviceScaleFactor: PrivacyScripts.deviceScaleFactor(for: configuration),
                           passwordVault: passwordVault, passwordSettings: passwordSettings, library: library,
                           proxyCredential: configuration.proxy.flatMap { proxy in
                               proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
@@ -98,15 +123,32 @@ final class BrowserSession {
 
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let webConfiguration = WKWebViewConfiguration()
-        if let dataStore { webConfiguration.websiteDataStore = dataStore }
+        // Never WebKit's default store, shared and persistent (with it opened, session cookies
+        // outlived a profile's stop: docs §1). After shutDown, a throwaway one.
+        webConfiguration.websiteDataStore = dataStore ?? WKWebsiteDataStore.nonPersistent()
+        // The profile's processes and workers: its time zone, and no other profile's worker settings.
+        if let processPool { ProfileProcessPool.assign(processPool, to: webConfiguration) }
         webConfiguration.userContentController = userContentController
         // Safe Browsing lookups bypass the per-profile proxy; opt-in per profile.
         webConfiguration.preferences.isFraudulentWebsiteWarningEnabled = configuration.safeBrowsingEnabled
         // Popups only in response to a user gesture.
         webConfiguration.preferences.javaScriptCanOpenWindowsAutomatically = false
-        // As Safari: the Fullscreen API is available (a WKWebView has it off by default, which a
-        // page sees as document.fullscreenEnabled === undefined).
-        webConfiguration.preferences.isElementFullscreenEnabled = true
+        // As Safari on the declared device (MDN browser-compat-data, Safari on iOS): the Fullscreen
+        // API on a Mac and an iPad, not on an iPhone (a WKWebView has it off by default, which a page
+        // sees as document.fullscreenEnabled === undefined); MediaSource on an iPad, not on an iPhone,
+        // where ManagedMediaSource alone remains; and no Notification on either outside a web app
+        // saved to the home screen. macOS 26.6.2's WebKit still exposes MediaSource with this
+        // setting off (CI run 217); the shim then removes it (`missingInterfaces`).
+        let platform = configuration.deviceGeneration.platform
+        webConfiguration.preferences.isElementFullscreenEnabled = platform != .iOS
+        if platform == .iOS {
+            WebKitPreferences.setBool(webConfiguration.preferences, "_setMediaSourceEnabled:", false)
+        }
+        if platform != .macOS {
+            WebKitPreferences.setFeature(webConfiguration.preferences, "NotificationsEnabled", false)
+            // `cursive` as on the device (its fonts: the pool's allowlist, set at launch).
+            DeviceFontRestriction.setCursiveFamily(of: webConfiguration.preferences)
+        }
         // As Safari: pages see the system's fonts only, not the ones the user installed (a WKWebView
         // shows those by default, and a font list is among the strongest fingerprints). There is no
         // public switch; this is the WKPreferences property Safari turns off, set only when this
@@ -118,6 +160,17 @@ final class BrowserSession {
         // this WKPreferences property.
         if configuration.effectiveWebRTCPolicy == .disabled {
             WebKitPreferences.setBool(webConfiguration.preferences, "_setPeerConnectionEnabled:", false)
+            // The encoded transforms (RTCRtpScriptTransform, RTCEncoded*Frame) are a setting of their
+            // own, left on: switched off as a WebKit feature, shared and service workers reported
+            // WebKit's default User-Agent instead of the profile's in half the CI runs (211, 212). The
+            // shim removes them from the page; without a peer connection they do nothing.
+        }
+        // WebKit opens WebTransport's QUIC sockets outside the data store's proxy too (the leak
+        // check measured a proxied profile's session sending its datagrams from this Mac's address),
+        // and neither proxy kind carries QUIC: with a proxy it is off in the engine, in every frame
+        // and worker. Safari has it, so this shows; the address it would show is worse.
+        if configuration.proxy != nil {
+            WebKitPreferences.setFeature(webConfiguration.preferences, Self.webTransportFeature, false)
         }
         // WebRTC through the packet tunnel: libwebrtc gathers on the tunnel interface for the relay
         // addresses (measured with a utun in CI; the tunnel's enforced routes are a second line).
@@ -214,6 +267,8 @@ final class BrowserSession {
         // The controller holds its handlers strongly.
         userContentController.removeAllScriptMessageHandlers()
         dataStore = nil
+        // Its processes end with it, and with them their hold on the data store (sealing waits for that).
+        processPool = nil
     }
 }
 
@@ -234,5 +289,67 @@ enum WebKitPreferences {
         guard object.responds(to: selector), let method = class_getInstanceMethod(type(of: object), selector) else { return nil }
         typealias Getter = @convention(c) (NSObject, Selector) -> Bool
         return unsafeBitCast(method_getImplementation(method), to: Getter.self)(object, selector)
+    }
+
+    /// Switches one of WebKit's features (the flags Safari's Develop menu lists) by its key, e.g.
+    /// "WebTransportEnabled": `-[WKPreferences _setEnabled:forFeature:]` with the `_WKFeature` of
+    /// `+[WKPreferences _features]`. False when this WebKit lists no feature with that key.
+    @discardableResult
+    static func setFeature(_ preferences: NSObject, _ key: String, _ value: Bool) -> Bool {
+        let selector = NSSelectorFromString("_setEnabled:forFeature:")
+        guard let feature = feature(key), let method = class_getInstanceMethod(WKPreferences.self, selector) else { return false }
+        typealias Setter = @convention(c) (NSObject, Selector, Bool, NSObject) -> Void
+        unsafeBitCast(method_getImplementation(method), to: Setter.self)(preferences, selector, value, feature)
+        return true
+    }
+
+    /// Whether that feature is on in `preferences` (`-_isEnabledForFeature:`); nil without it.
+    static func isFeatureEnabled(_ preferences: NSObject, _ key: String) -> Bool? {
+        let selector = NSSelectorFromString("_isEnabledForFeature:")
+        guard let feature = feature(key), let method = class_getInstanceMethod(WKPreferences.self, selector) else { return nil }
+        typealias Getter = @convention(c) (NSObject, Selector, NSObject) -> Bool
+        return unsafeBitCast(method_getImplementation(method), to: Getter.self)(preferences, selector, feature)
+    }
+
+    /// The `_WKFeature` with this key, nil when this WebKit has no such list or no such feature.
+    static func feature(_ key: String) -> NSObject? {
+        let list = NSSelectorFromString("_features"), keyGetter = NSSelectorFromString("key")
+        let preferencesClass: AnyObject = WKPreferences.self
+        guard preferencesClass.responds(to: list),
+              let features = preferencesClass.perform(list)?.takeUnretainedValue() as? [NSObject] else { return nil }
+        return features.first { $0.responds(to: keyGetter) && $0.perform(keyGetter)?.takeUnretainedValue() as? String == key }
+    }
+}
+
+/// Objects of WebKit's private classes made with their private initializers (`_WKProcessPoolConfiguration`,
+/// `_WKWebsiteDataStoreConfiguration`, …): `[[cls alloc] initializer]` or `[[cls alloc] initializer:argument]`,
+/// called through their implementations with ARC's init rules by hand — alloc returns the instance
+/// retained, the initializer takes it over and returns the object retained (or nil, having released
+/// it). Nil when this WebKit has neither the class nor the initializer.
+enum WebKitObjects {
+    private static let allocator = NSSelectorFromString("alloc")
+
+    static func make(_ className: String, _ initializer: String, _ argument: AnyObject? = nil) -> NSObject? {
+        guard let cls = NSClassFromString(className) else { return nil }
+        return make(cls, initializer, argument)
+    }
+
+    static func make(_ cls: AnyClass, _ initializer: String, _ argument: AnyObject? = nil) -> NSObject? {
+        let selector = NSSelectorFromString(initializer)
+        guard let allocMethod = class_getClassMethod(cls, allocator),
+              let initMethod = class_getInstanceMethod(cls, selector) else { return nil }
+        typealias Alloc = @convention(c) (AnyObject, Selector) -> UnsafeMutableRawPointer?
+        typealias Initializer = @convention(c) (UnsafeMutableRawPointer, Selector) -> UnsafeMutableRawPointer?
+        typealias InitializerWithArgument = @convention(c) (UnsafeMutableRawPointer, Selector, AnyObject) -> UnsafeMutableRawPointer?
+        let alloc = unsafeBitCast(method_getImplementation(allocMethod), to: Alloc.self)
+        guard let allocated = alloc(cls as AnyObject, allocator) else { return nil }
+        let initialized: UnsafeMutableRawPointer?
+        if let argument {
+            initialized = unsafeBitCast(method_getImplementation(initMethod), to: InitializerWithArgument.self)(allocated, selector, argument)
+        } else {
+            initialized = unsafeBitCast(method_getImplementation(initMethod), to: Initializer.self)(allocated, selector)
+        }
+        guard let initialized else { return nil }
+        return Unmanaged<AnyObject>.fromOpaque(initialized).takeRetainedValue() as? NSObject
     }
 }

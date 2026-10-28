@@ -1,5 +1,7 @@
 # PrivacyBrowser — multi-profile WebKit browser prototype for macOS
 
+> **Work in progress (Safari parity):** the next agent should start with [docs/HANDOFF.md](docs/HANDOFF.md): branch state, what is unfinished, the owner's rules.
+
 A Swift/SwiftUI + AppKit browser that runs several isolated profiles at once on the
 system WebKit engine (`WKWebView`), with tabs, per-profile history and bookmarks, and the
 App Sandbox enabled. Each profile has its own website data store, proxy, user agent, time
@@ -18,7 +20,7 @@ This is a prototype. The core has unit tests, and the app is checked end-to-end 
 real WebKit in CI. It has not had a security review, and some features are
 approximations limited by what WebKit exposes. The tables below say which parts are which.
 
-**Fingerprint note (2026-10-26):** no canvas, WebGL, audio or font noise — noise is exactly what fingerprinting tests detect. macOS profiles override no navigator or screen value and declare this Mac's real Safari version; iPhone/iPad profiles only get their device class's navigator/screen values. A profile with a proxy runs in the time zone of the proxy's exit IP (also in workers created from a blob), and the first profile launched sets the language websites see (otherwise this Mac's languages, as in Safari). The window reports Safari's geometry (real outer size, 52/90 px of chrome), user-installed fonts are hidden and the storage quota is Safari's. CI measures a profile against the runner's real Safari, page by page, including TLS/HTTP2 and header order: what still differs is Apple Pay/Web Push (Safari-only) and the profile's own privacy choices ([§2](docs/ISOLATION_AND_LIMITATIONS.md#measured-against-this-macs-safari)). deviceinfo.me's "Canvas: Spoofed" / "Fingerprinting Resistance: Detected" appear in real Safari 26 as well (its PNG-length list predates this WebKit). iOS fidelity remains UA-level (TLS, GPU, fonts, touch are the Mac's).
+**Fingerprint note (2026-10-26):** no canvas, WebGL, audio or font noise — noise is exactly what fingerprinting tests detect. macOS profiles override no navigator or screen value and declare this Mac's real Safari version. iPhone/iPad profiles get the device's pixel ratio, viewport and Safari's feature set there (Fullscreen, MediaSource, Notification) in the engine where WebKit allows it, and their device class's navigator/screen values from the shim. A profile with a proxy runs in the time zone of the proxy's exit IP — set in the engine through a WebKit process pool of the profile's own where WebKit allows it (every worker included), otherwise by a shim (workers created from a blob too) — and the first profile launched sets the language websites see (otherwise this Mac's languages, as in Safari). The window reports Safari's geometry (real outer size, 52/90 px of chrome; background tabs too), user-installed fonts are hidden and the storage quota is Safari's (in WebKit itself for saved profiles, every worker included). CI measures a profile against the runner's real Safari, page by page, including TLS/HTTP2 and header order: what still differs is Apple Pay/Web Push (Safari-only) and the profile's own privacy choices ([§2](docs/ISOLATION_AND_LIMITATIONS.md#measured-against-this-macs-safari)). deviceinfo.me's "Canvas: Spoofed" / "Fingerprinting Resistance: Detected" appear in real Safari 26 as well (its PNG-length list predates this WebKit). iPhone/iPad profiles also find only the fonts iOS preinstalls (WebKit's font allowlist per process pool). Their TLS ClientHello is the one Safari 26 sends on iOS too; WebGL extensions, codecs, touch and possibly HTTP/2 stay the Mac's ([§2](docs/ISOLATION_AND_LIMITATIONS.md#iphone-and-ipad-profiles-against-the-device)).
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, key hierarchy, on-disk layout, lifecycles, tabs, testing
 - [docs/ISOLATION_AND_LIMITATIONS.md](docs/ISOLATION_AND_LIMITATIONS.md): what is isolated, what leaks, fingerprinting, App Sandbox, verified results
@@ -75,6 +77,7 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: �
 swift test                                        # core tests (also run on Linux in CI)
 TZ=America/New_York node scripts/test-shims.mjs   # JS shim logic and CreepJS-style shape checks (Node 18+)
 TZ=America/New_York bun scripts/test-shims.mjs    # the same under JavaScriptCore, Safari's engine
+TZ=America/New_York SHIM_FORM=worker node scripts/test-shims.mjs   # on the one-line form a blob worker gets
 
 # End-to-end against the real WebKit of this Mac (headless, temporary vault, cleans up):
 python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 \
@@ -95,7 +98,7 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 183 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 264 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
@@ -111,9 +114,16 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   User-Agent, time on each page measured at the proxy, scrolling, only the safe link followed,
   nothing in the page world while it acts, Stop, tab closed, a page dialog, the profile stopped
   mid-run), tabs, history,
-  bookmarks, the
-  device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
-  the forced seal, and the window-lifecycle regression;
+  bookmarks, background tabs that measure their window as the shown tab does, the time zone in
+  the engine where WebKit has the override (two profiles in different zones at once, in the page,
+  frames and every kind of worker), Safari's storage quota in a saved profile's store (the page,
+  every kind of worker), blob workers under a strict CSP and under Trusted Types (no violation
+  report beyond the page's own), the device-generation UA path, iPhone and iPad profiles (the
+  engine's pixel ratio, Safari's feature set there, the window as the device's viewport, the fonts iOS has, compared
+  key by key with a plain web view set up as that device's Safari), error stacks of what the shim
+  replaces against a plain web view's, a WebSocket, an HLS stream and an MP4 file through HTTP
+  CONNECT and SOCKS5 proxies, beacons from `pagehide`, crash-recovery sealing, dialogs, Lock
+  during launch, ⌘Q and the forced seal, and the window-lifecycle regression;
 - the surface comparison with the runner's real Safari (`scripts/safari_reference.py`): every
   key that measures the engine or the Mac is identical; what differs is the set of features
   Safari alone enables (listed in `docs/ISOLATION_AND_LIMITATIONS.md` §2);
@@ -122,10 +132,15 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   permission states and storage quota, TLS/JA3/JA4 and HTTP/2 via tls.peet.ws;
 - the leak check (`scripts/leak_check.py`): profiles behind real forwarding proxies on the
   runner, and one without a proxy as the control. QUIC/HTTP/3 stays on the proxy (HTTP/2 through
-  it, HTTP/3 without it); WebRTC is off in proxied profiles without the tunnel. Through the
+  it, HTTP/3 without it); WebRTC is off in proxied profiles without the tunnel, and WebTransport,
+  which WebKit sends around a data store's proxy (`tcpdump` counts its QUIC datagrams), is off in
+  every proxied profile. Through the
   tunnel's relay (run on the runner, since CI cannot load the extension), a page gets relay
-  candidates at the proxy's address only, and a data channel through the proxy. Fails on any
-  request seen going around a proxy;
+  candidates at the proxy's address only, and a data channel through the proxy. Each proxied
+  profile also loads tls.peet.ws through its proxy: its TLS ClientHello (JA4, ciphers,
+  extensions), HTTP/2 frames (Akamai) and header order and values must be those of the profile
+  without a proxy. Fails on any request seen going around a proxy, or a TLS/HTTP2 fingerprint
+  that changes through it;
 - a container-migration check.
 
 ## Using it
@@ -135,8 +150,9 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    with a warning when the proxy's exit IP changes between launches), user agent, time zone,
    geolocation, WebRTC policy, history recording and retention, and whether it is ephemeral.
    Changes apply at the next launch. The **Device / version** picker tags the
-   profile with a target Apple OS version (macOS 26, iOS 26/27, iPadOS 26); iOS profiles also
-   get their device class's navigator/screen values (see note above).
+   profile with a target Apple OS version (macOS 26, iOS 26/27, iPadOS 26); iPhone/iPad profiles
+   also get the device's pixel ratio, viewport, feature set and navigator/screen values (see note
+   above).
 3. **Launch** opens a window for the profile. Profiles run side by side, and every window
    and tab is labelled with its profile. Closing a profile's last window stops that profile
    and returns you to the Profiles window; the app stays open.
@@ -191,7 +207,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Several proxied profiles at once | Each profile's data store has its own proxy and credentials. **Three SOCKS5 profiles (one with authentication) launched together and loading at once, each through its own proxy, verified by the self-test** |
 | Fast launch with a proxy | The lookup through the proxy (time zone, exit IP) holds a launch at most 1 s when a location is remembered for that proxy (the lookup finishes in the background), at most 3 s with nothing remembered. **Verified by the self-test** |
 | Proxy exit-IP warning | Per profile, off by default: a warning when the proxy's exit IP differs from the previous launch's (same proxy and credentials); the IP is stored only while the option is on |
-| Version-aware profiles | **Device / version** picker (`DeviceGeneration`): macOS 26 / iOS 26 / iOS 27 / iPadOS 26. Sets the self-declared `User-Agent` and defaults, and names a behaviour set. The macOS UA names the host's Safari version; iOS profiles additionally get navigator/screen values. Does **not** switch the real WebKit core. |
+| Version-aware profiles | **Device / version** picker (`DeviceGeneration`): macOS 26 / iOS 26 / iOS 27 / iPadOS 26. Sets the self-declared `User-Agent` and defaults, and names a behaviour set. The macOS UA names the host's Safari version, a mobile one of the same release its major.minor; a release other than the engine's is offered only to a profile that has it. iPhone/iPad profiles also get the device's pixel ratio, viewport and feature set (below). Does **not** switch the real WebKit core. |
 | Per-profile user agent | `WKWebView.customUserAgent` (an explicit UA overrides the generation) |
 | Russian / English UI | `Localizable.strings` (ru default, en fallback), deterministic bundle lookup |
 | Stable window lifecycle | closing a profile window never quits or crashes the app (use-after-free fixed); verified by the self-test |
@@ -209,18 +225,23 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Feature | How | Main gaps |
 |---|---|---|
 | WebKit data encrypted while a profile is not running | Archive, encrypt, then `remove(forIdentifier:)` on stop; restore on launch. Directories found by UUID (`WebKitDataLayout`), layout checked in CI | Plaintext on disk while the profile runs; a crash leaves plaintext until the next unlock; no "flush" API (last-moment writes can be lost, not leaked) |
-| Time zone | JS shim (`Intl`, `Date` getters, offsets, string forms, local constructors, setters, `Date.parse`), also in workers created from a blob; by default the proxy's exit-IP zone, looked up through the proxy at launch | Workers loaded from a URL and service workers keep the host zone; the lookup is a third-party request |
-| Geolocation | JS shim: deny (default) or fixed coordinates | Detectable; the IP address reveals location unless the proxy matches |
+| Time zone | In the engine where WebKit allows it: the profile's own process pool with WebKit's time zone override (SPI) — the page, frames and every worker (from a URL, shared, service) report the zone as the engine's own. Otherwise a JS shim (`Intl`, `Date` getters, offsets, string forms, local constructors, setters, `Date.parse`), also in workers created from a blob. By default the proxy's exit-IP zone, looked up through the proxy at launch | Private API, used only where present; with the shim, workers loaded from a URL and service workers keep the host zone; the lookup is a third-party request |
+| Geolocation | Deny (default): WebKit's own denial and permission state; the tab's UI delegate (private API) answers as a user who said no, so a `PermissionStatus` the page holds follows. Fixed coordinates: JS shim | Fixed coordinates are detectable; the IP address reveals location unless the proxy matches |
 | WebRTC leak reduction | Off in the engine (default) via a private `WKPreferences` property, JS removal as the fallback; or a JS shim forcing relay-only | Relay-only shows the TURN server this Mac's IP |
 | WebRTC through a profile's SOCKS5 proxy | Packet-tunnel system extension (`NE=1` builds): a TURN relay per profile on a virtual address, relaying through the proxy's UDP ASSOCIATE; several profiles with different proxies at once; IPv4 and IPv6 ([docs/TUNNEL.md](docs/TUNNEL.md)). Without it, or with an HTTP proxy, WebRTC is off in proxied profiles, with a warning | Needs a paid Apple Developer team and user approval; the extension itself has not run on a real Mac yet (CI cannot load it); relay-only is enforced by the page script, not the engine; starting it disconnects another VPN app's tunnel; relay candidates only; the proxy must relay UDP |
-| Navigator / screen (iPhone/iPad profiles) | Document-start JS getters on the prototypes (blob workers too) | URL-loaded workers keep the Mac's values; GPU/TLS/fonts/canvas still the Mac's |
+| iPhone/iPad profiles | In the engine (private API where needed): the device's pixel ratio (`_setOverrideDeviceScaleFactor:`, so the resolution media queries agree), Fullscreen (iPad only) and Notification (neither) as Safari there has them, and only the fonts iOS preinstalls (`WKContextSetFontAllowList` on the profile's pool; `cursive` is Snell Roundhand). The window is the device's viewport (390 × 739 on an iPhone, an estimate; `scripts/device_reference.py` measures a real device). Document-start JS getters on the prototypes for the navigator and screen values and `screen.orientation`; `MediaSource` removed on an iPhone, where this WebKit keeps it (blob workers too) | URL-loaded workers keep the Mac's navigator; `pointer`/`hover`/`device-width` media queries, touch, WebGL extensions, codecs and canvas still the Mac's (the TLS ClientHello is Safari's on iOS too); shared and service workers sometimes get WebKit's bare User-Agent (a WebKit race, docs §2) |
 | Website language (`Accept-Language`, `navigator.language`) | Set once per app run, before WebKit starts, from the first launched profile's proxy country | WebKit has one language list per process: later profiles share it |
 | Password AutoFill | A user script in its own content world (invisible to pages; no `window.webkit` in the page world), a native suggestion list and Safari's save questions | WKWebView on macOS 26 has no AutoFill API: sign-ins are recognised by heuristics (a submitted form, or the fields leaving after a click), filled values fire untrusted `input`/`change` events, and `:autofill` (Safari's highlight) and WebKit's key button need a WebKit with AutoFill scripting; no strong-password suggestions or Touch ID; passwords are per profile (Safari profiles share them) |
 
 ### Not implemented / limited
 
-- True engine-level iOS WebKit (private APIs or bundled core required). TLS ClientHello, real GPU renderer, full font set, touch behavior remain Mac.
-- Per-profile `Accept-Language` header (JS navigator.language is spoofed).
+- True engine-level iOS WebKit (private APIs or bundled core required). WebGL extensions and limits, codecs, touch interfaces and
+  behaviour remain the Mac's; the WebGL strings and the TLS ClientHello already equal an iPhone's ([§2](docs/ISOLATION_AND_LIMITATIONS.md#iphone-and-ipad-profiles-against-the-device)).
+- Per-profile `Accept-Language` / `navigator.languages`: one list per app run (WebKit hands it to its processes at
+  launch, and every profile shares one network process); the shim never changes `navigator.language`, so the
+  header and the page agree. A per-profile language needs an app process per language ([§6](docs/ISOLATION_AND_LIMITATIONS.md#6-time-zone-geolocation-user-agent)).
+- WebTransport with a proxy: WebKit opens its QUIC sockets without the data store's proxy, so a
+  proxied profile has it off in the engine, where Safari has it.
 - Sync server (only the client and its API spec), syncing of WebKit website data other than
   cookies (localStorage, IndexedDB, caches), and per-entry merging of passwords (concurrent
   edits keep the remote version plus a `.conflict` copy). Synced data reaches a running profile
@@ -257,6 +278,7 @@ Resources/                         Info.plist, entitlements (sandboxed / not), c
 scripts/                           build-app.sh, test-shims.mjs, selftest_proxy.py, safari_reference.py,
                                    update_public_suffix_list.py,
                                    live_compare.py + live_sites/ (pages measured in Safari and in profiles),
-                                   leak_check.py (QUIC/WebRTC around a proxy)
+                                   leak_check.py (QUIC/WebRTC around a proxy, TLS/HTTP2 parity),
+                                   device_reference.py (Safari on a real iPhone or iPad)
 docs/                              architecture, isolation and limitations, sync format, sync server API
 ```

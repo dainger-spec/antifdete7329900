@@ -33,6 +33,8 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │        ├── WebDataStoreVault ── seal/unseal WebKit dirs (WebKitDataLayout + archive)       │
 │        └── BrowserSession (one per running profile)                                        │
 │              ├── WKWebsiteDataStore(forIdentifier:) + proxyConfigurations                  │
+│              ├── ProfileProcessPool ── own WKProcessPool (time zone in the engine, workers)│
+│              ├── SafariStorageQuota ── Safari's quota in the store (persistent profiles)   │
 │              ├── WKUserContentController + PrivacyScripts (TZ / geo / WebRTC)              │
 │              ├── ProfileLibrary ── HistoryStore + BookmarkStore (observable, debounced)    │
 │              ├── LibraryWindowController ── bookmarks & history UI                         │
@@ -260,8 +262,11 @@ windows be merged and needs one `NSWindow` per tab.
 - `BrowserTab` owns one `WKWebView` and is its navigation, UI and download delegate. It talks
   to its window through the `BrowserTabHost` protocol: state changes, new-tab requests,
   close requests, attention for dialogs.
-- The selected tab's web view is the only one in the view hierarchy; others stay alive
-  off-screen.
+- Every tab's web view is in the window, filling the web area; only the selected one is shown,
+  the others are hidden (not visible to WebKit: `document.visibilityState` 'hidden', throttled).
+  A page in a background tab therefore measures the viewport, window and screen it will be shown
+  in, as in Safari — not 0×0 — and WebKit keeps its window frame current when the window moves or
+  is resized (a view taken out of the window would keep the frame WebKit cached for it).
 - `window.open` / `target=_blank` become tabs created from the configuration WebKit supplies.
   ⌘-click and middle-click open background tabs with the profile's standard configuration.
 - ⌘W closes the tab: `BrowserWindow.performClose` intercepts menu-initiated closes. The
@@ -292,7 +297,7 @@ configs read as the default generation).
 | Core (crypto, vault, profiles, archive, layout, history, bookmarks, passwords, cookie import, sync incl. cookies and settings conflicts, warm-up plans and link rules, HTTP transport, UA presets, proxy location) | XCTest, 120 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
 | Tunnel protocols (STUN/TURN against RFC 5769 vectors, IPv4/IPv6 UDP packets, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy, several profiles through one router) | XCTest, 32 tests | Linux and macOS, every push |
 | Packet-tunnel extension | builds against the macOS SDK and is laid out as a system extension, plists linted, provider class checked (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner. Its router runs on a raw utun interface opened as root (`--utun-relay`, `UTunDevice`) against real WebKit, inside the leak check | macOS 26 runner, every push |
-| JS shims (logic, CreepJS-style shape checks) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages) | Linux, every push |
+| JS shims (logic, CreepJS-style shape checks, blob workers) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages), each also on the one-line form a blob worker gets (`SHIM_FORM=worker`) | Linux, every push |
 | App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 26 runner, every push |
 | Measured surface of a macOS profile vs. the runner's real Safari | `scripts/safari_reference.py` (safaridriver) with `Resources/fingerprint_probe.js` | macOS 26 runner, every push |
 | The same pages in Safari and in on-screen profile windows of the same size: probe, window geometry (1 and 2 tabs), request header order, permissions/quota/devices, TLS + HTTP/2 (tls.peet.ws) | `scripts/live_compare.py` + `PrivacyBrowser --capture-sites` (`SiteCapture.swift`, pages in `scripts/live_sites/`) | macOS 26 runner, every push (report only: third-party sites change) |

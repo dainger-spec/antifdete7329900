@@ -144,12 +144,26 @@ Shim tests attack it by replacing `Reflect`, `Function.prototype.call`/`apply`,
 `Promise` methods, and by putting accessors on `Object.prototype`. Each attack must leave the
 engine with the relay alone, relay-only, and the native functions out of reach.
 
-It remains page-level code. A way to run script in a window of the page before its copy runs,
-or a WebKit change in how a configuration is read, would not be covered. Without a proxy, or
+It remains page-level code. Workers have no RTCPeerConnection, and frames sandboxed without
+`allow-scripts` get the script too (WebKit runs user scripts in them). The self-test makes peer
+connections from such frames, reached by index or by `contentWindow`, and finds them relay-only
+with no host or srflx candidate; it also checks that no worker has RTCPeerConnection
+([ISOLATION_AND_LIMITATIONS.md](ISOLATION_AND_LIMITATIONS.md) §5). A popup's first, blank
+document runs no user script: the opener's copy patches the popup as `window.open` (or
+`document.open` with three arguments) returns it, and closes it when that patch did not take, so
+the page gets null. The self-test opens both kinds, and one after the page broke
+`Object.defineProperty`. Another way to run script in a window of the page before its copy runs,
+or a WebKit change in how a configuration is read, would not be covered. WebKit offers no engine-level backstop short of WebRTC off: no setting forces
+relay-only, restricts the interfaces or sockets WebRTC uses, or proxies its UDP or TURN
+(read in WebKit's source, 2026). Without a proxy, or
 with the default WebRTC setting (Disabled), WebRTC is off in the engine and none of this
 applies. A network-level backstop would need a content filter (`NEFilterDataProvider`, another
 system extension and approval) that drops UDP from this app's WebKit process except to the
 relay subnets. It is not built.
+
+The tunnel carries WebRTC only. WebTransport, whose QUIC WebKit also opens without the data
+store's proxy (measured by the leak check), is off in every proxied profile
+([ISOLATION_AND_LIMITATIONS.md](ISOLATION_AND_LIMITATIONS.md) §4).
 
 ## Requirements and real limitations
 

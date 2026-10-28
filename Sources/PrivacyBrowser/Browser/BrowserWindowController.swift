@@ -8,6 +8,19 @@ import WebKit
 /// Window subclass so that File ▸ Close (⌘W) closes the current tab while the window's
 /// close button still closes the whole window.
 final class BrowserWindow: NSWindow {
+    /// A mobile generation's window keeps the device's viewport whatever the screen. AppKit would
+    /// shorten a window taller than the visible screen, and the page would then measure a viewport
+    /// no such device has. The title bar stays on screen; the bottom may run past it.
+    var keepsHeight = false
+
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        guard keepsHeight else { return super.constrainFrameRect(frameRect, to: screen) }
+        guard let visible = (screen ?? self.screen ?? NSScreen.main)?.visibleFrame else { return frameRect }
+        var frame = frameRect
+        if frame.maxY > visible.maxY { frame.origin.y = visible.maxY - frame.height }
+        return frame
+    }
+
     override func performClose(_ sender: Any?) {
         if sender is NSMenuItem, let controller = windowController as? BrowserWindowController, controller.tabCount > 1 {
             controller.closeSelectedTab()
@@ -36,6 +49,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private var startPage: NSHostingView<StartPageView>!
     /// 0 with one tab: like Safari, the tab bar shows from the second tab on.
     private var tabStripHeight: NSLayoutConstraint!
+    /// A mobile generation's viewport (nil for macOS): the tab strip adds to the window, not
+    /// takes from the page, as a phone's Safari keeps its viewport whatever the tabs.
+    private let deviceViewport: CGSize?
     /// The address field's width: what the other toolbar items leave, up to 680 pt (`fitAddressField`).
     private var addressWidth: NSLayoutConstraint!
     private let webContainer = NSView()
@@ -62,14 +78,19 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         self.chrome = BrowserChromeModel(profileName: session.profileName, profileID: session.profileID,
                                          exit: BrowserWindowController.profileExit(of: session))
 
-        // A mobile generation's window is the declared device's screen: its web content can never
-        // be wider or taller than the screen the page is told about (see PrivacyScripts).
-        let deviceScreen = PrivacyScripts.deviceScreenSize(for: session.configuration)
-        let contentSize = deviceScreen ?? CGSize(width: 1200, height: 820)
+        // A mobile generation's window is the viewport Safari leaves a page on the declared device:
+        // its web content is never wider than the screen the page is told about, and lower than
+        // it, as on the device (see PrivacyScripts.deviceViewportSize).
+        let viewport = PrivacyScripts.deviceViewportSize(for: session.configuration)
+        deviceViewport = viewport
+        let contentSize = viewport ?? CGSize(width: 1200, height: 820)
         let window = BrowserWindow(contentRect: NSRect(origin: .zero, size: contentSize),
                                    styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                    backing: .buffered, defer: false)
-        if let deviceScreen { window.contentMaxSize = deviceScreen }
+        if let viewport {
+            window.contentMaxSize = viewport
+            window.keepsHeight = true
+        }
         window.isReleasedWhenClosed = false
         // Never saved as restorable state at quit: AppKit would write the title — the profile's
         // name — to ~/Library/Saved Application State in plaintext.
@@ -93,6 +114,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         window.backgroundColor = Theme.NS.toolbar
         buildInterface(in: window)
         WebContentAppearance.shared.follow(webContainer)
+        // The device's viewport again, now that the toolbar is in (AppKit also fitted the window to
+        // the screen while making it, before it kept its height).
+        if let viewport { window.setContentSize(viewport) }
         window.center()
         // @Published emits before the value changes; read the store on the next main-actor turn.
         libraryObservation = library.$bookmarks.sink { [weak self] _ in
@@ -234,14 +258,38 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let index = afterSelected && !tabs.isEmpty ? selectedIndex + 1 : tabs.count
         tabs.insert(tab, at: index)
         if !select && index <= selectedIndex { selectedIndex += 1 }
-        if let url { tab.load(url) }
+        attach(tab)
         if select || tabs.count == 1 {
+            if let url { tab.load(url) }
             selectTab(at: index)
             if url == nil && configuration == nil { focusAddressBar() }
         } else {
             refreshChrome()
+            // Laid out before its page starts loading (the tab strip may just have appeared).
+            window?.contentView?.layoutSubtreeIfNeeded()
+            if let url { tab.load(url) }
         }
         return tab
+    }
+
+    /// Every tab's web view is in the window, filling the web area; only the selected one is shown.
+    /// A tab behind the shown one (⌘-click, or the one the user left) thus has its window, screen
+    /// and size, as in Safari: its page measures the viewport and window it will be shown in — not
+    /// a 0×0 view outside any window, what headless browsers report — and WebKit keeps its window
+    /// frame current when the window is moved or resized (a view taken out of the window would keep
+    /// the frame it had then). Hidden, the page is not visible to WebKit (`document.visibilityState`
+    /// 'hidden', timers throttled), as a background tab's.
+    private func attach(_ tab: BrowserTab) {
+        let webView = tab.webView
+        webView.isHidden = true
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        webContainer.addSubview(webView)
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: webContainer.topAnchor),
+            webView.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+            webView.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
+        ])
     }
 
     func selectTab(at index: Int) {
@@ -249,17 +297,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         selectedTab?.passwords.closeSuggestions()
         selectedIndex = index
         let webView = tabs[index].webView
-        if webView.superview !== webContainer {
-            webContainer.subviews.forEach { $0.removeFromSuperview() }
-            webView.translatesAutoresizingMaskIntoConstraints = false
-            webContainer.addSubview(webView)
-            NSLayoutConstraint.activate([
-                webView.topAnchor.constraint(equalTo: webContainer.topAnchor),
-                webView.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
-                webView.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
-                webView.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
-            ])
-        }
+        // Shown before the others are hidden: a hidden first responder hands focus on to the next view.
+        webView.isHidden = false
+        for tab in tabs where tab.webView !== webView { tab.webView.isHidden = true }
         refreshChrome()
         if webView.url != nil { window?.makeFirstResponder(webView) }
     }
@@ -310,8 +350,20 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// Updates tab strip, address bar, buttons and window title from the selected tab.
     private func refreshChrome() {
         let showsTabStrip = tabs.count > 1
+        let stripChanges = (tabStripHeight.constant > 0) != showsTabStrip
         tabStrip.isHidden = !showsTabStrip
         tabStripHeight.constant = showsTabStrip ? TabStripView.height : 0
+        if stripChanges, let deviceViewport, let window {
+            let strip = showsTabStrip ? TabStripView.height : -TabStripView.height
+            let content = window.contentRect(forFrameRect: window.frame).size
+            window.contentMaxSize = CGSize(width: deviceViewport.width, height: deviceViewport.height + tabStripHeight.constant)
+            // The top edge stays where it is: the window grows or shrinks at the bottom.
+            var frame = window.frame
+            let height = window.frameRect(forContentRect: NSRect(origin: .zero, size: CGSize(width: content.width, height: content.height + strip))).height
+            frame.origin.y -= height - frame.height
+            frame.size.height = height
+            window.setFrame(frame, display: true)
+        }
         updateStartPage()
         tabStrip.update(items: tabs.map { tab in
             TabStripView.Item(title: tab.displayTitle,

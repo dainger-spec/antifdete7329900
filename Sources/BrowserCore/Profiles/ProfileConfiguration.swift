@@ -155,7 +155,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
 
     /// The User-Agent applied: an explicit `userAgent` override wins; otherwise the generation's
     /// (the default generation when none is stored), the macOS one naming the host's Safari
-    /// version. Never WebKit's bare default, which lacks the "Version/… Safari/…" every Safari sends.
+    /// version, a mobile one of the host's release its major.minor. Never WebKit's bare default,
+    /// which lacks the "Version/… Safari/…" every Safari sends.
     public func userAgent(hostSafariVersion: String?) -> String {
         if let userAgent, !userAgent.isEmpty { return userAgent }
         return deviceGeneration.userAgent(hostSafariVersion: hostSafariVersion)

@@ -9,9 +9,28 @@ final class SafariUserAgentTests: XCTestCase {
         // Unknown or malformed host version: the catalog UA.
         XCTAssertEqual(mac.userAgent(hostSafariVersion: nil), mac.userAgent)
         XCTAssertEqual(mac.userAgent(hostSafariVersion: "26.0 beta"), mac.userAgent)
-        // Mobile generations never take the Mac's Safari version.
+        // A mobile generation of another release than the Mac's Safari keeps its catalog UA.
         let ios = DeviceGenerations.resolved(id: "ios-26")
         XCTAssertEqual(ios.userAgent(hostSafariVersion: "18.6"), ios.userAgent)
+    }
+
+    func testMobileGenerationOfTheEngineNamesItsRelease() {
+        // The engine's release as major.minor, the rest of the device's UA unchanged.
+        XCTAssertEqual(DeviceGenerations.resolved(id: "ios-26").userAgent(hostSafariVersion: "26.4.1"),
+                       "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Mobile/15E148 Safari/604.1")
+        XCTAssertEqual(DeviceGenerations.resolved(id: "ipados-26").userAgent(hostSafariVersion: "26.1"),
+                       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15")
+        XCTAssertTrue(DeviceGenerations.resolved(id: "ios-26").userAgent(hostSafariVersion: "26").contains("Version/26.0 Mobile"))
+        // A newer release than the engine: the catalog UA, and offered only to a profile that has it.
+        let ios27 = DeviceGenerations.resolved(id: "ios-27")
+        XCTAssertFalse(ios27.isOfEngine(hostSafariVersion: "26.6.2"))
+        XCTAssertEqual(ios27.userAgent(hostSafariVersion: "26.6.2"), ios27.userAgent)
+        XCTAssertEqual(DeviceGenerations.selectable(hostSafariVersion: "26.6.2", current: nil).map(\.id),
+                       ["macos-26", "ios-26", "ipados-26"])
+        XCTAssertEqual(DeviceGenerations.selectable(hostSafariVersion: "26.6.2", current: "ios-27").map(\.id),
+                       ["macos-26", "ios-27", "ios-26", "ipados-26"])
+        // Unknown host version: everything is offered.
+        XCTAssertEqual(DeviceGenerations.selectable(hostSafariVersion: nil, current: nil).count, DeviceGenerations.all.count)
     }
 
     func testSafariVersionFormat() {
@@ -272,5 +291,41 @@ final class ProxiedWebRTCTests: XCTestCase {
         let iPad = DeviceGenerations.generation(id: "ipados-26")?.userAgent ?? ""
         XCTAssertTrue(iPad.hasPrefix("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26."), iPad)
         XCTAssertTrue(iPad.hasSuffix(" Safari/605.1.15"), iPad)
+    }
+}
+
+final class DeviceFontsTests: XCTestCase {
+    /// Apple's list: what a Mac has and an iPhone does not preinstall (only for download or for
+    /// document-based apps).
+    func testAppleListNamesTheMacOnlyFaces() {
+        for face in ["Monaco", "Comic Sans MS", "Arial Unicode MS", "Tahoma", "Lucida Grande", "Times Roman", "Apple Chancery",
+                     "Courier", "Sukhumvit Set Text"] {
+            XCTAssertTrue(IOSFonts.macOnlyFaces.contains(face), face)
+        }
+        for face in ["Menlo Regular", "Helvetica", "Helvetica Neue", "Times New Roman", "Courier New", "Snell Roundhand",
+                     "PingFang SC Regular"] {
+            XCTAssertFalse(IOSFonts.macOnlyFaces.contains(face), face)
+        }
+    }
+
+    func testAllowlistKeepsAFamilyWithAFaceIOSHas() {
+        let faces = [
+            DeviceFonts.Face(family: "Monaco", postScriptName: "Monaco", fullName: "Monaco"),
+            DeviceFonts.Face(family: "Menlo", postScriptName: "Menlo-Regular", fullName: "Menlo Regular"),
+            DeviceFonts.Face(family: "Menlo", postScriptName: "Menlo-Bold", fullName: "Menlo Bold"),
+            DeviceFonts.Face(family: "Times", postScriptName: "Times-Roman", fullName: "Times Roman"),
+            DeviceFonts.Face(family: "Times", postScriptName: "Times-Bold", fullName: "Times Bold"),
+            // A kept family keeps its name; a face iOS lacks loses its PostScript name.
+            DeviceFonts.Face(family: "Kohinoor Telugu", postScriptName: "KohinoorTelugu-Regular", fullName: "Kohinoor Telugu"),
+            DeviceFonts.Face(family: "Kohinoor Telugu", postScriptName: "KohinoorTelugu-Bold", fullName: "Kohinoor Telugu Bold"),
+            // Downloadable on both systems by Apple's list (their CJK font), or not listed: kept.
+            DeviceFonts.Face(family: "PingFang SC", postScriptName: "PingFangSC-Regular", fullName: "PingFang SC Regular"),
+        ]
+        XCTAssertEqual(DeviceFonts.iOSAllowlist(faces), [
+            "Menlo", "Kohinoor Telugu", "PingFang SC",
+            "Menlo-Regular", "Menlo-Bold", "KohinoorTelugu-Regular", "PingFangSC-Regular"])
+        XCTAssertEqual(DeviceFonts.hiddenFamilies(faces), ["Monaco", "Times"])
+        // Nothing read: an empty list, which WebKit takes as "every font".
+        XCTAssertEqual(DeviceFonts.iOSAllowlist([]), [])
     }
 }

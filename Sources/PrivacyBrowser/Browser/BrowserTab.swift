@@ -23,6 +23,8 @@ protocol BrowserTabHost: AnyObject {
 struct BrowserTabContext {
     let profileName: String
     let userAgent: String?
+    /// The declared device's pixel ratio (a mobile generation), set in WebKit for the tab.
+    var deviceScaleFactor: CGFloat? = nil
     let passwordVault: PasswordVault
     /// AutoFill on or off, and the sites passwords are never saved for, as they are now.
     let passwordSettings: ProfilePasswordSettings
@@ -80,6 +82,11 @@ final class BrowserTab: NSObject {
     /// Set while the warm-up robot drives this tab: what would be downloaded is refused instead
     /// (a response WebKit cannot show fails as a load), so a run never saves a file.
     var refusesDownloads = false
+    /// Sites that asked for the position in the page this tab shows (`GeolocationPermission`).
+    private var geolocationAsked: Set<String> = []
+    /// How often WebKit asked this tab for the position and for a permission's state (self-test).
+    private(set) var geolocationRequestsAnswered = 0
+    private(set) var permissionQueriesAnswered = 0
 
     /// Password AutoFill in this tab: suggestions, filling, the save question.
     private(set) lazy var passwords = TabPasswordAutoFill(tab: self, vault: context.passwordVault,
@@ -93,6 +100,12 @@ final class BrowserTab: NSObject {
         // FINGERPRINTING LIMITATION: navigator.platform/vendor, the supported feature set and the
         // TLS/HTTP2 fingerprint still identify WebKit on macOS; a non-WebKit UA is inconsistent.
         webView.customUserAgent = context.userAgent
+        // The declared device's pixel ratio in the engine (PrivacyScripts.deviceScaleFactor).
+        if let scale = context.deviceScaleFactor, PrivacyScripts.deviceScaleFactorByEngine,
+           let method = class_getInstanceMethod(WKWebView.self, PrivacyScripts.deviceScaleFactorSelector) {
+            typealias Setter = @convention(c) (NSObject, Selector, CGFloat) -> Void
+            unsafeBitCast(method_getImplementation(method), to: Setter.self)(webView, PrivacyScripts.deviceScaleFactorSelector, scale)
+        }
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
         webView.navigationDelegate = self
@@ -114,8 +127,8 @@ final class BrowserTab: NSObject {
     /// page over it until it starts loading something.
     var startsEmpty = false
     var showsStartPage: Bool { startsEmpty && webView.url == nil && !webView.isLoading }
-    /// Shown in its window (the selected tab's web view is the only one in the window).
-    var isSelected: Bool { webView.window != nil }
+    /// Shown in its window (every tab's web view is in its window; only the selected one is not hidden).
+    var isSelected: Bool { webView.window != nil && !webView.isHidden }
 
     /// Loads `url`; returns the navigation it started (see `hasCommitted`).
     @discardableResult
@@ -282,6 +295,7 @@ extension BrowserTab: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         if let navigation { committedNavigations.add(navigation) }
+        geolocationAsked.removeAll() // another page: WebKit asks again when it does
         passwords.closeSuggestions()
         if let url = webView.url { recordVisit(url) }
     }
@@ -418,7 +432,8 @@ extension BrowserTab: WKUIDelegate {
     /// screenX/screenY. WebKit asks the UI delegate for it (`WKUIDelegatePrivate`, the method Safari
     /// answers); a delegate without it gets outerWidth = outerHeight = 0 and a screen position
     /// computed from an empty rectangle — what embedded and headless browsers report. AppKit screen
-    /// coordinates; WebKit flips them.
+    /// coordinates; WebKit flips them. A tab behind the shown one is in the window too (hidden,
+    /// `BrowserWindowController.attach`), so it answers with its window as the shown tab does.
     @objc(_webView:getWindowFrameWithCompletionHandler:)
     func webView(_ webView: WKWebView, windowFrameCompletion completionHandler: @escaping (CGRect) -> Void) {
         completionHandler(webView.window?.frame ?? .zero)
@@ -474,6 +489,33 @@ extension BrowserTab: WKUIDelegate {
         panel.canChooseFiles = true
         presentSheet(panel, begin: { panel.beginSheetModal(for: $0, completionHandler: $1) },
                      respond: { completionHandler($0 == .OK ? panel.urls : nil) })
+    }
+
+    /// Geolocation (`WKUIDelegatePrivate`, asked when a frame calls getCurrentPosition or
+    /// watchPosition): no, as a user who said no would answer, so the page gets WebKit's own
+    /// PERMISSION_DENIED. Profiles with a fixed position never get here: the shim answers them.
+    @objc(_webView:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:)
+    func answerGeolocationRequest(_ webView: WKWebView, origin: WKSecurityOrigin, frame: WKFrameInfo,
+                                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        geolocationRequestsAnswered += 1
+        geolocationAsked.insert(GeolocationPermission.site(origin))
+        if let top = GeolocationPermission.site(of: webView.url) { geolocationAsked.insert(top) }
+        decisionHandler(.deny)
+        // A PermissionStatus the page holds reads the state again ('denied') and fires 'change'.
+        GeolocationPermission.announceChange(of: "geolocation", for: origin)
+    }
+
+    /// A permission's state as WebKit reads it from the embedder (`WKUIDelegatePrivate`): for
+    /// geolocation 'denied' once a page of the site asked for the position, else 'prompt'; for every
+    /// other permission 'prompt', which WebKit reports for them when a delegate does not answer.
+    /// A fresh navigator.permissions.query gets WebKit's own rule on top ('denied' only to a document
+    /// that asked); a PermissionStatus the page holds takes this answer as it is when told of a change.
+    @objc(_webView:queryPermission:forOrigin:completionHandler:)
+    func answerPermissionQuery(_ webView: WKWebView, name: String, origin: WKSecurityOrigin,
+                               completionHandler: @escaping (WKPermissionDecision) -> Void) {
+        permissionQueriesAnswered += 1
+        let asked = name == "geolocation" && geolocationAsked.contains(GeolocationPermission.site(origin))
+        completionHandler(asked ? .deny : .prompt)
     }
 
     /// Camera / microphone: ask every time (WebKit forwards the request only after the page called getUserMedia).

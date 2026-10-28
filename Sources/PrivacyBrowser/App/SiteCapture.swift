@@ -22,7 +22,8 @@ import WebKit
 ///                             "route": {…TunnelRoute…}, "allInterfaces": false}],
 ///               "pages": [{"name": "…", "url": "…", "script": "<async function body>", "settleMs": 0,
 ///                          "timeoutMs": 60000, "extraTabs": 0}]}
-/// A page script is the body of an async function; its result is serialised with JSON.stringify.
+/// A page script is the body of an async function, with `profile` (the profile's name) in scope;
+/// its result is serialised with JSON.stringify.
 /// Output: <out-dir>/<profile>.json = {"<page>": result or {"error": "…"}}.
 @MainActor
 final class SiteCapture {
@@ -161,7 +162,7 @@ final class SiteCapture {
         for page in spec.pages {
             print("INFO [\(profileSpec.name)] \(page.name): \(page.url)")
             do {
-                results[page.name] = try await run(page, in: controller)
+                results[page.name] = try await run(page, in: controller, profile: profileSpec.name)
             } catch {
                 print("INFO [\(profileSpec.name)] \(page.name) failed: \(error.localizedDescription)")
                 results[page.name] = ["error": error.localizedDescription]
@@ -191,7 +192,8 @@ final class SiteCapture {
         return host
     }
 
-    private func run(_ page: Spec.Page, in controller: BrowserWindowController) async throws -> Any {
+    /// The page's script runs with `profile` (the profile's name in the spec) in scope.
+    private func run(_ page: Spec.Page, in controller: BrowserWindowController, profile: String) async throws -> Any {
         guard let url = URL(string: page.url), let tab = controller.selectedTab else { throw Failure("no tab or bad URL") }
         let timeout = TimeInterval(page.timeoutMs ?? 60_000) / 1000
         tab.load(url)
@@ -206,12 +208,13 @@ final class SiteCapture {
         }
         if let settle = page.settleMs, settle > 0 { try await Task.sleep(nanoseconds: UInt64(settle) * 1_000_000) }
         let body = "const __value = await (async () => {\n" + page.script + "\n})();\nreturn JSON.stringify(__value === undefined ? null : __value);"
-        let value = try await evaluate(body, in: tab.webView, timeout: timeout)
+        let value = try await evaluate(body, in: tab.webView, timeout: timeout, arguments: ["profile": profile])
         guard let text = value as? String, let data = text.data(using: .utf8) else { return NSNull() }
         return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
     }
 
-    private func evaluate(_ body: String, in webView: WKWebView, timeout: TimeInterval) async throws -> Any? {
+    private func evaluate(_ body: String, in webView: WKWebView, timeout: TimeInterval,
+                          arguments: [String: Any]) async throws -> Any? {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Any?, Error>) in
             var answered = false
             let answer: (Result<Any?, Error>) -> Void = { result in
@@ -219,7 +222,7 @@ final class SiteCapture {
                 answered = true
                 continuation.resume(with: result)
             }
-            webView.callAsyncJavaScript(body, arguments: [:], in: nil, in: .page) { result in
+            webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: .page) { result in
                 answer(result.map { $0 as Any? })
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {

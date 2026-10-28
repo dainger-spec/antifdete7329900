@@ -9,8 +9,10 @@ import WebKit
 /// `CFNetworkCopySystemProxySettings`), not for a data store's `proxyConfigurations`. With
 /// SOCKS5 the proxy resolves every other name, so this would be the one DNS query a page can
 /// make the Mac send itself. WebKit runs the prefetch through the content rule lists as a
-/// `ping`-type load, so a rule blocking `ping` stops it. The same rule stops `<a ping>` and
-/// `navigator.sendBeacon` (click and unload trackers, which content blockers block too).
+/// `ping`-type load, so a rule blocking `ping` stops it. The same rule stops `<a ping>` (a click
+/// tracker, which content blockers block too), which Safari sends. `navigator.sendBeacon` is a
+/// fetch to WebKit, not a ping: it goes through the proxy like any request, also from `pagehide`
+/// (the self-test checks both).
 @MainActor
 enum ContentRules {
     /// Blocks every ping-type load; nil until `prepare()` compiled it (or when compiling failed).

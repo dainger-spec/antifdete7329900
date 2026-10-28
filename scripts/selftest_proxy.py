@@ -33,6 +33,27 @@ fetch does; `?autofocus=1`), and `/pb-frame?src=<url>` a page with that URL in a
 `/pb-cookies` shows the request's `Cookie` header (`PB-COOKIES cookie=...`), for the cookie import
 checks.
 
+`/pb-scopes/page` is an empty page for the time-zone checks in every scope a page can reach:
+`/pb-scopes/worker.js` (a dedicated worker), `/pb-scopes/shared.js` (a shared worker) and
+`/pb-scopes/sw.js` (a service worker) each answer a message with their time zone, the offset of
+2024-01-15 and their User-Agent (`zone|offset|ua`); `/pb-scopes/quota.js` (a dedicated worker) and the
+service worker, asked 'quota', answer with `navigator.storage.estimate().quota`; `/pb-scopes/types.js`,
+`/pb-scopes/types-shared.js` and the service worker, asked `types:<name>,<name>…`, with `typeof` of
+each of those globals there (`typeof RTCPeerConnection`, `typeof WebTransport`, …), comma-separated.
+The listener also answers requests made to it directly (`http://127.0.0.1:<port>/…`, a secure
+context, which service workers and WebTransport need).
+
+`/pb-hls/<run>/stream.m3u8` is a one-segment HLS playlist (its segment `/pb-hls/<run>/seg0.ts`)
+and `/pb-media/<run>/clip.mp4` a file a `<video>` asks for; neither plays, only the requests count.
+A WebSocket handshake (`/pb-ws/<run>`) is answered with a page, not a 101: the self-test only
+needs to see that it reached the proxy.
+
+`/pb-csp/page?run=<id>` is an empty page under a strict Content-Security-Policy, as a site that
+collects violation reports sends it: no 'unsafe-eval', `connect-src 'self'`, blob: workers allowed,
+`report-uri /pb-csp/report?run=<id>` (`&tt=1` also requires Trusted Types, allowing the policies
+`pbtest` and `default`). The reports the browser posts are kept per run and listed by
+`/pb-csp/reports.json?run=<id>`.
+
 `/pb-warmup/<name>?run=<id>` are pages for the session warm-up robot: each sets a cookie
 (`pbwarm_<name>=<id>`), is tall enough to scroll, and has, in view, one plain link to the same site
 (`Next article` → `/pb-warmup/<name>-next`) next to links the robot must never follow (sign-out,
@@ -71,12 +92,29 @@ GEO_ANSWER = b'{"ip":"203.0.113.7","country":"DE","timezone":"Europe/Berlin"}'
 SERVED: list = []
 SERVED_LOCK = threading.Lock()
 WARMUP_LOG: list = []
+CSP_REPORTS: list = []
 
 
 def header(request: str, name: str) -> str:
     prefix = name.lower() + ":"
     return next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
                  if line.lower().startswith(prefix)), "")
+
+
+def request_body(conn: socket.socket, request: str) -> bytes:
+    """The body of a request whose head (and maybe the start of its body) `request` holds."""
+    _, _, start = request.partition("\r\n\r\n")
+    body = start.encode("latin-1", "replace")
+    try:
+        length = min(int(header(request, "Content-Length") or "0"), 1 << 20)
+    except ValueError:
+        length = 0
+    while len(body) < length:
+        chunk = conn.recv(length - len(body))
+        if not chunk:
+            break
+        body += chunk
+    return body
 
 
 def warmup_page(name: str, run: str) -> bytes:
@@ -137,6 +175,25 @@ def login_page(params: dict) -> bytes:
     return f'<!doctype html><html><head><meta charset="utf-8"><title>PB login</title></head><body>{body}{script}</body></html>'.encode()
 
 
+# What each worker scope reports (see the module docstring), and how it is asked.
+SCOPE_REPORT = ("const report = () => [Intl.DateTimeFormat().resolvedOptions().timeZone,"
+                " new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset(), navigator.userAgent].join('|');\n"
+                "const types = (message) => message.slice('types:'.length).split(',').map((name) => typeof self[name]).join();\n")
+SCOPE_SCRIPTS = {
+    "/pb-scopes/worker.js": "onmessage = () => postMessage(report());\n",
+    "/pb-scopes/shared.js": "onconnect = (e) => { const port = e.ports[0]; port.onmessage = () => port.postMessage(report()); };\n",
+    "/pb-scopes/quota.js": "onmessage = () => navigator.storage.estimate().then((e) => postMessage(String(e.quota)));\n",
+    "/pb-scopes/types.js": "onmessage = (e) => postMessage(types(e.data));\n",
+    "/pb-scopes/types-shared.js": "onconnect = (e) => { const port = e.ports[0]; port.onmessage = (m) => port.postMessage(types(m.data)); };\n",
+    "/pb-scopes/sw.js": ("addEventListener('install', () => skipWaiting());\n"
+                         "addEventListener('activate', (e) => e.waitUntil(clients.claim()));\n"
+                         "addEventListener('message', (e) => { const port = e.ports[0]; if (!port) return;"
+                         " if (e.data === 'quota') navigator.storage.estimate().then((q) => port.postMessage(String(q.quota)));"
+                         " else if (String(e.data).startsWith('types:')) port.postMessage(types(e.data));"
+                         " else port.postMessage(report()); });\n"),
+}
+
+
 def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
     """Answers the (tunnelled or forwarded) HTTP request `request` for `path`."""
     accept_language = next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
@@ -184,6 +241,47 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
             cookie_name = "".join(c if c.isalnum() else "_" for c in name)
             extra_headers = f"Set-Cookie: pbwarm_{cookie_name}={run or 'x'}; Max-Age=86400; Path=/\r\n"
             body, content_type = warmup_page(name, run), "text/html; charset=utf-8"
+    elif plain_path == "/pb-csp/page":
+        params = {key: values[0] for key, values in parse_qs(query).items()}
+        run = "".join(c for c in params.get("run", "") if c.isalnum() or c == "-")
+        policy = ("default-src 'none'; script-src 'nonce-pbcsp' 'report-sample'; worker-src blob:; connect-src 'self'; "
+                  f"img-src 'self'; report-uri /pb-csp/report?run={run}")
+        if params.get("tt") == "1":
+            policy += "; require-trusted-types-for 'script'; trusted-types pbtest default"
+        extra_headers = f"Content-Security-Policy: {policy}\r\n"
+        body = b"<!doctype html><html><head><meta charset='utf-8'><title>PB CSP</title></head><body>csp</body></html>"
+        content_type = "text/html; charset=utf-8"
+    elif plain_path == "/pb-csp/report":
+        run = parse_qs(query).get("run", [""])[0]
+        payload = request_body(conn, request)
+        try:
+            report = json.loads(payload.decode("utf-8", "replace"))
+            report = report.get("csp-report", report) if isinstance(report, dict) else report
+        except ValueError:
+            report = {"unparsed": payload.decode("utf-8", "replace")}
+        with SERVED_LOCK:
+            CSP_REPORTS.append({"run": run, "report": report})
+        print(f"[selftest-proxy] CSP report run={run}: {json.dumps(report)[:300]}", flush=True)
+        body, content_type = b"", "text/plain"
+    elif plain_path == "/pb-csp/reports.json":
+        run = parse_qs(query).get("run", [""])[0]
+        with SERVED_LOCK:
+            body = json.dumps([entry["report"] for entry in CSP_REPORTS if entry["run"] == run]).encode()
+        content_type = "application/json"
+    elif plain_path.startswith("/pb-hls/") and plain_path.endswith(".m3u8"):
+        # A one-segment HLS playlist: whether the player asks for it, and for its segment, is what counts.
+        body = ("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n"
+                "#EXTINF:2.0,\nseg0.ts\n#EXT-X-ENDLIST\n").encode()
+        content_type = "application/vnd.apple.mpegurl"
+    elif plain_path.startswith("/pb-hls/") or plain_path.startswith("/pb-media/"):
+        # MPEG-TS null packets, no programme: nothing plays; only the request is measured.
+        body = (b"\x47\x1f\xff\x10" + b"\xff" * 184) * 8
+        content_type = "video/mp2t" if plain_path.startswith("/pb-hls/") else "video/mp4"
+    elif plain_path == "/pb-scopes/page":
+        body = b"<!doctype html><html><head><meta charset='utf-8'><title>PB scopes</title></head><body>scopes</body></html>"
+        content_type = "text/html; charset=utf-8"
+    elif plain_path in SCOPE_SCRIPTS:
+        body, content_type = (SCOPE_REPORT + SCOPE_SCRIPTS[plain_path]).encode(), "text/javascript; charset=utf-8"
     elif plain_path == "/pb-frame":
         src = parse_qs(query).get("src", ["about:blank"])[0].replace('"', "%22")
         body = (f'<!doctype html><html><head><title>PB frame</title></head><body>'
