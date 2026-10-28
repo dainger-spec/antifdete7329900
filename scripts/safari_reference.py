@@ -37,7 +37,10 @@ INFO_KEYS = {"language", "languages", "intlLocale", "innerSize", "outerSize", "w
              "webdriver",
              # The WebRTC policy removes these on purpose in a default profile.
              "features.RTCPeerConnection", "features.webkitRTCPeerConnection", "features.RTCDataChannel",
-             "features.window.webkitRTCPeerConnection", "natives.RTCPeerConnection"}
+             "features.window.webkitRTCPeerConnection", "natives.RTCPeerConnection",
+             # What a page finds by trying (autoplay, pop-ups, permissions, storage, devices, Apple Pay,
+             # Push, display media queries): reported for now, so the differences are seen first.
+             "behavior"}
 # What a page measures of the engine and the Mac: must be identical.
 MUST_MATCH = {"ua", "appVersion", "vendor", "platform", "hardwareConcurrency", "deviceMemory", "maxTouchPoints",
               "pdfViewerEnabled", "plugins", "mimeTypes", "webdriver", "standalone", "doNotTrack", "ownNavigator",
@@ -45,6 +48,14 @@ MUST_MATCH = {"ua", "appVersion", "vendor", "platform", "hardwareConcurrency", "
               "canvas.colors", "canvas.urlLength", "canvas.url", "canvasText", "fonts", "webkitObject", "safari"}
 # The media stack, the touch interfaces and the fonts a page finds (a macOS profile has no font allowlist).
 MUST_MATCH_PREFIXES = ("webgl.", "natives.", "codecs.", "touchShape.", "fontFamilies.")
+
+
+# The probe's last part (behaviour) is asynchronous: execute/async, as live_compare.py runs scripts.
+ASYNC_WRAPPER = """const __done = arguments[arguments.length - 1];
+(async () => {
+%s
+})().then((v) => __done(JSON.stringify(v === undefined ? null : v)),
+          (e) => __done(JSON.stringify({ error: String(e && e.message || e) })));"""
 
 
 def flat(value):
@@ -80,6 +91,13 @@ class WebDriver:
 
     def execute(self, script):
         return self.request("POST", f"/session/{self.session}/execute/sync", {"script": script, "args": []})
+
+    def execute_async(self, body, timeout=120):
+        """`body` as an async function body (it may return a promise), its value as JSON."""
+        self.request("POST", f"/session/{self.session}/timeouts", {"script": timeout * 1000})
+        value = self.request("POST", f"/session/{self.session}/execute/async",
+                             {"script": ASYNC_WRAPPER % body, "args": []}, timeout=timeout + 30)
+        return json.loads(value) if isinstance(value, str) else value
 
     def quit(self):
         if self.session:
@@ -128,7 +146,7 @@ def run_in_safari(probe_source, port):
         try:
             capabilities = driver.start()
             driver.navigate(url)
-            result = driver.execute(probe_source)
+            result = driver.execute_async(probe_source)
             result["_safari"] = {"browserVersion": capabilities.get("browserVersion"), "url": url}
             return result
         finally:

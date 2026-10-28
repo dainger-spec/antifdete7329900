@@ -26,8 +26,9 @@ Two pages on two ports, with one certificate made for this run (openssl):
    - the pixel ratio and the media queries that follow it; orientation, pointer and hover,
      device-width;
    - the navigator a worker sees;
-   - what MediaCapabilities and WebCodecs answer for common codecs (asynchronous, so not in the
-     probe).
+   - what MediaCapabilities and WebCodecs answer for common codecs.
+   The probe's behaviour checks (autoplay, pop-ups, permission states, storage, media devices,
+   Apple Pay, Push, display media queries) tell Safari from a WKWebView app by trying.
 
 The script writes scripts/reference/<name>.json. It prints the values a mobile generation declares
 (PrivacyScripts: the screen, the pixel ratio, deviceViewportSize) next to the device's, and the TLS
@@ -435,10 +436,18 @@ const showResult = (out, why) => {
 (async () => {
   const out = { steps };
   out.atLoad = await step('sizes at load', sizes);
-  // The probe is synchronous: an exception goes in the result, and the rest still runs.
+  // The probe's behaviour checks (autoplay, pop-ups, permissions, …) report each check here: its
+  // name on the page before it runs, its duration in the steps after.
+  globalThis.__probeStep = (key, ms, value) => {
+    if (ms === undefined) { statusLine.textContent = 'step: probe ' + key + '…'; return; }
+    const text = String(value);
+    steps.push({ step: 'probe ' + key, ms, outcome: text === 'timeout' || text.startsWith('error') ? text : 'ok' });
+  };
+  // An exception in the probe's synchronous part goes in the result, and the rest still runs; its
+  // behaviour checks have time limits of their own.
   out.probe = await step('probe', () => {
     try { return probe(); } catch (e) { return { error: errorText(e) }; }
-  });
+  }, 90000);
   const media = (query) => matchMedia(query).matches;
   out.media = await step('media queries', () => ({
     resolution: [1, 2, 3].filter((r) => media('(resolution: ' + r + 'dppx)')),
@@ -514,6 +523,7 @@ def summary(name, result):
     print(f"  WebGL {json.dumps(probe.get('webgl'))[:600]}")
     print(f"  codecs {json.dumps(probe.get('codecs'))[:600]}")
     print(f"  async codecs {json.dumps(result.get('codecs'))}")
+    print(f"  behaviour {json.dumps(probe.get('behavior'), sort_keys=True)[:900]}")
     network = result.get("network", {})
     for tls in network.get("tls", []):
         verdict = ("a resumed session: not the ClientHello a site first sees" if tls.get("resumed")
