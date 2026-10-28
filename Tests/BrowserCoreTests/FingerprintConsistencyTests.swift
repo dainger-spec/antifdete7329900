@@ -295,12 +295,15 @@ final class ProxiedWebRTCTests: XCTestCase {
 }
 
 final class DeviceFontsTests: XCTestCase {
-    /// Apple's list: what a Mac has by default and an iPhone only offers for download.
+    /// Apple's list: what a Mac has and an iPhone does not preinstall (only for download or for
+    /// document-based apps).
     func testAppleListNamesTheMacOnlyFaces() {
-        for face in ["Monaco", "Comic Sans MS", "Arial Unicode MS", "Tahoma", "Lucida Grande", "Times Roman", "Apple Chancery"] {
+        for face in ["Monaco", "Comic Sans MS", "Arial Unicode MS", "Tahoma", "Lucida Grande", "Times Roman", "Apple Chancery",
+                     "Courier", "Sukhumvit Set Text"] {
             XCTAssertTrue(IOSFonts.macOnlyFaces.contains(face), face)
         }
-        for face in ["Menlo Regular", "Helvetica", "Helvetica Neue", "Times New Roman", "Courier New", "Courier", "Snell Roundhand"] {
+        for face in ["Menlo Regular", "Helvetica", "Helvetica Neue", "Times New Roman", "Courier New", "Snell Roundhand",
+                     "PingFang SC Regular"] {
             XCTAssertFalse(IOSFonts.macOnlyFaces.contains(face), face)
         }
     }

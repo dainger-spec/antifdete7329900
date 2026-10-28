@@ -9,7 +9,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26.6.2, 262/262 checks in both builds, CI run 223):
+(macOS 26.6.2, 264/264 checks in both builds, CI run 228):
 
 | Claim | Self-test result |
 |---|---|
@@ -34,6 +34,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
 | Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks. An iPhone or iPad profile measures the same as a plain web view set up as that device's Safari (its pixel ratio, its feature set), `MediaSource` on an iPhone apart (removed by the shim, §2). It reports its device class's navigator and screen values, its pixel ratio is the engine's own (`devicePixelRatio` 3 or 2, the resolution media queries agreeing), and Fullscreen, MediaSource, Notification and `screen.orientation` are as Safari on that device has them. User-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
 | iPhone window | an iPhone profile's page measures 390 × 739 (`innerWidth` × `innerHeight`) under a 390 × 844 screen, with one tab and with two (the tab strip adds to the window). The window keeps that height on a screen too short for it: the runner's visible screen is 674 points high, and its bottom runs past it (CI run 223) |
+| Fonts (iPhone/iPad) | an iPhone and an iPad profile do not find nine families a Mac has and iOS does not preinstall (Monaco, Comic Sans MS, Arial Unicode MS, Tahoma, Lucida Grande, Geneva, Andale Mono, Apple Chancery, Webdings), which a plain web view finds, and find the ten both systems have that the check names; `cursive` is Snell Roundhand. WebKit's font allowlist per process pool (private API; macOS 26.6.2 exports all of it); a macOS profile finds what Safari finds (the Safari reference requires `fontFamilies.*` to match) |
 | Error stacks | an error a page provokes in what the shim replaces (a wrong receiver for: the navigator, screen and orientation getters, `outerWidth`, `contentWindow`, `window.open`, `document.open`, `Function.prototype.toString`, a rejected `estimate()`) has the stack a plain web view gives, with no frame of the shim's, in a macOS, an iPhone and an iPad profile (CI run 221; before the fix each showed a `@user-script:` frame, run 220) |
 | Remote workers' User-Agent | the profile's own in its shared and service workers, or WebKit's bare default where WebKit's race left a worker without one (§2), never another profile's. Fresh iPhone profiles, 6 per setting and pass, CI runs 218–221 (8 passes, 48 profiles per setting): WebKit's own in 12 as shipped, 14 with Notification on, 11 with encoded transforms off |
 | Shims in workers and frames | a worker made from a blob runs in the profile's zone, stays strict and keeps its line numbers, also on a page whose CSP has no `'unsafe-eval'`, `connect-src 'self'` and a `report-uri`: the site receives no violation report beyond the page's own controls (a blocked image, which is reported; an eval in a worker of its own, which the CSP blocks there — macOS 26.6.2 reports a page's violations, not a worker's), and the worker still reports the profile's zone, strict mode and the page's line numbers; with Trusted Types required, a worker from a `TrustedScriptURL`, or under the page's default policy, starts from the page's own URL; a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
@@ -156,6 +157,9 @@ What a generation actually does, and only this:
     one of WebKit's features);
   - the window: the viewport Safari leaves a page on the device (§6), with `screen.orientation`
     held upright;
+  - the fonts Safari on the device has: the profile's process pool gets WebKit's font allowlist
+    (private API; *iPhone and iPad profiles against the device*, below), and `cursive` is iOS's
+    Snell Roundhand;
   - the device class's navigator and screen values (the shim);
 - seeds per-profile defaults (e.g. WebRTC policy) when a new profile picks it;
 - names a **behaviour set** (`behaviorSetID`) — the injected-script bundle. This is an
@@ -173,9 +177,10 @@ What it does **not** do, and cannot:
   its real version.
 - Only the macOS generation is engine-consistent, and only when its version equals the Mac's
   real Safari version (the editor still shows the string, which may differ from the host's).
-  An iOS/iPadOS generation changes the UA, the pixel ratio, the window and the features listed
-  above. Every other signal in the table below (GPU, fonts, touch and pointer, TLS, the
-  navigator of a worker loaded from a URL) still says "desktop Mac". The editor lists them.
+  An iOS/iPadOS generation changes the UA, the pixel ratio, the window, the fonts and the
+  features listed above. Other signals in the tables below (WebGL extensions, touch and pointer,
+  codecs, perhaps HTTP/2, the navigator of a worker loaded from a URL) still say "desktop Mac";
+  the TLS ClientHello is the one Safari sends on iOS too. The editor lists them.
 
 Compared with a deeply integrated product that ships and switches genuine per-version WebKit
 cores, this is version *labelling*, not version *emulation*. It is honest about being
@@ -208,19 +213,20 @@ shared worker's sees the difference.
 ### What remains impossible with public APIs
 
 FINGERPRINTING LIMITATION. Each of the following would require private WebKit API, a
-modified WebKit, or different hardware. None is attempted:
+modified WebKit, or different hardware. A row says where a profile uses one of WebKit's private
+pieces:
 
 | Signal | Why a profile can't change it |
 |---|---|
-| Canvas 2D / WebGL pixels, WebGL renderer and vendor strings, extensions, limits | produced by the Mac's GPU and driver; WebKit exposes them as is |
+| Canvas 2D / WebGL pixels, WebGL extensions and limits | produced by the Mac's GPU and driver; WebKit exposes them as is. The renderer and vendor strings ("Apple GPU", "Apple Inc.") are the ones an iPhone reports |
 | AudioContext output | the Mac's audio stack |
-| Fonts (measured via text metrics) | macOS system fonts; iOS has a different font set. As in Safari, fonts the user installed are hidden from pages (the WebKit preference Safari sets, `_shouldAllowUserInstalledFonts`; it has no public API, so it is applied only when this WebKit has it, which the self-test checks) |
+| Fonts (measured via text metrics) | a macOS profile: the Mac's system fonts, as Safari; fonts the user installed are hidden (the WebKit preference Safari sets, `_shouldAllowUserInstalledFonts`; no public API, so applied only when this WebKit has it, which the self-test checks). An iPhone or iPad profile: only the families iOS has (private API, below and *iPhone and iPad profiles against the device*) |
 | Screen size, colour depth, `matchMedia` results | the real display. A mobile generation's pixel ratio is set per web view (private API, above), so its resolution media queries agree, and its window is the device's viewport, so `width`, `height` and `orientation` follow natively. `device-width`, `device-height`, colour depth and gamut stay the Mac's display |
 | `navigator.platform`, `vendor`, `hardwareConcurrency`, `maxTouchPoints` | engine and hardware; `customUserAgent` changes only the UA string. macOS profiles keep the native values; iPhone/iPad profiles get their device class's values from the shim (detectable; in workers made from a blob too, not in workers loaded from a URL) |
-| Touch and pointer behaviour, `ontouchstart`, the `pointer` and `hover` media queries, motion events | macOS WebKit is a desktop engine; there is no touch-input emulation API. `screen.orientation` reads the device upright (the shim) |
-| `navigator.languages`, `Accept-Language` | one list per app run: WebKit reads it once, when its first process starts. The first profile launched picks it (its proxy's country, else the app's language); the shim never overrides `navigator.language(s)`, so header and script agree |
-| Supported JS/CSS features, media codecs, WebKit version quirks | the installed macOS WebKit, which differs from iOS WebKit |
-| TLS ClientHello, HTTP/2 settings, header order | Apple's macOS network stack |
+| Touch input, the `pointer` and `hover` media queries, motion events | macOS WebKit is built without touch events (`ENABLE_TOUCH_EVENTS` is defined only for iOS with Apple's internal SDK: `Source/WTF/wtf/PlatformEnableCocoa.h`). No touch event reaches a page, and one a script makes is `isTrusted: false`. The interfaces themselves are missing too (below). `screen.orientation` reads the device upright (the shim) |
+| `navigator.languages`, `Accept-Language` | one list per app run (§6, with WebKit's code): the first profile launched picks it (its proxy's country, else the Mac's languages); the shim never overrides `navigator.language(s)`, so header and script agree |
+| Supported JS/CSS features, media codecs, WebKit version quirks | the installed macOS WebKit and media stack. Against Safari on the same Mac the profile lacks only what Safari the app adds (Apple Pay, Payment Request, Web Push, `DigitalCredential`, `MediaSessionCoordinator`, `browser`: the probe's list of globals, CI run 227); against an iPhone, what differs needs a device to tell (below) |
+| HTTP/2 settings, TLS ClientHello, header order | Apple's network stack (CFNetwork and Network.framework), outside WebKit: no API sets them, and a proxy only tunnels the TLS. The ClientHello is the one Safari 26 sends on iOS too (below) |
 
 **Why this project doesn't paper over these with JavaScript:** injected overrides for canvas,
 WebGL, audio or fonts are unreliable. They don't reach workers, don't change server-side TLS
@@ -245,13 +251,38 @@ The honest options for real separation between identities are outside the browse
 - a different Mac or VM per identity (different hardware fingerprint);
 - for a genuine iPhone fingerprint, Safari on an actual iPhone.
 
+### iPhone and iPad profiles against the device
+
+What a page or a server can still tell from an iPhone profile, signal by signal: what the profile
+shows on the CI runner (macOS 26.6.2, Apple silicon; run 227's `fingerprint-surfaces`), whether a
+profile can match the device, and why not where it cannot. WebKit references are to
+[WebKit's sources](https://github.com/WebKit/WebKit) (`main`, October 2026).
+
+| Signal | An iPhone profile shows | Can it match the device? |
+|---|---|---|
+| TLS ClientHello | JA4 `t13d2013h2_a09f3c656075_7f0f34a4126d`, Safari's own on this Mac (the leak check measures it through the proxy too, §4) | It already does. [Scrapfly's JA4 database](https://scrapfly.io/web-scraping-tools/ja4-fingerprint/t13d2013h2_a09f3c656075_7f0f34a4126d) lists this JA4 for Safari 26 on iOS (26.3 % of its 2,627 sightings), Safari 26 on OS X (19.6 %), and Safari 27 on both: Apple's TLS stack is the same on both systems |
+| HTTP/2 (SETTINGS, WINDOW_UPDATE, priorities, pseudo-header order) | `2:0;3:100;4:2097152;9:1\|10420225\|0\|m,s,a,p` | Not known yet, and not changeable: CFNetwork writes these frames, and no WKWebView or proxy setting reaches them. In 2024 a curl-impersonate maintainer wrote "For Safari, the iOS one and macOS differ on http2 fingerprints" ([issue 46](https://github.com/lexiforest/curl-impersonate/issues/46)); whether Safari 26 still does is what `scripts/device_reference.py` measures on an iPhone |
+| GPU: WebGL strings | "Apple GPU", "Apple Inc.", "WebKit WebGL" | They should already: Safari on an iPhone reports "Apple GPU" and "Apple Inc." as well (the device measurement confirms it) |
+| GPU: WebGL extensions and limits | 36 extensions, among them the BC formats of a Mac GPU (`WEBGL_compressed_texture_s3tc`, `…_s3tc_srgb`, `EXT_texture_compression_bptc`, `EXT_texture_compression_rgtc`); limits `16384,16,30,1024,16384,32,16384` | Unknown against an iPhone until measured (the probe's `webgl`, on a device by `device_reference.py`). Matching would mean rewriting what `getSupportedExtensions`, `getExtension` and `getParameter` answer: deterministic, not noise, but a change to WebGL's API, which this project keeps native (an open decision). Pixels: impossible, the Mac's GPU renders them |
+| Fonts | Only the families iOS preinstalls (CI run 228): Monaco, Comic Sans MS, Arial Unicode MS, Tahoma, Lucida Grande, Geneva, Times, Courier and the other families a Mac has and iOS offers only for download or to document-based apps are not found (WebKit then uses Times New Roman and Courier New, as on an iPhone); `cursive` is Snell Roundhand | Yes, in the engine (private API). WebKit keeps a font allowlist per process pool and hands it to every web process the pool starts (`WKContextSetFontAllowList` → `WebProcessPool::setFontAllowList` → `WebProcessCreationParameters.fontAllowList` → `FontCache::setFontAllowlist`, macOS only, `WebProcessCocoa.mm`). It filters lookups by family name (`platformFontLookupWithFamily`, `FontCacheCoreText.cpp`); system UI fonts always pass, and when a family is not found WebKit tries its alternate as on the device (`FontCache::alternateFamilyName`: Times → Times New Roman, Courier → Courier New). The list comes from [Apple's list of each system's fonts](https://developer.apple.com/fonts/system-fonts/) (`scripts/ios_fonts.py` → `IOSFonts`), whose "system font" faces are the preinstalled ones ("additional fonts are available for download on each platform or through document-based apps"): a family is hidden when every face of it this Mac lists is one iOS does not preinstall (523 faces). macOS's WebKit also finds faces Apple marks "document support" for macOS (Seravek, Iowan Old Style), which the Mac does not list among its fonts; the allowlist leaves them out, as iOS lacks them too. Faces marked downloadable on both systems (PingFang) stay. Left as on the Mac: the weights of a kept family that iOS lacks, family names in other languages, fallback fonts for text no named font covers, and the system UI font's metrics (SF on macOS and on iOS are different files) |
+| Touch interfaces | `maxTouchPoints` 5, but no `TouchEvent`, `Touch`, `TouchList` or `ontouchstart`; `document.createEvent('TouchEvent')` throws; `DeviceMotionEvent.requestPermission` is missing. FingerprintJS's touch support reads `{5, false, false}`, an iPhone `{5, true, true}` | The interfaces: possible, as the shim gives the navigator values, once their exact shape is measured on a device (the probe's `touchShape`): iOS builds them only with Apple's internal SDK, partly from sources Apple does not publish (`ENABLE_TOUCH_EVENTS` and `ENABLE_IOS_TOUCH_EVENTS`, `PlatformEnableCocoa.h`; WebKit's public `TouchEvent.idl` is another platform's). The events: impossible (macOS WebCore dispatches none; one a script makes is `isTrusted: false`; pointer events say `"mouse"`; `(pointer: fine)` and `(hover: hover)` stay) |
+| Codecs | The Mac's media stack: `canPlayType` answers "probably" for HEVC, AV1, Dolby Vision, VP8/VP9, AC-3, E-AC-3, ALAC; `MediaSource` removed, `ManagedMediaSource` kept (§2 above); `MediaRecorder` takes MP4 and WebM | Partly. What a device answers follows its hardware decoders (AV1 only on chips with an AV1 decoder) as well as the system. Answers can be taken away to match a measured device, as `MediaSource` is: removing only, since claiming a codec the Mac cannot play would break playback. Not done before a device has been measured (the probe's `codecs`, and MediaCapabilities and WebCodecs in `device_reference.py`) |
+| Language | One list for every profile of an app run | Only with a process per language (§6, with WebKit's code) |
+
+**Measuring a device.** `scripts/device_reference.py` (see *Mobile generations* in §6 for running
+it) writes everything above as a server and a page on the iPhone see it: the ClientHello's JA4,
+the HTTP/2 frames, the probe (WebGL, codecs, `touchShape`, `fontFamilies`, every global's name),
+MediaCapabilities and WebCodecs. `--compare` against the self-test's `surface-iphone.json` (CI
+artifact `fingerprint-surfaces`) prints every key where the profile differs, and for lists the
+items only one side has.
+
 ### Measured against this Mac's Safari
 
 Two CI steps compare a macOS profile with the runner's own Safari (macOS 26.6.2, Safari 26.6.2),
 driving Safari through `safaridriver`:
 
-- `scripts/safari_reference.py` runs `Resources/fingerprint_probe.js` in both: 434 keys identical,
-  0 must-match keys differ.
+- `scripts/safari_reference.py` runs `Resources/fingerprint_probe.js` in both: 449 keys identical,
+  0 must-match keys differ (CI run 228).
 - `scripts/live_compare.py` loads the same pages in Safari and in on-screen profile windows of the
   same outer size (`PrivacyBrowser --capture-sites`, `SiteCapture.swift`), once for a default profile
   and once with a time zone (Safari's own: in the engine where WebKit allows it, §6, else the shim's
@@ -306,7 +337,11 @@ What still differs, and why it cannot be changed from the app:
   through private preferences, and they need Safari's entitlements to work; exposing objects that
   cannot work (and that WebKit disables anyway once a page has user scripts) would be worse.
   `Object.getOwnPropertyNames(window).length` follows (1044 in Safari, 1029 in a profile with
-  WebRTC on, 1022 with the default policy that removes it).
+  WebRTC on, 1022 with the default policy that removes it). The probe's list of globals (CI run
+  227) names all 15 Safari has and a profile lacks: those, `ApplePaySetupFeature`,
+  `PaymentAddress`, `PaymentMethodChangeEvent`, `PaymentRequestUpdateEvent`, `PaymentResponse`,
+  `PushSubscription`, `PushSubscriptionOptions`, `DigitalCredential`, `MediaSessionCoordinator`
+  and `browser`. A profile has no global Safari lacks: the shim leaves none behind.
 - **WebRTC** is switched off by the default policy, and with a proxy unless the packet tunnel
   carries it (SOCKS5 only, relay candidates only; [TUNNEL.md](TUNNEL.md)). Without a proxy,
   `relayOnly` and `unrestricted` keep it.
@@ -576,7 +611,35 @@ the page anyway.
 | Time zone | In the engine where WebKit allows it: each profile runs in a WebKit process pool of its own (`ProfileProcessPool`), whose configuration names the zone (`_WKProcessPoolConfiguration.timeZoneOverride`, SPI since macOS 13). WebKit hands it to every process the pool launches, which sets it process-wide before any script runs, so the page, its frames, dedicated, shared and service workers, `Date` and `Intl` (and `Temporal` where WebKit exposes it; macOS 26's does not) report it as the engine's own. The shim checks at document start, in each realm, that the engine reports the zone and then replaces nothing; a realm whose engine does not (a process the override did not reach) gets the shim below. Without the SPI, JS: `Intl.DateTimeFormat` default `timeZone`; `Date` local getters and setters, `getTimezoneOffset` (with the sub-minute offsets of historical dates), the local constructor forms `new Date(y, m, d, …)`, `Date.parse` and `new Date(string)` for strings without an offset, `toString`, `toDateString`, `toTimeString`, `toLocale*String`, `getYear`/`setYear`. A worker made from a blob of the page (how fingerprinting scripts make theirs) starts with the same shim: the blob is handed to the engine as [the page's directives, the shim as one line of code, the rest of the page's blob], so the worker keeps a blob: location, its relative URLs, CSP, strict mode and line numbers. The shim goes in as code, not through `eval`, and nothing is read back from the page's blob (where its directives end comes from the strings the page made the Blob of), so a page's CSP (no `'unsafe-eval'`, `connect-src` without `blob:`) and Trusted Types have nothing to block or report | in the engine where the SPI exists; otherwise no | Only without the SPI: workers loaded from a URL and service workers use the host zone (rewriting them would change their location). A worker made from a `TrustedScriptURL`, or while the page has a default Trusted Types policy, does too: only a policy of the page's can make the URL the shim's blob would need, and a default policy would be shown another URL than the page's. A blob the page did not make from strings (fetched, a `File`) gets the shim first, so a `'use strict'` at its start no longer applies. The page's first line moves right by the shim's length, and the worker's own URL (`location`, stack traces, error events) is that of the blob made with the shim, not the page's. JavaScriptCore lists the replacement `Date`'s and `Intl.DateTimeFormat`'s `length`/`name` before their statics (`Object.getOwnPropertyNames(Date)`), which no script function can avoid. `Intl.DateTimeFormat().format()` without an explicit zone follows the shim; other `Intl` constructors carry no zone |
 | Geolocation | Deny (the default): WebKit itself. The tab's UI delegate answers the requests and permission queries WebKit sends it (`WKUIDelegatePrivate`, which Safari implements; `GeolocationPermission`) as a user who said no: every request is denied, so the page gets WebKit's own `PERMISSION_DENIED` ("User denied Geolocation") from the engine's own `getCurrentPosition`/`watchPosition`. A fresh `permissions.query({name:'geolocation'})` follows WebKit's own rule per document: 'prompt' until the document asks, 'denied' after, 'prompt' on the next page. A `PermissionStatus` the page already holds is told of the request and takes the tab's answer as it is ('denied' for the site that asked, until the tab shows another page), firing 'change'. Nothing is replaced. Every other permission is answered 'prompt', which WebKit reports when a delegate does not answer. Fixed coordinates: JS, answering as WebKit does for a user who allowed them; positions are instances of the real interfaces with no own properties (values from the prototype getters and `toJSON`), the `PermissionStatus` is the engine's own, 'prompt' until the page asks, then 'granted' | deny: yes (WebKit denies on the Mac by itself and keeps the per-document state; the delegate's answers, private API, keep a held `PermissionStatus` in step); fixed: no | The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed. The tab answers per site, not per document: a status a frame of the site's page holds turns 'denied' when the page asks, where a fresh query in that frame says 'prompt'. WebKit before macOS 26 reports a geolocation 'denied' as 'prompt' |
 | Time zone from the proxy | At launch, a geolocation service (ipinfo.io, then geojs.io, ipwho.is) is asked *through the profile's proxy* where it exits; the profile runs in that zone. The last answer per proxy is used on later launches when the new lookup takes over 1 s (and when a lookup fails), that lookup finishing in the background; with nothing remembered the launch waits for it at most 3 s (§4) | — | A third-party request per launch (HTTPS, via the proxy only, no cookies). Off per profile with *Time zone of the proxy's location*; *Override time zone* replaces the zone but keeps the lookup, for the country (language). Without any answer the host zone is used; a time zone that changed applies from the next launch |
-| Language | Process-wide: set before WebKit's first process from the first launched profile's proxy country (`WebContentLanguage`) | partly | WKWebView has no per-view `Accept-Language` / `navigator.languages` API; later profiles of the same run share the first one's language |
+| Language | Process-wide: set before WebKit's first process from the first launched profile's proxy country (`WebContentLanguage`) | partly | WKWebView has no per-view `Accept-Language` / `navigator.languages` API; later profiles of the same run share the first one's language, and the app says so at their launch (*Language: one per app run*, below) |
+
+**Language: one per app run.** Every profile of a run gets the language list the first one
+decided, for this reason in WebKit (sources on `main`, October 2026):
+- WebKit hands a process its languages when it starts it, as part of its launch
+  (`AuxiliaryProcessProxy::populateOverrideLanguagesLaunchOptions` puts them in the XPC bootstrap
+  message as `OverrideLanguages`; `XPCServiceMain.mm` makes them the process's `AppleLanguages`
+  before anything runs). The app sets that list before the first WebKit process
+  (`WebContentLanguage.decide`).
+- On macOS every data store shares one network process (`networkProcessForSession` →
+  `NetworkProcessProxy::ensureDefaultNetworkProcess()`, `WebsiteDataStore.cpp`), and that is
+  where CFNetwork writes `Accept-Language`. A later list reaches a pool's web processes
+  (`WebProcessPool::setOverrideLanguages` → `UserPreferredLanguagesChanged`), but network
+  processes only on WebKit's libsoup ports (`#if USE(SOUP)`): on a Mac the header keeps the
+  first list. Changing `navigator.languages` alone would make the page and the header disagree,
+  which is itself a signal, so the shim never does.
+- Headers set per request do not cover every request: `_WKCustomHeaderFields` (private,
+  `WKWebpagePreferences`) applies to the page's own origin and the domains it lists; a content
+  rule list's `modify-headers` action applies only where `_activeContentRuleListActionPatterns`
+  (private) allows it, and not to loads the network process starts itself, CORS preflights
+  among them (`ContentExtensionsBackend.cpp`).
+
+So two profiles with different languages need two app processes, each with its own WebKit
+network and web processes. That is the one complete fix: a second instance of the app per
+language, opened for a profile whose language differs from the running one's. It is an
+architectural change (the vault key handed to the second process, windows of one profile list in
+two processes, quitting and sealing both) and is not done. Until then the app tells the user at
+launch when a profile's language differs from the run's (`launch.languageFixed`), and quitting
+and relaunching with that profile first gives it its language.
 
 The shim logic is tested under Node (`scripts/test-shims.mjs`) against ICU, across
 fixed-offset zones, DST transitions, 30-minute shifts and pre-1900 offsets, together with
@@ -595,10 +658,14 @@ on the declared device: the screen less the status bar and Safari's own bars.
 - **These are estimates** (`PrivacyScripts.deviceViewportSize`). They are worked out from Safari
   26 on an iPhone 16 Pro, which leaves a page 754 of its 874 points in the compact tab layout; no
   390 × 844 iPhone or 820 × 1180 iPad was measured. `scripts/device_reference.py` measures a
-  real device to replace them. Run it on the Mac and open the address it prints in Safari on the
-  iPhone or iPad. It writes `scripts/reference/<name>.json` and prints the device's values next to
-  the declared ones: screen, pixel ratio, viewport at load and after scrolling, media queries, and
-  a worker's navigator.
+  real device to replace them. Run it on the Mac (`--name iphone-ios26`) and open the address it
+  prints (the Mac's Bonjour name, so Safari sends a server name as to a real site) in Safari on
+  the iPhone or iPad; accept the certificate warning, follow the page's link, keep the second page
+  in view until it reads "sent". It writes `scripts/reference/<name>.json` and prints the
+  device's values next to the declared ones: screen, pixel ratio, viewport at load and after
+  scrolling, media queries, a worker's navigator; the TLS ClientHello (JA4) and HTTP/2 frames
+  next to this Mac's WebKit's; WebGL, codecs, touch interfaces, fonts. `--compare` sets it
+  against a profile's surface (§2).
 - **Tabs.** A second tab adds the tab strip to the window, so the page keeps its viewport, as on
   the phone.
 - **Small screens.** On a screen with less visible height than the window (about 790 points for an
@@ -606,9 +673,11 @@ on the declared device: the screen less the status bar and Safari's own bars.
   AppKit would otherwise shorten it, and the page would measure a viewport no such device has.
 - **Other values.** `outerWidth`/`outerHeight` report the screen. The pixel ratio is the engine's
   own. The navigator/screen values are accessors on the prototypes.
-- **Still the Mac's.** The media queries `device-width`, `pointer` and `hover`, touch events,
-  fonts, GPU and TLS. CreepJS also compares the page's `navigator` with a worker's. A user script
-  reaches that only in workers made from a blob.
+- **Still the Mac's.** The media queries `device-width`, `pointer` and `hover`, touch events and
+  interfaces, WebGL extensions and codecs (§2, *iPhone and iPad profiles against the device*;
+  fonts are the device's, and the TLS ClientHello is Safari's on iOS as well). CreepJS also
+  compares the page's `navigator` with a worker's. A user script reaches that only in workers made
+  from a blob.
 
 ## 7. History and bookmarks
 

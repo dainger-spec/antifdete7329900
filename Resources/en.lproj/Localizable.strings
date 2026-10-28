@@ -83,7 +83,7 @@
 "editor.generation" = "Device / version";
 "editor.generation.footer" = "Tags the profile with a target Apple OS version: it sets the self-declared User-Agent and some defaults. It does not switch the real WebKit core (not possible with public APIs) and does not make a Mac look like an iPhone — see docs/ISOLATION_AND_LIMITATIONS.md §2.";
 "editor.generation.otherRelease" = "This release is not the one of this Mac's Safari (%@): its User-Agent names a release the engine is not, and a page can tell them apart by their features. Pick the release of this Mac's Safari.";
-"editor.generation.mobileLimits" = "The engine stays this Mac's WebKit. The pixel ratio, viewport, screen, orientation, Fullscreen, MediaSource and Notification are the device's; these stay the Mac's and a page can see them: pointer and hover media queries, touch events, device-width, WebGL extensions (S3TC, BPTC), fonts, the navigator in workers loaded from a URL, and Apple Pay.";
+"editor.generation.mobileLimits" = "The engine stays this Mac's WebKit. The pixel ratio, viewport, screen, orientation, fonts, Fullscreen, MediaSource and Notification are the device's; these stay the Mac's and a page can see them: pointer and hover media queries, touch events, device-width, WebGL extensions (S3TC, BPTC), media codecs, the navigator in workers loaded from a URL, and Apple Pay.";
 "editor.geo" = "Geolocation";
 "editor.geo.accuracy" = "Accuracy (m)";
 "editor.geo.deny" = "Deny";

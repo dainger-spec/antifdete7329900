@@ -43,7 +43,8 @@ MUST_MATCH = {"ua", "appVersion", "vendor", "platform", "hardwareConcurrency", "
               "pdfViewerEnabled", "plugins", "mimeTypes", "webdriver", "standalone", "doNotTrack", "ownNavigator",
               "ownScreen", "navigatorProtoCount", "screen", "colorDepth", "pointer", "touch", "timeZone", "tzOffset",
               "canvas.colors", "canvas.urlLength", "canvas.url", "canvasText", "fonts", "webkitObject", "safari"}
-MUST_MATCH_PREFIXES = ("webgl.", "natives.")
+# The media stack, the touch interfaces and the fonts a page finds (a macOS profile has no font allowlist).
+MUST_MATCH_PREFIXES = ("webgl.", "natives.", "codecs.", "touchShape.", "fontFamilies.")
 
 
 def flat(value):

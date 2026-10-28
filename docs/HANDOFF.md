@@ -32,7 +32,7 @@ Rules from the owner:
 | `claude/safari-parity-p0-workers` | P0-3: shim into blob workers as one line, no eval (CSP / Trusted Types safe) | done, CI green (215/215) |
 | `claude/safari-parity-p1-geolocation` | P1-2: geolocation denied by WebKit itself, the tab's UI delegate answers permission state | done, CI run 210 green (222/222) |
 | `claude/safari-parity-p1-webrtc` | P1-3: WebRTC escape routes, plus the WebTransport leak fix | done, CI runs 213–215 green (236/236) |
-| `claude/safari-parity-p1-ios` | P1-4: iPhone/iPad profiles; P2: TLS/HTTP2 parity, beacons, WebSocket and media through the proxy; P0-4: shim frames in `e.stack` | done, CI run 223 green (262/262, Safari reference 434 keys identical) |
+| `claude/safari-parity-p1-ios` | P1-4: iPhone/iPad profiles; P2: TLS/HTTP2 parity, beacons, WebSocket and media through the proxy; P0-4: shim frames in `e.stack`; iOS fonts in the engine | done, CI run 228 green (262/262, Safari reference 434 keys identical) |
 
 ## P1-3 state (`claude/safari-parity-p1-webrtc`)
 
@@ -178,10 +178,51 @@ P0-4's open point, the shim's frames in `e.stack`, is fixed (e860267). CI run 22
 - **Still with a frame.** Errors from arguments (`window.open('http://[')`), and the shims of
   non-default modes: the time-zone shim, fixed geolocation, relay-only WebRTC.
 
+## iOS signals and language (the owner's follow-up)
+
+The owner's request after P2: iPhone profiles are still told apart by TLS, GPU, fonts, touch and
+codecs, and the language (`Accept-Language`, `navigator.languages`) is set by the first profile
+for the whole run. Say what can be fixed and what WKWebView cannot do, with references. The
+answer is in `docs/ISOLATION_AND_LIMITATIONS.md`: §2 *iPhone and iPad profiles against the device*
+(one row per signal) and §6 *Language: one per app run* (WebKit's code).
+
+Done:
+- **Fonts, in the engine.** `WKContextSetFontAllowList` (C SPI, looked up with `dlsym`) gives
+  an iPhone or iPad profile's pool a font allowlist: every family of this Mac with a face iOS does
+  not lack, by Apple's font list (`scripts/ios_fonts.py` → `Sources/BrowserCore/Profiles/IOSFonts.swift`,
+  `DeviceFonts`, `DeviceFontRestriction`). `cursive` is Snell Roundhand
+  (`WKPreferencesSetCursiveFontFamily`). Self-test: families only a Mac has are not found in an
+  iPhone and an iPad profile, ones both systems have are. Regenerate the list when Apple's page
+  changes: `python3 scripts/ios_fonts.py`.
+- **TLS:** no change needed. Safari 26 on iOS sends the same ClientHello (Scrapfly's JA4
+  database, linked in §2).
+- **Measuring tools.** The probe has `codecs`, `touchShape`, `fontFamilies` and `windowNames`.
+  `scripts/device_reference.py` captures a device's JA4 and HTTP/2 frames on its own listener and
+  compares a device reference with a profile's surface (`--compare`). Checked locally against
+  curl: the values tls.peet.ws gives for the same curl.
+- `scripts/safari_reference.py` requires `codecs.*`, `touchShape.*` and `fontFamilies.*` to match
+  Safari on the Mac.
+
+Open, and why:
+- **A device measurement.** Nothing below can be settled without one: the owner runs
+  `device_reference.py` once on an iPhone (and an iPad), then `--compare` against
+  `surface-iphone.json` from the CI artifact `fingerprint-surfaces`.
+- **Touch interfaces** (`TouchEvent`, `Touch`, `TouchList`, `ontouchstart`,
+  `document.createEvent('TouchEvent')`, `DeviceMotionEvent.requestPermission`): a shim can add
+  them, the way it gives the navigator values, once the device shows their exact shape (iOS
+  builds them from sources Apple does not publish). Touch *events* are impossible.
+- **Codecs:** answers can only be taken away (as `MediaSource` is), from a device's measurement.
+- **WebGL extensions and limits:** matching them means rewriting WebGL's answers
+  (deterministic, not noise). Waiting for the owner's decision, since WebGL is kept native.
+- **HTTP/2:** cannot be changed (CFNetwork). Only measured.
+- **Language per profile:** needs a second app process per language. An architectural change,
+  waiting for the owner's decision. Until then the launch warning `launch.languageFixed` stays.
+
 ## What is left
 
 - Measure a real iPhone and iPad with `scripts/device_reference.py`; replace the viewport
-  estimates.
+  estimates; then the touch interfaces and the codec answers above, and the owner's decisions on
+  WebGL and on a process per language.
 - The remaining frames above, if a site is seen to look for them.
 - Smaller points from the analysis (below the plan table) are still open.
 
