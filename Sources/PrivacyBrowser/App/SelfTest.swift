@@ -1100,20 +1100,16 @@ final class SelfTest {
         try await PageLoader.load(plain, url: page)
         let control = try await js(plain, Self.gatherFunction + "return await gather(window.RTCPeerConnection);") as? String ?? "nil"
         info("WebRTC without the shim (a plain WKWebView, policy:candidates): \(control)")
-        // WebRTC off in the engine as a profile has it, without the shim: what WebKit itself leaves.
+        // WebRTC off in the engine as a profile has it (peer connections), without the shim: what
+        // WebKit itself leaves — the encoded transforms, a setting of their own (BrowserSession).
         let offConfiguration = WKWebViewConfiguration()
         offConfiguration.websiteDataStore = .nonPersistent()
         WebKitPreferences.setBool(offConfiguration.preferences, "_setPeerConnectionEnabled:", false)
-        let transformsListed = WebKitPreferences.setFeature(offConfiguration.preferences, BrowserSession.encodedTransformFeature, false)
         let off = WKWebView(frame: .zero, configuration: offConfiguration)
         try await PageLoader.load(off, url: page)
         let left = try await js(off, Self.rtcLeftScript) as? String ?? "nil"
-        info("WebRTC off in the engine, without the shim (window | a blob worker | onrtctransform there): \(left); encoded transforms "
-             + (transformsListed ? "switched off as a WebKit feature" : "not among WebKit's features here, left to the shim"))
-        if transformsListed {
-            check("WebRTC off: with peer connections and encoded transforms off, WebKit leaves no RTC interface in a page or its workers",
-                  left == "||false", left)
-        }
+        info("WebRTC off in the engine, without the shim (window | a blob worker | onrtctransform there): \(left); "
+             + "WebRTCEncodedTransformEnabled \(WebKitPreferences.feature("WebRTCEncodedTransformEnabled") == nil ? "is not" : "is") among WebKit's features")
 
         let profile = try repository.create(name: "WebRTC relay-only", configuration: ProfileConfiguration(
             webRTCPolicy: .relayOnly, ephemeral: true))
@@ -1183,6 +1179,8 @@ final class SelfTest {
     /// measures it), so a proxied profile has it off in the engine (`BrowserSession`): not in its
     /// pages, nor in any worker they make. A profile without a proxy keeps it, as Safari. The page
     /// is the self-test proxy's on 127.0.0.1, a secure context (WebTransport is exposed only there).
+    /// Each profile runs in a pool of its own (a time zone), so its shared and service workers show
+    /// whether the switch costs them the profile's User-Agent, as switching a WebKit feature did once.
     private func webTransportWithAProxy(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             info("WebTransport checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
@@ -1202,28 +1200,59 @@ final class SelfTest {
             return
         }
         for proxy in [ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), nil] {
-            let profile = try repository.create(name: proxy == nil ? "WebTransport direct" : "WebTransport proxied",
-                                                configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
+            let label = proxy == nil ? "without a proxy" : "with a proxy"
+            let profile = try repository.create(name: "WebTransport \(label)", configuration: ProfileConfiguration(
+                proxy: proxy, timeZoneIdentifier: "Europe/Berlin", ephemeral: true))
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
-            defer { session.shutDown() }
-            let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
-            try await PageLoader.load(webView, url: page)
-            let enabled = WebKitPreferences.isFeatureEnabled(webView.configuration.preferences, key)
-            let inPage = try await js(webView, "return typeof WebTransport;") as? String ?? "nil"
-            let workersText = try await js(webView, Self.workerTypesScript, ["names": "WebTransport"]) as? String ?? "{}"
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            defer { tab.tearDown(); session.shutDown() }
+            try await PageLoader.load(tab.webView, url: page)
+            let userAgent = try await js(tab.webView, "return navigator.userAgent;") as? String ?? "nil"
+            let remote = try await js(tab.webView, Self.remoteWorkerUserAgentsScript) as? String ?? "nil"
+            let enabled = WebKitPreferences.isFeatureEnabled(tab.webView.configuration.preferences, key)
+            let inPage = try await js(tab.webView, "return typeof WebTransport;") as? String ?? "nil"
+            let workersText = try await js(tab.webView, Self.workerTypesScript, ["names": "WebTransport"]) as? String ?? "{}"
             let workers = (try? JSONSerialization.jsonObject(with: Data(workersText.utf8))) as? [String: String] ?? [:]
             let answered = workers.values.filter { $0 == "function" || $0 == "undefined" }
             let detail = "feature \(enabled.map { "\($0)" } ?? "nil"), page \(inPage), workers \(workersText)"
+            info("WebTransport \(label): \(detail)")
             if proxy == nil {
                 check("WebTransport: a profile without a proxy has it in the page and its workers, as Safari",
                       enabled != false && inPage == "function" && answered.count >= 2 && answered.allSatisfy { $0 == "function" }, detail)
             } else {
-                info("WebTransport in a proxied profile: \(detail)")
                 check("WebTransport: off in the engine with a proxy (its QUIC would go around it), in the page and every worker",
                       enabled == false && inPage == "undefined" && answered.count >= 2 && answered.allSatisfy { $0 == "undefined" }, detail)
             }
+            check("WebTransport (\(label)): shared and service workers report the profile's User-Agent",
+                  remote == "\(userAgent)\n\(userAgent)", "\(remote.replacingOccurrences(of: "\n", with: " | ")) vs \(userAgent)")
         }
     }
+
+    /// navigator.userAgent of a shared worker and of the service worker (the self-test proxy's
+    /// `/pb-scopes/shared.js` and `/pb-scopes/sw.js` answer with `zone|offset|User-Agent`), a line each.
+    private static let remoteWorkerUserAgentsScript = """
+        const settle = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000))]);
+        const userAgent = (report) => String(report).split('|').slice(2).join('|');
+        const shared = new SharedWorker('/pb-scopes/shared.js');
+        const fromShared = await settle(new Promise((resolve) => {
+          shared.port.onmessage = (e) => resolve(userAgent(e.data));
+          shared.port.postMessage('report');
+        }));
+        let fromService;
+        try {
+          await settle(navigator.serviceWorker.register('/pb-scopes/sw.js'));
+          const registration = await settle(navigator.serviceWorker.ready);
+          if (!registration || registration === 'timeout' || !registration.active) throw new Error('no active service worker');
+          const channel = new MessageChannel();
+          fromService = await settle(new Promise((resolve) => {
+            channel.port1.onmessage = (e) => resolve(userAgent(e.data));
+            registration.active.postMessage('report', [channel.port2]);
+          }));
+        } catch (e) {
+          fromService = 'unavailable: ' + (e && e.message);
+        }
+        return fromShared + '\\n' + fromService;
+        """
 
     // MARK: Time zone in the engine
 

@@ -456,11 +456,13 @@ The profile setting:
   encoded-transform interfaces (`RTCRtpScriptTransform`, `RTCEncodedAudioFrame`,
   `RTCEncodedVideoFrame`; in a dedicated worker `RTCRtpScriptTransformer`, `RTCTransformEvent`
   and `onrtctransform`), which have a setting of their own, `WebRTCEncodedTransformEnabled`,
-  also off in Lockdown Mode. The profile switches that one off too, as one of WebKit's features
-  (`+[WKPreferences _features]`), where this WebKit lists it; the self-test logs whether it does
-  and what WebKit leaves without the shim. The document-start user script removes whatever
-  `RTC*` interface is left from the window, as in an engine built without WebRTC; where WebKit
-  kept peer connections (it lacks the property), from workers made from a blob too.
+  also off in Lockdown Mode and one of WebKit's features on macOS 26.6.2. It stays on: with it
+  switched off that way, shared and service workers reported WebKit's default User-Agent instead
+  of the profile's in 4 of 8 profile runs (CI runs 211 and 212). The document-start user script
+  removes those three from the window, as in an engine built without WebRTC; dedicated workers
+  keep theirs, which do nothing without a peer connection. Where WebKit kept peer connections (it
+  lacks the property), the script removes every `RTC*` interface from the window and from workers
+  made from a blob too.
 - `relayOnly` wraps the constructor and `setConfiguration` to force
   `iceTransportPolicy: "relay"`. No host or srflx candidate reaches the page or its peers, so
   peers see only the TURN server's address. The TURN server still sees your real IP, and so do

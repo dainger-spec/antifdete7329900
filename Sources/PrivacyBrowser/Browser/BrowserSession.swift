@@ -50,10 +50,8 @@ final class BrowserSession {
     /// The data store reports Safari's storage quota itself (`SafariStorageQuota`); the shim then
     /// leaves `navigator.storage.estimate()` alone.
     let storageQuotaByEngine: Bool
-    /// WebKit's keys among its features (`WebKitPreferences.setFeature`) for WebTransport and for
-    /// WebRTC's encoded transforms.
+    /// WebKit's key for WebTransport among its features (`WebKitPreferences.setFeature`).
     static let webTransportFeature = "WebTransportEnabled"
-    static let encodedTransformFeature = "WebRTCEncodedTransformEnabled"
     private let userContentController: WKUserContentController
     /// Receives the AutoFill script's messages (registered in its own content world only).
     private let passwordHandler = PasswordAutoFillHandler()
@@ -141,10 +139,10 @@ final class BrowserSession {
         // this WKPreferences property.
         if configuration.effectiveWebRTCPolicy == .disabled {
             WebKitPreferences.setBool(webConfiguration.preferences, "_setPeerConnectionEnabled:", false)
-            // The encoded transforms (RTCRtpScriptTransform, RTCEncoded*Frame; a worker's
-            // RTCRtpScriptTransformer) are a setting of their own, which Lockdown Mode turns off too.
-            // Where WebKit does not list it among its features the shim removes them from the page.
-            WebKitPreferences.setFeature(webConfiguration.preferences, Self.encodedTransformFeature, false)
+            // The encoded transforms (RTCRtpScriptTransform, RTCEncoded*Frame) are a setting of their
+            // own, left on: switched off as a WebKit feature, shared and service workers reported
+            // WebKit's default User-Agent instead of the profile's in half the CI runs (211, 212). The
+            // shim removes them from the page; without a peer connection they do nothing.
         }
         // WebKit opens WebTransport's QUIC sockets outside the data store's proxy too (the leak
         // check measured a proxied profile's session sending its datagrams from this Mac's address),
