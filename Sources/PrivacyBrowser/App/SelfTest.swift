@@ -3952,7 +3952,8 @@ extension SelfTest {
         // 1. The gate's live answer on this Mac: the measurement the spike is about.
         let gate = SafariGraph.evaluate()
         info("safari-graph: gate on this Mac: \(gate.summary)")
-        info("safari-graph: Safari.framework binary: \(SafariGraph.locateSafariFrameworkBinary() ?? "not found")")
+        info("safari-graph: Safari.framework this process gets: \(SafariGraph.bundleVersion(atPath: SafariGraph.canonicalFrameworkBundle) ?? "none"); "
+             + "the user's Safari: \(SafariGraph.safariAppBuild ?? "?")")
         check("safari-graph: the gate decides, with a reason", !gate.summary.isEmpty)
         // A failing gate takes the fallback.
         let forced = SafariGraph.evaluate(forceFallback: true)

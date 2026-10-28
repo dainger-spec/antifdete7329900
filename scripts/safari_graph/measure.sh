@@ -25,6 +25,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 OUT_DIR="${1:-$ROOT/build/safari-graph}"
 STAGED=/System/Cryptexes/App/System/Library/StagedFrameworks/Safari
 mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd)"   # absolute: it also becomes a throwaway HOME below
 LOG="$OUT_DIR/probe.log"
 : > "$LOG"
 
@@ -105,35 +106,95 @@ for variant in base dyld; do
     CONFIGS="$CONFIGS linked-$variant|$OUT_DIR/probe-linked-$variant|plain"
 done
 
-# The UI, in the first configuration where Safari.framework loaded.
-loaded=""
+# The UI. Safari's executable is a stub: its main() calls SafariMain() in Safari.framework, which runs
+# NSApplicationMain with Safari's Info.plist (principal class BrowserApplication, MainMenu nib). Three
+# attempts per configuration, each in a process of its own with a throwaway home (Safari's code is
+# unsandboxed here and writes under HOME/CFFIXED_USER_HOME, never into this user's Safari):
+#   -window       alloc/init of Safari's window controller in a plain process;
+#   -safari-main  SafariMain() in the plain probe (no Info.plist of Safari's);
+#   -bundle       SafariMain() in a bundle that has Safari's Info.plist (our bundle identifier) and links
+#                 to Safari's resources, so NSApplicationMain makes Safari's application and nib.
+# Each SafariMain run is asked to open a page served here, and the bundle run is photographed.
+list_home() {
+    log "-- what Safari's code wrote under $1:"
+    ( cd "$1" && find . -maxdepth 7 \( -type f -o -type d \) 2>/dev/null | sort | head -200 ) | tee -a "$LOG"
+}
+
+make_bundle() {  # make_bundle APP_DIR BINARY: a bundle with Safari's Info.plist and resources; prints its executable
+    local app="$1" bin="$2" safari entry name
+    safari="$(cd /Applications/Safari.app 2>/dev/null && pwd -P)"
+    rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
+    cp "$bin" "$app/Contents/MacOS/SafariGraphProbe"
+    cp "$safari/Contents/Info.plist" "$app/Contents/Info.plist"
+    plutil -replace CFBundleIdentifier -string dev.local.SafariGraphProbe "$app/Contents/Info.plist"
+    plutil -replace CFBundleExecutable -string SafariGraphProbe "$app/Contents/Info.plist"
+    for entry in "$safari/Contents"/*; do
+        name="$(basename "$entry")"
+        case "$name" in Info.plist|MacOS|_CodeSignature|CodeResources) continue ;; esac
+        ln -s "$entry" "$app/Contents/$name"
+    done
+    echo "$app/Contents/MacOS/SafariGraphProbe"
+}
+
+ui_attempts() {  # ui_attempts LABEL BINARY MODE
+    local label="$1" bin="$2" mode="$3" home exe shot
+    log ""
+    log "== UI attempts in configuration $label =="
+    run_probe "$label-window" "$bin" "$mode" --try-window
+    home="$OUT_DIR/home-$label-safari-main"; rm -rf "$home"; mkdir -p "$home"
+    HOME="$home" CFFIXED_USER_HOME="$home" GRAPH_UI_SECONDS=30 \
+        run_probe "$label-safari-main" "$bin" "$mode" --safari-main "$PAGE_URL"
+    list_home "$home"
+    exe="$(make_bundle "$OUT_DIR/bundle-$label/SafariGraphProbe.app" "$bin")"
+    home="$OUT_DIR/home-$label-bundle"; rm -rf "$home"; mkdir -p "$home"
+    ( sleep 25; screencapture -x "$OUT_DIR/screen-$label-bundle.png" >> "$LOG" 2>&1 \
+        && echo "screenshot: $OUT_DIR/screen-$label-bundle.png" >> "$LOG" || echo "screencapture failed" >> "$LOG" ) &
+    shot=$!
+    HOME="$home" CFFIXED_USER_HOME="$home" GRAPH_UI_SECONDS=30 \
+        run_probe "$label-bundle" "$exe" "$mode" --safari-main "$PAGE_URL"
+    wait "$shot" 2>/dev/null
+    list_home "$home"
+}
+
+# The configurations to try the UI in: the first where any Safari.framework loaded, and the first where
+# Safari's own staged one did (an older macOS with a newer Safari from the App cryptex).
+first_loaded=""; first_staged=""
 for config in $CONFIGS; do
     label="${config%%|*}"
-    if grep -q '^GRAPH safari_framework_loaded=yes' "$OUT_DIR/run-$label.log" 2>/dev/null; then loaded="$config"; break; fi
+    runlog="$OUT_DIR/run-$label.log"
+    if [ -z "$first_loaded" ] && grep -q '^GRAPH safari_framework_loaded=yes' "$runlog" 2>/dev/null; then first_loaded="$config"; fi
+    if [ -z "$first_staged" ] && grep -qE '^GRAPH staged_loaded=(.*,)?Safari(,|$)' "$runlog" 2>/dev/null; then first_staged="$config"; fi
 done
 log ""
 if [ "${GRAPH_UI:-1}" != "1" ]; then
-    log "== UI attempts off (GRAPH_UI=0); Safari.framework loaded in: ${loaded%%|*} =="
-elif [ -z "$loaded" ]; then
+    log "== UI attempts off (GRAPH_UI=0); Safari.framework loaded in: ${first_loaded%%|*}; Safari's staged one in: ${first_staged%%|*} =="
+elif [ -z "$first_loaded" ]; then
     log "== UI attempts skipped: Safari.framework loaded in no configuration =="
 else
-    label="${loaded%%|*}"; rest="${loaded#*|}"; bin="${rest%%|*}"; mode="${rest##*|}"
-    log "== UI attempts in the first configuration that loaded Safari.framework: $label =="
-    run_probe "$label-window" "$bin" "$mode" --try-window
-    # Safari's own entry point, with a page to open and a throwaway home: its code, unsandboxed here,
-    # writes its data under HOME/CFFIXED_USER_HOME, never into this user's Safari.
-    home="$OUT_DIR/safari-main-home"
-    rm -rf "$home"; mkdir -p "$home"
-    page="$OUT_DIR/page.html"
-    printf '%s\n' '<!doctype html><html><head><meta charset="utf-8"><title>PB graph page</title></head><body>graph</body></html>' > "$page"
-    HOME="$home" CFFIXED_USER_HOME="$home" run_probe "$label-safari-main" "$bin" "$mode" --safari-main "$page"
-    log "-- what Safari's code wrote under the throwaway home (history, bookmarks, website data):"
-    ( cd "$home" && find . -maxdepth 6 \( -type f -o -type d \) 2>/dev/null | sort | head -150 ) | tee -a "$LOG"
+    mkdir -p "$OUT_DIR/www"
+    printf '%s\n' '<!doctype html><html><head><meta charset="utf-8"><title>PB graph page</title></head><body>graph</body></html>' \
+        > "$OUT_DIR/www/page.html"
+    PAGE_PORT="$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+    ( cd "$OUT_DIR/www" && exec python3 -I -m http.server "$PAGE_PORT" --bind 127.0.0.1 ) > "$OUT_DIR/www.log" 2>&1 &
+    PAGE_SERVER=$!
+    PAGE_URL="http://127.0.0.1:$PAGE_PORT/page.html"
+    sleep 1
+    log "page for Safari's UI: $PAGE_URL"
+    for config in "$first_loaded" "$first_staged"; do
+        [ -n "$config" ] || continue
+        label="${config%%|*}"; rest="${config#*|}"; bin="${rest%%|*}"; mode="${rest##*|}"
+        case " ${tried:-} " in *" $label "*) continue ;; esac
+        tried="${tried:-} $label"
+        ui_attempts "$label" "$bin" "$mode"
+    done
+    kill "$PAGE_SERVER" 2>/dev/null
+    log "-- requests the page server saw:"
+    tee -a "$LOG" < "$OUT_DIR/www.log"
 fi
 
 log ""
 log "== summary =="
-grep -hE '^(=================== run: |GRAPH (safari_framework_loaded|staged_loaded|staged_failed|env_DYLD_VERSIONED_FRAMEWORK_PATH|window_attempt|safari_main[a-z_]*)=|run .* exit: )' "$LOG" \
+grep -hE '^(=================== run: |== UI attempts|GRAPH (safari_framework_loaded|staged_loaded|staged_failed|env_DYLD_VERSIONED_FRAMEWORK_PATH|window_attempt|safari_main[a-z_]*)=|run .* exit: |screenshot: )' "$LOG" \
     | tee "$OUT_DIR/summary.txt" || true
 log "== probe matrix complete =="
 exit 0

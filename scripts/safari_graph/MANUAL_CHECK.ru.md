@@ -81,10 +81,18 @@ dyld+env  safari_framework_loaded=yes  exit=0
   - суффикс `+env`: тот же вариант с `DYLD_VERSIONED_FRAMEWORK_PATH` на staged-фреймворки Safari;
   - `linked-base`, `linked-dyld`: проба, в которую этот путь вшит при сборке (`LC_DYLD_ENVIRONMENT`),
     без исключений и с исключением `dyld`;
-  - суффиксы `-window` и `-safari-main` (только с `--with-ui`): попытка открыть окно Safari и запуск
-    собственной точки входа Safari в первой конфигурации, где фреймворк загрузился.
+  - суффиксы `-window`, `-safari-main` и `-bundle` (только с `--with-ui`) — попытки поднять интерфейс
+    Safari в первой конфигурации, где фреймворк загрузился, и в первой, где загрузился собственный
+    (staged) фреймворк Safari:
+    - `-window`: создать оконный контроллер Safari в обычном процессе;
+    - `-safari-main`: вызвать точку входа Safari `SafariMain()` в пробе;
+    - `-bundle`: то же внутри пакета с Info.plist Safari (но со своим идентификатором) и ссылками на
+      ресурсы Safari. Только так `NSApplicationMain` создаёт приложение Safari (`BrowserApplication`)
+      и его главное меню. Для этого прогона делается снимок экрана.
 - `safari_framework_loaded`: загрузился ли сам `Safari.framework` в процесс пробы.
 - `safari_main_windows`: какие окна поднялись (заголовок, класс, видимо ли окно).
+  `safari_main_webviews`: веб-представления в этих окнах с адресом и заголовком страницы. Если там
+  `title=PB graph page`, интерфейс Safari в нашем процессе загрузил тестовую страницу.
 - `exit`: код завершения. 0 — проба отработала. 43 — проба сама остановила интерфейс Safari после
   20 секунд наблюдения. 134 или 139 — процесс аварийно завершился внутри кода Safari, это тоже
   результат.
@@ -115,6 +123,6 @@ in process …` или `… disallowed by system policy` означают отк
 - `sip.txt`: состояние SIP;
 - `facts.txt`: где лежит Safari, что он подключает, его подпись и ключи entitlements;
 - `probe/probe.log`: полный журнал пробы; `probe/run-<прогон>.log`: журнал каждого прогона;
-  `probe/summary.txt`: короткая сводка; `probe/safari-main-home/`: что код Safari записал во временную
-  домашнюю папку (только с `--with-ui`);
+  `probe/summary.txt`: короткая сводка; `probe/home-*/`: что код Safari записал во временные
+  домашние папки, и `probe/screen-*.png`: снимки экрана (только с `--with-ui`);
 - `selftest.log` и `surface/`: self-test нового режима и снимок поверхности профиля (если запускался).

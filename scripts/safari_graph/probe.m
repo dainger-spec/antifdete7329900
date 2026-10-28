@@ -9,7 +9,8 @@
 // Run:    GRAPH_VARIANT=base ./probe                # facts + the dlopen matrix
 //         GRAPH_VARIANT=all ./probe --try-window    # also tries to bring up Safari's window
 //         ./probe --json out.json                   # also a small JSON record
-//         ./probe --safari-main page.html           # also call Safari's own entry point (UI in this process)
+//         ./probe --safari-main URL                 # also call Safari's own entry point (UI in this process)
+//                                                   # and ask it to open URL; GRAPH_UI_SECONDS (default 20)
 //
 // Exit 0 whenever the probe measured, even when nothing loaded. A crash inside a framework ends the
 // process; the caller (measure.sh) records the signal, which is itself a result.
@@ -227,20 +228,56 @@ static void tryWindow(void) {
     }
 }
 
-// After Safari's own entry point has had `seconds` to bring its UI up in this process: what is on
-// screen, read on the main thread (where AppKit lives), then the process ends.
+static NSString *gPage;  // the page Safari's UI is asked to open (a URL, or a file path)
+
+// The web views in a window's view tree, with the URL and title each shows.
+static void collectWebViews(NSView *view, NSMutableArray *out, int depth) {
+    if (!view || depth > 60) { return; }
+    Class webViewClass = NSClassFromString(@"WKWebView");
+    if (webViewClass && [view isKindOfClass:webViewClass]) {
+        NSString *url = @"<nil>", *title = @"";
+        @try { id value = [view valueForKey:@"URL"]; if (value) { url = [value description]; } } @catch (NSException *e) {}
+        @try { id value = [view valueForKey:@"title"]; if (value) { title = [value description]; } } @catch (NSException *e) {}
+        [out addObject:[NSString stringWithFormat:@"%@ url=%@ title=%@", NSStringFromClass(view.class), url, title]];
+    }
+    for (NSView *subview in view.subviews) { collectWebViews(subview, out, depth + 1); }
+}
+
+// After Safari's own entry point has run for half the time, ask its app delegate to open the page (as
+// LaunchServices would); at the end, report what is on screen, read on the main thread (where AppKit
+// lives), then end the process.
 static void *uiWatchdog(void *arg) {
     unsigned seconds = (unsigned)(uintptr_t)arg;
-    sleep(seconds);
+    sleep(seconds / 2);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        id delegate = NSApp.delegate;
+        emit(@"safari_main_delegate", delegate ? NSStringFromClass([delegate class]) : @"<none>");
+        NSURL *url = nil;
+        if (gPage) { url = [gPage containsString:@"://"] ? [NSURL URLWithString:gPage] : [NSURL fileURLWithPath:gPage]; }
+        @try {
+            if (url && [delegate respondsToSelector:@selector(application:openURLs:)]) {
+                emit(@"safari_main_open", [@"application:openURLs: " stringByAppendingString:url.absoluteString]);
+                [delegate application:NSApp openURLs:@[url]];
+            } else {
+                emit(@"safari_main_open", @"<the app delegate does not open URLs>");
+            }
+        } @catch (NSException *exception) {
+            emit(@"safari_main_open", [NSString stringWithFormat:@"objc_exception:%@:%@", exception.name, exception.reason]);
+        }
+    });
+    sleep(seconds - seconds / 2);
     dispatch_semaphore_t answered = dispatch_semaphore_create(0);
     dispatch_async(dispatch_get_main_queue(), ^{
         emit(@"safari_main_app_class", NSApp ? NSStringFromClass([NSApp class]) : @"<no NSApp>");
-        NSMutableArray *windows = [NSMutableArray array];
+        emit(@"safari_main_menu_items", [NSString stringWithFormat:@"%ld", (long)NSApp.mainMenu.numberOfItems]);
+        NSMutableArray *windows = [NSMutableArray array], *webViews = [NSMutableArray array];
         for (NSWindow *window in (NSApp ? NSApp.windows : @[])) {
             [windows addObject:[NSString stringWithFormat:@"%@ [%@, %@]", window.title ?: @"",
                                 NSStringFromClass(window.class), window.isVisible ? @"visible" : @"hidden"]];
+            collectWebViews(window.contentView.superview ?: window.contentView, webViews, 0);
         }
         emit(@"safari_main_windows", windows.count ? [windows componentsJoinedByString:@" | "] : @"<none>");
+        emit(@"safari_main_webviews", webViews.count ? [webViews componentsJoinedByString:@" | "] : @"<none>");
         dispatch_semaphore_signal(answered);
     });
     if (dispatch_semaphore_wait(answered, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC))) != 0) {
@@ -264,11 +301,15 @@ static void trySafariMain(NSString *pagePath) {
         emit(@"safari_main_symbol", @"<absent>");
         return;
     }
+    const char *configured = getenv("GRAPH_UI_SECONDS");
+    unsigned seconds = configured ? (unsigned)atoi(configured) : 20;
+    if (seconds < 6) { seconds = 20; }
+    gPage = pagePath;
     pthread_t thread;
-    pthread_create(&thread, NULL, uiWatchdog, (void *)(uintptr_t)20);
+    pthread_create(&thread, NULL, uiWatchdog, (void *)(uintptr_t)seconds);
     pthread_detach(thread);
-    const char *args[] = {"Safari", pagePath ? pagePath.UTF8String : NULL, NULL};
-    int count = pagePath ? 2 : 1;
+    const char *args[] = {"Safari", NULL};
+    int count = 1;
     emit(@"safari_main", @"calling");
     int (*safariMain)(int, const char **) = (int (*)(int, const char **))entry;
     int result = safariMain(count, args);

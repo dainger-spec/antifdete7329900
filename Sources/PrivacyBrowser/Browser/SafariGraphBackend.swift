@@ -35,7 +35,7 @@ enum SafariGraph {
         var summary: String {
             switch self {
             case let .safariFramework(version, binary):
-                return "Safari.framework \(version) loadable (\(binary))"
+                return "Safari.framework of Safari \(version) loads in this process (\(binary)); the in-process Safari window is not built"
             case let .webKitFallback(reason):
                 return "WKWebView fallback: \(reason)"
             }
@@ -90,9 +90,20 @@ enum SafariGraph {
             return .webKitFallback(reason: "Safari \(version) is outside the measured majors \(supportedSafariMajors.sorted())")
         }
 
-        // 3. The framework's binary.
-        guard let binary = locateSafariFrameworkBinary() else {
-            return .webKitFallback(reason: "Safari.framework not found where Safari keeps it")
+        // 3. The framework this process would get: Safari's executable links it by this install name,
+        //    which dyld serves from the shared cache (there is no file on disk). On macOS 26 it is the
+        //    user's Safari. On an older macOS with a newer Safari from the App cryptex it is the base
+        //    system's older copy: Safari itself reaches its own through the DYLD_FRAMEWORK_PATH it
+        //    carries (LC_DYLD_ENVIRONMENT), which this app does not (docs/SAFARI_GRAPH_SPIKE.md).
+        let binary = canonicalFrameworkBinary
+        let frameworkBuild = bundleVersion(atPath: canonicalFrameworkBundle)
+        let safariBuild = safariAppBuild
+        guard let frameworkBuild else {
+            return .webKitFallback(reason: "no Safari.framework at \(canonicalFrameworkBundle)")
+        }
+        guard frameworkBuild == safariBuild else {
+            return .webKitFallback(reason: "this process gets Safari.framework \(frameworkBuild), the user's Safari is \(safariBuild ?? "?") "
+                                   + "(Safari takes its own from the App cryptex through its DYLD_FRAMEWORK_PATH)")
         }
 
         // 4. The load itself, in a child process of this same binary (same signature, same hardened
@@ -152,7 +163,7 @@ enum SafariGraph {
         }
         let prefix = "LOADCHECK fail "
         let reason = line.hasPrefix(prefix) ? String(line.dropFirst(prefix.count)) : "no answer (exit \(process.terminationStatus))"
-        return LoadCheck(loaded: false, hasBrowserClasses: false, detail: "dlopen refused: \(reason)")
+        return LoadCheck(loaded: false, hasBrowserClasses: false, detail: "dlopen failed: \(reason)")
     }
 
     /// `PrivacyBrowser --safari-graph-load-check <binary>`: the child side of `loadCheck`. Loads
@@ -175,23 +186,24 @@ enum SafariGraph {
         exit(0)
     }
 
-    /// Where Safari.framework has lived: the staged framework (in the app cryptex since macOS 13),
-    /// and Safari.app's own Frameworks folder. The first Mach-O that exists.
-    static func locateSafariFrameworkBinary() -> String? {
-        var roots = [
-            "/System/Library/StagedFrameworks/Safari/Safari.framework",
-            "/System/Cryptexes/App/System/Library/StagedFrameworks/Safari/Safari.framework",
-        ]
-        if let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") {
-            roots.append(safari.appendingPathComponent("Contents/Frameworks/Safari.framework").path)
-        }
-        for root in roots {
-            for layout in ["Safari", "Versions/Current/Safari", "Versions/A/Safari"] {
-                let binary = "\(root)/\(layout)"
-                if FileManager.default.fileExists(atPath: binary) { return binary }
-            }
-        }
-        return nil
+    /// Safari.framework's install name, as Safari's executable links it.
+    static let canonicalFrameworkBundle = "/System/Library/PrivateFrameworks/Safari.framework"
+    static let canonicalFrameworkBinary = SafariGraph.canonicalFrameworkBundle + "/Versions/A/Safari"
+
+    /// The user's Safari build (`CFBundleVersion` of Safari.app, e.g. "21624.5.1.11.3").
+    static var safariAppBuild: String? {
+        let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari")
+            ?? URL(fileURLWithPath: "/Applications/Safari.app")
+        return Bundle(url: app)?.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+    }
+
+    /// `CFBundleVersion` of the framework bundle at `path` (its Info.plist is on disk even when its code
+    /// lives in the shared cache).
+    static func bundleVersion(atPath path: String) -> String? {
+        let plist = URL(fileURLWithPath: path).appendingPathComponent("Resources/Info.plist")
+        guard let data = try? Data(contentsOf: plist),
+              let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return nil }
+        return info["CFBundleVersion"] as? String
     }
 
     /// A profile window in the new mode: Safari's when the gate passes, else ours. Returns the
