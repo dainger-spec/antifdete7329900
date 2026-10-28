@@ -27,6 +27,11 @@ profile without a proxy as the control:
   `tcpdump` (passwordless sudo) counts the UDP datagrams that leave this Mac for it on the default
   route. Through a proxy none may: neither proxy carries QUIC, so a datagram to the profile's
   address went around it. The profile without a proxy must send some, or the check proves nothing.
+* TLS and HTTP/2 through the proxy: each proxied profile loads tls.peet.ws through its proxy. Its
+  TLS ClientHello (JA4, ciphers, extensions), HTTP/2 SETTINGS and frames (Akamai) and header order
+  and values must be those of the profile without a proxy, whose own are Safari's
+  (live_compare.py): the proxy only tunnels the connection. The TCP SYN the site sees is the
+  proxy's, by design. When the site gives no answer the result is inconclusive (a warning).
 * WebRTC through a utun interface: where passwordless sudo works (CI), `PrivacyBrowser
   --utun-relay` opens a utun interface as root, routes the tunnel's subnets into it and serves
   two routes with the extension's own PacketRouter, each through its own UDP-capable proxy. One
@@ -168,6 +173,14 @@ try {
 }
 return { available: true, target, outcome };
 """
+
+
+# The TLS ClientHello and HTTP/2 a proxied profile sends through the proxy's tunnel must be the
+# profile's own, as without the proxy (whose own are Safari's: live_compare.py). The TCP SYN is
+# the proxy's then, by design.
+TLS_SITE = "https://tls.peet.ws/api/all"
+TLS_SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "live_sites", "tls.js")
+TLS_KEYS = ("httpVersion", "tlsVersion", "ja4", "ciphers", "extensions", "akamai", "frames", "headerOrder", "headerValues")
 
 
 class DatagramCapture:
@@ -559,6 +572,7 @@ def main():
         {"name": "webrtc-loop", "url": QUIC_SITE, "script": LOOP_SCRIPT, "timeoutMs": 45000},
         {"name": "webtransport", "url": QUIC_SITE, "script": WEBTRANSPORT_SCRIPT.replace("__TARGETS__", json.dumps(targets)),
          "timeoutMs": 20000},
+        {"name": "tls", "url": TLS_SITE, "script": open(TLS_SCRIPT_PATH, encoding="utf-8").read(), "timeoutMs": 60000},
     ]
     spec = {"window": {"width": 1000, "height": 600}, "profiles": profiles, "pages": pages}
     capture = DatagramCapture()
@@ -584,6 +598,8 @@ def main():
     control = quic_protocols(results.get("direct", {}))
     control_h3 = any(p in ("http/3", "h3") for p in control)
     control_datagrams = capture.counts.get(targets["direct"], 0)
+    control_tls = results.get("direct", {}).get("tls")
+    control_tls = control_tls if isinstance(control_tls, dict) and control_tls.get("ja4") else None
     print(f"INFO WebTransport datagrams on {capture.interface} per target: {capture.counts} "
           f"(capture {'running' if capture.started else 'NOT running'})")
     report = {}
@@ -608,6 +624,8 @@ def main():
                                    or any(t in ("srflx", "host", "prflx") for t in loop.get("candidateTypes") or []))
         # A datagram to the profile's own address left this Mac, and no proxy here carries QUIC.
         webtransport_bypass = proxied and capture.started and datagrams > 0
+        tls = result.get("tls") if isinstance(result.get("tls"), dict) and result["tls"].get("ja4") else None
+        tls_differs = [key for key in TLS_KEYS if proxied and tls and control_tls and tls.get(key) != control_tls.get(key)]
         # The relay's own address (this Mac's, for the harness) named to the page as a server url.
         relay_url_shown = bool(profile.get("relay")) and (webrtc.get("foreignServerURLs") or 0) > 0
         report[name] = {"proxied": proxied, "protocols": seen, "webrtc": webrtc, "loop": loop,
@@ -615,7 +633,8 @@ def main():
                         "proxyUdpDatagrams": proxy.udp_datagrams if proxy else 0,
                         "proxyLog": log, "quicBypassesProxy": quic_bypass, "stunBypassesProxy": stun_bypass,
                         "webTransport": transport, "webTransportDatagrams": datagrams,
-                        "webTransportBypassesProxy": webtransport_bypass, "relayURLShown": relay_url_shown}
+                        "webTransportBypassesProxy": webtransport_bypass, "relayURLShown": relay_url_shown,
+                        "tls": tls, "tlsDiffers": tls_differs}
         print(f"::group::[{name}] protocols {seen}, WebRTC {webrtc}, loop {loop}, proxy saw {through_proxy} request(s) to the site")
         for request in log:
             print(f"  {request['proxy']} {request['command']} {request['target']}")
@@ -625,7 +644,8 @@ def main():
         if not proxied:
             print(f"LEAK-CHECK [{name}] control: HTTP/3 {'seen' if control_h3 else 'not seen'}, "
                   f"WebRTC srflx {webrtc.get('srflx')}, WebTransport {transport.get('outcome')} "
-                  f"({datagrams} datagram(s) to {targets[name]})")
+                  f"({datagrams} datagram(s) to {targets[name]}), TLS "
+                  f"{(control_tls or {}).get('httpVersion')} JA4 {(control_tls or {}).get('ja4')}")
             continue
         if not capture.started:
             webtransport = "not measured (no packet capture here)"
@@ -661,7 +681,15 @@ def main():
             rtc = "no candidates"
             if profile.get("relay"):
                 warnings.append(f"{name}: the relay gave no candidates")
-        print(f"LEAK-CHECK [{name}] QUIC: {quic}; WebRTC: {rtc}; WebTransport: {webtransport}")
+        if not tls or not control_tls:
+            tls_text = "inconclusive (tls.peet.ws gave no answer)"
+            warnings.append(f"{name}: TLS parity inconclusive (no answer from {TLS_SITE})")
+        elif tls_differs:
+            tls_text = "DIFFERS through the proxy: " + "; ".join(
+                f"{key} {json.dumps(tls.get(key))[:120]} vs {json.dumps(control_tls.get(key))[:120]}" for key in tls_differs)
+        else:
+            tls_text = f"as without the proxy ({tls.get('httpVersion')}, JA4 {tls.get('ja4')}; TCP SYN the proxy's: {tls.get('tcpSyn')})"
+        print(f"LEAK-CHECK [{name}] QUIC: {quic}; WebRTC: {rtc}; WebTransport: {webtransport}; TLS/HTTP2: {tls_text}")
     with open(os.path.join(args.out, "leaks.json"), "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=1, sort_keys=True)
     for warning in warnings:
@@ -670,6 +698,10 @@ def main():
               if r["quicBypassesProxy"] or r["stunBypassesProxy"] or r["webTransportBypassesProxy"]]
     if leaked:
         print(f"::error::traffic went around the proxy in: {', '.join(leaked)}")
+        return 1
+    differing = [name for name, r in report.items() if r["tlsDiffers"]]
+    if differing:
+        print(f"::error::the TLS or HTTP/2 fingerprint differs through the proxy in: {', '.join(differing)}")
         return 1
     shown = [name for name, r in report.items() if r["relayURLShown"]]
     if shown:

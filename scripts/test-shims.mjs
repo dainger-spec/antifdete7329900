@@ -533,7 +533,7 @@ const probeLies = `
   return lies;
 })`;
 const iPhone = { platform: 'iPhone', maxTouchPoints: 5, hardwareConcurrency: 4, screenWidth: 390, screenHeight: 844, devicePixelRatio: 3,
-                 orientation: 'portrait-primary' };
+                 orientation: 'portrait-primary', missingInterfaces: ['MediaSource'] };
 const everything = { geolocation: { mode: 'fixed', latitude: 1, longitude: 2, accuracy: 3 }, webRTC: 'relayOnly', timeZone: 'Europe/Berlin', device: iPhone, storageQuota: 0.6 * 128 * 2 ** 30 };
 const wrappers = [
   ['Function.prototype.toString'], ['Date.prototype.getTimezoneOffset', 'Date'], ['Date.prototype.getHours', 'Date'],
@@ -645,6 +645,20 @@ test('iPhone profile: held upright; the pixel ratio left to the engine where it 
   assert.equal(run(e, `Object.getOwnPropertyDescriptor(window, 'devicePixelRatio').get.toString().includes('return 2')`), true);
   assert.equal(run(e, `[screen.width, outerWidth, screen.orientation.type].join()`), '390,390,portrait-primary');
   assert.equal(run(makeWindow(base), `screen.orientation.type`), 'landscape-primary');
+});
+
+test('iPhone profile: MediaSource removed where the engine still has it, ManagedMediaSource kept', () => {
+  // As WebKit on a Mac: MediaSource exposed, ManagedMediaSource derived from it.
+  const engine = (context) => vm.runInContext(`
+    globalThis.MediaSource = class MediaSource { constructor() { throw new TypeError('Illegal constructor'); } };
+    globalThis.ManagedMediaSource = class ManagedMediaSource extends MediaSource {};`, context);
+  const w = makeWindow({ ...base, device: iPhone }, undefined, FORM, engine);
+  assert.equal(run(w, `['MediaSource' in globalThis, typeof MediaSource, typeof ManagedMediaSource, Object.getPrototypeOf(ManagedMediaSource).name].join()`),
+               'false,undefined,function,MediaSource');
+  const iPad = makeWindow({ ...base, device: { ...iPhone, platform: undefined, missingInterfaces: [] } }, undefined, FORM, engine);
+  assert.equal(run(iPad, `typeof MediaSource`), 'function');
+  // An engine that leaves it out already: nothing to do.
+  assert.equal(run(makeWindow({ ...base, device: iPhone }), `'MediaSource' in globalThis`), false);
 });
 
 test('iPad profile: the Mac platform (desktop websites), the iPad touch points and screen', () => {

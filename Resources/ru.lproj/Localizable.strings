@@ -82,7 +82,8 @@
 "editor.footer.note" = "Изменения вступят в силу при следующем запуске.";
 "editor.generation" = "Устройство / версия";
 "editor.generation.footer" = "Помечает профиль целевой версией ОС Apple: задаёт заявляемый User-Agent и часть настроек по умолчанию. Не переключает реальный движок WebKit (невозможно через публичные API) и не превращает Mac в iPhone — см. docs/ISOLATION_AND_LIMITATIONS.md §2.";
-"editor.generation.inconsistent" = "Сигналы движка для этого поколения не совпадают с настоящим устройством этой версии; меняется только User-Agent, движок остаётся macOS WebKit. Обнаруживается, это не эмуляция.";
+"editor.generation.otherRelease" = "Эта версия не совпадает с Safari на этом Mac (%@): её User-Agent называет выпуск, которым движок не является, и страница различит их по возможностям. Выберите версию Safari этого Mac.";
+"editor.generation.mobileLimits" = "Движок остаётся WebKit этого Mac. Плотность пикселей, viewport, экран, ориентация, Fullscreen, MediaSource и Notification — как у устройства; остаются от Mac, и страница может это увидеть: медиазапросы pointer и hover, touch-события, device-width, расширения WebGL (S3TC, BPTC), шрифты, navigator в воркерах по URL и Apple Pay.";
 "editor.geo" = "Геолокация";
 "editor.geo.accuracy" = "Точность (м)";
 "editor.geo.deny" = "Запретить";

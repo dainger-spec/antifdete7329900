@@ -9,9 +9,28 @@ final class SafariUserAgentTests: XCTestCase {
         // Unknown or malformed host version: the catalog UA.
         XCTAssertEqual(mac.userAgent(hostSafariVersion: nil), mac.userAgent)
         XCTAssertEqual(mac.userAgent(hostSafariVersion: "26.0 beta"), mac.userAgent)
-        // Mobile generations never take the Mac's Safari version.
+        // A mobile generation of another release than the Mac's Safari keeps its catalog UA.
         let ios = DeviceGenerations.resolved(id: "ios-26")
         XCTAssertEqual(ios.userAgent(hostSafariVersion: "18.6"), ios.userAgent)
+    }
+
+    func testMobileGenerationOfTheEngineNamesItsRelease() {
+        // The engine's release as major.minor, the rest of the device's UA unchanged.
+        XCTAssertEqual(DeviceGenerations.resolved(id: "ios-26").userAgent(hostSafariVersion: "26.4.1"),
+                       "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Mobile/15E148 Safari/604.1")
+        XCTAssertEqual(DeviceGenerations.resolved(id: "ipados-26").userAgent(hostSafariVersion: "26.1"),
+                       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15")
+        XCTAssertTrue(DeviceGenerations.resolved(id: "ios-26").userAgent(hostSafariVersion: "26").contains("Version/26.0 Mobile"))
+        // A newer release than the engine: the catalog UA, and offered only to a profile that has it.
+        let ios27 = DeviceGenerations.resolved(id: "ios-27")
+        XCTAssertFalse(ios27.isOfEngine(hostSafariVersion: "26.6.2"))
+        XCTAssertEqual(ios27.userAgent(hostSafariVersion: "26.6.2"), ios27.userAgent)
+        XCTAssertEqual(DeviceGenerations.selectable(hostSafariVersion: "26.6.2", current: nil).map(\.id),
+                       ["macos-26", "ios-26", "ipados-26"])
+        XCTAssertEqual(DeviceGenerations.selectable(hostSafariVersion: "26.6.2", current: "ios-27").map(\.id),
+                       ["macos-26", "ios-27", "ios-26", "ipados-26"])
+        // Unknown host version: everything is offered.
+        XCTAssertEqual(DeviceGenerations.selectable(hostSafariVersion: nil, current: nil).count, DeviceGenerations.all.count)
     }
 
     func testSafariVersionFormat() {

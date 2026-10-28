@@ -80,6 +80,10 @@ enum PrivacyScripts {
             var devicePixelRatio: Double?
             /// screen.orientation.type: the device held upright, as its window is.
             var orientation: String
+            /// Interfaces Safari on the device does not have. The engine is asked to leave them out
+            /// (BrowserSession); where it still exposes one, the shim removes it from the window and
+            /// blob workers, as an engine without it would lack it.
+            var missingInterfaces: [String]
         }
     }
 
@@ -108,13 +112,17 @@ enum PrivacyScripts {
         case .macOS:
             device = nil
         case .iOS:
+            // MediaSource: iPad only (MDN's browser-compat-data); an iPhone has ManagedMediaSource.
+            // macOS 26.6.2's WebKit keeps it in the window with _setMediaSourceEnabled: off.
             device = .init(platform: "iPhone", maxTouchPoints: 5, hardwareConcurrency: 4,
-                           screenWidth: 390, screenHeight: 844, devicePixelRatio: scale, orientation: "portrait-primary")
+                           screenWidth: 390, screenHeight: 844, devicePixelRatio: scale, orientation: "portrait-primary",
+                           missingInterfaces: ["MediaSource"])
         case .iPadOS:
             // iPad Safari shows desktop websites by default: the Mac's UA and platform, with the
             // iPad's touch points and screen (how a page tells an iPad from a Mac).
             device = .init(platform: nil, maxTouchPoints: 5, hardwareConcurrency: 8,
-                           screenWidth: 820, screenHeight: 1180, devicePixelRatio: scale, orientation: "portrait-primary")
+                           screenWidth: 820, screenHeight: 1180, devicePixelRatio: scale, orientation: "portrait-primary",
+                           missingInterfaces: [])
         }
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, engineTimeZone: timeZoneByEngine, geolocation: geolocation,
                                  webRTC: webRTC, webRTCRelay: relay, device: device,
@@ -148,11 +156,24 @@ enum PrivacyScripts {
     static let deviceScaleFactorSelector = NSSelectorFromString("_setOverrideDeviceScaleFactor:")
     static let deviceScaleFactorByEngine = class_getInstanceMethod(WKWebView.self, deviceScaleFactorSelector) != nil
 
-    /// The declared device's screen in points for a mobile generation (the browser window is
-    /// sized to it, so inner sizes never exceed the screen the page is told about); nil for macOS.
+    /// The declared device's screen in points for a mobile generation; nil for macOS.
     static func deviceScreenSize(for configuration: ProfileConfiguration) -> CGSize? {
         guard let device = shimConfiguration(for: configuration).device else { return nil }
         return CGSize(width: device.screenWidth, height: device.screenHeight)
+    }
+
+    /// The viewport Safari leaves a page on the declared device — the screen less the status bar
+    /// and Safari's own bars — for a mobile generation's window (innerWidth × innerHeight); nil
+    /// for macOS. The page's inner height is then below the screen's, as on a phone; equal ones
+    /// are what a desktop browser's device emulation shows.
+    /// APPROXIMATION: estimated, not measured on the device (scripts/device_reference.py measures
+    /// it). An iPhone 16 Pro's Safari 26 leaves 754 of 874 points in its compact tab layout,
+    /// 62 of them the status bar; a 390 × 844 iPhone has a 47-point one: 844 − 47 − 58. An iPad:
+    /// its 24-point status bar and a 50-point Safari bar.
+    static func deviceViewportSize(for configuration: ProfileConfiguration) -> CGSize? {
+        guard let screen = deviceScreenSize(for: configuration) else { return nil }
+        let chrome: CGFloat = configuration.deviceGeneration.platform == .iOS ? 47 + 58 : 24 + 50
+        return CGSize(width: screen.width, height: screen.height - chrome)
     }
 
     static func makeUserContentController(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false,
@@ -312,6 +333,10 @@ function define(target, name, value) {
 // window itself for its own attributes. Each calls the native accessor first, so a wrong receiver
 // (Navigator.prototype.platform) throws the engine's TypeError. Rendering is left alone.
 function patchDevice(w, device) {
+  // What the device's Safari lacks, where this engine still has it: no property remains.
+  for (const name of device.missingInterfaces || []) {
+    if (Object.prototype.hasOwnProperty.call(w, name)) { try { delete w[name]; } catch (e) {} }
+  }
   const nav = w.navigator;
   if (IS_WORKER) {
     // WorkerNavigator has platform and hardwareConcurrency, nothing else of the device.

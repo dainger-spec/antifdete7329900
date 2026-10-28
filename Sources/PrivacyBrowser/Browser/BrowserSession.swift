@@ -130,7 +130,8 @@ final class BrowserSession {
         // API on a Mac and an iPad, not on an iPhone (a WKWebView has it off by default, which a page
         // sees as document.fullscreenEnabled === undefined); MediaSource on an iPad, not on an iPhone,
         // where ManagedMediaSource alone remains; and no Notification on either outside a web app
-        // saved to the home screen.
+        // saved to the home screen. macOS 26.6.2's WebKit still exposes MediaSource with this
+        // setting off (CI run 217); the shim then removes it (`missingInterfaces`).
         let platform = configuration.deviceGeneration.platform
         webConfiguration.preferences.isElementFullscreenEnabled = platform != .iOS
         if platform == .iOS {

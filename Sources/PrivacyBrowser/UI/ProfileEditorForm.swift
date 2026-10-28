@@ -159,13 +159,18 @@ struct ProfileEditorForm: View {
         return VStack(alignment: .leading, spacing: 14) {
             EditorRow(L("editor.generation")) {
                 Picker(L("editor.generation"), selection: $draft.deviceGenerationID) {
-                    ForEach(DeviceGenerations.all) { Text(L($0.nameKey)).tag($0.id) }
+                    ForEach(DeviceGenerations.selectable(hostSafariVersion: HostSafari.version, current: draft.deviceGenerationID)) {
+                        Text(L($0.nameKey)).tag($0.id)
+                    }
                 }
                 .labelsHidden()
                 .fixedSize()
             }
+            if !generation.isOfEngine(hostSafariVersion: HostSafari.version) {
+                EditorNote(String(format: L("editor.generation.otherRelease"), HostSafari.version ?? "?"), tone: .warning)
+            }
             if !generation.matchesEngine {
-                EditorNote(L("editor.generation.inconsistent"), tone: .warning)
+                EditorNote(L("editor.generation.mobileLimits"), tone: .warning)
             }
             EditorDivider()
             EditorToggle(L("editor.ua.useCustom"), isOn: $draft.customUserAgent)

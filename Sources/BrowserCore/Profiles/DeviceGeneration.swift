@@ -17,7 +17,9 @@ import Foundation
 ///     iOS/iPadOS generations change the UA string while every measured signal (rendering,
 ///     feature set, touch behaviour, TLS) still says "desktop Mac" — detectable, not emulation.
 ///   * The macOS generation declares the host's own Safari version at runtime
-///     (`userAgent(hostSafariVersion:)`); its catalog string below is only the fallback. Mobile
+///     (`userAgent(hostSafariVersion:)`); its catalog string below is only the fallback. A mobile
+///     generation of the host's release declares the host's major.minor; one of another release
+///     keeps its catalog string and is offered only to profiles that have it. Mobile
 ///     UA strings are the ones Safari sends on that OS: from iOS 26.1 on, Safari freezes the OS
 ///     token at "18_7" (as macOS Safari freezes "10_15_7"; WebKit bug 298260) and only
 ///     "Version/" names the release, so "iPhone OS 26_0" is a string no Safari sends. iPadOS
@@ -65,10 +67,25 @@ public struct DeviceGeneration: Identifiable, Equatable, Sendable {
     /// (e.g. "26.0.1"). The engine-matching macOS generation names that version: Safari and
     /// WKWebView render with the same system WebKit, so any other version would contradict the
     /// engine a page can measure. "Intel Mac OS X 10_15_7" is genuine — every Safari since
-    /// macOS 11 freezes the OS version at that value. Mobile generations keep their fixed UA.
+    /// macOS 11 freezes the OS version at that value. A mobile generation of the engine's own
+    /// major (`isOfEngine`) names the engine's release as major.minor; another keeps its catalog
+    /// UA, whose Version token would announce a release the engine is not.
     public func userAgent(hostSafariVersion: String?) -> String {
-        guard matchesEngine, let version = hostSafariVersion, Self.isSafariVersion(version) else { return userAgent }
-        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(version) Safari/605.1.15"
+        guard let version = hostSafariVersion, Self.isSafariVersion(version) else { return userAgent }
+        if matchesEngine {
+            return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(version) Safari/605.1.15"
+        }
+        guard isOfEngine(hostSafariVersion: version),
+              let token = userAgent.range(of: "Version/[0-9.]+", options: .regularExpression) else { return userAgent }
+        let parts = version.split(separator: ".")
+        return userAgent.replacingCharacters(in: token, with: "Version/\(parts[0]).\(parts.count > 1 ? parts[1] : "0")")
+    }
+
+    /// Whether this generation's OS release is the one the Mac's Safari — the engine — belongs to
+    /// (its major). An unknown host version counts as a match: nothing is hidden on a guess.
+    public func isOfEngine(hostSafariVersion: String?) -> Bool {
+        guard let version = hostSafariVersion, Self.isSafariVersion(version) else { return true }
+        return version.split(separator: ".").first.map(String.init) == osVersionLabel
     }
 
     /// What Safari writes after "Version/": "26", "26.0", "26.0.1".
@@ -124,6 +141,13 @@ public enum DeviceGenerations {
         case ..<26: return "\(major + 3).\(min(max(minor, 0), 6))"
         default: return "\(major).\(max(minor, 0))"
         }
+    }
+
+    /// What the device picker offers on a Mac whose Safari is `hostSafariVersion`: the macOS
+    /// generation and the mobile ones of the engine's release; one of another release only where
+    /// a profile already has it (`current`), so it can be seen and changed.
+    public static func selectable(hostSafariVersion: String?, current: String?) -> [DeviceGeneration] {
+        all.filter { $0.matchesEngine || $0.isOfEngine(hostSafariVersion: hostSafariVersion) || $0.id == current }
     }
 
     /// The generation for `id`, or the default generation if `id` is nil/unknown.
