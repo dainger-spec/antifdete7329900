@@ -1669,6 +1669,16 @@ final class SelfTest {
              "webkitObject", "webdriver", "doNotTrack"].contains(key) || key.hasPrefix("webgl.")
                 || (key.hasPrefix("features.") && key != "features.safari") // window.safari is added on purpose (macOS)
         }.sorted()
+        // What an iPhone or iPad profile's font allowlist is made of (DeviceFontRestriction).
+        let fontsStarted = Date()
+        let allowlist = DeviceFontRestriction.allowlist
+        let milliseconds = Int(Date().timeIntervalSince(fontsStarted) * 1000)
+        let macFaces = DeviceFontRestriction.macFaces
+        let macOnlyHere = macFaces.filter { IOSFonts.macOnlyFaces.contains($0.fullName) }.count
+        let hiddenFamilies = DeviceFonts.hiddenFamilies(macFaces).joined(separator: ", ")
+        info("fonts (iPhone/iPad): \(DeviceFontRestriction.availability); this Mac has \(macFaces.count) faces, \(macOnlyHere) of "
+             + "the \(IOSFonts.macOnlyFaces.count) Apple lists as only a Mac's (found by full name); allowlist \(allowlist.count) names, "
+             + "read in \(milliseconds) ms (0: read earlier); hidden families: \(hiddenFamilies)")
         for generationID in [DeviceGenerations.defaultID, "ios-26", "ipados-26"] {
             let platform = DeviceGenerations.resolved(id: generationID).platform
             // WebRTC left as the engine has it: its removal (the default policy) is checked by the
@@ -1679,9 +1689,11 @@ final class SelfTest {
                 timeZoneIdentifier: platform == .macOS ? nil : "Europe/Berlin", webRTCPolicy: .unrestricted, ephemeral: true,
                 deviceGenerationID: generationID))
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
-            // Interfaces the device's Safari lacks, removed on purpose where the engine keeps them.
+            // Interfaces the device's Safari lacks, removed on purpose where the engine keeps them, and
+            // the fonts it lacks, which the pool's font allowlist hides (checked below).
+            let fontsByEngine = session.deviceFontsByEngine
             let removed = Set((PrivacyScripts.shimConfiguration(for: session.configuration).device?.missingInterfaces ?? [])
-                .map { "features.\($0)" })
+                .map { "features.\($0)" } + (fontsByEngine ? ["fonts"] : []))
             let tabConfiguration = session.makeWebViewConfiguration()
             check("surface (\(generationID)): user-installed fonts hidden from pages, as in Safari",
                   WebKitPreferences.bool(tabConfiguration.preferences, "_shouldAllowUserInstalledFonts") == false)
@@ -1763,8 +1775,40 @@ final class SelfTest {
                 let wrong = expected.filter { string(probed, $0.key) != $0.value }
                 check("surface (\(name)): Fullscreen, MediaSource, Notification and orientation as Safari on that device has them",
                       wrong.isEmpty, wrong.map { "\($0.key): \(string(probed, $0.key)) vs \($0.value)" }.sorted().joined(separator: "; "))
+                deviceFonts(name, probed: probed, plain: baseline, byEngine: fontsByEngine)
             }
         }
+    }
+
+    /// An iPhone or iPad profile's pages find the fonts Safari on the device has: families a Mac has
+    /// and iOS only offers for download are not found (those this Mac has, as a plain web view
+    /// shows), ones both systems have are, and `cursive` is the device's Snell Roundhand.
+    private func deviceFonts(_ name: String, probed: [String: String], plain: [String: String], byEngine: Bool) {
+        guard byEngine else {
+            info("surface (\(name)): no font allowlist, pages see this Mac's fonts (\(DeviceFontRestriction.availability))")
+            return
+        }
+        func presence(_ surface: [String: String]) -> [String: Bool] {
+            var found: [String: Bool] = [:]
+            for item in (surface["fontFamilies.present"] ?? "").split(separator: ",") {
+                let parts = item.split(separator: ":")
+                if parts.count == 2 { found[String(parts[0])] = parts[1] == "y" }
+            }
+            return found
+        }
+        let inProfile = presence(probed), inPlain = presence(plain)
+        // Only on a Mac by Apple's list (IOSFonts), and on both systems.
+        let macOnly = ["Monaco", "Comic Sans MS", "Arial Unicode MS", "Tahoma", "Lucida Grande", "Geneva", "Andale Mono",
+                       "Apple Chancery", "Webdings"]
+        let onBoth = ["Helvetica Neue", "Menlo", "Georgia", "Verdana", "Futura", "Gill Sans", "Palatino", "Courier New",
+                      "Times New Roman", "Snell Roundhand"]
+        let testable = macOnly.filter { inPlain[$0] == true }
+        let wrong = testable.filter { inProfile[$0] != false } + onBoth.filter { inProfile[$0] != true || inPlain[$0] != true }
+        let cursive = (probed["fontFamilies.generics"] ?? "").split(separator: ",").first { $0.hasPrefix("cursive=") }.map(String.init) ?? "nil"
+        check("surface (\(name)): fonts as on the device: \(testable.count) families only a Mac has are not found, "
+              + "\(onBoth.count) both have are, cursive is Snell Roundhand",
+              testable.count >= 5 && wrong.isEmpty && cursive.hasSuffix("=Snell Roundhand"),
+              "wrong: \(wrong.joined(separator: ", ")); \(cursive); profile: \(probed["fontFamilies.present"] ?? "nil")")
     }
 
     /// An iPhone profile's window is the viewport Safari leaves a page on the phone: as wide as the

@@ -39,8 +39,9 @@ safe('innerSize', () => innerWidth + 'x' + innerHeight);
 safe('outerSize', () => outerWidth + 'x' + outerHeight);
 safe('pointer', () => [matchMedia('(pointer: fine)').matches, matchMedia('(hover: hover)').matches, matchMedia('(any-pointer: coarse)').matches].join(','));
 safe('touch', () => ['ontouchstart' in window, typeof TouchEvent, typeof Touch].join(','));
-// The touch interfaces' shape where they exist: iOS WebKit's come from sources Apple does not
-// publish (ENABLE_TOUCH_EVENTS needs the internal SDK), so only a device shows what a profile lacks.
+// The touch interfaces' shape where they exist: WebKit builds them only for iOS with Apple's internal
+// SDK (ENABLE_TOUCH_EVENTS, ENABLE_IOS_TOUCH_EVENTS in WTF's PlatformEnableCocoa.h), partly from
+// sources Apple does not publish, so only a device shows what a profile lacks.
 safe('touchShape', () => {
   const holders = { window, 'Window.prototype': Window.prototype, 'Document.prototype': Document.prototype,
                     'Element.prototype': Element.prototype, 'HTMLElement.prototype': HTMLElement.prototype };
@@ -177,6 +178,30 @@ safe('fonts', () => {
           'Noto Sans', 'Ubuntu', '-apple-system', 'system-ui']
     .map((f) => { ctx.font = '20px "' + f + '", monospace'; return Math.round(ctx.measureText('mmmmmmmmmmlli').width * 100) / 100; })
     .join(',');
+});
+// Which families a page finds, the way font-detection scripts tell (text in the family measures
+// unlike a generic family alone): first ones a Mac has and an iPhone only offers for download, then
+// ones both have. And which family each generic one is (the candidates of the same width).
+safe('fontFamilies', () => {
+  const ctx = document.createElement('canvas').getContext('2d');
+  const width = (font) => { ctx.font = '20px ' + font; return ctx.measureText('mmmmmmmmmmlli wWQ@').width; };
+  const generics = ['monospace', 'serif', 'sans-serif'];
+  const fallback = Object.fromEntries(generics.map((g) => [g, width(g)]));
+  const present = (family) => generics.some((g) => width('"' + family + '", ' + g) !== fallback[g]);
+  const families = ['Monaco', 'Comic Sans MS', 'Arial Unicode MS', 'Tahoma', 'Lucida Grande', 'Geneva', 'Andale Mono',
+    'Apple Chancery', 'Arial Black', 'Arial Narrow', 'Webdings', 'Wingdings', 'Microsoft Sans Serif', 'Century Gothic',
+    'Garamond', 'Skia', 'Herculanum', 'PT Sans', 'Songti SC', 'AppleMyungjo', 'Times',
+    'Helvetica', 'Helvetica Neue', 'Arial', 'Times New Roman', 'Courier', 'Courier New', 'Menlo', 'Georgia', 'Verdana',
+    'Trebuchet MS', 'Futura', 'Gill Sans', 'Palatino', 'Optima', 'Baskerville', 'Avenir', 'Avenir Next', 'Didot',
+    'Copperplate', 'Papyrus', 'Zapfino', 'Snell Roundhand', 'Marker Felt', 'Chalkboard SE', 'Impact', 'Rockwell',
+    'Charter', 'Iowan Old Style', 'Seravek', 'PingFang SC', 'Hiragino Sans', 'Apple SD Gothic Neo', 'Apple Color Emoji'];
+  const candidates = ['Times', 'Times New Roman', 'Helvetica', 'Courier', 'Courier New', 'Apple Chancery',
+    'Snell Roundhand', 'Papyrus', 'Comic Sans MS', 'Impact'];
+  return {
+    present: families.map((family) => family + ':' + (present(family) ? 'y' : 'n')).join(','),
+    generics: [...generics, 'cursive', 'fantasy'].map((g) => g + '=' + (candidates
+      .filter((family) => present(family) && width('"' + family + '"') === width(g)).join('|') || '?')).join(','),
+  };
 });
 
 // Feature presence

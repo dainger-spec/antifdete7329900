@@ -397,6 +397,9 @@ def summary(name, result):
         print(f"  features.{key} = {probe.get('features', {}).get(key)}")
     print(f"  touch {probe.get('touch')}; shape {json.dumps(probe.get('touchShape'))[:600]}")
     print(f"  globals {len(str(probe.get('windowNames', '')).split(','))}")
+    families = probe.get("fontFamilies") or {}
+    print(f"  font families {families.get('present')}")
+    print(f"  generic fonts {families.get('generics')}")
     print(f"  WebGL {json.dumps(probe.get('webgl'))[:600]}")
     print(f"  codecs {json.dumps(probe.get('codecs'))[:600]}")
     print(f"  async codecs {json.dumps(result.get('codecs'))}")

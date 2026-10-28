@@ -293,3 +293,36 @@ final class ProxiedWebRTCTests: XCTestCase {
         XCTAssertTrue(iPad.hasSuffix(" Safari/605.1.15"), iPad)
     }
 }
+
+final class DeviceFontsTests: XCTestCase {
+    /// Apple's list: what a Mac has by default and an iPhone only offers for download.
+    func testAppleListNamesTheMacOnlyFaces() {
+        for face in ["Monaco", "Comic Sans MS", "Arial Unicode MS", "Tahoma", "Lucida Grande", "Times Roman", "Apple Chancery"] {
+            XCTAssertTrue(IOSFonts.macOnlyFaces.contains(face), face)
+        }
+        for face in ["Menlo Regular", "Helvetica", "Helvetica Neue", "Times New Roman", "Courier New", "Courier", "Snell Roundhand"] {
+            XCTAssertFalse(IOSFonts.macOnlyFaces.contains(face), face)
+        }
+    }
+
+    func testAllowlistKeepsAFamilyWithAFaceIOSHas() {
+        let faces = [
+            DeviceFonts.Face(family: "Monaco", postScriptName: "Monaco", fullName: "Monaco"),
+            DeviceFonts.Face(family: "Menlo", postScriptName: "Menlo-Regular", fullName: "Menlo Regular"),
+            DeviceFonts.Face(family: "Menlo", postScriptName: "Menlo-Bold", fullName: "Menlo Bold"),
+            DeviceFonts.Face(family: "Times", postScriptName: "Times-Roman", fullName: "Times Roman"),
+            DeviceFonts.Face(family: "Times", postScriptName: "Times-Bold", fullName: "Times Bold"),
+            // A kept family keeps its name; a face iOS lacks loses its PostScript name.
+            DeviceFonts.Face(family: "Kohinoor Telugu", postScriptName: "KohinoorTelugu-Regular", fullName: "Kohinoor Telugu"),
+            DeviceFonts.Face(family: "Kohinoor Telugu", postScriptName: "KohinoorTelugu-Bold", fullName: "Kohinoor Telugu Bold"),
+            // Downloadable on both systems by Apple's list (their CJK font), or not listed: kept.
+            DeviceFonts.Face(family: "PingFang SC", postScriptName: "PingFangSC-Regular", fullName: "PingFang SC Regular"),
+        ]
+        XCTAssertEqual(DeviceFonts.iOSAllowlist(faces), [
+            "Menlo", "Kohinoor Telugu", "PingFang SC",
+            "Menlo-Regular", "Menlo-Bold", "KohinoorTelugu-Regular", "PingFangSC-Regular"])
+        XCTAssertEqual(DeviceFonts.hiddenFamilies(faces), ["Monaco", "Times"])
+        // Nothing read: an empty list, which WebKit takes as "every font".
+        XCTAssertEqual(DeviceFonts.iOSAllowlist([]), [])
+    }
+}

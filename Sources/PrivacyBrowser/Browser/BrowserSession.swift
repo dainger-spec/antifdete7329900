@@ -50,6 +50,9 @@ final class BrowserSession {
     /// The data store reports Safari's storage quota itself (`SafariStorageQuota`); the shim then
     /// leaves `navigator.storage.estimate()` alone.
     let storageQuotaByEngine: Bool
+    /// An iPhone or iPad profile's pages find only the fonts Safari on that device has (its pool's
+    /// font allowlist, `DeviceFontRestriction`).
+    let deviceFontsByEngine: Bool
     /// WebKit's key for WebTransport among its features (`WebKitPreferences.setFeature`).
     static let webTransportFeature = "WebTransportEnabled"
     private let userContentController: WKUserContentController
@@ -84,6 +87,8 @@ final class BrowserSession {
         let pool = ProfileProcessPool.make(timeZone: configuration.timeZoneIdentifier)
         self.processPool = pool?.processPool
         self.timeZoneByEngine = pool?.timeZone != nil
+        // Before the pool launches a process: WebKit hands the list over when it starts one.
+        self.deviceFontsByEngine = platform != .macOS && pool.map { DeviceFontRestriction.restrict($0.processPool) } == true
         self.storageQuotaByEngine = !configuration.ephemeral && SafariStorageQuota.isApplied(to: store, platform: platform)
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
         self.userContentController = BehaviorSets.makeUserContentController(for: configuration, timeZoneByEngine: timeZoneByEngine,
@@ -141,6 +146,8 @@ final class BrowserSession {
         }
         if platform != .macOS {
             WebKitPreferences.setFeature(webConfiguration.preferences, "NotificationsEnabled", false)
+            // `cursive` as on the device (its fonts: the pool's allowlist, set at launch).
+            DeviceFontRestriction.setCursiveFamily(of: webConfiguration.preferences)
         }
         // As Safari: pages see the system's fonts only, not the ones the user installed (a WKWebView
         // shows those by default, and a font list is among the strongest fingerprints). There is no
