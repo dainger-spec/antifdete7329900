@@ -25,6 +25,13 @@
 #import <pthread.h>
 #import <unistd.h>
 
+static CFAbsoluteTime gStart;     // for the elapsed time on the interface's events
+static void *gSafariHandle;       // the Safari.framework that loaded last (dlsym through it: RTLD_LOCAL)
+
+static NSString *elapsed(void) {
+    return [NSString stringWithFormat:@"t=%.1fs", CFAbsoluteTimeGetCurrent() - gStart];
+}
+
 static void emit(NSString *key, NSString *value) {
     NSString *flat = [[(value ?: @"<nil>") stringByReplacingOccurrencesOfString:@"\n" withString:@" "]
                       stringByReplacingOccurrencesOfString:@"\r" withString:@" "];
@@ -112,9 +119,9 @@ static NSArray<NSDictionary *> *frameworkCandidates(void) {
 
 // The Mach-O inside a .framework directory, in the layouts macOS uses.
 static NSArray<NSString *> *binaryPathsFor(NSString *dir, NSString *name) {
-    return @[[NSString stringWithFormat:@"%@/%@", dir, name],
-             [NSString stringWithFormat:@"%@/Versions/Current/%@", dir, name],
-             [NSString stringWithFormat:@"%@/Versions/A/%@", dir, name]];
+    return @[[NSString stringWithFormat:@"%@/Versions/A/%@", dir, name],
+             [NSString stringWithFormat:@"%@/%@", dir, name],
+             [NSString stringWithFormat:@"%@/Versions/Current/%@", dir, name]];
 }
 
 // Tries every layout; returns YES once one loads. dyld keeps system frameworks in the shared cache, so
@@ -133,6 +140,7 @@ static BOOL probeOneFramework(NSDictionary *candidate) {
         emit(@"dlopen", [NSString stringWithFormat:@"name=%@ kind=%@ dir_exists=%d file_on_disk=%d bin=%@ result=%@ err=\"%@\"",
                          name, candidate[@"kind"], dirExists, fileOnDisk, bin, handle ? @"ok" : @"fail", errText]);
         if (handle) {
+            if ([name isEqualToString:@"Safari"]) { gSafariHandle = handle; }
             return YES;
         }
     }
@@ -180,6 +188,16 @@ static void reportClassPresence(void) {
     emit(@"safari_classes_present", present.count ? [present componentsJoinedByString:@","] : @"<none>");
 }
 
+// What ends an attempt at Safari's interface when its code throws: the exception's name, reason and the
+// first frames of its call stack, printed before the runtime aborts the process.
+static void onUncaughtException(NSException *exception) {
+    emit(@"uncaught_exception", [NSString stringWithFormat:@"%@: %@ %@", exception.name, exception.reason, elapsed()]);
+    NSArray<NSString *> *stack = exception.callStackSymbols;
+    for (NSUInteger i = 0; i < MIN(stack.count, (NSUInteger)25); i++) {
+        emit(@"uncaught_exception_frame", stack[i]);
+    }
+}
+
 // A --try-window attempt that hangs must not stall CI.
 static void *watchdog(void *arg) {
     unsigned seconds = (unsigned)(uintptr_t)arg;
@@ -211,6 +229,17 @@ static void tryWindow(void) {
         if (controllerClass == Nil) {
             emit(@"window_attempt", @"no_controller_class");
             return;
+        }
+        // Safari's window controller asks NSDocumentController for -frontmostBrowserDocument: the first
+        // document controller made becomes the shared one, so make Safari's before it.
+        Class documentControllerClass = objc_getClass("BrowserDocumentController");
+        if (documentControllerClass != Nil) {
+            id documentController = [[documentControllerClass alloc] init];
+            emit(@"window_attempt", [NSString stringWithFormat:@"document_controller=%@ shared=%@",
+                                     NSStringFromClass([documentController class]),
+                                     NSStringFromClass([[NSDocumentController sharedDocumentController] class])]);
+        } else {
+            emit(@"window_attempt", @"no BrowserDocumentController class");
         }
         emit(@"window_attempt", @"init_start");
         id controller = [[controllerClass alloc] init];
@@ -251,7 +280,7 @@ static void *uiWatchdog(void *arg) {
     sleep(seconds / 2);
     dispatch_async(dispatch_get_main_queue(), ^{
         id delegate = NSApp.delegate;
-        emit(@"safari_main_delegate", delegate ? NSStringFromClass([delegate class]) : @"<none>");
+        emit(@"safari_main_delegate", [NSString stringWithFormat:@"%@ %@", delegate ? NSStringFromClass([delegate class]) : @"<none>", elapsed()]);
         NSURL *url = nil;
         if (gPage) { url = [gPage containsString:@"://"] ? [NSURL URLWithString:gPage] : [NSURL fileURLWithPath:gPage]; }
         @try {
@@ -268,7 +297,7 @@ static void *uiWatchdog(void *arg) {
     sleep(seconds - seconds / 2);
     dispatch_semaphore_t answered = dispatch_semaphore_create(0);
     dispatch_async(dispatch_get_main_queue(), ^{
-        emit(@"safari_main_app_class", NSApp ? NSStringFromClass([NSApp class]) : @"<no NSApp>");
+        emit(@"safari_main_app_class", [NSString stringWithFormat:@"%@ %@", NSApp ? NSStringFromClass([NSApp class]) : @"<no NSApp>", elapsed()]);
         emit(@"safari_main_menu_items", [NSString stringWithFormat:@"%ld", (long)NSApp.mainMenu.numberOfItems]);
         NSMutableArray *windows = [NSMutableArray array], *webViews = [NSMutableArray array];
         for (NSWindow *window in (NSApp ? NSApp.windows : @[])) {
@@ -294,7 +323,8 @@ static void trySafariMain(NSString *pagePath) {
     NSArray<NSString *> *names = @[@"SafariMain", @"_SafariMain"];
     void *entry = NULL;
     for (NSString *name in names) {
-        entry = dlsym(RTLD_DEFAULT, name.UTF8String);
+        if (gSafariHandle) { entry = dlsym(gSafariHandle, name.UTF8String); }
+        if (!entry) { entry = dlsym(RTLD_DEFAULT, name.UTF8String); }
         if (entry) { emit(@"safari_main_symbol", name); break; }
     }
     if (!entry) {
@@ -310,7 +340,7 @@ static void trySafariMain(NSString *pagePath) {
     pthread_detach(thread);
     const char *args[] = {"Safari", NULL};
     int count = 1;
-    emit(@"safari_main", @"calling");
+    emit(@"safari_main", [@"calling " stringByAppendingString:elapsed()]);
     int (*safariMain)(int, const char **) = (int (*)(int, const char **))entry;
     int result = safariMain(count, args);
     emit(@"safari_main", [NSString stringWithFormat:@"returned %d", result]);
@@ -332,6 +362,8 @@ int main(int argc, const char *argv[]) {
             }
         }
 
+        gStart = CFAbsoluteTimeGetCurrent();
+        NSSetUncaughtExceptionHandler(&onUncaughtException);
         NSString *variant = NSProcessInfo.processInfo.environment[@"GRAPH_VARIANT"] ?: @"base";
         emit(@"variant", variant);
         emit(@"macos", NSProcessInfo.processInfo.operatingSystemVersionString);
@@ -351,7 +383,15 @@ int main(int argc, const char *argv[]) {
 
         BOOL safariLoaded = NO;
         NSMutableArray *stagedOK = [NSMutableArray array], *stagedFailed = [NSMutableArray array];
-        for (NSDictionary *candidate in frameworkCandidates()) {
+        // An attempt at the interface loads Safari.framework alone, by its install name (dyld picks the
+        // base or the staged copy, as for Safari): the matrix would also map other copies of Safari's
+        // frameworks, and two copies of one Objective-C class make crashes of their own.
+        BOOL uiOnly = tryWindowFlag || safariMainPage != nil;
+        NSArray *candidates = uiOnly
+            ? @[@{@"name": @"Safari", @"dir": @"/System/Library/PrivateFrameworks/Safari.framework", @"kind": @"canonical"}]
+            : frameworkCandidates();
+        emit(@"mode", uiOnly ? @"interface (Safari.framework alone)" : @"matrix");
+        for (NSDictionary *candidate in candidates) {
             BOOL loaded = probeOneFramework(candidate);
             if (loaded && [candidate[@"name"] isEqualToString:@"Safari"]) { safariLoaded = YES; }
             if ([candidate[@"kind"] isEqualToString:@"staged"] && [candidate[@"dir"] hasPrefix:@"/System/Cryptexes/"]) {

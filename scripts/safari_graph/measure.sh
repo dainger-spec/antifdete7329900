@@ -26,6 +26,7 @@ OUT_DIR="${1:-$ROOT/build/safari-graph}"
 STAGED=/System/Cryptexes/App/System/Library/StagedFrameworks/Safari
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"   # absolute: it also becomes a throwaway HOME below
+REAL_HOME="$HOME"                   # where ReportCrash writes this user's crash reports
 LOG="$OUT_DIR/probe.log"
 : > "$LOG"
 
@@ -136,24 +137,46 @@ make_bundle() {  # make_bundle APP_DIR BINARY: a bundle with Safari's Info.plist
     echo "$app/Contents/MacOS/SafariGraphProbe"
 }
 
+# Why an attempt crashed: the crash reports ReportCrash wrote since MARKER (a few seconds after the
+# process ended), summarized by crash_summary.py and copied to OUT_DIR/crashes.
+collect_crashes() {  # collect_crashes MARKER LABEL
+    local marker="$1" label="$2" reports report
+    sleep 6
+    reports="$(find "$REAL_HOME/Library/Logs/DiagnosticReports" /Library/Logs/DiagnosticReports -maxdepth 1 -name '*.ips' \
+        -newer "$marker" 2>/dev/null | grep -E '/(SafariGraphProbe|probe)[^/]*\.ips$' || true)"
+    if [ -z "$reports" ]; then log "-- no crash report for $label"; return; fi
+    mkdir -p "$OUT_DIR/crashes"
+    for report in $reports; do
+        cp "$report" "$OUT_DIR/crashes/" 2>/dev/null
+        python3 -I "$HERE/crash_summary.py" "$report" | tee -a "$LOG"
+    done
+}
+
+# One attempt at the interface: its own throwaway home, then its crash report and what it wrote.
+run_ui() {  # run_ui LABEL BINARY MODE [probe arguments…]
+    local label="$1" bin="$2" mode="$3" home; shift 3
+    home="$OUT_DIR/home-$label"; rm -rf "$home"; mkdir -p "$home"
+    touch "$OUT_DIR/.marker-$label"
+    HOME="$home" CFFIXED_USER_HOME="$home" GRAPH_UI_SECONDS=30 run_probe "$label" "$bin" "$mode" ${1+"$@"}
+    collect_crashes "$OUT_DIR/.marker-$label" "$label"
+    list_home "$home"
+}
+
 ui_attempts() {  # ui_attempts LABEL BINARY MODE
-    local label="$1" bin="$2" mode="$3" home exe shot
+    local label="$1" bin="$2" mode="$3" exe shot
     log ""
     log "== UI attempts in configuration $label =="
-    run_probe "$label-window" "$bin" "$mode" --try-window
-    home="$OUT_DIR/home-$label-safari-main"; rm -rf "$home"; mkdir -p "$home"
-    HOME="$home" CFFIXED_USER_HOME="$home" GRAPH_UI_SECONDS=30 \
-        run_probe "$label-safari-main" "$bin" "$mode" --safari-main "$PAGE_URL"
-    list_home "$home"
+    run_ui "$label-window" "$bin" "$mode" --try-window
+    run_ui "$label-safari-main" "$bin" "$mode" --safari-main "$PAGE_URL"
     exe="$(make_bundle "$OUT_DIR/bundle-$label/SafariGraphProbe.app" "$bin")"
-    home="$OUT_DIR/home-$label-bundle"; rm -rf "$home"; mkdir -p "$home"
-    ( sleep 25; screencapture -x "$OUT_DIR/screen-$label-bundle.png" >> "$LOG" 2>&1 \
-        && echo "screenshot: $OUT_DIR/screen-$label-bundle.png" >> "$LOG" || echo "screencapture failed" >> "$LOG" ) &
+    ( for at in 10 25; do
+          sleep $(( at == 10 ? 10 : 15 ))
+          screencapture -x "$OUT_DIR/screen-$label-bundle-${at}s.png" >> "$LOG" 2>&1 \
+              && echo "screenshot: $OUT_DIR/screen-$label-bundle-${at}s.png" >> "$LOG" || echo "screencapture failed" >> "$LOG"
+      done ) &
     shot=$!
-    HOME="$home" CFFIXED_USER_HOME="$home" GRAPH_UI_SECONDS=30 \
-        run_probe "$label-bundle" "$exe" "$mode" --safari-main "$PAGE_URL"
+    run_ui "$label-bundle" "$exe" "$mode" --safari-main "$PAGE_URL"
     wait "$shot" 2>/dev/null
-    list_home "$home"
 }
 
 # The configurations to try the UI in: the first where any Safari.framework loaded, and the first where
@@ -194,7 +217,7 @@ fi
 
 log ""
 log "== summary =="
-grep -hE '^(=================== run: |== UI attempts|GRAPH (safari_framework_loaded|staged_loaded|staged_failed|env_DYLD_VERSIONED_FRAMEWORK_PATH|window_attempt|safari_main[a-z_]*)=|run .* exit: |screenshot: )' "$LOG" \
+grep -hE '^(=================== run: |== UI attempts|GRAPH (safari_framework_loaded|staged_loaded|staged_failed|env_DYLD_VERSIONED_FRAMEWORK_PATH|window_attempt|safari_main[a-z_]*|uncaught_exception)=|run .* exit: |screenshot: |== crash report|  (exception|termination|application-specific)|-- no crash report)' "$LOG" \
     | tee "$OUT_DIR/summary.txt" || true
 log "== probe matrix complete =="
 exit 0
