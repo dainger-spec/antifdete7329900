@@ -28,10 +28,16 @@ import WebKit
 /// sub-minute historical offsets, so Date is consistent with itself, not only with `Intl`.
 /// A user script never runs in a worker; workers created from a blob of the page (how
 /// fingerprinting scripts create theirs) start with this script (`hookWorkers`), workers loaded
-/// from a URL and service workers keep the host's zone.
+/// from a URL and service workers keep the host's zone. Where WebKit allows it the time zone is
+/// not the shim's at all: the profile's process pool runs every page and worker in it
+/// (`ProfileProcessPool`), and the shim, seeing the engine report the zone, replaces nothing.
 enum PrivacyScripts {
     struct ShimConfiguration: Encodable {
         var timeZone: String?
+        /// The profile's process pool runs in `timeZone` (`BrowserSession.timeZoneByEngine`): each
+        /// realm checks that its engine reports the zone, and only where it does not is the shim
+        /// installed.
+        var engineTimeZone = false
         var geolocation: Geolocation
         /// "disabled", "relayOnly", "unrestricted", or "tunnel" (with `webRTCRelay`).
         var webRTC: String
@@ -71,7 +77,7 @@ enum PrivacyScripts {
         }
     }
 
-    static func shimConfiguration(for configuration: ProfileConfiguration) -> ShimConfiguration {
+    static func shimConfiguration(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false) -> ShimConfiguration {
         let webRTC: String
         var relay: ShimConfiguration.Relay?
         switch configuration.webRTCRouting {
@@ -101,7 +107,7 @@ enum PrivacyScripts {
             device = .init(platform: nil, maxTouchPoints: 5, hardwareConcurrency: 8,
                            screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2)
         }
-        return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, geolocation: geolocation,
+        return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, engineTimeZone: timeZoneByEngine, geolocation: geolocation,
                                  webRTC: webRTC, webRTCRelay: relay, device: device,
                                  safariObject: configuration.deviceGeneration.platform == .macOS,
                                  storageQuota: safariStorageQuota(for: configuration.deviceGeneration.platform))
@@ -124,17 +130,18 @@ enum PrivacyScripts {
         return CGSize(width: device.screenWidth, height: device.screenHeight)
     }
 
-    static func makeUserContentController(for configuration: ProfileConfiguration) -> WKUserContentController {
+    static func makeUserContentController(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false) -> WKUserContentController {
         let controller = WKUserContentController()
-        controller.addUserScript(WKUserScript(source: source(for: configuration),
+        controller.addUserScript(WKUserScript(source: source(for: configuration, timeZoneByEngine: timeZoneByEngine),
                                               injectionTime: .atDocumentStart,
                                               forMainFrameOnly: false,
                                               in: .page))
         return controller
     }
 
-    static func source(for configuration: ProfileConfiguration) -> String {
-        let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration)), encoding: .utf8)) ?? "{}"
+    static func source(for configuration: ProfileConfiguration, timeZoneByEngine: Bool = false) -> String {
+        let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration, timeZoneByEngine: timeZoneByEngine)),
+                                encoding: .utf8)) ?? "{}"
         return "(function install(CONFIG) {\n" + shimBody + "\n})(" + json + ");"
     }
 
@@ -171,7 +178,13 @@ function patchWindow(w) {
   patched.add(w);
   try { patchToString(w); } catch (e) {}
   if (CONFIG.device) { try { patchDevice(w, CONFIG.device); } catch (e) {} }
-  if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
+  // With the profile's process pool in its zone, Date and Intl are the engine's own; a realm whose
+  // engine does not report the zone (a process the override did not reach) gets the shim. Workers
+  // made from a blob start with this script either way: it decides there for itself, and they
+  // need the storage quota too.
+  if (CONFIG.timeZone && !(CONFIG.engineTimeZone && engineReportsZone(w, CONFIG.timeZone))) {
+    try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {}
+  }
   if (CONFIG.timeZone || CONFIG.device) { try { hookWorkers(w); } catch (e) {} }
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
   if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
@@ -312,6 +325,26 @@ function overrideGetter(w, obj, name, value) {
 }
 
 // ---- Time zone --------------------------------------------------------------------------------
+// Whether this realm's engine already runs in TZ: its default zone is the one Intl names for TZ,
+// or, for a link (Asia/Calcutta, which the engine names by its primary Asia/Kolkata; GMT, which it
+// names UTC), a zone whose wall clock is the same over the zone's history.
+const ZONE_PROBES = [-2208988800000, -880000000000, 0, 631152000000, 1262304000000, 1705320000000, 1721044800000];
+function engineReportsZone(w, TZ) {
+  try {
+    const DTF = w.Intl.DateTimeFormat;
+    if (new DTF().resolvedOptions().timeZone === new DTF(undefined, { timeZone: TZ }).resolvedOptions().timeZone) return true;
+    const options = { era: 'short', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
+                      second: 'numeric', hourCycle: 'h23' };
+    const engine = new DTF('en-US', options);
+    options.timeZone = TZ;
+    const wanted = new DTF('en-US', options);
+    for (let i = 0; i < ZONE_PROBES.length; i++) {
+      if (engine.format(ZONE_PROBES[i]) !== wanted.format(ZONE_PROBES[i])) return false;
+    }
+    return true;
+  } catch (e) { return false; }
+}
+
 // Date and Intl behave as if the system zone were TZ: local getters and setters, the local
 // constructor forms, Date.parse of strings without an offset, toString's zone name, and the
 // default time zone of Intl.DateTimeFormat and toLocale*String. Offsets keep sub-minute

@@ -13,7 +13,9 @@ import WebKit
 ///     store, and serves it through a separate network *session*.
 ///   * Ephemeral profiles use `WKWebsiteDataStore.nonPersistent()` (in-memory only).
 ///   * Every web view of this profile — every tab of every window, and `window.open` popups,
-///     which WebKit creates from the opener's configuration — uses this data store.
+///     which WebKit creates from the opener's configuration — uses this data store, and the
+///     profile's own process pool where WebKit allows it (`ProfileProcessPool`: the profile's time
+///     zone in the engine, and its own service and shared workers).
 ///
 /// PLATFORM LIMITATIONS:
 ///   * All profiles share one WebKit networking process (separate sessions inside it). This
@@ -39,6 +41,11 @@ final class BrowserSession {
     }
 
     private(set) var dataStore: WKWebsiteDataStore?
+    /// The profile's own WebKit process pool (`ProfileProcessPool`); nil: WebKit's shared pool.
+    private(set) var processPool: NSObject?
+    /// The engine runs this profile's pages and workers in `configuration.timeZoneIdentifier` (its
+    /// pool's time zone override); the shim then leaves `Date` and `Intl` alone.
+    let timeZoneByEngine: Bool
     private let userContentController: WKUserContentController
     /// Receives the AutoFill script's messages (registered in its own content world only).
     private let passwordHandler = PasswordAutoFillHandler()
@@ -67,8 +74,11 @@ final class BrowserSession {
         // Applies to all network loads of this data store. Empty only when no proxy is configured.
         store.proxyConfigurations = proxies
         self.dataStore = store
+        let pool = ProfileProcessPool.make(timeZone: configuration.timeZoneIdentifier)
+        self.processPool = pool?.processPool
+        self.timeZoneByEngine = pool?.timeZone != nil
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
-        self.userContentController = BehaviorSets.makeUserContentController(for: configuration)
+        self.userContentController = BehaviorSets.makeUserContentController(for: configuration, timeZoneByEngine: timeZoneByEngine)
         if configuration.proxy != nil {
             // Loads WebKit would otherwise make outside the proxy (see ContentRules).
             if let blocker = ContentRules.dnsPrefetchBlocker {
@@ -99,6 +109,8 @@ final class BrowserSession {
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let webConfiguration = WKWebViewConfiguration()
         if let dataStore { webConfiguration.websiteDataStore = dataStore }
+        // The profile's processes and workers: its time zone, and no other profile's worker settings.
+        if let processPool { ProfileProcessPool.assign(processPool, to: webConfiguration) }
         webConfiguration.userContentController = userContentController
         // Safe Browsing lookups bypass the per-profile proxy; opt-in per profile.
         webConfiguration.preferences.isFraudulentWebsiteWarningEnabled = configuration.safeBrowsingEnabled
@@ -214,6 +226,8 @@ final class BrowserSession {
         // The controller holds its handlers strongly.
         userContentController.removeAllScriptMessageHandlers()
         dataStore = nil
+        // Its processes end with it, and with them their hold on the data store (sealing waits for that).
+        processPool = nil
     }
 }
 
