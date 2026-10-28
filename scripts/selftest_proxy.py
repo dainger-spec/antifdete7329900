@@ -43,6 +43,11 @@ each of those globals there (`typeof RTCPeerConnection`, `typeof WebTransport`, 
 The listener also answers requests made to it directly (`http://127.0.0.1:<port>/…`, a secure
 context, which service workers and WebTransport need).
 
+`/pb-hls/<run>/stream.m3u8` is a one-segment HLS playlist (its segment `/pb-hls/<run>/seg0.ts`)
+and `/pb-media/<run>/clip.mp4` a file a `<video>` asks for; neither plays, only the requests count.
+A WebSocket handshake (`/pb-ws/<run>`) is answered with a page, not a 101: the self-test only
+needs to see that it reached the proxy.
+
 `/pb-csp/page?run=<id>` is an empty page under a strict Content-Security-Policy, as a site that
 collects violation reports sends it: no 'unsafe-eval', `connect-src 'self'`, blob: workers allowed,
 `report-uri /pb-csp/report?run=<id>` (`&tt=1` also requires Trusted Types, allowing the policies
@@ -263,6 +268,15 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         with SERVED_LOCK:
             body = json.dumps([entry["report"] for entry in CSP_REPORTS if entry["run"] == run]).encode()
         content_type = "application/json"
+    elif plain_path.startswith("/pb-hls/") and plain_path.endswith(".m3u8"):
+        # A one-segment HLS playlist: whether the player asks for it, and for its segment, is what counts.
+        body = ("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n"
+                "#EXTINF:2.0,\nseg0.ts\n#EXT-X-ENDLIST\n").encode()
+        content_type = "application/vnd.apple.mpegurl"
+    elif plain_path.startswith("/pb-hls/") or plain_path.startswith("/pb-media/"):
+        # MPEG-TS null packets, no programme: nothing plays; only the request is measured.
+        body = (b"\x47\x1f\xff\x10" + b"\xff" * 184) * 8
+        content_type = "video/mp2t" if plain_path.startswith("/pb-hls/") else "video/mp4"
     elif plain_path == "/pb-scopes/page":
         body = b"<!doctype html><html><head><meta charset='utf-8'><title>PB scopes</title></head><body>scopes</body></html>"
         content_type = "text/html; charset=utf-8"

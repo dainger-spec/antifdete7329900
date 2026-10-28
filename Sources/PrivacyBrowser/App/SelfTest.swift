@@ -469,6 +469,7 @@ final class SelfTest {
         info("proxy: a beacon \(served.contains("/beacon") ? "still reaches" : "does not reach") the proxy (beacons are fetches, not pings)")
         check("proxy: a beacon sent as the page goes away (pagehide) goes through the proxy, as Safari sends it",
               served.contains("/beacon-pagehide"), served.joined(separator: ","))
+        try await streamsThroughProxy(repository, httpPort: httpPort, socksPort: socksPort)
 
         // A proxy that answers 407: the profile's credentials are sent, wrong ones fail closed.
         // Loaded in a BrowserTab, whose navigation delegate answers the proxy's challenge.
@@ -547,6 +548,75 @@ final class SelfTest {
         try await Task.sleep(nanoseconds: 1_000_000_000)
         let after = try await js(webView, "return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();") as? [String] ?? []
         return served + after.filter { !served.contains($0) }
+    }
+
+    /// A WebSocket and media in a proxied profile go through its proxy, as the data store's proxy
+    /// is documented to carry them. The page is on a host only the proxy resolves, so a request
+    /// the proxy did not see went around it or nowhere. AVFoundation plays the media (an HLS
+    /// stream, an MP4 file), not WebKit's own loader: a profile without a proxy, asking the
+    /// listener directly, shows whether this WebKit asks for them at all.
+    private func streamsThroughProxy(_ repository: ProfileRepository, httpPort: Int, socksPort: Int) async throws {
+        let script = """
+            const result = {};
+            result.webSocket = await new Promise((resolve) => {
+              let socket;
+              try { socket = new WebSocket(base.replace(/^http/, 'ws') + '/pb-ws/' + run); } catch (e) { resolve('threw ' + e.name); return; }
+              socket.onopen = () => resolve('open');
+              socket.onerror = () => resolve('error');
+              setTimeout(() => resolve('timeout'), 5000);
+            });
+            const play = (src) => {
+              const video = document.createElement('video');
+              video.muted = true;
+              video.preload = 'auto';
+              document.body.appendChild(video);
+              video.src = src;
+              video.load();
+              video.play().catch(() => {});
+              return video;
+            };
+            result.hls = document.createElement('video').canPlayType('application/vnd.apple.mpegurl');
+            const videos = [play(base + '/pb-hls/' + run + '/stream.m3u8'), play(base + '/pb-media/' + run + '/clip.mp4')];
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+            result.media = videos.map((v) => [v.networkState, v.readyState, v.error ? v.error.code : 0].join()).join(' ');
+            result.served = await (await fetch(base + '/pb-served.json', { cache: 'no-store' })).json();
+            return JSON.stringify(result);
+            """
+        let cases: [(label: String, proxy: ProxySettings?, base: String)] = [
+            ("without a proxy", nil, "http://127.0.0.1:\(httpPort)"),
+            ("HTTP CONNECT", ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), "http://proxied.selftest.invalid"),
+            ("SOCKS5", ProxySettings(kind: .socks5, host: "127.0.0.1", port: socksPort), "http://proxied.selftest.invalid"),
+        ]
+        var control: (hls: Bool, mp4: Bool) = (false, false)
+        for (index, item) in cases.enumerated() {
+            let run = "\(index)-\(UUID().uuidString.prefix(8))"
+            let profile = try repository.create(name: "Streams \(index)", configuration: ProfileConfiguration(proxy: item.proxy, ephemeral: true))
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
+            try await PageLoader.load(webView, url: URL(string: "\(item.base)/streams-page")!)
+            let text = try await js(webView, script, ["base": item.base, "run": run]) as? String ?? "{}"
+            session.shutDown()
+            let result = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+            let served = result["served"] as? [String] ?? []
+            let webSocket = served.contains("/pb-ws/\(run)")
+            let hls = served.contains("/pb-hls/\(run)/stream.m3u8"), segment = served.contains("/pb-hls/\(run)/seg0.ts")
+            let mp4 = served.contains("/pb-media/\(run)/clip.mp4")
+            info("streams (\(item.label)): WebSocket \(result["webSocket"] ?? "nil"), \(webSocket ? "seen" : "not seen") by the listener; "
+                 + "HLS (canPlayType '\(result["hls"] ?? "")'): playlist \(hls ? "asked" : "not asked"), segment \(segment ? "asked" : "not asked"); "
+                 + "MP4 \(mp4 ? "asked" : "not asked"); media state \(result["media"] ?? "nil")")
+            guard item.proxy != nil else {
+                control = (hls, mp4)
+                continue
+            }
+            check("proxy (\(item.label)): a WebSocket goes through the proxy", webSocket, text)
+            for (name, measured, reached) in [("an HLS stream", control.hls, hls), ("an MP4 file", control.mp4, mp4)] {
+                if measured {
+                    check("proxy (\(item.label)): \(name) a <video> plays (AVFoundation) goes through the proxy", reached, text)
+                } else {
+                    info("proxy (\(item.label)): \(name) not checked — without a proxy this WebKit asked for none either")
+                }
+            }
+        }
     }
 
     /// Loads `url` in an ephemeral profile using `proxy`. Returns the page text, or nil if the load failed.
