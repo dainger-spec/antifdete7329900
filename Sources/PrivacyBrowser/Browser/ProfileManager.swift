@@ -414,6 +414,8 @@ final class ProfileManager: ObservableObject {
             // off there (passwords.bin keeps one writer: the password manager here).
             configuration.webRTCRelay = nil
             configuration.passwordAutoFill = false
+            // Where the proxy exits, for the window's address field (the process saves nothing).
+            configuration.lastProxyLocation = lookup?.location ?? stored.rememberedProxyLocation
             runningZone = configuration.timeZoneIdentifier
             let language = location?.webLanguage
             try await process.start(configuration: configuration, language: language,
@@ -432,6 +434,8 @@ final class ProfileManager: ObservableObject {
             guard let self, let process else { return }
             self.profileProcessExited(id, process, exit)
         }
+        // Ended already (its window closed at once): as if it had just ended.
+        if let exit = process.exit { profileProcessExited(id, process, exit) }
         try? repository.markLaunched(id)
         if lookup == nil, let lookupTask {
             let zone = runningZone

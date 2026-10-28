@@ -3441,6 +3441,8 @@ final class SelfTest {
             return process
         }
         defer { info(String(format: "\(label()): the group took %.1f s", Date().timeIntervalSince(started))) }
+        info("\(label()): launchers listen in \(ProcessSocket.directory.path); a profile process looks in "
+             + ProcessSocket.directories.map(\.path).joined(separator: ", "))
 
         do {
             guard let deProcess = await launch(de), let jpProcess = await launch(jp) else {

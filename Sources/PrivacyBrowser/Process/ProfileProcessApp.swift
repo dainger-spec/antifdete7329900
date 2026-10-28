@@ -226,6 +226,7 @@ final class ProfileProcessRuntime {
                 Task { await self?.seal(reportAndExit: true) }
             }
             self.session = session
+            session.exitLocation = configuration.lastProxyLocation
             session.openWindow(url: configuration.startURL)
             NSApp.activate(ignoringOtherApps: true)
             send(ProcessMessage(.started))

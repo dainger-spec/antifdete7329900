@@ -74,9 +74,16 @@ location, language, locale) go over the channel too, so both builds take the sam
 SwiftUI app:
 1. It connects to each launcher socket in the container's temporary directory and checks the
    server's code signature.
-2. It says hello. The launcher answers with an assignment only if the instance's PID is one
-   LaunchServices returned to it for a launch it is waiting on.
+2. It says hello. The launcher answers with an assignment only for a launch it is waiting on:
+   the one LaunchServices reported with the instance's PID, or, when the hello comes before
+   LaunchServices has answered, the one launch still waiting for its PID. Launches go one at a
+   time until LaunchServices has answered, so there is never a choice to make, and the key leaves
+   only once the PID matches (below).
 3. Without an assignment the instance starts as a launcher, as today.
+
+`ProfileProcessClient.assignment()` runs before `NSApplication` exists, so it must not depend on
+when LaunchServices calls back: the hello is answered either way, and only the key waits for the
+PID.
 
 ## The channel and the key handover
 
@@ -104,11 +111,14 @@ service is per client and cannot connect two instances.
 
   A peer that cannot be checked is refused (fail closed).
 - The launcher also requires:
-  - the peer's PID to be one LaunchServices returned for a launch it is waiting on (a hello that
-    arrives before LaunchServices answers is held, up to 15 s);
-  - the same uid.
+  - the same uid;
+  - a launch it is waiting on: by the PID LaunchServices returned, or the single launch whose
+    PID LaunchServices has not returned yet (a hello is held up to 15 s while one is starting);
+  - before the key leaves, the peer's PID to be the one LaunchServices returned for that launch
+    (it waits up to 30 s for LaunchServices; a mismatch fails the launch and force-quits the
+    process LaunchServices started).
 
-  It then keeps the full audit token: a reused PID has another PID version.
+  It keeps the full audit token of the peer it assigned: a reused PID has another PID version.
 - The profile process checks the launcher the same way. Under the sandbox it cannot know the
   launcher's PID.
 
@@ -141,7 +151,7 @@ live in ordinary memory).
 
 | Threat | Closed? |
 |---|---|
-| Another process of the same user connects to the launcher | **Closed.** Under the sandbox the socket is inside the container: other sandboxed apps cannot reach it, unsandboxed ones need the user's "App Data" consent (macOS 14+). In both builds the peer must pass the code requirement and be a PID this launcher launched and is waiting on. |
+| Another process of the same user connects to the launcher | **Closed.** Under the sandbox the socket is inside the container: other sandboxed apps cannot reach it, unsandboxed ones need the user's "App Data" consent (macOS 14+). In both builds the peer must pass the code requirement, be assigned a launch this launcher is waiting on, and be the very process LaunchServices started for it before the key leaves. Another instance of this app started by hand (`open -n`) while a launch is starting can take that launch's assignment; it still gets no key (another PID), the launch fails, and the profile is not opened. |
 | Another process impersonates the launcher (binds a socket first, or squats the name) | **Closed.** The profile process checks the server's code requirement before it sends or believes anything; launcher sockets carry the launcher's PID and stale ones are removed. |
 | A replaced or patched app binary | **Closed for the peer:** its code no longer satisfies the requirement (another cdhash; another Team ID). Not closed if the launcher itself was replaced before it started (as today). |
 | Replay: a profile process asks again later, or for another profile | **Closed.** One-time launch token, bound to the launched process's audit token (PID and PID version). |
@@ -157,7 +167,7 @@ live in ordinary memory).
 | Stop (launcher) | `stop` → the process closes its windows and seals (WebKit-coordinated removal, retries) → `sealed` → it exits. The launcher waits for both, up to 90 s. A process that does not answer is force-terminated and its data is sealed as after a crash. |
 | Last window closed / ⌘Q in the profile process | The process seals itself (⌘Q through the same `QuitCoordinator` as the app) → `sealed` → exit. The launcher marks the profile stopped. |
 | Lock, ⌘Q in the launcher | `ProfileManager.shutDown()` stops every profile process and waits for every `sealed` and exit. `QuitCoordinator` is unchanged: running profile processes count as activity. |
-| The profile process dies (crash, `kill -9`) | The launcher sees the socket close without `sealed`, and the process gone. It waits for the dead instance's WebKit processes to end (they exit when their host does; 2 s grace), then seals what is left with the profile key (`activeStore: false`, as unlock-time recovery does), and tells the user. The plaintext lasts seconds instead of until the next unlock. |
+| The profile process dies (crash, `kill -9`) | The launcher sees the socket close without `sealed`, and the process gone. It waits for the dead instance's WebKit processes to end (they exit when their host does; 2 s grace, up to three tries if a file is still being written), then seals what is left with the profile key (`activeStore: false`, as unlock-time recovery does), and tells the user. The plaintext lasts seconds instead of until the next unlock. |
 | The launcher dies | Each profile process sees the socket close and seals and exits on its own (it holds its key). If it dies too, the next unlock's recovery seals it (as today). |
 
 ## Language, locale, time zone
@@ -187,9 +197,33 @@ message. Stage 2 makes the limit a setting.
 
 ## The setting
 
-**Settings → Run each profile in its own process** (per device, in the encrypted device settings,
-off by default). It applies to launches from then on; running profiles keep their mode until
-stopped.
+**Profiles window → ⋯ → Each Profile in a Process of Its Own (beta)** (per device, in the
+encrypted device settings, `DeviceSettings.processPerProfile`, off by default). It applies to
+launches from then on; running profiles keep their mode until stopped.
+
+## Self-test
+
+`--self-test` runs the group *process per profile* in both builds (sandboxed and not), with the
+setting on (`SelfTest.processPerProfile`). Two persistent profiles behind the self-test proxy's
+SOCKS5 listeners, one answering lookups as Germany (`--socks2`) and one as Japan (`--socks-jp`):
+
+- launched through `ProfileManager` as the app launches them: separate PIDs, the ones LaunchServices
+  returned; the launcher's socket 0600;
+- per profile: the proxy carried its page and saw its country's `Accept-Language`;
+  `navigator.language(s)`, `Intl.DateTimeFormat`/`Intl.NumberFormat` default locale, default number
+  and date formatting (equal to the country locale's, unlike en-US); the time zone of the page and
+  of a worker loaded from a URL; the profile process's own memory footprint (information);
+- who gets a key: another process of this app the launcher did not start, a launch token used from
+  another profile's process, a token used twice, an unknown token, and a process that is not this
+  app (`/usr/bin/nc`) are refused; a socket made by a process that is not this app is never sent a
+  word by a would-be profile process;
+- Stop seals in the profile's process while the launcher waits; `kill -9` leaves the data to the
+  launcher, which seals it and tells the user; the next launches restore localStorage and IndexedDB
+  (DE sealed at Stop, JP sealed by the launcher) in the same language and time zone;
+- the last window closed, and ⌘Q in a profile's process, each seal before the process exits; Quit
+  in the launcher with both running seals both.
+
+A launch that the sandbox or LaunchServices blocks fails the group with `BLOCKED: <why>`.
 
 ## Stage 2 (not started)
 

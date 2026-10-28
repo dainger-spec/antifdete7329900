@@ -141,15 +141,30 @@ enum ProcessSocket {
 
     static var directory: URL { FileManager.default.temporaryDirectory }
 
+    /// Where a launcher of this app may listen, as this process sees it: its temporary directory,
+    /// and the per-user one `confstr` names. An instance LaunchServices started and one started
+    /// from a shell need not share `TMPDIR`.
+    static var directories: [URL] {
+        var urls = [directory]
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        if confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, buffer.count) > 0 {
+            let other = URL(fileURLWithPath: String(cString: buffer), isDirectory: true)
+            if other.resolvingSymlinksInPath().path != directory.resolvingSymlinksInPath().path { urls.append(other) }
+        }
+        return urls
+    }
+
     static func launcherPath(for pid: pid_t) -> String {
         directory.appendingPathComponent("\(prefix)\(pid).sock").path
     }
 
     /// Every launcher socket there is, live or left by a launcher that ended.
     static func launcherPaths() -> [String] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
-        return names.filter { $0.hasPrefix(prefix) && $0.hasSuffix(".sock") }.sorted()
-            .map { directory.appendingPathComponent($0).path }
+        directories.flatMap { folder in
+            ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
+                .filter { $0.hasPrefix(prefix) && $0.hasSuffix(".sock") }.sorted()
+                .map { folder.appendingPathComponent($0).path }
+        }
     }
 
     private static func address(_ path: String) throws -> sockaddr_un {
@@ -222,6 +237,8 @@ enum ProcessSocket {
 }
 
 /// One verified connection: length-prefixed JSON frames (4-byte big-endian length), at most 4 MiB.
+/// `close()` shuts the socket down; its descriptor is released only with the object, so a late
+/// read or write can never reach another connection that got the same number.
 final class ProcessConnection: @unchecked Sendable {
     let fd: Int32
     let peer: ProcessPeer.Identity
@@ -236,7 +253,7 @@ final class ProcessConnection: @unchecked Sendable {
         self.peer = peer
     }
 
-    deinit { close() }
+    deinit { Darwin.close(fd) }
 
     /// Waits at most `seconds` for each read (0: no limit).
     func setReadTimeout(_ seconds: Int) {
@@ -298,7 +315,6 @@ final class ProcessConnection: @unchecked Sendable {
         guard !isClosed else { return }
         isClosed = true
         Darwin.shutdown(fd, SHUT_RDWR)
-        Darwin.close(fd)
     }
 
     /// Reads on a thread of its own until the connection ends; each message, then the end, is

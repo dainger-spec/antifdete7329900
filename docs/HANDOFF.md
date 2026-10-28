@@ -32,7 +32,8 @@ Rules from the owner:
 | `claude/safari-parity-p0-workers` | P0-3: shim into blob workers as one line, no eval (CSP / Trusted Types safe) | done, CI green (215/215) |
 | `claude/safari-parity-p1-geolocation` | P1-2: geolocation denied by WebKit itself, the tab's UI delegate answers permission state | done, CI run 210 green (222/222) |
 | `claude/safari-parity-p1-webrtc` | P1-3: WebRTC escape routes, plus the WebTransport leak fix | done, CI runs 213–215 green (236/236) |
-| `claude/safari-parity-p1-ios` | P1-4: iPhone/iPad profiles; P2: TLS/HTTP2 parity, beacons, WebSocket and media through the proxy; P0-4: shim frames in `e.stack`; iOS fonts in the engine | done, CI run 229 green (262/262, Safari reference 434 keys identical) |
+| `claude/safari-parity-p1-ios` | P1-4: iPhone/iPad profiles; P2: TLS/HTTP2 parity, beacons, WebSocket and media through the proxy; P0-4: shim frames in `e.stack`; iOS fonts in the engine | done, CI run 230 green; PR #2 into the default branch (`main` does not exist), contains PR #1 |
+| `claude/process-per-profile` | A process per profile, stage 1: design and a minimal end-to-end mode behind a setting (off by default) | see *A process per profile* below |
 
 ## P1-3 state (`claude/safari-parity-p1-webrtc`)
 
@@ -215,8 +216,33 @@ Open, and why:
 - **WebGL extensions and limits:** matching them means rewriting WebGL's answers
   (deterministic, not noise). Waiting for the owner's decision, since WebGL is kept native.
 - **HTTP/2:** cannot be changed (CFNetwork). Only measured.
-- **Language per profile:** needs a second app process per language. An architectural change,
-  waiting for the owner's decision. Until then the launch warning `launch.languageFixed` stays.
+- **Language per profile:** needs an app process per profile. Stage 1 is on
+  `claude/process-per-profile` (below); in the one-process mode the launch warning
+  `launch.languageFixed` stays.
+
+## A process per profile (`claude/process-per-profile`)
+
+The owner's request: the language per profile through a separate app process per profile.
+Stage 1 is the design (`docs/PROCESS_PER_PROFILE.md`) and a minimal end-to-end mode behind a
+device setting, off by default. **Stage 2 is not to be started** without the owner.
+
+- **Launch:** `ProfileProcessHost` (launcher) opens the app's own bundle again through
+  `NSWorkspace.openApplication` with `createsNewApplicationInstance`. `main.swift` asks
+  `ProfileProcessClient.assignment()` first; an instance a launcher started runs
+  `ProfileProcessApp` (one profile, its own menus and Dock tile) instead of the SwiftUI app.
+- **Channel:** `ProfileProcessChannel.swift`: a Unix socket in the container's temporary
+  directory (0600), length-prefixed JSON, peers checked by audit token and code requirement on
+  both ends; the key is handed over once per launch token, to the process LaunchServices started.
+- **Launcher side of a launch:** `ProfileManager.launchInOwnProcess` (lookup through the proxy,
+  then `start` with the effective configuration, language and locale), `stopProcess`,
+  `profileProcessExited` (seals what a crashed process left: `recoverProfileData`).
+- **Profile side:** `ProfileProcessRuntime` (decrypt, `WebContentLanguage.decide(language,
+  locale:)`, `BrowserSession` over `SingleProfileFiles`, seal on stop, last window, ⌘Q, and when the
+  launcher goes away).
+- **Off in a profile's process (stage 2):** AutoFill, the packet tunnel, cookie import while it
+  runs, sync of running profiles, warm-up, the launcher's Library for it.
+- **Self-test:** the group *process per profile* (both builds), with the self-test proxy's
+  `--socks-jp` listener (answers lookups as Japan) next to `--socks2` (Germany).
 
 ## What is left
 
