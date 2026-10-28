@@ -3,8 +3,9 @@ import Foundation
 import WebKit
 
 /// JavaScript shims for settings WebKit has no native per-web-view API for: time zone,
-/// geolocation, WebRTC, and — for mobile generations only — the navigator and screen values of
-/// the declared device. Best-effort and detectable; not engine-level.
+/// geolocation (a fixed position; a denial is WebKit's own, `GeolocationPermission`), WebRTC, and —
+/// for mobile generations only — the navigator and screen values of the declared device.
+/// Best-effort and detectable; not engine-level.
 ///
 /// What is deliberately NOT touched, because a fingerprinting test looks exactly for it:
 ///   * canvas, WebGL, audio and font rendering: noise makes two readings differ ("Canvas:
@@ -58,6 +59,7 @@ enum PrivacyScripts {
         }
 
         struct Geolocation: Encodable {
+            /// "engine" (WebKit denies it, BrowserTab answers the state), "deny" or "fixed".
             var mode: String
             var latitude: Double?
             var longitude: Double?
@@ -91,7 +93,8 @@ enum PrivacyScripts {
         let geolocation: ShimConfiguration.Geolocation
         switch configuration.geolocation {
         case .deny:
-            geolocation = .init(mode: "deny")
+            // WebKit denies it and reports the state itself (BrowserTab, GeolocationPermission).
+            geolocation = .init(mode: GeolocationPermission.answeredByEngine ? "engine" : "deny")
         case let .fixed(latitude, longitude, accuracy):
             geolocation = .init(mode: "fixed", latitude: latitude, longitude: longitude, accuracy: accuracy)
         }
@@ -193,7 +196,9 @@ function patchWindow(w) {
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
   if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
   if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
-  try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
+  // 'engine': WebKit denies geolocation and reports the permission's state (GeolocationPermission).
+  const geo = CONFIG.geolocation || { mode: 'deny' };
+  if (geo.mode !== 'engine') { try { patchGeolocation(w, geo); } catch (e) {} }
   try { patchWebRTC(w, CONFIG.webRTC || 'disabled', CONFIG.webRTCRelay); } catch (e) {}
   try { hookChildWindows(w); } catch (e) {}
 }

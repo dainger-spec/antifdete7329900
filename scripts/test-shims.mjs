@@ -671,6 +671,17 @@ test('storage quota: Safari\'s instead of the app default', async () => {
   assert.match(run(plain, `Function.prototype.toString.call(StorageManager.prototype.estimate)`), /illegal/);
 });
 
+test('geolocation answered by the engine: geolocation and permissions are the engine\'s own', () => {
+  // WebKit denies the request and reports the state (BrowserTab, GeolocationPermission): no wrapper.
+  const w = makeWindow({ ...base, geolocation: { mode: 'engine' } });
+  for (const expr of ['Geolocation.prototype.getCurrentPosition', 'Geolocation.prototype.watchPosition', 'Permissions.prototype.query',
+                      'Object.getOwnPropertyDescriptor(PermissionStatus.prototype, "state").get',
+                      'Object.getOwnPropertyDescriptor(GeolocationPositionError.prototype, "code").get']) {
+    assert.ok(!run(w, `Function.prototype.toString.call(${expr})`).includes('[native code]'), expr);
+  }
+  assert.ok(run(makeWindow(base), 'Function.prototype.toString.call(Geolocation.prototype.getCurrentPosition)').includes('[native code]'));
+});
+
 test('geolocation fixed: position objects without own properties', async () => {
   const w = makeWindow({ ...base, geolocation: { mode: 'fixed', latitude: 48.8566, longitude: 2.3522, accuracy: 25 } });
   w.position = await run(w, `new Promise((res) => navigator.geolocation.getCurrentPosition((p) => res(p)))`);

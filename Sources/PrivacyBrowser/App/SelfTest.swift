@@ -124,6 +124,7 @@ final class SelfTest {
             try await storageIsolationAndShims(repository)
             try await engineTimeZone(repository)
             try await workersUnderCSP(repository)
+            try await geolocationInEngine(repository)
             try await deviceGenerations(repository)
             try await fingerprintSurface(repository)
             try await recoverySealing(repository)
@@ -807,6 +808,87 @@ final class SelfTest {
     private static func describe(_ report: [String: Any]) -> String {
         [directive(of: report), report["blocked-uri"] as? String ?? "-", report["script-sample"] as? String ?? "",
          report["source-file"] as? String ?? ""].joined(separator: " ")
+    }
+
+    // MARK: Geolocation in the engine
+
+    /// What a page sees of geolocation: the permission's state, then getCurrentPosition's and
+    /// watchPosition's answers (code, message, the interface, own properties), the state after and
+    /// how often a PermissionStatus held from before fired 'change'.
+    private static let geolocationScript = """
+        const status = await navigator.permissions.query({ name: 'geolocation' });
+        let changes = 0;
+        status.onchange = () => { changes++; };
+        const before = [status.state, status instanceof PermissionStatus, Object.getOwnPropertyNames(status).length].join();
+        const ask = (method) => new Promise((resolve) => {
+          const timer = setTimeout(() => resolve('timeout'), 5000);
+          navigator.geolocation[method](() => { clearTimeout(timer); resolve('position'); }, (e) => {
+            clearTimeout(timer);
+            resolve([e.code, e.message, e instanceof GeolocationPositionError, Object.getOwnPropertyNames(e).length].join());
+          });
+        });
+        const current = await ask('getCurrentPosition');
+        const watched = await ask('watchPosition');
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const after = (await navigator.permissions.query({ name: 'geolocation' })).state;
+        return JSON.stringify({ before, current, watched, after, held: status.state, changes });
+        """
+
+    /// The state of each permission a page can query (or the error).
+    private static let permissionStatesScript = """
+        const out = [];
+        for (const name of ['geolocation', 'notifications', 'camera', 'microphone', 'persistent-storage', 'screen-wake-lock', 'midi', 'clipboard-read']) {
+          try { out.push(name + '=' + (await navigator.permissions.query({ name })).state); } catch (e) { out.push(name + '=error ' + e.name); }
+        }
+        return out.join(';');
+        """
+
+    /// A profile that denies geolocation (the default) gets WebKit's own answer, not the shim's: the
+    /// tab's UI delegate denies the request and reports the state (`GeolocationPermission`). Checked in
+    /// a profile tab on the self-test proxy's page (127.0.0.1, a secure context): WebKit's
+    /// PERMISSION_DENIED, 'prompt' until the page asked and 'denied' after, 'prompt' again on the next
+    /// page, and every other permission as a plain WKWebView reports it.
+    private func geolocationInEngine(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("geolocation checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let page = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!
+        let plainConfiguration = WKWebViewConfiguration()
+        plainConfiguration.websiteDataStore = .nonPersistent()
+        let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
+        let plainDelegate = SelfTestUIDelegate()
+        retainedDelegates.append(plainDelegate) // the web view holds its UI delegate weakly
+        plain.uiDelegate = plainDelegate
+        try await PageLoader.load(plain, url: page)
+        let plainStates = try await js(plain, Self.permissionStatesScript) as? String ?? "nil"
+
+        let profile = try repository.create(name: "Geolocation", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+        defer { tab.tearDown(); session.shutDown() }
+        try await PageLoader.load(tab.webView, url: page)
+        let states = try await js(tab.webView, Self.permissionStatesScript) as? String ?? "nil"
+        check("permissions: a profile tab reports every permission as a plain WKWebView does", states == plainStates,
+              "\(states) vs \(plainStates)")
+        let mode = PrivacyScripts.shimConfiguration(for: session.configuration).geolocation.mode
+        guard GeolocationPermission.answeredByEngine else {
+            info("geolocation: no permission SPI in this WebKit, the shim denies it (mode \(mode))")
+            return
+        }
+        check("geolocation: a profile that denies it leaves it to WebKit (no shim)", mode == "engine", mode)
+        let text = try await js(tab.webView, Self.geolocationScript) as? String ?? "{}"
+        let result = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+        info("geolocation in the engine: \(text)")
+        let denied = "1,User denied Geolocation,true,0"
+        check("geolocation: getCurrentPosition and watchPosition get WebKit's own PERMISSION_DENIED",
+              result["current"] as? String == denied && result["watched"] as? String == denied, text)
+        check("geolocation: 'prompt' until the page asks, 'denied' after, on the engine's own PermissionStatus",
+              result["before"] as? String == "prompt,true,0" && result["after"] as? String == "denied", text)
+        info("geolocation: a PermissionStatus held from before reads \(result["held"] ?? "nil"), 'change' fired \(result["changes"] ?? "nil") time(s)")
+        try await PageLoader.load(tab.webView, url: page)
+        let next = try await js(tab.webView, "return (await navigator.permissions.query({ name: 'geolocation' })).state;") as? String
+        check("geolocation: the next page starts at 'prompt' again", next == "prompt", next ?? "nil")
     }
 
     // MARK: Time zone in the engine

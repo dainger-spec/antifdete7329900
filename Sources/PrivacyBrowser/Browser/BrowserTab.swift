@@ -80,6 +80,8 @@ final class BrowserTab: NSObject {
     /// Set while the warm-up robot drives this tab: what would be downloaded is refused instead
     /// (a response WebKit cannot show fails as a load), so a run never saves a file.
     var refusesDownloads = false
+    /// Sites that asked for the position in the page this tab shows (`GeolocationPermission`).
+    private var geolocationAsked: Set<String> = []
 
     /// Password AutoFill in this tab: suggestions, filling, the save question.
     private(set) lazy var passwords = TabPasswordAutoFill(tab: self, vault: context.passwordVault,
@@ -282,6 +284,7 @@ extension BrowserTab: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         if let navigation { committedNavigations.add(navigation) }
+        geolocationAsked.removeAll() // another page: WebKit asks again when it does
         passwords.closeSuggestions()
         if let url = webView.url { recordVisit(url) }
     }
@@ -475,6 +478,31 @@ extension BrowserTab: WKUIDelegate {
         panel.canChooseFiles = true
         presentSheet(panel, begin: { panel.beginSheetModal(for: $0, completionHandler: $1) },
                      respond: { completionHandler($0 == .OK ? panel.urls : nil) })
+    }
+
+    /// Geolocation (`WKUIDelegatePrivate`, asked when a frame calls getCurrentPosition or
+    /// watchPosition): no, as a user who said no would answer, so the page gets WebKit's own
+    /// PERMISSION_DENIED. Profiles with a fixed position never get here: the shim answers them.
+    @objc(_webView:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:)
+    func answerGeolocationRequest(_ webView: WKWebView, origin: WKSecurityOrigin, frame: WKFrameInfo,
+                                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        geolocationAsked.insert(GeolocationPermission.site(origin))
+        if let top = GeolocationPermission.site(of: webView.url) { geolocationAsked.insert(top) }
+        decisionHandler(.deny)
+        // A PermissionStatus the page holds reads the state again ('denied') and fires 'change'.
+        if webView.responds(to: GeolocationPermission.permissionChanged) {
+            _ = webView.perform(GeolocationPermission.permissionChanged, with: "geolocation", with: origin)
+        }
+    }
+
+    /// The state navigator.permissions.query reports (`WKUIDelegatePrivate`): for geolocation,
+    /// 'prompt' until a page of the site asked for the position, then 'denied'; for every other
+    /// permission 'prompt', which WebKit reports for them when a delegate does not answer.
+    @objc(_webView:queryPermission:forOrigin:completionHandler:)
+    func answerPermissionQuery(_ webView: WKWebView, name: String, origin: WKSecurityOrigin,
+                               completionHandler: @escaping (WKPermissionDecision) -> Void) {
+        let asked = name == "geolocation" && geolocationAsked.contains(GeolocationPermission.site(origin))
+        completionHandler(asked ? .deny : .prompt)
     }
 
     /// Camera / microphone: ask every time (WebKit forwards the request only after the page called getUserMedia).
