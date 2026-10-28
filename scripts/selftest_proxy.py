@@ -37,10 +37,11 @@ checks.
 `/pb-scopes/worker.js` (a dedicated worker), `/pb-scopes/shared.js` (a shared worker) and
 `/pb-scopes/sw.js` (a service worker) each answer a message with their time zone, the offset of
 2024-01-15 and their User-Agent (`zone|offset|ua`); `/pb-scopes/quota.js` (a dedicated worker) and the
-service worker, asked 'quota', answer with `navigator.storage.estimate().quota`; `/pb-scopes/rtc.js`,
-`/pb-scopes/rtc-shared.js` and the service worker, asked 'rtc', with `typeof RTCPeerConnection` and
-`typeof RTCDataChannel` there. The listener also answers requests made to it
-directly (`http://127.0.0.1:<port>/…`, a secure context, which service workers need).
+service worker, asked 'quota', answer with `navigator.storage.estimate().quota`; `/pb-scopes/types.js`,
+`/pb-scopes/types-shared.js` and the service worker, asked `types:<name>,<name>…`, with `typeof` of
+each of those globals there (`typeof RTCPeerConnection`, `typeof WebTransport`, …), comma-separated.
+The listener also answers requests made to it directly (`http://127.0.0.1:<port>/…`, a secure
+context, which service workers and WebTransport need).
 
 `/pb-csp/page?run=<id>` is an empty page under a strict Content-Security-Policy, as a site that
 collects violation reports sends it: no 'unsafe-eval', `connect-src 'self'`, blob: workers allowed,
@@ -172,18 +173,18 @@ def login_page(params: dict) -> bytes:
 # What each worker scope reports (see the module docstring), and how it is asked.
 SCOPE_REPORT = ("const report = () => [Intl.DateTimeFormat().resolvedOptions().timeZone,"
                 " new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset(), navigator.userAgent].join('|');\n"
-                "const rtc = () => [typeof RTCPeerConnection, typeof RTCDataChannel].join();\n")
+                "const types = (message) => message.slice('types:'.length).split(',').map((name) => typeof self[name]).join();\n")
 SCOPE_SCRIPTS = {
     "/pb-scopes/worker.js": "onmessage = () => postMessage(report());\n",
     "/pb-scopes/shared.js": "onconnect = (e) => { const port = e.ports[0]; port.onmessage = () => port.postMessage(report()); };\n",
     "/pb-scopes/quota.js": "onmessage = () => navigator.storage.estimate().then((e) => postMessage(String(e.quota)));\n",
-    "/pb-scopes/rtc.js": "onmessage = () => postMessage(rtc());\n",
-    "/pb-scopes/rtc-shared.js": "onconnect = (e) => { const port = e.ports[0]; port.onmessage = () => port.postMessage(rtc()); };\n",
+    "/pb-scopes/types.js": "onmessage = (e) => postMessage(types(e.data));\n",
+    "/pb-scopes/types-shared.js": "onconnect = (e) => { const port = e.ports[0]; port.onmessage = (m) => port.postMessage(types(m.data)); };\n",
     "/pb-scopes/sw.js": ("addEventListener('install', () => skipWaiting());\n"
                          "addEventListener('activate', (e) => e.waitUntil(clients.claim()));\n"
                          "addEventListener('message', (e) => { const port = e.ports[0]; if (!port) return;"
                          " if (e.data === 'quota') navigator.storage.estimate().then((q) => port.postMessage(String(q.quota)));"
-                         " else if (e.data === 'rtc') port.postMessage(rtc());"
+                         " else if (String(e.data).startsWith('types:')) port.postMessage(types(e.data));"
                          " else port.postMessage(report()); });\n"),
 }
 

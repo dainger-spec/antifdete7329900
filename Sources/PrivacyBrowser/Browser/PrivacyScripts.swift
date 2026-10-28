@@ -193,9 +193,12 @@ function patchWindow(w) {
   // is process-wide, so a realm in it has workers in it), the device's values or the quota.
   const zoneShim = !!CONFIG.timeZone && !(CONFIG.engineTimeZone && engineReportsZone(w, CONFIG.timeZone));
   if (zoneShim) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
-  // WebRTC 'disabled' where the engine could not switch it off: its interfaces go here and in
-  // workers made from a blob (RTCDataChannel and the transform interfaces are exposed to workers).
-  const rtcByShim = (CONFIG.webRTC || 'disabled') === 'disabled' && rtcNames(w).length > 0;
+  // WebRTC 'disabled' where the engine kept peer connections (RTCPeerConnection in a window,
+  // RTCDataChannel, which only they make, in a worker): their interfaces go here and in workers made
+  // from a blob, which have RTCDataChannel and the transform interfaces. Encoded transforms the
+  // engine keeps beside peer connections it switched off (a setting of their own) go in this realm
+  // only, by patchWebRTC: without a peer connection they do nothing, so no reason to rewrite workers.
+  const rtcByShim = (CONFIG.webRTC || 'disabled') === 'disabled' && ('RTCPeerConnection' in w || 'RTCDataChannel' in w);
   if (zoneShim || CONFIG.device || CONFIG.storageQuota || rtcByShim) { try { hookWorkers(w); } catch (e) {} }
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
   if (IS_WORKER) { // no window, geolocation, peer connection or frames in a worker
@@ -737,6 +740,7 @@ const ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
 const SymbolIterator = Symbol.iterator;
 const WeakMapGet = WeakMap.prototype.get;
 const WeakMapSet = WeakMap.prototype.set;
+const WeakMapHas = WeakMap.prototype.has;
 const PromiseThen = Promise.prototype.then;
 const RegExpExec = RegExp.prototype.exec;
 const StringSlice = String.prototype.slice;
@@ -782,6 +786,10 @@ function patchWebRTC(w, policy, relay) {
       if (Object.prototype.hasOwnProperty.call(w, name)) {
         try { Object.defineProperty(w, name, { value: undefined, writable: false, configurable: false }); } catch (e) {}
       }
+    }
+    // A dedicated worker's handler for transform events (on its global's prototype) goes with them.
+    for (let o = IS_WORKER ? w : null; o; o = Object.getPrototypeOf(o)) {
+      if (Object.prototype.hasOwnProperty.call(o, 'onrtctransform')) { try { delete o.onrtctransform; } catch (e) {} }
     }
     return;
   }
@@ -1052,13 +1060,51 @@ function hookChildWindows(w) {
   hook(w.HTMLIFrameElement, 'contentDocument', (v) => v && v.defaultView);
   hook(w.HTMLFrameElement, 'contentWindow', (v) => v);
   hook(w.HTMLObjectElement, 'contentWindow', (v) => v);
+  // A new page's first, blank document runs no user script: the page gets the window from these
+  // two before anything else could patch it.
   const nativeOpen = w.open;
   if (nativeOpen) {
     define(w, 'open', method('open', 0, function (...args) {
-      const opened = nativeOpen.apply(this, args);
-      try { patchWindow(opened); } catch (e) {}
-      return opened;
+      return contained(ReflectApply(nativeOpen, this, args));
     }));
+  }
+  // document.open with three arguments opens a window too (with fewer it rewrites the document).
+  const documentProto = w.Document && w.Document.prototype;
+  const nativeDocumentOpen = documentProto && Object.prototype.hasOwnProperty.call(documentProto, 'open') ? documentProto.open : null;
+  if (nativeDocumentOpen) {
+    define(documentProto, 'open', method('open', 0, function (...args) {
+      const result = ReflectApply(nativeDocumentOpen, this, args);
+      return args.length > 2 ? contained(result) : result;
+    }));
+  }
+}
+
+// A window the page opened, patched, and handed over only if its WebRTC is what the profile allows:
+// patching runs after the page's scripts, which may have broken what it uses. Otherwise the window
+// is closed and the page gets null, as for a blocked popup.
+function contained(opened) {
+  try { patchWindow(opened); } catch (e) {}
+  if (rtcContained(opened)) return opened;
+  try { opened.close(); } catch (e) {}
+  return null;
+}
+
+// No peer connection, or ('relayOnly', 'tunnel') a constructor of the shim's — this one's, or that
+// of the window's own copy, whose registry its Function.prototype.toString answers with. Only
+// built-ins taken before any page script ran.
+function rtcContained(win) {
+  const policy = CONFIG.webRTC || 'disabled';
+  if (!win || policy === 'unrestricted') return true;
+  let peerConnection;
+  try { peerConnection = win.RTCPeerConnection; } catch (e) { return true; } // another origin's: out of the page's reach too
+  if (peerConnection === undefined) return true;
+  if (policy === 'disabled') return false;
+  if (ReflectApply(WeakMapHas, registry, [peerConnection])) return true;
+  try {
+    const theirs = ReflectApply(win.Function.prototype.toString, REGISTRY_KEY, []);
+    return !!theirs && ReflectApply(WeakMapHas, theirs, [peerConnection]);
+  } catch (e) {
+    return false;
   }
 }
 
@@ -1227,11 +1273,13 @@ function oneLine(source) {
 // directives at its start and the comments before them, given as their UTF-8 length — when a line
 // break ends them, on their line, so the next line keeps its columns too — and after a semicolon
 // unless they end with one (a directive the text ends with would otherwise be called). Null when
-// the strings at the start do not show where the directives end.
-const PROLOGUE = /^(?:(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*(?:'[^'\\\n]*'|"[^"\\\n]*")[ \t]*(?:;|\r?\n|$))*/;
+// the strings at the start do not show where the directives end. A block comment ends at its
+// first `*/` (a lazy `[\s\S]*?` could also run on to a later one, and the ways to split a run of
+// comments would grow exponentially when no directive follows them: a page could time it).
+const PROLOGUE = /^(?:(?:\s|\/\*[^*]*\*+(?:[^\/*][^*]*\*+)*\/|\/\/[^\n]*(?:\n|$))*(?:'[^'\\\n]*'|"[^"\\\n]*")[ \t]*(?:;|\r?\n|$))*/;
 // What surely follows the directives: past white space and comments, a character no directive or
 // comment starts with.
-const AFTER_PROLOGUE = /^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)*[^\s'"/]/;
+const AFTER_PROLOGUE = /^(?:\s|\/\*[^*]*\*+(?:[^\/*][^*]*\*+)*\/|\/\/[^\n]*\n)*[^\s'"/]/;
 const LINE_END = /\r?\n$/;
 const ENDS_STATEMENT = /;\s*$/;
 const HEAD_LIMIT = 65536;

@@ -153,7 +153,9 @@ const ENGINE_WORKERS = String.raw`(() => {
 
 // A realm shaped like a WebKit window: navigator and screen values are accessors on the
 // prototypes that reject other receivers; window attributes are own accessors.
-function makeWindow(config, parentContext, form = FORM) {
+// `prepare(context)` shapes the engine before the shim runs (an engine with WebRTC off, a window
+// open() makes); form 'none' leaves the shim out (a new page's first document).
+function makeWindow(config, parentContext, form = FORM, prepare = null) {
   const context = vm.createContext({});
   vm.runInContext(`
     var window = globalThis;
@@ -294,6 +296,8 @@ function makeWindow(config, parentContext, form = FORM) {
   context.parent = parentContext || context;
   context.top = parentContext ? parentContext.top : context;
   vm.runInContext(ENGINE_WORKERS, context);
+  if (prepare) prepare(context);
+  if (form === 'none') return context;
   vm.runInContext(form === 'worker' ? `(${oneLineInstall()})(${JSON.stringify(config)});`
                                     : `(function install(CONFIG) {\n${body}\n})(${JSON.stringify(config)});`, context);
   return context;
@@ -327,8 +331,12 @@ function runWorker(script, { codeGeneration = true } = {}) {
                             get hardwareConcurrency() { illegal(this, WorkerNavigator); return 8; } }
     class StorageManager { estimate() { illegal(this, StorageManager); return Promise.resolve({ quota: 1048576000, usage: 0 }); } }
     globalThis.StorageManager = StorageManager;
-    // WebKit exposes RTCDataChannel to workers (Exposed=(Window,Worker)), RTCPeerConnection not.
-    Object.defineProperty(globalThis, 'RTCDataChannel', { value: function RTCDataChannel() {}, writable: true, configurable: true });
+    // WebKit exposes RTCDataChannel to workers (Exposed=(Window,Worker)), RTCPeerConnection not; the
+    // encoded transforms (a setting of their own) to dedicated workers, with their onrtctransform.
+    for (const name of ['RTCDataChannel', 'RTCEncodedAudioFrame', 'RTCEncodedVideoFrame', 'RTCRtpScriptTransformer', 'RTCTransformEvent']) {
+      Object.defineProperty(globalThis, name, { value: { [name]: function () {} }[name], writable: true, configurable: true });
+    }
+    Object.defineProperty(Object.getPrototypeOf(globalThis), 'onrtctransform', { get() { return null; }, set(v) {}, enumerable: true, configurable: true });
     var navigator = Object.create(WorkerNavigator.prototype);
     Object.defineProperty(navigator, 'storage', { value: new StorageManager() });
     var messages = [];
@@ -676,9 +684,13 @@ test('storage quota: Safari\'s instead of the app default', async () => {
 test('geolocation answered by the engine: geolocation and permissions are the engine\'s own', () => {
   // WebKit denies the request and reports the state (BrowserTab, GeolocationPermission): no wrapper.
   const w = makeWindow({ ...base, geolocation: { mode: 'engine' } });
-  for (const expr of ['Geolocation.prototype.getCurrentPosition', 'Geolocation.prototype.watchPosition', 'Permissions.prototype.query',
-                      'Object.getOwnPropertyDescriptor(PermissionStatus.prototype, "state").get',
-                      'Object.getOwnPropertyDescriptor(GeolocationPositionError.prototype, "code").get']) {
+  const accessor = (C, name) => `Object.getOwnPropertyDescriptor(${C}.prototype, "${name}").get`;
+  for (const expr of ['Geolocation.prototype.getCurrentPosition', 'Geolocation.prototype.watchPosition', 'Geolocation.prototype.clearWatch',
+                      'Permissions.prototype.query', accessor('PermissionStatus', 'state'), accessor('PermissionStatus', 'name'),
+                      accessor('GeolocationPositionError', 'code'), accessor('GeolocationPositionError', 'message'),
+                      ...['latitude', 'longitude', 'altitude', 'accuracy', 'altitudeAccuracy', 'heading', 'speed'].map((k) => accessor('GeolocationCoordinates', k)),
+                      accessor('GeolocationPosition', 'coords'), accessor('GeolocationPosition', 'timestamp'),
+                      'GeolocationCoordinates.prototype.toJSON', 'GeolocationPosition.prototype.toJSON']) {
     assert.ok(!run(w, `Function.prototype.toString.call(${expr})`).includes('[native code]'), expr);
   }
   assert.ok(run(makeWindow(base), 'Function.prototype.toString.call(Geolocation.prototype.getCurrentPosition)').includes('[native code]'));
@@ -703,14 +715,32 @@ test('WebRTC disabled: removed without a trace', () => {
   assert.equal(run(w, `Object.getOwnPropertyNames(window).filter((n) => /^(webkit)?RTC/.test(n)).join()`), '');
 });
 
+const WORKER_RTC = "postMessage([typeof RTCDataChannel, typeof RTCPeerConnection, typeof RTCEncodedVideoFrame, typeof RTCRtpScriptTransformer, "
+                 + "typeof RTCTransformEvent, 'onrtctransform' in self].join())";
+
 test('WebRTC disabled where the engine kept it: workers made from a blob lose its interfaces too', () => {
   // A macOS profile with zone and quota in the engine needs nothing else in a worker; with WebRTC
-  // left on by the engine its workers still get the shim, for RTCDataChannel.
+  // left on by the engine its workers still get the shim, for RTCDataChannel and the transforms.
   const w = makeWindow({ geolocation: { mode: 'engine' }, webRTC: 'disabled' });
   assert.equal(run(w, 'typeof RTCPeerConnection'), 'undefined');
-  const worker = blobWorker(w, JSON.stringify(["postMessage([typeof RTCDataChannel, typeof RTCPeerConnection].join())"]));
-  assert.deepEqual(runWorker(worker.script).messages(), ['undefined,undefined']);
-  assert.deepEqual(runWorker("postMessage([typeof RTCDataChannel, typeof RTCPeerConnection].join())").messages(), ['function,undefined']);
+  const worker = blobWorker(w, JSON.stringify([WORKER_RTC]));
+  assert.deepEqual(runWorker(worker.script).messages(), ['undefined,undefined,undefined,undefined,undefined,false']);
+  assert.deepEqual(runWorker(WORKER_RTC).messages(), ['function,undefined,function,function,function,true']);
+});
+
+test('WebRTC disabled with peer connections off in the engine: its leftovers go, workers stay the engine\'s', () => {
+  // WebKit's peer-connection setting leaves the encoded transforms, a setting of their own: the
+  // shim removes them from the window, and a profile that needs nothing else rewrites no worker.
+  const peerConnectionsOff = (context) => vm.runInContext(`
+    for (const name of Object.getOwnPropertyNames(globalThis)) if (/^(webkit)?RTC[A-Z]/.test(name)) delete globalThis[name];
+    for (const name of ['RTCRtpScriptTransform', 'RTCEncodedAudioFrame', 'RTCEncodedVideoFrame']) globalThis[name] = { [name]: function () {} }[name];
+  `, context);
+  const w = makeWindow({ geolocation: { mode: 'engine' }, webRTC: 'disabled' }, undefined, FORM, peerConnectionsOff);
+  assert.equal(run(w, `Object.getOwnPropertyNames(window).filter((n) => /^(webkit)?RTC/.test(n)).join()`), '');
+  const code = 'postMessage(1)';
+  assert.equal(blobWorker(w, JSON.stringify([code])).script, code);
+  // The same profile where the engine kept peer connections: its workers get the shim.
+  assert.notEqual(blobWorker(makeWindow({ geolocation: { mode: 'engine' }, webRTC: 'disabled' }), JSON.stringify([code])).script, code);
 });
 
 test('WebRTC relayOnly', () => {
@@ -720,6 +750,55 @@ test('WebRTC relayOnly', () => {
   assert.equal(run(w, `(() => { const p = new RTCPeerConnection(); p.setConfiguration({ iceTransportPolicy: 'all' }); return p.config.iceTransportPolicy; })()`), 'relay');
   assert.equal(run(w, `new webkitRTCPeerConnection({}).config.iceTransportPolicy`), 'relay');
   assert.equal(run(w, `new RTCPeerConnection() instanceof RTCPeerConnection`), true);
+});
+
+// A window open() (or document.open with three arguments) makes: a new page's first document, which
+// no user script runs in, as the engine has it.
+const opening = (config) => (context) => {
+  const popup = () => makeWindow(config, undefined, 'none');
+  context.open = function open() { return popup(); };
+  Object.defineProperty(context, '__engineOpen', { value: context.open });
+  vm.runInContext('globalThis.Document = class Document {}; globalThis.document = new Document();', context);
+  context.Document.prototype.open = function open(...args) { return args.length > 2 ? popup() : this; };
+};
+
+test('WebRTC relay-only: a popup comes patched, from open() and from document.open with three arguments', () => {
+  for (const policy of ['relayOnly', 'tunnel']) {
+    const config = { ...base, webRTC: policy, webRTCRelay: { urls: ['turn:192.0.2.10:3478?transport=udp'], username: 'u', credential: 'c' } };
+    const w = makeWindow(config, undefined, FORM, opening(config));
+    for (const opener of [`open('', 'a', '')`, `document.open('', 'b', '')`]) {
+      assert.equal(run(w, `new (${opener}).RTCPeerConnection({ iceTransportPolicy: 'all' }).config.iceTransportPolicy`), 'relay', `${policy} ${opener}`);
+    }
+    assert.equal(run(w, `document.open() === document && document.open('a', 'b') === document`), true, 'document.open with fewer arguments');
+    assert.ok(run(w, 'Function.prototype.toString.call(Document.prototype.open)').includes('[native code]'));
+  }
+});
+
+test('WebRTC relay-only: a popup the patch cannot reach is closed, and the page gets null', () => {
+  // The page breaks what patching the new window uses before it opens one; it may get the window
+  // patched, never with the engine's own constructor.
+  const config = { ...base, webRTC: 'relayOnly' };
+  const w = makeWindow(config, undefined, FORM, opening(config));
+  for (const breakIt of ['Object.defineProperty = () => { throw new TypeError(); }', 'WeakSet.prototype.has = () => true',
+                         'Object.getOwnPropertyDescriptor = () => undefined', 'WeakMap.prototype.set = () => {}']) {
+    const policy = run(w, `(() => {
+      const saved = [Object.defineProperty, WeakSet.prototype.has, Object.getOwnPropertyDescriptor, WeakMap.prototype.set];
+      let popup;
+      try { ${breakIt}; popup = open('', 'x', ''); } finally {
+        [Object.defineProperty, WeakSet.prototype.has, Object.getOwnPropertyDescriptor, WeakMap.prototype.set] = saved;
+      }
+      return popup === null ? 'null' : new popup.RTCPeerConnection({ iceTransportPolicy: 'all' }).config.iceTransportPolicy;
+    })()`);
+    assert.ok(policy === 'null' || policy === 'relay', `${breakIt}: ${policy}`);
+  }
+  // Nor does the page get the engine's open by replacing call and apply.
+  assert.equal(run(w, `(() => {
+    const seen = [], call = Function.prototype.call, apply = Function.prototype.apply;
+    Function.prototype.call = function (...args) { seen.push(this); return Reflect.apply(this, args[0], args.slice(1)); };
+    Function.prototype.apply = function (self, args) { seen.push(this); return Reflect.apply(this, self, args || []); };
+    try { open('', 'y', ''); } finally { Function.prototype.call = call; Function.prototype.apply = apply; }
+    return seen.includes(__engineOpen);
+  })()`), false);
 });
 
 test('WebRTC through the tunnel: the relay is the only ICE server, the page sees its own configuration', () => {

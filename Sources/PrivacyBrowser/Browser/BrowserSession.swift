@@ -50,6 +50,10 @@ final class BrowserSession {
     /// The data store reports Safari's storage quota itself (`SafariStorageQuota`); the shim then
     /// leaves `navigator.storage.estimate()` alone.
     let storageQuotaByEngine: Bool
+    /// WebKit's keys among its features (`WebKitPreferences.setFeature`) for WebTransport and for
+    /// WebRTC's encoded transforms.
+    static let webTransportFeature = "WebTransportEnabled"
+    static let encodedTransformFeature = "WebRTCEncodedTransformEnabled"
     private let userContentController: WKUserContentController
     /// Receives the AutoFill script's messages (registered in its own content world only).
     private let passwordHandler = PasswordAutoFillHandler()
@@ -137,6 +141,17 @@ final class BrowserSession {
         // this WKPreferences property.
         if configuration.effectiveWebRTCPolicy == .disabled {
             WebKitPreferences.setBool(webConfiguration.preferences, "_setPeerConnectionEnabled:", false)
+            // The encoded transforms (RTCRtpScriptTransform, RTCEncoded*Frame; a worker's
+            // RTCRtpScriptTransformer) are a setting of their own, which Lockdown Mode turns off too.
+            // Where WebKit does not list it among its features the shim removes them from the page.
+            WebKitPreferences.setFeature(webConfiguration.preferences, Self.encodedTransformFeature, false)
+        }
+        // WebKit opens WebTransport's QUIC sockets outside the data store's proxy too (the leak
+        // check measured a proxied profile's session sending its datagrams from this Mac's address),
+        // and neither proxy kind carries QUIC: with a proxy it is off in the engine, in every frame
+        // and worker. Safari has it, so this shows; the address it would show is worse.
+        if configuration.proxy != nil {
+            WebKitPreferences.setFeature(webConfiguration.preferences, Self.webTransportFeature, false)
         }
         // WebRTC through the packet tunnel: libwebrtc gathers on the tunnel interface for the relay
         // addresses (measured with a utun in CI; the tunnel's enforced routes are a second line).
@@ -255,6 +270,35 @@ enum WebKitPreferences {
         guard object.responds(to: selector), let method = class_getInstanceMethod(type(of: object), selector) else { return nil }
         typealias Getter = @convention(c) (NSObject, Selector) -> Bool
         return unsafeBitCast(method_getImplementation(method), to: Getter.self)(object, selector)
+    }
+
+    /// Switches one of WebKit's features (the flags Safari's Develop menu lists) by its key, e.g.
+    /// "WebTransportEnabled": `-[WKPreferences _setEnabled:forFeature:]` with the `_WKFeature` of
+    /// `+[WKPreferences _features]`. False when this WebKit lists no feature with that key.
+    @discardableResult
+    static func setFeature(_ preferences: NSObject, _ key: String, _ value: Bool) -> Bool {
+        let selector = NSSelectorFromString("_setEnabled:forFeature:")
+        guard let feature = feature(key), let method = class_getInstanceMethod(WKPreferences.self, selector) else { return false }
+        typealias Setter = @convention(c) (NSObject, Selector, Bool, NSObject) -> Void
+        unsafeBitCast(method_getImplementation(method), to: Setter.self)(preferences, selector, value, feature)
+        return true
+    }
+
+    /// Whether that feature is on in `preferences` (`-_isEnabledForFeature:`); nil without it.
+    static func isFeatureEnabled(_ preferences: NSObject, _ key: String) -> Bool? {
+        let selector = NSSelectorFromString("_isEnabledForFeature:")
+        guard let feature = feature(key), let method = class_getInstanceMethod(WKPreferences.self, selector) else { return nil }
+        typealias Getter = @convention(c) (NSObject, Selector, NSObject) -> Bool
+        return unsafeBitCast(method_getImplementation(method), to: Getter.self)(preferences, selector, feature)
+    }
+
+    /// The `_WKFeature` with this key, nil when this WebKit has no such list or no such feature.
+    static func feature(_ key: String) -> NSObject? {
+        let list = NSSelectorFromString("_features"), keyGetter = NSSelectorFromString("key")
+        let preferencesClass: AnyObject = WKPreferences.self
+        guard preferencesClass.responds(to: list),
+              let features = preferencesClass.perform(list)?.takeUnretainedValue() as? [NSObject] else { return nil }
+        return features.first { $0.responds(to: keyGetter) && $0.perform(keyGetter)?.takeUnretainedValue() as? String == key }
     }
 }
 

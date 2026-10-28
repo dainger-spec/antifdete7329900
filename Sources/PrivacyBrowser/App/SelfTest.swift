@@ -126,6 +126,7 @@ final class SelfTest {
             try await workersUnderCSP(repository)
             try await geolocationInEngine(repository)
             try await webRTCEscapeRoutes(repository)
+            try await webTransportWithAProxy(repository)
             try await deviceGenerations(repository)
             try await fingerprintSurface(repository)
             try await recoverySealing(repository)
@@ -1031,22 +1032,37 @@ final class SelfTest {
         return JSON.stringify(out);
         """
 
-    /// `typeof RTCPeerConnection, typeof RTCDataChannel` in each kind of worker the page can make.
-    private static let rtcWorkersScript = """
+    /// The RTC interfaces of the window and of a worker made from a blob, and whether that worker
+    /// has onrtctransform: `window names|worker names|true or false`.
+    private static let rtcLeftScript = """
+        const rtc = /^(webkit)?RTC[A-Z]/;
+        const code = "postMessage([Object.getOwnPropertyNames(self).filter((n) => /^(webkit)?RTC[A-Z]/.test(n)).join(' '), 'onrtctransform' in self].join('|'))";
+        const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+        const inWorker = await new Promise((resolve) => {
+          worker.onmessage = (e) => resolve(String(e.data));
+          worker.onerror = () => resolve('error');
+          setTimeout(() => resolve('timeout'), 4000);
+        });
+        return Object.getOwnPropertyNames(window).filter((n) => rtc.test(n)).join(' ') + '|' + inWorker;
+        """
+
+    /// `typeof` of each of `names` (an argument: "RTCPeerConnection,RTCDataChannel") in each kind of
+    /// worker the page can make, comma-separated per worker (the self-test proxy's /pb-scopes/types.js).
+    private static let workerTypesScript = """
         const settle = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000))]);
         const ask = (worker, port) => settle(new Promise((resolve) => {
           port.onmessage = (e) => resolve(String(e.data));
           worker.onerror = () => resolve('error');
-          port.postMessage('rtc');
+          port.postMessage('types:' + names);
         }));
         const out = {};
-        const code = "onmessage = () => postMessage([typeof RTCPeerConnection, typeof RTCDataChannel].join())";
+        const code = "onmessage = (e) => postMessage(e.data.slice(6).split(',').map((name) => typeof self[name]).join())";
         const blob = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
         out.blob = await ask(blob, blob);
-        const dedicated = new Worker('/pb-scopes/rtc.js');
+        const dedicated = new Worker('/pb-scopes/types.js');
         out.url = await ask(dedicated, dedicated);
         if (typeof SharedWorker === 'function') {
-          const shared = new SharedWorker('/pb-scopes/rtc-shared.js');
+          const shared = new SharedWorker('/pb-scopes/types-shared.js');
           out.shared = await ask(shared, shared.port);
         }
         try {
@@ -1056,7 +1072,7 @@ final class SelfTest {
           const channel = new MessageChannel();
           out.service = await settle(new Promise((resolve) => {
             channel.port1.onmessage = (e) => resolve(String(e.data));
-            registration.active.postMessage('rtc', [channel.port2]);
+            registration.active.postMessage('types:' + names, [channel.port2]);
           }));
         } catch (e) {
           out.service = 'unavailable: ' + (e && e.message);
@@ -1066,11 +1082,12 @@ final class SelfTest {
 
     /// Where a page could reach a peer connection the shim does not hold, in a relay-only profile
     /// (WebRTC on in the engine; the shim keeps every connection on the relay, docs/TUNNEL.md):
-    /// workers, where WebKit exposes no RTCPeerConnection (a canary for a WebKit that would), and
+    /// workers, where WebKit exposes no RTCPeerConnection (a canary for a WebKit that would),
     /// frames sandboxed without allow-scripts, where no script of the frame's own runs — the shim's
-    /// copy included — while their parent can reach their constructors. Each connection reports
-    /// its policy and gathers against public STUN servers; a plain WKWebView shows what gathering
-    /// finds here without the shim.
+    /// copy included — while their parent can reach their constructors, and popups, whose first
+    /// document runs no user script. Each connection reports its policy and gathers against public
+    /// STUN servers; a plain WKWebView shows what gathering finds here without the shim. First, what
+    /// WebKit itself leaves with WebRTC off as a profile has it.
     private func webRTCEscapeRoutes(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             info("WebRTC escape route checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
@@ -1083,18 +1100,37 @@ final class SelfTest {
         try await PageLoader.load(plain, url: page)
         let control = try await js(plain, Self.gatherFunction + "return await gather(window.RTCPeerConnection);") as? String ?? "nil"
         info("WebRTC without the shim (a plain WKWebView, policy:candidates): \(control)")
+        // WebRTC off in the engine as a profile has it, without the shim: what WebKit itself leaves.
+        let offConfiguration = WKWebViewConfiguration()
+        offConfiguration.websiteDataStore = .nonPersistent()
+        WebKitPreferences.setBool(offConfiguration.preferences, "_setPeerConnectionEnabled:", false)
+        let transformsListed = WebKitPreferences.setFeature(offConfiguration.preferences, BrowserSession.encodedTransformFeature, false)
+        let off = WKWebView(frame: .zero, configuration: offConfiguration)
+        try await PageLoader.load(off, url: page)
+        let left = try await js(off, Self.rtcLeftScript) as? String ?? "nil"
+        info("WebRTC off in the engine, without the shim (window | a blob worker | onrtctransform there): \(left); encoded transforms "
+             + (transformsListed ? "switched off as a WebKit feature" : "not among WebKit's features here, left to the shim"))
+        if transformsListed {
+            check("WebRTC off: with peer connections and encoded transforms off, WebKit leaves no RTC interface in a page or its workers",
+                  left == "||false", left)
+        }
 
         let profile = try repository.create(name: "WebRTC relay-only", configuration: ProfileConfiguration(
             webRTCPolicy: .relayOnly, ephemeral: true))
         let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
-        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
-        defer { tab.tearDown(); session.shutDown() }
-        try await PageLoader.load(tab.webView, url: page)
+        defer { session.shutDown() }
+        // In a window, as the user's tabs are: popups open as its tabs.
+        let controller = session.openWindow(url: page)
+        guard let tab = controller.selectedTab,
+              await waitUntil(timeout: 20, { !tab.isLoading && tab.webView.url?.path == "/pb-scopes/page" }) else {
+            check("WebRTC escape routes: a relay-only profile window opens the page", false)
+            return
+        }
         guard try await js(tab.webView, "return typeof RTCPeerConnection;") as? String == "function" else {
             info("WebRTC escape route checks skipped: a relay-only profile has no RTCPeerConnection here")
             return
         }
-        let workersText = try await js(tab.webView, Self.rtcWorkersScript) as? String ?? "{}"
+        let workersText = try await js(tab.webView, Self.workerTypesScript, ["names": "RTCPeerConnection,RTCDataChannel"]) as? String ?? "{}"
         let workers = (try? JSONSerialization.jsonObject(with: Data(workersText.utf8))) as? [String: String] ?? [:]
         info("WebRTC in workers (RTCPeerConnection, RTCDataChannel): \(workersText)")
         let answered = workers.values.filter { value in !["timeout", "error", "unavailable"].contains { value.hasPrefix($0) } }
@@ -1110,6 +1146,82 @@ final class SelfTest {
                               ("sandboxedContentWindow", "a sandboxed frame reached by contentWindow")] {
             let value = routes[route] ?? "nil"
             check("WebRTC relay-only: \(name) gets a relay-only connection, no host or srflx candidate", value == "relay:none", value)
+        }
+        // Popups the page gets before any user script ran in them (WebKit runs none in a new page's
+        // first, blank document): an ordinary one, which shows that popups open here, one from
+        // document.open with three arguments, and one opened after the page broke a built-in that
+        // patching it uses (it must come patched or not at all). A script each: the app's user
+        // gesture lasts until the script first waits, and the constructor is read at once.
+        var popups: [String: String] = [:]
+        for (route, opener) in [("ordinary", "window.open('', 'pbOrdinary', 'width=320,height=240')"),
+                                ("documentOpen", "document.open('', 'pbDocumentOpen', 'width=320,height=240')"),
+                                ("brokenPatch", "(() => { const define = Object.defineProperty; Object.defineProperty = () => { throw new TypeError('broken'); }; "
+                                    + "try { return window.open('', 'pbBroken', 'width=320,height=240'); } finally { Object.defineProperty = define; } })()")] {
+            popups[route] = try await js(tab.webView, Self.gatherFunction + """
+                const popup = \(opener);
+                const result = popup ? await gather(popup.RTCPeerConnection) : 'blocked';
+                try { if (popup) popup.close(); } catch (e) {}
+                return result;
+                """) as? String ?? "nil"
+        }
+        info("WebRTC in popups of a relay-only profile (policy:candidates, or blocked): \(popups)")
+        guard popups["ordinary"] != "blocked" else {
+            info("popup checks skipped: popups do not open here")
+            return
+        }
+        check("WebRTC relay-only: a popup from window.open gets a relay-only connection", popups["ordinary"] == "relay:none",
+              popups["ordinary"] ?? "nil")
+        check("WebRTC relay-only: a popup from document.open with three arguments gets a relay-only connection",
+              popups["documentOpen"] == "relay:none", popups["documentOpen"] ?? "nil")
+        check("WebRTC relay-only: a popup opened after the page broke what patching it uses comes patched or not at all",
+              popups["brokenPatch"] == "relay:none" || popups["brokenPatch"] == "blocked", popups["brokenPatch"] ?? "nil")
+    }
+
+    // MARK: WebTransport with a proxy
+
+    /// WebKit opens WebTransport's QUIC sockets outside the data store's proxy (the leak check
+    /// measures it), so a proxied profile has it off in the engine (`BrowserSession`): not in its
+    /// pages, nor in any worker they make. A profile without a proxy keeps it, as Safari. The page
+    /// is the self-test proxy's on 127.0.0.1, a secure context (WebTransport is exposed only there).
+    private func webTransportWithAProxy(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("WebTransport checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let page = URL(string: "http://127.0.0.1:\(httpPort)/pb-scopes/page")!
+        let key = BrowserSession.webTransportFeature
+        let plainConfiguration = WKWebViewConfiguration()
+        plainConfiguration.websiteDataStore = .nonPersistent()
+        let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
+        try await PageLoader.load(plain, url: page)
+        let control = try await js(plain, "return typeof WebTransport;") as? String ?? "nil"
+        info("WebTransport in a plain WKWebView: \(control); WebKit's feature \(key): "
+             + (WebKitPreferences.feature(key).map { String(describing: $0) } ?? "not listed"))
+        guard control == "function" else {
+            info("WebTransport checks skipped: this WebKit has no WebTransport here")
+            return
+        }
+        for proxy in [ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), nil] {
+            let profile = try repository.create(name: proxy == nil ? "WebTransport direct" : "WebTransport proxied",
+                                                configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            defer { session.shutDown() }
+            let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
+            try await PageLoader.load(webView, url: page)
+            let enabled = WebKitPreferences.isFeatureEnabled(webView.configuration.preferences, key)
+            let inPage = try await js(webView, "return typeof WebTransport;") as? String ?? "nil"
+            let workersText = try await js(webView, Self.workerTypesScript, ["names": "WebTransport"]) as? String ?? "{}"
+            let workers = (try? JSONSerialization.jsonObject(with: Data(workersText.utf8))) as? [String: String] ?? [:]
+            let answered = workers.values.filter { $0 == "function" || $0 == "undefined" }
+            let detail = "feature \(enabled.map { "\($0)" } ?? "nil"), page \(inPage), workers \(workersText)"
+            if proxy == nil {
+                check("WebTransport: a profile without a proxy has it in the page and its workers, as Safari",
+                      enabled != false && inPage == "function" && answered.count >= 2 && answered.allSatisfy { $0 == "function" }, detail)
+            } else {
+                info("WebTransport in a proxied profile: \(detail)")
+                check("WebTransport: off in the engine with a proxy (its QUIC would go around it), in the page and every worker",
+                      enabled == false && inPage == "undefined" && answered.count >= 2 && answered.allSatisfy { $0 == "undefined" }, detail)
+            }
         }
     }
 
