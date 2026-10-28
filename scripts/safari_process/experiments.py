@@ -285,7 +285,13 @@ class DevProfile(Launcher):
                            + (f" --https-proxy {self.https_proxy}" if self.https_proxy else ""), "pid": pid}
 
     def stop(self):
-        safari_profile.dev_quit(self.home)
+        outcome = safari_profile.dev_quit(self.home)
+        if outcome:
+            files = sh(f"find {shlex.quote(self.home)} \\( -iname '*cookie*' -o -path '*HTTPStorages*' \\) "
+                       f"-type f 2>&1 | sed 's|^{self.home}||'")[1]
+            real = sh("ls -la ~/Library/HTTPStorages ~/Library/Cookies 2>&1 | grep -i -E 'safari|total|cookies'")[1]
+            log(f"dev profile {os.path.basename(self.home)} quit: {outcome}; cookie files in the profile: "
+                f"{files.splitlines()}; in the real home: {real.splitlines()}")
 
 
 class CopiedSafari(Launcher):
@@ -300,21 +306,26 @@ class CopiedSafari(Launcher):
 
     def prepare(self, work):
         self.app = os.path.join(work, f"SafariCopy-{self.variant}.app")
-        shutil.rmtree(self.app, ignore_errors=True)
-        # /Applications/Safari.app is a symlink into the App cryptex: copy what it points to.
+        stage = os.path.join(work, f"stage-{self.variant}")
+        for path in (self.app, stage):
+            shutil.rmtree(path, ignore_errors=True)
+        # /Applications/Safari.app is a symlink into the App cryptex: copy what it points to. `ditto`
+        # also copies the cryptex's file flags and is refused (EPERM on Contents); `cp -R` copies the
+        # files only. The bundle is prepared under a name without .app and renamed at the end.
         self.notes = {"source": os.path.realpath(SAFARI_APP),
-                      "copy": sh(["ditto", os.path.realpath(SAFARI_APP), self.app], timeout=300)}
+                      "copy": sh(["cp", "-R", os.path.realpath(SAFARI_APP), stage], timeout=300)}
         if self.variant != "identical":
-            plist = os.path.join(self.app, "Contents", "Info.plist")
+            plist = os.path.join(stage, "Contents", "Info.plist")
             self.notes["identifier"] = sh(["/usr/libexec/PlistBuddy", "-c",
                                            f"Set :CFBundleIdentifier dev.local.SafariCopy.{self.variant}", plist])
             # --force without --entitlements drops the entitlements of everything it signs.
-            self.notes["codesign"] = sh(["codesign", "--force", "--deep", "--sign", "-", self.app], timeout=300)
+            self.notes["codesign"] = sh(["codesign", "--force", "--deep", "--sign", "-", stage], timeout=300)
             if self.variant == "entitled":
                 entitlements = os.path.join(work, "safari-entitlements.plist")
                 sh(f"codesign -d --entitlements - --xml {SAFARI_APP} > {shlex.quote(entitlements)}")
                 self.notes["codesign_entitled"] = sh(["codesign", "--force", "--sign", "-", "--entitlements",
-                                                      entitlements, self.app], timeout=120)
+                                                      entitlements, stage], timeout=120)
+        self.notes["rename"] = sh(["mv", stage, self.app])
         self.notes["verify"] = sh(["codesign", "--verify", "--verbose=2", self.app], timeout=120)
         self.notes["signature"] = sh(f"codesign -dvv {shlex.quote(self.app)} 2>&1 | grep -E 'Identifier|Signature|flags|Team'")[1]
 
@@ -341,6 +352,8 @@ class CopiedSafari(Launcher):
                 info["exec"]["output"] = proc.stdout.read().decode(errors="replace")[-2000:]
         info["log"] = sh(CONSTRAINT_LOG, timeout=120)[1].splitlines()
         info["crash_reports"] = sh("ls -t ~/Library/Logs/DiagnosticReports 2>/dev/null | head -5")[1].splitlines()
+        for key, value in self.notes.items():
+            log(f"copy {self.variant} {key}: {json.dumps(value)[:600]}")
         return info
 
 

@@ -131,19 +131,20 @@ def dev_open(profile, url):
 
 
 def dev_quit(profile, timeout=15):
-    """Asks the profile's process to quit (it saves its cookies on the way out); kills it after
-    `timeout` seconds."""
+    """Asks the profile's process to quit (it saves its cookies on the way out); terminates it after
+    `timeout` seconds. Returns None if it was not running, else how it ended."""
     profile = os.path.abspath(os.path.expanduser(profile))
     pid = dev_pid(profile)
     if not pid:
-        return False
-    send_url(pid, "--quit")
+        return None
+    code, answer = send_url(pid, "--quit")
     deadline = time.time() + timeout
     while time.time() < deadline and dev_pid(profile):
         time.sleep(0.5)
     if dev_pid(profile):
         os.kill(pid, 15)
-    return True
+        return f"terminated after {timeout} s (quit event: {answer})"
+    return "quit"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -218,7 +219,7 @@ def main():
     elif args.command == "dev-open":
         print(dev_open(args.profile, args.url)[1])
     elif args.command == "dev-quit":
-        print("quit" if dev_quit(args.profile) else "not running")
+        print(dev_quit(args.profile) or "not running")
     elif args.command == "webapp-create":
         bundle = webapp_create(args.name, args.url)
         print(f"{bundle} ({webapp_identifier(args.name)})")

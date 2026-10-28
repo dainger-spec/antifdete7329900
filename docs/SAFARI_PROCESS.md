@@ -27,9 +27,9 @@ ships two siblings of the Safari executable that do keep data apart:
 | One process per profile | yes, one per profile folder | yes, one per web app |
 | Own data | in the folder given as `CFFIXED_USER_HOME` (`Library/WebKit/SafariForWebKitDevelopment/…`); nothing shared with Safari or other profiles (measured) | in a per-app container inside `~/Library/Containers/com.apple.Safari.WebApp`; nothing shared with Safari or the other web app (measured; Safari's cookies are copied once, at creation) |
 | Sites | any | one site (out-of-scope links open in the default browser) |
-| Own proxy | WebKit's per-process `-WebKit2HTTPSProxy` default (verified on the `Safari` executable; see §3) | not through launch arguments (§3) |
+| Own proxy | yes, an HTTP CONNECT proxy per process through WebKit's `-WebKit2HTTPSProxy` / `-WebKit2HTTPProxy` launch arguments (measured: only the profile given one went through it) | no: a web app launched with any arguments never loads its page (measured); no proxy setting exists |
 | Created by | `safari_profile.py dev-launch --profile <folder>` | Safari's UI only; `safari_profile.py webapp-create` scripts the menu |
-| Catch | no App Sandbox and none of Safari's entitlements: Apple Pay and Web Push are exposed to pages but cannot work, no iCloud, no Safari passwords; a developer binary Apple can change or drop in any update | not a browser: one site, no address bar, no AppleScript or WebDriver; creation needs Accessibility |
+| Catch | no App Sandbox and none of Safari's entitlements: pages see `ApplePaySession` and `PushManager`, but the process lacks the entitlements both need; no iCloud, no Safari passwords; a developer binary Apple can change or drop in any update | not a browser: one site, no address bar, no AppleScript or WebDriver; creation needs Accessibility |
 | TLS / HTTP/2 | identical to Safari on the same macOS (measured) | identical to Safari on the same macOS (measured) |
 
 `scripts/safari_process/safari_profile.py` is the prototype for both (§6).
