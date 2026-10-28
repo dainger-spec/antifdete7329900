@@ -197,6 +197,16 @@ final class ProxyLocationTests: XCTestCase {
         XCTAssertEqual(edited.keepingStoredState(of: nil).lastProxyLocation, older)
     }
 
+    func testSafariChromeIsOffForOldConfigsAndRoundTrips() throws {
+        let legacy = #"{"ephemeral":false,"geolocation":{"deny":{}},"safeBrowsingEnabled":false,"webRTCPolicy":"disabled"}"#
+        XCTAssertFalse(try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(legacy.utf8)).useSafariChrome)
+        XCTAssertFalse(ProfileConfiguration().useSafariChrome)
+        let on = ProfileConfiguration(useSafariChrome: true)
+        let decoded = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: JSONCoding.encoder.encode(on))
+        XCTAssertTrue(decoded.useSafariChrome)
+        XCTAssertEqual(decoded, on)
+    }
+
     func testProxyLocationFieldsRoundTripAndDefaultOnForOldConfigs() throws {
         let legacy = #"{"ephemeral":false,"geolocation":{"deny":{}},"safeBrowsingEnabled":false,"webRTCPolicy":"disabled"}"#
         let old = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(legacy.utf8))

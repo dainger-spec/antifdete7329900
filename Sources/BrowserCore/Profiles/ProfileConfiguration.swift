@@ -53,9 +53,10 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// bookmarks (explicit user data) are still saved, encrypted.
     public var ephemeral: Bool
 
-    /// Opt-in: open this profile's windows via Safari.framework (AppController path)
-    /// instead of the in-process WKWebView. Requires the safari-framework-path build.
-    /// Default off; older configurations decode as off.
+    /// Experimental: try Safari's own window (Safari.framework) as the profile's first window,
+    /// kept only if its tabs use this profile's data store and scripts, else the usual window
+    /// (docs/SAFARI_FRAMEWORK_PATH.md). Unsandboxed build only. Default off; older
+    /// configurations decode as off.
     public var useSafariChrome: Bool
 
     /// NATIVE: `WKPreferences.isFraudulentWebsiteWarningEnabled`. Safe Browsing lookups

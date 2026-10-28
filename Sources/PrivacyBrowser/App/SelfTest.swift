@@ -139,6 +139,7 @@ final class SelfTest {
             try await lockDuringLaunch(repository)
             try await quitFromFocusedPage(repository)
             try await forcedSealAtQuit(repository)
+            try await safariChrome(repository) // last: it maps Safari.framework into this process
         } catch {
             check("self-test ran without unexpected errors", false, String(describing: error))
         }
@@ -2130,6 +2131,37 @@ final class SelfTest {
         _ = try? await vault.seal(profileID: profile.id, key: key)
         await vault.deleteData(profileID: profile.id)
         try repository.delete(profile.id)
+    }
+
+    // MARK: Safari's own window
+
+    /// The experimental Safari window (`useSafariChrome`, docs/SAFARI_FRAMEWORK_PATH.md): whatever Safari's
+    /// code does in this process, the profile ends up with one window, and a Safari window that failed
+    /// the isolation check is not left open. The app's delegate and menu stay the app's.
+    private func safariChrome(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Safari chrome",
+                                            configuration: ProfileConfiguration(ephemeral: true, useSafariChrome: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let delegate = NSApp.delegate, menu = NSApp.mainMenu
+        session.openFirstWindow(url: nil)
+        let reason = session.safariChromeFallbackReason
+        info("Safari chrome: \(reason.map { "the usual window, because \($0)" } ?? "Safari's window kept")")
+        check("Safari chrome: one window, Safari's (checked) or the usual one",
+              session.windowCount == (reason == nil ? 0 : 1), "windows=\(session.windowCount)")
+        func safariWindows() -> Int {
+            NSApp.windows.filter { window in
+                window.isVisible && window.windowController.map { NSStringFromClass(type(of: $0)) == "BrowserWindowController" } == true
+            }.count
+        }
+        let settled = await waitUntil(timeout: 5) { safariWindows() == (reason == nil ? 1 : 0) }
+        check("Safari chrome: no Safari window is left open after a failed check", settled, "\(safariWindows()) visible")
+        check("Safari chrome: the app's delegate and main menu are still the app's",
+              NSApp.delegate === delegate && NSApp.mainMenu === menu)
+        if AppEnvironment.isSandboxed {
+            check("Safari chrome: the sandboxed build does not load Safari.framework",
+                  reason?.contains("sandboxed") == true, reason ?? "nil")
+        }
+        session.shutDown()
     }
 
     // MARK: Helpers

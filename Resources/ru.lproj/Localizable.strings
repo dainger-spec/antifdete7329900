@@ -121,6 +121,8 @@
 "editor.retain.week" = "1 неделя";
 "editor.retain.year" = "1 год";
 "editor.safeBrowsing" = "Safe Browsing (запросы идут в обход прокси)";
+"editor.safariChrome" = "Собственное окно Safari (эксперимент)";
+"editor.safariChrome.detail" = "Сначала пробует окно Safari из Safari.framework и оставляет его, только если его вкладки работают с данными, прокси и скриптами этого профиля; иначе открывается обычное окно.";
 "editor.section.general" = "Основные";
 "editor.section.history" = "История";
 "editor.section.identity" = "Устройство и идентичность";

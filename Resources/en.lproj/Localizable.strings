@@ -121,6 +121,8 @@
 "editor.retain.week" = "1 week";
 "editor.retain.year" = "1 year";
 "editor.safeBrowsing" = "Safe Browsing (lookups bypass the proxy)";
+"editor.safariChrome" = "Safari's own window (experimental)";
+"editor.safariChrome.detail" = "Tries Safari's window from Safari.framework first and keeps it only if its tabs use this profile's data, proxy and scripts; otherwise the usual window opens.";
 "editor.section.general" = "General";
 "editor.section.history" = "History";
 "editor.section.identity" = "Device & identity";

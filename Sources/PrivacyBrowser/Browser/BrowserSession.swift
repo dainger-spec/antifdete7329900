@@ -43,6 +43,11 @@ final class BrowserSession {
     /// Receives the AutoFill script's messages (registered in its own content world only).
     private let passwordHandler = PasswordAutoFillHandler()
     private var windows: [BrowserWindowController] = []
+    /// Safari's own windows (`useSafariChrome`), only ever ones that passed its isolation check.
+    private var safariWindows: [SafariBrowserWindowController] = []
+    /// Why this launch's Safari window was not used (log and self-test).
+    private(set) var safariChromeFallbackReason: String?
+    private let logger = Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
     private var libraryWindow: LibraryWindowController?
     private var isClosing = false
 
@@ -131,20 +136,28 @@ final class BrowserSession {
 
     // MARK: Windows
 
-    /// Opens a browser window. When `useSafariChrome` is true (opt-in, default false) the
-    /// Safari.framework BrowserWindowController is attempted first; on failure the existing
-    /// custom controller is used. See docs/SAFARI_FRAMEWORK_PATH.md.
-    @discardableResult
-    func openWindow(url: URL?, useSafariChrome: Bool = false) -> BrowserWindowController {
-        if useSafariChrome {
-            let safari = SafariBrowserWindowController(profileID: profileID)
-            if let window = safari.open(dataStore: dataStore) {
-                window.makeKeyAndOrderFront(nil)
-                NSLog("BrowserSession: Safari chrome opened for profile \(profileID)")
-                // Safari controller is not tracked in `windows` yet; fall through to custom
-                // controller so existing close/shutdown paths remain intact.
+    /// The profile's first window of a launch. With `useSafariChrome` (experimental, off by default)
+    /// Safari's own window is tried first and kept only if its tabs use this profile's data store and
+    /// scripts; otherwise, with the reason in the log, the usual window opens.
+    func openFirstWindow(url: URL?) {
+        if configuration.useSafariChrome, let dataStore {
+            do {
+                let safari = try SafariBrowserWindowController(
+                    profileName: profileName, dataStore: dataStore, userContentController: userContentController,
+                    url: url, onClose: { [weak self] in self?.safariWindowDidClose($0) })
+                safariWindows.append(safari)
+                logger.notice("Safari's window opened for profile \(self.profileID, privacy: .public)")
+                return
+            } catch {
+                safariChromeFallbackReason = String(describing: error)
+                logger.notice("Safari's window not used, the usual one opens: \(String(describing: error), privacy: .public)")
             }
         }
+        openWindow(url: url)
+    }
+
+    @discardableResult
+    func openWindow(url: URL?) -> BrowserWindowController {
         let controller = BrowserWindowController(session: self)
         windows.append(controller)
         controller.showWindow(nil)
@@ -178,13 +191,22 @@ final class BrowserSession {
 
     func windowDidClose(_ controller: BrowserWindowController) {
         windows.removeAll { $0 === controller }
-        if windows.isEmpty && !isClosing {
+        reportIfAllWindowsClosed()
+    }
+
+    private func safariWindowDidClose(_ controller: SafariBrowserWindowController) {
+        safariWindows.removeAll { $0 === controller }
+        reportIfAllWindowsClosed()
+    }
+
+    private func reportIfAllWindowsClosed() {
+        if windows.isEmpty && safariWindows.isEmpty && !isClosing {
             onAllWindowsClosed?()
         }
     }
 
     func bringToFront() {
-        frontmostWindow?.window?.makeKeyAndOrderFront(nil)
+        (frontmostWindow?.window ?? safariWindows.last?.window)?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -215,12 +237,15 @@ final class BrowserSession {
         // `tearDown()` nils each window's delegate, so `close()` here never calls back into us.
         let toClose = windows
         windows.removeAll()
+        let safariToClose = safariWindows
+        safariWindows.removeAll()
         libraryWin?.window?.delegate = nil
         libraryWin?.close()
         for controller in toClose {
             controller.tearDown()
             controller.close()
         }
+        safariToClose.forEach { $0.close() }
         library.flush()
         userContentController.removeAllUserScripts()
         // The controller holds its handlers strongly.

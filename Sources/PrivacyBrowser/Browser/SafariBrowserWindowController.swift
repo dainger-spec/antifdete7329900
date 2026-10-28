@@ -1,102 +1,104 @@
 import AppKit
+import SafariBridge
 import WebKit
 
-/// Wrapper that attempts to open a real Safari BrowserWindowController via the
-/// path recovered from sample: AppController._newWindowWithFrontmostProfile: →
-/// _createNewWindowWithFrontmostProfile: → BrowserWindowController showWindow:.
-/// Falls back to nil if creation fails; caller should use the existing custom path.
+/// Experimental (profile setting `useSafariChrome`, unsandboxed build only): a profile's first
+/// window as Safari's own browser window from Safari.framework, instead of this app's.
+///
+/// Safari's window is kept only when every tab in it uses this profile's data store (its cookies,
+/// storage and proxy) and its user content controller (the fingerprint and WebRTC shims, AutoFill,
+/// the ping-load blocker). Otherwise it is closed again and `init` throws, with the reason, so the
+/// caller opens the usual window: a window on Safari's own data store would run outside the
+/// profile's isolation and proxy. See docs/SAFARI_FRAMEWORK_PATH.md.
 @MainActor
-final class SafariBrowserWindowController: NSObject {
-    private var safariController: NSObject?
-    let profileID: UUID
-    
-    init(profileID: UUID) {
-        self.profileID = profileID
-        super.init()
+final class SafariBrowserWindowController {
+    struct Unavailable: Error, CustomStringConvertible {
+        let description: String
     }
-    
-    /// Returns the Safari window if the controller was created, otherwise nil.
-    func open(dataStore: WKWebsiteDataStore?) -> NSWindow? {
-        guard SafariLoader.load() else { return nil }
-        SafariHooks.install()
-        
-        // Prefer the real creation path recovered from sample.
-        if let window = openViaAppController(dataStore: dataStore) {
-            return window
+
+    private let controller: NSWindowController
+    private var closeObserver: NSObjectProtocol?
+    private let onClose: (SafariBrowserWindowController) -> Void
+
+    var window: NSWindow? { controller.window }
+
+    init(profileName: String, dataStore: WKWebsiteDataStore, userContentController: WKUserContentController,
+         url: URL?, onClose: @escaping (SafariBrowserWindowController) -> Void) throws {
+        guard !AppEnvironment.isSandboxed else {
+            throw Unavailable(description: "the sandboxed build does not load Safari.framework")
         }
-        
-        // Fallback: direct init (rarely works without private entitlements).
-        guard let cls = SafariLoader.browserWindowControllerClass as? NSObject.Type else {
-            NSLog("SafariBrowserWindowController: class not found")
-            return nil
+        let controller: NSWindowController
+        do {
+            try PBSafariBridge.loadFramework()
+            controller = try PBSafariBridge.makeWindowController()
+        } catch {
+            throw Unavailable(description: error.localizedDescription)
         }
-        let controller = cls.init()
-        self.safariController = controller
-        if let dataStore {
-            controller.setValue(dataStore, forKey: "websiteDataStore")
+        // Offered for Safari to pick up; whether its tabs use it is what the check below finds out.
+        try? PBSafariBridge.set(dataStore, forKey: "websiteDataStore", of: controller)
+        let webViews = controller.window.map { Self.webViews(in: $0.contentView) } ?? []
+        let mismatch: String?
+        if controller.window == nil {
+            mismatch = "Safari's window controller has no window"
+        } else if webViews.isEmpty {
+            mismatch = "Safari's window has no web view"
+        } else if !webViews.allSatisfy({ $0.configuration.websiteDataStore === dataStore }) {
+            mismatch = "Safari's tabs do not use this profile's data store (cookies, storage, proxy)"
+        } else if !webViews.allSatisfy({ $0.configuration.userContentController === userContentController }) {
+            mismatch = "Safari's tabs do not run this profile's scripts (fingerprint and WebRTC shims, AutoFill)"
+        } else {
+            mismatch = nil
         }
-        controller.setValue(profileID.uuidString, forKey: "profileIdentifier")
-        if let window = controller.value(forKey: "window") as? NSWindow {
-            window.title = "PrivacyBrowser"
-            applyShell(to: window)
-            return window
+        if let mismatch {
+            try? PBSafariBridge.close(controller)
+            throw Unavailable(description: mismatch)
         }
-        return nil
+
+        self.controller = controller
+        self.onClose = onClose
+        let window = controller.window!
+        Self.applyShell(to: window, title: profileName)
+        closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window,
+                                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.windowWillClose() }
+        }
+        if let url { webViews[0].load(URLRequest(url: url)) }
+        do {
+            try PBSafariBridge.show(controller)
+        } catch {
+            close()
+            throw Unavailable(description: "showing Safari's window: \(error.localizedDescription)")
+        }
     }
-    
-    /// Uses the sample-recovered path: AppController._newWindowWithFrontmostProfile:
-    private func openViaAppController(dataStore: WKWebsiteDataStore?) -> NSWindow? {
-        guard let appControllerClass = NSClassFromString("AppController") as? NSObject.Type else {
-            NSLog("SafariBrowserWindowController: AppController not found")
-            return nil
-        }
-        // Shared instance is the usual pattern for AppController.
-        let shared = appControllerClass.perform(#selector(NSObject.value(forKey:)), with: "sharedController")?.takeUnretainedValue() as? NSObject
-            ?? appControllerClass.init()
-        
-        // _newWindowWithFrontmostProfile: returns the BrowserWindowController.
-        let sel = NSSelectorFromString("_newWindowWithFrontmostProfile:")
-        guard shared.responds(to: sel) else {
-            NSLog("SafariBrowserWindowController: _newWindowWithFrontmostProfile: not found")
-            return nil
-        }
-        guard let controller = shared.perform(sel)?.takeUnretainedValue() as? NSObject else {
-            return nil
-        }
-        self.safariController = controller
-        
-        if let dataStore {
-            controller.setValue(dataStore, forKey: "websiteDataStore")
-        }
-        controller.setValue(profileID.uuidString, forKey: "profileIdentifier")
-        
-        // Force show if not already visible.
-        controller.perform(#selector(NSWindowController.showWindow(_:)), with: nil)
-        
-        if let window = controller.value(forKey: "window") as? NSWindow {
-            window.title = "PrivacyBrowser"
-            applyShell(to: window)
-            return window
-        }
-        return nil
+
+    func close() {
+        try? PBSafariBridge.close(controller)
     }
-    
-    private func applyShell(to window: NSWindow) {
-        // Hide dock and menu bar so the window reads as a pure browser shell.
-        NSApp.setActivationPolicy(.accessory)
-        window.styleMask.remove(.titled)
-        window.styleMask.insert(.borderless)
+
+    private func windowWillClose() {
+        if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+        closeObserver = nil
+        // As BrowserWindowController: report on the next run-loop turn, once AppKit has finished
+        // closing the window this object keeps alive.
+        DispatchQueue.main.async { [self] in onClose(self) }
+    }
+
+    private static func webViews(in view: NSView?) -> [WKWebView] {
+        guard let view else { return [] }
+        if let webView = view as? WKWebView { return [webView] }
+        return view.subviews.flatMap { webViews(in: $0) }
+    }
+
+    /// Safari's window as a bare browser shell. Window-scoped only: the app's other windows (Profiles,
+    /// other profiles) keep their Dock icon and menu bar, and the window stays titled underneath,
+    /// so it can still become key and take typing in its address field.
+    private static func applyShell(to window: NSWindow, title: String) {
+        window.title = title
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        // Hide the system menu bar and dock for this process.
-        if let dock = NSClassFromString("NSApplication") as? NSObject.Type {
-            dock.perform(#selector(NSObject.setValue(_:forKey:)), with: false, with: "presentationOptions")
-        }
-        NSLog("SafariBrowserWindowController: shell applied to window")
-    }
-    
-    func close() {
-        safariController?.perform(#selector(NSWindowController.close))
     }
 }

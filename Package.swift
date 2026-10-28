@@ -15,6 +15,8 @@
 //                   a UDP host for the TURN server outside the tunnel (CI harness).
 //   PacketTunnelExtension  macOS only: the NEPacketTunnelProvider system extension's executable.
 //                   Packaged and signed into the app only by `NE=1 scripts/build-app.sh`.
+//   SafariBridge    macOS only: Objective-C calls into Safari.framework's private classes for the
+//                   experimental Safari window, each inside @try (docs/SAFARI_FRAMEWORK_PATH.md).
 //   PrivacyBrowser  macOS app (SwiftUI + AppKit + WebKit). macOS only.
 //
 import PackageDescription
@@ -68,9 +70,14 @@ targets.append(contentsOf: [
         dependencies: ["TunnelCore", "TunnelTransport"],
         path: "Sources/PacketTunnelExtension"
     ),
+    .target(
+        name: "SafariBridge",
+        path: "Sources/SafariBridge",
+        cSettings: [.unsafeFlags(["-fobjc-arc"])]
+    ),
     .executableTarget(
         name: "PrivacyBrowser",
-        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport"],
+        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "SafariBridge"],
         path: "Sources/PrivacyBrowser"
     ),
 ])
