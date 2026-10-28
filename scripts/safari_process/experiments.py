@@ -33,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
 import harness  # noqa: E402
+import safari_profile  # noqa: E402
 
 SAFARI_APP = "/Applications/Safari.app"
 SAFARI_BIN = SAFARI_APP + "/Contents/MacOS/Safari"
@@ -177,7 +178,10 @@ def quit_all():
 
 
 def send_url(pid, url):
-    return sh(["osascript", "-l", "JavaScript", os.path.join(HERE, "send_url.js"), str(pid), url], timeout=30)
+    try:
+        return safari_profile.send_url(pid, url)
+    except subprocess.TimeoutExpired:
+        return 124, "timeout"
 
 
 class Launcher:
@@ -262,6 +266,26 @@ def quit_pid(process):
         process.wait(timeout=15)
     except subprocess.TimeoutExpired:
         process.terminate()
+
+
+class DevProfile(Launcher):
+    """The prototype's `dev` profile (safari_profile.py): SafariForWebKitDevelopment with a home
+    folder of its own, optionally with WebKit's per-process HTTPS proxy default."""
+
+    def __init__(self, home, https_proxy=None):
+        self.home, self.https_proxy = home, https_proxy
+
+    def start(self, url):
+        try:
+            pid, self.process = safari_profile.dev_launch(self.home, url, https_proxy=self.https_proxy)
+        except (OSError, RuntimeError) as exc:
+            return {"command": f"safari_profile.py dev-launch --profile {self.home}", "error": str(exc),
+                    "log": sh(CONSTRAINT_LOG, timeout=120)[1].splitlines()}
+        return {"command": f"safari_profile.py dev-launch --profile {self.home}"
+                           + (f" --https-proxy {self.https_proxy}" if self.https_proxy else ""), "pid": pid}
+
+    def stop(self):
+        safari_profile.dev_quit(self.home)
 
 
 class CopiedSafari(Launcher):
@@ -358,15 +382,11 @@ class WebApp(Launcher):
         self.notes = {}
 
     def create(self):
-        start = self.reports.url(f"/app?name={self.name}")
-        self.notes["open_in_safari"] = sh(["open", "-b", SAFARI_ID, start], timeout=30)
-        time.sleep(5)
-        self.notes["add_to_dock"] = sh(["osascript", os.path.join(HERE, "add_to_dock.applescript"), f"SPWA-{self.name}"],
-                                       timeout=60)
-        for _ in range(30):
-            if os.path.exists(os.path.join(self.bundle, "Contents", "Info.plist")):
-                break
-            time.sleep(1)
+        try:
+            safari_profile.webapp_create(f"SPWA-{self.name}", self.reports.url(f"/app?name={self.name}"))
+            self.notes["add_to_dock"] = [0, "created"]
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            self.notes["add_to_dock"] = [1, str(exc)]
         exists = os.path.exists(self.bundle)
         self.notes["created"] = exists
         if exists:
@@ -387,9 +407,13 @@ class WebApp(Launcher):
             return {"command": f"open {self.bundle}", "error": "web app was not created"}
         self.reports.set_plan(self.name, url)
         command = ["open", self.bundle] + (["--args"] + self.args if self.args else [])
-        code, output = sh(command, timeout=30)
+        try:
+            safari_profile.webapp_launch(f"SPWA-{self.name}", self.args)
+            outcome = "ok"
+        except (OSError, subprocess.SubprocessError) as exc:
+            outcome = str(exc)
         time.sleep(3)
-        return {"command": " ".join(shlex.quote(c) for c in command), "exit": code, "output": output,
+        return {"command": " ".join(shlex.quote(c) for c in command), "outcome": outcome,
                 "web_app_pids": pids("Web App.app/Contents/MacOS/Web App")}
 
 
@@ -444,9 +468,9 @@ def experiment_specs(work_root, reports, proxy):
                      "container. Isolated? Which Safari-only APIs remain? The second gets WebKit's per-process "
                      "HTTPS proxy default as an argument.",
             "instances": [("s5", OpenSafari()),
-                          ("f5", ExecBinary(SAFARI_DEV_BIN, os.path.join(work_root, "sfwd", "home-f5"))),
-                          ("g5", ExecBinary(SAFARI_DEV_BIN, os.path.join(work_root, "sfwd", "home-g5"),
-                                            args=proxy_args(proxy)))],
+                          ("f5", DevProfile(os.path.join(work_root, "sfwd", "home-f5"))),
+                          ("g5", DevProfile(os.path.join(work_root, "sfwd", "home-g5"),
+                                            https_proxy=f"http://127.0.0.1:{proxy.port}"))],
         },
         "copy": {
             "about": "A copy of Safari.app run from another folder: bit-identical (launch constraints?), with a new "
