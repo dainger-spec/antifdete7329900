@@ -1,0 +1,49 @@
+name: Safari process experiments
+
+# Can the real Safari.app run as a separate process per profile with its own data, and what is
+# its TLS fingerprint then? See docs/SAFARI_PROCESS.md. Report-only: the results are the
+# artifacts and the job summary; a step fails only when the harness itself breaks.
+on:
+  push:
+    paths:
+      - "scripts/safari_process/**"
+      - ".github/workflows/safari-process.yml"
+  workflow_dispatch:
+
+jobs:
+  harness:
+    name: Harness tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/safari_process/test_harness.py
+
+  experiments:
+    name: Safari experiments (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Harness tests
+        run: python3 scripts/safari_process/test_harness.py
+      - name: Python with hpack (HTTP/2 header names)
+        run: |
+          python3 -m venv build/venv
+          build/venv/bin/pip install --quiet hpack || echo "::warning::hpack not installed; Huffman-coded header names show as '?'"
+      - name: Enable safaridriver (reference measurement only)
+        run: sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
+      - name: Experiments
+        timeout-minutes: 35
+        run: |
+          build/venv/bin/python scripts/safari_process/experiments.py --out build/safari-process \
+            --setup-hosts --trust facts reference baseline open-n env-home exec-home
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: safari-process-${{ matrix.os }}
+          path: build/safari-process
+          if-no-files-found: ignore
