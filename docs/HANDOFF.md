@@ -32,6 +32,7 @@ Rules from the owner:
 | `claude/safari-parity-p0-workers` | P0-3: shim into blob workers as one line, no eval (CSP / Trusted Types safe) | done, CI green (215/215) |
 | `claude/safari-parity-p1-geolocation` | P1-2: geolocation denied by WebKit itself, the tab's UI delegate answers permission state | done, CI run 210 green (222/222) |
 | `claude/safari-parity-p1-webrtc` | P1-3: WebRTC escape routes, plus the WebTransport leak fix | done, CI runs 213–215 green (236/236) |
+| `claude/safari-parity-p1-ios` | P1-4: iPhone/iPad profiles; P2: TLS/HTTP2 parity, beacons, WebSocket and media through the proxy; P0-4: shim frames in `e.stack` | see "P1-4 and P2 state" below |
 
 ## P1-3 state (`claude/safari-parity-p1-webrtc`)
 
@@ -88,8 +89,8 @@ each item since.
 | P1-1 | Native storage quota through `_WKWebsiteDataStoreConfiguration`. Safari reports 82 GB; WebKit gave 1000 MiB in URL and service workers | done (`claude/safari-parity-p1-quota`) |
 | P1-2 | Geolocation denied by WebKit through `WKUIDelegatePrivate`, instead of about 20 replaced functions | done (`claude/safari-parity-p1-geolocation`) |
 | P1-3 | WebRTC routes around relay-only (worker canary, sandboxed frames, popups), plus the WebTransport proxy leak | done |
-| P1-4 | iPhone/iPad profiles, see below | not started |
-| P2 | Measure TLS/HTTP2 through the proxy and gate those checks on it; "inert" WebRTC; small differences from Safari in the live comparison (`errorStack`, `windowOwnCount`); leak check for WebSocket and HLS | not started |
+| P1-4 | iPhone/iPad profiles: the device's pixel ratio, feature set, window and orientation | done (`claude/safari-parity-p1-ios`), see below |
+| P2 | Measure TLS/HTTP2 through the proxy and gate those checks on it; "inert" WebRTC; small differences from Safari in the live comparison (`errorStack`, `windowOwnCount`); leak check for WebSocket and HLS | TLS/HTTP2 parity, beacons, WebSocket and media done; "inert" WebRTC not done on purpose; `errorStack`/`windowOwnCount` explained (below) |
 
 Smaller open points from the analysis:
 - **Blob-worker traces.** A shimmed blob worker's `location.href` and `ErrorEvent.filename`
@@ -101,36 +102,81 @@ Smaller open points from the analysis:
   from WKWebView. The docs say so; leave them.
 - **Merging is the owner's decision.** None of the stacked branches is merged yet.
 
-## Next: P1-4 (iPhone/iPad profiles)
+## P1-4 and P2 state (`claude/safari-parity-p1-ios`)
 
-Also on the list: `screen.orientation`, and a UA version taken from the host engine. A
-reference snapshot from a real iPhone is needed; without one, several points cannot be
-checked.
+What an iPhone or iPad profile gets (commits 273e529, 02612c6):
+- **Pixel ratio in the engine:** `-[WKWebView _setOverrideDeviceScaleFactor:]` per tab (3 or
+  2), so `devicePixelRatio` and the resolution media queries agree. The shim's getter is only
+  the fallback for a WebKit without it (macOS 26.6.2 has it).
+- **Safari's feature set there**, per MDN's browser-compat-data:
+  - Fullscreen: iPad only (`isElementFullscreenEnabled`).
+  - Notification: neither (`NotificationsEnabled` via `_features`).
+  - MediaSource: iPad only. `_setMediaSourceEnabled:` does not hide it on macOS 26.6.2 (CI run
+    217), so the shim removes it (`Device.missingInterfaces`). The self-test logs the engine's
+    own answer from `WKContentWorld.defaultClient`.
+- **The window is the device's viewport:** 390 × 739 (iPhone), 820 × 1106 (iPad). These are
+  estimates from an iPhone 16 Pro's numbers (`PrivacyScripts.deviceViewportSize`); no real
+  device was measured. A second tab grows the window by the tab strip.
+- **Orientation:** `screen.orientation` portrait-primary, angle 0.
+- **UA:** a mobile generation of the host's release names its major.minor (`Version/26.6`). The
+  picker hides other releases (iOS 27) unless the profile already has one.
 
-The current iPhone profile sets JS getters only (`patchDevice`: platform, maxTouchPoints,
-screen 390×844, devicePixelRatio 3). The window stays a desktop one, so
-`innerWidth > screen.width`, an obvious contradiction.
+To do with a real device: run `python3 scripts/device_reference.py --name iphone-ios26` on a
+Mac, open the printed URL in Safari on the iPhone, and replace the estimates in
+`deviceViewportSize` (and `DECLARED` in the script) with what it measured.
 
-Engine levers found in WebKit's source (all private API):
-- **`-[WKWebView _setOverrideDeviceScaleFactor:]`**: a native DPR, so `matchMedia`
-  resolution and canvas agree. Then drop the JS `devicePixelRatio` getter.
-- **`-[WKWebView _setLayoutMode:]`** with `_WKLayoutModeDynamicSizeComputedFromViewScale`,
-  plus `_setViewScale:` (or `_setFixedLayoutSize:`): a native layout width of 390, so
-  `innerWidth` matches.
-- **`-[WKPreferences _setMediaSourceEnabled:NO]`**: an iPhone has no `MediaSource`. Keep
-  `_setManagedMediaSourceEnabled:` on.
-- **`WKPreferences.isElementFullscreenEnabled = false`** on iPhone.
-- **`NotificationsEnabled`** via `_features`: iOS has no `Notification`.
-- iOS defaults are in WebKit's `UnifiedWebPreferences.yaml`, under
-  `PLATFORM(IOS_FAMILY)` keys.
+**Remote workers' User-Agent: a WebKit race, not ours.**
+- A fresh profile's shared and service workers sometimes report WebKit's bare default UA
+  (`… (KHTML, like Gecko)`, no `Version/… Safari/…`).
+- The "shared pool" INFO line shows it since CI run 193, before any engine switch of ours: 9 of
+  32 self-test passes, mostly the first (sandboxed) one.
+- WebKit source:
+  - Safari 26 branches 7622–7624 have an inverted test in
+    `WebSharedWorkerContextManagerConnection::launchSharedWorker`
+    (`if (!initializationData.userAgent.isEmpty()) initializationData.userAgent = m_userAgent;`):
+    a shared worker takes the worker process's UA, never its page's. Fixed in 7625.
+  - `WebProcessPool::remoteWorkerProcesses()` is static: every pool's
+    `updateRemoteWorkerUserAgent` reaches every remote-worker process of the app.
+  - The race itself (why the process sometimes has no UA) was not found.
+- The checks (time zone, WebTransport, surface) now:
+  - accept the profile's UA or WebKit's bare default (logged);
+  - fail on any other UA, such as another profile's.
+- `remoteWorkerRace` counts the race over 6 fresh iPhone profiles each: as shipped, with
+  Notification on, and with encoded transforms off.
+  - That last switch made it frequent in runs 211–212 (4 of 8). It stays reverted.
+  - After any new engine switch, compare these counts.
 
-**Caution:** after each engine preference change, check that the remote-worker UA checks
-(time-zone test, iPhone profile "Asia/Tokyo") stay green. See the regression above.
+P2 (02612c6, 3529a37):
+- **TLS/HTTP2 parity.** The leak check loads tls.peet.ws in each proxied profile through its
+  proxy. JA4, ciphers, extensions, Akamai frames and header order and values must equal the
+  profile's without a proxy, or it exits 1.
+- **Beacons.** A `pagehide` beacon reaches the proxy (self-test).
+- **WebSocket and media.** A WebSocket, an HLS stream and an MP4 in HTTP CONNECT and SOCKS5
+  profiles must reach the proxy (self-test, with a no-proxy control). AVFoundation plays media,
+  not WebKit's loader, so this is a real question.
+- **Not done on purpose.** "Inert" WebRTC would replace the engine's guarantee (no
+  `RTCPeerConnection`) with a JS one. The original analysis advised against it.
+- **Live-compare differences that stay.**
+  - `errorStack` and `webdriver` come from the harness (safaridriver against our capture).
+  - `windowOwnCount` follows from Apple Pay, Web Push and WebRTC, which WKWebView cannot match.
 
-## P2 (later)
+P0-4's open point, the shim's frames in `e.stack`, has a fix in e860267. The shim tests pass under JavaScriptCore; the self-test check first runs in CI run 221:
+- **What leaked.** A replacement that called the native first to check its receiver left its
+  frame (`user-script:N`, as WebKit names it) in the native's error. That held in every profile:
+  the `contentWindow`/`contentDocument` getters, `window.open` and `document.open`.
+- **The fix.** A receiver the native refuses now gets the native call in tail position; the shim
+  is strict, and JavaScriptCore drops the caller's frame for it (`refused()` in `PrivacyScripts`).
+- **Tests.** A shim test checks it under Bun (JavaScriptCore; V8 has no proper tail calls).
+  The self-test compares the stacks with a plain web view's.
+- **Still with a frame.** Errors from arguments (`window.open('http://[')`), and the shims of
+  non-default modes: the time-zone shim, fixed geolocation, relay-only WebRTC.
 
-TLS/HTTP2 through the proxy, inert WebRTC, minor surface differences. Also worth adding to
-the leak check: WebSocket and HLS media through the proxy.
+## What is left
+
+- Measure a real iPhone and iPad with `scripts/device_reference.py`; replace the viewport
+  estimates.
+- The remaining frames above, if a site is seen to look for them.
+- Smaller points from the analysis (below the plan table) are still open.
 
 ## Where things are
 
@@ -144,5 +190,6 @@ the leak check: WebSocket and HLS media through the proxy.
   - It runs only on the macOS CI runner; Swift cannot be compiled on Linux here.
   - Its test pages come from `scripts/selftest_proxy.py`.
 - Leak check: `scripts/leak_check.py`.
+- A real device's Safari: `scripts/device_reference.py` (HTTPS page on this Mac; results in `scripts/reference/`).
 - CI logs: the GitHub MCP `get_job_logs` (`return_content=false`), then `curl` the URL.
   The macOS job holds the self-test and the leak check.
