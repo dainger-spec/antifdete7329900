@@ -93,6 +93,17 @@ jobs:
           code=$?
           if [ "$code" = "2" ]; then echo "::warning::Safari could not be driven on this runner; surface not compared"; exit 0; fi
           exit $code
+      - name: Device reference pages in Safari (safaridriver)
+        # scripts/device_reference.py as a device opens it: the TLS/HTTP/2 page, its link, the
+        # measurement page until "sent", and the JSON written. A runner where Safari cannot be driven
+        # (or the certificate trusted) only warns.
+        if: always()
+        timeout-minutes: 6
+        run: |
+          code=0
+          python3 scripts/device_reference_safari.py --out build/device-reference-safari.json || code=$?
+          if [ "$code" = "2" ]; then echo "::warning::Safari could not be driven for the device reference pages"; exit 0; fi
+          exit $code
       - name: Leak check — does QUIC or WebRTC go around a profile's proxy?
         # Real forwarding proxies on this runner and a profile without one as the control; see
         # scripts/leak_check.py. Fails on traffic seen going around a proxy, or on a TLS/HTTP2
@@ -116,6 +127,7 @@ jobs:
             build/surface-sandboxed
             build/surface-unsandboxed
             build/safari-surface.json
+            build/device-reference-safari.json
             build/live
             build/leaks
           if-no-files-found: ignore

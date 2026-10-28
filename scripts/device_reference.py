@@ -36,6 +36,14 @@ surface shows what the profile still has of the Mac; for lists (globals, WebGL e
 it prints the items only one side has.
 
 HTTPS: APIs Safari exposes only in a secure context then read as they do on a real site.
+
+If a page stays blank:
+- A VPN in TUN mode (this Mac's addresses in 198.18.0.0/15) or a system proxy a VPN client set
+  takes the device's (or this Mac's own) connection elsewhere: turn it off while measuring. A
+  profile of another browser measured on this Mac: no proxy in that profile.
+- https://localhost:<port + 1>/ (or this Mac's name or address) can be opened at once, skipping the
+  TLS page; TLS and HTTP/2 are then not noted.
+- --verbose prints every connection: the address, the ALPN, TLS errors and the response given.
 """
 import argparse
 import hashlib
@@ -241,9 +249,17 @@ def read_exact(conn, count):
     return data
 
 
+def h2_frame(kind, flags, stream, payload=b""):
+    return struct.pack(">I", len(payload))[1:] + struct.pack(">BBI", kind, flags, stream) + payload
+
+
 def h2_capture(conn):
-    """Reads the client's connection preface and frames up to its first request's HEADERS."""
-    conn.settimeout(10)  # a connection Safari opens ahead and never uses
+    """Reads the client's connection preface and frames up to its first request's HEADERS. The
+    server's SETTINGS go out first, and each client SETTINGS is acknowledged as it comes: a client
+    may wait for them before it sends a request."""
+    # A connection Safari opens ahead (preconnect) may carry its request only a while later.
+    conn.settimeout(60)
+    conn.sendall(h2_frame(0x4, 0, 0))
     if read_exact(conn, 24) != b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":
         raise ConnectionError("no HTTP/2 preface")
     settings, window, priorities, headers_priority, block = [], 0, [], None, b""
@@ -253,12 +269,14 @@ def h2_capture(conn):
         payload = read_exact(conn, length)
         if kind == 0x4 and not flags & 0x1:  # SETTINGS
             settings += [struct.unpack(">HI", payload[i:i + 6]) for i in range(0, len(payload), 6)]
+            conn.sendall(h2_frame(0x4, 0x1, 0))
         elif kind == 0x8 and stream == 0:  # WINDOW_UPDATE
             window = struct.unpack(">I", payload[:4])[0] & 0x7FFFFFFF
         elif kind == 0x2:  # PRIORITY
             dependency, weight = struct.unpack(">IB", payload[:5])
             priorities.append(f"{stream}:{dependency >> 31}:{dependency & 0x7FFFFFFF}:{weight + 1}")
         elif kind in (0x1, 0x9):  # HEADERS, CONTINUATION
+            request_stream = stream
             fragment = payload
             if kind == 0x1 and flags & 0x8:  # PADDED
                 fragment = fragment[1:len(fragment) - fragment[0]]
@@ -271,27 +289,41 @@ def h2_capture(conn):
                 break
     akamai = "|".join([";".join(f"{key}:{value}" for key, value in settings), str(window),
                        ",".join(priorities) or "0", pseudo_header_order(block)])
-    return {"akamai": akamai, "headersPriority": headers_priority}
+    return {"akamai": akamai, "headersPriority": headers_priority}, request_stream
 
 
-def h2_respond(conn, html):
-    """SETTINGS, the ACK of the client's, and one 200 response on stream 1, then GOAWAY."""
-    def frame(kind, flags, stream, payload=b""):
-        return struct.pack(">I", len(payload))[1:] + struct.pack(">BBI", kind, flags, stream) + payload
-    content_type = b"text/html; charset=utf-8"
-    # :status 200 (static index 8); content-type, literal without indexing, name index 31.
-    block = b"\x88" + b"\x0f\x10" + bytes([len(content_type)]) + content_type
-    goaway = struct.pack(">II", 1, 0)
-    conn.sendall(frame(0x4, 0, 0) + frame(0x4, 0x1, 0) + frame(0x1, 0x4, 1, block)
-                 + frame(0x0, 0x1, 1, html) + frame(0x7, 0, 0, goaway))
-    # Read what the client still sends (its ACK of our SETTINGS) until it closes: closing with
-    # unread data resets the connection, and the client may then drop the response.
-    conn.settimeout(3)
+def h2_respond(conn, html, stream):
+    """One 200 response on the stream the request came on, then GOAWAY naming that stream."""
+    content_type, length = b"text/html; charset=utf-8", str(len(html)).encode()
+    # :status 200 (static index 8); content-type and content-length, literals without indexing,
+    # name indexes 31 and 28.
+    block = (b"\x88" + b"\x0f\x10" + bytes([len(content_type)]) + content_type
+             + b"\x0f\x0d" + bytes([len(length)]) + length)
+    conn.sendall(h2_frame(0x1, 0x4, stream, block) + h2_frame(0x0, 0x1, stream, html)
+                 + h2_frame(0x7, 0, 0, struct.pack(">II", stream, 0)))
+    drain(conn)
+
+
+def drain(conn, seconds=3):
+    """Reads what the client still sends (an ACK of our SETTINGS, …) until it closes or goes quiet:
+    closing with unread data resets the connection, and the client may then drop the response."""
+    conn.settimeout(seconds)
     try:
         while conn.recv(65536):
             pass
     except (OSError, ssl.SSLError):
         pass
+
+
+def close_tls(conn):
+    """close_notify, then the socket: without it a client may take the response as cut short."""
+    try:
+        conn.settimeout(2)
+        conn.unwrap()
+    except (OSError, ssl.SSLError, ValueError):
+        pass
+    finally:
+        conn.close()
 
 
 # ---- The measurement page -------------------------------------------------------------------------
@@ -485,6 +517,10 @@ def main():
     parser.add_argument("--port", type=int, default=8443, help="the TLS/HTTP/2 page; the measurement page is on the next port")
     parser.add_argument("--probe", default=PROBE)
     parser.add_argument("--compare", nargs=2, metavar="JSON", help="print where two references differ, and exit")
+    parser.add_argument("--verbose", action="store_true",
+                        help="print every connection: address, ALPN, TLS errors, the response given")
+    parser.add_argument("--cert", nargs=2, metavar=("CERT", "KEY"),
+                        help="serve this certificate instead of one made for the run (CI trusts its own)")
     args = parser.parse_args()
     if args.compare:
         return compare(*args.compare)
@@ -500,6 +536,10 @@ def main():
     lock = threading.Lock()
     done = threading.Event()
 
+    def log(message):
+        if args.verbose:
+            print(f"DEVICE-REFERENCE connection: {message}", flush=True)
+
     def note(client, key, value):
         with lock:
             seen = network.setdefault(client, {}).setdefault(key, [])
@@ -510,14 +550,29 @@ def main():
         hello = parse_client_hello(peek_client_hello(sock))
         if hello:
             note(client, "tls", dict(ja4(hello), port=port))
+        log(f"{client} -> port {port}: " + (f"ClientHello, SNI {'yes' if hello['sni'] else 'no'}, "
+                                            f"ALPN offered {','.join(hello['alpn']) or '-'}" if hello
+                                            else "no ClientHello in the first bytes"))
 
     class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+        # HTTP/1.1 with a Content-Length and Connection: close on every response: WebKit (CFNetwork)
+        # left an HTTP/1.0 page read to the connection's end blank.
+        protocol_version = "HTTP/1.1"
+
+        def respond(self, status, body=b"", content_type="text/plain; charset=utf-8"):
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
             self.end_headers()
-            self.wfile.write(page)
+            self.wfile.write(body)
+            self.wfile.flush()
+            log(f"{self.client_address[0]} -> port {args.port + 1}: {self.command} {self.path} -> {status}, "
+                f"{len(body)} bytes")
+
+        def do_GET(self):
+            self.respond(200, page, "text/html; charset=utf-8")
 
         def do_POST(self):
             length = min(int(self.headers.get("Content-Length") or 0), 4 * 1024 * 1024)
@@ -525,16 +580,15 @@ def main():
             try:
                 result = json.loads(body)
             except ValueError:
-                self.send_response(400)
-                self.end_headers()
+                self.respond(400, b"not JSON")
                 return
             with lock:
                 result["network"] = json.loads(json.dumps(network.get(self.client_address[0], {})))
             path = os.path.join(REFERENCE_DIR, args.name + ".json")
             with open(path, "w", encoding="utf-8") as handle:
                 json.dump(result, handle, indent=1, sort_keys=True)
-            self.send_response(204)
-            self.end_headers()
+            # 200 with a body rather than 204, which may not carry a Content-Length.
+            self.respond(200, b"ok")
             summary(args.name, result)
             print(f"DEVICE-REFERENCE written: {os.path.relpath(path, ROOT)}")
             done.set()
@@ -557,35 +611,58 @@ def main():
             note_hello(request, client_address[0], args.port + 1)
             request.settimeout(30)
             conn = self.context.wrap_socket(request, server_side=True)
+            log(f"{client_address[0]} -> port {args.port + 1}: TLS done, ALPN {conn.selected_alpn_protocol()}")
             try:
                 self.RequestHandlerClass(conn, client_address, self)
             finally:
-                conn.close()
+                close_tls(conn)
+
+        def shutdown_request(self, request):
+            # finish_request closed the TLS connection; the raw socket only needs closing.
+            request.close()
 
         def handle_error(self, request, client_address):
-            note(client_address[0], "errors", f"port {args.port + 1}: {sys.exc_info()[1]}")
+            note(client_address[0], "errors", f"port {args.port + 1}: {sys.exc_info()[1]!r}")
+            log(f"{client_address[0]} -> port {args.port + 1}: error {sys.exc_info()[1]!r}")
 
     class EntryHandler(socketserver.BaseRequestHandler):
         def handle(self):
             sock, client = self.request, self.client_address[0]
             note_hello(sock, client, args.port)
+            conn = None
             try:
                 sock.settimeout(30)
                 conn = self.server.context.wrap_socket(sock, server_side=True)
-                if conn.selected_alpn_protocol() == "h2":
-                    note(client, "h2", h2_capture(conn))
-                    h2_respond(conn, entry_page)
+                alpn = conn.selected_alpn_protocol()
+                log(f"{client} -> port {args.port}: TLS done, ALPN {alpn}")
+                if alpn == "h2":
+                    h2, stream = h2_capture(conn)
+                    note(client, "h2", h2)
+                    h2_respond(conn, entry_page, stream)
+                    log(f"{client} -> port {args.port}: h2 200 on stream {stream}, {len(entry_page)} bytes, "
+                        f"GOAWAY last stream {stream}; {h2['akamai']}")
                 else:
-                    conn.recv(65536)
+                    request = b""
+                    while b"\r\n\r\n" not in request and len(request) < 65536:
+                        chunk = conn.recv(65536)
+                        if not chunk:
+                            raise ConnectionError("closed before a request")
+                        request += chunk
                     conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n"
+                                 + b"Cache-Control: no-store\r\n"
                                  + f"Content-Length: {len(entry_page)}\r\n\r\n".encode() + entry_page)
                     note(client, "h2", {"akamai": "none: the browser did not offer h2"})
-                conn.close()
+                    first_line = request.split(b"\r\n", 1)[0].decode("latin-1")
+                    log(f"{client} -> port {args.port}: HTTP/1.1 200, {len(entry_page)} bytes ({first_line})")
             except (ssl.SSLError, ConnectionError, OSError, struct.error, IndexError) as error:
-                note(client, "errors", f"port {args.port}: {error}")
+                note(client, "errors", f"port {args.port}: {error!r}")
+                log(f"{client} -> port {args.port}: error {error!r}")
+            finally:
+                if conn is not None:
+                    close_tls(conn)
 
     with tempfile.TemporaryDirectory(prefix="pb-device-reference-") as directory:
-        cert, key = certificate(directory, address, name)
+        cert, key = args.cert or certificate(directory, address, name)
         socketserver.ThreadingTCPServer.allow_reuse_address = True
         entry = socketserver.ThreadingTCPServer(("0.0.0.0", args.port), EntryHandler)
         entry.daemon_threads = True
