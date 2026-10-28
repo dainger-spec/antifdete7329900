@@ -450,17 +450,28 @@ The profile setting:
   in any frame. Where WebKit lacks that property, the document-start user script removes
   every `RTC*` interface from the window instead, as in an engine built without WebRTC.
 - `relayOnly` wraps the constructor and `setConfiguration` to force
-  `iceTransportPolicy: "relay"`. No host or srflx candidates are gathered, so peers see
-  only the TURN server's address. The TURN server still sees your real IP. With a proxy,
-  only the tunnel's relay is used.
+  `iceTransportPolicy: "relay"`. No host or srflx candidate reaches the page or its peers, so
+  peers see only the TURN server's address. The TURN server still sees your real IP, and so do
+  the page's STUN servers: libwebrtc applies the relay policy to what it reports, and by its code
+  still asks the configured STUN servers from this Mac's address (not measured here). Without a
+  proxy that is the address the site already sees. With a proxy, only the tunnel's relay is used,
+  and the page's STUN servers are dropped ([TUNNEL.md](TUNNEL.md)).
 - `unrestricted` uses the WebKit default; never applied with a proxy.
 
-**Limits of the shim (relay-only, and the fallback removal):** it isn't applied in workers, which have no RTCPeerConnection
-anyway. The script runs in every same-origin frame when its document starts, so a frame
-created by the page (`window.frames[i]`, `window[i]`) is already patched when the page
-reaches it; `contentWindow`, `contentDocument` and `window.open` are hooked as well for a
-window reached before its own copy ran. A cross-origin frame is patched by its own copy and
-cannot be inspected from the page anyway.
+**Limits of the shim (relay-only, and the fallback removal):** workers have no
+RTCPeerConnection (WebKit exposes `RTCDataChannel` there, not the peer connection); the self-test
+checks blob, URL, shared and service workers, so a WebKit that exposed it would turn CI red.
+Where WebKit cannot switch WebRTC off, the fallback removes the `RTC*` interfaces in workers made
+from a blob too. The script runs in every same-origin frame when its document starts, including
+frames sandboxed without `allow-scripts` (nothing on WebKit's user-script path checks sandbox
+flags), so a frame created by the page (`window.frames[i]`, `window[i]`) is already patched when
+the page reaches it; `contentWindow`, `contentDocument` and `window.open` are hooked as well for a
+window reached before its own copy ran. Checked on macOS 26.6.2: a relay-only profile's peer
+connections made from frames sandboxed without scripts (empty, `srcdoc`, a same-origin URL,
+reached by index or by `contentWindow`) and from an ordinary frame reached by index are all
+relay-only and gather no host or srflx candidate against public STUN servers, where a plain
+WKWebView gathers a srflx one. A cross-origin frame is patched by its own copy and cannot be
+inspected from the page anyway.
 
 ## 6. Time zone, geolocation, user agent
 

@@ -22,6 +22,11 @@ profile without a proxy as the control:
   then open a data channel to each other through the relay and the proxy (the test proxy plays
   the NAT hairpin a real proxy's public address would need). The server urls the page is told
   (ICE events, `getStats()`) must be its own: the relay's address here is this Mac's.
+* WebTransport: WebKit opens its QUIC sockets itself. Each profile's page opens a WebTransport
+  session to an address of its own in TEST-NET-2 (198.51.100.0/24, which no server holds), and
+  `tcpdump` (passwordless sudo) counts the UDP datagrams that leave this Mac for it on the default
+  route. Through a proxy none may: neither proxy carries QUIC, so a datagram to the profile's
+  address went around it. The profile without a proxy must send some, or the check proves nothing.
 * WebRTC through a utun interface: where passwordless sudo works (CI), `PrivacyBrowser
   --utun-relay` opens a utun interface as root, routes the tunnel's subnets into it and serves
   two routes with the extension's own PacketRouter, each through its own UDP-capable proxy. One
@@ -42,6 +47,7 @@ import argparse
 import ipaddress
 import json
 import os
+import re
 import secrets
 import select
 import socket
@@ -140,6 +146,76 @@ const result = { available: true, open, delivered: message === 'ping-through-pro
 a.close(); b.close();
 return result;
 """
+
+
+# A WebTransport session to the profile's own TEST-NET-2 address (`profile` is the profile's name,
+# given by SiteCapture). Nothing answers there: only whether datagrams leave this Mac counts.
+WEBTRANSPORT_SCRIPT = r"""
+const targets = __TARGETS__;
+const target = targets[profile];
+if (typeof WebTransport !== 'function') return { available: false, target };
+let outcome;
+try {
+  const session = new WebTransport('https://' + target + ':4433/pb-leak-check');
+  outcome = await Promise.race([
+    session.ready.then(() => 'ready', (e) => 'failed: ' + (e && (e.name + ' ' + e.message))),
+    new Promise((resolve) => setTimeout(() => resolve('pending after 5 s'), 5000)),
+  ]);
+  try { session.close(); } catch (e) {}
+} catch (e) {
+  outcome = 'threw: ' + e.name + ' ' + e.message;
+}
+return { available: true, target, outcome };
+"""
+
+
+class DatagramCapture:
+    """`sudo -n tcpdump` on the default route's interface, counting UDP datagrams to TEST-NET-2
+    per destination address. `started` is False where it cannot run (no passwordless sudo)."""
+
+    def __init__(self):
+        self.counts = {}
+        self.started = False
+        self.process = None
+        interface = "en0"
+        try:
+            route = subprocess.run(["route", "-n", "get", "default"], capture_output=True, text=True, timeout=10).stdout
+            interface = next((line.split(":", 1)[1].strip() for line in route.splitlines() if line.strip().startswith("interface:")), interface)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        self.interface = interface
+        try:
+            self.process = subprocess.Popen(["sudo", "-n", "tcpdump", "-l", "-n", "-i", interface, "udp and dst net 198.51.100.0/24"],
+                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except OSError as error:
+            print(f"INFO datagram capture could not start: {error}")
+            return
+        threading.Thread(target=self._read, daemon=True).start()
+        # tcpdump says "listening on …" on stderr once it captures.
+        ready = threading.Event()
+        def wait_ready():
+            for line in self.process.stderr:
+                if "listening on" in line:
+                    ready.set()
+                    return
+        threading.Thread(target=wait_ready, daemon=True).start()
+        self.started = ready.wait(10) and self.process.poll() is None
+        if not self.started:
+            print("INFO datagram capture did not start (tcpdump needs passwordless sudo)")
+
+    def _read(self):
+        for line in self.process.stdout:
+            match = re.search(r" > (198\.51\.100\.\d+)\.\d+: ", line)
+            if match:
+                self.counts[match.group(1)] = self.counts.get(match.group(1), 0) + 1
+
+    def stop(self):
+        if self.process and self.process.poll() is None:
+            self.process.terminate()  # sudo passes SIGTERM on to tcpdump
+            try:
+                self.process.wait(10)
+            except subprocess.TimeoutExpired:
+                subprocess.run(["sudo", "-n", "pkill", "-f", "--", "tcpdump -l -n -i"], check=False)
 
 
 class ForwardingProxy:
@@ -473,16 +549,22 @@ def main():
         print("::warning::leak check: the utun relay could not run here (it needs passwordless sudo on macOS)")
         for name, _ in utun_profiles:
             del proxies[name]
+    # Each profile's WebTransport target: an address of its own in TEST-NET-2.
+    targets = {profile["name"]: f"198.51.100.{10 + index}" for index, profile in enumerate(profiles)}
     pages = [
         {"name": "quic", "url": QUIC_SITE, "script": QUIC_SCRIPT, "settleMs": 500, "timeoutMs": 60000},
         {"name": "quic-again", "url": QUIC_SITE, "script": QUIC_SCRIPT, "settleMs": 500, "timeoutMs": 60000},
         {"name": "webrtc", "url": QUIC_SITE, "script": WEBRTC_SCRIPT, "timeoutMs": 30000},
         {"name": "webrtc-loop", "url": QUIC_SITE, "script": LOOP_SCRIPT, "timeoutMs": 45000},
+        {"name": "webtransport", "url": QUIC_SITE, "script": WEBTRANSPORT_SCRIPT.replace("__TARGETS__", json.dumps(targets)),
+         "timeoutMs": 20000},
     ]
     spec = {"window": {"width": 1000, "height": 600}, "profiles": profiles, "pages": pages}
+    capture = DatagramCapture()
     try:
         results = run_app(os.path.abspath(args.app), spec, os.path.abspath(os.path.join(args.out, "profiles")))
     finally:
+        capture.stop()
         if utun:
             stop_utun_relay(utun)
     if not results:
@@ -500,6 +582,9 @@ def main():
 
     control = quic_protocols(results.get("direct", {}))
     control_h3 = any(p in ("http/3", "h3") for p in control)
+    control_datagrams = capture.counts.get(targets["direct"], 0)
+    print(f"INFO WebTransport datagrams on {capture.interface} per target: {capture.counts} "
+          f"(capture {'running' if capture.started else 'NOT running'})")
     report = {}
     warnings = []
     for profile in profiles:
@@ -507,6 +592,8 @@ def main():
         result = results.get(name, {})
         seen = quic_protocols(result)
         webrtc = result.get("webrtc") if isinstance(result.get("webrtc"), dict) else {}
+        transport = result.get("webtransport") if isinstance(result.get("webtransport"), dict) else {}
+        datagrams = capture.counts.get(targets[name], 0)
         loop = result.get("webrtc-loop") if isinstance(result.get("webrtc-loop"), dict) else {}
         proxied = name in proxies
         proxy = proxies.get(name)
@@ -518,13 +605,16 @@ def main():
         # this Mac's address, host means WebKit gathered on its own interfaces.
         stun_bypass = proxied and ((webrtc.get("srflx") or 0) > 0 or (webrtc.get("host") or 0) > 0
                                    or any(t in ("srflx", "host", "prflx") for t in loop.get("candidateTypes") or []))
+        # A datagram to the profile's own address left this Mac, and no proxy here carries QUIC.
+        webtransport_bypass = proxied and capture.started and datagrams > 0
         # The relay's own address (this Mac's, for the harness) named to the page as a server url.
         relay_url_shown = bool(profile.get("relay")) and (webrtc.get("foreignServerURLs") or 0) > 0
         report[name] = {"proxied": proxied, "protocols": seen, "webrtc": webrtc, "loop": loop,
                         "proxyRequestsToSite": through_proxy, "proxyUdpAssociations": udp_associations,
                         "proxyUdpDatagrams": proxy.udp_datagrams if proxy else 0,
                         "proxyLog": log, "quicBypassesProxy": quic_bypass, "stunBypassesProxy": stun_bypass,
-                        "relayURLShown": relay_url_shown}
+                        "webTransport": transport, "webTransportDatagrams": datagrams,
+                        "webTransportBypassesProxy": webtransport_bypass, "relayURLShown": relay_url_shown}
         print(f"::group::[{name}] protocols {seen}, WebRTC {webrtc}, loop {loop}, proxy saw {through_proxy} request(s) to the site")
         for request in log:
             print(f"  {request['proxy']} {request['command']} {request['target']}")
@@ -533,8 +623,20 @@ def main():
         print("::endgroup::")
         if not proxied:
             print(f"LEAK-CHECK [{name}] control: HTTP/3 {'seen' if control_h3 else 'not seen'}, "
-                  f"WebRTC srflx {webrtc.get('srflx')}")
+                  f"WebRTC srflx {webrtc.get('srflx')}, WebTransport {transport.get('outcome')} "
+                  f"({datagrams} datagram(s) to {targets[name]})")
             continue
+        if not capture.started:
+            webtransport = "not measured (no packet capture here)"
+        elif webtransport_bypass:
+            webtransport = f"BYPASSES THE PROXY ({datagrams} QUIC datagram(s) to {targets[name]}; the page saw {transport.get('outcome')})"
+        elif transport.get("available") is False:
+            webtransport = "no WebTransport (nothing to leak)"
+        elif control_datagrams == 0:
+            webtransport = "inconclusive (the profile without a proxy sent nothing either)"
+            warnings.append(f"{name}: WebTransport check inconclusive (no datagram from the profile without a proxy)")
+        else:
+            webtransport = f"nothing left this Mac for {targets[name]} (the page saw {transport.get('outcome')})"
         quic = ("BYPASSES THE PROXY (HTTP/3 over UDP)" if quic_bypass else
                 "stays on the proxy" if control_h3 and seen else "inconclusive (no HTTP/3 without a proxy, or no answer)")
         if stun_bypass:
@@ -558,12 +660,13 @@ def main():
             rtc = "no candidates"
             if profile.get("relay"):
                 warnings.append(f"{name}: the relay gave no candidates")
-        print(f"LEAK-CHECK [{name}] QUIC: {quic}; WebRTC: {rtc}")
+        print(f"LEAK-CHECK [{name}] QUIC: {quic}; WebRTC: {rtc}; WebTransport: {webtransport}")
     with open(os.path.join(args.out, "leaks.json"), "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=1, sort_keys=True)
     for warning in warnings:
         print(f"::warning::leak check: {warning}")
-    leaked = [name for name, r in report.items() if r["quicBypassesProxy"] or r["stunBypassesProxy"]]
+    leaked = [name for name, r in report.items()
+              if r["quicBypassesProxy"] or r["stunBypassesProxy"] or r["webTransportBypassesProxy"]]
     if leaked:
         print(f"::error::traffic went around the proxy in: {', '.join(leaked)}")
         return 1
