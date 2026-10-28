@@ -39,6 +39,36 @@ safe('innerSize', () => innerWidth + 'x' + innerHeight);
 safe('outerSize', () => outerWidth + 'x' + outerHeight);
 safe('pointer', () => [matchMedia('(pointer: fine)').matches, matchMedia('(hover: hover)').matches, matchMedia('(any-pointer: coarse)').matches].join(','));
 safe('touch', () => ['ontouchstart' in window, typeof TouchEvent, typeof Touch].join(','));
+// The touch interfaces' shape where they exist: iOS WebKit's come from sources Apple does not
+// publish (ENABLE_TOUCH_EVENTS needs the internal SDK), so only a device shows what a profile lacks.
+safe('touchShape', () => {
+  const holders = { window, 'Window.prototype': Window.prototype, 'Document.prototype': Document.prototype,
+                    'Element.prototype': Element.prototype, 'HTMLElement.prototype': HTMLElement.prototype };
+  const where = (name) => Object.keys(holders)
+    .filter((holder) => Object.prototype.hasOwnProperty.call(holders[holder], name)).join('+') || 'none';
+  const shape = (name) => {
+    const f = window[name];
+    if (typeof f !== 'function') return typeof f;
+    const chain = [];
+    for (let p = Object.getPrototypeOf(f.prototype); p && p !== Object.prototype; p = Object.getPrototypeOf(p)) {
+      chain.push(p.constructor ? p.constructor.name : '?');
+    }
+    return ['len=' + f.length, 'chain=' + chain.join('>'), 'own=' + Object.getOwnPropertyNames(f.prototype).join('+')].join(' ');
+  };
+  const attempt = (fn) => {
+    try { const v = fn(); return 'ok:' + Object.prototype.toString.call(v); } catch (e) { return 'throws:' + e.name + ': ' + e.message; }
+  };
+  return {
+    handlers: ['ontouchstart', 'ontouchmove', 'ontouchend', 'ontouchcancel', 'ongesturestart', 'ongesturechange', 'ongestureend']
+      .map((name) => name + ':' + where(name)).join(','),
+    TouchEvent: shape('TouchEvent'), Touch: shape('Touch'), TouchList: shape('TouchList'), GestureEvent: shape('GestureEvent'),
+    createEvent: attempt(() => document.createEvent('TouchEvent')),
+    construct: attempt(() => new TouchEvent('touchstart')),
+    touchObject: attempt(() => new Touch({ identifier: 1, target: document.documentElement })),
+    motionPermission: [window.DeviceMotionEvent, window.DeviceOrientationEvent]
+      .map((f) => (f ? typeof f.requestPermission : 'absent')).join(','),
+  };
+});
 
 // Time and locale
 safe('timeZone', () => Intl.DateTimeFormat().resolvedOptions().timeZone);
@@ -92,6 +122,39 @@ safe('webgl', () => {
       .map((p) => gl.getParameter(p)).join(','),
     viewport: Array.from(gl.getParameter(gl.MAX_VIEWPORT_DIMS)).join('x'),
     lineWidth: Array.from(gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE)).join('-'),
+  };
+});
+
+// Codecs: what the media stack answers for the types fingerprinting scripts ask about (the
+// synchronous APIs; MediaCapabilities and WebCodecs answer asynchronously). 'p' probably, 'm' maybe,
+// '-' no; y/n for the isTypeSupported calls; a dot where the API is absent.
+safe('codecs', () => {
+  const types = [
+    ['h264', 'video/mp4; codecs="avc1.42E01E"'], ['h264high', 'video/mp4; codecs="avc1.640028"'],
+    ['hevc', 'video/mp4; codecs="hvc1.1.6.L93.B0"'], ['hev1', 'video/mp4; codecs="hev1.1.6.L93.B0"'],
+    ['av1', 'video/mp4; codecs="av01.0.05M.08"'], ['dolbyVision', 'video/mp4; codecs="dvh1.05.06"'],
+    ['vp8', 'video/webm; codecs="vp8"'], ['vp9', 'video/webm; codecs="vp9"'], ['vp9mp4', 'video/mp4; codecs="vp09.00.10.08"'],
+    ['av1webm', 'video/webm; codecs="av01.0.05M.08"'], ['theora', 'video/ogg; codecs="theora"'],
+    ['hls', 'application/vnd.apple.mpegurl'], ['quicktime', 'video/quicktime'], ['matroska', 'video/x-matroska'],
+    ['aac', 'audio/mp4; codecs="mp4a.40.2"'], ['heaac', 'audio/mp4; codecs="mp4a.40.5"'], ['ac3', 'audio/mp4; codecs="ac-3"'],
+    ['eac3', 'audio/mp4; codecs="ec-3"'], ['opusmp4', 'audio/mp4; codecs="opus"'], ['flacmp4', 'audio/mp4; codecs="flac"'],
+    ['alac', 'audio/mp4; codecs="alac"'], ['mp3', 'audio/mpeg'], ['opuswebm', 'audio/webm; codecs="opus"'],
+    ['vorbis', 'audio/webm; codecs="vorbis"'], ['opusogg', 'audio/ogg; codecs="opus"'], ['flac', 'audio/flac'],
+    ['wav', 'audio/wav'], ['caf', 'audio/x-caf'],
+  ];
+  const video = document.createElement('video');
+  const play = (type) => ({ probably: 'p', maybe: 'm', '': '-' })[video.canPlayType(type)] || '?';
+  const supported = (api, type) => {
+    if (!api || typeof api.isTypeSupported !== 'function') return '.';
+    try { return api.isTypeSupported(type) ? 'y' : 'n'; } catch (e) { return 'e'; }
+  };
+  const recorder = ['video/mp4', 'video/mp4; codecs="avc1,mp4a"', 'video/webm', 'video/webm; codecs="vp8,opus"',
+                    'audio/mp4', 'audio/webm; codecs="opus"'];
+  return {
+    canPlay: types.map(([name, type]) => name + ':' + play(type)).join(','),
+    mediaSource: types.map(([name, type]) => name + ':' + supported(window.MediaSource, type)).join(','),
+    managedMediaSource: types.map(([name, type]) => name + ':' + supported(window.ManagedMediaSource, type)).join(','),
+    mediaRecorder: recorder.map((type) => type + ':' + supported(window.MediaRecorder, type)).join(','),
   };
 });
 
@@ -230,6 +293,9 @@ safe('safariShape', () => {
 });
 safe('webkitObject', () => typeof window.webkit);
 safe('windowOwnCount', () => Object.getOwnPropertyNames(window).length);
+// Which globals exist (sorted: the order depends on what the page touched first). Two engines'
+// lists differ by what each has; scripts/device_reference.py --compare prints the difference.
+safe('windowNames', () => Object.getOwnPropertyNames(window).sort().join(','));
 
 // Native-looking functions (CreepJS "lies"): toString, name, length, own property names
 safe('natives', () => {

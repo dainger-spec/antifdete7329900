@@ -150,6 +150,17 @@ def text(value):
     return str(value)
 
 
+def describe(key, a, b):
+    """One line per difference; for lists (globals, WebGL extensions, codecs) the items one side lacks."""
+    left, right = a.split(","), b.split(",")
+    if min(len(left), len(right)) >= 4:
+        only_safari, only_profile = [x for x in left if x not in right], [x for x in right if x not in left]
+        if not only_safari and not only_profile:
+            return f"{key}: the same items, in another order"
+        return f"{key}: only in Safari: {','.join(only_safari) or '-'}; only in the profile: {','.join(only_profile) or '-'}"
+    return f"{key}: Safari={json.dumps(a)[:160]}  profile={json.dumps(b)[:160]}"
+
+
 def compare(safari, ours):
     safari_flat, ours_flat = flat(safari), flat(ours)
     failures, diffs, same = [], [], 0
@@ -160,7 +171,7 @@ def compare(safari, ours):
         if a == b:
             same += 1
             continue
-        line = f"{key}: Safari={json.dumps(a)[:160]}  profile={json.dumps(b)[:160]}"
+        line = describe(key, a, b)
         must = key in MUST_MATCH or key.startswith(MUST_MATCH_PREFIXES)
         if key in INFO_KEYS or key.split(".")[0] in INFO_KEYS and key.split(".")[0] not in ("features", "natives"):
             diffs.append("INFO " + line)
