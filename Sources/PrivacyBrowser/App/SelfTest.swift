@@ -834,6 +834,43 @@ final class SelfTest {
         return JSON.stringify({ before, current, watched, after, held: status.state, changes });
         """
 
+    /// Methods of WebKit's classes and of WKUIDelegatePrivate whose names mention permissions or
+    /// geolocation: what this WebKit offers an embedder (self-test information).
+    private static func permissionSelectors() -> String {
+        let wanted = { (name: String) in name.range(of: "ermission", options: .caseInsensitive) != nil
+            || name.range(of: "eolocation", options: .caseInsensitive) != nil }
+        var found: [String] = []
+        for name in ["WKWebView", "WKWebsiteDataStore", "WKProcessPool", "WKPreferences", "WKWebViewConfiguration"] {
+            guard let cls = NSClassFromString(name) else { continue }
+            let targets: [(String, AnyClass?)] = [("-", cls), ("+", object_getClass(cls))]
+            for (kind, target) in targets {
+                guard let target else { continue }
+                var count: UInt32 = 0
+                guard let methods = class_copyMethodList(target, &count) else { continue }
+                defer { free(methods) }
+                for index in 0..<Int(count) {
+                    let selector = NSStringFromSelector(method_getName(methods[index]))
+                    if wanted(selector) { found.append("\(kind)[\(name) \(selector)]") }
+                }
+            }
+        }
+        if let delegateProtocol = objc_getProtocol("WKUIDelegatePrivate") {
+            for required in [true, false] {
+                var count: UInt32 = 0
+                guard let list = protocol_copyMethodDescriptionList(delegateProtocol, required, true, &count) else { continue }
+                defer { free(list) }
+                for index in 0..<Int(count) {
+                    if let selector = list[index].name, wanted(NSStringFromSelector(selector)) {
+                        found.append("WKUIDelegatePrivate \(NSStringFromSelector(selector))")
+                    }
+                }
+            }
+        } else {
+            found.append("(no WKUIDelegatePrivate protocol object)")
+        }
+        return found.isEmpty ? "none" : found.joined(separator: ", ")
+    }
+
     /// The state of each permission a page can query (or the error).
     private static let permissionStatesScript = """
         const out = [];
@@ -872,11 +909,8 @@ final class SelfTest {
         check("permissions: a profile tab reports every permission as a plain WKWebView does", states == plainStates,
               "\(states) vs \(plainStates)")
         let mode = PrivacyScripts.shimConfiguration(for: session.configuration).geolocation.mode
-        guard GeolocationPermission.answeredByEngine else {
-            info("geolocation: no permission SPI in this WebKit, the shim denies it (mode \(mode))")
-            return
-        }
         check("geolocation: a profile that denies it leaves it to WebKit (no shim)", mode == "engine", mode)
+        info("WebKit's private methods about permissions here: \(Self.permissionSelectors())")
         let text = try await js(tab.webView, Self.geolocationScript) as? String ?? "{}"
         let result = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
         info("geolocation in the engine: \(text)")
@@ -885,7 +919,8 @@ final class SelfTest {
               result["current"] as? String == denied && result["watched"] as? String == denied, text)
         check("geolocation: 'prompt' until the page asks, 'denied' after, on the engine's own PermissionStatus",
               result["before"] as? String == "prompt,true,0" && result["after"] as? String == "denied", text)
-        info("geolocation: a PermissionStatus held from before reads \(result["held"] ?? "nil"), 'change' fired \(result["changes"] ?? "nil") time(s)")
+        info("geolocation: a PermissionStatus held from before reads \(result["held"] ?? "nil"), 'change' fired \(result["changes"] ?? "nil") time(s); "
+             + "WebKit asked the tab \(tab.geolocationRequestsAnswered) time(s) for the position, \(tab.permissionQueriesAnswered) for a state")
         try await PageLoader.load(tab.webView, url: page)
         let next = try await js(tab.webView, "return (await navigator.permissions.query({ name: 'geolocation' })).state;") as? String
         check("geolocation: the next page starts at 'prompt' again", next == "prompt", next ?? "nil")

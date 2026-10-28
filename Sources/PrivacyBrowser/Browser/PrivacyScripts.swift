@@ -59,7 +59,8 @@ enum PrivacyScripts {
         }
 
         struct Geolocation: Encodable {
-            /// "engine" (WebKit denies it, BrowserTab answers the state), "deny" or "fixed".
+            /// "engine" (WebKit denies it, BrowserTab answers the state) or "fixed"; "deny" is the
+            /// shim's own denial (its tests).
             var mode: String
             var latitude: Double?
             var longitude: Double?
@@ -94,7 +95,7 @@ enum PrivacyScripts {
         switch configuration.geolocation {
         case .deny:
             // WebKit denies it and reports the state itself (BrowserTab, GeolocationPermission).
-            geolocation = .init(mode: GeolocationPermission.answeredByEngine ? "engine" : "deny")
+            geolocation = .init(mode: "engine")
         case let .fixed(latitude, longitude, accuracy):
             geolocation = .init(mode: "fixed", latitude: latitude, longitude: longitude, accuracy: accuracy)
         }

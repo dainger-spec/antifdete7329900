@@ -13,16 +13,13 @@ import WebKit
 /// (`-[WKWebView _permissionChanged:forOrigin:]`). Every other permission is answered 'prompt',
 /// what WebKit reports for them with a delegate that does not answer (the self-test compares them).
 ///
-/// PLATFORM LIMITATION: private API. Used where this WebKit has the permission SPI of macOS 13
-/// (`_permissionChanged:forOrigin:` stands for it); otherwise the shim answers, as before. A WebKit
-/// that stopped asking would still deny on the Mac, and report 'prompt' after the request too.
+/// PLATFORM LIMITATION: private API, and nothing to detect: WebKit calls the delegate methods it
+/// knows. One it does not call costs only the state after a request ('prompt' instead of
+/// 'denied'): on the Mac WebKit denies a request its delegate leaves unanswered by itself.
 enum GeolocationPermission {
-    /// `-[WKWebView _permissionChanged:forOrigin:]`: a page's PermissionStatus objects read the
-    /// state again and fire 'change' when it differs.
+    /// `-[WKWebView _permissionChanged:forOrigin:]`, where this WebKit has it: a page's
+    /// PermissionStatus objects read the state again and fire 'change' when it differs.
     static let permissionChanged = NSSelectorFromString("_permissionChanged:forOrigin:")
-
-    /// WebKit asks the UI delegate about geolocation and permission states.
-    static var answeredByEngine: Bool { WKWebView.instancesRespond(to: permissionChanged) }
 
     /// A site as its permission state is kept: the origin's scheme, host and port (0 for the
     /// scheme's default, as `WKSecurityOrigin` gives it).
