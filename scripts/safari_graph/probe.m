@@ -9,6 +9,7 @@
 // Run:    GRAPH_VARIANT=base ./probe                # facts + the dlopen matrix
 //         GRAPH_VARIANT=all ./probe --try-window    # also tries to bring up Safari's window
 //         ./probe --json out.json                   # also a small JSON record
+//         ./probe --safari-main page.html           # also call Safari's own entry point (UI in this process)
 //
 // Exit 0 whenever the probe measured, even when nothing loaded. A crash inside a framework ends the
 // process; the caller (measure.sh) records the signal, which is itself a result.
@@ -74,6 +75,10 @@ static NSArray<NSDictionary *> *frameworkCandidates(void) {
         }
     }
 
+    // Safari.framework's own install name (what Safari's executable links); dyld maps it to the cryptex
+    // only when told to prefer the staged frameworks (Safari's LC_DYLD_ENVIRONMENT).
+    [out addObject:@{@"name": @"Safari", @"dir": @"/System/Library/PrivateFrameworks/Safari.framework", @"kind": @"canonical"}];
+
     NSMutableSet *seen = [NSMutableSet set];
     for (NSString *root in @[@"/System/Library/StagedFrameworks/Safari",
                              @"/System/Cryptexes/App/System/Library/StagedFrameworks/Safari"]) {
@@ -131,6 +136,32 @@ static BOOL probeOneFramework(NSDictionary *candidate) {
         }
     }
     return NO;
+}
+
+// Which copies of the WebKit/Safari stack dyld actually mapped: the base system's or Safari's staged ones.
+static void reportImages(void) {
+    NSArray *needles = @[@"/WebKit.framework/", @"/JavaScriptCore.framework/", @"/WebCore.framework/",
+                         @"/SafariShared.framework/", @"/SafariCore.framework/", @"/Safari.framework/"];
+    NSMutableArray *hits = [NSMutableArray array];
+    uint32_t count = _dyld_image_count();
+    for (uint32_t i = 0; i < count; i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (!name) { continue; }
+        NSString *path = [NSString stringWithUTF8String:name];
+        for (NSString *needle in needles) {
+            if ([path containsString:needle]) { [hits addObject:path]; break; }
+        }
+    }
+    emit(@"images", hits.count ? [hits componentsJoinedByString:@","] : @"<none>");
+}
+
+// The DYLD variables as this process sees them: dyld prunes them for a hardened-runtime process
+// that lacks com.apple.security.cs.allow-dyld-environment-variables.
+static void reportEnvironment(void) {
+    for (NSString *name in @[@"DYLD_VERSIONED_FRAMEWORK_PATH", @"DYLD_FRAMEWORK_PATH", @"CFFIXED_USER_HOME", @"HOME"]) {
+        const char *value = getenv(name.UTF8String);
+        emit([@"env_" stringByAppendingString:name], value ? [NSString stringWithUTF8String:value] : @"<unset>");
+    }
 }
 
 // Safari's browser-UI classes across releases: present after a load means the ABI is there.
@@ -196,16 +227,67 @@ static void tryWindow(void) {
     }
 }
 
+// After Safari's own entry point has had `seconds` to bring its UI up in this process: what is on
+// screen, read on the main thread (where AppKit lives), then the process ends.
+static void *uiWatchdog(void *arg) {
+    unsigned seconds = (unsigned)(uintptr_t)arg;
+    sleep(seconds);
+    dispatch_semaphore_t answered = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        emit(@"safari_main_app_class", NSApp ? NSStringFromClass([NSApp class]) : @"<no NSApp>");
+        NSMutableArray *windows = [NSMutableArray array];
+        for (NSWindow *window in (NSApp ? NSApp.windows : @[])) {
+            [windows addObject:[NSString stringWithFormat:@"%@ [%@, %@]", window.title ?: @"",
+                                NSStringFromClass(window.class), window.isVisible ? @"visible" : @"hidden"]];
+        }
+        emit(@"safari_main_windows", windows.count ? [windows componentsJoinedByString:@" | "] : @"<none>");
+        dispatch_semaphore_signal(answered);
+    });
+    if (dispatch_semaphore_wait(answered, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC))) != 0) {
+        emit(@"safari_main_windows", @"<the main thread did not answer in 5 s>");
+    }
+    emit(@"safari_main", [NSString stringWithFormat:@"stopped by the probe after %us", seconds]);
+    _exit(43);
+    return NULL;
+}
+
+// Safari's executable is a stub whose main() hands over to Safari.framework. Call that entry point
+// here, with a page to open, and let the watchdog report what came up.
+static void trySafariMain(NSString *pagePath) {
+    NSArray<NSString *> *names = @[@"SafariMain", @"_SafariMain"];
+    void *entry = NULL;
+    for (NSString *name in names) {
+        entry = dlsym(RTLD_DEFAULT, name.UTF8String);
+        if (entry) { emit(@"safari_main_symbol", name); break; }
+    }
+    if (!entry) {
+        emit(@"safari_main_symbol", @"<absent>");
+        return;
+    }
+    pthread_t thread;
+    pthread_create(&thread, NULL, uiWatchdog, (void *)(uintptr_t)20);
+    pthread_detach(thread);
+    const char *args[] = {"Safari", pagePath ? pagePath.UTF8String : NULL, NULL};
+    int count = pagePath ? 2 : 1;
+    emit(@"safari_main", @"calling");
+    int (*safariMain)(int, const char **) = (int (*)(int, const char **))entry;
+    int result = safariMain(count, args);
+    emit(@"safari_main", [NSString stringWithFormat:@"returned %d", result]);
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         BOOL tryWindowFlag = NO;
         NSString *jsonPath = nil;
+        NSString *safariMainPage = nil;
         for (int i = 1; i < argc; i++) {
             NSString *arg = [NSString stringWithUTF8String:argv[i]];
             if ([arg isEqualToString:@"--try-window"]) {
                 tryWindowFlag = YES;
             } else if ([arg isEqualToString:@"--json"] && i + 1 < argc) {
                 jsonPath = [NSString stringWithUTF8String:argv[++i]];
+            } else if ([arg isEqualToString:@"--safari-main"] && i + 1 < argc) {
+                safariMainPage = [NSString stringWithUTF8String:argv[++i]];
             }
         }
 
@@ -224,16 +306,33 @@ int main(int argc, const char *argv[]) {
         emit(@"self_path", me);
         emit(@"self_entitlements", runTool(@"/usr/bin/codesign", @[@"-d", @"--entitlements", @"-", @"--xml", me]));
         emit(@"self_signature", runTool(@"/usr/bin/codesign", @[@"-dvv", me]));
+        reportEnvironment();
 
-        BOOL safariLoaded = NO, sharedLoaded = NO;
+        BOOL safariLoaded = NO;
+        NSMutableArray *stagedOK = [NSMutableArray array], *stagedFailed = [NSMutableArray array];
         for (NSDictionary *candidate in frameworkCandidates()) {
             BOOL loaded = probeOneFramework(candidate);
             if (loaded && [candidate[@"name"] isEqualToString:@"Safari"]) { safariLoaded = YES; }
-            if (loaded && [candidate[@"name"] isEqualToString:@"SafariShared"]) { sharedLoaded = YES; }
+            if ([candidate[@"kind"] isEqualToString:@"staged"] && [candidate[@"dir"] hasPrefix:@"/System/Cryptexes/"]) {
+                [(loaded ? stagedOK : stagedFailed) addObject:candidate[@"name"]];
+            }
         }
         emit(@"safari_framework_loaded", safariLoaded ? @"yes" : @"no");
-        emit(@"safari_shared_loaded", sharedLoaded ? @"yes" : @"no");
+        emit(@"staged_loaded", stagedOK.count ? [stagedOK componentsJoinedByString:@","] : @"<none>");
+        emit(@"staged_failed", stagedFailed.count ? [stagedFailed componentsJoinedByString:@","] : @"<none>");
+        reportImages();
         if (safariLoaded) { reportClassPresence(); }
+
+        if (jsonPath) {
+            NSDictionary *record = @{@"variant": variant,
+                                     @"macos": NSProcessInfo.processInfo.operatingSystemVersionString,
+                                     @"safari_version": safariVersion,
+                                     @"safari_framework_loaded": safariLoaded ? @"yes" : @"no",
+                                     @"staged_loaded": stagedOK,
+                                     @"staged_failed": stagedFailed};
+            NSData *data = [NSJSONSerialization dataWithJSONObject:record options:0 error:NULL];
+            [data writeToFile:jsonPath atomically:YES];
+        }
 
         if (tryWindowFlag) {
             if (safariLoaded) {
@@ -242,15 +341,12 @@ int main(int argc, const char *argv[]) {
                 emit(@"window_attempt", @"skipped_safari_framework_not_loaded");
             }
         }
-
-        if (jsonPath) {
-            NSDictionary *record = @{@"variant": variant,
-                                     @"macos": NSProcessInfo.processInfo.operatingSystemVersionString,
-                                     @"safari_version": safariVersion,
-                                     @"safari_framework_loaded": safariLoaded ? @"yes" : @"no",
-                                     @"safari_shared_loaded": sharedLoaded ? @"yes" : @"no"};
-            NSData *data = [NSJSONSerialization dataWithJSONObject:record options:0 error:NULL];
-            [data writeToFile:jsonPath atomically:YES];
+        if (safariMainPage) {
+            if (safariLoaded) {
+                trySafariMain(safariMainPage);
+            } else {
+                emit(@"safari_main", @"skipped_safari_framework_not_loaded");
+            }
         }
         emit(@"done", @"ok");
         return 0;
