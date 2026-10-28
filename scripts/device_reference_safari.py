@@ -53,12 +53,11 @@ def trust(cert):
     return code == 0
 
 
-def untrust(cert):
-    for command in (["sudo", "-n", "security", "remove-trusted-cert", "-d", cert],
-                    ["sudo", "-n", "security", "delete-certificate", "-c", "pb-device-reference",
-                     "/Library/Keychains/System.keychain"]):
-        code, output = run(command, 20)
-        say(f"untrust {command[3]}: exit {code} {output[:200]}")
+def untrust():
+    # Deleting the certificate is enough: remove-trusted-cert waits for an authorization (it hung on CI).
+    code, output = run(["sudo", "-n", "security", "delete-certificate", "-c", "pb-device-reference",
+                        "/Library/Keychains/System.keychain"], 20)
+    say(f"untrust: exit {code} {output[:200]}")
 
 
 def page_state(driver):
@@ -151,8 +150,13 @@ def main():
     timer.start()
     try:
         say("waiting for the server and safaridriver")
-        if not wait_for_port(args.port + 1, 20) or not wait_for_port(driver_port, 20):
-            say("the server or safaridriver did not listen")
+        if not wait_for_port(args.port + 1, 30):
+            say("the server did not listen; its stacks follow")
+            server.send_signal(signal.SIGABRT)
+            time.sleep(2)
+            return 1
+        if not wait_for_port(driver_port, 20):
+            say("safaridriver did not listen")
             return 2
         say("starting a Safari session")
         try:
@@ -210,7 +214,7 @@ def main():
         if os.path.exists(reference):
             os.remove(reference)
         if trusted:
-            untrust(cert)
+            untrust()
         timer.cancel()
         shutil.rmtree(directory, ignore_errors=True)
 

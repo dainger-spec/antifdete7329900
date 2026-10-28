@@ -707,6 +707,12 @@ def main():
     class PageServer(http.server.ThreadingHTTPServer):
         daemon_threads = True
 
+        def server_bind(self):
+            # Not HTTPServer's, which looks up socket.getfqdn("0.0.0.0"): a reverse DNS lookup that can
+            # hold the start for a long while on macOS (more than 20 s on CI).
+            socketserver.TCPServer.server_bind(self)
+            self.server_name, self.server_port = "localhost", self.server_address[1]
+
         def finish_request(self, request, client_address):
             # In the request's thread: a client that stalls (or refuses the certificate, as Safari
             # does until the warning is accepted) holds up only itself.
