@@ -118,7 +118,9 @@ final class BrowserSession {
 
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let webConfiguration = WKWebViewConfiguration()
-        if let dataStore { webConfiguration.websiteDataStore = dataStore }
+        // Never WebKit's default store, shared and persistent (with it opened, session cookies
+        // outlived a profile's stop: docs §1). After shutDown, a throwaway one.
+        webConfiguration.websiteDataStore = dataStore ?? WKWebsiteDataStore.nonPersistent()
         // The profile's processes and workers: its time zone, and no other profile's worker settings.
         if let processPool { ProfileProcessPool.assign(processPool, to: webConfiguration) }
         webConfiguration.userContentController = userContentController

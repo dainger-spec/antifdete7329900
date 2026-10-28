@@ -77,6 +77,13 @@ Cache API, service worker registrations, the HTTP disk and memory cache, HSTS st
 media keys, the per-session credential store, and Intelligent Tracking Prevention
 classification.
 
+**WebKit's default data store stays closed.** No `WKWebView` of the app is made with a
+`WKWebViewConfiguration` whose store is left unset: that store is WebKit's default, persistent
+one. With it opened, a profile's session cookies outlived its stop and came back at its next
+launch, and on a second vault of the same profile. The self-test opened it once, for a
+measurement, and both cookie checks failed in CI runs 218 and 219. With the store closed again
+they passed (run 220). How WebKit links the two was not found.
+
 **Within one profile:** all tabs share the profile's storage, like tabs in any browser.
 Background tabs keep running. WebKit may throttle timers in views that aren't in a window.
 
