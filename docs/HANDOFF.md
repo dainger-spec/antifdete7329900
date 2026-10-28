@@ -85,7 +85,38 @@ Then finish the P1-3 docs:
 - the README check count;
 - remove the "follow once CI has run" note.
 
+## Full plan with status
+
+This is the plan from the original analysis, in priority order, with what has happened to
+each item since.
+
+| Item | What | Status |
+|---|---|---|
+| P0-1 | A `WKProcessPool` per profile with `_WKProcessPoolConfiguration.timeZoneOverride`: a native time zone in the page, frames and every worker, and no service-worker User-Agent shared between profiles | done (`claude/safari-parity-p0`, PR #1) |
+| P0-2 | Background tabs (⌘-click) measured 0×0 (`WKWebView(frame: .zero)`), like headless | done (PR #1) |
+| P0-3 | The blob-worker bootstrap triggered CSP / Trusted Types violations (eval, sync XHR) that went to `report-uri` | done (`claude/safari-parity-p0-workers`) |
+| P0-4 | Measurements: worker scopes, background tabs, quota in workers | mostly done. **Open:** check whether the shim's wrapper frames show up in `e.stack` |
+| P1-1 | Native storage quota through `_WKWebsiteDataStoreConfiguration`. Safari reports 82 GB; WebKit gave 1000 MiB in URL and service workers | done (`claude/safari-parity-p1-quota`) |
+| P1-2 | Geolocation denied by WebKit through `WKUIDelegatePrivate`, instead of about 20 replaced functions | done (`claude/safari-parity-p1-geolocation`) |
+| P1-3 | WebRTC routes around relay-only (worker canary, sandboxed frames, popups), plus the WebTransport proxy leak | nearly done, see above |
+| P1-4 | iPhone/iPad profiles, see below | not started |
+| P2 | Measure TLS/HTTP2 through the proxy and gate those checks on it; "inert" WebRTC; small differences from Safari in the live comparison (`errorStack`, `windowOwnCount`); leak check for WebSocket and HLS | not started |
+
+Smaller open points from the analysis:
+- **Blob-worker traces.** A shimmed blob worker's `location.href` and `ErrorEvent.filename`
+  are the shim's new blob URL, not the page's.
+- **Blobs from other frames.** A blob made in another same-origin frame is not tracked: each
+  window has its own map.
+- **`data:` URL workers** are not covered.
+- **Out of scope for good:** Apple Pay, Web Push and `navigator.webdriver` cannot be fixed
+  from WKWebView. The docs say so; leave them.
+- **Merging is the owner's decision.** None of the stacked branches is merged yet.
+
 ## Next: P1-4 (iPhone/iPad profiles)
+
+Also on the list: `screen.orientation`, and a UA version taken from the host engine. A
+reference snapshot from a real iPhone is needed; without one, several points cannot be
+checked.
 
 The current iPhone profile sets JS getters only (`patchDevice`: platform, maxTouchPoints,
 screen 390×844, devicePixelRatio 3). The window stays a desktop one, so
