@@ -1,6 +1,6 @@
 import Foundation
 
-/// Loads Safari.framework via dlopen (BlackBird approach).
+/// Loads Safari.framework via dlopen.
 /// Does not link at build time; loaded only when Safari mode is requested.
 enum SafariLoader {
     private static var handle: UnsafeMutableRawPointer?

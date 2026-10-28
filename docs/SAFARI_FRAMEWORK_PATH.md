@@ -1,4 +1,4 @@
-# Safari.framework integration (BlackBird approach)
+# Safari.framework integration
 
 ## Status
 
