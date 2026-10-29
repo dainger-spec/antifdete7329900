@@ -26,6 +26,7 @@ approximations limited by what WebKit exposes. The tables below say which parts 
 - [docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md): sync wire format, merge rules, what is server-ready vs. local-only
 - [docs/SYNC_SERVER_API.md](docs/SYNC_SERVER_API.md): HTTP contract for a future sync server
 - [docs/AUTOMATION_API.md](docs/AUTOMATION_API.md): the local automation API and `scripts/pbctl`
+- [docs/UPDATES.md](docs/UPDATES.md): automatic updates — why our own updater rather than Sparkle, installing only after every profile is sealed, what each file on disk may hold across versions, the privacy of the check (design; implemented step by step)
 
 ## Requirements
 
