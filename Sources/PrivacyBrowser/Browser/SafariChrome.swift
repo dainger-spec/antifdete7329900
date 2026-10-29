@@ -200,9 +200,13 @@ enum SafariChrome {
             // Build the nib from the file itself rather than hand another bundle to AppKit: bundle
             // resolution is what went wrong here twice, and a framework in the Safari cryptex does
             // not answer -pathForResource:ofType: for these nibs at all.
-            if let url = nibURL(named: name as String) {
+            // `NSNib(contentsOf:)` is not available to Swift (deprecated in 10.9), so the file is
+            // read and handed over as data, with the framework it came from as the nib's bundle so
+            // that what the nib itself refers to still resolves.
+            if let url = nibURL(named: name as String), let data = try? Data(contentsOf: url) {
+                let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
                 log.info("\(name, privacy: .public).nib from \(url.path, privacy: .public)")
-                return NSNib(contentsOf: url)
+                return NSNib(nibData: data, bundle: owner)
             }
             log.notice("No Safari framework holds \(name, privacy: .public).nib; letting AppKit try \(bundle?.bundlePath ?? "the main bundle", privacy: .public)")
             return original(object, loader, name, bundle)
