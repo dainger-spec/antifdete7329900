@@ -679,8 +679,11 @@ final class SelfTest {
         // about it (and the capture would see the run id), where ".invalid" may be answered on the Mac.
         let domain = "leak.example.com"
         let startPath = "/pb-leak?run=\(run)"
+        // A time zone the runner is not in, to tell the profile's from the Mac's in workers.
+        let zone = "Pacific/Chatham"
         let profile = try repository.create(name: "Safari chrome", configuration: ProfileConfiguration(
-            startURL: URL(string: "http://start-\(run).\(domain)\(startPath)"), proxy: proxy, matchProxyLocation: false))
+            startURL: URL(string: "http://start-\(run).\(domain)\(startPath)"), proxy: proxy, timeZoneIdentifier: zone,
+            matchProxyLocation: false))
         let manager = ProfileManager(repository: repository)
         var messages: [String] = []
         manager.onError = { messages.append($0) }
@@ -710,7 +713,7 @@ final class SelfTest {
 
         // What the proxy answered for this run, and what the page reported, asked through the same
         // proxy from a window of ours. Polled: the chrome's page loads are on their own schedule.
-        struct Entry { let via: String; let target: String; let path: String; let cookie: String }
+        struct Entry { let via: String; let target: String; let path: String; let cookie: String; let userAgent: String }
         func leakLog() async -> (targets: [Entry], reports: [[String: Any]], canary: [String]) {
             let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
             let text = try? await loadThroughProxy(repository, proxy, url: url)
@@ -718,7 +721,8 @@ final class SelfTest {
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], [], []) }
             let targets = (object["targets"] as? [[String: Any]] ?? []).map {
                 Entry(via: $0["via"] as? String ?? "", target: ($0["target"] as? String ?? "").lowercased(),
-                      path: $0["path"] as? String ?? "", cookie: $0["cookie"] as? String ?? "")
+                      path: $0["path"] as? String ?? "", cookie: $0["cookie"] as? String ?? "",
+                      userAgent: $0["userAgent"] as? String ?? "")
             }
             let canary = (object["canary"] as? [[String: Any]] ?? []).map { "\($0["listener"] ?? "?") \($0["request"] ?? "")" }
             return (targets, object["reports"] as? [[String: Any]] ?? [], canary)
@@ -739,6 +743,15 @@ final class SelfTest {
         check("Safari chrome: a profile in its own process loads its pages through its own proxy",
               reached("start-\(run).\(domain):80", startPath),
               "the proxy answered: \(log.targets.map { "\($0.target)\($0.path.prefix(40))" }.joined(separator: " "))")
+        // The profile's User-Agent, not one of Safari's choosing (`ProfileNetworkGuard.pinUserAgent`).
+        let startAgent = log.targets.first { $0.path.hasPrefix(startPath) }?.userAgent ?? ""
+        let wantedAgent = ProfileConfiguration(proxy: proxy).userAgent(hostSafariVersion: HostSafari.version)
+        check("Safari chrome: the start page goes out with the profile's User-Agent",
+              wantedAgent.map { startAgent == $0 } ?? (startAgent.contains("Safari/") && startAgent.contains("Version/")),
+              "sent \(startAgent), wanted \(wantedAgent ?? "Safari's own")")
+        check("Safari chrome: an iPhone or iPad profile gets our own window, not Safari's desktop chrome",
+              !SafariChromeHost.canHost(ProfileConfiguration(deviceGenerationID: "ios-26"))
+                && SafariChromeHost.canHost(ProfileConfiguration()))
         let page = log.reports.first(where: isPage) ?? [:]
         let frame = log.reports.first { $0["frame"] != nil } ?? [:]
         check("Safari chrome: the leak page ran and reported", !page.isEmpty, "no report from the page")
@@ -891,6 +904,12 @@ final class SelfTest {
             if !worker.isEmpty {
                 check("Safari chrome: WebTransport is absent in a service worker", worker["webTransport"] as? String == "undefined", "\(worker)")
             }
+            // The profile's time zone is the engine's own in the profile's process, workers
+            // included: a worker no script of ours reaches says what WebKit's process was given.
+            check("Safari chrome: the profile's time zone in the page, a dedicated worker and a service worker",
+                  secure["tz"] as? String == zone && secure["workerTZ"] as? String == zone
+                    && (worker.isEmpty || worker["tz"] as? String == zone),
+                  "page \(secure["tz"] ?? "nil"), worker \(secure["workerTZ"] ?? "nil"), service worker \(worker["tz"] ?? "nil")")
         } else {
             check("Safari chrome: the secure half of the leak page ran in a secure context", false, "\(secure)")
         }

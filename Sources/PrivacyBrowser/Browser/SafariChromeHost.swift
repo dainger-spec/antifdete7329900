@@ -35,6 +35,10 @@ enum SafariChromeHost {
     static func prepareForChildProcess(configuration: ProfileConfiguration) -> Bool {
         guard !isPrepared else { return true }
         guard !isTurnedOff else { return false }
+        guard canHost(configuration) else {
+            log.notice("An iPhone or iPad profile: our own window, which presents that device, rather than Safari's desktop chrome")
+            return false
+        }
         // Before the frameworks load: some of what they read, they read as they load.
         SafariChrome.configureSafarisOwnServices(for: configuration)
         guard SafariChrome.load() else { return false }
@@ -107,6 +111,13 @@ enum SafariChromeHost {
 
     /// Opens Safari's window for `session` and lets Safari build the profile's web view in its
     /// tab. False when the chrome is not hosted here, and the caller opens our own window as before.
+    /// Safari's chrome is the Mac's: a profile that presents an iPhone or an iPad would show its
+    /// device's navigator and screen next to a Mac's window and User-Agent, which no real device
+    /// does. Those profiles run in our own window, which presents their device.
+    static func canHost(_ configuration: ProfileConfiguration) -> Bool {
+        configuration.deviceGeneration.platform == .macOS
+    }
+
     static func open(session: BrowserSession, url: URL?) -> Bool {
         guard isPrepared else { return false }
         // Registered before the window exists: Safari builds the first web view while opening it,

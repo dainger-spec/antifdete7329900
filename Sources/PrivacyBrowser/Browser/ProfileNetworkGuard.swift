@@ -89,12 +89,15 @@ enum ProfileNetworkGuard {
             // Lock 3. The default privacy context is what every Network.framework connection and
             // URLSession task of this process uses unless it brings its own (macOS 14).
             NWParameters.PrivacyContext.default.proxyConfigurations = proxies
-            missingHooks += proxyEverySessionConfiguration(proxies, delegate: StoreChallenges(policy: policy))
         }
+        // With a proxy, every session of the process carries it; with or without, none shares the
+        // app's own cookie jar, cache or saved credentials with the other profiles' processes.
+        missingHooks += proxyEverySessionConfiguration(proxies, delegate: StoreChallenges(policy: policy))
         missingHooks += closeTheProcess(udp: !proxies.isEmpty)
         missingHooks += everyStoreStartsClosed(except: profileID)
         missingHooks += everyWebViewGetsTheProfilesData()
         missingHooks += pinPrivacyPreferences()
+        missingHooks += pinUserAgent()
         missingHooks += noPagePicksAnotherStore()
         missingHooks += theProfilesContentStays()
         missingHooks += everyChallengeIsTheProfiles(policy)
@@ -557,6 +560,8 @@ enum ProfileNetworkGuard {
         webViews.add(webView)
         webView.allowsLinkPreview = false // and kept off (`HandOffs`)
         HostedPageHistory.follow(webView)
+        // The profile's User-Agent, not whatever Safari's code computes (and kept: `pinUserAgent`).
+        if let agent = profileUserAgent { webView.customUserAgent = agent }
         // A web view nobody gives a navigation delegate would have its challenges answered the
         // system's default way: until someone does, it has one that answers only those.
         if webView.navigationDelegate == nil, let challengePolicy {
@@ -638,6 +643,25 @@ enum ProfileNetworkGuard {
             method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
         return missing
+    }
+
+    /// The User-Agent the profile declares (`ProfileConfiguration.userAgent`), nil for WebKit's own.
+    private static var profileUserAgent: String? {
+        session?.configuration.userAgent(hostSafariVersion: HostSafari.version)
+    }
+
+    /// A web view of the process keeps the profile's User-Agent, whoever sets another (Safari's
+    /// Develop menu, its site quirks).
+    private static func pinUserAgent() -> [String] {
+        let selector = NSSelectorFromString("setCustomUserAgent:")
+        guard let method = class_getInstanceMethod(WKWebView.self, selector) else { return ["-[WKWebView setCustomUserAgent:]"] }
+        typealias Setter = @convention(c) (AnyObject, Selector, NSString?) -> Void
+        let original = unsafeBitCast(method_getImplementation(method), to: Setter.self)
+        let replacement: @convention(block) (AnyObject, NSString?) -> Void = { webView, asked in
+            original(webView, selector, profileUserAgent.map { $0 as NSString } ?? asked)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        return []
     }
 
     /// The feature `key` as the profile allows it, when something asks for `asked`.
@@ -860,10 +884,18 @@ enum ProfileNetworkGuard {
                 continue
             }
             let original = unsafeBitCast(method_getImplementation(method), to: Factory.self)
+            let isDefault = name == "defaultSessionConfiguration"
             let replacement: @convention(block) (AnyObject) -> Unmanaged<URLSessionConfiguration>? = { cls in
                 let result = original(cls, selector)
                 if let configuration = result?.takeUnretainedValue(), configuration.proxyConfigurations.isEmpty {
                     configuration.proxyConfigurations = proxies
+                }
+                // The default configuration's cookie jar, cache and saved credentials are the
+                // app's, which the process of every profile of this bundle would share: none here.
+                if isDefault, let configuration = result?.takeUnretainedValue() {
+                    configuration.httpCookieStorage = nil
+                    configuration.urlCache = nil
+                    configuration.urlCredentialStorage = nil
                 }
                 return result
             }

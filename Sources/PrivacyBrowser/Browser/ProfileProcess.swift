@@ -92,7 +92,12 @@ final class ProfileProcess {
         environment["CFFIXED_USER_HOME"] = home.path
         // ...which would take the vault with them, so it is named explicitly (AppEnvironment).
         environment["PRIVACYBROWSER_VAULT_DIR"] = vaultRoot.path
-        if let timeZone { environment["TZ"] = timeZone }
+        if let timeZone {
+            environment["TZ"] = timeZone
+            // And for the WebKit processes the child starts (pages and workers run there): libxpc
+            // hands an `__XPC_`-prefixed variable to the services it launches, without the prefix.
+            environment["__XPC_TZ"] = timeZone
+        }
         // Started to warm the profile up and nothing else: it opens no window of its own and
         // quits when the run ends, which is what seals what the run collected.
         if forWarmUpOnly { environment["PB_WARM_UP_ONLY"] = "1" }
@@ -137,7 +142,7 @@ final class ProfileProcess {
                 MainActor.assumeIsolated { child.onExit?(status) }
             }
         }
-        child.log.info("Profile \(profileID.uuidString, privacy: .public) runs as pid \(process.processIdentifier, privacy: .public), home \(home.path, privacy: .public), languages \(languages.joined(separator: ","), privacy: .public), TZ \(timeZone ?? "(system)", privacy: .public)")
+        child.log.info("Profile \(profileID.uuidString, privacy: .public) runs as pid \(process.processIdentifier, privacy: .public), home \(home.path, privacy: .private), languages \(languages.joined(separator: ","), privacy: .private), TZ \(timeZone ?? "(system)", privacy: .private)")
         return child
     }
 

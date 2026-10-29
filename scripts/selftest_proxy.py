@@ -311,7 +311,8 @@ def leak_secure_page(run: str) -> bytes:
 (async () => {
   const run = 'RUN';
   const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve(value), ms));
-  const result = { secure: isSecureContext, run, webTransport: typeof WebTransport, rtc: typeof RTCPeerConnection };
+  const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const result = { secure: isSecureContext, run, webTransport: typeof WebTransport, rtc: typeof RTCPeerConnection, tz: zone() };
   const fromWorker = (make) => Promise.race([new Promise((resolve) => make(resolve)), timeout(3000, 'timeout')]);
   const source = (body) => URL.createObjectURL(new Blob([body], { type: 'text/javascript' }));
   try {
@@ -327,6 +328,13 @@ def leak_secure_page(run: str) -> bytes:
       shared.port.start();
     });
   } catch (e) { result.shared = 'error ' + e; }
+  try {
+    // A worker loaded from a URL: no script of the page's reaches it.
+    result.workerTZ = await fromWorker((resolve) => {
+      const worker = new Worker('/pb-leak/tzworker.js?run=RUN');
+      worker.onmessage = (e) => resolve(e.data);
+    });
+  } catch (e) { result.workerTZ = 'error ' + e; }
   try {
     await navigator.serviceWorker.register('/pb-leak/sw.js?run=RUN');
     result.sw = 'registered';
@@ -347,7 +355,7 @@ def leak_service_worker(run: str) -> bytes:
     """The service worker of the secure page: what a service worker can reach."""
     script = r"""self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
-    const report = { sw: true, webTransport: typeof WebTransport };
+    const report = { sw: true, webTransport: typeof WebTransport, tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
     if (typeof WebTransport === 'function') {
       try {
         const transport = new WebTransport('https://192.0.2.13:4433/pb-leak/swwt?run=RUN');
@@ -408,7 +416,8 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
             SERVED.append(plain_path)
         if not plain_path.startswith("/pb-leak/log.json"):
             TARGETS.append({"via": via.split()[0] if via else "", "target": target, "path": path,
-                            "cookie": header(request, "Cookie")})
+                            "cookie": header(request, "Cookie"), "userAgent": header(request, "User-Agent"),
+                            "language": accept_language})
         served = list(SERVED)
     if plain_path == "/pb-geo.json":
         params = {key: values[0] for key, values in parse_qs(query).items()}
@@ -430,6 +439,8 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         body, content_type = leak_secure_page(safe_run(query)), "text/html; charset=utf-8"
     elif plain_path == "/pb-leak/sw.js":
         body, content_type = leak_service_worker(safe_run(query)), "text/javascript"
+    elif plain_path == "/pb-leak/tzworker.js":
+        body, content_type = b"postMessage(Intl.DateTimeFormat().resolvedOptions().timeZone)", "text/javascript"
     elif plain_path == "/pb-leak/frame":
         body, content_type = leak_frame(safe_run(query)), "text/html; charset=utf-8"
     elif plain_path == "/pb-leak/report":
