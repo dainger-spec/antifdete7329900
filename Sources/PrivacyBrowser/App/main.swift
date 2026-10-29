@@ -32,7 +32,13 @@ MainActor.assumeIsolated {
     } else if arguments.contains("--safari-chrome") {
         // Safari's own window hosted in this process, with one of our web views in its tab
         // (SafariChrome.swift). Needs a build without the App Sandbox and with library validation
-        // off; it exits with a message when the frameworks cannot be loaded.
+        // off; it exits with a message when the frameworks cannot be loaded. A developer's tool:
+        // it runs no profile — no proxy, none of a profile process's locks — so it is refused
+        // unless asked for in so many words (PB_DEVELOPER=1).
+        guard ProcessInfo.processInfo.environment["PB_DEVELOPER"] == "1" else {
+            FileHandle.standardError.write(Data("--safari-chrome is a developer's tool with no proxy and no profile; set PB_DEVELOPER=1 to run it\n".utf8))
+            exit(64)
+        }
         SafariChrome.startStandalone(arguments: arguments)
     } else if arguments.contains("--render-ui-snapshots") {
         // The app's screens with sample data, as PNG files for design review (UISnapshots.swift).
