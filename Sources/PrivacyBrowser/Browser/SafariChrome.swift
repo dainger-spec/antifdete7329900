@@ -220,7 +220,14 @@ enum SafariChrome {
         let frameworks = ["Safari", "SafariShared", "SafariSharedUI", "SafariFoundation", "SafariCore", "PasswordManagerUI"]
         let roots = ["/System/Library/PrivateFrameworks",
                      "/System/Volumes/Preboot/Cryptexes/OS/System/Library/PrivateFrameworks"]
+        // Safari.app itself, because part of the chrome's nibs are resources of the application
+        // rather than of its frameworks: in Safari the main bundle is Safari.app, and that is the
+        // bundle those nibs are looked up in.
+        let applications = ["/Applications/Safari.app",
+                            "/System/Applications/Safari.app",
+                            "/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app"]
         return roots.flatMap { root in frameworks.compactMap { Bundle(path: "\(root)/\($0).framework") } }
+            + applications.compactMap(Bundle.init(path:))
     }()
 
     /// The file `name.nib` inside one of Safari's frameworks. Looked for on disk, under every
@@ -229,7 +236,8 @@ enum SafariChrome {
     private static func nibURL(named name: String) -> URL? {
         if let known = nibURLs[name] { return known }
         let subdirectories = ["Resources", "Resources/Base.lproj", "Resources/en.lproj",
-                              "Versions/A/Resources", "Versions/A/Resources/Base.lproj", "Versions/A/Resources/en.lproj"]
+                              "Versions/A/Resources", "Versions/A/Resources/Base.lproj", "Versions/A/Resources/en.lproj",
+                              "Contents/Resources", "Contents/Resources/Base.lproj", "Contents/Resources/en.lproj"]
         let found = chromeBundles.lazy.flatMap { bundle in
             subdirectories.lazy.map { bundle.bundleURL.appendingPathComponent($0).appendingPathComponent("\(name).nib") }
         }.first { FileManager.default.fileExists(atPath: $0.path) }
