@@ -5,6 +5,12 @@
     PrivacyBrowser --self-test | tee selftest.txt
     python3 scripts/egress_check.py --capture capture.txt --selftest-log selftest.txt
 
+Two checks of the self-test open a window (`INFO egress-window begin/end`) and name a run id
+(`INFO egress-token`): the proxy checker's (`proxyChecker`: every listener of the self-test proxy
+probed step by step, checks through each to a geolocation service whose name carries the run id,
+and a profile started with a proxy that never answers), in which this process talks to the proxy on
+loopback and to nothing else; and the Safari-chrome one.
+
 The self-test's `safariChromeThroughTheProxy` runs a proxied profile in its own process, in
 Safari's chrome, on the leak page of the self-test proxy (scripts/selftest_proxy.py `/pb-leak`):
 requests of every kind a page can make, to addresses in the documentation ranges (192.0.2.0/24,
@@ -109,9 +115,11 @@ def main() -> int:
     ends = [float(t) for t in re.findall(r"INFO egress-window end ([\d.]+)", log)]
     pids = {int(p) for p in re.findall(r"INFO egress-pid (\d+)", log)}
     if not tokens or not begins:
-        print("::warning::egress check: the self-test did not run its Safari-chrome check (no egress-token); nothing to look at")
+        print("::warning::egress check: no check of the self-test opened an egress window (no egress-token); nothing to look at")
         return 0
-    windows = [(b, ends[i] if i < len(ends) else float("inf")) for i, b in enumerate(begins)]
+    # Each window ends at the first end after its begin: a check that stopped before printing its
+    # end leaves its window open to the end of the run, never borrows another check's end.
+    windows = [(b, min((e for e in ends if e >= b), default=float("inf"))) for b in begins]
 
     try:
         lines = open(args.capture, encoding="utf-8", errors="replace").read().splitlines()

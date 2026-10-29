@@ -11,7 +11,7 @@ itself with a page that reports how the request arrived, e.g.
 `.invalid` hostname can only load at all if it was not resolved locally.
 
     python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 \
-        --socks2 18084 --socks-auth 18085
+        --socks2 18084 --socks-auth 18085 --silent 18088
 
 `--http-auth` is an HTTP CONNECT proxy that answers 407 until the request carries
 `Proxy-Authorization: Basic pb-user:pb-pass`, then reports `via=connect-auth`.
@@ -20,11 +20,19 @@ itself with a page that reports how the request arrived, e.g.
 `--socks2` is a second SOCKS5 proxy, and `--socks-auth` one that accepts only username/password
 authentication (RFC 1929) with pb-user2:pb-pass2: several profiles behind different SOCKS5
 proxies at once. Every page names the port of the listener that served it (`listener=...`).
+`--silent` takes every connection and never says a word, as SOCKS5 or as HTTP: what a proxy that
+serves only the IP addresses on its whitelist does to the others, or one whose back end is gone
+(the proxy checker's "takes the connection and stays silent").
+
+A tunnel that is closed without a request in it (the proxy checker's probe: it opens one to see
+that the proxy can, and closes it) is noted as such, and a connection that does not speak the
+listener's protocol (the probe's SOCKS5 greeting to an HTTP listener, its CONNECT to a SOCKS5
+one) is closed without an answer: neither is a request served.
 
 Pages also report the request's `Accept-Language` header (`accept-language=...`), the path
 `/pb-geo.json` answers like a geolocation service (`{"ip": "203.0.113.7", "timezone":
-"Europe/Berlin", "country": "DE"}`; `?ip=`, `?tz=` and `?delay=<seconds>` change the answer) for
-the proxy-location checks, and `/pb-served.json` lists the paths served so far (so the self-test
+"Europe/Berlin", "country": "DE", "city": "Berlin", "org": "AS64500 Example Networks"}`; `?ip=`,
+`?tz=` and `?delay=<seconds>` change the answer) for the proxy-location checks, and `/pb-served.json` lists the paths served so far (so the self-test
 can tell which requests reached the proxy, e.g. that a beacon did not).
 
 `/pb-login` is a sign-in form for the password AutoFill checks (`?signup=1`: a new password and
@@ -105,7 +113,7 @@ def read_until_blank_line(conn: socket.socket) -> bytes:
     return data
 
 
-GEO_ANSWER = b'{"ip":"203.0.113.7","country":"DE","timezone":"Europe/Berlin"}'
+GEO_ANSWER = b'{"ip":"203.0.113.7","country":"DE","timezone":"Europe/Berlin","city":"Berlin","org":"AS64500 Example Networks"}'
 SERVED: list = []
 SERVED_LOCK = threading.Lock()
 WARMUP_LOG: list = []
@@ -575,15 +583,32 @@ def respond_with_page(conn: socket.socket, via: str) -> None:
 
 def serve_request(conn: socket.socket, via: str) -> None:
     request = read_until_blank_line(conn).decode("latin-1", "replace")
+    if not request:
+        # The tunnel was opened and closed again without a request (the proxy checker's probe).
+        note(via, "(tunnel closed without a request)")
+        return
     request_line = request.split("\r\n", 1)[0]
     parts = request_line.split(" ")
     path = parts[1] if len(parts) > 1 else "?"
     answer(conn, via, path, request)
 
 
+def speaks_http(head: str) -> bool:
+    """The connection's first bytes are an HTTP request line ("CONNECT host:port HTTP/1.1"), not
+    a SOCKS5 greeting or anything else."""
+    method = head.split(" ", 1)[0]
+    return method.isascii() and method.isalpha() and method.isupper()
+
+
 def handle_http(conn: socket.socket, via: str = "connect") -> None:
     with conn:
         head = read_until_blank_line(conn).decode("latin-1", "replace")
+        if not head:
+            note(f"via={via}-listener target=", "(connected and closed without a word)")
+            return
+        if not speaks_http(head):
+            note(f"via={via}-listener target=", "(not an HTTP request: closed without an answer)")
+            return
         first = head.split("\r\n", 1)[0]
         method, _, rest = first.partition(" ")
         target = rest.split(" ", 1)[0]
@@ -602,6 +627,12 @@ AUTH_EXPECTED = "Basic " + base64.b64encode(b"pb-user:pb-pass").decode()
 def handle_http_auth(conn: socket.socket) -> None:
     with conn:
         head = read_until_blank_line(conn).decode("latin-1", "replace")
+        if not head:
+            note("via=connect-auth-listener target=", "(connected and closed without a word)")
+            return
+        if not speaks_http(head):
+            note("via=connect-auth-listener target=", "(not an HTTP request: closed without an answer)")
+            return
         lines = head.split("\r\n")
         method, _, rest = lines[0].partition(" ")
         target = rest.split(" ", 1)[0]
@@ -636,10 +667,16 @@ SOCKS_AUTH = (b"pb-user2", b"pb-pass2")
 
 def handle_socks(conn: socket.socket, listener: int = 0, auth: bool = False) -> None:
     with conn:
-        version, nmethods = recv_exact(conn, 2)
-        methods = recv_exact(conn, nmethods)
-        if version != 5:
+        first = conn.recv(2)
+        if not first:
+            # A connection opened and closed again (the proxy checker's reachability step).
+            note(f"via=socks5-listener target= listener={listener}", "(connected and closed without a word)")
             return
+        version, nmethods = (first + recv_exact(conn, 2 - len(first)))[:2]
+        if version != 5:
+            note(f"via=socks5-listener target= listener={listener}", "(not a SOCKS5 greeting: closed without an answer)")
+            return
+        methods = recv_exact(conn, nmethods)
         if auth:
             # Username/password only (RFC 1929): a client without credentials gets "no acceptable method".
             if 2 not in methods:
@@ -674,6 +711,23 @@ def handle_socks(conn: socket.socket, listener: int = 0, auth: bool = False) -> 
         conn.sendall(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")
         via = "socks5-auth" if auth else "socks5"
         respond_with_page(conn, f"via={via} atyp={atyp} target={host}:{port} listener={listener}")
+
+
+def handle_silent(conn: socket.socket) -> None:
+    """Takes the connection and never answers (see the module docstring): whatever comes is read
+    and dropped until the client gives up."""
+    with conn:
+        conn.settimeout(120)
+        received = 0
+        try:
+            while True:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                received += len(chunk)
+        except OSError:
+            pass
+        note("via=silent target=", f"(silent: {received} bytes taken, nothing said)")
 
 
 def handle_tls_control(conn: socket.socket) -> None:
@@ -746,6 +800,7 @@ def main() -> None:
     parser.add_argument("--socks-auth", type=int, default=None)
     parser.add_argument("--tls-control", type=int, default=None)
     parser.add_argument("--canary", type=int, default=None)
+    parser.add_argument("--silent", type=int, default=None)
     args = parser.parse_args()
     make_certificates()
     if args.tls_control:
@@ -767,6 +822,8 @@ def main() -> None:
     if args.socks_auth:
         threading.Thread(target=serve, args=(args.socks_auth, functools.partial(handle_socks, listener=args.socks_auth, auth=True)),
                          daemon=True).start()
+    if args.silent:
+        threading.Thread(target=serve, args=(args.silent, handle_silent), daemon=True).start()
     serve(args.socks, functools.partial(handle_socks, listener=args.socks))
 
 

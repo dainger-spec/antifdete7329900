@@ -1733,21 +1733,34 @@ final class SelfTest {
 
     /// The proxy list's checker (`ProxyChecker`) against the self-test proxy, whose stand-in
     /// geolocation service (`/pb-geo.json`) only answers through it:
-    ///   * a working proxy is alive, with the exit IP, country and time zone the service saw and a
-    ///     latency;
+    ///   * the probe tells every listener of the self-test proxy apart, step by step: HTTP CONNECT
+    ///     and SOCKS5 each found whatever type the settings say, the login not needed, missing,
+    ///     wrong or taken (HTTP and SOCKS5), on IPv6 too, a port that takes the connection and never
+    ///     answers (silent), a closed port (refused), a host name that does not exist;
+    ///   * a working proxy is alive, with the exit IP, country, time zone, city and network the
+    ///     service saw through it, and the probe's median latency;
     ///   * an unreachable proxy, and one whose host does not resolve, are dead — and a real website
     ///     among the services, which a request made directly would reach, did not answer either, nor
     ///     was any connection made but to the proxy: a dead proxy is never gone around;
     ///   * a proxy that wants credentials it was not given is dead for that reason, and settings
     ///     that cannot be applied are not checked at all (no request is made);
     ///   * the list's model checks several at a time and keeps each result with its proxy,
-    ///     encrypted; a profile given a checked proxy knows at once where it exits.
+    ///     encrypted, finds the type of a line without a scheme and corrects a wrong one; a profile
+    ///     given a checked proxy knows at once where it exits;
+    ///   * a profile started with a silent proxy says so (`ProfileManager.onProxyProblem`), one with
+    ///     a working proxy says nothing, and Check from what it said is the same check.
+    /// All of it but the host name that does not resolve (this Mac's resolver is asked for the
+    /// proxy's own name: there is nothing else to reach a proxy by) runs inside an egress window:
+    /// scripts/egress_check.py fails on any packet of this process past loopback during it, and on
+    /// any DNS question for the geolocation service's name, which carries the run's id.
     private func proxyChecker(_ repository: ProfileRepository) async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             info("proxy checker checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
             return
         }
+        func port(_ name: String) -> Int? { environment[name].flatMap(Int.init) }
+        let loopback = "127.0.0.1"
         let services = ProxyGeoLookup.services
         let timeout = ProxyChecker.timeout
         let concurrentChecks = ProxyChecker.concurrentChecks
@@ -1756,16 +1769,124 @@ final class SelfTest {
             ProxyChecker.timeout = timeout
             ProxyChecker.concurrentChecks = concurrentChecks
         }
+        // The service's name carries the run's id: asked of this Mac's resolver instead of named to
+        // the proxy, it is in the capture (scripts/egress_check.py).
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
         ProxyGeoLookup.services = [
-            .init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json?ip=203.0.113.21")!,
-                  timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
+            .init(url: URL(string: "http://geo-\(run).leak.example.com/pb-geo.json?ip=203.0.113.21")!,
+                  timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"],
+                  cityKeyPath: ["city"], asnKeyPath: ["org"], organizationKeyPath: ["org"]),
             // A real website, as the fail-closed checks above use one: a request made directly would
             // reach it and be answered, so any answer through a dead proxy would have gone around it.
             .init(url: URL(string: "https://example.com/")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
         ]
         ProxyChecker.timeout = 8
 
-        let working = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        // Before the window: the proxy's own name is asked of this Mac's resolver.
+        let unresolvedProbe = await ProxyChecker.probe(latencySamples: 1).run(ProxySettings(kind: .socks5, host: "proxy.selftest.invalid", port: 1080))
+        check("proxy probe: a proxy whose host name does not exist is told apart (host not found)",
+              unresolvedProbe.verdict == .hostNotFound, String(describing: unresolvedProbe))
+        let unresolved = ProxyChecker.result(of: await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: "proxy.selftest.invalid",
+                                                                                         port: 1080)))
+        check("proxy checker: a proxy whose host does not resolve is dead (nothing goes direct)",
+              unresolved.failure == .noAnswer, String(describing: unresolved))
+
+        info("egress-token \(run)")
+        info("egress-window begin \(Date().timeIntervalSince1970)")
+        defer { info("egress-window end \(Date().timeIntervalSince1970)") }
+
+        // Every listener, told apart. Each working one is listed as the other type: the type is
+        // found, not taken from the settings.
+        struct ProbeCase {
+            let name: String
+            let proxy: ProxySettings
+            let verdict: ProxyDiagnosis.Verdict
+            var kind: ProxySettings.Kind?
+            var authentication: ProxyDiagnosis.Authentication?
+        }
+        var cases = [
+            ProbeCase(name: "HTTP CONNECT, listed as SOCKS5", proxy: ProxySettings(kind: .socks5, host: loopback, port: httpPort),
+                      verdict: .works, kind: .httpConnect, authentication: .notRequired),
+            ProbeCase(name: "a closed port", proxy: ProxySettings(kind: .socks5, host: loopback, port: 9), verdict: .refused),
+        ]
+        if let socksPort = port("PB_SELFTEST_SOCKS_PROXY_PORT") {
+            cases.append(ProbeCase(name: "SOCKS5, listed as HTTP", proxy: ProxySettings(kind: .httpConnect, host: loopback, port: socksPort),
+                                   verdict: .works, kind: .socks5, authentication: .notRequired))
+        }
+        if let authPort = port("PB_SELFTEST_HTTP_AUTH_PROXY_PORT") {
+            cases += [
+                ProbeCase(name: "HTTP with a login, none given", proxy: ProxySettings(kind: .httpConnect, host: loopback, port: authPort),
+                          verdict: .credentialsNeeded, kind: .httpConnect, authentication: .missing),
+                ProbeCase(name: "HTTP with a login, a wrong one",
+                          proxy: ProxySettings(kind: .httpConnect, host: loopback, port: authPort, username: "pb-user", password: "wrong"),
+                          verdict: .credentialsRejected, kind: .httpConnect, authentication: .rejected),
+                ProbeCase(name: "HTTP with a login, the right one",
+                          proxy: ProxySettings(kind: .httpConnect, host: loopback, port: authPort, username: "pb-user", password: "pb-pass"),
+                          verdict: .works, kind: .httpConnect, authentication: .accepted),
+            ]
+        }
+        if let socksAuthPort = port("PB_SELFTEST_SOCKS_AUTH_PROXY_PORT") {
+            cases += [
+                ProbeCase(name: "SOCKS5 with a login, none given", proxy: ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort),
+                          verdict: .credentialsNeeded, kind: .socks5, authentication: .missing),
+                ProbeCase(name: "SOCKS5 with a login, a wrong one",
+                          proxy: ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort, username: "pb-user2", password: "wrong"),
+                          verdict: .credentialsRejected, kind: .socks5, authentication: .rejected),
+                ProbeCase(name: "SOCKS5 with a login, the right one",
+                          proxy: ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort, username: "pb-user2", password: "pb-pass2"),
+                          verdict: .works, kind: .socks5, authentication: .accepted),
+            ]
+        }
+        if let http6Port = port("PB_SELFTEST_HTTP6_PROXY_PORT") {
+            cases.append(ProbeCase(name: "HTTP CONNECT on the IPv6 loopback", proxy: ProxySettings(kind: .httpConnect, host: "::1", port: http6Port),
+                                   verdict: .works, kind: .httpConnect, authentication: .notRequired))
+        }
+        let silentPort = port("PB_SELFTEST_SILENT_PROXY_PORT")
+        if let silentPort {
+            cases.append(ProbeCase(name: "a port that takes the connection and never answers",
+                                   proxy: ProxySettings(kind: .socks5, host: loopback, port: silentPort), verdict: .silent))
+        } else {
+            info("proxy probe: the silent listener's checks skipped (PB_SELFTEST_SILENT_PROXY_PORT not set)")
+        }
+        let probe = ProxyChecker.probe()
+        // All at once: the silent one alone takes the probe's whole answer timeout.
+        let diagnoses = await withTaskGroup(of: (Int, ProxyDiagnosis).self) { group -> [Int: ProxyDiagnosis] in
+            for (index, item) in cases.enumerated() {
+                let proxy = item.proxy
+                group.addTask { (index, await probe.run(proxy)) }
+            }
+            var found: [Int: ProxyDiagnosis] = [:]
+            for await (index, diagnosis) in group { found[index] = diagnosis }
+            return found
+        }
+        for (index, item) in cases.enumerated() {
+            let diagnosis = diagnoses[index]
+            var expected = item.verdict.rawValue
+            if let kind = item.kind { expected += ", \(kind.rawValue)" }
+            if let authentication = item.authentication { expected += ", login \(authentication.rawValue)" }
+            check("proxy probe: \(item.name) — \(expected)",
+                  diagnosis?.verdict == item.verdict && (item.kind == nil || diagnosis?.kinds.first == item.kind)
+                      && (item.authentication == nil || diagnosis?.authentication == item.authentication)
+                      && (item.verdict != .works || diagnosis?.latencies.count == probe.latencySamples),
+                  String(describing: diagnosis))
+        }
+
+        // End to end through a working proxy listed with the wrong type: where it exits.
+        let full = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: httpPort))
+        check("proxy checker: a working proxy listed with the wrong type is checked as the type that answered, end to end — exit IP, country, city, network, and the probe's median latency",
+              full.isAlive && full.exitIP == "203.0.113.21" && full.countryCode == "DE" && full.timeZoneIdentifier == "Europe/Berlin"
+                  && full.city == "Berlin" && full.asn == "AS64500" && full.organization == "Example Networks"
+                  && full.diagnosis?.kinds.first == .httpConnect && full.latencyMilliseconds != nil
+                  && full.latencyMilliseconds == full.diagnosis?.medianLatency,
+              String(describing: full))
+        if let silentPort {
+            let silent = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: silentPort))
+            check("proxy checker: the silent proxy fails as silent, and nothing came back from anywhere",
+                  silent.failure == .noAnswer && silent.diagnosis?.verdict == .silent && silent.exitIP == nil,
+                  String(describing: silent))
+        }
+
+        let working = ProxySettings(kind: .httpConnect, host: loopback, port: httpPort)
         let alive = await ProxyChecker.lookUp(working)
         let aliveResult = ProxyChecker.result(of: alive)
         info("proxy checker: through the working proxy \(aliveResult), on \(alive?.connections.map(\.description) ?? [])")
@@ -1778,7 +1899,7 @@ final class SelfTest {
              + ((alive?.connections ?? []).allSatisfy { ($0.port ?? httpPort) == httpPort } ? "to the proxy only" : "NOT all to the proxy"))
 
         // Port 9 (discard) on localhost is closed on CI runners, as in the fail-closed check above.
-        let unreachable = await ProxyChecker.lookUp(ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9))
+        let unreachable = await ProxyChecker.lookUp(ProxySettings(kind: .httpConnect, host: loopback, port: 9))
         let unreachableResult = ProxyChecker.result(of: unreachable)
         check("proxy checker: an unreachable proxy is dead, and nothing answered — not the website a direct request would reach either",
               unreachableResult.failure == .noAnswer && unreachable?.answered == false && unreachableResult.exitIP == nil,
@@ -1786,18 +1907,15 @@ final class SelfTest {
         check("proxy checker: checking the unreachable proxy connected to nothing but it",
               unreachable?.connections.allSatisfy { ($0.port ?? 9) == 9 } == true,
               unreachable?.connections.map(\.description).joined(separator: ", ") ?? "no lookup")
-        let unresolved = ProxyChecker.result(of: await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: "proxy.selftest.invalid",
-                                                                                         port: 1080)))
-        check("proxy checker: a proxy whose host does not resolve is dead (nothing goes direct)",
-              unresolved.failure == .noAnswer, String(describing: unresolved))
         let notApplicable = await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: "127.0.0.1:1080", port: 1080))
         check("proxy checker: settings that cannot be applied are not checked at all (no request without the proxy)",
               notApplicable == nil && ProxyChecker.result(of: notApplicable).failure == .invalidSettings)
-        if let authPort = environment["PB_SELFTEST_HTTP_AUTH_PROXY_PORT"].flatMap(Int.init) {
-            let noCredentials = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: authPort))
+        if let authPort = port("PB_SELFTEST_HTTP_AUTH_PROXY_PORT") {
+            let noCredentials = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: loopback, port: authPort))
             check("proxy checker: a proxy that wants credentials it was not given is dead for that reason",
-                  noCredentials.failure == .needsCredentials, String(describing: noCredentials))
-            let withCredentials = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: authPort,
+                  noCredentials.failure == .needsCredentials && noCredentials.diagnosis?.verdict == .credentialsNeeded,
+                  String(describing: noCredentials))
+            let withCredentials = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: loopback, port: authPort,
                                                                          username: "pb-user", password: "pb-pass"))
             info("proxy checker: the HTTP proxy that wants credentials, given them: \(withCredentials)")
         }
@@ -1805,7 +1923,7 @@ final class SelfTest {
         // The list's model: an import, a check of all of it two at a time, the results kept with
         // their proxies in the encrypted file.
         var lines = "http://127.0.0.1:\(httpPort)  # working\n127.0.0.1:9  # unreachable\n"
-        let socksAuthPort = environment["PB_SELFTEST_SOCKS_AUTH_PROXY_PORT"].flatMap(Int.init)
+        let socksAuthPort = port("PB_SELFTEST_SOCKS_AUTH_PROXY_PORT")
         if let socksAuthPort { lines += "socks5://pb-user2:pb-pass2@127.0.0.1:\(socksAuthPort)  # socks with credentials\n" }
         var messages: [String] = []
         let model = ProxyListModel(vault: repository.vault) { messages.append($0) }
@@ -1819,8 +1937,26 @@ final class SelfTest {
         check("proxy list: several proxies checked at a time, each result kept with its proxy and saved encrypted",
               finished && added?.added.count == (socksAuthPort == nil ? 2 : 3)
                   && found["working"]?.isAlive == true && found["unreachable"]?.failure == .noAnswer
+                  && found["unreachable"]?.diagnosis?.verdict == .refused
                   && (socksAuthPort == nil || found["socks with credentials"]?.isAlive == true) && messages.isEmpty,
               "\(found) \(messages)")
+
+        // The type found by the check: a line without a scheme gets the one that answered, and an
+        // entry listed with the wrong one is corrected.
+        if let socksPort = port("PB_SELFTEST_SOCKS_PROXY_PORT"), let socks2Port = port("PB_SELFTEST_SOCKS2_PROXY_PORT") {
+            let kindLines = "127.0.0.1:\(socksPort)  # no scheme\nhttp://127.0.0.1:\(socks2Port)  # SOCKS5 listed as HTTP\n"
+            let kindIDs = model.add(ProxyListImport.read(kindLines).proxies)?.added ?? []
+            let unknownBefore = kindIDs.first.flatMap { model.list.entry($0) }.map { !$0.kindKnown } ?? false
+            model.check(Set(kindIDs))
+            let kindsFinished = await waitUntil(timeout: 30) { !model.isChecking }
+            let entries = kindIDs.compactMap { model.list.entry($0) }
+            check("proxy list: a line without a scheme gets the type the check found, and a wrong type is corrected",
+                  kindsFinished && unknownBefore && entries.count == 2 && entries.allSatisfy { $0.kindKnown && $0.proxy.kind == .socks5 }
+                      && entries[0].lastCheck?.kindFinding == .found && entries[1].lastCheck?.kindFinding == .corrected(from: .httpConnect)
+                      && entries.allSatisfy { $0.lastCheck?.isAlive == true },
+                  entries.map { "\($0.label): \($0.proxy.kind.rawValue) known=\($0.kindKnown) \(String(describing: $0.lastCheck?.kindFinding))" }
+                      .joined(separator: " | "))
+        }
 
         // Given that checked proxy, a profile has it, and where it exits, before any launch.
         let profile = try repository.create(name: "Proxy from the list", configuration: ProfileConfiguration(ephemeral: true))
@@ -1834,6 +1970,33 @@ final class SelfTest {
                   String(describing: configuration.lastProxyLocation))
         }
         try repository.delete(profile.id)
+
+        // A profile started with a proxy that takes the connection and never answers says so, in
+        // the checker's words; one whose proxy works says nothing.
+        if let silentPort {
+            let manager = ProfileManager(repository: repository)
+            var reported: [(id: UUID, diagnosis: ProxyDiagnosis)] = []
+            manager.onProxyProblem = { id, _, diagnosis in reported.append((id, diagnosis)) }
+            let silentProfile = try repository.create(name: "Silent proxy", configuration: ProfileConfiguration(
+                proxy: ProxySettings(kind: .socks5, host: loopback, port: silentPort), ephemeral: true, matchProxyLocation: false))
+            let workingProfile = try repository.create(name: "Working proxy", configuration: ProfileConfiguration(
+                proxy: working, ephemeral: true, matchProxyLocation: false))
+            try await manager.launch(workingProfile.id)
+            try await manager.launch(silentProfile.id)
+            let said = await waitUntil(timeout: 25) { !reported.isEmpty }
+            check("launch: a profile whose proxy takes the connection and never answers says why (silent), and one whose proxy works says nothing",
+                  said && reported.map { $0.id } == [silentProfile.id] && reported.first?.diagnosis.verdict == .silent,
+                  reported.map { "\($0.id == silentProfile.id ? "silent" : "working"): \($0.diagnosis.verdict.rawValue)" }.joined(separator: ", "))
+            // Check, as what the profile said offers it: the same check, of the profile's own proxy.
+            let fromProblem = await model.checkProfileProxy(ProxySettings(kind: .socks5, host: loopback, port: silentPort))
+            check("launch: Check from what the profile said is the list's check of its proxy (silent), kept in the list",
+                  fromProblem.diagnosis?.verdict == .silent && !fromProblem.isAlive
+                      && model.list.entry(for: ProxySettings(kind: .socks5, host: loopback, port: silentPort))?.lastCheck?.diagnosis?.verdict == .silent,
+                  String(describing: fromProblem))
+            await manager.shutDown()
+            try repository.delete(silentProfile.id)
+            try repository.delete(workingProfile.id)
+        }
         try? FileManager.default.removeItem(at: repository.root.appendingPathComponent("proxies.bin"))
     }
 
