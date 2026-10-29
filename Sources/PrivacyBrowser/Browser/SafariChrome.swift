@@ -401,6 +401,42 @@ enum SafariChrome {
         method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
 
+    // MARK: The menu
+
+    /// Safari's own menu bar, from `MainMenu.nib` in Safari.app.
+    ///
+    /// Without it a hosted chrome has no keyboard at all: on macOS the shortcuts live in the menu,
+    /// so ⌘T, ⌘N, ⌘L, ⌘Y and the rest simply do not exist, which is why only the mouse worked.
+    /// The items wired to the first responder (new tab, close tab, the address bar, history,
+    /// bookmarks) reach Safari's window controller through the responder chain on their own. The
+    /// nib's File's Owner is Safari's application object, which this process has as `NSApp`
+    /// (`installApplication`), so its outlets resolve.
+    @discardableResult
+    static func installMainMenu() -> Bool {
+        guard isAvailable else { return false }
+        guard let url = nibURL(named: "MainMenu"), let data = try? Data(contentsOf: url) else {
+            log.error("No MainMenu.nib in Safari.app: the hosted chrome will have no menu and no shortcuts")
+            return false
+        }
+        let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
+        var objects: [Any]?
+        guard NSNib(nibData: data, bundle: owner).instantiate(withOwner: NSApp, topLevelObjects: &objects) else {
+            log.error("Safari's MainMenu.nib did not instantiate")
+            return false
+        }
+        // The nib's other top-level objects are owned by nobody once this returns.
+        menuObjects = objects
+        guard let menu = objects?.compactMap({ $0 as? NSMenu }).first else {
+            log.error("Safari's MainMenu.nib holds no menu")
+            return false
+        }
+        NSApp.mainMenu = menu
+        log.info("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
+        return true
+    }
+
+    private static var menuObjects: [Any]?
+
     // MARK: Opening a window
 
     /// Opens one of Safari's browser windows and puts `webView` in its tab, with `addressText` in
@@ -468,6 +504,7 @@ extension SafariChrome {
         }
         installApplication()
         prepare()
+        installMainMenu()
         let address = arguments.firstIndex(of: "--safari-chrome")
             .flatMap { arguments.indices.contains($0 + 1) && !arguments[$0 + 1].hasPrefix("--") ? arguments[$0 + 1] : nil }
             ?? "https://example.com"
