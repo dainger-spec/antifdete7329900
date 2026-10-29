@@ -1,0 +1,9 @@
+{
+  "macos": "26.6.2",
+  "build": "25G83",
+  "sip": "System Integrity Protection status: disabled.",
+  "sdk": "26.5",
+  "xcode": "Xcode 26.6\nBuild version 17F113",
+  "arch": "arm64",
+  "signature": "Executable=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser\nIdentifier=dev.local.PrivacyBrowser\nFormat=app bundle with Mach-O thin (arm64)\nCodeDirectory v=20500 size=19993 flags=0x10002(adhoc,runtime) hashes=614+7 location=embedded\nSignature=adhoc\nInfo.plist entries=18\nTeamIdentifier=not set\nRuntime Version=26.5.0\nSealed Resources version=2 rules=13 files=4\nInternal requirements count=0 size=12"
+}

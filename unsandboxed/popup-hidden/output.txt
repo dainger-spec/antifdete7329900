@@ -1,0 +1,98 @@
+PROBE step popup-hidden
+PROBE macOS Version 26.6.2 (Build 25G83)
+PROBE sandboxed: false
+PROBE NSApplicationCrashOnExceptions at start: reads false; arguments unset, app unset, registered unset
+PROBE prepareProcess: true
+PROBE shared document controller is now BrowserDocumentController
+PROBE NSApplicationCrashOnExceptions with the framework loaded: reads false; arguments unset, app unset, registered unset
+PROBE NSApplicationCrashOnExceptions with the application running: reads false; arguments unset, app unset, registered unset
+PROBE profile store: persistent C1A1CBE8-2501-4036-A1D8-84BAB3CE6D1E
+PROBE   framework image: /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari
+PROBE   document controller: BrowserDocumentController
+PROBE   popup path, popup-hidden
+PROBE   NSApplicationCrashOnExceptions: reads false; arguments unset, app unset, registered unset
+PROBE   RAISED NSInvalidArgumentException: -[NSApplication isRestoringWindows]: unrecognized selector sent to instance 0x103c60960
+PROBE     0   CoreFoundation                      0x0000000188cbf1f0 __exceptionPreprocess + 176
+PROBE     1   PrivacyBrowser                      0x0000000102a77ba4 PBPreprocessException + 48
+PROBE     2   libobjc.A.dylib                     0x000000018873a91c objc_exception_throw + 88
+PROBE     3   CoreFoundation                      0x0000000188d803b4 -[NSObject(NSObject) __retain_OA] + 0
+PROBE     4   CoreFoundation                      0x0000000188c2ff68 ___forwarding___ + 1480
+PROBE     5   CoreFoundation                      0x0000000188c2f8e0 _CF_forwarding_prep_0 + 96
+PROBE     6   Safari                              0x00000001c0b2b1b8 -[BrowserDocument makeWindowControllers] + 168
+PROBE     7   Safari                              0x00000001c0cc9f4c -[BrowserDocumentController _createBrowserDocumentWithBrowsingMode:profileIdentifier:configuration:initialSize:options:] + 140
+PROBE     8   Safari                              0x00000001c0cc9e40 -[BrowserDocumentController _createBrowserDocumentWithBrowsingMode:profileIdentifier:initialSize:options:] + 248
+PROBE     9   Safari                              0x00000001c0cc6494 -[BrowserDocumentController createHiddenEmptyBrowserDocumentWithBrowsingMode:profileIdentifier:jitEnabled:isPopupWindow:restoringFromLastSession:initialSize:] + 64
+PROBE     10  Safari                              0x00000001c0d99320 +[BrowserWindowController hiddenEmptyBrowserWindowControllerWithBrowsingMode:profileIdentifier:isPopupWindow:restoringFromLastSession:] + 108
+PROBE     11  Safari                              0x00000001c0d993c4 +[BrowserWindowController hiddenEmptyBrowserWindowControllerWithBrowsingMode:profileIdentifier:isPopupWindow:] + 20
+PROBE     12  PrivacyBrowser                      0x0000000102b87ab8 $s14PrivacyBrowser06SafariB16WindowControllerC011createPopupE033_D5663EB8AEBCFB374BED3A50E441DB28LL_2ofSo8NSObjectCSgAC0G7VariantO_yXlXptF + 460
+PROBE     13  PrivacyBrowser                      0x0000000102b878b8 $s14PrivacyBrowser06SafariB16WindowControllerC10buildPopup33_D5663EB8AEBCFB374BED3A50E441DB28LLySbAC0G7VariantOFyycfU_ + 36
+PROBE     14  PrivacyBrowser                      0x0000000102a24f90 $sIeg_IeyB_TR + 28
+PROBE     15  PrivacyBrowser                      0x0000000102a77a08 PBCatchException + 36
+PROBE     16  PrivacyBrowser                      0x0000000102b83990 $s14PrivacyBrowser06SafariB16WindowControllerC7guarded33_D5663EB8AEBCFB374BED3A50E441DB28LLySbSS_yyctF + 136
+PROBE     17  PrivacyBrowser                      0x0000000102b855fc $s14PrivacyBrowser06SafariB16WindowControllerC10buildPopup33_D5663EB8AEBCFB374BED3A50E441DB28LLySbAC0G7VariantOF + 256
+PROBE     18  PrivacyBrowser                      0x0000000102b823a8 $s14PrivacyBrowser06SafariB16WindowControllerC12attemptPopup33_D5663EB8AEBCFB374BED3A50E441DB28LL_9dataStore8startURLSo8NSWindowCSgAC0G7VariantO_So013WKWebsiteDataP0CSg10Foundation0R0VSgtF + 916
+PROBE     19  PrivacyBrowser                      0x0000000102b992e8 $s14PrivacyBrowser20SafariFrameworkProbeO9popupStep33_9F0153DCAF2CE7EC9F01CEB735D44942LLyyAA0cB16WindowControllerC12PopupVariantOYaFZSo8NSWindowCSgAG_So18WKWebsiteDataStoreC10Foundation3URLVtXEfU_ + 184
+PROBE     20  PrivacyBrowser                      0x0000000102b973e8 $s14PrivacyBrowser20SafariFrameworkProbeO12openAndCheck33_9F0153DCAF2CE7EC9F01CEB735D44942LLyySo8NSWindowCSgAA0cB16WindowControllerC_So18WKWebsiteDataStoreC10Foundation3URLVtXEYaFZTY0_ + 1040
+PROBE     21  PrivacyBrowser                      0x0000000102b93dc1 $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TQ2_ + 1
+PROBE     22  PrivacyBrowser                      0x0000000102b99e5d $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TATQ0_ + 1
+PROBE     23  PrivacyBrowser                      0x0000000102c54331 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TQ0_ + 1
+PROBE     24  PrivacyBrowser                      0x0000000102c54319 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TATQ0_ + 1
+PROBE     25  libswift_Concurrency.dylib          0x000000028e2afec5 _ZL23completeTaskWithClosurePN5swift12AsyncContextEPNS_10SwiftErrorE + 1
+PROBE   creating the controller raised NSInvalidArgumentException: -[NSApplication isRestoringWindows]: unrecognized selector sent to instance 0x103c60960; caught, so the attempt ends and the process does not
+PROBE   popup path, popup-hidden: giving up — raised NSInvalidArgumentException: -[NSApplication isRestoringWindows]: unrecognized selector sent to instance 0x103c60960
+PROBE   the profile's store was handed out 3 times during the attempt
+PROBE     per-profile store factory asked for C1A1CBE8-2501-4036-A1D8-84BAB3CE6D1E -> handed it persistent C1A1CBE8-2501-4036-A1D8-84BAB3CE6D1E
+PROBE     per-profile store factory asked for C1A1CBE8-2501-4036-A1D8-84BAB3CE6D1E -> handed it persistent C1A1CBE8-2501-4036-A1D8-84BAB3CE6D1E
+PROBE     websiteDataStore read on WKWebViewConfiguration -> persistent C1A1CBE8-2501-4036-A1D8-84BAB3CE6D1E
+PROBE RESULT no window
+PROBE activation policy afterwards: 0 (0 = regular, 1 = accessory)
+PROBE FALLBACK in-process window: visible=true url=https://example.com/ title=Example Domain
+PROBE wrote fallback-window.png (15545 bytes)
+PROBE wrote fallback-page.png (76420 bytes)
+PROBE step popup-hidden finished
+2026-10-29 08:20:44.551 PrivacyBrowser[5190:20101] SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:20:44.552 PrivacyBrowser[5190:20101] SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:20:44.553 PrivacyBrowser[5190:20101] SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:20:44.553 PrivacyBrowser[5190:20101] SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:20:44.640 PrivacyBrowser[5190:20101] SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:20:44.641 PrivacyBrowser[5190:20101] SafariWindow: +[BrowserDocumentController sharedDocumentController]: sharedDocumentController -> BrowserDocumentController
+2026-10-29 08:20:44.642 PrivacyBrowser[5190:20101] SafariWindow: +sharedDocumentController is now BrowserDocumentController
+2026-10-29 08:20:44.967 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]: framework image: /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari
+2026-10-29 08:20:44.967 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]: document controller: BrowserDocumentController
+2026-10-29 08:20:44.967 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]: popup path, popup-hidden
+2026-10-29 08:20:44.968 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]: NSApplicationCrashOnExceptions: reads false; arguments unset, app unset, registered unset
+2026-10-29 08:20:44.968 PrivacyBrowser[5190:20101] SafariHooks: bound +[WKWebsiteDataStore _safari_dataStoreForProfileWithIdentifier:createIfNecessary:cacheNewDataStoreInMemory:]
+2026-10-29 08:20:44.968 PrivacyBrowser[5190:20101] SafariHooks: bound -[WKWebViewConfiguration websiteDataStore]
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]: RAISED NSInvalidArgumentException: -[NSApplication isRestoringWindows]: unrecognized selector sent to instance 0x103c60960
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   0   CoreFoundation                      0x0000000188cbf1f0 __exceptionPreprocess + 176
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   1   PrivacyBrowser                      0x0000000102a77ba4 PBPreprocessException + 48
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   2   libobjc.A.dylib                     0x000000018873a91c objc_exception_throw + 88
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   3   CoreFoundation                      0x0000000188d803b4 -[NSObject(NSObject) __retain_OA] + 0
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   4   CoreFoundation                      0x0000000188c2ff68 ___forwarding___ + 1480
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   5   CoreFoundation                      0x0000000188c2f8e0 _CF_forwarding_prep_0 + 96
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   6   Safari                              0x00000001c0b2b1b8 -[BrowserDocument makeWindowControllers] + 168
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   7   Safari                              0x00000001c0cc9f4c -[BrowserDocumentController _createBrowserDocumentWithBrowsingMode:profileIdentifier:configuration:initialSize:options:] + 140
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   8   Safari                              0x00000001c0cc9e40 -[BrowserDocumentController _createBrowserDocumentWithBrowsingMode:profileIdentifier:initialSize:options:] + 248
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   9   Safari                              0x00000001c0cc6494 -[BrowserDocumentController createHiddenEmptyBrowserDocumentWithBrowsingMode:profileIdentifier:jitEnabled:isPopupWindow:restoringFromLastSession:initialSize:] + 64
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   10  Safari                              0x00000001c0d99320 +[BrowserWindowController hiddenEmptyBrowserWindowControllerWithBrowsingMode:profileIdentifier:isPopupWindow:restoringFromLastSession:] + 108
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   11  Safari                              0x00000001c0d993c4 +[BrowserWindowController hiddenEmptyBrowserWindowControllerWithBrowsingMode:profileIdentifier:isPopupWindow:] + 20
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   12  PrivacyBrowser                      0x0000000102b87ab8 $s14PrivacyBrowser06SafariB16WindowControllerC011createPopupE033_D5663EB8AEBCFB374BED3A50E441DB28LL_2ofSo8NSObjectCSgAC0G7VariantO_yXlXptF + 460
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   13  PrivacyBrowser                      0x0000000102b878b8 $s14PrivacyBrowser06SafariB16WindowControllerC10buildPopup33_D5663EB8AEBCFB374BED3A50E441DB28LLySbAC0G7VariantOFyycfU_ + 36
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   14  PrivacyBrowser                      0x0000000102a24f90 $sIeg_IeyB_TR + 28
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   15  PrivacyBrowser                      0x0000000102a77a08 PBCatchException + 36
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   16  PrivacyBrowser                      0x0000000102b83990 $s14PrivacyBrowser06SafariB16WindowControllerC7guarded33_D5663EB8AEBCFB374BED3A50E441DB28LLySbSS_yyctF + 136
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   17  PrivacyBrowser                      0x0000000102b855fc $s14PrivacyBrowser06SafariB16WindowControllerC10buildPopup33_D5663EB8AEBCFB374BED3A50E441DB28LLySbAC0G7VariantOF + 256
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   18  PrivacyBrowser                      0x0000000102b823a8 $s14PrivacyBrowser06SafariB16WindowControllerC12attemptPopup33_D5663EB8AEBCFB374BED3A50E441DB28LL_9dataStore8startURLSo8NSWindowCSgAC0G7VariantO_So013WKWebsiteDataP0CSg10Foundation0R0VSgtF + 916
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   19  PrivacyBrowser                      0x0000000102b992e8 $s14PrivacyBrowser20SafariFrameworkProbeO9popupStep33_9F0153DCAF2CE7EC9F01CEB735D44942LLyyAA0cB16WindowControllerC12PopupVariantOYaFZSo8NSWindowCSgAG_So18WKWebsiteDataStoreC10Foundation3URLVtXEfU_ + 184
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   20  PrivacyBrowser                      0x0000000102b973e8 $s14PrivacyBrowser20SafariFrameworkProbeO12openAndCheck33_9F0153DCAF2CE7EC9F01CEB735D44942LLyySo8NSWindowCSgAA0cB16WindowControllerC_So18WKWebsiteDataStoreC10Foundation3URLVtXEYaFZTY0_ + 1040
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   21  PrivacyBrowser                      0x0000000102b93dc1 $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TQ2_ + 1
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   22  PrivacyBrowser                      0x0000000102b99e5d $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TATQ0_ + 1
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   23  PrivacyBrowser                      0x0000000102c54331 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TQ0_ + 1
+2026-10-29 08:20:45.049 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   24  PrivacyBrowser                      0x0000000102c54319 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TATQ0_ + 1
+2026-10-29 08:20:45.050 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   25  libswift_Concurrency.dylib          0x000000028e2afec5 _ZL23completeTaskWithClosurePN5swift12AsyncContextEPNS_10SwiftErrorE + 1
+2026-10-29 08:20:45.055 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]: creating the controller raised NSInvalidArgumentException: -[NSApplication isRestoringWindows]: unrecognized selector sent to instance 0x103c60960; caught, so the attempt ends and the process does not
+2026-10-29 08:20:45.055 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]: popup path, popup-hidden: giving up — raised NSInvalidArgumentException: -[NSApplication isRestoringWindows]: unrecognized selector sent to instance 0x103c60960
+2026-10-29 08:20:45.055 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]: the profile's store was handed out 3 times during the attempt
+2026-10-29 08:20:45.055 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   per-profile store factory asked for C1A1CBE8-2501-4036-A1D8-84BAB3CE6D1E -> handed it persistent C1A1CBE8-2501-4036-A1D8-84BAB3CE6D1E
+2026-10-29 08:20:45.055 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   per-profile store factory asked for C1A1CBE8-2501-4036-A1D8-84BAB3CE6D1E -> handed it persistent C1A1CBE8-2501-4036-A1D8-84BAB3CE6D1E
+2026-10-29 08:20:45.055 PrivacyBrowser[5190:20101] SafariWindow[C1A1CBE8]:   websiteDataStore read on WKWebViewConfiguration -> persistent C1A1CBE8-2501-4036-A1D8-84BAB3CE6D1E

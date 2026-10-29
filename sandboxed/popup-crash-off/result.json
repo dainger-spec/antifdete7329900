@@ -1,0 +1,72 @@
+{
+  "step": "popup:crash-off",
+  "pid": 8411,
+  "seconds": 1.6,
+  "exit": -5,
+  "crashes": [
+    {
+      "path": "/Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-082249.ips",
+      "header": {
+        "app_name": "PrivacyBrowser",
+        "timestamp": "2026-10-29 08:22:49.00 +0000",
+        "app_version": "0.1.0",
+        "slice_uuid": "4bf1a461-0de2-3603-a83b-42847697e57f",
+        "build_version": "1",
+        "platform": 1,
+        "bundleID": "dev.local.PrivacyBrowser",
+        "share_with_app_devs": 0,
+        "is_first_party": 0,
+        "bug_type": "309",
+        "os_version": "macOS 26.6.2 (25G83)",
+        "roots_installed": 0,
+        "name": "PrivacyBrowser",
+        "incident_id": "3F7BCF6F-472D-4E2F-AF12-0B306AECFEB2"
+      },
+      "exception": {
+        "codes": "0x0000000000000001, 0x000000018d86b6b4",
+        "rawCodes": [
+          1,
+          6669383348
+        ],
+        "type": "EXC_BREAKPOINT",
+        "signal": "SIGTRAP"
+      },
+      "termination": {
+        "flags": 0,
+        "code": 5,
+        "namespace": "SIGNAL",
+        "indicator": "Trace/BPT trap: 5",
+        "byProc": "exc handler",
+        "byPid": 8411
+      },
+      "faultingThread": 0,
+      "triggered_frames": [
+        "AppKit + 8513204",
+        "AppKit + 5413880",
+        "AppKit + 5414380",
+        "AppKit + 14078072",
+        "AppKit + 500440",
+        "AppKit + 519184",
+        "AppKit + 14036332",
+        "AppKit + 500440",
+        "AppKit + 519076",
+        "AppKit + 14039356",
+        "AppKit + 500440",
+        "AppKit + 518016",
+        "AppKit + 500440",
+        "AppKit + 517904",
+        "Safari + 138872",
+        "AppKit + 1683880",
+        "Safari + 137808",
+        "AppKit + 1667980",
+        "PrivacyBrowser + 1996500",
+        "PrivacyBrowser + 1948684",
+        "PrivacyBrowser + 1948684",
+        "PrivacyBrowser + 1965240",
+        "PrivacyBrowser + 1981884",
+        "PrivacyBrowser + 511888"
+      ]
+    }
+  ],
+  "outcome": "killed by SIGTRAP"
+}

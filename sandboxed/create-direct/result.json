@@ -1,0 +1,63 @@
+{
+  "step": "create-direct",
+  "pid": 6479,
+  "seconds": 0.4,
+  "exit": -11,
+  "crashes": [
+    {
+      "path": "/Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-082127.ips",
+      "header": {
+        "app_name": "PrivacyBrowser",
+        "timestamp": "2026-10-29 08:21:27.00 +0000",
+        "app_version": "0.1.0",
+        "slice_uuid": "4bf1a461-0de2-3603-a83b-42847697e57f",
+        "build_version": "1",
+        "platform": 1,
+        "bundleID": "dev.local.PrivacyBrowser",
+        "share_with_app_devs": 0,
+        "is_first_party": 0,
+        "bug_type": "309",
+        "os_version": "macOS 26.6.2 (25G83)",
+        "roots_installed": 0,
+        "name": "PrivacyBrowser",
+        "incident_id": "6546A787-1BB7-4919-96FB-ADD0219CCD07"
+      },
+      "exception": {
+        "codes": "0x0000000000000001, 0x000079324589b878",
+        "rawCodes": [
+          1,
+          133256821979256
+        ],
+        "type": "EXC_BAD_ACCESS",
+        "signal": "SIGSEGV",
+        "subtype": "KERN_INVALID_ADDRESS at 0x000079324589b878"
+      },
+      "termination": {
+        "flags": 0,
+        "code": 11,
+        "namespace": "SIGNAL",
+        "indicator": "Segmentation fault: 11",
+        "byProc": "exc handler",
+        "byPid": 6479
+      },
+      "vmRegionInfo": "0x79324589b878 is not in any region.  \n      REGION TYPE                    START - END         [ VSIZE] PRT/MAX SHRMOD  REGION DETAIL\n      UNUSED SPACE AT START\n--->  \n      UNUSED SPACE AT END",
+      "faultingThread": 3,
+      "triggered_frames": [
+        "libobjc.A.dylib + 31004",
+        "libobjc.A.dylib + 79940",
+        "Foundation + 142428",
+        "Foundation + 142264",
+        "WebBookmarks + 66284",
+        "libdispatch.dylib + 6696",
+        "libdispatch.dylib + 111792",
+        "libdispatch.dylib + 41008",
+        "libdispatch.dylib + 43876",
+        "libdispatch.dylib + 85556",
+        "libdispatch.dylib + 83764",
+        "libsystem_pthread.dylib + 11968",
+        "libsystem_pthread.dylib + 7184"
+      ]
+    }
+  ],
+  "outcome": "killed by SIGSEGV"
+}

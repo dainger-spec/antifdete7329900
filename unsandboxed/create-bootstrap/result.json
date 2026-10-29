@@ -1,0 +1,8 @@
+{
+  "step": "create-bootstrap",
+  "pid": 3921,
+  "seconds": 0.7,
+  "exit": -5,
+  "crashes": [],
+  "outcome": "killed by SIGTRAP"
+}

@@ -1,0 +1,50 @@
+PROBE step selectors
+PROBE macOS Version 26.6.2 (Build 25G83)
+PROBE sandboxed: false
+PROBE NSApplicationCrashOnExceptions at start: reads true; arguments YES, app 1, registered unset
+PROBE _newWindowWithFrontmostProfile:: AppController
+PROBE _createNewWindowWithFrontmostProfile:: AppController
+PROBE newWindowWithFrontmostProfile:: nil — no class in the image declares it
+PROBE showWindow:: BrowserWindowController
+PROBE _didCompleteContentSetup: BrowserWindowController
+PROBE selectors matching ["newwindow"]: 22 classes
+PROBE   AppController: _createNewWindowWithFrontmostProfile:, _eventModifierFlagsForNewWindow, _newWindowFromDock:, _newWindowWithDefaultProfile:, _newWindowWithFrontmostProfile:, _prepareBrowserContentViewControllerForNewUserActivityUsingPrivateBrowsingForNewWindow:, createNewWindowWithRequestIdentifier:isPrivate:, moveCurrentTabToNewWindow:
+PROBE   AppControllerTouchBarProvider: _openNewWindow:, newWindowButton
+PROBE   MacSafariBookmarkDBAccess: _fallbackNewWindowBehaviorBookmarkFolderProvider
+PROBE   BookmarksController: bookmarkForNewWindowTabsPreferenceForProfileIdentifier:
+PROBE   BookmarkSource: goToContentItemInNewWindow:
+PROBE   BookmarksViewController: goToContentItemInNewWindow:
+PROBE   BrowserApplication: createNewWindowFromTouchBarProvider:
+PROBE   BrowserDocumentController: _newTabInNewWindowWithBrowsingMode:sender:
+PROBE   BrowserUIDelegate: _appendNewWindowAndTabMenuItemsToMenu:newWindowTitle:newWindowAction:newTabTitle:newTabAction:alternativeNewWindowTitle:alternativeNewWindowAction:enableNewWindowMenuItems:contextMenuInfo:, _appendNewWindowAndTabMenuItemsToMenu:prefixString:newNonPrivateWindowAction:newPrivateWindowAction:newAutomationWindowAction:newTabAction:contextMenuInfo:, _appendOpenFrameInNewWindowAndTabMenuItemsToMenu:openFrameInNewWindowExistingMenuItem:contextMenuInfo:, _appendOpenImageInNewWindowAndTabMenuItemsToMenu:openImageInNewWindowExistingMenuItem:contextMenuInfo:, _appendOpenLinkInNewWindowAndTabMenuItemsToMenu:openLinkInNewWindowExistingMenuItem:contextMenuInfo:, _appendOpenMediaInNewWindowAndTabMenuItemsToMenu:openMediaInNewWindowExistingMenuItem:elementType:contextMenuInfo:, _appendOpenQRCodePayloadURLInNewWindowAndTabMenuItemsToMenu:contextMenuInfo:, _openFrameInNewWindowFromContextMenuInfo:windowPolicy:
+PROBE   BrowserViewController: browserWKViewDidMoveToNewWindow
+PROBE   BrowserWindowController: _moveTabGroupTabsToNewWindow:, _moveTabToNewWindow:, _moveTabsToNewWindow:, _newWindowShouldBeUnbuffered, _notifyPageAboutBarsStatesAfterMovingToNewWindow:, _openBookmarksInTabsForNewWindow, _replaceEmptyTabInNewWindowWithTabs:, _shouldUseOpenBookmarksInTabsNewWindowBehavior
+PROBE   GeneralPreferences: _updateNewWindowBehaviorViews, _updateNewWindowTabsMenuItem, takeNewWindowBehaviorFrom:
+PROBE selectors matching ["createnewwindow"]: 3 classes
+PROBE   AppController: _createNewWindowWithFrontmostProfile:, createNewWindowWithRequestIdentifier:isPrivate:
+PROBE   BrowserApplication: createNewWindowFromTouchBarProvider:
+PROBE   SafariWebExtensionsController: _findBrowserTabViewItemOrCreateNewWindowForNewTabWithBrowsingMode:URL:shouldMakeNewTabActive:shouldMakeKeyNewWindow:
+PROBE selectors matching ["frontmostprofile"]: 2 classes
+PROBE   AppController: _createNewWindowWithFrontmostProfile:, _newWindowWithFrontmostProfile:
+PROBE   BrowserDocumentController: frontmostProfileIdentifier, setFrontmostProfileIdentifier:
+PROBE selectors matching ["websitedatastore"]: 4 classes
+PROBE   AppController: _setWKWebsiteDataStoreDelegate, websiteDataStore:domain:didExceedMemoryFootprintThreshold:withPageCount:processLifetime:inForeground:wasPrivateRelayed:canSuspend:, websiteDataStore:domain:didOpenDomainViaWindowOpen:withProperty:directly:, websiteDataStore:navigateToNotificationActionURL:, websiteDataStore:openWindow:fromServiceWorkerOrigin:completionHandler:, websiteDataStore:workerOrigin:updatedAppBadge:
+PROBE   BrowserUIDelegate: websiteDataStore:getDisplayedNotificationsForWorkerOrigin:completionHandler:
+PROBE   SearchableWKView: websiteDataStore
+PROBE   WebViewController: websiteDataStore
+PROBE selectors matching ["profile", "window"]: 8 classes
+PROBE   AppController: _addNewProfileWindowOptionsWithProfiles:toApplicationDockMenuOrSubmenu:, _createNewWindowWithFrontmostProfile:, _newProfileWindowFromDock:, _newWindowWithDefaultProfile:, _newWindowWithFrontmostProfile:, _updateNewProfileWindowMenuItems, _validateNewProfileWindowMenuItem:, newProfileWindowFromMenu:
+PROBE   BookmarksController: bookmarkForNewWindowTabsPreferenceForProfileIdentifier:
+PROBE   BrowserDocument: initWithBrowsingMode:configuration:profileIdentifier:isPopupWindow:restoringFromLastSession:, initWithContentsOfRequest:browsingMode:profileIdentifier:automationSessionIdentifier:isPopupWindow:, profileDisplayTitleInWindow, setProfileDisplayTitleInWindow:
+PROBE   BrowserDocumentController: _frontmostBrowserDocumentIfAvailableInProfileWithIdentifier:usingWindowPolicy:browsingMode:forExternalLink:, _frontmostBrowserDocumentIfAvailableUsingWindowPolicy:profileIdentififier:, _goToEachRequest:tabLabels:windowPolicy:tabPlacementHint:forSearch:inNewProcess:profileIdentifier:, _goToRequest:tabLabel:windowPolicy:tabPlacementHint:forSearch:inNewProcess:profileIdentifier:, _openDocumentWithContentsOfRequest:behind:display:browsingMode:isPopupWindow:inProfileIdentifier:, createHiddenBrowserDocumentForWebExtensionsWithBrowsingMode:profileIdentifier:shouldLoadUserStartPage:isPopupWindow:, createHiddenEmptyBrowserDocumentWithBrowsingMode:profileIdentifier:configuration:suppressSidebar:isPopupWindow:, createHiddenEmptyBrowserDocumentWithBrowsingMode:profileIdentifier:isPopupWindow:
+PROBE   BrowserSessionPersistentState: initWithPinnedTabsStates:privatePinnedTabsStates:pinnedTabsStatesByProfileIdentifier:windowStates:
+PROBE   BrowserWindowController: closeProfileWindow:, isInSameProfileAsBrowserWindowController:, profileWindow:selectProfile:, profileWindow:selectTabGroup:, willCloseProfileWindow
+PROBE   ClosedTabOrWindowStateManager: _loadRecentlyClosedTabsOrWindowsFromDiskForProfilesWithIdentifiers:
+PROBE   PinnedTabsManager: _attachAnyDetachedPinnedTabsToExistingWindowInProfileWithIdentifier:, _firstWindowToAttachOrphanedPinnedTabsToInProfileWithIdentifier:
+PROBE wrote framework-selectors.txt (7102 bytes)
+PROBE step selectors finished
+2026-10-29 08:19:32.349 PrivacyBrowser[3514:14498] SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:32.349 PrivacyBrowser[3514:14498] SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:32.349 PrivacyBrowser[3514:14498] SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:32.349 PrivacyBrowser[3514:14498] SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:32.358 PrivacyBrowser[3514:14498] SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)

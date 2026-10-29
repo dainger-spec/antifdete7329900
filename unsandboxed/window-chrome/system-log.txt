@@ -1,0 +1,417 @@
+Timestamp               Ty Process[PID:TID]
+2026-10-29 08:20:56.165 E  kernel[0:51bd] [com.apple.sandbox.reporting:violation] Sandbox: softwareupdated(288) deny(1) file-issue-extension target:/private/var/db/softwareupdate/Library/Preferences/com.apple.OSPersonalization.plist extension-class:com.apple.cfprefsd.read
+2026-10-29 08:20:56.165 E  softwareupdated[288:51bd] [com.apple.defaults:User Defaults] Could not issue sandbox extension for plist at <private>
+2026-10-29 08:20:57.599 E  kernel[0:698] [com.apple.sandbox.reporting:violation] Sandbox: softwareupdated(288) deny(1) file-issue-extension target:/private/var/db/softwareupdate/Library/Preferences/com.apple.coremedia.plist extension-class:com.apple.cfprefsd.read
+2026-10-29 08:20:57.599 E  softwareupdated[288:698] [com.apple.defaults:User Defaults] Could not issue sandbox extension for plist at <private>
+2026-10-29 08:20:57.703 E  kernel[0:698] [com.apple.sandbox.reporting:violation] Sandbox: softwareupdated(288) deny(1) file-issue-extension target:/private/var/db/softwareupdate/Library/Preferences/com.apple.ATS.plist extension-class:com.apple.cfprefsd.read
+2026-10-29 08:20:57.703 E  softwareupdated[288:698] [com.apple.defaults:User Defaults] Could not issue sandbox extension for plist at <private>
+2026-10-29 08:20:57.719 E  kernel[0:698] [com.apple.sandbox.reporting:violation] Sandbox: softwareupdated(288) deny(1) file-issue-extension target:/private/var/db/softwareupdate/Library/Preferences/com.apple.Accessibility.plist extension-class:com.apple.cfprefsd.read
+2026-10-29 08:20:57.719 E  softwareupdated[288:698] [com.apple.defaults:User Defaults] Could not issue sandbox extension for plist at <private>
+2026-10-29 08:20:57.753 E  kernel[0:698] [com.apple.sandbox.reporting:violation] Sandbox: softwareupdated(288) deny(1) file-issue-extension target:/private/var/db/softwareupdate/Library/Preferences/com.apple.CoreGraphics.plist extension-class:com.apple.cfprefsd.read
+2026-10-29 08:20:57.753 E  softwareupdated[288:698] [com.apple.defaults:User Defaults] Could not issue sandbox extension for plist at <private>
+2026-10-29 08:20:57.804 E  kernel[0:3440] [com.apple.sandbox.reporting:violation] Sandbox: softwareupdated(288) deny(1) mach-lookup com.apple.pasteboard.1
+2026-10-29 08:20:57.804 Df launchd[1:3440] [system:] denied lookup: name = com.apple.pasteboard.1, requestor = softwareupdated[288], error = 159: Sandbox restriction
+2026-10-29 08:20:57.804 E  softwareupdated[288:51be] [com.apple.CFPasteboard:general] Connection to 'pboard' server had an error: <dictionary: 0x1f6c3e080> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f6c3e1c0> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-10-29 08:20:57.804 E  softwareupdated[288:698] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'Apple CFPasteboard general'. Error: <dictionary: 0x1f6c3e080> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f6c3e1c0> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-10-29 08:20:57.804 E  softwareupdated[288:698] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'Apple CFPasteboard general'. Error: <dictionary: 0x1f6c3e080> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f6c3e1c0> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-10-29 08:20:59.498 Df log[5441:524a] [com.apple.log:] log run noninteractively, parent: 3381 (Python), args: 'log' 'show' '--style' 'compact' '--start' '2026-10-29 08:20:45' '--predicate' 'process == "PrivacyBrowser" OR eventMessage CONTAINS[c] "PrivacyBrowser" OR eventMessage CONTAINS[c] "AMFI" OR eventMess
+2026-10-29 08:21:00.071 Df kernel[0:52f7] (AppleMobileFileIntegrity) AMFI: [non-fatal] unable to accelerate context: com.apple.DistributionKit.DistributionHelper | 65285
+2026-10-29 08:21:00.239 E  kernel[0:51bc] [com.apple.sandbox.reporting:violation] Sandbox: softwareupdated(288) deny(1) file-issue-extension target:/private/var/db/softwareupdate/Library/Preferences/com.apple.SubmitDiagInfo.plist extension-class:com.apple.cfprefsd.read
+2026-10-29 08:21:00.239 E  softwareupdated[288:51bc] [com.apple.defaults:User Defaults] Could not issue sandbox extension for plist at <private>
+2026-10-29 08:21:00.529 A  PrivacyBrowser[5568:535a] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:21:00.530 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x105572470] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:21:00.530 Df PrivacyBrowser[5568:5364] [com.apple.xpc:connection] [0x1055729b0] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:21:00.534 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.534 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.534 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.535 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.607 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.607 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x105578a40] activating connection: mach=true listener=false peer=false name=com.apple.distributed_notifications@Uv3
+2026-10-29 08:21:00.608 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.608 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.609 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec000] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.launchservicesd
+2026-10-29 08:21:00.611 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec140] activating connection: mach=true listener=false peer=false name=com.apple.pasteboard.1
+2026-10-29 08:21:00.614 Df PrivacyBrowser[5568:535a] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) No windows open yet
+2026-10-29 08:21:00.615 A  PrivacyBrowser[5568:535a] (TCC) TCCAccessRequest() IPC
+2026-10-29 08:21:00.616 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec280] activating connection: mach=true listener=false peer=false name=com.apple.tccd.system
+2026-10-29 08:21:00.618 Df tccd[154:5103] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=5568.1, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, requesting={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=5568, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, },
+2026-10-29 08:21:00.621 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec280] invalidated after the last release of the connection object
+2026-10-29 08:21:00.622 Df PrivacyBrowser[5568:535a] [com.apple.SkyLight:default] server port 0x00003113, session port 0x00003113
+2026-10-29 08:21:00.624 Df tccd[154:5102] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=166.98, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=5568, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.WindowServer, pid=166, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer}, },
+2026-10-29 08:21:00.624 Df tccd[154:5102] [com.apple.TCC:access] requestor: TCCDProcess: identifier=com.apple.WindowServer, pid=166, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer is checking access for accessor TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=5568, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+2026-10-29 08:21:00.627 Df PrivacyBrowser[5568:535a] [com.apple.SkyLight:default] New connection 0x341b7 main
+2026-10-29 08:21:00.631 Df PrivacyBrowser[5568:535a] [com.apple.processmanager:front-35286506] CHECKIN: pid=5568
+2026-10-29 08:21:00.638 Df launchservicesd[127:4e93] [com.apple.launchservices:cas] CHECKIN:0x0-0x34034 5568 dev.local.PrivacyBrowser
+2026-10-29 08:21:00.644 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application _updateInformationInternal] | Got App URL: file:///Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/
+2026-10-29 08:21:00.645 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application setState:] | enter: <Application: 0xb2338b160: PrivacyBrowser> state 2
+2026-10-29 08:21:00.645 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[ApplicationManager checkInAppContext:eventData:] | ApplicationManager: Checked in app : PrivacyBrowser
+2026-10-29 08:21:00.645 Df distnoted[321:4bc5] [com.apple.distnoted:diagnostic] register name: com.apple.sharedfilelist.change object: com.apple.LSSharedFileList.ApplicationRecentDocuments/dev.local.privacybrowser token: 5600000046 pid: 351
+2026-10-29 08:21:00.646 Df PrivacyBrowser[5568:535a] [com.apple.processmanager:front-35286506] CHECKEDIN: pid=5568 asn=0x0-0x34034 foreground=1
+2026-10-29 08:21:00.647 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec280] activating connection: mach=true listener=false peer=false name=com.apple.lsd.modifydb
+2026-10-29 08:21:00.647 Df runningboardd[161:4e5b] [com.apple.runningboard:process] Resolved pid 5568 to [anon<PrivacyBrowser>(501):5568]
+2026-10-29 08:21:00.648 Df runningboardd[161:4e5b] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):5568] is not RunningBoard jetsam managed.
+2026-10-29 08:21:00.648 Df runningboardd[161:4e5b] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):5568] This process will not be managed.
+2026-10-29 08:21:00.648 Df runningboardd[161:4e5b] [com.apple.runningboard:ttl] Now tracking process: [anon<PrivacyBrowser>(501):5568]
+2026-10-29 08:21:00.648 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec3c0] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:21:00.648 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec3c0] Connection returned listener port: 0x4403
+2026-10-29 08:21:00.650 Df runningboardd[161:4e5b] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):5568] from originator [osservice<com.apple.coreservices.launchservicesd>:127] with description <RBSAssertionDescriptor| "foregroundApp:5568" ID:161-127-388 target:5568 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:21:00.650 Df runningboardd[161:4e5b] [com.apple.runningboard:ttl] Assertion 161-127-388 (target:[anon<PrivacyBrowser>(501):5568]) will be created as active
+2026-10-29 08:21:00.650 Df runningboardd[161:4e99] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):5568] Ignoring jetsam update because this process is not memory-managed
+2026-10-29 08:21:00.650 Df runningboardd[161:4e99] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):5568] Ignoring suspend because this process is not lifecycle managed
+2026-10-29 08:21:00.650 Df runningboardd[161:4e99] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):5568] Result 45 setting darwin role to UserInteractiveNonFocal: Operation not supported, falling back to setting priority
+2026-10-29 08:21:00.650 Df runningboardd[161:4e99] [com.apple.runningboard:ttl] [anon<PrivacyBrowser>(501):5568] Set darwin priority to: PRIO_DEFAULT
+2026-10-29 08:21:00.650 Df runningboardd[161:4e99] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):5568] Ignoring GPU update because this process is not GPU managed
+2026-10-29 08:21:00.650 Df runningboardd[161:4e99] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):5568] Ignoring memory limit update because this process is not memory-managed
+2026-10-29 08:21:00.651 Df PrivacyBrowser[5568:5364] [com.apple.xpc:connection] [0x8d3100180] activating connection: mach=false listener=false peer=true name=com.apple.xpc.anonymous.0x8d30ec3c0.peer[127].0x8d3100180
+2026-10-29 08:21:00.652 Df runningboardd[161:3f55] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):5568] from originator [osservice<com.apple.coreservices.launchservicesd>:127] with description <RBSAssertionDescriptor| "foregroundApp:5568" ID:161-127-389 target:5568 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:21:00.652 Df runningboardd[161:3f55] [com.apple.runningboard:ttl] Assertion 161-127-389 (target:[anon<PrivacyBrowser>(501):5568]) will be created as active
+2026-10-29 08:21:00.652 Df gamepolicyd[816:38d0] [com.apple.runningboard:process] Hit the server for a process handle 17365b10000015c0 that resolved to: [anon<PrivacyBrowser>(501):5568]
+2026-10-29 08:21:00.652 Df gamepolicyd[816:38d0] [com.apple.runningboard:monitor] Received state update for 5568 (anon<PrivacyBrowser>(501), running-NotVisible
+2026-10-29 08:21:00.654 Df runningboardd[161:3f55] [com.apple.runningboard:ttl] Invalidating assertion 161-127-388 (target:[anon<PrivacyBrowser>(501):5568]) from originator [osservice<com.apple.coreservices.launchservicesd>:127]
+2026-10-29 08:21:00.659 Df PrivacyBrowser[5568:535a] [com.apple.processmanager:front-35286506] FRONTLOGGING: version 1
+2026-10-29 08:21:00.659 Df PrivacyBrowser[5568:535a] [com.apple.processmanager:front-35286506] Registered, pid=5568 ASN=0x0,0x34034
+2026-10-29 08:21:00.659 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec500] activating connection: mach=true listener=false peer=false name=com.apple.analyticsd
+2026-10-29 08:21:00.665 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Lifecycle] 341b7[CreateApplication]: Process creation: 0x0-0x34034 (PrivacyBrowser) connectionID: 341B7 pid: 5568 in session 0x101
+2026-10-29 08:21:00.667 Df PrivacyBrowser[5568:5364] [com.apple.xpc:connection] [0x8d30ec640] activating connection: mach=true listener=false peer=false name=com.apple.lsd.mapdb
+2026-10-29 08:21:00.669 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec3c0] Connection returned listener port: 0x4403
+2026-10-29 08:21:00.671 Df lsd[350:4ea1] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:21:00.671 Df lsd[350:4ea1] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:21:00.672 Df PrivacyBrowser[5568:535a] [com.apple.processmanager:front-35286506] BringForward: pid=5568 asn=0x0-0x34034 bringForward=0 foreground=1 uiElement=0 launchedByLS=0 modifiersCount=0 allDisabled=0
+2026-10-29 08:21:00.674 Df PrivacyBrowser[5568:535a] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:21:00.680 Df PrivacyBrowser[5568:535a] (libMobileGestalt.dylib) No persisted cache on this platform.
+2026-10-29 08:21:00.682 Df PrivacyBrowser[5568:535a] (libMobileGestalt.dylib) Could not get size of EAN data (IOConnectCallScalarMethod kAppleNVMeEANGetSize returned 0xE00002E2)
+2026-10-29 08:21:00.682 Df PrivacyBrowser[5568:535a] (libMobileGestalt.dylib) Failed to copy 'aptk' from EAN
+2026-10-29 08:21:00.682 Df PrivacyBrowser[5568:535a] (libMobileGestalt.dylib) Failed to copy APTicket properties. Falling back to default policy.
+2026-10-29 08:21:00.682 Df PrivacyBrowser[5568:535a] (libMobileGestalt.dylib) Creating default MGSysConfigPolicy
+2026-10-29 08:21:00.682 Df PrivacyBrowser[5568:535a] (libMobileGestalt.dylib) CFDictionaryRef copySyscfgDictionary(void) enumeration of <private> failed.
+2026-10-29 08:21:00.682 Df PrivacyBrowser[5568:535a] (libMobileGestalt.dylib) Failed to find key <private>
+2026-10-29 08:21:00.686 Df PrivacyBrowser[5568:535a] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:21:00.689 Df PrivacyBrowser[5568:535a] [com.apple.AppKit:Appearance] Post-registration system appearance: (HLTB: 1)
+2026-10-29 08:21:00.695 Df PrivacyBrowser[5568:535a] [com.apple.FrontBoard:Common] FBSWorkspace: endpoint monitoring is disabled.
+2026-10-29 08:21:00.695 Df PrivacyBrowser[5568:535a] [com.apple.FrontBoard:Common] FBSWorkspace: default shell endpoint is disabled.
+2026-10-29 08:21:00.696 Df PrivacyBrowser[5568:535a] [com.apple.runningboard:connection] Initializing connection
+2026-10-29 08:21:00.696 Df PrivacyBrowser[5568:535a] [com.apple.runningboard:process] Removing all cached process handles
+2026-10-29 08:21:00.698 Df PrivacyBrowser[5568:5364] [com.apple.runningboard:connection] Sending handshake request attempt #1 to server
+2026-10-29 08:21:00.698 Df PrivacyBrowser[5568:5364] [com.apple.runningboard:connection] Creating connection to com.apple.runningboard
+2026-10-29 08:21:00.698 Df PrivacyBrowser[5568:5364] [com.apple.xpc:connection] [0x8d30ec8c0] activating connection: mach=true listener=false peer=false name=com.apple.runningboard
+2026-10-29 08:21:00.698 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec3c0] Connection returned listener port: 0x4403
+2026-10-29 08:21:00.699 Df runningboardd[161:5391] [com.apple.runningboard:connection] Setting client for [anon<PrivacyBrowser>(501):5568] as ready
+2026-10-29 08:21:00.700 A  PrivacyBrowser[5568:5365] (RunningBoardServices) didChangeInheritances
+2026-10-29 08:21:00.702 Df PrivacyBrowser[5568:5364] [com.apple.runningboard:connection] Handshake succeeded
+2026-10-29 08:21:00.702 Df PrivacyBrowser[5568:5364] [com.apple.runningboard:connection] Identity resolved as anon<PrivacyBrowser>(501)
+2026-10-29 08:21:00.703 Df distnoted[321:4e0f] [com.apple.distnoted:diagnostic] register name: com.apple.xctest.FakeForceTouchDevice object: dev.local.PrivacyBrowser token: 1f0000001c pid: 5568
+2026-10-29 08:21:00.706 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec3c0] Connection returned listener port: 0x4403
+2026-10-29 08:21:00.713 A  PrivacyBrowser[5568:539e] (AppIntents) appintents:register process
+2026-10-29 08:21:00.714 Df PrivacyBrowser[5568:539e] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:00.714 Df PrivacyBrowser[5568:539e] [com.apple.xpc:connection] [0x8d30ec780] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:21:00.714 Df PrivacyBrowser[5568:539e] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:21:00.714 Df PrivacyBrowser[5568:539e] [com.apple.xpc:connection] [0x8d30ecb40] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:21:00.714 Df PrivacyBrowser[5568:539e] [com.apple.xpc:connection] [0x8d30ecb40] Connection returned listener port: 0x6d03
+2026-10-29 08:21:00.716 Df PrivacyBrowser[5568:535a] [com.apple.dt.xctest:Default] Registering for test daemon availability notify post.
+2026-10-29 08:21:00.716 E  linkd[405:510b] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [5568]
+2026-10-29 08:21:00.716 Df PrivacyBrowser[5568:5364] [com.apple.xpc:connection] [0x8d30ec780] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:00.716 Df PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:21:00.717 Df PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:00.717 E  PrivacyBrowser[5568:539e] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:00.717 A  PrivacyBrowser[5568:5364] (AppIntents) appintents:register process
+2026-10-29 08:21:00.717 Df PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:00.717 Df PrivacyBrowser[5568:5364] [com.apple.xpc:connection] [0x8d30ecdc0] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:21:00.717 E  PrivacyBrowser[5568:539e] [com.apple.AppKit:Application] Error registering app with intents framework: Error Domain=NSCocoaErrorDomain Code=4097 UserInfo={NSDebugDescription=<private>}
+2026-10-29 08:21:00.717 Df PrivacyBrowser[5568:535a] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:21:00.717 Df PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:21:00.717 Df PrivacyBrowser[5568:5364] [com.apple.xpc:connection] [0x8d30ecb40] Connection returned listener port: 0x6d03
+2026-10-29 08:21:00.717 Df PrivacyBrowser[5568:535a] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:21:00.717 E  linkd[405:53a4] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [5568]
+2026-10-29 08:21:00.717 Df PrivacyBrowser[5568:535a] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:21:00.717 Df PrivacyBrowser[5568:539e] [com.apple.xpc:connection] [0x8d30ecdc0] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:00.717 Df PrivacyBrowser[5568:539e] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:21:00.718 Df PrivacyBrowser[5568:539e] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:00.718 A  PrivacyBrowser[5568:539e] (AppIntents) appintents:register process
+2026-10-29 08:21:00.718 Df PrivacyBrowser[5568:539e] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:00.718 Df PrivacyBrowser[5568:539e] [com.apple.xpc:connection] [0x8d30ed040] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:21:00.718 E  PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:00.718 E  PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:00.718 Df PrivacyBrowser[5568:539e] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:21:00.718 Df PrivacyBrowser[5568:539e] [com.apple.xpc:connection] [0x8d30ecb40] Connection returned listener port: 0x6d03
+2026-10-29 08:21:00.719 E  linkd[405:53a4] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [5568]
+2026-10-29 08:21:00.720 Df PrivacyBrowser[5568:5364] [com.apple.xpc:connection] [0x8d30ed040] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:00.720 Df PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:21:00.720 Df PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:00.720 A  PrivacyBrowser[5568:5364] (AppIntents) appintents:register process
+2026-10-29 08:21:00.720 Df PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:00.720 Df PrivacyBrowser[5568:5364] [com.apple.xpc:connection] [0x8d30ed680] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:21:00.720 E  PrivacyBrowser[5568:539e] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:00.720 E  PrivacyBrowser[5568:539e] [com.apple.appintents:Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:00.720 Df PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:21:00.720 Df PrivacyBrowser[5568:5364] [com.apple.xpc:connection] [0x8d30ecb40] Connection returned listener port: 0x6d03
+2026-10-29 08:21:00.721 E  linkd[405:53a4] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [5568]
+2026-10-29 08:21:00.721 Df PrivacyBrowser[5568:539e] [com.apple.xpc:connection] [0x8d30ed680] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:00.721 Df PrivacyBrowser[5568:539e] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:21:00.721 E  PrivacyBrowser[5568:539e] [com.apple.appintents:Connection] Will NOT re-try to establish the connection
+2026-10-29 08:21:00.721 E  PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:00.721 E  PrivacyBrowser[5568:5364] [com.apple.appintents:Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:00.722 A  PrivacyBrowser[5568:535a] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:21:00.723 Df PrivacyBrowser[5568:535a] (libMobileGestalt.dylib) couldn't load support library
+2026-10-29 08:21:00.723 Df PrivacyBrowser[5568:535a] (libMobileGestalt.dylib) called dummy function!
+2026-10-29 08:21:00.724 Df PrivacyBrowser[5568:535a] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.gms.availability.notification
+2026-10-29 08:21:00.724 Df PrivacyBrowser[5568:535a] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.os-eligibility-domain.change.greymatter
+2026-10-29 08:21:00.724 Df PrivacyBrowser[5568:535a] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.language.changed
+2026-10-29 08:21:00.724 Df PrivacyBrowser[5568:535a] [com.apple.WritingTools:Default] isAvailable value changed: isMDMAllowed = true, gmAvailable (current) = false
+2026-10-29 08:21:00.736 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ed2c0] activating connection: mach=true listener=false peer=false name=com.apple.appkit.restoration_storage
+2026-10-29 08:21:00.738 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ed400] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.appleevents
+2026-10-29 08:21:00.746 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ec3c0] Connection returned listener port: 0x4403
+2026-10-29 08:21:00.749 Df PrivacyBrowser[5568:535a] [com.apple.processmanager:front-35286506] SignalReady: pid=5568 asn=0x0-0x34034
+2026-10-29 08:21:00.750 Df PrivacyBrowser[5568:535a] [com.apple.processmanager:front-35286506] SIGNAL: pid=5568 asn=0x0x-0x34034
+2026-10-29 08:21:00.750 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application _updateInformationInternal] | Got App URL: file:///Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/
+2026-10-29 08:21:00.753 A  PrivacyBrowser[5568:535a] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:21:00.753 A  PrivacyBrowser[5568:535a] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:21:00.758 A  PrivacyBrowser[5568:535a] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:21:00.759 Df gamepolicyd[816:4e5e] [com.apple.runningboard:monitor] Received state update for 5568 (anon<PrivacyBrowser>(501), running-NotVisible
+2026-10-29 08:21:00.767 E  diagnostics_agent[450:4ea5] [com.apple.appstorefoundation:Default] Failed to parse receipt at /Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/_MASReceipt/receipt: Error Domain=NSCocoaErrorDomain Code=260 "The file “receipt” couldn’t be opened because there is no such file." UserInfo={NSFilePath=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/_MASReceipt/receipt, NSURL=file:///Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/_MASReceipt/receipt, NSUnderlyingError=0x8a4c2b8d0 {Error Domain=NSPOSIXErrorDomain Code=2 "No such file or directory"}}
+2026-10-29 08:21:00.770 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ed900] activating connection: mach=false listener=false peer=false name=com.apple.ViewBridgeAuxiliary
+2026-10-29 08:21:00.789 Df PrivacyBrowser[5568:5365] [com.apple.CoreAnalytics:client] Received configuration update from daemon (initial)
+2026-10-29 08:21:00.794 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ed7c0] activating connection: mach=false listener=false peer=false name=(anonymous)
+2026-10-29 08:21:00.794 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30eda40] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:21:00.794 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30eda40] Connection returned listener port: 0x9803
+2026-10-29 08:21:00.796 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ed900] invalidated after the last release of the connection object
+2026-10-29 08:21:00.798 Df PrivacyBrowser[5568:535a] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:21:00.798 Df PrivacyBrowser[5568:535a] [com.apple.AppKit:StateRestoration] -[NSApplication _reopenWindowsAsNecessaryIncludingRestorableState:withFullFidelity:completionHandler:] shouldRestoreState=1 hasPersistentStateToRestore=0 shouldStillRestoreStateAfterPrompting=0
+2026-10-29 08:21:00.798 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ed900] activating connection: mach=true listener=false peer=false name=com.apple.window_proxies
+2026-10-29 08:21:00.798 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ed900] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:21:00.802 Df tccd[154:5102] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=166.99, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=5568, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.WindowServer, pid=166, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer}, },
+2026-10-29 08:21:00.802 Df tccd[154:5102] [com.apple.TCC:access] requestor: TCCDProcess: identifier=com.apple.WindowServer, pid=166, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer is checking access for accessor TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=5568, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+2026-10-29 08:21:00.804 Df PrivacyBrowser[5568:535a] [com.apple.AppKit:AutomaticTermination] void _NSEnableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:21:00.811 A  PrivacyBrowser[5568:535a] (TCC) TCCAccessRequest() IPC
+2026-10-29 08:21:00.811 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30edb80] activating connection: mach=true listener=false peer=false name=com.apple.tccd
+2026-10-29 08:21:00.812 Df PrivacyBrowser[5568:5365] [com.apple.BoardServices:XPCErrors] [C:1] Alloc <private>
+2026-10-29 08:21:00.812 Df PrivacyBrowser[5568:5365] [com.apple.xpc:connection] [0x8d30edcc0] activating connection: mach=false listener=false peer=false name=(anonymous)
+2026-10-29 08:21:00.816 Df tccd[373:510e] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=5568.2, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, requesting={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=5568, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, },
+2026-10-29 08:21:00.821 Df WindowManager[348:53c0] [com.apple.windowmanagement:xpcconnection] Connection activated | (5568) PrivacyBrowser
+2026-10-29 08:21:00.823 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30edb80] invalidated after the last release of the connection object
+2026-10-29 08:21:00.826 A  PrivacyBrowser[5568:5394] (RunningBoardServices) didChangeInheritances
+2026-10-29 08:21:00.829 Df PrivacyBrowser[5568:535a] (WebKit) 0x1160480e0 - [PID=0] WebProcessCache::updateCapacity: Cache is disabled because process swap on navigation is disabled
+2026-10-29 08:21:00.845 A  PrivacyBrowser[5568:535a] (CoreFoundation) Updating Key-Value Observers Of Preferences
+2026-10-29 08:21:00.851 Df PrivacyBrowser[5568:53a5] [com.apple.xpc:connection] [0x8d30edb80] activating connection: mach=true listener=false peer=false name=com.apple.webprivacyd
+2026-10-29 08:21:00.854 Df PrivacyBrowser[5568:535a] [com.apple.WebKit:BackForwardCache] WebBackForwardCache::clear
+2026-10-29 08:21:00.855 Df PrivacyBrowser[5568:535a] [com.apple.WebKit:Storage] 0x8d31f8288 - WebsiteDataStore::WebsiteDataStore sessionID=2 identifier=1cd82f31-3785-4504-836e-d9d54d9aa478
+2026-10-29 08:21:00.860 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.861 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.861 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.861 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.861 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.862 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.864 Df PrivacyBrowser[5568:53a5] [com.apple.xpc:connection] [0x8d30ee080] activating connection: mach=true listener=false peer=false name=com.apple.metadata.mds
+2026-10-29 08:21:00.869 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.869 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.869 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:00.877 A  PrivacyBrowser[5568:535a] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:21:00.878 A  PrivacyBrowser[5568:535a] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:21:00.878 Df tccd[373:510e] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=114.43, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=5568, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.mds, pid=114, auid=0, euid=0, binary_path=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds}, },
+2026-10-29 08:21:00.879 Df distnoted[321:4bc5] [com.apple.distnoted:diagnostic] register name: com.apple.nsquiet_safe_quit_give_reason object: dev.local.PrivacyBrowser token: 3e00000039 pid: 5568
+2026-10-29 08:21:00.883 Df tccd[373:53bf] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=114.44, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=5568, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.mds, pid=114, auid=0, euid=0, binary_path=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds}, },
+2026-10-29 08:21:00.884 Df tccd[373:53bf] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=114.45, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=5568, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.mds, pid=114, auid=0, euid=0, binary_path=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds}, },
+2026-10-29 08:21:00.896 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ee300] activating connection: mach=true listener=false peer=false name=com.apple.fonts
+2026-10-29 08:21:00.901 Df PrivacyBrowser[5568:535a] [com.apple.AppKit:Appearance] NSApp cache appearance:
+-NSRequiresAquaSystemAppearance: 0
+-appearance: (null)
+-effectiveAppearance: <NSCompositeAppearance: 0x8d302c960
+ (
+    "<NSAquaAppearance: 0x8d302c8c0>",
+    "<NSSystemAppearance: 0x8d302ca00>"
+)>
+2026-10-29 08:21:00.909 A  PrivacyBrowser[5568:535a] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:21:01.017 E  PrivacyBrowser[5568:535a] [com.apple.parsec:CoreParsec] PARSession setup failed on host check
+2026-10-29 08:21:01.019 A  PrivacyBrowser[5568:5365] (Accounts) accounts/accounts-with-types-sync
+2026-10-29 08:21:01.019 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30ee580] activating connection: mach=true listener=false peer=false name=com.apple.ScreenTimeAgent.private
+2026-10-29 08:21:01.022 Df PrivacyBrowser[5568:5365] [com.apple.xpc:connection] [0x8d30ee6c0] activating connection: mach=true listener=false peer=false name=com.apple.accountsd.accountmanager
+2026-10-29 08:21:01.027 E  accountsd[400:149b] [com.apple.accounts:entitlement] Unentitled access by client 'PrivacyBrowser' (selector: accountsWithAccountTypeIdentifiers:preloadedProperties:completion:)
+2026-10-29 08:21:01.027 E  PrivacyBrowser[5568:5365] [com.apple.accounts:core] "Error returned from daemon: Error Domain=com.apple.accounts Code=7"
+2026-10-29 08:21:01.028 Df PrivacyBrowser[5568:5365] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:01.028 Df PrivacyBrowser[5568:5365] [com.apple.xpc:connection] [0x8d30ee800] activating connection: mach=true listener=false peer=false name=com.apple.passd.in-app-payment
+2026-10-29 08:21:01.033 Df PrivacyBrowser[5568:5365] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:01.033 Df PrivacyBrowser[5568:53a5] [com.apple.xpc:connection] [0x8d30ee800] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:21:01.034 Df PrivacyBrowser[5568:5365] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:01.034 Df PrivacyBrowser[5568:5365] [com.apple.xpc:connection] [0x8d30ee800] activating connection: mach=true listener=false peer=false name=com.apple.passd.payment-continuity
+2026-10-29 08:21:01.035 Df PrivacyBrowser[5568:5365] [com.apple.passkit:Continuity] Failed to retrieve registered host device status
+2026-10-29 08:21:01.035 Df PrivacyBrowser[5568:5365] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:01.035 Df PrivacyBrowser[5568:53a5] [com.apple.xpc:connection] [0x8d30ee800] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:21:01.035 Df PrivacyBrowser[5568:5365] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:01.035 Df PrivacyBrowser[5568:5365] [com.apple.xpc:connection] [0x8d30ee800] activating connection: mach=true listener=false peer=false name=com.apple.passd.in-app-payment
+2026-10-29 08:21:01.037 Df PrivacyBrowser[5568:5365] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:01.037 Df PrivacyBrowser[5568:5394] [com.apple.xpc:connection] [0x8d30ee800] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:21:01.037 Df PrivacyBrowser[5568:5365] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:01.037 Df PrivacyBrowser[5568:5365] [com.apple.xpc:connection] [0x8d30ee800] activating connection: mach=true listener=false peer=false name=com.apple.passd.payment-continuity
+2026-10-29 08:21:01.038 Df PrivacyBrowser[5568:5365] [com.apple.passkit:Continuity] Failed to retrieve registered host device status
+2026-10-29 08:21:01.038 Df PrivacyBrowser[5568:5365] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:01.038 Df PrivacyBrowser[5568:5365] [com.apple.xpc:connection] [0x8d30ee800] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:21:01.051 Df PrivacyBrowser[5568:535a] [com.apple.xpc:connection] [0x8d30eee40] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:01.052 Df PrivacyBrowser[5568:53a5] [com.apple.xpc:connection] [0x8d30eee40] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:01.052 E  PrivacyBrowser[5568:53a5] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:21:01.052 Df PrivacyBrowser[5568:5365] [com.apple.xpc:connection] [0x8d30eef80] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:01.053 Df PrivacyBrowser[5568:53a5] [com.apple.xpc:connection] [0x8d30eef80] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:01.053 E  PrivacyBrowser[5568:53a5] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:21:01.053 Df PrivacyBrowser[5568:53a5] [com.apple.xpc:connection] [0x8d30ef0c0] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:01.053 Df PrivacyBrowser[5568:5365] [com.apple.xpc:connection] [0x8d30ef0c0] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:01.053 E  PrivacyBrowser[5568:5365] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:21:01.053 Df PrivacyBrowser[5568:5365] [com.apple.xpc:connection] [0x8d30ef200] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:01.053 Df PrivacyBrowser[5568:53a5] [com.apple.xpc:connection] [0x8d30ef200] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:01.053 E  PrivacyBrowser[5568:53a5] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:21:01.053 Df PrivacyBrowser[5568:5365] [com.apple.xpc:connection] [0x8d30ef5c0] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:01.053 A  PrivacyBrowser[5568:535a] (CoreFoundation) Updating Key-Value Observers Of Preferences
+2026-10-29 08:21:01.054 Df PrivacyBrowser[5568:5394] [com.apple.xpc:connection] [0x8d30ef5c0] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:01.054 E  PrivacyBrowser[5568:5394] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:21:01.054 Df PrivacyBrowser[5568:5394] [com.apple.xpc:connection] [0x8d30ef700] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:01.054 Df PrivacyBrowser[5568:53a5] [com.apple.xpc:connection] [0x8d30ef700] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:01.054 E  PrivacyBrowser[5568:53a5] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:21:01.054 F  PrivacyBrowser[5568:53a5] [com.apple.Safari:TabGroup] Failed to reconnect too many times to sync agent since Thu Oct 29 08:21:01 2026, stopping.
+2026-10-29 08:21:01.054 A  PrivacyBrowser[5568:53a5] (libsystem_trace.dylib) Activity for state dumps
+2026-10-29 08:21:01.193 Df PrivacyBrowser[5568:535a] [com.apple.Safari:Other] BrowserWindowController <0x105562750> found window height: 600.000000, tab bar height: 0.000000, maxY for contentLayoutRect: -52.000000, while computing topContentInset
+2026-10-29 08:21:01.193 Df PrivacyBrowser[5568:535a] [com.apple.Safari:Other] BrowserWindowController <0x105562750> did compute topContentInset: 652.000000
+2026-10-29 08:21:01.193 Df PrivacyBrowser[5568:535a] [com.apple.Safari:Other] BrowserWindowController <0x105562750> found window height: 600.000000, tab bar height: 0.000000, maxY for contentLayoutRect: 548.000000, while computing topContentInset
+2026-10-29 08:21:01.193 Df PrivacyBrowser[5568:535a] [com.apple.Safari:Other] BrowserWindowController <0x105562750> did compute topContentInset: 52.000000
+2026-10-29 08:21:01.195 Df PrivacyBrowser[5568:535a] [com.apple.Safari:Other] BrowserWindowController <0x105562750> found window height: 600.000000, tab bar height: 0.000000, maxY for contentLayoutRect: 548.000000, while computing topContentInset
+2026-10-29 08:21:01.195 Df PrivacyBrowser[5568:535a] [com.apple.Safari:Other] BrowserWindowController <0x105562750> did compute topContentInset: 52.000000
+2026-10-29 08:21:01.195 Df PrivacyBrowser[5568:535a] [com.apple.Safari:Other] TabContentViewController <0x8d31056c0> will update topContentInset for TabContentView <0x8d2a85800> to: 52.000000
+2026-10-29 08:21:01.195 Df PrivacyBrowser[5568:535a] [com.apple.Safari:Other] TabContentView <0x8d2a85800> will update inheritedTopContentInset to: 52.000000 for BrowserViewController <0x0> and ReaderViewController <0x0>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.216 Df PrivacyBrowser[5568:535a] (Foundation) <private>
+2026-10-29 08:21:01.220 F  PrivacyBrowser[5568:535a] [com.apple.hiservices:HIExceptions] FAULT: NSInvalidArgumentException: <private>; (user info absent)
+2026-10-29 08:21:01.220 A  PrivacyBrowser[5568:535a] (libsystem_trace.dylib) Activity for state dumps
+2026-10-29 08:21:01.221 E  PrivacyBrowser[5568:535a] [com.apple.AppKit:General] NSConcreteMutableAttributedString addAttribute:value:range:: nil value
+2026-10-29 08:21:01.221 E  PrivacyBrowser[5568:535a] [com.apple.AppKit:General] (
+	0   CoreFoundation                      0x0000000188cbf1f0 __exceptionPreprocess + 176
+	1   PrivacyBrowser                      0x0000000104613ba4 PBPreprocessException + 48
+	2   libobjc.A.dylib                     0x000000018873a91c objc_exception_throw + 88
+	3   Foundation                          0x000000018a4b90bc -[NSConcreteMutableAttributedString attribute:atIndex:effectiveRange:] + 0
+	4   Safari                              0x00000001c0b3c100 -[UnifiedField _notSecureAnnotation] + 364
+	5   Safari                              0x00000001c0b3b00c -[UnifiedField _layOutFaviconAndMainContentView] + 2180
+	6   Safari                              0x00000001c0b3a670 -[UnifiedField layout] + 104
+	7   AppKit                              0x000000018d5b150c __getCGDisplayListGetHashSymbolLoc_block_invoke + 1516
+	8   AppKit                              0x000000018d5b1534 __getCGDisplayListGetHashSymbolLoc_block_invoke + 1556
+	9   AppKit                              0x000000018d5767a0 block_destroy_helper + 9428
+	10  AppKit                              0x000000018d576dec block_destroy_helper + 11040
+	11  AppKit                              0x000000018ddba078 ___NSViewLayout_block_invoke + 624
+	12  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	13  AppKit                              0x000000018d0cbc10 _NSViewLayout + 96
+	14  AppKit                              0x000000018ddafd6c __36-[NSView _layoutSubtreeWithOldSize:]_block_invoke + 372
+	15  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	16  AppKit                              0x000000018d0cbba4 -[NSView _layoutSubtreeWithOldSize:] + 100
+	17  AppKit                              0x000000018ddb093c __56-[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:]_block_invoke + 908
+	18  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	19  AppKit                              0x000000018d0cb780 -[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:] + 100
+	20  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	21  AppKit                              0x000000018d0cb710 -[NSView layoutSubtreeIfNeeded] + 96
+	22  Safari                              0x00000001c0b30e78 -[BrowserWindowController windowDidLoad] + 1032
+	23  AppKit                              0x000000018d1e81a8 -[NSWindowController _windowDidLoad] + 620
+	24  Safari                              0x00000001c0b30a50 -[WindowController _windowDidLoad] + 52
+	25  AppKit                              0x000000018d1e438c -[NSWindowController window] + 100
+	26  PrivacyBrowser                      0x000000010472b6d4 $s14PrivacyBrowser11ObjCRuntimeO19callReturningObjectySo8NSObjectCSg5value_SS6reasontyXl_SStFZTf4nnd_n + 1092
+	27  PrivacyBrowser                      0x000000010471fc0c $s14PrivacyBrowser06SafariB16WindowControllerC04loadD033_D5663EB8AEBCFB374BED3A50E441DB28LL2ofSo8NSWindowCSgSo8NSObjectC_tF + 48
+	28  PrivacyBrowser                      0x0000000104723cb8 $s14PrivacyBrowser06SafariB16WindowControllerC4open9dataStore8startURLSo8NSWindowCSgSo013WKWebsiteDataH0CSg_10Foundation0J0VSgtFyycfU0_Tm + 32
+	29  PrivacyBrowser                      0x0000000104727dbc $s14PrivacyBrowser06SafariB16WindowControllerC10buildPopup33_D5663EB8AEBCFB374BED3A50E441DB28LLySbAC0G7VariantOFyycfU1_TA + 20
+	30  PrivacyBrowser                      0x00000001045c0f90 $sIeg_IeyB_TR + 28
+	31  PrivacyBrowser                      0x0000000104613a08 PBCatchException + 36
+	32  PrivacyBrowser                      0x000000010471f990 $s14PrivacyBrowser06SafariB16WindowControllerC7guarded33_D5663EB8AEBCFB374BED3A50E441DB28LLySbSS_yyctF + 136
+	33  PrivacyBrowser                      0x0000000104722398 $s14PrivacyBrowser06SafariB16WindowControllerC10buildPopup33_D5663EB8AEBCFB374BED3A50E441DB28LLySbAC0G7VariantOF + 3740
+	34  PrivacyBrowser                      0x000000010471e3a8 $s14PrivacyBrowser06SafariB16WindowControllerC12attemptPopup33_D5663EB8AEBCFB374BED3A50E441DB28LL_9dataStore8startURLSo8NSWindowCSgAC0G7VariantO_So013WKWebsiteDataP0CSg10Foundation0R0VSgtF + 916
+	35  PrivacyBrowser                      0x000000010471c5e8 $s14PrivacyBrowser06SafariB16WindowControllerC4open9dataStore8startURLSo8NSWindowCSgSo013WKWebsiteDataH0CSg_10Foundation0J0VSgtF + 540
+	36  PrivacyBrowser                      0x0000000104730fb0 $s14PrivacyBrowser20SafariFrameworkProbeO12openAndCheck33_9F0153DCAF2CE7EC9F01CEB735D44942LLyySo8NSWindowCSgAA0cB16WindowControllerC_So18WKWebsiteDataStoreC10Foundation3URLVtXEYaFZ04$s14a9Browser20cde17O10windowStep33_9ijklmno11LLyyYaFZSo8p10CSgAA0cB16qr6C_So18stU24C10Foundation3URLVtXEfU_Tf1cn_nTY0_ + 1092
+	37  PrivacyBrowser                      0x000000010472ff49 $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TQ5_ + 1
+	38  PrivacyBrowser                      0x0000000104735e5d $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TATQ0_ + 1
+	39  PrivacyBrowser                      0x00000001047f0331 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TQ0_ + 1
+	40  PrivacyBrowser                      0x00000001047f0319 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TATQ0_ + 1
+	41  libswift_Concurrency.dylib          0x000000028e2afec5 _ZL23completeTaskWithClosurePN5swift12AsyncContextEPNS_10SwiftErrorE + 1
+)
+2026-10-29 08:21:01.221 Df kernel[0:535a] PrivacyBrowser[5568] Corpse allowed 1 of 5
+2026-10-29 08:21:01.222 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Lifecycle] 0[outside of RPC]: Process death: 0x0-0x34034 (PrivacyBrowser) connectionID: 341B7 pid: 5568 in session 0x101
+2026-10-29 08:21:01.222 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Focus] <BSCompoundAssertion:0xc42c092c0> ([FocusManager:257]-deferringPolicyEvaluationSuppression) acquire for reason:process death - 0x0-0x34034 (PrivacyBrowser) acq:0xc42962520 count:1
+2026-10-29 08:21:01.222 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Focus] 0[outside of RPC]: [FocusManager:257] update to deferring policy requested for reason: permitted list updated - 0x0-0x34034 removed - but we are suppressing evaluation for reasons: {(
+    "process death - 0x0-0x34034 (PrivacyBrowser)"
+)}
+2026-10-29 08:21:01.222 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Focus] 0[outside of RPC]: [FocusManager:257] update to deferring policy requested for reason: permitted list updated - 0x1-0x15c0 removed - but we are suppressing evaluation for reasons: {(
+    "process death - 0x0-0x34034 (PrivacyBrowser)"
+)}
+2026-10-29 08:21:01.224 Df launchd[1:3749] [gui/501 [100002]:] service inactive: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.5568
+2026-10-29 08:21:01.224 Df launchd[1:3749] [gui/501 [100002]:] removing inactive unmanaged service: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.5568
+2026-10-29 08:21:01.225 Df WindowManager[348:4225] [com.apple.windowmanagement:xpcconnection] Connection invalidated | (5568) PrivacyBrowser
+2026-10-29 08:21:01.225 Df runningboardd[161:4e5a] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):5568] termination reported by proc_exit
+2026-10-29 08:21:01.228 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:AppExit] -[ApplicationManager handleCASEvent:withData:] | CAS notification for appDeath for dev.local.PrivacyBrowser with asn: LSASN:{hi=0x0;lo=0x34034} for bundle path: /Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app with URL: file:///Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/
+2026-10-29 08:21:01.228 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application setState:] | enter: <Application: 0xb2338b160: PrivacyBrowser> state 3
+2026-10-29 08:21:01.228 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application setState:] | enter: <Application: 0xb2338b160: PrivacyBrowser> state 4
+2026-10-29 08:21:01.228 Df runningboardd[161:5391] [com.apple.runningboard:ttl] Invalidating assertion 161-127-389 (target:[anon<PrivacyBrowser>(501):5568]) from originator [osservice<com.apple.coreservices.launchservicesd>:127]
+2026-10-29 08:21:01.230 Df runningboardd[161:5391] [com.apple.runningboard:process] XPC connection invalidated: [anon<PrivacyBrowser>(501):5568]
+2026-10-29 08:21:01.332 Df runningboardd[161:5391] [com.apple.runningboard:process] Removing process: [anon<PrivacyBrowser>(501):5568]
+2026-10-29 08:21:01.332 Df runningboardd[161:5391] [com.apple.runningboard:general] removeJobWithInstance called for identity without existing job [anon<PrivacyBrowser>(501):5568]
+2026-10-29 08:21:01.332 Df runningboardd[161:5391] [com.apple.runningboard:process] Removing assertions for terminated process: [anon<PrivacyBrowser>(501):5568]
+2026-10-29 08:21:01.333 Df gamepolicyd[816:50dd] [com.apple.runningboard:monitor] Received state update for 5568 (anon<PrivacyBrowser>(501), none-NotVisible
+2026-10-29 08:21:02.581 Df ReportCrash[539:5124] Formulating fatal 309 report for corpse[5568] PrivacyBrowser
+2026-10-29 08:21:02.582 Df ReportCrash[539:5124] loadStoreInfo [platform 1] dev.local.PrivacyBrowser from file:///Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/
+2026-10-29 08:21:02.586 Df osanalyticshelper[275:4891] (OSAnalytics) creating type 309 as /Users/runner/Library/Logs/DiagnosticReports/.PrivacyBrowser-2026-10-29-082102.ips
+2026-10-29 08:21:02.592 Df osanalyticshelper[275:4891] (OSAnalytics) Saved type '309(<private>)' report (8 of max 25) at /Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-082102.ips
+2026-10-29 08:21:02.592 Df osanalyticshelper[275:4891] xpc log creation type 309 result success: /Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-082102.ips
+2026-10-29 08:21:02.593 Df ReportCrash[539:5124] (OSAnalytics) client log create type 309 result success: /Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-082102.ips
+2026-10-29 08:21:02.594 Df ReportCrash[539:5124] dev.local.PrivacyBrowser is not a MetricKit client
+2026-10-29 08:21:02.600 Df ReportCrash[539:5124] recordCrashEvent; isBeta 0, log: '/Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-082102.ips'
+2026-10-29 08:21:09.268 Df log[5640:5466] [com.apple.log:] log run noninteractively, parent: 3381 (Python), args: 'log' 'show' '--style' 'compact' '--start' '2026-10-29 08:20:55' '--predicate' 'process == "PrivacyBrowser" OR eventMessage CONTAINS[c] "PrivacyBrowser" OR eventMessage CONTAINS[c] "AMFI" OR eventMess

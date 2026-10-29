@@ -1,0 +1,626 @@
+Timestamp               Ty Process[PID:TID]
+2026-10-29 08:19:39.226 Df BackgroundShortcutRunner[981:357e] [com.apple.shortcuts:ToolKitExecution] -[WFIsolatedShortcutRunner unaliveProcess] Releasing sandbox extensions
+2026-10-29 08:19:39.348 E  kernel[0:28f1] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: iconservicesagent(3310) deny(1) mach-lookup com.apple.windowserver.active
+2026-10-29 08:19:39.348 E  kernel[0:28f1] [com.apple.sandbox.reporting:violation] Sandbox: siriactionsd(367) deny(1) user-preference-read com.apple.appleaccount
+2026-10-29 08:19:39.348 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { com.apple.appleaccount, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/com.apple.appleaccount.plist, managed: 0 } from process 367 (siriactionsd) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:39.348 F  siriactionsd[367:8c7] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa013ad780> (Domain: com.apple.appleaccount, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:39.348 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { com.apple.appleaccount, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/com.apple.appleaccount.plist, managed: 0 } from process 367 (siriactionsd) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:39.348 F  siriactionsd[367:1d13] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa013ad780> (Domain: com.apple.appleaccount, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:39.349 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { com.apple.appleaccount, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/com.apple.appleaccount.plist, managed: 0 } from process 367 (siriactionsd) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:39.349 F  siriactionsd[367:1d13] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa013ad780> (Domain: com.apple.appleaccount, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:40.227 Df nesessionmanager[133:1468] [com.apple.networkextension:] UUID cache miss for dev.local.PrivacyBrowser
+2026-10-29 08:19:40.227 Df neagent[416:300e] [com.apple.networkextension:] Failed to find dev.local.PrivacyBrowser in LaunchServices
+2026-10-29 08:19:40.227 Df nehelper[227:38e7] [com.apple.networkextension:] Failed to find dev.local.PrivacyBrowser using neagent
+2026-10-29 08:19:40.227 Df nehelper[227:38e7] [com.apple.networkextension:] 0 UUIDs for dev.local.PrivacyBrowser are already in the cache
+2026-10-29 08:19:42.254 Df nesessionmanager[133:3970] [com.apple.networkextension:] UUID cache miss for dev.local.PrivacyBrowser
+2026-10-29 08:19:42.254 Df neagent[416:300e] [com.apple.networkextension:] Failed to find dev.local.PrivacyBrowser in LaunchServices
+2026-10-29 08:19:42.254 Df nehelper[227:38e7] [com.apple.networkextension:] Failed to find dev.local.PrivacyBrowser using neagent
+2026-10-29 08:19:42.254 Df nehelper[227:38e7] [com.apple.networkextension:] 0 UUIDs for dev.local.PrivacyBrowser are already in the cache
+2026-10-29 08:19:43.139 Df log[3679:3b35] [com.apple.log:] log run noninteractively, parent: 3381 (Python), args: 'log' 'show' '--style' 'compact' '--start' '2026-10-29 08:19:29' '--predicate' 'process == "PrivacyBrowser" OR eventMessage CONTAINS[c] "PrivacyBrowser" OR eventMessage CONTAINS[c] "AMFI" OR eventMess
+2026-10-29 08:19:43.316 Df lsd[163:38d5] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:19:43.317 Df lsd[163:38d5] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:19:43.319 Df lsd[163:38d5] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:4:2:1:_LSServerRegisterItemInfo result = 0
+2026-10-29 08:19:43.345 Df lsd[163:3b38] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:19:43.345 Df lsd[163:3b38] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:19:43.349 Df lsd[163:3b38] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:4:2:1:_LSServerRegisterItemInfo result = 0
+2026-10-29 08:19:43.383 Df pkd[365:25b0] [com.apple.PlugInKit:unspecified] [u 936C1053-8CFF-56D1-B8E4-9197B0A6D526] [<private>(<private>)] issued sandbox extension for sub service: <private>
+2026-10-29 08:19:43.383 Df pkd[365:25b0] [com.apple.PlugInKit:unspecified] [u BF848CBA-3F1F-5FB4-86BB-680D1D270C8B] [<private>(<private>)] issued sandbox extension for sub service: <private>
+2026-10-29 08:19:43.383 Df pkd[365:25b0] [com.apple.PlugInKit:unspecified] [u 01ED9C25-EAD5-591A-91CA-0FEC9E63C00A] [<private>(<private>)] issued sandbox extension for sub service: <private>
+2026-10-29 08:19:43.384 Df pkd[365:25b0] [com.apple.PlugInKit:unspecified] [u 66AC55BA-21A2-5D27-B5EE-A0DE53DFF804] [<private>(<private>)] issued sandbox extension for sub service: <private>
+2026-10-29 08:19:43.384 Df pkd[365:25b0] [com.apple.PlugInKit:unspecified] [u 1A4D16BB-6A0B-5F6B-9ECB-8753C9072139] [<private>(<private>)] issued sandbox extension for sub service: <private>
+2026-10-29 08:19:43.387 Df nehelper[227:38e7] [com.apple.networkextension:] Received an apps installed notification with bundle IDs (
+    "dev.local.PrivacyBrowser"
+)
+2026-10-29 08:19:43.406 Df nehelper[227:344e] [com.apple.networkextension:] Received an apps installed notification with bundle IDs (
+    "dev.local.PrivacyBrowser"
+)
+2026-10-29 08:19:43.507 Df lsd[350:337e] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:19:43.507 Df lsd[350:337e] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:19:43.510 Df lsd[350:337e] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:4:2:1:_LSServerRegisterItemInfo result = 0
+2026-10-29 08:19:43.575 Df kernel[0:3b93] (AppleMobileFileIntegrity) AMFI: [non-fatal] unable to accelerate context: com.apple.MENotificationAgent | 65285
+2026-10-29 08:19:43.784 E  kernel[0:3b7f] [com.apple.sandbox.reporting:violation] 2 duplicate reports for Sandbox: siriactionsd(367) deny(1) user-preference-read com.apple.appleaccount
+2026-10-29 08:19:43.784 E  kernel[0:3b7f] [com.apple.sandbox.reporting:violation] Sandbox: sharingd(446) deny(1) syscall-unix 545
+2026-10-29 08:19:43.820 Df com.apple.quicklook.ThumbnailsAgent[360:8ad] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.FontExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:43.821 Df com.apple.quicklook.ThumbnailsAgent[360:8ad] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.OfficeExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:43.822 Df com.apple.quicklook.ThumbnailsAgent[360:8ad] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.PackageExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:43.823 Df com.apple.quicklook.ThumbnailsAgent[360:8ad] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.AudiovisualExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:43.824 Df com.apple.quicklook.ThumbnailsAgent[360:8ad] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.WebExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:43.824 Df com.apple.quicklook.ThumbnailsAgent[360:8ad] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.CalendarExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:43.825 Df com.apple.quicklook.ThumbnailsAgent[360:8ad] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.ClippingsExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:43.826 Df com.apple.quicklook.ThumbnailsAgent[360:8ad] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.ImageExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:43.826 Df com.apple.quicklook.ThumbnailsAgent[360:8ad] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.TextExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:43.826 Df com.apple.quicklook.ThumbnailsAgent[360:8ad] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.ContactExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:43.842 E  chronod[390:3042] [com.apple.extensionkit:discovery] Extension is not entitled to run in the App Sandbox : <_EXExtensionIdentity: 0xc90ea0f30>
+2026-10-29 08:19:44.117 Df siriactionsd[367:1d22] [com.apple.shortcuts:Daemon] Firing event: <distributed notification: com.apple.LaunchServices.applicationRegistered, userInfo: [AnyHashable("CFBundleDisplayName"): PrivacyBrowser, AnyHashable("isPlaceholder"): 0, AnyHashable("bundleIDs"): <__NSSingleObjectArrayI 0xa010be820>(
+dev.local.PrivacyBrowser
+)
+]>
+2026-10-29 08:19:44.160 Df dmd[359:8e6] Received xpc stream event (distributed notification matching) with name: com.apple.LaunchServices.applicationRegistered user info: {
+    CFBundleDisplayName = PrivacyBrowser;
+    bundleIDs =     (
+        "dev.local.PrivacyBrowser"
+    );
+    isPlaceholder = 0;
+}
+2026-10-29 08:19:44.161 Df nehelper[227:344e] [com.apple.networkextension:] Removing UUIDs for (
+    "dev.local.PrivacyBrowser"
+)
+2026-10-29 08:19:44.216 Df nehelper[227:344e] [com.apple.networkextension:] Handling an apps installed notification with bundle IDs (
+    "dev.local.PrivacyBrowser"
+)
+2026-10-29 08:19:44.243 E  kernel[0:3970] [com.apple.sandbox.reporting:violation] 28 duplicate reports for Sandbox: sharingd(446) deny(1) syscall-unix 545
+2026-10-29 08:19:44.243 E  kernel[0:3970] [com.apple.sandbox.reporting:violation] Sandbox: nesessionmanager(133) deny(1) system-fsctl (_IO "h" 47)
+2026-10-29 08:19:44.283 Df nehelper[227:38e6] [com.apple.networkextension:] com.apple.preferences.networkprivacy-A9A1519E-E6B4-4F98-A92D-A5EEC1042340: Populating the cache with 1 UUID(s) for dev.local.PrivacyBrowser
+2026-10-29 08:19:44.305 E  kernel[0:3be3] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: nesessionmanager(133) deny(1) system-fsctl (_IO "h" 47)
+2026-10-29 08:19:44.305 E  kernel[0:3be3] [com.apple.sandbox.reporting:violation] Sandbox: spotlightknowledged(3683) deny(1) iokit-get-properties iokit-class:IOPlatformExpertDevice property:region-info
+2026-10-29 08:19:44.420 Df nesessionmanager[133:3978] [com.apple.networkextension:] UUID: Found for dev.local.PrivacyBrowser: (
+    "4BF1A461-0DE2-3603-A83B-42847697E57F"
+)
+2026-10-29 08:19:44.592 A  PrivacyBrowser[3692:3beb] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:19:44.593 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0x105ee63e0] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:19:44.593 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0x105ee6920] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:19:44.597 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.598 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.598 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.598 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.634 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.635 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0x105eed320] activating connection: mach=true listener=false peer=false name=com.apple.distributed_notifications@Uv3
+2026-10-29 08:19:44.635 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.635 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.636 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0x105ee82c0] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.launchservicesd
+2026-10-29 08:19:44.637 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ec000] activating connection: mach=true listener=false peer=false name=com.apple.pasteboard.1
+2026-10-29 08:19:44.642 Df PrivacyBrowser[3692:3beb] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) No windows open yet
+2026-10-29 08:19:44.642 A  PrivacyBrowser[3692:3beb] (TCC) TCCAccessRequest() IPC
+2026-10-29 08:19:44.643 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ec140] activating connection: mach=true listener=false peer=false name=com.apple.tccd.system
+2026-10-29 08:19:44.647 Df tccd[154:3235] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=3692.1, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, requesting={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=3692, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, },
+2026-10-29 08:19:44.650 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ec140] invalidated after the last release of the connection object
+2026-10-29 08:19:44.650 Df PrivacyBrowser[3692:3beb] [com.apple.SkyLight:default] server port 0x0000380b, session port 0x0000380b
+2026-10-29 08:19:44.651 Df tccd[154:38c4] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=166.81, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=3692, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.WindowServer, pid=166, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer}, },
+2026-10-29 08:19:44.651 Df tccd[154:38c4] [com.apple.TCC:access] requestor: TCCDProcess: identifier=com.apple.WindowServer, pid=166, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer is checking access for accessor TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=3692, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+2026-10-29 08:19:44.654 Df PrivacyBrowser[3692:3beb] [com.apple.SkyLight:default] New connection 0x2a99b main
+2026-10-29 08:19:44.656 Df PrivacyBrowser[3692:3beb] [com.apple.processmanager:front-35286506] CHECKIN: pid=3692
+2026-10-29 08:19:44.660 Df launchservicesd[127:3957] [com.apple.launchservices:cas] CHECKIN:0x0-0x29029 3692 dev.local.PrivacyBrowser
+2026-10-29 08:19:44.664 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application _updateInformationInternal] | Got App URL: file:///Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/
+2026-10-29 08:19:44.665 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application setState:] | enter: <Application: 0xb2338ae40: PrivacyBrowser> state 2
+2026-10-29 08:19:44.665 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[ApplicationManager checkInAppContext:eventData:] | ApplicationManager: Checked in app : PrivacyBrowser
+2026-10-29 08:19:44.667 Df distnoted[321:3746] [com.apple.distnoted:diagnostic] register name: com.apple.sharedfilelist.change object: com.apple.LSSharedFileList.ApplicationRecentDocuments/dev.local.privacybrowser token: 4600000046 pid: 351
+2026-10-29 08:19:44.667 Df PrivacyBrowser[3692:3beb] [com.apple.processmanager:front-35286506] CHECKEDIN: pid=3692 asn=0x0-0x29029 foreground=1
+2026-10-29 08:19:44.668 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ec140] activating connection: mach=true listener=false peer=false name=com.apple.lsd.modifydb
+2026-10-29 08:19:44.669 Df runningboardd[161:38cc] [com.apple.runningboard:process] Resolved pid 3692 to [anon<PrivacyBrowser>(501):3692]
+2026-10-29 08:19:44.669 Df runningboardd[161:38cc] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):3692] is not RunningBoard jetsam managed.
+2026-10-29 08:19:44.669 Df runningboardd[161:38cc] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):3692] This process will not be managed.
+2026-10-29 08:19:44.669 Df runningboardd[161:38cc] [com.apple.runningboard:ttl] Now tracking process: [anon<PrivacyBrowser>(501):3692]
+2026-10-29 08:19:44.670 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ec280] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:19:44.670 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ec280] Connection returned listener port: 0x4403
+2026-10-29 08:19:44.673 Df runningboardd[161:38cc] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):3692] from originator [osservice<com.apple.coreservices.launchservicesd>:127] with description <RBSAssertionDescriptor| "foregroundApp:3692" ID:161-127-343 target:3692 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:19:44.673 Df runningboardd[161:38cc] [com.apple.runningboard:ttl] Assertion 161-127-343 (target:[anon<PrivacyBrowser>(501):3692]) will be created as active
+2026-10-29 08:19:44.673 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530fc180] activating connection: mach=false listener=false peer=true name=com.apple.xpc.anonymous.0xc530ec280.peer[127].0xc530fc180
+2026-10-29 08:19:44.673 Df runningboardd[161:3bf5] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):3692] Ignoring jetsam update because this process is not memory-managed
+2026-10-29 08:19:44.673 Df runningboardd[161:3bf5] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):3692] Ignoring suspend because this process is not lifecycle managed
+2026-10-29 08:19:44.673 Df runningboardd[161:3bf5] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):3692] Result 45 setting darwin role to UserInteractiveNonFocal: Operation not supported, falling back to setting priority
+2026-10-29 08:19:44.673 Df runningboardd[161:3bf5] [com.apple.runningboard:ttl] [anon<PrivacyBrowser>(501):3692] Set darwin priority to: PRIO_DEFAULT
+2026-10-29 08:19:44.673 Df runningboardd[161:3bf5] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):3692] Ignoring GPU update because this process is not GPU managed
+2026-10-29 08:19:44.673 Df runningboardd[161:3bf5] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):3692] Ignoring memory limit update because this process is not memory-managed
+2026-10-29 08:19:44.675 Df gamepolicyd[816:3436] [com.apple.runningboard:process] Hit the server for a process handle 1690722100000e6c that resolved to: [anon<PrivacyBrowser>(501):3692]
+2026-10-29 08:19:44.675 Df gamepolicyd[816:3436] [com.apple.runningboard:monitor] Received state update for 3692 (anon<PrivacyBrowser>(501), running-NotVisible
+2026-10-29 08:19:44.676 Df runningboardd[161:38f8] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):3692] from originator [osservice<com.apple.coreservices.launchservicesd>:127] with description <RBSAssertionDescriptor| "foregroundApp:3692" ID:161-127-344 target:3692 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:19:44.676 Df runningboardd[161:38f8] [com.apple.runningboard:ttl] Assertion 161-127-344 (target:[anon<PrivacyBrowser>(501):3692]) will be created as active
+2026-10-29 08:19:44.678 Df runningboardd[161:3bf6] [com.apple.runningboard:ttl] Invalidating assertion 161-127-343 (target:[anon<PrivacyBrowser>(501):3692]) from originator [osservice<com.apple.coreservices.launchservicesd>:127]
+2026-10-29 08:19:44.679 Df PrivacyBrowser[3692:3beb] [com.apple.processmanager:front-35286506] FRONTLOGGING: version 1
+2026-10-29 08:19:44.679 Df PrivacyBrowser[3692:3beb] [com.apple.processmanager:front-35286506] Registered, pid=3692 ASN=0x0,0x29029
+2026-10-29 08:19:44.679 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ec3c0] activating connection: mach=true listener=false peer=false name=com.apple.analyticsd
+2026-10-29 08:19:44.679 Df lsd[350:3bc0] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:19:44.679 Df lsd[350:3bc0] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:19:44.679 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Lifecycle] 2a99b[CreateApplication]: Process creation: 0x0-0x29029 (PrivacyBrowser) connectionID: 2A99B pid: 3692 in session 0x101
+2026-10-29 08:19:44.680 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530ec500] activating connection: mach=true listener=false peer=false name=com.apple.lsd.mapdb
+2026-10-29 08:19:44.680 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ec280] Connection returned listener port: 0x4403
+2026-10-29 08:19:44.680 Df PrivacyBrowser[3692:3beb] [com.apple.processmanager:front-35286506] BringForward: pid=3692 asn=0x0-0x29029 bringForward=0 foreground=1 uiElement=0 launchedByLS=0 modifiersCount=0 allDisabled=0
+2026-10-29 08:19:44.683 Df PrivacyBrowser[3692:3beb] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:19:44.694 Df PrivacyBrowser[3692:3beb] (libMobileGestalt.dylib) No persisted cache on this platform.
+2026-10-29 08:19:44.697 Df PrivacyBrowser[3692:3beb] (libMobileGestalt.dylib) Could not get size of EAN data (IOConnectCallScalarMethod kAppleNVMeEANGetSize returned 0xE00002E2)
+2026-10-29 08:19:44.697 Df PrivacyBrowser[3692:3beb] (libMobileGestalt.dylib) Failed to copy 'aptk' from EAN
+2026-10-29 08:19:44.697 Df PrivacyBrowser[3692:3beb] (libMobileGestalt.dylib) Failed to copy APTicket properties. Falling back to default policy.
+2026-10-29 08:19:44.697 Df PrivacyBrowser[3692:3beb] (libMobileGestalt.dylib) Creating default MGSysConfigPolicy
+2026-10-29 08:19:44.697 Df PrivacyBrowser[3692:3beb] (libMobileGestalt.dylib) CFDictionaryRef copySyscfgDictionary(void) enumeration of <private> failed.
+2026-10-29 08:19:44.697 Df PrivacyBrowser[3692:3beb] (libMobileGestalt.dylib) Failed to find key <private>
+2026-10-29 08:19:44.702 Df PrivacyBrowser[3692:3beb] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:19:44.707 Df PrivacyBrowser[3692:3beb] [com.apple.AppKit:Appearance] Post-registration system appearance: (HLTB: 1)
+2026-10-29 08:19:44.711 Df PrivacyBrowser[3692:3beb] [com.apple.FrontBoard:Common] FBSWorkspace: endpoint monitoring is disabled.
+2026-10-29 08:19:44.711 Df PrivacyBrowser[3692:3beb] [com.apple.FrontBoard:Common] FBSWorkspace: default shell endpoint is disabled.
+2026-10-29 08:19:44.711 Df PrivacyBrowser[3692:3beb] [com.apple.runningboard:connection] Initializing connection
+2026-10-29 08:19:44.711 Df PrivacyBrowser[3692:3beb] [com.apple.runningboard:process] Removing all cached process handles
+2026-10-29 08:19:44.711 Df PrivacyBrowser[3692:3bfa] [com.apple.runningboard:connection] Sending handshake request attempt #1 to server
+2026-10-29 08:19:44.711 Df PrivacyBrowser[3692:3bfa] [com.apple.runningboard:connection] Creating connection to com.apple.runningboard
+2026-10-29 08:19:44.711 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530ec640] activating connection: mach=true listener=false peer=false name=com.apple.runningboard
+2026-10-29 08:19:44.712 Df runningboardd[161:3bf5] [com.apple.runningboard:connection] Setting client for [anon<PrivacyBrowser>(501):3692] as ready
+2026-10-29 08:19:44.712 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ec280] Connection returned listener port: 0x4403
+2026-10-29 08:19:44.712 A  PrivacyBrowser[3692:3bec] (RunningBoardServices) didChangeInheritances
+2026-10-29 08:19:44.713 Df PrivacyBrowser[3692:3bfa] [com.apple.runningboard:connection] Handshake succeeded
+2026-10-29 08:19:44.713 Df PrivacyBrowser[3692:3bfa] [com.apple.runningboard:connection] Identity resolved as anon<PrivacyBrowser>(501)
+2026-10-29 08:19:44.713 Df distnoted[321:3746] [com.apple.distnoted:diagnostic] register name: com.apple.xctest.FakeForceTouchDevice object: dev.local.PrivacyBrowser token: 1f0000001c pid: 3692
+2026-10-29 08:19:44.714 E  diagnostics_agent[450:3933] [com.apple.appstorefoundation:Default] Failed to parse receipt at /Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/_MASReceipt/receipt: Error Domain=NSCocoaErrorDomain Code=260 "The file “receipt” couldn’t be opened because there is no such file." UserInfo={NSFilePath=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/_MASReceipt/receipt, NSURL=file:///Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/_MASReceipt/receipt, NSUnderlyingError=0x8a4c2bc00 {Error Domain=NSPOSIXErrorDomain Code=2 "No such file or directory"}}
+2026-10-29 08:19:44.715 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ec280] Connection returned listener port: 0x4403
+2026-10-29 08:19:44.717 A  PrivacyBrowser[3692:3bec] (AppIntents) appintents:register process
+2026-10-29 08:19:44.717 Df PrivacyBrowser[3692:3bec] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:19:44.717 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530ec8c0] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:19:44.718 Df PrivacyBrowser[3692:3bec] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:19:44.718 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530eca00] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:19:44.718 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530eca00] Connection returned listener port: 0x6c03
+2026-10-29 08:19:44.719 E  linkd[405:3913] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [3692]
+2026-10-29 08:19:44.720 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530ec8c0] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:19:44.720 Df PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:19:44.720 Df PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:19:44.720 A  PrivacyBrowser[3692:3bfa] (AppIntents) appintents:register process
+2026-10-29 08:19:44.720 Df PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:19:44.720 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530ecc80] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:19:44.720 E  PrivacyBrowser[3692:3bec] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:19:44.721 E  PrivacyBrowser[3692:3bec] [com.apple.AppKit:Application] Error registering app with intents framework: Error Domain=NSCocoaErrorDomain Code=4097 UserInfo={NSDebugDescription=<private>}
+2026-10-29 08:19:44.721 Df PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:19:44.721 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530eca00] Connection returned listener port: 0x6c03
+2026-10-29 08:19:44.721 E  linkd[405:3913] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [3692]
+2026-10-29 08:19:44.722 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530ecc80] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:19:44.722 Df PrivacyBrowser[3692:3bec] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:19:44.722 Df PrivacyBrowser[3692:3bec] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:19:44.722 A  PrivacyBrowser[3692:3bec] (AppIntents) appintents:register process
+2026-10-29 08:19:44.722 E  PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:19:44.722 E  PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:19:44.722 Df PrivacyBrowser[3692:3bec] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:19:44.722 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530ed040] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:19:44.723 Df PrivacyBrowser[3692:3bec] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:19:44.723 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530eca00] Connection returned listener port: 0x6c03
+2026-10-29 08:19:44.723 Df PrivacyBrowser[3692:3beb] [com.apple.dt.xctest:Default] Registering for test daemon availability notify post.
+2026-10-29 08:19:44.725 E  linkd[405:3913] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [3692]
+2026-10-29 08:19:44.726 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530ed040] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:19:44.726 Df PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:19:44.726 E  PrivacyBrowser[3692:3bec] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:19:44.726 E  PrivacyBrowser[3692:3bec] [com.apple.appintents:Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:19:44.726 Df PrivacyBrowser[3692:3beb] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:44.726 Df PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:19:44.726 A  PrivacyBrowser[3692:3bfa] (AppIntents) appintents:register process
+2026-10-29 08:19:44.726 Df PrivacyBrowser[3692:3beb] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:44.726 Df PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:19:44.726 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530ed180] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:19:44.727 Df PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:19:44.727 Df PrivacyBrowser[3692:3beb] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:44.727 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530eca00] Connection returned listener port: 0x6c03
+2026-10-29 08:19:44.728 E  linkd[405:24d1] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [3692]
+2026-10-29 08:19:44.729 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530ed180] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:19:44.729 Df PrivacyBrowser[3692:3bec] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:19:44.729 E  PrivacyBrowser[3692:3bec] [com.apple.appintents:Connection] Will NOT re-try to establish the connection
+2026-10-29 08:19:44.729 E  PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:19:44.729 E  PrivacyBrowser[3692:3bfa] [com.apple.appintents:Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:19:44.743 A  PrivacyBrowser[3692:3beb] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:19:44.747 Df PrivacyBrowser[3692:3beb] (libMobileGestalt.dylib) couldn't load support library
+2026-10-29 08:19:44.747 Df PrivacyBrowser[3692:3beb] (libMobileGestalt.dylib) called dummy function!
+2026-10-29 08:19:44.750 Df PrivacyBrowser[3692:3beb] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.gms.availability.notification
+2026-10-29 08:19:44.750 Df PrivacyBrowser[3692:3beb] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.os-eligibility-domain.change.greymatter
+2026-10-29 08:19:44.750 Df PrivacyBrowser[3692:3beb] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.language.changed
+2026-10-29 08:19:44.750 Df PrivacyBrowser[3692:3beb] [com.apple.WritingTools:Default] isAvailable value changed: isMDMAllowed = true, gmAvailable (current) = false
+2026-10-29 08:19:44.776 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ed2c0] activating connection: mach=true listener=false peer=false name=com.apple.appkit.restoration_storage
+2026-10-29 08:19:44.777 Df gamepolicyd[816:3436] [com.apple.runningboard:monitor] Received state update for 3692 (anon<PrivacyBrowser>(501), running-NotVisible
+2026-10-29 08:19:44.779 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ed400] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.appleevents
+2026-10-29 08:19:44.782 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ec280] Connection returned listener port: 0x4403
+2026-10-29 08:19:44.783 Df PrivacyBrowser[3692:3beb] [com.apple.processmanager:front-35286506] SignalReady: pid=3692 asn=0x0-0x29029
+2026-10-29 08:19:44.785 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application _updateInformationInternal] | Got App URL: file:///Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/
+2026-10-29 08:19:44.785 Df PrivacyBrowser[3692:3beb] [com.apple.processmanager:front-35286506] SIGNAL: pid=3692 asn=0x0x-0x29029
+2026-10-29 08:19:44.790 A  PrivacyBrowser[3692:3beb] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:19:44.790 A  PrivacyBrowser[3692:3beb] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:19:44.796 A  PrivacyBrowser[3692:3beb] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:19:44.802 Df PrivacyBrowser[3692:3bec] [com.apple.CoreAnalytics:client] Received configuration update from daemon (initial)
+2026-10-29 08:19:44.808 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ed7c0] activating connection: mach=false listener=false peer=false name=com.apple.ViewBridgeAuxiliary
+2026-10-29 08:19:44.823 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ed680] activating connection: mach=false listener=false peer=false name=(anonymous)
+2026-10-29 08:19:44.823 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ed900] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:19:44.823 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ed900] Connection returned listener port: 0x9103
+2026-10-29 08:19:44.825 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ed7c0] invalidated after the last release of the connection object
+2026-10-29 08:19:44.827 Df PrivacyBrowser[3692:3beb] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:19:44.827 Df PrivacyBrowser[3692:3beb] [com.apple.AppKit:StateRestoration] -[NSApplication _reopenWindowsAsNecessaryIncludingRestorableState:withFullFidelity:completionHandler:] shouldRestoreState=1 hasPersistentStateToRestore=0 shouldStillRestoreStateAfterPrompting=0
+2026-10-29 08:19:44.827 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ed7c0] activating connection: mach=true listener=false peer=false name=com.apple.window_proxies
+2026-10-29 08:19:44.827 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ed7c0] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:44.829 Df PrivacyBrowser[3692:3beb] [com.apple.AppKit:AutomaticTermination] void _NSEnableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:19:44.830 Df PrivacyBrowser[3692:3bfb] [com.apple.BoardServices:XPCErrors] [C:1] Alloc <private>
+2026-10-29 08:19:44.830 Df PrivacyBrowser[3692:3bfb] [com.apple.xpc:connection] [0xc530eda40] activating connection: mach=false listener=false peer=false name=(anonymous)
+2026-10-29 08:19:44.833 Df WindowManager[348:3920] [com.apple.windowmanagement:xpcconnection] Connection activated | (3692) PrivacyBrowser
+2026-10-29 08:19:44.835 A  PrivacyBrowser[3692:3beb] (TCC) TCCAccessRequest() IPC
+2026-10-29 08:19:44.835 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530edb80] activating connection: mach=true listener=false peer=false name=com.apple.tccd
+2026-10-29 08:19:44.836 Df tccd[373:31b7] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=3692.2, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, requesting={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=3692, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, },
+2026-10-29 08:19:44.839 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530edb80] invalidated after the last release of the connection object
+2026-10-29 08:19:44.842 Df PrivacyBrowser[3692:3beb] (WebKit) 0x1170480e0 - [PID=0] WebProcessCache::updateCapacity: Cache is disabled because process swap on navigation is disabled
+2026-10-29 08:19:44.851 A  PrivacyBrowser[3692:3bfa] (RunningBoardServices) didChangeInheritances
+2026-10-29 08:19:44.851 A  PrivacyBrowser[3692:3beb] (CoreFoundation) Updating Key-Value Observers Of Preferences
+2026-10-29 08:19:44.867 Df PrivacyBrowser[3692:3bfb] [com.apple.xpc:connection] [0xc530edb80] activating connection: mach=true listener=false peer=false name=com.apple.webprivacyd
+2026-10-29 08:19:44.868 Df PrivacyBrowser[3692:3beb] [com.apple.WebKit:BackForwardCache] WebBackForwardCache::clear
+2026-10-29 08:19:44.868 Df PrivacyBrowser[3692:3beb] [com.apple.WebKit:Storage] 0xc531f4008 - WebsiteDataStore::WebsiteDataStore sessionID=9223372036854775810 identifier=null
+2026-10-29 08:19:44.870 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.871 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.871 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.871 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.872 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.875 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.876 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:44.882 A  PrivacyBrowser[3692:3beb] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:19:44.882 A  PrivacyBrowser[3692:3beb] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:19:44.886 Df distnoted[321:302e] [com.apple.distnoted:diagnostic] register name: com.apple.nsquiet_safe_quit_give_reason object: dev.local.PrivacyBrowser token: 3e00000039 pid: 3692
+2026-10-29 08:19:44.899 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ede00] activating connection: mach=true listener=false peer=false name=com.apple.fonts
+2026-10-29 08:19:44.913 Df PrivacyBrowser[3692:3beb] [com.apple.AppKit:Appearance] NSApp cache appearance:
+-NSRequiresAquaSystemAppearance: 0
+-appearance: (null)
+-effectiveAppearance: <NSCompositeAppearance: 0xc5302c820
+ (
+    "<NSAquaAppearance: 0xc5302c960>",
+    "<NSSystemAppearance: 0xc5302c8c0>"
+)>
+2026-10-29 08:19:44.928 A  PrivacyBrowser[3692:3beb] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:19:45.040 Df dasd[135:38b6] [com.apple.duetactivityscheduler:scoring] 0:com.apple.security.amfid.cleanmetrics:A2E091:[
+	{name: Boot Time Policy, policyWeight: 0.010, response: {33, 0.00, [{[Minimum seconds after boot]: Required:300.00, Observed:218.14},]}}
+	{name: CPU Usage Policy, policyWeight: 5.000, response: {33, 0.00, [{[Max allowed CPU Usage level]: Required:50.00, Observed:95.00},]}}
+ ], Decision: MNP}
+2026-10-29 08:19:45.040 Df dasd[135:38b6] [com.apple.duetactivityscheduler:scoring] 0:com.apple.security.amfid.reportmetrics:F1D709:[
+	{name: Boot Time Policy, policyWeight: 0.010, response: {33, 0.00, [{[Minimum seconds after boot]: Required:300.00, Observed:218.14},]}}
+	{name: CPU Usage Policy, policyWeight: 5.000, response: {33, 0.00, [{[Max allowed CPU Usage level]: Required:50.00, Observed:95.00},]}}
+ ], Decision: MNP}
+2026-10-29 08:19:45.140 E  PrivacyBrowser[3692:3beb] [com.apple.parsec:CoreParsec] PARSession setup failed on host check
+2026-10-29 08:19:45.142 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530ee300] activating connection: mach=true listener=false peer=false name=com.apple.ScreenTimeAgent.private
+2026-10-29 08:19:45.142 A  PrivacyBrowser[3692:3bec] (Accounts) accounts/accounts-with-types-sync
+2026-10-29 08:19:45.149 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530ee440] activating connection: mach=true listener=false peer=false name=com.apple.accountsd.accountmanager
+2026-10-29 08:19:45.158 E  accountsd[400:149b] [com.apple.accounts:entitlement] Unentitled access by client 'PrivacyBrowser' (selector: accountsWithAccountTypeIdentifiers:preloadedProperties:completion:)
+2026-10-29 08:19:45.158 E  PrivacyBrowser[3692:3bec] [com.apple.accounts:core] "Error returned from daemon: Error Domain=com.apple.accounts Code=7"
+2026-10-29 08:19:45.159 Df PrivacyBrowser[3692:3bec] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:45.159 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530ee580] activating connection: mach=true listener=false peer=false name=com.apple.passd.in-app-payment
+2026-10-29 08:19:45.164 Df PrivacyBrowser[3692:3bec] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:45.164 Df PrivacyBrowser[3692:3bed] [com.apple.xpc:connection] [0xc530ee580] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:45.166 Df PrivacyBrowser[3692:3bec] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:45.166 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530eebc0] activating connection: mach=true listener=false peer=false name=com.apple.passd.payment-continuity
+2026-10-29 08:19:45.168 Df PrivacyBrowser[3692:3bec] [com.apple.passkit:Continuity] Failed to retrieve registered host device status
+2026-10-29 08:19:45.168 Df PrivacyBrowser[3692:3bec] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:45.169 Df PrivacyBrowser[3692:3bec] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:45.169 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530eee40] activating connection: mach=true listener=false peer=false name=com.apple.passd.in-app-payment
+2026-10-29 08:19:45.169 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530eebc0] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:45.170 Df PrivacyBrowser[3692:3bec] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:45.170 Df PrivacyBrowser[3692:3bec] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:45.170 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530eef80] activating connection: mach=true listener=false peer=false name=com.apple.passd.payment-continuity
+2026-10-29 08:19:45.170 Df PrivacyBrowser[3692:3beb] [com.apple.xpc:connection] [0xc530eed00] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:19:45.170 Df PrivacyBrowser[3692:3bed] [com.apple.xpc:connection] [0xc530eee40] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:45.171 A  PrivacyBrowser[3692:3beb] (CoreFoundation) Updating Key-Value Observers Of Preferences
+2026-10-29 08:19:45.171 Df PrivacyBrowser[3692:3bec] [com.apple.passkit:Continuity] Failed to retrieve registered host device status
+2026-10-29 08:19:45.171 Df PrivacyBrowser[3692:3bec] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:45.171 Df PrivacyBrowser[3692:3bed] [com.apple.xpc:connection] [0xc530eed00] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:19:45.171 E  PrivacyBrowser[3692:3bed] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:19:45.171 Df PrivacyBrowser[3692:3bed] [com.apple.xpc:connection] [0xc530eee40] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:19:45.171 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530eef80] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:45.172 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530eee40] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:19:45.172 E  PrivacyBrowser[3692:3bfa] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:19:45.172 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530ef200] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:19:45.173 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530ef200] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:19:45.173 E  PrivacyBrowser[3692:3bec] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:19:45.173 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530eef80] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:19:45.173 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530eef80] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:19:45.173 E  PrivacyBrowser[3692:3bfa] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:19:45.173 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530ef340] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:19:45.173 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530ef340] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:19:45.173 E  PrivacyBrowser[3692:3bec] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:19:45.173 Df PrivacyBrowser[3692:3bec] [com.apple.xpc:connection] [0xc530ef700] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:19:45.174 Df PrivacyBrowser[3692:3bfa] [com.apple.xpc:connection] [0xc530ef700] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:19:45.174 E  PrivacyBrowser[3692:3bfa] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was interrupted
+2026-10-29 08:19:45.174 F  PrivacyBrowser[3692:3bfa] [com.apple.Safari:TabGroup] Failed to reconnect too many times to sync agent since Thu Oct 29 08:19:45 2026, stopping.
+2026-10-29 08:19:45.174 A  PrivacyBrowser[3692:3bfa] (libsystem_trace.dylib) Activity for state dumps
+2026-10-29 08:19:45.434 Df PrivacyBrowser[3692:3beb] [com.apple.Safari:Other] BrowserWindowController <0x105ed6750> found window height: 600.000000, tab bar height: 0.000000, maxY for contentLayoutRect: -52.000000, while computing topContentInset
+2026-10-29 08:19:45.434 Df PrivacyBrowser[3692:3beb] [com.apple.Safari:Other] BrowserWindowController <0x105ed6750> did compute topContentInset: 652.000000
+2026-10-29 08:19:45.434 Df PrivacyBrowser[3692:3beb] [com.apple.Safari:Other] BrowserWindowController <0x105ed6750> found window height: 600.000000, tab bar height: 0.000000, maxY for contentLayoutRect: 548.000000, while computing topContentInset
+2026-10-29 08:19:45.434 Df PrivacyBrowser[3692:3beb] [com.apple.Safari:Other] BrowserWindowController <0x105ed6750> did compute topContentInset: 52.000000
+2026-10-29 08:19:45.436 Df PrivacyBrowser[3692:3beb] [com.apple.Safari:Other] BrowserWindowController <0x105ed6750> found window height: 600.000000, tab bar height: 0.000000, maxY for contentLayoutRect: 548.000000, while computing topContentInset
+2026-10-29 08:19:45.436 Df PrivacyBrowser[3692:3beb] [com.apple.Safari:Other] BrowserWindowController <0x105ed6750> did compute topContentInset: 52.000000
+2026-10-29 08:19:45.437 Df PrivacyBrowser[3692:3beb] [com.apple.Safari:Other] TabContentViewController <0xc531016c0> will update topContentInset for TabContentView <0xc52a7d800> to: 52.000000
+2026-10-29 08:19:45.437 Df PrivacyBrowser[3692:3beb] [com.apple.Safari:Other] TabContentView <0xc52a7d800> will update inheritedTopContentInset to: 52.000000 for BrowserViewController <0x0> and ReaderViewController <0x0>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.467 Df PrivacyBrowser[3692:3beb] (Foundation) <private>
+2026-10-29 08:19:45.471 F  PrivacyBrowser[3692:3beb] [com.apple.hiservices:HIExceptions] FAULT: NSInvalidArgumentException: <private>; (user info absent)
+2026-10-29 08:19:45.471 A  PrivacyBrowser[3692:3beb] (libsystem_trace.dylib) Activity for state dumps
+2026-10-29 08:19:45.472 E  PrivacyBrowser[3692:3beb] [com.apple.AppKit:General] NSConcreteMutableAttributedString addAttribute:value:range:: nil value
+2026-10-29 08:19:45.472 E  PrivacyBrowser[3692:3beb] [com.apple.AppKit:General] (
+	0   CoreFoundation                      0x0000000188cbf1f0 __exceptionPreprocess + 176
+	1   PrivacyBrowser                      0x0000000104d4fba4 PBPreprocessException + 48
+	2   libobjc.A.dylib                     0x000000018873a91c objc_exception_throw + 88
+	3   Foundation                          0x000000018a4b90bc -[NSConcreteMutableAttributedString attribute:atIndex:effectiveRange:] + 0
+	4   Safari                              0x00000001c0b3c100 -[UnifiedField _notSecureAnnotation] + 364
+	5   Safari                              0x00000001c0b3b00c -[UnifiedField _layOutFaviconAndMainContentView] + 2180
+	6   Safari                              0x00000001c0b3a670 -[UnifiedField layout] + 104
+	7   AppKit                              0x000000018d5b150c __getCGDisplayListGetHashSymbolLoc_block_invoke + 1516
+	8   AppKit                              0x000000018d5b1534 __getCGDisplayListGetHashSymbolLoc_block_invoke + 1556
+	9   AppKit                              0x000000018d5767a0 block_destroy_helper + 9428
+	10  AppKit                              0x000000018d576dec block_destroy_helper + 11040
+	11  AppKit                              0x000000018ddba078 ___NSViewLayout_block_invoke + 624
+	12  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	13  AppKit                              0x000000018d0cbc10 _NSViewLayout + 96
+	14  AppKit                              0x000000018ddafd6c __36-[NSView _layoutSubtreeWithOldSize:]_block_invoke + 372
+	15  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	16  AppKit                              0x000000018d0cbba4 -[NSView _layoutSubtreeWithOldSize:] + 100
+	17  AppKit                              0x000000018ddb093c __56-[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:]_block_invoke + 908
+	18  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	19  AppKit                              0x000000018d0cb780 -[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:] + 100
+	20  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	21  AppKit                              0x000000018d0cb710 -[NSView layoutSubtreeIfNeeded] + 96
+	22  Safari                              0x00000001c0b30e78 -[BrowserWindowController windowDidLoad] + 1032
+	23  AppKit                              0x000000018d1e81a8 -[NSWindowController _windowDidLoad] + 620
+	24  Safari                              0x00000001c0b30a50 -[WindowController _windowDidLoad] + 52
+	25  AppKit                              0x000000018d1e438c -[NSWindowController window] + 100
+	26  PrivacyBrowser                      0x0000000104e676d4 $s14PrivacyBrowser11ObjCRuntimeO19callReturningObjectySo8NSObjectCSg5value_SS6reasontyXl_SStFZTf4nnd_n + 1092
+	27  PrivacyBrowser                      0x0000000104e5bc0c $s14PrivacyBrowser06SafariB16WindowControllerC04loadD033_D5663EB8AEBCFB374BED3A50E441DB28LL2ofSo8NSWindowCSgSo8NSObjectC_tF + 48
+	28  PrivacyBrowser                      0x0000000104e5fcb8 $s14PrivacyBrowser06SafariB16WindowControllerC4open9dataStore8startURLSo8NSWindowCSgSo013WKWebsiteDataH0CSg_10Foundation0J0VSgtFyycfU0_Tm + 32
+	29  PrivacyBrowser                      0x0000000104e63dbc $s14PrivacyBrowser06SafariB16WindowControllerC10buildPopup33_D5663EB8AEBCFB374BED3A50E441DB28LLySbAC0G7VariantOFyycfU1_TA + 20
+	30  PrivacyBrowser                      0x0000000104cfcf90 $sIeg_IeyB_TR + 28
+	31  PrivacyBrowser                      0x0000000104d4fa08 PBCatchException + 36
+	32  PrivacyBrowser                      0x0000000104e5b990 $s14PrivacyBrowser06SafariB16WindowControllerC7guarded33_D5663EB8AEBCFB374BED3A50E441DB28LLySbSS_yyctF + 136
+	33  PrivacyBrowser                      0x0000000104e589ac $s14PrivacyBrowser06SafariB16WindowControllerC4open9dataStore8startURLSo8NSWindowCSgSo013WKWebsiteDataH0CSg_10Foundation0J0VSgtF + 1504
+	34  PrivacyBrowser                      0x0000000104e6c740 $s14PrivacyBrowser20SafariFrameworkProbeO10createStep33_9F0153DCAF2CE7EC9F01CEB735D44942LL9bootstrapySb_tFZ + 468
+	35  PrivacyBrowser                      0x0000000104e6bc84 $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TY0_ + 500
+	36  PrivacyBrowser                      0x0000000104e71e5d $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TATQ0_ + 1
+	37  PrivacyBrowser                      0x0000000104f2c331 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TQ0_ + 1
+	38  PrivacyBrowser                      0x0000000104f2c319 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TATQ0_ + 1
+	39  libswift_Concurrency.dylib          0x000000028e2afec5 _ZL23completeTaskWithClosurePN5swift12AsyncContextEPNS_10SwiftErrorE + 1
+)
+2026-10-29 08:19:45.472 Df kernel[0:3beb] PrivacyBrowser[3692] Corpse allowed 2 of 5
+2026-10-29 08:19:45.472 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Lifecycle] 0[outside of RPC]: Process death: 0x0-0x29029 (PrivacyBrowser) connectionID: 2A99B pid: 3692 in session 0x101
+2026-10-29 08:19:45.472 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Focus] <BSCompoundAssertion:0xc42c092c0> ([FocusManager:257]-deferringPolicyEvaluationSuppression) acquire for reason:process death - 0x0-0x29029 (PrivacyBrowser) acq:0xc42b84b00 count:1
+2026-10-29 08:19:45.472 Df launchd[1:3440] [gui/501 [100002]:] service inactive: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.3692
+2026-10-29 08:19:45.472 Df launchd[1:3440] [gui/501 [100002]:] removing inactive unmanaged service: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.3692
+2026-10-29 08:19:45.473 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Focus] 0[outside of RPC]: [FocusManager:257] update to deferring policy requested for reason: permitted list updated - 0x0-0x29029 removed - but we are suppressing evaluation for reasons: {(
+    "process death - 0x0-0x29029 (PrivacyBrowser)"
+)}
+2026-10-29 08:19:45.473 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Focus] 0[outside of RPC]: [FocusManager:257] update to deferring policy requested for reason: permitted list updated - 0x1-0xe6c removed - but we are suppressing evaluation for reasons: {(
+    "process death - 0x0-0x29029 (PrivacyBrowser)"
+)}
+2026-10-29 08:19:45.473 Df WindowManager[348:3920] [com.apple.windowmanagement:xpcconnection] Connection invalidated | (3692) PrivacyBrowser
+2026-10-29 08:19:45.474 Df runningboardd[161:38cc] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):3692] termination reported by proc_exit
+2026-10-29 08:19:45.475 Df runningboardd[161:38f8] [com.apple.runningboard:ttl] Invalidating assertion 161-127-344 (target:[anon<PrivacyBrowser>(501):3692]) from originator [osservice<com.apple.coreservices.launchservicesd>:127]
+2026-10-29 08:19:45.476 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:AppExit] -[ApplicationManager handleCASEvent:withData:] | CAS notification for appDeath for dev.local.PrivacyBrowser with asn: LSASN:{hi=0x0;lo=0x29029} for bundle path: /Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app with URL: file:///Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app/
+2026-10-29 08:19:45.476 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application setState:] | enter: <Application: 0xb2338ae40: PrivacyBrowser> state 3
+2026-10-29 08:19:45.476 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application setState:] | enter: <Application: 0xb2338ae40: PrivacyBrowser> state 4
+2026-10-29 08:19:45.481 Df runningboardd[161:38f8] [com.apple.runningboard:process] XPC connection invalidated: [anon<PrivacyBrowser>(501):3692]
+2026-10-29 08:19:45.515 E  kernel[0:28f7] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: spotlightknowledged(3683) deny(1) iokit-get-properties iokit-class:IOPlatformExpertDevice property:region-info
+2026-10-29 08:19:45.515 E  kernel[0:28f7] [com.apple.sandbox.reporting:violation] Sandbox: dasd(135) deny(1) user-preference-write com.apple.dasd.dailyperiodic
+2026-10-29 08:19:45.517 E  cfprefsd[155:28f7] [com.apple.defaults:cfprefsd] rejecting write of key(s) <private> in { com.apple.dasd.dailyPeriodic, root, kCFPreferencesAnyHost, /var/root/Library/Preferences/com.apple.dasd.dailyPeriodic.plist, managed: 0 } from process 135 (dasd) because setting these preferences requires user-preference-write or file-write-data sandbox access
+2026-10-29 08:19:45.518 F  dasd[135:37b0] [com.apple.defaults:User Defaults] Couldn't write values for keys (
+    "com.apple.dasd.dailyPeriodicPluginWiFi"
+) in CFPrefsPlistSource<0xb94e45b00> (Domain: com.apple.dasd.dailyPeriodic, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: No): setting these preferences requires user-preference-write or file-write-data sandbox access
+2026-10-29 08:19:45.578 Df runningboardd[161:3bf6] [com.apple.runningboard:process] Removing process: [anon<PrivacyBrowser>(501):3692]
+2026-10-29 08:19:45.578 Df runningboardd[161:3bf6] [com.apple.runningboard:general] removeJobWithInstance called for identity without existing job [anon<PrivacyBrowser>(501):3692]
+2026-10-29 08:19:45.578 Df runningboardd[161:3bf6] [com.apple.runningboard:process] Removing assertions for terminated process: [anon<PrivacyBrowser>(501):3692]
+2026-10-29 08:19:45.579 Df gamepolicyd[816:3436] [com.apple.runningboard:monitor] Received state update for 3692 (anon<PrivacyBrowser>(501), none-NotVisible
+2026-10-29 08:19:45.579 Df gamepolicyd[816:3436] [com.apple.runningboard:monitor] Received state update for 3692 (anon<PrivacyBrowser>(501), none-NotVisible
+2026-10-29 08:19:45.582 E  runningboardd[161:3bf6] [com.apple.runningboard:general] RBSStateCapture remove item called for untracked item 161-127-344 (target:[anon<PrivacyBrowser>(501):3692])
+2026-10-29 08:19:45.592 Df assistantd[564:2bdd] [com.apple.containermanager:sandbox] Consumed sandbox extension; path = [<private>], handle = 5
+2026-10-29 08:19:46.701 E  kernel[0:3749] [com.apple.sandbox.reporting:violation] Sandbox: SetStoreUpdateService(3698) deny(1) mach-lookup com.apple.CoreServices.coreservicesd
+2026-10-29 08:19:46.701 Df launchd[1:3749] [gui/501 [100002]:] denied lookup: name = com.apple.CoreServices.coreservicesd, flags = 0x9, requestor = SetStoreUpdateS[3698], error = 159: Sandbox restriction
+2026-10-29 08:19:46.704 E  kernel[0:3440] [com.apple.sandbox.reporting:violation] Sandbox: SetStoreUpdateService(3698) deny(1) mach-lookup com.apple.DiskArbitration.diskarbitrationd
+2026-10-29 08:19:46.704 Df launchd[1:3440] [gui/501 [100002]:] denied lookup: name = com.apple.DiskArbitration.diskarbitrationd, flags = 0x9, requestor = SetStoreUpdateS[3698], error = 159: Sandbox restriction
+2026-10-29 08:19:47.235 E  kernel[0:3c6f] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: SetStoreUpdateService(3698) deny(1) mach-lookup com.apple.DiskArbitration.diskarbitrationd
+2026-10-29 08:19:47.235 E  kernel[0:3c6f] [com.apple.sandbox.reporting:violation] Sandbox: biomesyncd(3708) deny(1) iokit-open-user-client RootDomainUserClient
+2026-10-29 08:19:47.387 E  kernel[0:2bfd] [com.apple.sandbox.reporting:violation] Sandbox: siriknowledged(567) deny(1) file-read-data /Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app
+2026-10-29 08:19:49.585 Df dasd[135:2e18] [com.apple.duetactivityscheduler:scoring] 0:com.apple.security.amfid.cleanmetrics:A2E091:[
+	{name: Boot Time Policy, policyWeight: 0.010, response: {33, 0.00, [{[Minimum seconds after boot]: Required:300.00, Observed:222.69},]}}
+	{name: CPU Usage Policy, policyWeight: 5.000, response: {33, 0.00, [{[Max allowed CPU Usage level]: Required:50.00, Observed:95.00},]}}
+ ], Decision: MNP}
+2026-10-29 08:19:49.585 Df dasd[135:2e18] [com.apple.duetactivityscheduler:scoring] 0:com.apple.security.amfid.reportmetrics:F1D709:[
+	{name: Boot Time Policy, policyWeight: 0.010, response: {33, 0.00, [{[Minimum seconds after boot]: Required:300.00, Observed:222.69},]}}
+	{name: CPU Usage Policy, policyWeight: 5.000, response: {33, 0.00, [{[Max allowed CPU Usage level]: Required:50.00, Observed:95.00},]}}
+ ], Decision: MNP}
+2026-10-29 08:19:49.930 Df RemoteManagementAgent[3729:3cfa] [com.apple.xpc:connection] [0xa0cca8000] activating connection: mach=true listener=false peer=false name=com.apple.backupd.sandbox.xpc
+2026-10-29 08:19:49.930 E  kernel[0:3749] [com.apple.sandbox.reporting:violation] 4 duplicate reports for Sandbox: siriknowledged(567) deny(1) file-read-data /Users/runner/work/antifdete7329900/antifdete7329900/build/unsandboxed/PrivacyBrowser.app
+2026-10-29 08:19:49.930 E  kernel[0:3749] [com.apple.sandbox.reporting:violation] Sandbox: RemoteManagementAgent(3729) deny(1) mach-lookup com.apple.backupd.sandbox.xpc
+2026-10-29 08:19:49.930 Df launchd[1:3749] [system:] denied lookup: name = com.apple.backupd.sandbox.xpc, flags = 0x8, requestor = RemoteManagemen[3729], error = 159: Sandbox restriction
+2026-10-29 08:19:49.931 E  RemoteManagementAgent[3729:3cfa] [com.apple.CarbonCore:backupmgr] _CSBackupIsItemExcluded_Remote():XPC error for connection com.apple.backupd.sandbox.xpc: Connection invalid
+2026-10-29 08:19:49.933 Df RemoteManagementAgent[3729:3cfa] [com.apple.xpc:connection] [0xa0cca8140] activating connection: mach=true listener=false peer=false name=com.apple.backupd.sandbox.xpc
+2026-10-29 08:19:49.933 E  RemoteManagementAgent[3729:3cfa] [com.apple.CarbonCore:backupmgr] _CSBackupIsItemExcluded_Remote():XPC error for connection com.apple.backupd.sandbox.xpc: Connection invalid
+2026-10-29 08:19:50.410 E  kernel[0:3280] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: RemoteManagementAgent(3729) deny(1) mach-lookup com.apple.backupd.sandbox.xpc
+2026-10-29 08:19:50.410 E  kernel[0:3280] [com.apple.sandbox.reporting:violation] Sandbox: AssetCacheLocatorService(3737) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-10-29 08:19:50.410 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.410 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.410 F  AssetCacheLocatorService[3737:3d39] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.410 F  AssetCacheLocatorService[3737:3d39] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.410 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.410 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.410 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.410 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.411 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.412 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.414 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.414 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.414 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.414 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.415 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.415 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.415 F  AssetCacheLocatorService[3737:3d39] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.415 F  AssetCacheLocatorService[3737:3d39] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.416 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.416 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.416 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.416 F  AssetCacheLocatorService[3737:3d38] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.444 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.444 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.444 F  AssetCacheLocatorService[3737:3d3b] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.444 F  AssetCacheLocatorService[3737:3d3b] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.445 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.445 F  AssetCacheLocatorService[3737:3d3b] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.445 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.445 F  AssetCacheLocatorService[3737:3d3b] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.445 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.445 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.445 F  AssetCacheLocatorService[3737:3d3b] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.445 F  AssetCacheLocatorService[3737:3d3b] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.446 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.446 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.446 F  AssetCacheLocatorService[3737:3d3b] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.446 F  AssetCacheLocatorService[3737:3d3b] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.456 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.456 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.456 F  AssetCacheLocatorService[3737:3d3b] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.456 F  AssetCacheLocatorService[3737:3d3b] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.459 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.459 F  AssetCacheLocatorService[3737:3d3f] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.491 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.491 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.491 F  AssetCacheLocatorService[3737:3d3f] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088000> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.491 F  AssetCacheLocatorService[3737:3d3f] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.584 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3737 (AssetCacheLocatorService) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.584 F  AssetCacheLocatorService[3737:3d3b] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa21088080> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.763 E  kernel[0:2d37] [com.apple.sandbox.reporting:violation] 39 duplicate reports for Sandbox: AssetCacheLocatorService(3737) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-10-29 08:19:50.763 E  kernel[0:2d37] [com.apple.sandbox.reporting:violation] Sandbox: ScreenSharingSubscriber(3740) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-10-29 08:19:50.763 E  cfprefsd[155:2d37] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, kCFPreferencesAnyUser, kCFPreferencesCurrentHost, /Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3740 (ScreenSharingSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.776 F  ScreenSharingSubscriber[3740:3d54] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x7b6c94600> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesAnyUser, ByHost: Yes, Container: (null), Contents Need Refresh: No): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.782 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3740 (ScreenSharingSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.782 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3740 (ScreenSharingSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.789 F  ScreenSharingSubscriber[3740:3d56] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x7b6c94400> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.789 F  ScreenSharingSubscriber[3740:3d56] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x7b6c94480> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.795 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3740 (ScreenSharingSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.798 F  ScreenSharingSubscriber[3740:3d54] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x7b6c94400> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.799 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3740 (ScreenSharingSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.802 F  ScreenSharingSubscriber[3740:3d54] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x7b6c94480> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.824 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3740 (ScreenSharingSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.824 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3740 (ScreenSharingSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.830 F  ScreenSharingSubscriber[3740:3d56] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x7b6c94400> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.830 F  ScreenSharingSubscriber[3740:3d56] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x7b6c94480> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.835 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3740 (ScreenSharingSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.836 F  ScreenSharingSubscriber[3740:3d54] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x7b6c94400> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.845 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3740 (ScreenSharingSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.847 F  ScreenSharingSubscriber[3740:3d54] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x7b6c94480> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.875 E  kernel[0:2d37] [com.apple.sandbox.reporting:violation] 8 duplicate reports for Sandbox: ScreenSharingSubscriber(3740) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-10-29 08:19:50.875 E  kernel[0:2d37] [com.apple.sandbox.reporting:violation] Sandbox: ScreenSharingSubscriber(3740) deny(1) user-preference-read com.apple.mdmclient
+2026-10-29 08:19:50.875 E  cfprefsd[155:2d37] [com.apple.defaults:cfprefsd] rejecting read of { com.apple.mdmclient, kCFPreferencesAnyUser, kCFPreferencesCurrentHost, /Library/Preferences/com.apple.mdmclient.plist, managed: 0 } from process 3740 (ScreenSharingSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:50.875 F  ScreenSharingSubscriber[3740:3d54] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x7b6c94b00> (Domain: com.apple.mdmclient, User: kCFPreferencesAnyUser, ByHost: Yes, Container: (null), Contents Need Refresh: No): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.494 E  kernel[0:28f7] [com.apple.sandbox.reporting:violation] Sandbox: ASConfigurationSubscriber(3775) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-10-29 08:19:51.495 E  cfprefsd[155:28f7] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, kCFPreferencesAnyUser, kCFPreferencesCurrentHost, /Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.496 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080700> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesAnyUser, ByHost: Yes, Container: (null), Contents Need Refresh: No): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.497 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.497 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.497 F  ASConfigurationSubscriber[3775:3de8] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080500> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.497 F  ASConfigurationSubscriber[3775:3de8] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080580> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.498 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.498 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080500> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.498 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.498 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080580> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.499 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.499 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.499 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080500> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.499 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080580> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.499 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.499 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.499 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080500> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.499 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080580> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080500> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080580> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080500> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080580> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesCurrentHost, /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AE14EDBC-971C-5E2A-9587-129EBE1A06EC.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { kCFPreferencesAnyApplication, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/.GlobalPreferences.plist, managed: 0 } from process 3775 (ASConfigurationSubscriber) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080500> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: Yes, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.500 F  ASConfigurationSubscriber[3775:3dec] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xaa9080580> (Domain: kCFPreferencesAnyApplication, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:52.208 E  kernel[0:3280] [com.apple.sandbox.reporting:violation] 14 duplicate reports for Sandbox: ASConfigurationSubscriber(3775) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-10-29 08:19:52.208 E  kernel[0:3280] [com.apple.sandbox.reporting:violation] Sandbox: generativeexperiencesd(568) deny(1) user-preference-read com.apple.triald
+2026-10-29 08:19:52.208 E  cfprefsd[323:3280] [com.apple.defaults:cfprefsd] rejecting read of { com.apple.triald, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/com.apple.triald.plist, managed: 0 } from process 568 (generativeexperiencesd) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:52.211 F  generativeexperiencesd[568:3cfd] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x9b0dd1300> (Domain: com.apple.triald, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: No): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:53.684 Df log[3917:3f13] [com.apple.log:] log run noninteractively, parent: 3381 (Python), args: 'log' 'show' '--style' 'compact' '--start' '2026-10-29 08:19:39' '--predicate' 'process == "PrivacyBrowser" OR eventMessage CONTAINS[c] "PrivacyBrowser" OR eventMessage CONTAINS[c] "AMFI" OR eventMess

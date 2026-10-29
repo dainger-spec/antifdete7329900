@@ -1,0 +1,1654 @@
+Timestamp               Ty Process[PID:TID]
+2026-10-29 08:21:33.697 Df log[6523:5e60] [com.apple.log:] log run noninteractively, parent: 6077 (Python), args: 'log' 'show' '--style' 'compact' '--start' '2026-10-29 08:21:20' '--predicate' 'process == "PrivacyBrowser" OR eventMessage CONTAINS[c] "PrivacyBrowser" OR eventMessage CONTAINS[c] "AMFI" OR eventMess
+2026-10-29 08:21:34.801 Df dasd[135:5dfe] [com.apple.duetactivityscheduler:scoring] 0:com.apple.security.amfid.cleanmetrics:A2E091:[
+	{name: Activity Group Policy, policyWeight: 0.500, response: {33, 0.00, [{"com.apple.dasd.default".currentAvailableLimit == 0}]}}
+	{name: CPU Usage Policy, policyWeight: 5.000, response: {33, 0.00, [{[Max allowed CPU Usage level]: Required:50.00, Observed:95.00},]}}
+ ], Decision: MNP}
+2026-10-29 08:21:34.801 Df dasd[135:5dfe] [com.apple.duetactivityscheduler:scoring] 0:com.apple.security.amfid.reportmetrics:F1D709:[
+	{name: Activity Group Policy, policyWeight: 0.500, response: {33, 0.00, [{"com.apple.dasd.default".currentAvailableLimit == 0}]}}
+	{name: CPU Usage Policy, policyWeight: 5.000, response: {33, 0.00, [{[Max allowed CPU Usage level]: Required:50.00, Observed:95.00},]}}
+ ], Decision: MNP}
+2026-10-29 08:21:34.901 E  kernel[0:306f] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: PrivacyBrowser(6479) deny(1) mach-lookup com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:34.901 E  kernel[0:306f] [com.apple.sandbox.reporting:violation] Sandbox: dasd(135) deny(1) user-preference-write com.apple.dasd.dailyperiodic
+2026-10-29 08:21:34.901 E  cfprefsd[155:306f] [com.apple.defaults:cfprefsd] rejecting write of key(s) <private> in { com.apple.dasd.dailyPeriodic, root, kCFPreferencesAnyHost, /var/root/Library/Preferences/com.apple.dasd.dailyPeriodic.plist, managed: 0 } from process 135 (dasd) because setting these preferences requires user-preference-write or file-write-data sandbox access
+2026-10-29 08:21:34.905 F  dasd[135:51c7] [com.apple.defaults:User Defaults] Couldn't write values for keys (
+    "com.apple.dasd.dailyPeriodicUtilityBasic"
+) in CFPrefsPlistSource<0xb94e45b00> (Domain: com.apple.dasd.dailyPeriodic, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: No): setting these preferences requires user-preference-write or file-write-data sandbox access
+2026-10-29 08:21:34.998 E  cfprefsd[155:306f] [com.apple.defaults:cfprefsd] rejecting write of key(s) <private> in { com.apple.dasd.dailyPeriodic, root, kCFPreferencesAnyHost, /var/root/Library/Preferences/com.apple.dasd.dailyPeriodic.plist, managed: 0 } from process 135 (dasd) because setting these preferences requires user-preference-write or file-write-data sandbox access
+2026-10-29 08:21:35.005 F  dasd[135:5f02] [com.apple.defaults:User Defaults] Couldn't write values for keys (
+    "com.apple.dasd.dailyPeriodicNetworking"
+) in CFPrefsPlistSource<0xb94e45b00> (Domain: com.apple.dasd.dailyPeriodic, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: No): setting these preferences requires user-preference-write or file-write-data sandbox access
+2026-10-29 08:21:35.040 E  cfprefsd[155:5669] [com.apple.defaults:cfprefsd] rejecting write of key(s) <private> in { com.apple.dasd.dailyPeriodic, root, kCFPreferencesAnyHost, /var/root/Library/Preferences/com.apple.dasd.dailyPeriodic.plist, managed: 0 } from process 135 (dasd) because setting these preferences requires user-preference-write or file-write-data sandbox access
+2026-10-29 08:21:35.048 F  dasd[135:5f01] [com.apple.defaults:User Defaults] Couldn't write values for keys (
+    "com.apple.dasd.dailyPeriodicUtilityPlugin"
+) in CFPrefsPlistSource<0xb94e45b00> (Domain: com.apple.dasd.dailyPeriodic, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: No): setting these preferences requires user-preference-write or file-write-data sandbox access
+2026-10-29 08:21:35.060 A  PrivacyBrowser[6623:5f37] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:35.061 Df secinitd[372:5a05] PrivacyBrowser[6623]: root path for bundle "<private>" of main executable "<private>"
+2026-10-29 08:21:35.070 Df secinitd[372:5a05] PrivacyBrowser[6623]: AppSandbox request successful
+2026-10-29 08:21:35.078 Df wifianalyticsd[6597:5f05] [com.apple.wifi.analytics:Default] int main(int, const char **)::116:STARTUP (6597) isSandboxed: YES -- <private> version: WiFiAnalytics-806.3 Jul 31 2026 23:28:58
+2026-10-29 08:21:35.080 A  PrivacyBrowser[6623:5f37] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:21:35.081 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0x100fb5780] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:21:35.081 Df PrivacyBrowser[6623:5f44] [com.apple.xpc:connection] [0x100fb5cc0] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:21:35.090 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.091 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.091 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.091 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.124 Df mlhostd[6601:5f0c] [com.apple.containermanager:sandbox] Consumed sandbox extension; path = [<private>], handle = 1
+2026-10-29 08:21:35.177 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.180 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0x100fbbb00] activating connection: mach=true listener=false peer=false name=com.apple.distributed_notifications@Uv3
+2026-10-29 08:21:35.181 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.181 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.187 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0x100fb7ed0] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.launchservicesd
+2026-10-29 08:21:35.190 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8000] activating connection: mach=true listener=false peer=false name=com.apple.pasteboard.1
+2026-10-29 08:21:35.198 E  kernel[0:43d0] [com.apple.sandbox.reporting:violation] 2 duplicate reports for Sandbox: dasd(135) deny(1) user-preference-write com.apple.dasd.dailyperiodic
+2026-10-29 08:21:35.198 E  kernel[0:43d0] [com.apple.sandbox.reporting:violation] Sandbox: wifianalyticsd(6597) deny(1) mach-lookup com.apple.duetactivityscheduler
+2026-10-29 08:21:35.198 Df launchd[1:43d0] [system:] denied lookup: name = com.apple.duetactivityscheduler, flags = 0x8, requestor = wifianalyticsd[6597], error = 159: Sandbox restriction
+2026-10-29 08:21:35.199 Df PrivacyBrowser[6623:5f37] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) No windows open yet
+2026-10-29 08:21:35.199 A  PrivacyBrowser[6623:5f37] (TCC) TCCAccessRequest() IPC
+2026-10-29 08:21:35.199 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8140] activating connection: mach=true listener=false peer=false name=com.apple.tccd.system
+2026-10-29 08:21:35.201 Df tccd[154:5e4e] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=6623.1, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, requesting={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=6623, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, },
+2026-10-29 08:21:35.203 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8140] invalidated after the last release of the connection object
+2026-10-29 08:21:35.204 Df PrivacyBrowser[6623:5f37] [com.apple.SkyLight:default] server port 0x00003313, session port 0x00003313
+2026-10-29 08:21:35.205 Df tccd[154:5e4e] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=166.107, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=6623, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.WindowServer, pid=166, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer}, },
+2026-10-29 08:21:35.205 Df tccd[154:5e4e] [com.apple.TCC:access] requestor: TCCDProcess: identifier=com.apple.WindowServer, pid=166, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer is checking access for accessor TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=6623, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+2026-10-29 08:21:35.213 Df PrivacyBrowser[6623:5f37] [com.apple.SkyLight:default] New connection 0x3596b main
+2026-10-29 08:21:35.217 Df PrivacyBrowser[6623:5f37] [com.apple.processmanager:front-35286506] CHECKIN: pid=6623
+2026-10-29 08:21:35.220 Df mlhostd[6601:5f0c] [com.apple.xpc:connection] [0x81ecb0000] activating connection: mach=true listener=false peer=false name=com.apple.backupd.sandbox.xpc
+2026-10-29 08:21:35.221 E  kernel[0:3441] [com.apple.sandbox.reporting:violation] Sandbox: mlhostd(6601) deny(1) mach-lookup com.apple.backupd.sandbox.xpc
+2026-10-29 08:21:35.221 Df launchd[1:3441] [system:] denied lookup: name = com.apple.backupd.sandbox.xpc, flags = 0x8, requestor = mlhostd[6601], error = 159: Sandbox restriction
+2026-10-29 08:21:35.221 E  mlhostd[6601:5f0c] [com.apple.CarbonCore:backupmgr] _CSBackupIsItemExcluded_Remote():XPC error for connection com.apple.backupd.sandbox.xpc: Connection invalid
+2026-10-29 08:21:35.232 Df launchservicesd[127:5cca] [com.apple.launchservices:cas] CHECKIN:0x0-0x38038 6623 dev.local.PrivacyBrowser
+2026-10-29 08:21:35.237 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application _updateInformationInternal] | Got App URL: file:///Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/
+2026-10-29 08:21:35.237 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application setState:] | enter: <Application: 0xb2338ae40: PrivacyBrowser> state 2
+2026-10-29 08:21:35.237 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[ApplicationManager checkInAppContext:eventData:] | ApplicationManager: Checked in app : PrivacyBrowser
+2026-10-29 08:21:35.239 Df distnoted[321:5f61] [com.apple.distnoted:diagnostic] register name: com.apple.sharedfilelist.change object: com.apple.LSSharedFileList.ApplicationRecentDocuments/dev.local.privacybrowser token: 5a00000046 pid: 351
+2026-10-29 08:21:35.242 Df PrivacyBrowser[6623:5f37] [com.apple.processmanager:front-35286506] CHECKEDIN: pid=6623 asn=0x0-0x38038 foreground=1
+2026-10-29 08:21:35.245 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8140] activating connection: mach=true listener=false peer=false name=com.apple.lsd.modifydb
+2026-10-29 08:21:35.247 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8280] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:21:35.247 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8280] Connection returned listener port: 0x4203
+2026-10-29 08:21:35.248 Df runningboardd[161:5ce4] [com.apple.runningboard:process] Resolved pid 6623 to [anon<PrivacyBrowser>(501):6623]
+2026-10-29 08:21:35.249 Df runningboardd[161:5ce4] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):6623] is not RunningBoard jetsam managed.
+2026-10-29 08:21:35.250 Df runningboardd[161:5ce4] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):6623] This process will not be managed.
+2026-10-29 08:21:35.250 Df runningboardd[161:5ce4] [com.apple.runningboard:ttl] Now tracking process: [anon<PrivacyBrowser>(501):6623]
+2026-10-29 08:21:35.253 Df runningboardd[161:5ce4] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):6623] from originator [osservice<com.apple.coreservices.launchservicesd>:127] with description <RBSAssertionDescriptor| "foregroundApp:6623" ID:161-127-398 target:6623 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:21:35.254 Df runningboardd[161:5ce4] [com.apple.runningboard:ttl] Assertion 161-127-398 (target:[anon<PrivacyBrowser>(501):6623]) will be created as active
+2026-10-29 08:21:35.254 Df runningboardd[161:5f89] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):6623] Ignoring jetsam update because this process is not memory-managed
+2026-10-29 08:21:35.254 Df runningboardd[161:5f89] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):6623] Ignoring suspend because this process is not lifecycle managed
+2026-10-29 08:21:35.254 Df runningboardd[161:5f89] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):6623] Result 45 setting darwin role to UserInteractiveNonFocal: Operation not supported, falling back to setting priority
+2026-10-29 08:21:35.254 Df runningboardd[161:5f89] [com.apple.runningboard:ttl] [anon<PrivacyBrowser>(501):6623] Set darwin priority to: PRIO_DEFAULT
+2026-10-29 08:21:35.254 Df runningboardd[161:5f89] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):6623] Ignoring GPU update because this process is not GPU managed
+2026-10-29 08:21:35.254 Df runningboardd[161:5f89] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):6623] Ignoring memory limit update because this process is not memory-managed
+2026-10-29 08:21:35.260 Df PrivacyBrowser[6623:5f44] [com.apple.xpc:connection] [0xc2acf0180] activating connection: mach=false listener=false peer=true name=com.apple.xpc.anonymous.0xc2b0b8280.peer[127].0xc2acf0180
+2026-10-29 08:21:35.263 Df runningboardd[161:5f8a] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):6623] from originator [osservice<com.apple.coreservices.launchservicesd>:127] with description <RBSAssertionDescriptor| "foregroundApp:6623" ID:161-127-399 target:6623 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:21:35.263 Df runningboardd[161:5f8a] [com.apple.runningboard:ttl] Assertion 161-127-399 (target:[anon<PrivacyBrowser>(501):6623]) will be created as active
+2026-10-29 08:21:35.265 Df gamepolicyd[816:5cd4] [com.apple.runningboard:process] Hit the server for a process handle 10fb8854000019df that resolved to: [anon<PrivacyBrowser>(501):6623]
+2026-10-29 08:21:35.267 Df gamepolicyd[816:5cd4] [com.apple.runningboard:monitor] Received state update for 6623 (anon<PrivacyBrowser>(501), running-NotVisible
+2026-10-29 08:21:35.268 Df runningboardd[161:5f89] [com.apple.runningboard:ttl] Invalidating assertion 161-127-398 (target:[anon<PrivacyBrowser>(501):6623]) from originator [osservice<com.apple.coreservices.launchservicesd>:127]
+2026-10-29 08:21:35.283 Df PrivacyBrowser[6623:5f37] [com.apple.processmanager:front-35286506] FRONTLOGGING: version 1
+2026-10-29 08:21:35.283 Df PrivacyBrowser[6623:5f37] [com.apple.processmanager:front-35286506] Registered, pid=6623 ASN=0x0,0x38038
+2026-10-29 08:21:35.285 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b83c0] activating connection: mach=true listener=false peer=false name=com.apple.analyticsd
+2026-10-29 08:21:35.287 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Lifecycle] 3596b[CreateApplication]: Process creation: 0x0-0x38038 (PrivacyBrowser) connectionID: 3596B pid: 6623 in session 0x101
+2026-10-29 08:21:35.287 Df PrivacyBrowser[6623:5f44] [com.apple.xpc:connection] [0xc2b0b8500] activating connection: mach=true listener=false peer=false name=com.apple.lsd.mapdb
+2026-10-29 08:21:35.290 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8280] Connection returned listener port: 0x4203
+2026-10-29 08:21:35.292 Df lsd[350:5429] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:21:35.294 Df lsd[350:5429] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:21:35.301 Df PrivacyBrowser[6623:5f37] [com.apple.processmanager:front-35286506] BringForward: pid=6623 asn=0x0-0x38038 bringForward=0 foreground=1 uiElement=0 launchedByLS=0 modifiersCount=0 allDisabled=0
+2026-10-29 08:21:35.310 Df PrivacyBrowser[6623:5f37] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:21:35.316 Df PrivacyBrowser[6623:5f37] (libMobileGestalt.dylib) No persisted cache on this platform.
+2026-10-29 08:21:35.318 E  kernel[0:5f37] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) iokit-open-user-client AppleNVMeEANUC
+2026-10-29 08:21:35.318 Df kernel[0:5f37] IOUC AppleNVMeEANUC failed MACF in process pid 6623, PrivacyBrowser
+2026-10-29 08:21:35.318 Df PrivacyBrowser[6623:5f37] (libMobileGestalt.dylib) IOServiceOpen failed for class 'AppleNVMeEAN'
+2026-10-29 08:21:35.318 Df PrivacyBrowser[6623:5f37] (libMobileGestalt.dylib) Could not open EAN service and connect
+2026-10-29 08:21:35.318 Df PrivacyBrowser[6623:5f37] (libMobileGestalt.dylib) Failed to copy 'aptk' from EAN
+2026-10-29 08:21:35.318 Df PrivacyBrowser[6623:5f37] (libMobileGestalt.dylib) Failed to copy APTicket properties. Falling back to default policy.
+2026-10-29 08:21:35.318 Df PrivacyBrowser[6623:5f37] (libMobileGestalt.dylib) Creating default MGSysConfigPolicy
+2026-10-29 08:21:35.319 Df PrivacyBrowser[6623:5f37] (libMobileGestalt.dylib) CFDictionaryRef copySyscfgDictionary(void) enumeration of <private> failed.
+2026-10-29 08:21:35.319 Df PrivacyBrowser[6623:5f37] (libMobileGestalt.dylib) Failed to find key <private>
+2026-10-29 08:21:35.323 Df PrivacyBrowser[6623:5f37] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:21:35.329 Df PrivacyBrowser[6623:5f37] [com.apple.AppKit:Appearance] Post-registration system appearance: (HLTB: 1)
+2026-10-29 08:21:35.334 Df PrivacyBrowser[6623:5f37] [com.apple.FrontBoard:Common] FBSWorkspace: endpoint monitoring is disabled.
+2026-10-29 08:21:35.334 Df PrivacyBrowser[6623:5f37] [com.apple.FrontBoard:Common] FBSWorkspace: default shell endpoint is disabled.
+2026-10-29 08:21:35.334 Df PrivacyBrowser[6623:5f37] [com.apple.runningboard:connection] Initializing connection
+2026-10-29 08:21:35.334 Df PrivacyBrowser[6623:5f37] [com.apple.runningboard:process] Removing all cached process handles
+2026-10-29 08:21:35.335 Df PrivacyBrowser[6623:5f45] [com.apple.runningboard:connection] Sending handshake request attempt #1 to server
+2026-10-29 08:21:35.335 Df PrivacyBrowser[6623:5f45] [com.apple.runningboard:connection] Creating connection to com.apple.runningboard
+2026-10-29 08:21:35.335 Df PrivacyBrowser[6623:5f45] [com.apple.xpc:connection] [0xc2b0b8780] activating connection: mach=true listener=false peer=false name=com.apple.runningboard
+2026-10-29 08:21:35.335 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8280] Connection returned listener port: 0x4203
+2026-10-29 08:21:35.336 Df runningboardd[161:5f8a] [com.apple.runningboard:connection] Setting client for [anon<PrivacyBrowser>(501):6623] as ready
+2026-10-29 08:21:35.336 A  PrivacyBrowser[6623:5f44] (RunningBoardServices) didChangeInheritances
+2026-10-29 08:21:35.338 Df PrivacyBrowser[6623:5f45] [com.apple.runningboard:connection] Handshake succeeded
+2026-10-29 08:21:35.338 Df PrivacyBrowser[6623:5f45] [com.apple.runningboard:connection] Identity resolved as anon<PrivacyBrowser>(501)
+2026-10-29 08:21:35.338 Df distnoted[321:5aa6] [com.apple.distnoted:diagnostic] register name: com.apple.xctest.FakeForceTouchDevice object: dev.local.PrivacyBrowser token: 1f0000001c pid: 6623
+2026-10-29 08:21:35.340 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8280] Connection returned listener port: 0x4203
+2026-10-29 08:21:35.345 A  PrivacyBrowser[6623:5f44] (AppIntents) appintents:register process
+2026-10-29 08:21:35.346 Df PrivacyBrowser[6623:5f44] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:35.346 Df PrivacyBrowser[6623:5f44] [com.apple.xpc:connection] [0xc2b0b88c0] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:21:35.346 Df PrivacyBrowser[6623:5f44] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:21:35.346 Df PrivacyBrowser[6623:5f44] [com.apple.xpc:connection] [0xc2b0b8a00] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:21:35.347 Df PrivacyBrowser[6623:5f44] [com.apple.xpc:connection] [0xc2b0b8a00] Connection returned listener port: 0x6403
+2026-10-29 08:21:35.350 E  linkd[405:510b] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [6623]
+2026-10-29 08:21:35.351 Df PrivacyBrowser[6623:5f37] [com.apple.dt.xctest:Default] Registering for test daemon availability notify post.
+2026-10-29 08:21:35.351 Df PrivacyBrowser[6623:5f45] [com.apple.xpc:connection] [0xc2b0b88c0] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:35.351 Df PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:21:35.351 Df PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:35.351 A  PrivacyBrowser[6623:5f45] (AppIntents) appintents:register process
+2026-10-29 08:21:35.351 E  PrivacyBrowser[6623:5f44] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:35.351 E  PrivacyBrowser[6623:5f44] [com.apple.AppKit:Application] Error registering app with intents framework: Error Domain=NSCocoaErrorDomain Code=4097 UserInfo={NSDebugDescription=<private>}
+2026-10-29 08:21:35.351 Df PrivacyBrowser[6623:5f37] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:21:35.352 Df PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:35.352 Df PrivacyBrowser[6623:5f45] [com.apple.xpc:connection] [0xc2b0b8c80] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:21:35.352 Df PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:21:35.352 Df PrivacyBrowser[6623:5f45] [com.apple.xpc:connection] [0xc2b0b8a00] Connection returned listener port: 0x6403
+2026-10-29 08:21:35.352 Df PrivacyBrowser[6623:5f37] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:21:35.352 Df PrivacyBrowser[6623:5f37] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:21:35.353 E  linkd[405:5fa4] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [6623]
+2026-10-29 08:21:35.353 Df PrivacyBrowser[6623:5f44] [com.apple.xpc:connection] [0xc2b0b8c80] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:35.353 Df PrivacyBrowser[6623:5f44] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:21:35.353 E  PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:35.354 E  PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:35.354 Df PrivacyBrowser[6623:5f44] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:35.354 A  PrivacyBrowser[6623:5f44] (AppIntents) appintents:register process
+2026-10-29 08:21:35.354 Df PrivacyBrowser[6623:5f44] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:35.354 Df PrivacyBrowser[6623:5f44] [com.apple.xpc:connection] [0xc2b0b92c0] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:21:35.354 Df PrivacyBrowser[6623:5f44] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:21:35.354 Df PrivacyBrowser[6623:5f44] [com.apple.xpc:connection] [0xc2b0b8a00] Connection returned listener port: 0x6403
+2026-10-29 08:21:35.355 E  linkd[405:510b] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [6623]
+2026-10-29 08:21:35.355 Df PrivacyBrowser[6623:5f45] [com.apple.xpc:connection] [0xc2b0b92c0] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:35.355 Df PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:21:35.355 Df PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:35.355 A  PrivacyBrowser[6623:5f45] (AppIntents) appintents:register process
+2026-10-29 08:21:35.355 Df PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Created a new Process Instance Registry XPC connection (inactive)
+2026-10-29 08:21:35.355 Df PrivacyBrowser[6623:5f45] [com.apple.xpc:connection] [0xc2b0b9540] activating connection: mach=true listener=false peer=false name=com.apple.linkd.autoShortcut
+2026-10-29 08:21:35.356 E  PrivacyBrowser[6623:5f44] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:35.356 E  PrivacyBrowser[6623:5f44] [com.apple.appintents:Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:35.356 Df PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Activated connection to linkd (ApplicationService)
+2026-10-29 08:21:35.356 Df PrivacyBrowser[6623:5f45] [com.apple.xpc:connection] [0xc2b0b8a00] Connection returned listener port: 0x6403
+2026-10-29 08:21:35.357 E  linkd[405:5fa4] [com.apple.appintents:General] Failed to generate bundleIdentity:
+ -Not a platform binary, checking teamId...
+ -Unable to get teamId from dev.local.PrivacyBrowser PID [6623]
+2026-10-29 08:21:35.358 Df PrivacyBrowser[6623:5f44] [com.apple.xpc:connection] [0xc2b0b9540] Re-initialization successful; calling out to event handler with XPC_ERROR_CONNECTION_INTERRUPTED
+2026-10-29 08:21:35.358 Df PrivacyBrowser[6623:5f44] [com.apple.appintents:Connection] Process Instance Registry XPC connection has been interrupted
+2026-10-29 08:21:35.358 E  PrivacyBrowser[6623:5f44] [com.apple.appintents:Connection] Will NOT re-try to establish the connection
+2026-10-29 08:21:35.358 Df gamepolicyd[816:5cd4] [com.apple.runningboard:monitor] Received state update for 6623 (anon<PrivacyBrowser>(501), running-NotVisible
+2026-10-29 08:21:35.359 E  PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:35.359 E  PrivacyBrowser[6623:5f45] [com.apple.appintents:Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-10-29 08:21:35.362 A  PrivacyBrowser[6623:5f37] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:21:35.368 Df PrivacyBrowser[6623:5f37] (libMobileGestalt.dylib) couldn't load support library
+2026-10-29 08:21:35.368 Df PrivacyBrowser[6623:5f37] (libMobileGestalt.dylib) called dummy function!
+2026-10-29 08:21:35.371 Df PrivacyBrowser[6623:5f37] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.gms.availability.notification
+2026-10-29 08:21:35.371 Df PrivacyBrowser[6623:5f37] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.os-eligibility-domain.change.greymatter
+2026-10-29 08:21:35.371 Df PrivacyBrowser[6623:5f37] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.language.changed
+2026-10-29 08:21:35.371 Df PrivacyBrowser[6623:5f37] [com.apple.WritingTools:Default] isAvailable value changed: isMDMAllowed = true, gmAvailable (current) = false
+2026-10-29 08:21:35.382 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8dc0] activating connection: mach=true listener=false peer=false name=com.apple.appkit.restoration_storage
+2026-10-29 08:21:35.383 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8f00] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.appleevents
+2026-10-29 08:21:35.384 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b8280] Connection returned listener port: 0x4203
+2026-10-29 08:21:35.385 Df PrivacyBrowser[6623:5f37] [com.apple.processmanager:front-35286506] SignalReady: pid=6623 asn=0x0-0x38038
+2026-10-29 08:21:35.387 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application _updateInformationInternal] | Got App URL: file:///Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/
+2026-10-29 08:21:35.387 Df PrivacyBrowser[6623:5f37] [com.apple.processmanager:front-35286506] SIGNAL: pid=6623 asn=0x0x-0x38038
+2026-10-29 08:21:35.394 A  PrivacyBrowser[6623:5f37] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:21:35.394 A  PrivacyBrowser[6623:5f37] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:21:35.399 A  PrivacyBrowser[6623:5f37] (libsystem_containermanager.dylib) container_create_or_lookup_for_current_user
+2026-10-29 08:21:35.399 A  PrivacyBrowser[6623:5f37] (libsystem_containermanager.dylib) container_create_or_lookup_for_platform
+2026-10-29 08:21:35.399 Df PrivacyBrowser[6623:5f37] [com.apple.containermanager:xpc] Requesting container lookup; personaid = 4294967295, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], class = 2, identifier = <private>, group_identifier = <private>, create = 0, temp = 0, euid = 501, uid = 501
+2026-10-29 08:21:35.399 A  PrivacyBrowser[6623:5f37] (libsystem_containermanager.dylib) container_query_t
+2026-10-29 08:21:35.399 Df PrivacyBrowser[6623:5f37] [com.apple.containermanager:query] Query; personaid = 4294967295, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], euid = 501, uid = 501, class = 2, identifier = [(null)](0), flags = 900000002
+2026-10-29 08:21:35.400 E  mlhostd[6601:5f0c] [com.apple.extensionkit:discovery] Extension is not entitled to run in the App Sandbox : <_EXExtensionIdentity: 0x81ec05590>
+2026-10-29 08:21:35.403 Df PrivacyBrowser[6623:5f37] [com.apple.containermanager:unspecified] _container_query_get_result_at_index: success
+2026-10-29 08:21:35.403 A  PrivacyBrowser[6623:5f37] (libsystem_containermanager.dylib) container_copy_object
+2026-10-29 08:21:35.403 Df PrivacyBrowser[6623:5f37] [com.apple.containermanager:unspecified] container_create_or_lookup_for_platform: success
+2026-10-29 08:21:35.404 A  PrivacyBrowser[6623:5f37] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:21:35.411 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b9680] activating connection: mach=false listener=false peer=false name=com.apple.hiservices-xpcservice
+2026-10-29 08:21:35.430 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b9900] activating connection: mach=false listener=false peer=false name=com.apple.ViewBridgeAuxiliary
+2026-10-29 08:21:35.431 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b9a40] activating connection: mach=false listener=false peer=false name=(anonymous)
+2026-10-29 08:21:35.431 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b9b80] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:21:35.431 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b9b80] Connection returned listener port: 0x9903
+2026-10-29 08:21:35.432 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b9900] invalidated after the last release of the connection object
+2026-10-29 08:21:35.434 Df PrivacyBrowser[6623:5f37] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:21:35.444 Df PrivacyBrowser[6623:5f37] [com.apple.AppKit:StateRestoration] -[NSApplication _reopenWindowsAsNecessaryIncludingRestorableState:withFullFidelity:completionHandler:] shouldRestoreState=1 hasPersistentStateToRestore=0 shouldStillRestoreStateAfterPrompting=0
+2026-10-29 08:21:35.444 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b9900] activating connection: mach=true listener=false peer=false name=com.apple.window_proxies
+2026-10-29 08:21:35.444 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b9900] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:21:35.447 E  mlhostd[6601:5f0c] [com.apple.extensionkit:discovery] Extension is not entitled to run in the App Sandbox : <_EXExtensionIdentity: 0x81ec05ec0>
+2026-10-29 08:21:35.448 Df tccd[154:5e4e] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=166.108, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=6623, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.WindowServer, pid=166, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer}, },
+2026-10-29 08:21:35.448 Df tccd[154:5e4e] [com.apple.TCC:access] requestor: TCCDProcess: identifier=com.apple.WindowServer, pid=166, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer is checking access for accessor TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=6623, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+2026-10-29 08:21:35.449 Df PrivacyBrowser[6623:5f37] [com.apple.AppKit:AutomaticTermination] void _NSEnableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:21:35.452 Df PrivacyBrowser[6623:5f45] [com.apple.BoardServices:XPCErrors] [C:1] Alloc <private>
+2026-10-29 08:21:35.452 Df PrivacyBrowser[6623:5f45] [com.apple.xpc:connection] [0xc2b0b9900] activating connection: mach=false listener=false peer=false name=(anonymous)
+2026-10-29 08:21:35.456 Df WindowManager[348:53c3] [com.apple.windowmanagement:xpcconnection] Connection activated | (6623) PrivacyBrowser
+2026-10-29 08:21:35.462 A  PrivacyBrowser[6623:5f37] (TCC) TCCAccessRequest() IPC
+2026-10-29 08:21:35.462 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b9e00] activating connection: mach=true listener=false peer=false name=com.apple.tccd
+2026-10-29 08:21:35.463 Df tccd[373:5fc5] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=6623.2, attribution={responsible={TCCDProcess: identifier=a.out, pid=973, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, requesting={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=6623, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, },
+2026-10-29 08:21:35.466 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b9e00] invalidated after the last release of the connection object
+2026-10-29 08:21:35.470 Df PrivacyBrowser[6623:5f37] (WebKit) 0x1120480e0 - [PID=0] WebProcessCache::updateCapacity: Cache is disabled because process swap on navigation is disabled
+2026-10-29 08:21:35.477 E  mlhostd[6601:5f0c] [com.apple.extensionkit:discovery] Extension is not entitled to run in the App Sandbox : <_EXExtensionIdentity: 0x81ec06850>
+2026-10-29 08:21:35.482 A  PrivacyBrowser[6623:5f37] (CoreFoundation) Updating Key-Value Observers Of Preferences
+2026-10-29 08:21:35.486 Df PrivacyBrowser[6623:5f44] [com.apple.xpc:connection] [0xc2b0b9e00] activating connection: mach=true listener=false peer=false name=com.apple.webprivacyd
+2026-10-29 08:21:35.488 E  mlhostd[6601:5f0c] [com.apple.extensionkit:discovery] Extension is not entitled to run in the App Sandbox : <_EXExtensionIdentity: 0x81ec061c0>
+2026-10-29 08:21:35.488 E  mlhostd[6601:5f0c] [com.apple.extensionkit:discovery] Extension is not entitled to run in the App Sandbox : <_EXExtensionIdentity: 0x81ec06460>
+2026-10-29 08:21:35.488 Df PrivacyBrowser[6623:5f37] [com.apple.WebKit:BackForwardCache] WebBackForwardCache::clear
+2026-10-29 08:21:35.495 Df PrivacyBrowser[6623:5f37] [com.apple.WebKit:Storage] 0xc2b1e4008 - WebsiteDataStore::WebsiteDataStore sessionID=9223372036854775810 identifier=null
+2026-10-29 08:21:35.501 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.509 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.510 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.510 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.512 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.514 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.514 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:35.521 A  PrivacyBrowser[6623:5fcc] (RunningBoardServices) didChangeInheritances
+2026-10-29 08:21:35.534 A  PrivacyBrowser[6623:5f37] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:21:35.536 A  PrivacyBrowser[6623:5f37] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:21:35.537 Df distnoted[321:5aa6] [com.apple.distnoted:diagnostic] register name: com.apple.nsquiet_safe_quit_give_reason object: dev.local.PrivacyBrowser token: 3f00000038 pid: 6623
+2026-10-29 08:21:35.551 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0b9f40] activating connection: mach=true listener=false peer=false name=com.apple.fonts
+2026-10-29 08:21:35.561 Df PrivacyBrowser[6623:5f37] [com.apple.AppKit:Appearance] NSApp cache appearance:
+-NSRequiresAquaSystemAppearance: 0
+-appearance: (null)
+-effectiveAppearance: <NSCompositeAppearance: 0xc2b040820
+ (
+    "<NSAquaAppearance: 0xc2b0408c0>",
+    "<NSSystemAppearance: 0xc2b040960>"
+)>
+2026-10-29 08:21:35.574 A  PrivacyBrowser[6623:5f37] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:21:35.626 E  kernel[0:5f0c] [com.apple.sandbox.reporting:violation] Sandbox: mlhostd(6601) deny(1) iokit-open-user-client AppleKeyStoreUserClient
+2026-10-29 08:21:35.684 E  kernel[0:5f37] [com.apple.sandbox.reporting:violation] 3 duplicate reports for Sandbox: mlhostd(6601) deny(1) iokit-open-user-client AppleKeyStoreUserClient
+2026-10-29 08:21:35.684 E  kernel[0:5f37] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) file-read-data /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences
+2026-10-29 08:21:35.685 E  kernel[0:28f1] [com.apple.sandbox.reporting:violation] 3 duplicate reports for Sandbox: PrivacyBrowser(6623) deny(1) file-read-data /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences
+2026-10-29 08:21:35.685 E  kernel[0:28f1] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) file-read-data /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist
+2026-10-29 08:21:35.685 E  cfprefsd[323:28f1] [com.apple.defaults:cfprefsd] rejecting read of { com.apple.Safari, runner, kCFPreferencesAnyHost, /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist, managed: 0 } from process 6623 (PrivacyBrowser) because accessing preferences outside an application's container requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:21:35.685 F  PrivacyBrowser[6623:5fcc] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xc2b3a7600> (Domain: com.apple.Safari, User: kCFPreferencesCurrentUser, ByHost: No, Container: /Users/runner/Library/Containers/com.apple.Safari/Data, Contents Need Refresh: No): accessing preferences outside an application's container requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:21:35.685 A  PrivacyBrowser[6623:5fcc] (libsystem_trace.dylib) Activity for state dumps
+2026-10-29 08:21:35.686 E  PrivacyBrowser[6623:5f37] [com.apple.parsec:CoreParsec] PARSession setup failed on host check
+2026-10-29 08:21:35.687 A  PrivacyBrowser[6623:5fcc] (Accounts) accounts/accounts-with-types-sync
+2026-10-29 08:21:35.688 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0ba580] activating connection: mach=true listener=false peer=false name=com.apple.ScreenTimeAgent.private
+2026-10-29 08:21:35.688 E  kernel[0:3440] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) mach-lookup com.apple.ScreenTimeAgent.private
+2026-10-29 08:21:35.688 Df launchd[1:3440] [gui/501 [100002]:] denied lookup: name = com.apple.ScreenTimeAgent.private, requestor = PrivacyBrowser[6623], error = 159: Sandbox restriction
+2026-10-29 08:21:35.688 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0ba580] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-10-29 08:21:35.688 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0ba580] invalidated after a failed init
+2026-10-29 08:21:35.690 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0ba6c0] activating connection: mach=true listener=false peer=false name=com.apple.accountsd.accountmanager
+2026-10-29 08:21:35.701 E  accountsd[400:93a] [com.apple.accounts:entitlement] Unentitled access by client 'PrivacyBrowser' (selector: accountsWithAccountTypeIdentifiers:preloadedProperties:completion:)
+2026-10-29 08:21:35.702 E  PrivacyBrowser[6623:5fcc] [com.apple.accounts:core] "Error returned from daemon: Error Domain=com.apple.accounts Code=7"
+2026-10-29 08:21:35.703 Df PrivacyBrowser[6623:5fcc] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:35.703 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0ba800] activating connection: mach=true listener=false peer=false name=com.apple.passd.in-app-payment
+2026-10-29 08:21:35.708 Df PrivacyBrowser[6623:5fcc] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:35.709 Df PrivacyBrowser[6623:5fa6] [com.apple.xpc:connection] [0xc2b0ba800] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:21:35.709 Df PrivacyBrowser[6623:5fcc] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:35.709 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0ba800] activating connection: mach=true listener=false peer=false name=com.apple.passd.payment-continuity
+2026-10-29 08:21:35.711 Df PrivacyBrowser[6623:5fcc] [com.apple.passkit:Continuity] Failed to retrieve registered host device status
+2026-10-29 08:21:35.711 Df PrivacyBrowser[6623:5fcc] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:35.711 Df PrivacyBrowser[6623:5fa6] [com.apple.xpc:connection] [0xc2b0ba800] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:21:35.711 Df PrivacyBrowser[6623:5fcc] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:35.711 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0ba800] activating connection: mach=true listener=false peer=false name=com.apple.passd.in-app-payment
+2026-10-29 08:21:35.713 Df PrivacyBrowser[6623:5fcc] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:35.713 Df PrivacyBrowser[6623:5fcc] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:35.713 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0ba940] activating connection: mach=true listener=false peer=false name=com.apple.passd.payment-continuity
+2026-10-29 08:21:35.713 Df PrivacyBrowser[6623:5fa6] [com.apple.xpc:connection] [0xc2b0ba800] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:21:35.714 Df PrivacyBrowser[6623:5fcc] [com.apple.passkit:Continuity] Failed to retrieve registered host device status
+2026-10-29 08:21:35.714 Df PrivacyBrowser[6623:5fcc] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:21:35.714 Df PrivacyBrowser[6623:5ffb] [com.apple.xpc:connection] [0xc2b0ba940] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:21:35.735 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0bae40] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:35.735 E  kernel[0:3440] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) mach-lookup com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:35.735 Df launchd[1:3440] [gui/501 [100002]:] denied lookup: name = com.apple.SafariBookmarksSyncAgent, requestor = PrivacyBrowser[6623], error = 159: Sandbox restriction
+2026-10-29 08:21:35.735 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0bae40] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-10-29 08:21:35.735 Df PrivacyBrowser[6623:5f37] [com.apple.xpc:connection] [0xc2b0bae40] invalidated after a failed init
+2026-10-29 08:21:35.736 E  PrivacyBrowser[6623:5fa6] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was invalidated
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0bae40] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0bae40] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0bae40] invalidated after a failed init
+2026-10-29 08:21:35.736 E  PrivacyBrowser[6623:5fa6] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was invalidated
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0baf80] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0baf80] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0baf80] invalidated after a failed init
+2026-10-29 08:21:35.736 E  PrivacyBrowser[6623:5fa6] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was invalidated
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0baf80] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0baf80] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0baf80] invalidated after a failed init
+2026-10-29 08:21:35.736 E  PrivacyBrowser[6623:5fa6] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was invalidated
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0bb0c0] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0bb0c0] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0bb0c0] invalidated after a failed init
+2026-10-29 08:21:35.736 E  PrivacyBrowser[6623:5fcc] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was invalidated
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0bb0c0] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0bb0c0] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0bb0c0] invalidated after a failed init
+2026-10-29 08:21:35.736 E  PrivacyBrowser[6623:5fa6] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was invalidated
+2026-10-29 08:21:35.736 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0baf80] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:35.737 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0baf80] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-10-29 08:21:35.737 Df PrivacyBrowser[6623:5fcc] [com.apple.xpc:connection] [0xc2b0baf80] invalidated after a failed init
+2026-10-29 08:21:35.737 E  PrivacyBrowser[6623:5fcc] [com.apple.Safari:TabGroup] Connection to TabGroups sync agent was invalidated
+2026-10-29 08:21:35.737 F  PrivacyBrowser[6623:5fa6] [com.apple.Safari:TabGroup] Failed to reconnect too many times to sync agent since Thu Oct 29 08:21:35 2026, stopping.
+2026-10-29 08:21:35.737 A  PrivacyBrowser[6623:5fa6] (libsystem_trace.dylib) Activity for state dumps
+2026-10-29 08:21:35.737 A  PrivacyBrowser[6623:5f37] (CoreFoundation) Updating Key-Value Observers Of Preferences
+2026-10-29 08:21:36.033 Df PrivacyBrowser[6623:5f37] [com.apple.Safari:Other] BrowserWindowController <0x100fa6f30> found window height: 600.000000, tab bar height: 0.000000, maxY for contentLayoutRect: -52.000000, while computing topContentInset
+2026-10-29 08:21:36.033 Df PrivacyBrowser[6623:5f37] [com.apple.Safari:Other] BrowserWindowController <0x100fa6f30> did compute topContentInset: 652.000000
+2026-10-29 08:21:36.033 Df PrivacyBrowser[6623:5f37] [com.apple.Safari:Other] BrowserWindowController <0x100fa6f30> found window height: 600.000000, tab bar height: 0.000000, maxY for contentLayoutRect: 548.000000, while computing topContentInset
+2026-10-29 08:21:36.033 Df PrivacyBrowser[6623:5f37] [com.apple.Safari:Other] BrowserWindowController <0x100fa6f30> did compute topContentInset: 52.000000
+2026-10-29 08:21:36.039 Df PrivacyBrowser[6623:5f37] [com.apple.Safari:Other] BrowserWindowController <0x100fa6f30> found window height: 600.000000, tab bar height: 0.000000, maxY for contentLayoutRect: 548.000000, while computing topContentInset
+2026-10-29 08:21:36.039 Df PrivacyBrowser[6623:5f37] [com.apple.Safari:Other] BrowserWindowController <0x100fa6f30> did compute topContentInset: 52.000000
+2026-10-29 08:21:36.041 Df PrivacyBrowser[6623:5f37] [com.apple.Safari:Other] TabContentViewController <0xc2b13d5e0> will update topContentInset for TabContentView <0xc2aa31800> to: 52.000000
+2026-10-29 08:21:36.041 Df PrivacyBrowser[6623:5f37] [com.apple.Safari:Other] TabContentView <0xc2aa31800> will update inheritedTopContentInset to: 52.000000 for BrowserViewController <0x0> and ReaderViewController <0x0>
+2026-10-29 08:21:36.051 E  kernel[0:5fa6] [com.apple.sandbox.reporting:violation] 6 duplicate reports for Sandbox: PrivacyBrowser(6623) deny(1) mach-lookup com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:21:36.051 E  kernel[0:5fa6] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) file-read-data /Users/runner/Library/Safari
+2026-10-29 08:21:36.052 E  kernel[0:5fa6] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) file-read-data /Users/runner/Library
+2026-10-29 08:21:36.052 E  kernel[0:5fa6] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) file-read-data /Users/runner
+2026-10-29 08:21:36.052 E  kernel[0:5fa6] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) file-read-data /Users
+2026-10-29 08:21:36.052 E  kernel[0:5fa6] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) file-read-data /Users/runner/Library/Safari
+2026-10-29 08:21:36.052 E  kernel[0:5fa6] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) file-read-data /Users/runner/Library
+2026-10-29 08:21:36.052 E  kernel[0:5fa6] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) file-read-data /Users/runner
+2026-10-29 08:21:36.052 E  kernel[0:5fa6] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(6623) deny(1) file-read-data /Users
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.079 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.080 Df PrivacyBrowser[6623:5f37] (Foundation) <private>
+2026-10-29 08:21:36.086 F  PrivacyBrowser[6623:5f37] [com.apple.hiservices:HIExceptions] FAULT: NSInvalidArgumentException: <private>; (user info absent)
+2026-10-29 08:21:36.086 A  PrivacyBrowser[6623:5f37] (libsystem_trace.dylib) Activity for state dumps
+2026-10-29 08:21:36.086 E  PrivacyBrowser[6623:5f37] [com.apple.AppKit:General] NSConcreteMutableAttributedString addAttribute:value:range:: nil value
+2026-10-29 08:21:36.086 E  PrivacyBrowser[6623:5f37] [com.apple.AppKit:General] (
+	0   CoreFoundation                      0x0000000188cbf1f0 __exceptionPreprocess + 176
+	1   PrivacyBrowser                      0x0000000100163ba4 PBPreprocessException + 48
+	2   libobjc.A.dylib                     0x000000018873a91c objc_exception_throw + 88
+	3   Foundation                          0x000000018a4b90bc -[NSConcreteMutableAttributedString attribute:atIndex:effectiveRange:] + 0
+	4   Safari                              0x00000001c0b3c100 -[UnifiedField _notSecureAnnotation] + 364
+	5   Safari                              0x00000001c0b3b00c -[UnifiedField _layOutFaviconAndMainContentView] + 2180
+	6   Safari                              0x00000001c0b3a670 -[UnifiedField layout] + 104
+	7   AppKit                              0x000000018d5b150c __getCGDisplayListGetHashSymbolLoc_block_invoke + 1516
+	8   AppKit                              0x000000018d5b1534 __getCGDisplayListGetHashSymbolLoc_block_invoke + 1556
+	9   AppKit                              0x000000018d5767a0 block_destroy_helper + 9428
+	10  AppKit                              0x000000018d576dec block_destroy_helper + 11040
+	11  AppKit                              0x000000018ddba078 ___NSViewLayout_block_invoke + 624
+	12  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	13  AppKit                              0x000000018d0cbc10 _NSViewLayout + 96
+	14  AppKit                              0x000000018ddafd6c __36-[NSView _layoutSubtreeWithOldSize:]_block_invoke + 372
+	15  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	16  AppKit                              0x000000018d0cbba4 -[NSView _layoutSubtreeWithOldSize:] + 100
+	17  AppKit                              0x000000018ddb093c __56-[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:]_block_invoke + 908
+	18  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	19  AppKit                              0x000000018d0cb780 -[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:] + 100
+	20  AppKit                              0x000000018d0c72d8 NSPerformVisuallyAtomicChange + 128
+	21  AppKit                              0x000000018d0cb710 -[NSView layoutSubtreeIfNeeded] + 96
+	22  Safari                              0x00000001c0b30e78 -[BrowserWindowController windowDidLoad] + 1032
+	23  AppKit                              0x000000018d1e81a8 -[NSWindowController _windowDidLoad] + 620
+	24  Safari                              0x00000001c0b30a50 -[WindowController _windowDidLoad] + 52
+	25  AppKit                              0x000000018d1e438c -[NSWindowController window] + 100
+	26  PrivacyBrowser                      0x000000010027b6d4 $s14PrivacyBrowser11ObjCRuntimeO19callReturningObjectySo8NSObjectCSg5value_SS6reasontyXl_SStFZTf4nnd_n + 1092
+	27  PrivacyBrowser                      0x000000010026fc0c $s14PrivacyBrowser06SafariB16WindowControllerC04loadD033_D5663EB8AEBCFB374BED3A50E441DB28LL2ofSo8NSWindowCSgSo8NSObjectC_tF + 48
+	28  PrivacyBrowser                      0x0000000100273cb8 $s14PrivacyBrowser06SafariB16WindowControllerC4open9dataStore8startURLSo8NSWindowCSgSo013WKWebsiteDataH0CSg_10Foundation0J0VSgtFyycfU0_Tm + 32
+	29  PrivacyBrowser                      0x0000000100277dbc $s14PrivacyBrowser06SafariB16WindowControllerC10buildPopup33_D5663EB8AEBCFB374BED3A50E441DB28LLySbAC0G7VariantOFyycfU1_TA + 20
+	30  PrivacyBrowser                      0x0000000100110f90 $sIeg_IeyB_TR + 28
+	31  PrivacyBrowser                      0x0000000100163a08 PBCatchException + 36
+	32  PrivacyBrowser                      0x000000010026f990 $s14PrivacyBrowser06SafariB16WindowControllerC7guarded33_D5663EB8AEBCFB374BED3A50E441DB28LLySbSS_yyctF + 136
+	33  PrivacyBrowser                      0x000000010026c9ac $s14PrivacyBrowser06SafariB16WindowControllerC4open9dataStore8startURLSo8NSWindowCSgSo013WKWebsiteDataH0CSg_10Foundation0J0VSgtF + 1504
+	34  PrivacyBrowser                      0x0000000100280740 $s14PrivacyBrowser20SafariFrameworkProbeO10createStep33_9F0153DCAF2CE7EC9F01CEB735D44942LL9bootstrapySb_tFZ + 468
+	35  PrivacyBrowser                      0x000000010027fc84 $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TY0_ + 500
+	36  PrivacyBrowser                      0x0000000100285e5d $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TATQ0_ + 1
+	37  PrivacyBrowser                      0x0000000100340331 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TQ0_ + 1
+	38  PrivacyBrowser                      0x0000000100340319 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TATQ0_ + 1
+	39  libswift_Concurrency.dylib          0x000000028e2afec5 _ZL23completeTaskWithClosurePN5swift12AsyncContextEPNS_10SwiftErrorE + 1
+)
+2026-10-29 08:21:36.087 Df kernel[0:5f37] PrivacyBrowser[6623] Corpse allowed 1 of 5
+2026-10-29 08:21:36.087 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Lifecycle] 0[outside of RPC]: Process death: 0x0-0x38038 (PrivacyBrowser) connectionID: 3596B pid: 6623 in session 0x101
+2026-10-29 08:21:36.087 Df launchd[1:3440] [gui/501 [100002]:] service inactive: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.6623
+2026-10-29 08:21:36.087 Df launchd[1:3440] [gui/501 [100002]:] removing inactive unmanaged service: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.6623
+2026-10-29 08:21:36.087 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Focus] <BSCompoundAssertion:0xc42c092c0> ([FocusManager:257]-deferringPolicyEvaluationSuppression) acquire for reason:process death - 0x0-0x38038 (PrivacyBrowser) acq:0xc42961c60 count:1
+2026-10-29 08:21:36.088 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Focus] 0[outside of RPC]: [FocusManager:257] update to deferring policy requested for reason: permitted list updated - 0x0-0x38038 removed - but we are suppressing evaluation for reasons: {(
+    "process death - 0x0-0x38038 (PrivacyBrowser)"
+)}
+2026-10-29 08:21:36.088 Df WindowManager[348:5fc0] [com.apple.windowmanagement:xpcconnection] Connection invalidated | (6623) PrivacyBrowser
+2026-10-29 08:21:36.089 Df WindowServer[166:37f] [com.apple.SkyLight.processes:Focus] 0[outside of RPC]: [FocusManager:257] update to deferring policy requested for reason: permitted list updated - 0x1-0x19df removed - but we are suppressing evaluation for reasons: {(
+    "process death - 0x0-0x38038 (PrivacyBrowser)"
+)}
+2026-10-29 08:21:36.090 Df runningboardd[161:5f89] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):6623] termination reported by proc_exit
+2026-10-29 08:21:36.092 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:AppExit] -[ApplicationManager handleCASEvent:withData:] | CAS notification for appDeath for dev.local.PrivacyBrowser with asn: LSASN:{hi=0x0;lo=0x38038} for bundle path: /Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app with URL: file:///Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/
+2026-10-29 08:21:36.092 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application setState:] | enter: <Application: 0xb2338ae40: PrivacyBrowser> state 3
+2026-10-29 08:21:36.092 Df runningboardd[161:5f8a] [com.apple.runningboard:ttl] Invalidating assertion 161-127-399 (target:[anon<PrivacyBrowser>(501):6623]) from originator [osservice<com.apple.coreservices.launchservicesd>:127]
+2026-10-29 08:21:36.092 Df loginwindow[156:2fc] [com.apple.loginwindow.logging:Standard] -[Application setState:] | enter: <Application: 0xb2338ae40: PrivacyBrowser> state 4
+2026-10-29 08:21:36.096 Df runningboardd[161:5f8a] [com.apple.runningboard:process] XPC connection invalidated: [anon<PrivacyBrowser>(501):6623]
+2026-10-29 08:21:36.198 Df runningboardd[161:5f89] [com.apple.runningboard:process] Removing process: [anon<PrivacyBrowser>(501):6623]
+2026-10-29 08:21:36.198 Df runningboardd[161:5f89] [com.apple.runningboard:general] removeJobWithInstance called for identity without existing job [anon<PrivacyBrowser>(501):6623]
+2026-10-29 08:21:36.199 Df runningboardd[161:5f89] [com.apple.runningboard:process] Removing assertions for terminated process: [anon<PrivacyBrowser>(501):6623]
+2026-10-29 08:21:36.200 Df gamepolicyd[816:5cd4] [com.apple.runningboard:monitor] Received state update for 6623 (anon<PrivacyBrowser>(501), none-NotVisible
+2026-10-29 08:21:36.466 Df runningboardd[161:5ce4] [com.apple.runningboard:job_oversize] '19A4EA70-F392-4919-B759-CF31B73E3794' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/com.apple.mlhost.TelemetryWorker.appex/Contents/MacOS/com.apple.mlhost.TelemetryWorker):
+<dictionary: 0x9473be9a0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473bea00> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473c4150> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473c4480> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473c4450> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473beb80> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473bec40> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473beca0> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473bed60> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d0f440>: { length = 200 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473c4180> { string cache = 0x0, length = 32, contents = "com.apple.mlhost.TelemetryWorker" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473bebe0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473c41b0> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473bed00> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.mlhost.TelemetryWorker.xpc-session" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.mlhost.TelemetryWorker" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473beb20> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473c4540> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473c44e0> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473c4420> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473c41e0> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473c4090> { string cache = 0x0, length = 126, contents = "/System/Library/ExtensionKit/Extensions/com.apple.mlhost.TelemetryWorker.appex/Contents/MacOS/com.apple.mlhost.TelemetryWorker" }
+			1: <string: 0x9473c4120> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473c40f0> { string cache = 0x0, length = 112, contents = "eyJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5tbGhvc3QuVGVsZW1ldHJ5V29ya2VyIiwidHlwZSI6MSwiZW5oYW5jZWRTZWN1cml0eSI6ZmFsc2V9" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473c4510> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473c44b0> { string cache = 0x0, length = 32, contents = "com.apple.mlhost.TelemetryWorker" }
+			1: <string: 0x9473c43f0> { string cache = 0x0, length = 44, contents = "com.apple.mlhost.TelemetryWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473c40c0> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:36.501 A  com.apple.mlhost.TelemetryWorker[6718:6059] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:36.782 Df containermanagerd[347:4c0f] [com.apple.containermanager:fs] Wrote [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30869, options = 0x1, mode = 0666
+2026-10-29 08:21:36.821 Df secinitd[372:5a05] com.apple.mlhost.TelemetryWorker[6718]: AppSandbox request successful
+2026-10-29 08:21:37.127 E  kernel[0:5f4e] [com.apple.sandbox.reporting:violation] Sandbox: mlhostd(6601) deny(1) iokit-open-user-client AppleKeyStoreUserClient
+2026-10-29 08:21:37.182 Df runningboardd[161:5f8a] [com.apple.runningboard:job_oversize] 'C6AD5314-4F25-4C19-BA8E-A36E749DB4CD' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/ODDIPoirotExperimentationExtension.appex/Contents/MacOS/ODDIPoirotExperimentationExtension):
+<dictionary: 0x9473bf120> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473bee20> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473c45a0> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473c4bd0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473c4c60> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473bf360> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473bf300> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473bf240> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473bf420> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d0ce80>: { length = 219 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473c4990> { string cache = 0x0, length = 49, contents = "com.apple.siri.ODDIPoirotExperimentationExtension" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473bf2a0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473c4750> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473bf3c0> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.siri.ODDIPoirotExperimentationExtension.xpc-session" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.siri.ODDIPoirotExperimentationExtension" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473befa0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473c4cc0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473c4840> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473c4c30> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473c4c00> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473c43f0> { string cache = 0x0, length = 130, contents = "/System/Library/ExtensionKit/Extensions/ODDIPoirotExperimentationExtension.appex/Contents/MacOS/ODDIPoirotExperimentationExtension" }
+			1: <string: 0x9473c49c0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473c4780> { string cache = 0x0, length = 136, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5zaXJpLk9ERElQb2lyb3RFeHBlcmltZW50YXRpb25FeHRlbnNpb24iLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZX0=" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473c4d20> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473c4cf0> { string cache = 0x0, length = 49, contents = "com.apple.siri.ODDIPoirotExperimentationExtension" }
+			1: <string: 0x9473c4c90> { string cache = 0x0, length = 61, contents = "com.apple.siri.ODDIPoirotExperimentationExtension.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473c4270> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:37.223 A  ODDIPoirotExperimentationExtension[6720:6075] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:37.252 A  secinitd[372:5a05] (libsystem_containermanager.dylib) container_copy_sandbox_token
+2026-10-29 08:21:37.252 A  secinitd[372:5a05] (libsystem_containermanager.dylib) container_copy_sandbox_token
+2026-10-29 08:21:37.473 Df secinitd[372:5a05] ODDIPoirotExperimentationExtension[6720]: AppSandbox request successful
+2026-10-29 08:21:37.566 E  kernel[0:5fe6] [com.apple.sandbox.reporting:violation] 3 duplicate reports for Sandbox: mlhostd(6601) deny(1) iokit-open-user-client AppleKeyStoreUserClient
+2026-10-29 08:21:37.566 E  kernel[0:5fe6] [com.apple.sandbox.reporting:violation] Sandbox: mobileassetd(173) deny(1) file-read-data /Library/Preferences/com.apple.networkextension.uuidcache.plist
+2026-10-29 08:21:37.566 Df mobileassetd[173:5fe6] [com.apple.networkextension:] UUID cache sandbox check failed
+2026-10-29 08:21:37.635 Df runningboardd[161:5f8b] [com.apple.runningboard:job_oversize] 'C96D9243-BCF0-4EC9-BA84-EFD44EF6CA50' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/MediaMLExtension.appex/Contents/MacOS/MediaMLExtension):
+<dictionary: 0x9473bf4e0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473bf600> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473c4f00> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473c51d0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473c5260> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473bfa20> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473bf9c0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473bf6c0> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473bfae0> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d0f680>: { length = 195 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473c4f90> { string cache = 0x0, length = 43, contents = "com.apple.MediaMLPluginApp.MediaMLExtension" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473bf660> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473c4960> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473bfa80> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.MediaMLPluginApp.MediaMLExtension" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.MediaMLPluginApp.MediaMLExtension.xpc-session" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473bf7e0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473c52c0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473c48a0> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473c5230> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473c5200> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473c4ed0> { string cache = 0x0, length = 94, contents = "/System/Library/ExtensionKit/Extensions/MediaMLExtension.appex/Contents/MacOS/MediaMLExtension" }
+			1: <string: 0x9473c4fc0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473c46f0> { string cache = 0x0, length = 128, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5NZWRpYU1MUGx1Z2luQXBwLk1lZGlhTUxFeHRlbnNpb24iLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZX0=" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473c5320> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473c52f0> { string cache = 0x0, length = 43, contents = "com.apple.MediaMLPluginApp.MediaMLExtension" }
+			1: <string: 0x9473c5290> { string cache = 0x0, length = 55, contents = "com.apple.MediaMLPluginApp.MediaMLExtension.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473c4f30> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:37.681 A  MediaMLExtension[6721:6081] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:37.690 Df ReportCrash[539:5d7a] Formulating fatal 309 report for corpse[6623] PrivacyBrowser
+2026-10-29 08:21:37.690 Df ReportCrash[539:5d7a] loadStoreInfo [platform 1] dev.local.PrivacyBrowser from file:///Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/
+2026-10-29 08:21:37.707 Df osanalyticshelper[275:4891] (OSAnalytics) creating type 309 as /Users/runner/Library/Logs/DiagnosticReports/.PrivacyBrowser-2026-10-29-082137.ips
+2026-10-29 08:21:37.712 Df osanalyticshelper[275:4891] (OSAnalytics) Saved type '309(<private>)' report (10 of max 25) at /Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-082137.ips
+2026-10-29 08:21:37.712 Df osanalyticshelper[275:4891] xpc log creation type 309 result success: /Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-082137.ips
+2026-10-29 08:21:37.713 Df ReportCrash[539:5d7a] (OSAnalytics) client log create type 309 result success: /Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-082137.ips
+2026-10-29 08:21:37.714 Df ReportCrash[539:5d7a] dev.local.PrivacyBrowser is not a MetricKit client
+2026-10-29 08:21:37.719 Df ReportCrash[539:5d7a] recordCrashEvent; isBeta 0, log: '/Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-082137.ips'
+2026-10-29 08:21:37.791 Df runningboardd[161:5f8a] [com.apple.runningboard:job_oversize] '989CB944-BA7A-4551-83F6-FD80B09F1563' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/SiriSuggestionsLightHousePlugin.appex/Contents/MacOS/SiriSuggestionsLightHousePlugin):
+<dictionary: 0x947304c00> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473044e0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473c50e0> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473c57d0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473c5860> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x947305ce0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x947306400> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473076c0> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x947305f80> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d0c840>: { length = 213 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473c5590> { string cache = 0x0, length = 46, contents = "com.apple.siri.SiriSuggestionsLightHousePlugin" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473763a0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473c4f60> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x947305140> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.siri.SiriSuggestionsLightHousePlugin" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.siri.SiriSuggestionsLightHousePlugin.xpc-session" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473058c0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473c58c0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473c5170> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473c5830> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473c5800> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473c5440> { string cache = 0x0, length = 124, contents = "/System/Library/ExtensionKit/Extensions/SiriSuggestionsLightHousePlugin.appex/Contents/MacOS/SiriSuggestionsLightHousePlugin" }
+			1: <string: 0x9473c55c0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473c52c0> { string cache = 0x0, length = 132, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5zaXJpLlNpcmlTdWdnZXN0aW9uc0xpZ2h0SG91c2VQbHVnaW4iLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZX0=" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473c5920> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473c58f0> { string cache = 0x0, length = 46, contents = "com.apple.siri.SiriSuggestionsLightHousePlugin" }
+			1: <string: 0x9473c5890> { string cache = 0x0, length = 58, contents = "com.apple.siri.SiriSuggestionsLightHousePlugin.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473c5110> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:37.828 A  SiriSuggestionsLightHousePlugin[6722:6087] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:37.846 Df runningboardd[161:5f89] [com.apple.runningboard:job_oversize] '466E02C6-C39D-43FE-9E12-BB2684432D7C' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/CloudWorker.appex/Contents/MacOS/CloudWorker):
+<dictionary: 0x94724eac0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x94724f9c0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473c5650> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473c5dd0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473c5e60> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473b6e80> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473b5ce0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473b79c0> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473b6220> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d0f240>: { length = 175 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473c5b90> { string cache = 0x0, length = 28, contents = "com.apple.mlhost.CloudWorker" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473b68e0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473c59b0> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473b6880> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.mlhost.CloudWorker" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.mlhost.CloudWorker.xpc-session" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x94724e520> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473c5ec0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473c5680> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473c5e30> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473c5e00> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473c50e0> { string cache = 0x0, length = 84, contents = "/System/Library/ExtensionKit/Extensions/CloudWorker.appex/Contents/MacOS/CloudWorker" }
+			1: <string: 0x9473c5bc0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473c54d0> { string cache = 0x0, length = 108, contents = "eyJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZSwidHlwZSI6MSwic2VydmljZU5hbWUiOiJjb20uYXBwbGUubWxob3N0LkNsb3VkV29ya2VyIn0=" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473c5f20> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473c5ef0> { string cache = 0x0, length = 28, contents = "com.apple.mlhost.CloudWorker" }
+			1: <string: 0x9473c5e90> { string cache = 0x0, length = 40, contents = "com.apple.mlhost.CloudWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473c56e0> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:37.848 A  secinitd[372:6088] (libsystem_containermanager.dylib) container_copy_sandbox_token
+2026-10-29 08:21:37.874 Df secinitd[372:5a05] MediaMLExtension[6721]: AppSandbox request successful
+2026-10-29 08:21:37.912 A  CloudWorker[6723:608b] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:38.002 Df runningboardd[161:5f8b] [com.apple.runningboard:job_oversize] '0EC2D42A-1B31-4B36-81EA-AED3A9491D02' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/SearchUploadWorker.appex/Contents/MacOS/SearchUploadWorker):
+<dictionary: 0x94724eac0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473b7780> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473c5770> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473c6400> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473c6490> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x947395da0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x947397960> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d0000> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d00c0> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d0cf00>: { length = 189 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473c61c0> { string cache = 0x0, length = 35, contents = "com.apple.unilog.SearchUploadWorker" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d0120> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473c5ce0> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d0060> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.unilog.SearchUploadWorker" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.unilog.SearchUploadWorker.xpc-session" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473b6220> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473c64f0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473c5c20> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473c6460> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473c6430> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473c6070> { string cache = 0x0, length = 98, contents = "/System/Library/ExtensionKit/Extensions/SearchUploadWorker.appex/Contents/MacOS/SearchUploadWorker" }
+			1: <string: 0x9473c61f0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473c5f50> { string cache = 0x0, length = 116, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS51bmlsb2cuU2VhcmNoVXBsb2FkV29ya2VyIiwiZW5oYW5jZWRTZWN1cml0eSI6ZmFsc2V9" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473c6550> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473c6520> { string cache = 0x0, length = 35, contents = "com.apple.unilog.SearchUploadWorker" }
+			1: <string: 0x9473c64c0> { string cache = 0x0, length = 47, contents = "com.apple.unilog.SearchUploadWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473c5b00> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:38.020 Df secinitd[372:6088] SiriSuggestionsLightHousePlugin[6722]: AppSandbox request successful
+2026-10-29 08:21:38.039 A  SearchUploadWorker[6724:6091] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:38.054 Df secinitd[372:6088] SearchUploadWorker[6724]: AppSandbox request successful
+2026-10-29 08:21:38.101 Df secinitd[372:5a05] CloudWorker[6723]: AppSandbox request successful
+2026-10-29 08:21:38.137 Df runningboardd[161:5f8a] [com.apple.runningboard:job_oversize] 'A41E08CD-D2BD-4837-9572-E106ABA36965' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/DevicePropertiesExtension.appex/Contents/MacOS/DevicePropertiesExtension):
+<dictionary: 0x9473d01e0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d06c0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473c6700> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473c6af0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473c6b80> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d07e0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d0780> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d03c0> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d08a0> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946cde300>: { length = 209 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473c68b0> { string cache = 0x0, length = 48, contents = "com.apple.siri.metrics.DevicePropertiesExtension" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d0600> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473c5b30> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d0840> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.siri.metrics.DevicePropertiesExtension" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.siri.metrics.DevicePropertiesExtension.xpc-session" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d0180> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473c6be0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473c6280> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473c6b50> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473c6b20> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473c62e0> { string cache = 0x0, length = 112, contents = "/System/Library/ExtensionKit/Extensions/DevicePropertiesExtension.appex/Contents/MacOS/DevicePropertiesExtension" }
+			1: <string: 0x9473c68e0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473c6310> { string cache = 0x0, length = 136, contents = "eyJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZSwidHlwZSI6MSwic2VydmljZU5hbWUiOiJjb20uYXBwbGUuc2lyaS5tZXRyaWNzLkRldmljZVByb3BlcnRpZXNFeHRlbnNpb24ifQ==" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473c6c40> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473c6c10> { string cache = 0x0, length = 48, contents = "com.apple.siri.metrics.DevicePropertiesExtension" }
+			1: <string: 0x9473c6bb0> { string cache = 0x0, length = 60, contents = "com.apple.siri.metrics.DevicePropertiesExtension.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473c6790> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:38.173 A  DevicePropertiesExtension[6725:609d] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:38.207 Df runningboardd[161:5f8a] [com.apple.runningboard:job_oversize] 'D79145F5-94D8-44E1-AA0C-D30440B563E6' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/ODDIPoirotMetricsExtension.appex/Contents/MacOS/ODDIPoirotMetricsExtension):
+<dictionary: 0x9473d0960> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d0de0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473c6bb0> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473c70f0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473c7180> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d08a0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d0f00> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d0f60> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d1020> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d19ec0>: { length = 203 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473c6eb0> { string cache = 0x0, length = 41, contents = "com.apple.siri.ODDIPoirotMetricsExtension" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d0ba0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473c6d30> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d0fc0> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.siri.ODDIPoirotMetricsExtension.xpc-session" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.siri.ODDIPoirotMetricsExtension" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d0d20> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473c71e0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473c6d00> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473c7150> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473c7120> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473c6d60> { string cache = 0x0, length = 114, contents = "/System/Library/ExtensionKit/Extensions/ODDIPoirotMetricsExtension.appex/Contents/MacOS/ODDIPoirotMetricsExtension" }
+			1: <string: 0x9473c6ee0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473c6ac0> { string cache = 0x0, length = 124, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5zaXJpLk9ERElQb2lyb3RNZXRyaWNzRXh0ZW5zaW9uIiwiZW5oYW5jZWRTZWN1cml0eSI6ZmFsc2V9" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473c7240> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473c7210> { string cache = 0x0, length = 41, contents = "com.apple.siri.ODDIPoirotMetricsExtension" }
+			1: <string: 0x9473c71b0> { string cache = 0x0, length = 53, contents = "com.apple.siri.ODDIPoirotMetricsExtension.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473c6a00> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:38.238 A  ODDIPoirotMetricsExtension[6727:60a1] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:38.255 A  secinitd[372:5a05] (libsystem_containermanager.dylib) container_copy_sandbox_token
+2026-10-29 08:21:38.255 A  secinitd[372:5a05] (libsystem_containermanager.dylib) container_copy_sandbox_token
+2026-10-29 08:21:38.346 Df runningboardd[161:5ce4] [com.apple.runningboard:job_oversize] '73ADDC87-28BF-4E43-B031-269AAC691937' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/BitacoraWorker.appex/Contents/MacOS/BitacoraWorker):
+<dictionary: 0x9473d1020> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d13e0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473c6eb0> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473c7690> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473c7720> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d0d20> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d1500> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d1560> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d1620> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d19f00>: { length = 202 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473c7450> { string cache = 0x0, length = 52, contents = "com.apple.LighthouseBitacoraFramework.BitacoraWorker" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d1380> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473c7210> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d15c0> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.LighthouseBitacoraFramework.BitacoraWorker" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.LighthouseBitacoraFramework.BitacoraWorker.xpc-session" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d1320> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473c7780> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473c7090> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473c76f0> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473c76c0> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473c7270> { string cache = 0x0, length = 90, contents = "/System/Library/ExtensionKit/Extensions/BitacoraWorker.appex/Contents/MacOS/BitacoraWorker" }
+			1: <string: 0x9473c7480> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473c7030> { string cache = 0x0, length = 140, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5MaWdodGhvdXNlQml0YWNvcmFGcmFtZXdvcmsuQml0YWNvcmFXb3JrZXIiLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZX0=" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473c77e0> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473c77b0> { string cache = 0x0, length = 52, contents = "com.apple.LighthouseBitacoraFramework.BitacoraWorker" }
+			1: <string: 0x9473c7750> { string cache = 0x0, length = 64, contents = "com.apple.LighthouseBitacoraFramework.BitacoraWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473c6f10> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:38.397 Df secinitd[372:6092] DevicePropertiesExtension[6725]: AppSandbox request successful
+2026-10-29 08:21:38.403 A  BitacoraWorker[6728:60a5] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:38.417 A  secinitd[372:6092] (libsystem_containermanager.dylib) container_copy_sandbox_token
+2026-10-29 08:21:38.448 Df secinitd[372:5a05] ODDIPoirotMetricsExtension[6727]: AppSandbox request successful
+2026-10-29 08:21:38.523 Df runningboardd[161:5f8b] [com.apple.runningboard:job_oversize] '101F4C25-845D-406D-AA40-C132DEDA94F2' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/SiriUploadWorker.appex/Contents/MacOS/SiriUploadWorker):
+<dictionary: 0x9473d16e0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d1860> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473c74b0> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473c7d20> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473c7db0> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d1620> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d1bc0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d1c20> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d1ce0> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d19b00>: { length = 185 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473c7ae0> { string cache = 0x0, length = 33, contents = "com.apple.unilog.SiriUploadWorker" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d1b00> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473c7660> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d1c80> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.unilog.SiriUploadWorker.xpc-session" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.unilog.SiriUploadWorker" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d1a40> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473c7e10> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473c6fa0> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473c7d80> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473c7d50> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473c7990> { string cache = 0x0, length = 94, contents = "/System/Library/ExtensionKit/Extensions/SiriUploadWorker.appex/Contents/MacOS/SiriUploadWorker" }
+			1: <string: 0x9473c7b10> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473c7390> { string cache = 0x0, length = 116, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS51bmlsb2cuU2lyaVVwbG9hZFdvcmtlciIsImVuaGFuY2VkU2VjdXJpdHkiOmZhbHNlfQ==" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473c7e70> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473c7e40> { string cache = 0x0, length = 33, contents = "com.apple.unilog.SiriUploadWorker" }
+			1: <string: 0x9473c7de0> { string cache = 0x0, length = 45, contents = "com.apple.unilog.SiriUploadWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473c78a0> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:38.558 A  SiriUploadWorker[6729:60ad] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:38.568 Df secinitd[372:60a9] SiriUploadWorker[6729]: AppSandbox request successful
+2026-10-29 08:21:38.614 Df secinitd[372:6092] BitacoraWorker[6728]: AppSandbox request successful
+2026-10-29 08:21:38.619 Df runningboardd[161:5ce4] [com.apple.runningboard:job_oversize] 'E6898049-8EA5-40AD-BA43-C92B2B325C15' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/SafariBrowsingAssistantWorker.appex/Contents/MacOS/SafariBrowsingAssistantWorker):
+<dictionary: 0x9473d19e0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d2100> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473d4060> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473d4240> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473d4210> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d1fe0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d21c0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d2220> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d22e0> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d19840>: { length = 211 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473d4090> { string cache = 0x0, length = 46, contents = "com.apple.parsec.SafariBrowsingAssistantWorker" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d2040> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473d40c0> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d2280> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.parsec.SafariBrowsingAssistantWorker.xpc-session" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.parsec.SafariBrowsingAssistantWorker" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d20a0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473d4300> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473d42a0> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473d41e0> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473d4000> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473d4180> { string cache = 0x0, length = 120, contents = "/System/Library/ExtensionKit/Extensions/SafariBrowsingAssistantWorker.appex/Contents/MacOS/SafariBrowsingAssistantWorker" }
+			1: <string: 0x9473d40f0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473d4150> { string cache = 0x0, length = 132, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5wYXJzZWMuU2FmYXJpQnJvd3NpbmdBc3Npc3RhbnRXb3JrZXIiLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZX0=" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473d42d0> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473d4270> { string cache = 0x0, length = 46, contents = "com.apple.parsec.SafariBrowsingAssistantWorker" }
+			1: <string: 0x9473d41b0> { string cache = 0x0, length = 58, contents = "com.apple.parsec.SafariBrowsingAssistantWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473d4120> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:38.670 A  SafariBrowsingAssistantWorker[6730:60b3] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:38.681 Df runningboardd[161:5f89] [com.apple.runningboard:job_oversize] 'D2ECDC70-1A43-4A34-B1CB-E6D81413DE46' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/UnilogTelemetryWorker.appex/Contents/MacOS/UnilogTelemetryWorker):
+<dictionary: 0x9473d23a0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d2820> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473d45d0> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473d4bd0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473d4c60> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d22e0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d2940> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d29a0> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d2a60> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d19600>: { length = 193 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473d4990> { string cache = 0x0, length = 36, contents = "com.apple.aiml.UnilogTelemetryWorker" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d27c0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473d41b0> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d2a00> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.aiml.UnilogTelemetryWorker" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.aiml.UnilogTelemetryWorker.xpc-session" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d25e0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473d4cc0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473d4540> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473d4c30> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473d4c00> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473d4840> { string cache = 0x0, length = 104, contents = "/System/Library/ExtensionKit/Extensions/UnilogTelemetryWorker.appex/Contents/MacOS/UnilogTelemetryWorker" }
+			1: <string: 0x9473d49c0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473d4720> { string cache = 0x0, length = 120, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5haW1sLlVuaWxvZ1RlbGVtZXRyeVdvcmtlciIsImVuaGFuY2VkU2VjdXJpdHkiOmZhbHNlfQ==" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473d4d20> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473d4cf0> { string cache = 0x0, length = 36, contents = "com.apple.aiml.UnilogTelemetryWorker" }
+			1: <string: 0x9473d4c90> { string cache = 0x0, length = 48, contents = "com.apple.aiml.UnilogTelemetryWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473d4660> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:38.713 A  UnilogTelemetryWorker[6731:60b5] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:38.868 Df runningboardd[161:5ce4] [com.apple.runningboard:job_oversize] '0F0C28CE-15B9-4919-935F-FBBA39E7C777' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/MetricsExtension.appex/Contents/MacOS/MetricsExtension):
+<dictionary: 0x9473d2a60> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d2ee0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473d4c90> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473d51a0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473d5230> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d2b20> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d3000> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d3060> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d3120> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d19380>: { length = 191 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473d4f60> { string cache = 0x0, length = 39, contents = "com.apple.siri.metrics.MetricsExtension" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d2dc0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473d4b70> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d30c0> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.siri.metrics.MetricsExtension.xpc-session" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.siri.metrics.MetricsExtension" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d2e80> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473d5290> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473d49f0> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473d5200> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473d51d0> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473d4d80> { string cache = 0x0, length = 94, contents = "/System/Library/ExtensionKit/Extensions/MetricsExtension.appex/Contents/MacOS/MetricsExtension" }
+			1: <string: 0x9473d4f90> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473d4a50> { string cache = 0x0, length = 124, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5zaXJpLm1ldHJpY3MuTWV0cmljc0V4dGVuc2lvbiIsImVuaGFuY2VkU2VjdXJpdHkiOmZhbHNlfQ==" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473d52f0> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473d52c0> { string cache = 0x0, length = 39, contents = "com.apple.siri.metrics.MetricsExtension" }
+			1: <string: 0x9473d5260> { string cache = 0x0, length = 51, contents = "com.apple.siri.metrics.MetricsExtension.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473d4db0> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:38.897 A  MetricsExtension[6732:60ba] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:38.947 Df secinitd[372:60a9] SafariBrowsingAssistantWorker[6730]: AppSandbox request successful
+2026-10-29 08:21:38.966 Df secinitd[372:6092] UnilogTelemetryWorker[6731]: AppSandbox request successful
+2026-10-29 08:21:39.021 Df runningboardd[161:5f8a] [com.apple.runningboard:job_oversize] 'B99D729A-091A-45E9-8AD2-9AA25CD5A575' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/TelemetryAggregator.appex/Contents/MacOS/TelemetryAggregator):
+<dictionary: 0x9473d31e0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d35a0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473d5440> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473d5830> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473d58c0> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d3120> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d36c0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d3720> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d37e0> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d19b80>: { length = 204 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473d55f0> { string cache = 0x0, length = 49, contents = "com.apple.DifferentialPrivacy.TelemetryAggregator" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d3480> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473d5350> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d3780> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.DifferentialPrivacy.TelemetryAggregator.xpc-session" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.DifferentialPrivacy.TelemetryAggregator" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d32a0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473d5920> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473d4a20> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473d5890> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473d5860> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473d54a0> { string cache = 0x0, length = 100, contents = "/System/Library/ExtensionKit/Extensions/TelemetryAggregator.appex/Contents/MacOS/TelemetryAggregator" }
+			1: <string: 0x9473d5620> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473d5410> { string cache = 0x0, length = 136, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5EaWZmZXJlbnRpYWxQcml2YWN5LlRlbGVtZXRyeUFnZ3JlZ2F0b3IiLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZX0=" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473d5980> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473d5950> { string cache = 0x0, length = 49, contents = "com.apple.DifferentialPrivacy.TelemetryAggregator" }
+			1: <string: 0x9473d58f0> { string cache = 0x0, length = 61, contents = "com.apple.DifferentialPrivacy.TelemetryAggregator.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473d5290> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:39.068 A  TelemetryAggregator[6733:60c2] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:39.123 Df secinitd[372:60bb] MetricsExtension[6732]: AppSandbox request successful
+2026-10-29 08:21:39.149 Df runningboardd[161:5ce4] [com.apple.runningboard:job_oversize] 'D71A7C4E-7B74-4818-9BC2-0244AAB5A02B' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/PnROnDeviceWorker.appex/Contents/MacOS/PnROnDeviceWorker):
+<dictionary: 0x9473bff00> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473bfba0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473d5ad0> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473d5e30> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473d5ec0> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d3360> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d39c0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d3c60> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d3420> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d18f80>: { length = 191 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473d58f0> { string cache = 0x0, length = 38, contents = "com.apple.lighthouse.PnROnDeviceWorker" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d37e0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473d5590> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d3d20> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.lighthouse.PnROnDeviceWorker" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.lighthouse.PnROnDeviceWorker.xpc-session" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d3ba0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473d5f20> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473d5710> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473d5e90> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473d5e60> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473d5740> { string cache = 0x0, length = 96, contents = "/System/Library/ExtensionKit/Extensions/PnROnDeviceWorker.appex/Contents/MacOS/PnROnDeviceWorker" }
+			1: <string: 0x9473d5c20> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473d56b0> { string cache = 0x0, length = 120, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5saWdodGhvdXNlLlBuUk9uRGV2aWNlV29ya2VyIiwiZW5oYW5jZWRTZWN1cml0eSI6ZmFsc2V9" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473d5f80> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473d5f50> { string cache = 0x0, length = 38, contents = "com.apple.lighthouse.PnROnDeviceWorker" }
+			1: <string: 0x9473d5ef0> { string cache = 0x0, length = 50, contents = "com.apple.lighthouse.PnROnDeviceWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473d5bf0> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:39.197 A  PnROnDeviceWorker[6734:60c8] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:39.303 Df secinitd[372:6092] TelemetryAggregator[6733]: AppSandbox request successful
+2026-10-29 08:21:39.349 Df runningboardd[161:5f8a] [com.apple.runningboard:job_oversize] 'AAC1DC43-D9EF-4355-9C44-C339BC4A7BC1' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/MessagesAnalyticsWorker.appex/Contents/MacOS/MessagesAnalyticsWorker):
+<dictionary: 0x9473d8120> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d80c0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473d5f20> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473d6460> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473d64f0> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d8420> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d8240> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d8480> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d8600> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d18d40>: { length = 199 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473d54a0> { string cache = 0x0, length = 40, contents = "com.apple.poirot.MessagesAnalyticsWorker" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d83c0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473d61f0> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d85a0> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.poirot.MessagesAnalyticsWorker.xpc-session" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.poirot.MessagesAnalyticsWorker" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d81e0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473d6550> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473d5fb0> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473d64c0> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473d6490> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473d5a70> { string cache = 0x0, length = 108, contents = "/System/Library/ExtensionKit/Extensions/MessagesAnalyticsWorker.appex/Contents/MacOS/MessagesAnalyticsWorker" }
+			1: <string: 0x9473d6250> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473d6010> { string cache = 0x0, length = 124, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5wb2lyb3QuTWVzc2FnZXNBbmFseXRpY3NXb3JrZXIiLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZX0=" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473d65b0> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473d6580> { string cache = 0x0, length = 40, contents = "com.apple.poirot.MessagesAnalyticsWorker" }
+			1: <string: 0x9473d6520> { string cache = 0x0, length = 52, contents = "com.apple.poirot.MessagesAnalyticsWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473d60d0> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:39.390 A  MessagesAnalyticsWorker[6736:60ce] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:39.419 A  secinitd[372:6092] (libsystem_containermanager.dylib) container_copy_sandbox_token
+2026-10-29 08:21:39.419 A  secinitd[372:6092] (libsystem_containermanager.dylib) container_copy_sandbox_token
+2026-10-29 08:21:39.419 A  secinitd[372:6092] (libsystem_containermanager.dylib) container_copy_sandbox_token
+2026-10-29 08:21:39.428 Df secinitd[372:60bb] PnROnDeviceWorker[6734]: AppSandbox request successful
+2026-10-29 08:21:39.493 Df runningboardd[161:5ce4] [com.apple.runningboard:job_oversize] '953F16A8-DE9D-4567-B71A-19BE052AB4AA' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/AssetMetricsExtension.appex/Contents/MacOS/AssetMetricsExtension):
+<dictionary: 0x9473d86c0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d8b40> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473d6850> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473d6ac0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473d6b50> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d8cc0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d8c60> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d8600> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d8d80> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d18b00>: { length = 201 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473d5c50> { string cache = 0x0, length = 44, contents = "com.apple.siri.metrics.AssetMetricsExtension" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d8ae0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473d5cb0> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d8d20> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.siri.metrics.AssetMetricsExtension" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.siri.metrics.AssetMetricsExtension.xpc-session" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d8a80> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473d6bb0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473d6340> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473d6b20> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473d6af0> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473d57d0> { string cache = 0x0, length = 104, contents = "/System/Library/ExtensionKit/Extensions/AssetMetricsExtension.appex/Contents/MacOS/AssetMetricsExtension" }
+			1: <string: 0x9473d68b0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473d6820> { string cache = 0x0, length = 128, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5zaXJpLm1ldHJpY3MuQXNzZXRNZXRyaWNzRXh0ZW5zaW9uIiwiZW5oYW5jZWRTZWN1cml0eSI6ZmFsc2V9" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473d6c10> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473d6be0> { string cache = 0x0, length = 44, contents = "com.apple.siri.metrics.AssetMetricsExtension" }
+			1: <string: 0x9473d6b80> { string cache = 0x0, length = 56, contents = "com.apple.siri.metrics.AssetMetricsExtension.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473d6880> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:39.531 A  AssetMetricsExtension[6737:60d3] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:39.808 Df SiriSuggestionsLightHousePlugin[6722:6096] [com.apple.intelligenceplatform:views] Consumed sandbox extension for <private> at <private>
+2026-10-29 08:21:39.819 Df secinitd[372:6092] MessagesAnalyticsWorker[6736]: AppSandbox request successful
+2026-10-29 08:21:39.917 Df SiriSuggestionsLightHousePlugin[6722:6096] [com.apple.containermanager:sandbox] Consumed sandbox extension; path = [<private>], handle = 2
+2026-10-29 08:21:40.049 Df secinitd[372:60bb] AssetMetricsExtension[6737]: AppSandbox request successful
+2026-10-29 08:21:40.525 E  kernel[0:4b3d] [com.apple.sandbox.reporting:violation] Sandbox: siriactionsd(367) deny(1) user-preference-read com.apple.appleaccount
+2026-10-29 08:21:40.526 E  cfprefsd[323:4b3d] [com.apple.defaults:cfprefsd] rejecting read of { com.apple.appleaccount, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/com.apple.appleaccount.plist, managed: 0 } from process 367 (siriactionsd) because accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:21:40.532 F  siriactionsd[367:5d01] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0xa013ad780> (Domain: com.apple.appleaccount, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: Yes): accessing these preferences requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:21:40.734 E  kernel[0:604e] [com.apple.sandbox.reporting:violation] Sandbox: mlhostd(6601) deny(1) iokit-open-user-client AppleKeyStoreUserClient
+2026-10-29 08:21:41.335 Df dasd[135:5e00] [com.apple.duetactivityscheduler:scoring] 0:com.apple.security.amfid.cleanmetrics:A2E091:[
+	{name: Activity Group Policy, policyWeight: 0.500, response: {33, 0.00, [{"com.apple.dasd.default".currentAvailableLimit == 0}]}}
+	{name: CPU Usage Policy, policyWeight: 5.000, response: {33, 0.00, [{[Max allowed CPU Usage level]: Required:50.00, Observed:95.00},]}}
+ ], Decision: MNP}
+2026-10-29 08:21:41.336 Df dasd[135:5e00] [com.apple.duetactivityscheduler:scoring] 0:com.apple.security.amfid.reportmetrics:F1D709:[
+	{name: Activity Group Policy, policyWeight: 0.500, response: {33, 0.00, [{"com.apple.dasd.default".currentAvailableLimit == 0}]}}
+	{name: CPU Usage Policy, policyWeight: 5.000, response: {33, 0.00, [{[Max allowed CPU Usage level]: Required:50.00, Observed:95.00},]}}
+ ], Decision: MNP}
+2026-10-29 08:21:41.583 Df dasd[135:5e00] [com.apple.duetactivityscheduler:scoring] 0:com.apple.security.amfid.cleanmetrics:A2E091:[
+	{name: Activity Group Policy, policyWeight: 0.500, response: {33, 0.00, [{"com.apple.dasd.default".currentAvailableLimit == 0}]}}
+	{name: CPU Usage Policy, policyWeight: 5.000, response: {33, 0.00, [{[Max allowed CPU Usage level]: Required:50.00, Observed:95.00},]}}
+ ], Decision: MNP}
+2026-10-29 08:21:41.584 Df dasd[135:5e00] [com.apple.duetactivityscheduler:scoring] 0:com.apple.security.amfid.reportmetrics:F1D709:[
+	{name: Activity Group Policy, policyWeight: 0.500, response: {33, 0.00, [{"com.apple.dasd.default".currentAvailableLimit == 0}]}}
+	{name: CPU Usage Policy, policyWeight: 5.000, response: {33, 0.00, [{[Max allowed CPU Usage level]: Required:50.00, Observed:95.00},]}}
+ ], Decision: MNP}
+2026-10-29 08:21:41.651 Df runningboardd[161:5ce4] [com.apple.runningboard:job_oversize] '5A93025F-442D-437D-BF68-E5B5C830EE10' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/SearchUploadWorker.appex/Contents/MacOS/SearchUploadWorker):
+<dictionary: 0x9473d89c0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d8180> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473d44b0> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473d6e20> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473d6910> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d8ba0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d8e40> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d8540> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d98c0> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d18a80>: { length = 189 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473d63d0> { string cache = 0x0, length = 35, contents = "com.apple.unilog.SearchUploadWorker" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d8ea0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473d6dc0> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d8360> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.unilog.SearchUploadWorker" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.unilog.SearchUploadWorker.xpc-session" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d82a0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473d5080> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473d6af0> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473d68e0> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473d4510> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473d69a0> { string cache = 0x0, length = 98, contents = "/System/Library/ExtensionKit/Extensions/SearchUploadWorker.appex/Contents/MacOS/SearchUploadWorker" }
+			1: <string: 0x9473d53e0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473d5d70> { string cache = 0x0, length = 116, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS51bmlsb2cuU2VhcmNoVXBsb2FkV29ya2VyIiwiZW5oYW5jZWRTZWN1cml0eSI6ZmFsc2V9" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473d4a50> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473d50e0> { string cache = 0x0, length = 35, contents = "com.apple.unilog.SearchUploadWorker" }
+			1: <string: 0x9473d6340> { string cache = 0x0, length = 47, contents = "com.apple.unilog.SearchUploadWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473d65b0> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:41.691 A  SearchUploadWorker[6740:6138] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:41.712 Df secinitd[372:60e1] SearchUploadWorker[6740]: AppSandbox request successful
+2026-10-29 08:21:41.954 Df runningboardd[161:5f8a] [com.apple.runningboard:job_oversize] '806E3C34-B840-4170-B493-25C03B35F156' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/SiriUploadWorker.appex/Contents/MacOS/SiriUploadWorker):
+<dictionary: 0x9473d91a0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d8de0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473d6d60> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473d4a80> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473d6d30> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d9320> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d98c0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d9020> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d9860> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d18840>: { length = 185 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473d56e0> { string cache = 0x0, length = 33, contents = "com.apple.unilog.SiriUploadWorker" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d9500> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473d6a30> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d9aa0> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.unilog.SiriUploadWorker.xpc-session" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.unilog.SiriUploadWorker" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d9a40> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473d43f0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473d6520> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473d4ed0> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473d4e10> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473d4360> { string cache = 0x0, length = 94, contents = "/System/Library/ExtensionKit/Extensions/SiriUploadWorker.appex/Contents/MacOS/SiriUploadWorker" }
+			1: <string: 0x9473d4f00> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473d61c0> { string cache = 0x0, length = 116, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS51bmlsb2cuU2lyaVVwbG9hZFdvcmtlciIsImVuaGFuY2VkU2VjdXJpdHkiOmZhbHNlfQ==" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473d44e0> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473d6700> { string cache = 0x0, length = 33, contents = "com.apple.unilog.SiriUploadWorker" }
+			1: <string: 0x9473d4930> { string cache = 0x0, length = 45, contents = "com.apple.unilog.SiriUploadWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473d5080> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:41.989 A  SiriUploadWorker[6741:6145] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:42.004 Df secinitd[372:60e1] SiriUploadWorker[6741]: AppSandbox request successful
+2026-10-29 08:21:42.637 E  diagnostics_agent[450:614a] [com.apple.appstorefoundation:Default] Failed to parse receipt at /Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/_MASReceipt/receipt: Error Domain=NSCocoaErrorDomain Code=260 "The file “receipt” couldn’t be opened because there is no such file." UserInfo={NSFilePath=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/_MASReceipt/receipt, NSURL=file:///Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/_MASReceipt/receipt, NSUnderlyingError=0x8a4c2b6f0 {Error Domain=NSPOSIXErrorDomain Code=2 "No such file or directory"}}
+2026-10-29 08:21:42.653 Df runningboardd[161:5f88] [com.apple.runningboard:job_oversize] '45F126F4-0EF8-4B72-B61B-D6404341BF0C' Submitting extension overlay (host PID 6601, path /System/Library/ExtensionKit/Extensions/ODDIMetricsExtension.appex/Contents/MacOS/ODDIMetricsExtension):
+<dictionary: 0x9473d9740> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x9473d9bc0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x9473d53b0> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x9473d5ef0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x94475175ed50e70f>: 1
+		"JoinExistingSession" => <bool: 0x1f6c3dcb0>: true
+		"_SandboxProfile" => <string: 0x9473d6c10> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x9473d9860> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f6c3dcb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x9473d97a0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x9473d99e0> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x9473d9f20> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x94475175ed50e8af>: 501
+					"TYPE" => <int64: 0x94475175ed50e727>: 4
+					"v" => <data: 0x946d18a40>: { length = 191 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x94475175ed50294f>: 6601
+					"i" => <string: 0x9473d6e80> { string cache = 0x0, length = 35, contents = "com.apple.siri.ODDIMetricsExtension" }
+					"r" => <int64: 0x94475175ed50e717>: 2
+					"H" => <dictionary: 0x9473d9440> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x9473d4d20> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x94475175ed50e717>: 2
+						"TYPE" => <int64: 0x94475175ed50e737>: 6
+						"a" => <int64: 0x94475175ed50e8af>: 501
+						"p" => <int64: 0x94475175ed50e707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f6c3dcb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x9473d9e00> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.siri.ODDIMetricsExtension" => <bool: 0x1f6c3dcb0>: true
+					"com.apple.siri.ODDIMetricsExtension.xpc-session" => <bool: 0x1f6c3dcb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x9473d9b00> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x9473d5140> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x9473d4b10> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f6c3dcb0>: true
+		"_AbandonCoalition" => <bool: 0x1f6c3dcb0>: true
+		"_MultipleInstances" => <bool: 0x1f6c3dcb0>: true
+		"ServiceType" => <string: 0x9473d6400> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x9473d67f0> { count = 3, capacity = 8, contents =
+			0: <string: 0x9473d45a0> { string cache = 0x0, length = 102, contents = "/System/Library/ExtensionKit/Extensions/ODDIMetricsExtension.appex/Contents/MacOS/ODDIMetricsExtension" }
+			1: <string: 0x9473d6f10> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x9473d4de0> { string cache = 0x0, length = 116, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5zaXJpLk9ERElNZXRyaWNzRXh0ZW5zaW9uIiwiZW5oYW5jZWRTZWN1cml0eSI6ZmFsc2V9" }
+		}
+		"_ManagedBy_Services" => <array: 0x9473d7000> { count = 2, capacity = 8, contents =
+			0: <string: 0x9473d4480> { string cache = 0x0, length = 35, contents = "com.apple.siri.ODDIMetricsExtension" }
+			1: <string: 0x9473d6e50> { string cache = 0x0, length = 47, contents = "com.apple.siri.ODDIMetricsExtension.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x9473d4300> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-29 08:21:42.700 A  ODDIMetricsExtension[6743:6150] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:21:42.758 E  kernel[0:4b3d] [com.apple.sandbox.reporting:violation] 3 duplicate reports for Sandbox: mlhostd(6601) deny(1) iokit-open-user-client AppleKeyStoreUserClient
+2026-10-29 08:21:42.758 E  kernel[0:4b3d] [com.apple.sandbox.reporting:violation] Sandbox: secd(327) deny(1) user-preference-write secd
+2026-10-29 08:21:42.758 E  cfprefsd[323:4b3d] [com.apple.defaults:cfprefsd] rejecting write of key(s) <private> in { secd, runner, kCFPreferencesAnyHost, /Users/runner/Library/Preferences/secd.plist, managed: 0 } from process 327 (secd) because setting these preferences requires user-preference-write or file-write-data sandbox access
+2026-10-29 08:21:42.758 F  secd[327:185b] [com.apple.defaults:User Defaults] Couldn't write values for keys (
+    CloudKitAccountInfoCache
+) in CFPrefsPlistSource<0xaaac9e600> (Domain: secd, User: kCFPreferencesCurrentUser, ByHost: No, Container: (null), Contents Need Refresh: No): setting these preferences requires user-preference-write or file-write-data sandbox access
+2026-10-29 08:21:42.924 Df secinitd[372:5f41] ODDIMetricsExtension[6743]: AppSandbox request successful
+2026-10-29 08:21:43.808 E  kernel[0:615c] [com.apple.sandbox.reporting:violation] Sandbox: parsec-fbf(6745) deny(1) file-read-data /Users/runner/Library/Caches/GeoServices/DirectReadConfigStore.plist
+2026-10-29 08:21:43.815 E  kernel[0:3441] [com.apple.sandbox.reporting:violation] Sandbox: parsec-fbf(6745) deny(1) mach-lookup com.apple.coreservices.quarantine-resolver
+2026-10-29 08:21:43.815 Df launchd[1:3441] [gui/501 [100002]:] denied lookup: name = com.apple.coreservices.quarantine-resolver, requestor = parsec-fbf[6745], error = 159: Sandbox restriction
+2026-10-29 08:21:43.815 Df launchd[1:3441] [gui/501 [100002]:] denied lookup: name = com.apple.coreservices.quarantine-resolver, flags = 0x9, requestor = parsec-fbf[6745], error = 159: Sandbox restriction
+2026-10-29 08:21:43.817 Df launchd[1:43d0] [gui/501 [100002]:] denied lookup: name = com.apple.coreservices.quarantine-resolver, requestor = parsec-fbf[6745], error = 159: Sandbox restriction
+2026-10-29 08:21:43.818 Df launchd[1:43d0] [gui/501 [100002]:] denied lookup: name = com.apple.coreservices.quarantine-resolver, flags = 0x9, requestor = parsec-fbf[6745], error = 159: Sandbox restriction
+2026-10-29 08:21:43.824 E  kernel[0:6160] [com.apple.sandbox.reporting:violation] 3 duplicate reports for Sandbox: parsec-fbf(6745) deny(1) mach-lookup com.apple.coreservices.quarantine-resolver
+2026-10-29 08:21:43.824 E  kernel[0:6160] [com.apple.sandbox.reporting:violation] Sandbox: parsec-fbf(6745) deny(1) file-read-data /Users/runner/Library/Caches/GeoServices
+2026-10-29 08:21:43.884 A  parsec-fbf[6745:615d] (libsystem_containermanager.dylib) container_copy_sandbox_token
+2026-10-29 08:21:44.197 Df log[6746:6174] [com.apple.log:] log run noninteractively, parent: 6077 (Python), args: 'log' 'show' '--style' 'compact' '--start' '2026-10-29 08:21:30' '--predicate' 'process == "PrivacyBrowser" OR eventMessage CONTAINS[c] "PrivacyBrowser" OR eventMessage CONTAINS[c] "AMFI" OR eventMess

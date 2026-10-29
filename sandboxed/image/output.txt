@@ -1,0 +1,43 @@
+PROBE step image
+PROBE macOS Version 26.6.2 (Build 25G83)
+PROBE sandboxed: true
+PROBE NSApplicationCrashOnExceptions at start: reads true; arguments YES, app 1, registered unset
+PROBE candidate /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari: on disk false
+PROBE candidate /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari: on disk false
+PROBE candidate /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari: on disk false
+PROBE candidate /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari: on disk false
+PROBE candidate /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari: on disk false
+PROBE candidate /System/Library/PrivateFrameworks/Safari.framework/Safari: on disk false
+PROBE dlopen succeeded: true
+PROBE   failed /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (on disk false): dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file)
+PROBE   failed /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (on disk false): dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file)
+PROBE   failed /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari (on disk false): dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file)
+PROBE   failed /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari (on disk false): dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file)
+PROBE opened path: /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari
+PROBE dyld image name: /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari
+PROBE loaded images of interest (13):
+PROBE   /System/Library/Frameworks/WebKit.framework/Versions/A/WebKit
+PROBE   /System/Library/Frameworks/WebKit.framework/Versions/A/Frameworks/WebKitLegacy.framework/Versions/A/WebKitLegacy
+PROBE   /System/Library/Frameworks/WebKit.framework/Versions/A/Frameworks/WebCore.framework/Versions/A/Frameworks/libwebrtc.dylib
+PROBE   /System/Library/Frameworks/WebKit.framework/Versions/A/Frameworks/WebCore.framework/Versions/A/WebCore
+PROBE   /System/Library/Frameworks/WebKit.framework/Versions/A/Frameworks/WebCore.framework/Versions/A/Frameworks/libANGLE-shared.dylib
+PROBE   /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari
+PROBE   /System/Library/PrivateFrameworks/SafariFoundation.framework/Versions/A/SafariFoundation
+PROBE   /System/Library/PrivateFrameworks/SafariSwift.framework/Versions/A/SafariSwift
+PROBE   /System/Library/PrivateFrameworks/SafariSafeBrowsing.framework/Versions/A/SafariSafeBrowsing
+PROBE   /System/Library/Frameworks/SafariServices.framework/Versions/A/SafariServices
+PROBE   /System/Library/PrivateFrameworks/SafariShared.framework/Versions/A/SafariShared
+PROBE   /System/Library/PrivateFrameworks/SafariSharedUI.framework/Versions/A/SafariSharedUI
+PROBE   /System/Library/PrivateFrameworks/SafariCore.framework/Versions/A/SafariCore
+PROBE what the framework bundle holds on disk:
+PROBE   /System/Library/PrivateFrameworks/Safari.framework: 3 entries; PlugIns, Resources, Versions
+PROBE   /System/Library/PrivateFrameworks/Safari.framework/Versions/A: 3 entries; PlugIns, Resources, _CodeSignature
+PROBE   /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Resources: 69 entries, 42 .lproj (de.lproj, he.lproj, en_AU.lproj, ar.lproj); ContactsAutoFillChoicesMenuItemView.nib, ExtensionCheckmark.svg, ar.lproj, de.lproj, el.lproj, en.lproj, en_AU.lproj, he.lproj, ja.lproj, uk.lproj
+PROBE   /System/Library/PrivateFrameworks/Safari.framework/Resources: 69 entries, 42 .lproj (de.lproj, he.lproj, en_AU.lproj, ar.lproj); ContactsAutoFillChoicesMenuItemView.nib, ExtensionCheckmark.svg, ar.lproj, de.lproj, el.lproj, en.lproj, en_AU.lproj, he.lproj, ja.lproj, uk.lproj
+PROBE   Bundle(path:) -> loaded=false, identifier=com.apple.Safari.framework
+PROBE step image finished
+2026-10-29 08:21:22.270 PrivacyBrowser[6138:23029] SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:21:22.271 PrivacyBrowser[6138:23029] SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:21:22.271 PrivacyBrowser[6138:23029] SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:21:22.271 PrivacyBrowser[6138:23029] SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:21:22.358 PrivacyBrowser[6138:23029] SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
