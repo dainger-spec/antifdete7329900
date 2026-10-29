@@ -109,6 +109,7 @@ final class ProfileManager: ObservableObject {
             return
         }
         if let child = children[id] {
+            child.send(.activate)
             child.bringToFront()
             return
         }
@@ -261,6 +262,19 @@ final class ProfileManager: ObservableObject {
             languages: languages,
             locale: languages.first.map { $0.replacingOccurrences(of: "-", with: "_") },
             timeZone: stored.timeZoneIdentifier ?? location?.timeZoneIdentifier)
+        child.onEvent = { [weak self] event in
+            guard let self else { return }
+            switch event {
+            case .error(let message):
+                self.onError?(message)
+            case .running:
+                self.objectWillChange.send()
+            case .warmUpProgress, .warmUpFinished:
+                self.objectWillChange.send()
+            case .cookiesImported(let accepted, let refused):
+                self.log.notice("Profile \(id.uuidString, privacy: .public) imported \(accepted, privacy: .public) cookies, \(refused, privacy: .public) refused")
+            }
+        }
         child.onExit = { [weak self] status in
             guard let self, self.children[id] === child else { return }
             self.children[id] = nil

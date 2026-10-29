@@ -19,6 +19,13 @@ enum ProfileSessionHost {
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "ProfileSession")
     private static var delegate: Delegate?
 
+    /// Tells the manager something. One line on standard output, prefixed so that Safari's own
+    /// output on the same stream is not read as ours.
+    static func send(_ event: ProfileEvent) {
+        guard let data = ProfileChannel.encode(event, prefix: ProfileChannel.eventPrefix) else { return }
+        try? FileHandle.standardOutput.write(contentsOf: data)
+    }
+
     static func start(arguments: [String]) {
         guard let index = arguments.firstIndex(of: "--profile-session"),
               arguments.indices.contains(index + 1),
@@ -26,6 +33,7 @@ enum ProfileSessionHost {
             FileHandle.standardError.write(Data("--profile-session needs a profile id\n".utf8))
             exit(2)
         }
+        // Everything after the key on this stream is commands from the manager.
         guard let key = readMasterKey() else {
             FileHandle.standardError.write(Data("--profile-session expects the vault master key on stdin\n".utf8))
             exit(2)
@@ -76,6 +84,10 @@ enum ProfileSessionHost {
             source.resume()
             terminationSource = source
 
+            ProfileChannel.readLines(from: FileHandle.standardInput) { [weak self] line in
+                guard let command = ProfileChannel.decode(ProfileCommand.self, from: line) else { return }
+                self?.handle(command)
+            }
             do {
                 let vault = try MasterVault.open(in: AppEnvironment.vaultDirectory, masterKeyMaterial: masterKeyMaterial)
                 masterKeyMaterial.withUnsafeMutableBytes { bytes in
@@ -86,6 +98,8 @@ enum ProfileSessionHost {
                 let manager = ProfileManager(repository: repository)
                 manager.onError = { message in
                     ProfileSessionHost.log.error("\(message, privacy: .public)")
+                    // Shown by the manager, which is where the user is looking.
+                    ProfileSessionHost.send(.error(message))
                 }
                 // The profile's last window closed: this process exists for that profile only, so
                 // it quits — and quitting is what seals the data.
@@ -101,6 +115,7 @@ enum ProfileSessionHost {
                 Task { @MainActor in
                     do {
                         try await manager.launch(self.profileID)
+                        ProfileSessionHost.send(.running)
                     } catch {
                         ProfileSessionHost.log.error("Launching \(self.profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
                         NSApp.terminate(nil)
@@ -109,6 +124,40 @@ enum ProfileSessionHost {
             } catch {
                 ProfileSessionHost.log.error("Could not open the vault for \(self.profileID.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
                 exit(3)
+            }
+        }
+
+        /// What the manager asked for. Anything that needs the profile's session waits until it
+        /// exists: a command can arrive while the launch is still running.
+        private func handle(_ command: ProfileCommand) {
+            switch command {
+            case .stop:
+                NSApp.terminate(nil)
+            case .activate:
+                NSApp.activate(ignoringOtherApps: true)
+                manager?.session(for: profileID)?.bringToFront()
+            case .showLibrary(let section):
+                guard let section = LibraryView.Section(rawValue: section) else { return }
+                manager?.showLibrary(profileID, section: section)
+            case .showPasswords:
+                // The password window is the manager's own screen; from here the most it can do is
+                // bring the profile forward so the two are not fighting over the front.
+                NSApp.activate(ignoringOtherApps: true)
+            case .importCookies(let cookies):
+                Task { @MainActor [weak self] in
+                    guard let self, let manager = self.manager else { return }
+                    let outcome = try? await manager.importCookies(cookies, into: self.profileID)
+                    switch outcome {
+                    case .applied(let stored, let refused):
+                        ProfileSessionHost.send(.cookiesImported(accepted: stored, refused: refused.count))
+                    case .queued(let queued):
+                        ProfileSessionHost.send(.cookiesImported(accepted: queued, refused: 0))
+                    case nil:
+                        ProfileSessionHost.send(.error(L("cookies.error.busy")))
+                    }
+                }
+            case .startWarmUp(let plan):
+                _ = manager?.startWarmUp(profileID, plan: plan)
             }
         }
 

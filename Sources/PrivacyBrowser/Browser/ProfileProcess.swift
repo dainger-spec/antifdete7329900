@@ -38,12 +38,26 @@ final class ProfileProcess {
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ProfileProcess")
     /// Called on the main actor when the child has exited, however it exited.
     var onExit: (@MainActor (Int32) -> Void)?
+    /// What the profile tells the manager (`ProfileChannel`).
+    var onEvent: (@MainActor (ProfileEvent) -> Void)?
+    /// Open for as long as the child runs: the key first, then commands.
+    private var commands: FileHandle?
 
     var isRunning: Bool { process.isRunning }
 
     private init(profileID: UUID, process: Process) {
         self.profileID = profileID
         self.process = process
+    }
+
+    /// Asks the profile to do something. Nothing happens if it has already gone.
+    func send(_ command: ProfileCommand) {
+        guard let commands, process.isRunning, let data = ProfileChannel.encode(command) else { return }
+        do {
+            try commands.write(contentsOf: data)
+        } catch {
+            log.error("Could not reach profile \(self.profileID.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// Starts the profile's process. `home` is the directory Safari's frameworks and the child's
@@ -82,19 +96,31 @@ final class ProfileProcess {
 
         let keyPipe = Pipe()
         process.standardInput = keyPipe
+        // What the profile says back. Safari's own frameworks print on this stream too, so only
+        // prefixed lines are ours and the rest is passed on to the log as it was.
+        let eventPipe = Pipe()
+        process.standardOutput = eventPipe
         try process.run()
 
         // The master key, and nothing else, then end of file. Written after the fork so that it
         // exists only in the two processes' memory and the pipe buffer.
         var key = masterKeyMaterial
         keyPipe.fileHandleForWriting.write(key)
-        try? keyPipe.fileHandleForWriting.close()
         key.withUnsafeMutableBytes { bytes in
             guard let base = bytes.baseAddress else { return }
             memset_s(base, bytes.count, 0, bytes.count)
         }
 
         let child = ProfileProcess(profileID: profileID, process: process)
+        // The same pipe carries the commands after the key; it stays open until the child exits.
+        child.commands = keyPipe.fileHandleForWriting
+        ProfileChannel.readLines(from: eventPipe.fileHandleForReading) { [weak child] line in
+            guard let event = ProfileChannel.decode(ProfileEvent.self, from: line, prefix: ProfileChannel.eventPrefix) else {
+                FileHandle.standardError.write(Data((line + "\n").utf8))
+                return
+            }
+            child?.onEvent?(event)
+        }
         // Called on one of Foundation's queues, not the main one.
         process.terminationHandler = { finished in
             let status = finished.terminationStatus
@@ -106,10 +132,12 @@ final class ProfileProcess {
         return child
     }
 
-    /// Asks the child to quit, which is what seals its data (`SIGTERM` reaches its own quit path).
-    /// `waitUntilExit` is how the manager knows the sealing finished.
+    /// Asks the child to quit, which is what seals its data. The command is the ordinary way and
+    /// `SIGTERM` the fallback for a child that is not reading its input any more; both end up in
+    /// the same quit path. `waitUntilExit` is how the manager knows the sealing finished.
     func terminate() {
         guard process.isRunning else { return }
+        send(.stop)
         process.terminate()
     }
 
