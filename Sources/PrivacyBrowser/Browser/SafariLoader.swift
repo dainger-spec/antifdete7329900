@@ -282,6 +282,91 @@ enum ObjCRuntime {
         return (value, "\(name) -> \(NSStringFromClass(type(of: value)))")
     }
 
+    /// `[[cls alloc] name:flag]` — an initialiser taking only a flag, the shape of the window
+    /// controller's popup initialiser. Looked up before allocating, so a missing one leaks nothing.
+    static func allocating(_ cls: AnyClass, _ name: String, flag: Bool) -> (value: NSObject?, reason: String) {
+        let allocSelector = NSSelectorFromString("alloc")
+        let selector = NSSelectorFromString(name)
+        guard let meta: AnyClass = object_getClass(cls),
+              let allocMethod = class_getInstanceMethod(meta, allocSelector) else {
+            return (nil, "+alloc -> not implemented")
+        }
+        guard let method = class_getInstanceMethod(cls, selector) else { return (nil, "\(name) -> not implemented") }
+        typealias Alloc = @convention(c) (AnyObject, Selector) -> UnsafeRawPointer?
+        guard let allocated = unsafeBitCast(method_getImplementation(allocMethod), to: Alloc.self)(cls as AnyObject, allocSelector) else {
+            return (nil, "+alloc -> nil")
+        }
+        let instance = Unmanaged<AnyObject>.fromOpaque(allocated).takeUnretainedValue()
+        typealias Init = @convention(c) (AnyObject, Selector, ObjCBool) -> UnsafeRawPointer?
+        guard let returned = unsafeBitCast(method_getImplementation(method), to: Init.self)(instance, selector, ObjCBool(flag)) else {
+            return (nil, "\(name) -> nil")
+        }
+        return reported(returned, name)
+    }
+
+    /// A method taking an integer and a flag — the shape of the window controller's tab factory.
+    static func callReturningObject(_ receiver: AnyObject, _ name: String, integer: Int, flag: Bool) -> (value: NSObject?, reason: String) {
+        let selector = NSSelectorFromString(name)
+        guard let cls: AnyClass = object_getClass(receiver),
+              let method = class_getInstanceMethod(cls, selector) else { return (nil, "\(name) -> not implemented") }
+        typealias Call = @convention(c) (AnyObject, Selector, Int, ObjCBool) -> UnsafeRawPointer?
+        guard let returned = unsafeBitCast(method_getImplementation(method), to: Call.self)(receiver, selector, integer, ObjCBool(flag)) else {
+            return (nil, "\(name) -> nil")
+        }
+        return reported(returned, name)
+    }
+
+    /// A method taking an integer, an object and a flag — the shape of the window controller's
+    /// class-side factory for an empty window.
+    static func callReturningObject(_ receiver: AnyObject, _ name: String,
+                                    integer: Int, object: AnyObject?, flag: Bool) -> (value: NSObject?, reason: String) {
+        let selector = NSSelectorFromString(name)
+        guard let cls: AnyClass = object_getClass(receiver),
+              let method = class_getInstanceMethod(cls, selector) else { return (nil, "\(name) -> not implemented") }
+        typealias Call = @convention(c) (AnyObject, Selector, Int, AnyObject?, ObjCBool) -> UnsafeRawPointer?
+        guard let returned = unsafeBitCast(method_getImplementation(method), to: Call.self)(receiver, selector, integer, object, ObjCBool(flag)) else {
+            return (nil, "\(name) -> nil")
+        }
+        return reported(returned, name)
+    }
+
+    /// Sends a method that takes nothing and returns `BOOL`. nil when it is not implemented or
+    /// returns something else, so a report can tell "false" from "not there".
+    static func callReturningBool(_ receiver: AnyObject, _ name: String) -> Bool? {
+        let selector = NSSelectorFromString(name)
+        guard !name.contains(":"),
+              let cls: AnyClass = object_getClass(receiver),
+              let method = class_getInstanceMethod(cls, selector) else { return nil }
+        let returnTypePointer = method_copyReturnType(method)
+        let returnType = String(cString: returnTypePointer)
+        free(returnTypePointer)
+        // `BOOL` is encoded `B` on arm64 and `c` on x86_64.
+        guard returnType == "B" || returnType == "c" else { return nil }
+        typealias Call = @convention(c) (AnyObject, Selector) -> ObjCBool
+        return unsafeBitCast(method_getImplementation(method), to: Call.self)(receiver, selector).boolValue
+    }
+
+    /// Sends a method taking one flag, for its effect — a `BOOL` property's setter. False when
+    /// the receiver does not implement it.
+    @discardableResult
+    static func send(_ receiver: AnyObject, _ name: String, flag: Bool) -> Bool {
+        let selector = NSSelectorFromString(name)
+        guard name.filter({ $0 == ":" }).count == 1,
+              let cls: AnyClass = object_getClass(receiver),
+              let method = class_getInstanceMethod(cls, selector) else { return false }
+        typealias Call = @convention(c) (AnyObject, Selector, ObjCBool) -> Void
+        unsafeBitCast(method_getImplementation(method), to: Call.self)(receiver, selector, ObjCBool(flag))
+        return true
+    }
+
+    /// A returned object pointer as an `NSObject`, with the line that reports it.
+    private static func reported(_ returned: UnsafeRawPointer, _ name: String) -> (value: NSObject?, reason: String) {
+        guard let value = Unmanaged<AnyObject>.fromOpaque(returned).takeUnretainedValue() as? NSObject else {
+            return (nil, "\(name) -> a non-NSObject")
+        }
+        return (value, "\(name) -> \(NSStringFromClass(type(of: value)))")
+    }
+
     /// A three-argument class or instance method taking an integer and two objects — the shape
     /// the framework's web view configuration factory has.
     static func callReturningObject(_ receiver: Any, _ name: String,

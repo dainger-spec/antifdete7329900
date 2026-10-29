@@ -33,7 +33,28 @@ STEPS = [
     "create",           # the application-controller window path
     "create-bootstrap", # the same, after the launch callbacks
     "window",           # the whole path as the app runs it, data store included
+    "popupfield",       # the popup's own address field against the one that raises in layout
+    "popup",            # initAsPopupWindow:YES
+    "popup-nofield",    # the same, with the popup's address field turned off before it loads
+    "popup-mode",       # initWithBrowsingMode:0 isPopupWindow:YES
+    "popup-hidden",     # +hiddenEmptyBrowserWindowControllerWithBrowsingMode:profileIdentifier:isPopupWindow:
+    "popup:crash-off",  # popup again, with NSApplicationCrashOnExceptions set to NO rather than unset
+    "window:chrome",    # the whole path as -safari-chrome runs it: the popups, then the ordinary window
 ]
+
+# Run as the app runs them, without NSApplicationCrashOnExceptions: whether an exception raised
+# inside the framework can be caught is what these measure, and that setting would end the
+# process first. They record each exception as it is raised, so a hang still says why.
+AS_THE_APP_RUNS = {"popup", "popup-nofield", "popup-mode", "popup-hidden"}
+
+# "<step>:<variant>" runs a step again under other launch arguments, into its own folder.
+VARIANT_ARGUMENTS = {
+    # Set, not merely absent: whether AppKit tells the two apart is what it measures.
+    "crash-off": ["-NSApplicationCrashOnExceptions", "NO"],
+    # As the app runs with the launch argument. Last, because the defaults system would read
+    # whatever followed it as its value.
+    "chrome": ["-NSApplicationCrashOnExceptions", "NO", "-safari-chrome"],
+}
 
 CRASH_DIRS = [
     os.path.expanduser("~/Library/Logs/DiagnosticReports"),
@@ -50,6 +71,33 @@ def crash_snapshot():
     for directory in CRASH_DIRS:
         found.update(glob.glob(os.path.join(directory, "*.ips")))
     return found
+
+
+def crash_pid(path):
+    """The process a crash report is about. Reports are written late, sometimes after the next
+    step has begun, so they are matched to steps by this rather than by when they appeared."""
+    try:
+        with open(path, "r", errors="replace") as handle:
+            body = handle.read().split("\n", 1)[1]
+        return json.loads(body).get("pid")
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def attach_crashes(result, candidates):
+    """Copies the reports among `candidates` that are about this step's process into its folder."""
+    for path in sorted(candidates):
+        if "PrivacyBrowser" not in os.path.basename(path) or crash_pid(path) != result["pid"]:
+            continue
+        if any(crash["path"] == path for crash in result["crashes"]):
+            continue
+        shutil.copy(path, os.path.join(result["dir"], os.path.basename(path)))
+        result["crashes"].append(read_crash(path))
+
+
+def write_result(result):
+    with open(os.path.join(result["dir"], "result.json"), "w") as handle:
+        json.dump({key: value for key, value in result.items() if key not in ("output", "log", "dir")}, handle, indent=2)
 
 
 def read_crash(path):
@@ -99,25 +147,34 @@ def system_log(since, process):
         return "log show failed: %s" % error
 
 
-def run_step(binary, step, out_dir, timeout):
-    step_dir = os.path.join(out_dir, step)
+def run_step(binary, spec, out_dir, timeout):
+    step, _, variant = spec.partition(":")
+    step_dir = os.path.join(out_dir, spec.replace(":", "-"))
     os.makedirs(step_dir, exist_ok=True)
     before = crash_snapshot()
     # `log show --start` wants local time, and wants to be a little earlier than the step.
     since = (datetime.datetime.now() - datetime.timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
     # -NSApplicationCrashOnExceptions on the command line as well as in code: AppKit otherwise
     # swallows an exception raised under its run loop, and the step hangs with nothing to read.
-    command = [binary, "--safari-probe", step, "--out", step_dir, "-NSApplicationCrashOnExceptions", "YES"]
+    command = [binary, "--safari-probe", step, "--out", step_dir]
+    if variant:
+        command += VARIANT_ARGUMENTS[variant]
+    elif step not in AS_THE_APP_RUNS:
+        command += ["-NSApplicationCrashOnExceptions", "YES"]
     start = time.time()
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace")
     try:
-        done = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
-        output, status = done.stdout + done.stderr, done.returncode
-    except subprocess.TimeoutExpired as expired:
-        output = (expired.stdout or b"").decode(errors="replace") + (expired.stderr or b"").decode(errors="replace")
+        stdout, stderr = process.communicate(timeout=timeout)
+        status = process.returncode
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate()
         status = None
+    output = (stdout or "") + (stderr or "")
     elapsed = time.time() - start
 
-    result = {"step": step, "seconds": round(elapsed, 1), "exit": status, "output": output}
+    result = {"step": spec, "pid": process.pid, "seconds": round(elapsed, 1), "exit": status,
+              "output": output, "dir": step_dir, "crashes": []}
     if status is None:
         result["outcome"] = "timed out after %d s" % timeout
     elif status < 0:
@@ -127,16 +184,12 @@ def run_step(binary, step, out_dir, timeout):
     else:
         result["outcome"] = "exited %d" % status
 
-    # A crash leaves its report a moment later.
-    if status is None or (status is not None and status != 0):
+    # A crash leaves its report a moment later. The steps run as the app runs them keep the log
+    # even when they exit cleanly: it is where AppKit says what it did with an exception it caught.
+    if status is None or status != 0:
         time.sleep(8)
-        new = crash_snapshot() - before
-        result["crashes"] = []
-        for path in sorted(new):
-            if "PrivacyBrowser" not in os.path.basename(path):
-                continue
-            shutil.copy(path, os.path.join(step_dir, os.path.basename(path)))
-            result["crashes"].append(read_crash(path))
+        attach_crashes(result, crash_snapshot() - before)
+    if status is None or status != 0 or step in AS_THE_APP_RUNS or variant:
         result["log"] = system_log(since, "PrivacyBrowser")
 
     with open(os.path.join(step_dir, "output.txt"), "w") as handle:
@@ -144,8 +197,7 @@ def run_step(binary, step, out_dir, timeout):
     if result.get("log"):
         with open(os.path.join(step_dir, "system-log.txt"), "w") as handle:
             handle.write(result["log"])
-    with open(os.path.join(step_dir, "result.json"), "w") as handle:
-        json.dump({key: value for key, value in result.items() if key not in ("output", "log")}, handle, indent=2)
+    write_result(result)
     return result
 
 
@@ -169,6 +221,22 @@ def crash_reason(result):
     return ""
 
 
+def headline(result):
+    """Why the step ended, in one line: the crash report, else the first exception raised, else
+    the result the step printed."""
+    reason = crash_reason(result)
+    if reason:
+        return reason
+    raised = result_line = ""
+    for line in result["output"].splitlines():
+        text = line.strip()
+        if not raised and "RAISED" in text:
+            raised = text.split("RAISED", 1)[1].strip(" ,:")
+        if text.startswith("PROBE RESULT"):
+            result_line = text[len("PROBE RESULT"):].strip()
+    return "; ".join(piece for piece in (raised and "raised " + raised, result_line) if piece)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--app", required=True, help="path to PrivacyBrowser.app")
@@ -187,6 +255,8 @@ def main():
     for name, command in (("macos", ["sw_vers", "-productVersion"]),
                           ("build", ["sw_vers", "-buildVersion"]),
                           ("sip", ["csrutil", "status"]),
+                          ("sdk", ["xcrun", "--show-sdk-version"]),
+                          ("xcode", ["xcodebuild", "-version"]),
                           ("arch", ["uname", "-m"])):
         try:
             facts[name] = subprocess.run(command, capture_output=True, text=True, timeout=30).stdout.strip()
@@ -198,18 +268,28 @@ def main():
     except (OSError, subprocess.SubprocessError) as error:
         facts["signature"] = "unavailable: %s" % error
 
+    before_run = crash_snapshot()
     results = [run_step(binary, step, arguments.out, arguments.timeout) for step in arguments.steps]
+    # Reports still being written when their own step stopped waiting for them.
+    unreported = [result for result in results if result["exit"] != 0 and not result["crashes"]]
+    if unreported:
+        time.sleep(10)
+        new = crash_snapshot() - before_run
+        for result in unreported:
+            attach_crashes(result, new)
+            write_result(result)
 
     lines = ["# Framework window probe", ""]
     lines.append("macOS %s (%s), %s, SIP: %s" % (facts["macos"], facts["build"], facts["arch"],
                                                  facts["sip"].replace("\n", " ")))
+    lines.append("built with SDK %s, %s" % (facts["sdk"], facts["xcode"].replace("\n", " ")))
     lines.append("app: %s" % arguments.app)
     lines.append("")
     lines.append("| step | outcome | seconds | why |")
     lines.append("|---|---|---|---|")
     for result in results:
         lines.append("| %s | %s | %s | %s |" % (result["step"], result["outcome"], result["seconds"],
-                                                crash_reason(result).replace("|", "/") or ""))
+                                                headline(result).replace("|", "/")))
     lines.append("")
     for result in results:
         lines.append("## %s — %s" % (result["step"], result["outcome"]))
@@ -240,7 +320,7 @@ def main():
             handle.write("| step | outcome | why |\n|---|---|---|\n")
             for result in results:
                 handle.write("| %s | %s | %s |\n" % (result["step"], result["outcome"],
-                                                     crash_reason(result).replace("|", "/") or ""))
+                                                     headline(result).replace("|", "/")))
     return 0
 
 
