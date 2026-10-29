@@ -129,7 +129,6 @@ final class SelfTest {
             // A profile with a proxy does not start without the proxied profile's rule list (ContentRules).
             await ContentRules.prepare()
             info("WebKit \(WebKitBuild.version)")
-            info("PB_SELFTEST_DIAG=\(ProcessInfo.processInfo.environment["PB_SELFTEST_DIAG"] ?? "none") (a measurement: a worker setting left out of this process's profiles)")
             debugSwitchesStayDebugSwitches()
             try await storageIsolationAndShims(repository)
             try await deviceGenerations(repository)
@@ -139,6 +138,7 @@ final class SelfTest {
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
             try await handOffsInOurWindows(repository)
+            try await workersInOurWindows(repository)
             try await proxyLocationAtLaunch(repository)
             try await socksProfilesSideBySide(repository)
             try await proxyLookupAndExitIP(repository)
@@ -621,7 +621,7 @@ final class SelfTest {
               WebDataStoreVault.layout.searchRoots.allSatisfy {
                   (try? $0.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup == true
               }, WebDataStoreVault.layout.searchRoots.map(\.path).joined(separator: ", ")
-                  + " — failures: \(WebDataStoreVault.exclusionFailures)")
+                  + " — ran: \(WebDataStoreVault.rootsExclusionRan), failures: \(WebDataStoreVault.exclusionFailures)")
         let profile = try repository.create(name: "Hand-offs", configuration: ProfileConfiguration(ephemeral: true))
         let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
         defer { session.shutDown() }
@@ -644,6 +644,51 @@ final class SelfTest {
         check("hand-offs: the context menu keeps Copy and the link items, and loses Search with Google, Look Up, Translate, Share, Quick Note and Writing Tools, and Services",
               stripped?.items.compactMap(\.identifier?.rawValue) == kept && stripped?.allowsContextMenuPlugIns == false,
               "\(stripped?.items.map(\.title) ?? [])")
+    }
+
+    // MARK: Workers of a profile with a proxy, in this process
+
+    /// Shared and service workers take their preferences from the process, not from the page that
+    /// starts them: WebKit copies the first web view's (`ProfileNetworkGuard.ensureWorkerTemplate`).
+    /// The manager's process makes no template (it kept stopped profiles' sessions alive), so here
+    /// the workers of a profile with a proxy are measured in a window of ours, after profiles
+    /// without one have had theirs: on a page of this Mac (a secure context, where WebTransport
+    /// exists at all), in the page, a dedicated, a shared and a service worker.
+    private func workersInOurWindows(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("worker checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        func reports(_ configuration: ProfileConfiguration) async throws -> (page: [String: Any], serviceWorker: [String: Any]) {
+            let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+            let profile = try repository.create(name: "Workers \(run)", configuration: configuration)
+            defer { try? repository.delete(profile.id) }
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            defer { session.shutDown() }
+            let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
+            try? await PageLoader.load(webView, url: URL(string: "http://127.0.0.1:\(httpPort)/pb-leak/secure?run=\(run)")!)
+            let logURL = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            var page: [String: Any] = [:], serviceWorker: [String: Any] = [:]
+            for _ in 0..<12 {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard let text = try await loadThroughProxy(repository, proxy, url: logURL),
+                      let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { continue }
+                let found = object["reports"] as? [[String: Any]] ?? []
+                page = found.first { $0["secure"] != nil } ?? page
+                serviceWorker = found.first { $0["sw"] as? Bool == true && $0["secure"] == nil } ?? serviceWorker
+                if !page.isEmpty && !serviceWorker.isEmpty { break }
+            }
+            return (page, serviceWorker)
+        }
+        let open = try await reports(ProfileConfiguration(ephemeral: true))
+        info("workers: a profile without a proxy has WebTransport in its page \(open.page["webTransport"] ?? "nil"), shared worker \(open.page["shared"] ?? "nil"), service worker \(open.serviceWorker["webTransport"] ?? "nil")")
+        let proxied = try await reports(ProfileConfiguration(proxy: proxy, ephemeral: true))
+        check("workers: a profile with a proxy, after profiles without one, has no WebTransport in its page, a dedicated, a shared or a service worker (each answered)",
+              proxied.page["secure"] as? Bool == true && proxied.page["webTransport"] as? String == "undefined"
+                && proxied.page["worker"] as? String == "undefined" && proxied.page["shared"] as? String == "undefined"
+                && proxied.serviceWorker["webTransport"] as? String == "undefined",
+              "page \(proxied.page), service worker \(proxied.serviceWorker.isEmpty ? "no report" : "\(proxied.serviceWorker)")")
     }
 
     // MARK: Safari's chrome, in a profile's own process, through that profile's proxy
@@ -802,7 +847,9 @@ final class SelfTest {
         check("Safari chrome: a page cannot reach this Mac (127.0.0.1, localhost, ::1, 0.0.0.0, from the page and from a worker): each is refused",
               refusedHere.allSatisfy { page[$0] as? String == "rejected" },
               refusedHere.map { "\($0)=\(page[$0] ?? "nil")" }.joined(separator: " "))
-        info("Safari chrome: a fetch to a private-network address (10.255.255.1) \(reached("10.255.255.1:8080", "/pb-leak/lan10") ? "went through the proxy" : "did not reach the proxy (\(page["lan10"] ?? "nil"))")")
+        // Measured through the proxy in run 383; kept that way.
+        check("Safari chrome: a fetch to a private-network address (10.255.255.1) goes through the profile's proxy",
+              reached("10.255.255.1:8080", "/pb-leak/lan10"), "not seen by the proxy (\(page["lan10"] ?? "nil"))")
         // The proxied profile's rule list (dns-prefetch, <a ping>) reaches the web views Safari builds.
         check("Safari chrome: <a ping> is blocked in Safari's web views (and dns-prefetch with it)",
               !log.targets.contains { $0.path.hasPrefix("/pb-leak/ping") }, "the ping reached the proxy")
@@ -917,7 +964,8 @@ final class SelfTest {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             log = await leakLog()
             secure = log.reports.first { $0["secure"] != nil } ?? [:]
-            worker = log.reports.first { $0["sw"] != nil } ?? [:]
+            // The service worker's own report (`"sw": true`), not the page's (`"sw": "registered"`).
+            worker = log.reports.first { $0["sw"] as? Bool == true && $0["secure"] == nil } ?? [:]
             if !secure.isEmpty && !worker.isEmpty { break }
         }
         // A page opened on this Mac is loaded from this Mac (the system never proxies loopback); it
@@ -925,18 +973,18 @@ final class SelfTest {
         info("Safari chrome: the page on this Mac was loaded \(log.targets.filter { $0.path.hasPrefix(securePath) }.map { "\($0.via) \($0.target)" }.joined(separator: " | "))")
         info("Safari chrome: the secure page reported \(secure), its service worker \(worker)")
         if secure["secure"] as? Bool == true {
+            // Each worker answered, and without it: a worker that never answered proves nothing.
             check("Safari chrome: WebTransport and WebRTC are absent in a secure context (page, worker, shared worker)",
                   secure["webTransport"] as? String == "undefined" && secure["rtc"] as? String == "undefined"
-                    && secure["worker"] as? String != "function" && secure["shared"] as? String != "function",
+                    && secure["worker"] as? String == "undefined" && secure["shared"] as? String == "undefined",
                   "\(secure)")
-            if !worker.isEmpty {
-                check("Safari chrome: WebTransport is absent in a service worker", worker["webTransport"] as? String == "undefined", "\(worker)")
-            }
+            check("Safari chrome: WebTransport is absent in a service worker (which reported)",
+                  worker["webTransport"] as? String == "undefined", worker.isEmpty ? "no report from the service worker" : "\(worker)")
             // The profile's time zone is the engine's own in the profile's process, workers
             // included: a worker no script of ours reaches says what WebKit's process was given.
             check("Safari chrome: the profile's time zone in the page, a dedicated worker and a service worker",
                   secure["tz"] as? String == zone && secure["workerTZ"] as? String == zone
-                    && (worker.isEmpty || worker["tz"] as? String == zone),
+                    && worker["tz"] as? String == zone,
                   "page \(secure["tz"] ?? "nil"), worker \(secure["workerTZ"] ?? "nil"), service worker \(worker["tz"] ?? "nil")")
         } else {
             check("Safari chrome: the secure half of the leak page ran in a secure context", false, "\(secure)")
@@ -2196,8 +2244,7 @@ final class SelfTest {
         weak var storeBeforeStop = manager.session(for: profile.id)?.dataStore
         try await manager.stop(profile.id)
         let storeReleased = await waitUntil(timeout: 10) { storeBeforeStop == nil }
-        check("cookie import: WebKit lets go of a stopped profile's data store", storeReleased,
-              "still alive 10 s after the stop (PB_SELFTEST_DIAG=\(ProcessInfo.processInfo.environment["PB_SELFTEST_DIAG"] ?? "none"))")
+        check("cookie import: WebKit lets go of a stopped profile's data store", storeReleased, "still alive 10 s after the stop")
         // Exported while stopped: started without a window, read, and stopped again.
         let fromStopped = (try? await manager.exportCookies(of: profile.id)) ?? []
         let stoppedAgain = await waitUntil(timeout: 30) { !manager.isRunning(profile.id) && !manager.busyProfileIDs.contains(profile.id) }

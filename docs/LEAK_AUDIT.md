@@ -33,7 +33,7 @@ canary, a packet in the pktap capture (`scripts/egress_check.py`), a line of
 | Channel | A page's fetches, frames and workers to this Mac's own addresses go directly, never through the proxy. A page probes which local ports are open: the same set in every profile, so it links the profiles to one machine (identity, not the public IP). |
 | Why reachable here | The system never sends loopback through a proxy (`WKWebsiteDataStore.proxyConfigurations` / `ProxyConfiguration` have no setting for it). |
 | Proof | CI 382: `FAIL … a fetch to 127.0.0.1 / localhost / ::1 goes through the profile's proxy`, and the canary listener on the runner logged `127.0.0.1:18087 GET /pb-leak/lo4`, `::1:18087 GET /pb-leak/lohost`, `/pb-leak/lo6`. |
-| Close / cost | WebKit's content blocker in every proxied profile's web views (`ProxiedContentRules`, compiled by `ContentRules`): every load to 127.0.0.0/8, `localhost`, `*.localhost`, `::1`, its IPv4-mapped form, `0.0.0.0`, `::` is blocked unless the page itself is on this Mac. Check in the same commit: the leak page's fetches to all of them, a frame on 127.0.0.1 and a worker's fetch are `rejected`, and the canary takes no connection. Cost: a page of a proxied profile cannot reach a local service (a dev server, a local wallet bridge) unless the user opens it as a page. Not covered: a remote HTTPS site's service worker (not provable now, see the deferred list). |
+| Close / cost | WebKit's content blocker in every proxied profile's web views (`ProxiedContentRules`, compiled by `ContentRules`): every load to 127.0.0.0/8, `localhost`, `*.localhost`, `::1`, its IPv4-mapped form, `0.0.0.0`, `::` is blocked unless the page itself is on this Mac. Check in the same commit: the leak page's fetches to all of them, a frame on 127.0.0.1 and a worker's fetch are `rejected`, and the canary takes no connection. **Closed — CI 383** (7c9c7eb): `PASS … a page cannot reach this Mac (127.0.0.1, localhost, ::1, 0.0.0.0, from the page and from a worker): each is refused`, `PASS … nothing reached this Mac directly`. A private-network address (10.255.255.1) was measured going through the proxy, and is checked so from then on. Cost: a page of a proxied profile cannot reach a local service (a dev server, a local wallet bridge) unless the user opens it as a page. Not covered: a remote HTTPS site's service worker (not provable now, see the deferred list). |
 
 ## 3. A certificate that makes the system fetch (AIA / OCSP) — critical in the audit
 
@@ -68,8 +68,8 @@ canary, a packet in the pktap capture (`scripts/egress_check.py`), a line of
 |---|---|
 | Channel | QUIC from a shared or service worker, which copies the preferences of the process's first web view rather than the page's. |
 | Why reachable here | WebKit's remote-worker preferences. |
-| Proof | CI 382: `PASS … WebTransport is absent in a service worker`, `PASS … WebTransport and WebRTC are absent in a secure context (page, worker, shared worker)`. |
-| Close / cost | Closed: the process's first web view is a closed template with these features off, and each store carries the profile's preferences for its service workers. One of these two settings is the measured suspect of a CI regression (a stopped profile's session cookie outliving a launch, since run 380); the next CI run measures which (`PB_SELFTEST_DIAG`, self-test only). |
+| Proof | CI 382: `PASS … WebTransport and WebRTC are absent in a secure context (page, worker, shared worker)`. **The service-worker half was vacuous**: the test took the page's own report (`"sw": "registered"`) for the service worker's; it now takes the service worker's (`"sw": true`) and fails when there is none, and every worker must have answered `undefined` (a timeout no longer passes). |
+| Close / cost | In a profile's process: the process's first web view is a closed template with these features off, and each store carries the profile's preferences for its service workers. In the manager's process (profiles in our own windows) the template is gone: measured in CI 383, it kept a stopped profile's session alive (its session cookie came back at the next launch; without the template every cookie check passed, without the per-store preferences they did not). What those profiles' workers get without it is a new check: a proxied profile's page, dedicated, shared and service worker on a page of this Mac, after profiles without a proxy have had theirs. |
 
 ## 7. DNS from this Mac (dns-prefetch)
 
@@ -139,13 +139,14 @@ One line each; back to them once the list above is closed.
 - Profiles in their own processes stop each other's packet tunnel — WebRTC relay; such profiles stay in the main process.
 - `leak_check.py` covers our own windows only, not Safari's chrome or WebTransport — test gap.
 - A remote HTTPS site's service worker fetching this Mac — not provable now: the test proxy serves no trusted HTTPS origin.
-- Private-network addresses (10/8, 192.168/16) — measured (reported) from the next run, not yet checked.
+- Private-network addresses — 10.255.255.1 measured through the proxy (CI 383) and checked; 192.168/16 and 172.16/12 not probed.
 - Foundation's per-app stores (cookie jar, HSTS, URL cache) shared between profile processes — not provable now; proof: a Set-Cookie on an icon, then a second profile.
 - XPC: a deny list rather than an allow list — needs the chrome's service list from CI.
 - Search suggestions driven by typing — not provable now: the self-test does not type into Safari's address bar.
 - The JS shim and a frame's initial empty document — fingerprint consistency, not IP.
 - `.webarchive` opened in the chrome gets a store without the proxy — refuted: `LoadWebArchiveWithEphemeralStorageEnabled` is off with a proxy.
 - Attribution (PCM) reports stored before the proxy — removed at launch; no check.
+- The warm-up report counted a run's first page's cookies as the profile's own (its starting point was read before the session was set) — fixed with its check (the self-test's per-site report); not a leak.
 - A private window of Safari's chrome writes the profile's persistent store — disk.
 - Plaintext in backups and Spotlight while running — disk; checked (`home.noindex`, excluded from backups); the sandboxed build's WebKit folders fail it (measured in CI 382, reason recorded from the next run).
 - AppKit saved state, `/var/folders`, recent documents, crash reports — disk.

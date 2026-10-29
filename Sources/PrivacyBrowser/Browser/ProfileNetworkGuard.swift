@@ -152,12 +152,13 @@ enum ProfileNetworkGuard {
     /// web view a profile's without a proxy, a page of a profile with one could start a shared
     /// worker with WebTransport in it, which no proxy carries. So the first one is this. A
     /// profile's service workers get the profile's own preferences besides
-    /// (`BrowserSession`, `_setServiceWorkerOverridePreferences:`). Idempotent; built before the
-    /// first profile's session, and in a profile's process when its default store is closed.
+    /// (`BrowserSession`, `_setServiceWorkerOverridePreferences:`). Idempotent; made in a profile's
+    /// process when its default store is closed, before Safari's chrome builds anything.
     ///
-    /// Released as soon as it is made: WebKit has copied its preferences by then, and a page left
-    /// open would keep WebKit's process pool holding on to what the profiles' pages used (a
-    /// stopped profile's session cookies were still there at its next launch).
+    /// Only there. In the manager's process, which runs profile after profile, a template made
+    /// there kept a stopped profile's session alive in WebKit — measured in CI run 383, released or
+    /// not: its session cookies came back at the next launch. What the manager's profiles' workers
+    /// get without it is measured by the self-test (`workersInOurWindows`).
     static func ensureWorkerTemplate() {
         guard !workerTemplateMade else { return }
         workerTemplateMade = true

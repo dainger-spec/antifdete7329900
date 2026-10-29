@@ -68,9 +68,11 @@ final class BrowserSession {
         // `.nonPersistent()` needs WebKit initialized but does not initialize it, and an ephemeral
         // profile can be the first WebKit use after unlock (see `ensureWebKitInitialized`).
         WebDataStoreVault.ensureWebKitInitialized()
-        // Before the first web view of any profile: the one every worker of the process copies
-        // its preferences from.
-        if !Self.selfTestLeavesOut("worker-template") { ProfileNetworkGuard.ensureWorkerTemplate() }
+        // No template web view here, in the manager's process: measured (CI run 383, one self-test
+        // variant without it, one without the per-store worker preferences below), a template made
+        // in this process kept a stopped profile's session alive — its session cookies came back
+        // at the profile's next launch. A profile's own process makes one when it starts
+        // (`ProfileNetworkGuard.engage`); it runs one profile, once.
         let store: WKWebsiteDataStore = configuration.ephemeral
             ? .nonPersistent()
             : WebDataStoreVault.makeStore(for: profileID)
@@ -109,7 +111,7 @@ final class BrowserSession {
         applyPrivacyPreferences(to: workerPreferences)
         let override = NSSelectorFromString("_setServiceWorkerOverridePreferences:")
         Self.workerPreferencesApplied = store.responds(to: override)
-        if store.responds(to: override), !Self.selfTestLeavesOut("worker-override") { store.perform(override, with: workerPreferences) }
+        if store.responds(to: override) { store.perform(override, with: workerPreferences) }
     }
 
     /// The scripts every page of this profile gets (the privacy scripts of its device generation),
@@ -118,14 +120,6 @@ final class BrowserSession {
     private let autoFillScript: WKUserScript
     /// The data store's delegate (`StoreChallenges`); the store holds it weakly.
     private let storeChallenges: StoreChallenges
-    /// The self-test's measurement of which of two worker settings keeps a stopped profile's
-    /// store alive (run 380 on: a session cookie outlived a stop and a launch): one CI variant
-    /// leaves out one, the other variant the other (`PB_SELFTEST_DIAG`). Only with `--self-test`,
-    /// in the self-test's own process — a profile's process gets no `PB_SELFTEST_` variable.
-    static func selfTestLeavesOut(_ part: String) -> Bool {
-        CommandLine.arguments.contains("--self-test") && ProcessInfo.processInfo.environment["PB_SELFTEST_DIAG"] == "no-\(part)"
-    }
-
     /// Whether this WebKit let a profile's service workers have the profile's preferences.
     private(set) static var workerPreferencesApplied: Bool?
 

@@ -163,7 +163,6 @@ final class WarmUpRobot: ObservableObject {
         cookieSites = nil
         startedAt = Date()
         plannedSecondsPerPage = plan.secondsPerPage
-        countCookiesSoFar() // the run's starting point: `cookiesBefore` is nil until it answers
         tab.refusesDownloads = true
         run += 1
         let current = run
@@ -245,6 +244,13 @@ final class WarmUpRobot: ObservableObject {
         }
     }
 
+    /// The profile's cookies before the run's first page, waited for.
+    private func takeStartingPoint() async {
+        guard cookiesBefore == nil, let store = session?.dataStore else { return }
+        let cookies = await store.httpCookieStore.allCookies()
+        if cookiesBefore == nil { cookiesBefore = Set(cookies.map { Self.identity($0) }) }
+    }
+
     /// The cookies the profile holds right now, as `WarmUpCookieCount` tells them apart.
     private func countCookies(_ answer: @escaping @MainActor ([WarmUpCookieCount.Cookie]) -> Void) {
         guard let store = session?.dataStore else { return }
@@ -273,6 +279,11 @@ final class WarmUpRobot: ObservableObject {
     // MARK: The run
 
     private func perform(_ plan: WarmUpPlan, _ pages: [WarmUpPlan.Page], run: Int) async {
+        // The run's starting point, read before its first page: a cookie that page sets is the
+        // run's, not one the profile had (read before the session was set, it never came back,
+        // and the store as it was after the first page became the starting point).
+        await takeStartingPoint()
+        guard isCurrent(run) else { return }
         var generator = SystemRandomNumberGenerator()
         for (index, page) in pages.enumerated() {
             guard await waitUntilShown(run) else { return }

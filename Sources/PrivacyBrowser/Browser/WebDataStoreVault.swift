@@ -148,6 +148,9 @@ final class WebDataStoreVault {
                 values.isExcludedFromBackup = true
                 var url = root
                 try url.setResourceValues(values)
+                // Read back from a URL of its own (no cached value): set, or only said to be.
+                let readBack = try URL(fileURLWithPath: root.path).resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
+                if readBack != true { exclusionFailures.append("\(root.lastPathComponent): set without error, reads back \(String(describing: readBack))") }
             } catch {
                 exclusionFailures.append("\(root.lastPathComponent): \(error.logKind) \(error.localizedDescription)")
                 Logger(subsystem: "PrivacyBrowser", category: "WebDataStoreVault")
@@ -158,6 +161,8 @@ final class WebDataStoreVault {
 
     /// The roots `excludeRootsFromCopies` could not mark, and why (the self-test shows them).
     private(set) static var exclusionFailures: [String] = []
+    /// Whether `excludeRootsFromCopies` has run in this process (the self-test shows it).
+    static var rootsExclusionRan: Bool { rootsExcluded }
 
     // MARK: Launch
 
