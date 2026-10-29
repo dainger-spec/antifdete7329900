@@ -27,7 +27,10 @@ so. It fails on:
   name was resolved on this Mac instead of by the proxy;
 * during the check (the self-test prints `INFO egress-window begin/end`), any packet of a
   `PrivacyBrowser` process (the profile's own, `INFO egress-pid`, or the self-test's), or made on
-  its behalf by another process, to anything but loopback.
+  its behalf by another process, to anything but loopback. A resolver's answer (from port 53) is
+  not a packet the app sent — the question is, and a question asked in a window fails — so an
+  answer that comes in a window to a question asked before it is listed, not failed on (measured:
+  the NXDOMAIN for the proxy checker's control arrived 0.1 s after its window opened).
 
 During the check, packets of Safari's own services and of the daemons a profile's process could ask
 to fetch for it (search suggestions, Safe Browsing, Safari Suggestions, background URL sessions,
@@ -97,6 +100,8 @@ def parse(line: str):
         "time": float(time.group(1)) if time else None,
         "proc": (proc.group(1), int(proc.group(2))) if proc else None,
         "eproc": (eproc.group(1), int(eproc.group(2))) if eproc else None,
+        # From port 53: a resolver's answer ("192.168.64.1.53 > 192.168.64.12.58738: 52290 NXDomain").
+        "dns_answer": bool(flow) and flow.group(1).endswith((".53", ".domain")),
         "src": address(flow.group(1)) if flow else None,
         "dst": address(flow.group(2)) if flow else None,
         "line": line.rstrip("\n"),
@@ -179,6 +184,12 @@ def main() -> int:
             failures.append(("carries a run id or a canary (a name resolved, or a fetch made, on this Mac rather than through the proxy)", line))
         elif name.endswith(LEAK_DOMAIN):
             failures.append(("a DNS question for a leak page's name (resolved on this Mac, not by the proxy)", line))
+        elif in_window(packet) and packet["dns_answer"]:
+            # An answer is not a packet the app sent: the question is what counts, and a question
+            # asked in the window fails above (its name) or below (its process). An answer that
+            # comes in the window to a question asked before it — the proxy checker's control,
+            # asked just before its window opens — is listed.
+            others.setdefault("DNS answers (to questions asked before the window)", []).append(line)
         elif in_window(packet) and (ours(packet["proc"]) or ours(packet["eproc"])):
             if packet["dst"] is None or not packet["dst"].is_loopback:
                 failures.append(("a PrivacyBrowser process (or one acting for it) reached past the proxy", line))
