@@ -40,13 +40,6 @@ enum SafariChrome {
         "/System/Library/PrivateFrameworks/SafariFoundation.framework/Versions/A/SafariFoundation",
     ]
 
-    /// The bundles Safari's chrome looks in for its icons once `imageNamed:` is bridged.
-    private static let resourceBundlePaths = [
-        "/System/Library/PrivateFrameworks/Safari.framework",
-        "/System/Library/PrivateFrameworks/SafariShared.framework",
-        "/System/Library/PrivateFrameworks/PasswordManagerUI.framework",
-    ]
-
     private(set) static var isAvailable = false
 
     // MARK: Loading
@@ -174,7 +167,7 @@ enum SafariChrome {
         typealias ImageNamed = @convention(c) (AnyObject, Selector, NSString) -> NSImage?
         let selector = NSSelectorFromString("imageNamed:")
         guard let method = class_getClassMethod(NSImage.self, selector) else { return }
-        let bundles = resourceBundlePaths.compactMap(Bundle.init(path:))
+        let bundles = chromeBundles
         let original = unsafeBitCast(method_getImplementation(method), to: ImageNamed.self)
         let replacement: @convention(block) (AnyObject, NSString) -> NSImage? = { cls, name in
             if let image = original(cls, selector, name) { return image }
@@ -186,52 +179,53 @@ enum SafariChrome {
         method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
 
-    /// Safari's view controllers load their nib from the bundle they were built with, which
-    /// `NSViewController` works out as the *main* bundle unless told otherwise — in this process,
-    /// our own executable. `-[NSNib _initWithNibNamed:bundle:options:]` then throws, and opening a
-    /// second window dies in `-[StartPageViewController loadView]`. Give any controller whose class
-    /// comes from Safari's frameworks the bundle that class lives in.
+    /// Safari's view controllers load their nibs out of the framework they were built in, and
+    /// `NSViewController` works that bundle out as the *main* bundle — in this process, our own
+    /// executable — so `-[NSNib _initWithNibNamed:bundle:options:]` finds nothing and the chrome
+    /// throws as soon as it builds a sidebar or a start page. Intercept the call that loads the nib
+    /// and name the bundle that actually holds a nib of that name.
+    ///
+    /// Choosing by the controller's own framework is not enough: Safari's classes load nibs out of
+    /// each other's frameworks (`LibraryViewController` lives in Safari.framework), so the bundle is
+    /// chosen by looking for the nib itself.
     private static func bridgeNibLookups() {
-        typealias NibBundle = @convention(c) (AnyObject, Selector) -> Bundle?
-        let selector = NSSelectorFromString("nibBundle")
-        let bundles = resourceBundlePaths.compactMap(Bundle.init(path:))
-        guard let fallback = bundles.first else { return }
-        for cls in [NSViewController.self, NSWindowController.self] as [AnyClass] {
-            guard let method = class_getInstanceMethod(cls, selector) else { continue }
-            let original = unsafeBitCast(method_getImplementation(method), to: NibBundle.self)
-            let replacement: @convention(block) (AnyObject) -> Bundle? = { object in
-                guard let imagePointer = object_getClass(object).flatMap({ class_getImageName($0) }) else {
-                    return original(object, selector)
-                }
-                let image = String(cString: imagePointer)
-                guard image.contains("Safari") || image.contains("PasswordManagerUI") else {
-                    return original(object, selector)
-                }
-                return bundles.first { $0.executableURL?.resolvingSymlinksInPath().path == image } ?? fallback
-            }
-            method_setImplementation(method, imp_implementationWithBlock(replacement))
-        }
-
-        // -[NSViewController loadView] does not go through -nibBundle for every controller:
-        // Safari's LibraryViewController still looked for its nib in our bundle. Intercept the call
-        // that actually loads it and name Safari's bundle there too.
         typealias NibWithName = @convention(c) (AnyObject, Selector, NSString, Bundle?) -> AnyObject?
         let loader = NSSelectorFromString("_nibWithName:bundle:")
-        guard let method = class_getInstanceMethod(NSViewController.self, loader) else { return }
+        guard let method = class_getInstanceMethod(NSViewController.self, loader) else {
+            log.notice("No -[NSViewController _nibWithName:bundle:]: Safari's chrome will not find its nibs")
+            return
+        }
         let original = unsafeBitCast(method_getImplementation(method), to: NibWithName.self)
         let replacement: @convention(block) (AnyObject, NSString, Bundle?) -> AnyObject? = { object, name, bundle in
-            guard let imagePointer = object_getClass(object).flatMap({ class_getImageName($0) }) else {
-                return original(object, loader, name, bundle)
+            if bundle?.bundlePath.hasPrefix("/System/") != true, let own = chromeBundle(holdingNib: name as String) {
+                return original(object, loader, name, own)
             }
-            let image = String(cString: imagePointer)
-            guard image.contains("Safari") || image.contains("PasswordManagerUI") else {
-                return original(object, loader, name, bundle)
-            }
-            let own = bundles.first { $0.executableURL?.resolvingSymlinksInPath().path == image } ?? fallback
-            return original(object, loader, name, own)
+            return original(object, loader, name, bundle)
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
+
+    /// Every bundle Safari's chrome keeps nibs and assets in, under both the ordinary path and the
+    /// cryptex one, since a Safari update moves the frameworks between them.
+    private static let chromeBundles: [Bundle] = {
+        let frameworks = ["Safari", "SafariShared", "SafariSharedUI", "SafariFoundation", "SafariCore", "PasswordManagerUI"]
+        let roots = ["/System/Library/PrivateFrameworks",
+                     "/System/Volumes/Preboot/Cryptexes/OS/System/Library/PrivateFrameworks"]
+        return roots.flatMap { root in frameworks.compactMap { Bundle(path: "\(root)/\($0).framework") } }
+    }()
+
+    /// The bundle that holds `name.nib`, or nil when none of Safari's does.
+    private static func chromeBundle(holdingNib name: String) -> Bundle? {
+        if let known = nibBundles[name] { return known }
+        guard let found = chromeBundles.first(where: { $0.path(forResource: name, ofType: "nib") != nil }) else {
+            log.notice("No Safari bundle holds \(name, privacy: .public).nib")
+            return nil
+        }
+        nibBundles[name] = found
+        return found
+    }
+
+    private static var nibBundles: [String: Bundle] = [:]
 
     /// Features of Safari's chrome that need services only Safari has, and take the process down
     /// when they do not find them. None of them is wanted here.
