@@ -352,7 +352,7 @@ final class ProfileManager: ObservableObject {
                 try self.safariHomeVault.seal(profileID: id, key: key)
             } catch {
                 sealed = false
-                self.log.error("Could not seal Safari's home for \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+                self.log.error("Could not seal Safari's home for \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
                 self.onError?(String(format: L("profile.homeNotSealed"), summary.name, error.localizedDescription))
             }
             // A stop asked for from here takes this handler away first, so this is a process that
@@ -469,7 +469,7 @@ final class ProfileManager: ObservableObject {
             try repository.saveConfiguration(current, for: id)
             onConfigurationChanged?(id)
         } catch {
-            log.error("Could not store the proxy location of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            log.error("Could not store the proxy location of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
         }
     }
 
@@ -617,7 +617,7 @@ final class ProfileManager: ObservableObject {
         do {
             try await stop(id)
         } catch {
-            log.error("Stopping \(id.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            log.error("Stopping \(id.uuidString, privacy: .public) failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             onError?(error.localizedDescription)
         }
     }
@@ -815,7 +815,7 @@ final class ProfileManager: ObservableObject {
             log.notice("Synced cookies at launch: \(applied.set) set, \(applied.deleted) deleted, \(applied.refused.count) refused")
             synced = (loaded, jar, await CookieStoreSync.persistentCookies(in: store))
         } catch {
-            log.error("Could not read the synced cookies of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            log.error("Could not read the synced cookies of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             onError?(String(format: L("cookies.sync.unreadable"), summary.name))
         }
         await applyQueuedCookies(of: id, name: summary.name, to: session)
@@ -840,7 +840,7 @@ final class ProfileManager: ObservableObject {
             saveSyncedCookies(of: id, name: name, loaded: loaded, jar: loaded.recording(store: current, baseline: baseline.cookies, at: since),
                               baseline: CookieBaseline(cookies: current, savedAt: now))
         } catch {
-            log.error("Could not read the synced cookies of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            log.error("Could not read the synced cookies of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             onError?(String(format: L("cookies.sync.unreadable"), name))
         }
     }
@@ -851,7 +851,7 @@ final class ProfileManager: ObservableObject {
             if jar != loaded { try repository.saveCookieJar(jar, for: id) }
             try repository.saveCookieBaseline(baseline, for: id)
         } catch {
-            log.error("Could not save the synced cookies of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            log.error("Could not save the synced cookies of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             onError?(String(format: L("cookies.sync.saveFailed"), name))
         }
     }
@@ -861,7 +861,7 @@ final class ProfileManager: ObservableObject {
         do {
             queued = try repository.importedCookiesForLaunch(id)
         } catch {
-            log.error("Could not read the cookies queued for \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            log.error("Could not read the cookies queued for \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             repository.clearImportedCookies(id)
             onError?(String(format: L("cookies.launch.unreadable"), name))
             return

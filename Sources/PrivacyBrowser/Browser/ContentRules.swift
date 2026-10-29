@@ -51,7 +51,7 @@ enum ContentRules {
                         log.info("Compiled the ping-load blocker")
                         break
                     } catch {
-                        log.error("Could not compile the ping-load blocker in a store: \(String(describing: error), privacy: .public)")
+                        log.error("Could not compile the ping-load blocker in a store: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
                     }
                 }
                 if dnsPrefetchBlocker == nil {

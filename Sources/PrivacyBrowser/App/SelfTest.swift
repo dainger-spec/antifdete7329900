@@ -129,6 +129,7 @@ final class SelfTest {
             // A profile with a proxy does not start without the ping-load blocker (ContentRules).
             await ContentRules.prepare()
             info("WebKit \(WebKitBuild.version)")
+            debugSwitchesStayDebugSwitches()
             try await storageIsolationAndShims(repository)
             try await deviceGenerations(repository)
             try await fingerprintSurface(repository)
@@ -696,6 +697,15 @@ final class SelfTest {
         info("egress-window begin \(Date().timeIntervalSince1970)")
         // The per-profile process is off by default; this one check is what it is for.
         setenv("PB_PROFILE_PROCESS", "1", 1)
+        // Variables of the manager's own that a profile's process must not inherit: one of the
+        // manager's, and one that would change what the process does (it would open no window).
+        setenv("PB_INHERIT_CANARY", run, 1)
+        setenv("PB_WARM_UP_ONLY", "1", 1)
+        let managerEnvironment = Set(ProcessInfo.processInfo.environment.keys)
+        defer {
+            unsetenv("PB_INHERIT_CANARY")
+            unsetenv("PB_WARM_UP_ONLY")
+        }
         do {
             try await manager.launch(profile.id)
         } catch {
@@ -704,6 +714,8 @@ final class SelfTest {
             return
         }
         setenv("PB_PROFILE_PROCESS", "0", 1)
+        unsetenv("PB_INHERIT_CANARY")
+        unsetenv("PB_WARM_UP_ONLY")
         if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
         let started = await waitUntil(timeout: 90) { hostsChrome != nil }
         check("Safari chrome: the profile's own process started and reported its window",
@@ -834,6 +846,15 @@ final class SelfTest {
             check("Safari chrome: UDP is closed to the profile's process (QUIC cannot go around the proxy)",
                   report.udpClosed && !report.udp.values.contains { $0 == "sent" || $0.hasPrefix("ready") },
                   "closed=\(report.udpClosed) \(report.udp)")
+            let inherited = Set(report.environmentNames).intersection(managerEnvironment.subtracting(ProfileProcess.environmentNames))
+            check("Safari chrome: the profile's process has only its own environment, not the manager's",
+                  inherited.isEmpty && !report.environmentNames.contains { $0.hasPrefix("PB_SELFTEST_") },
+                  "inherited \(inherited.sorted()), names \(report.environmentNames)")
+            let home = report.places["CFFIXED_USER_HOME"] ?? ""
+            check("Safari chrome: HOME and TMPDIR of the profile's process are in the profile's home",
+                  !home.isEmpty && report.places["HOME"] == home && (report.places["TMPDIR"] ?? "").hasPrefix(home + "/"),
+                  "\(report.places)")
+            info("Safari chrome: Foundation's temporary directory in the profile's process is \(report.places["temporaryDirectory"] ?? "?")")
             check("Safari chrome: certificates are checked without fetching, and the leak page's were refused",
                   report.trustEvaluated > 0 && report.trustRefused > 0,
                   "evaluated \(report.trustEvaluated), refused \(report.trustRefused)")
@@ -941,8 +962,10 @@ final class SelfTest {
               log.targets.filter { $0.target.hasPrefix("aia-") }.map(\.path).joined(separator: " | "))
         check("Safari chrome: nothing reached loopback directly (the canary listener took no connection)",
               log.canary.isEmpty, log.canary.joined(separator: " | "))
+        // Whether Safari fetches these is Safari's business; where it does, it is through the proxy
+        // (https: the CONNECT is the proof), and anything it fetched another way is in the capture.
         for (what, host) in [("the page's icon", "icon-"), ("its touch icon", "touchicon-"), ("its OpenSearch description", "osd-")] {
-            info("Safari chrome: \(what) \(log.targets.contains { $0.target.hasPrefix(host + run) } ? "was fetched through the proxy" : "was not fetched through the proxy")")
+            info("Safari chrome: \(what) \(log.targets.contains { $0.target.hasPrefix(host + run) } ? "was fetched through the proxy" : "was not fetched (not exercised)")")
         }
         try? await manager.stop(profile.id)
         // What Safari's window visited is in the profile's own, encrypted history (`HostedPageHistory`).
@@ -1640,6 +1663,18 @@ final class SelfTest {
     /// nil `RunLoop::main()`) when they are the first WebKit use in the process — e.g. "unlock,
     /// then delete a profile" or "unlock, then open an ephemeral profile". Must run before anything
     /// else touches WebKit.
+    /// The tunnel's all-interfaces switch (hardware checks only) is not turned on by a command-line
+    /// argument: only by the app's own saved settings (`DebugSwitches`).
+    private func debugSwitchesStayDebugSwitches() {
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        var withSwitch = arguments
+        withSwitch["PBTunnelAllInterfaces"] = true
+        UserDefaults.standard.setVolatileDomain(withSwitch, forName: UserDefaults.argumentDomain)
+        let turnedOn = DebugSwitches.tunnelAllInterfaces
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        check("the tunnel's all-interfaces switch is not turned on by a command-line argument", !turnedOn)
+    }
+
     private func firstWebKitUse(_ repository: ProfileRepository) async throws {
         let vault = WebDataStoreVault(repository: repository)
         let removalsBefore = WebDataStoreVault.removeCallCount

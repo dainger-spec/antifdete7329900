@@ -384,7 +384,7 @@ extension BrowserTab: WKNavigationDelegate {
                 do {
                     try self.context.passwordVault.upsert(PasswordEntry(origin: origin, username: credential.user ?? "", password: password))
                 } catch {
-                    self.log.error("Could not save the HTTP sign-in: \(String(describing: error), privacy: .public)")
+                    self.log.error("Could not save the HTTP sign-in: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
                 }
             }
             completionHandler(.useCredential, credential)

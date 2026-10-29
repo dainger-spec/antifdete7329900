@@ -228,8 +228,8 @@ final class BrowserSession {
         // WebRTC through the packet tunnel: libwebrtc gathers on the tunnel interface for the relay
         // addresses (measured with a utun in CI; the tunnel's enforced routes are a second line).
         // For the hardware checks in docs/TUNNEL.md it can also be made to gather on every
-        // interface: `defaults write <bundle id> PBTunnelAllInterfaces -bool YES`.
-        if case .relay = configuration.webRTCRouting, UserDefaults.standard.bool(forKey: "PBTunnelAllInterfaces") {
+        // interface: `defaults write <bundle id> PBTunnelAllInterfaces -bool YES` (`DebugSwitches`).
+        if case .relay = configuration.webRTCRouting, DebugSwitches.tunnelAllInterfaces {
             WebKitPreferences.setBool(preferences, "_setEnumeratingAllNetworkInterfacesEnabled:", true)
         }
         if configuration.proxy != nil {

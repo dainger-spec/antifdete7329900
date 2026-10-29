@@ -687,7 +687,9 @@ applied to it (`BrowserSession.applyProfile`), and Safari's own state in the pro
 sealed between runs like everything else (`SafariHomeVault`).
 
 **Which private pieces this needs.** `SafariChrome.expectedPieces` lists every class and method
-reached for by name. `PrivacyBrowser --check-safari-chrome` prints which this macOS has (CI runs it);
+reached for by name. `PrivacyBrowser --check-safari-chrome` prints which this macOS has (CI runs it;
+it loads Safari's frameworks in a temporary home of its own, held to a closed proxy, as a profile's
+process does, and removes the home afterwards);
 a missing structural piece means the profile opens our own window, a missing network piece is a lock
 of the guard that is not there, and both are shown to the user; a stubbed method a Safari build
 does not have is only listed (on macOS 26, `+[WBSSearchProvidersController shared]` and

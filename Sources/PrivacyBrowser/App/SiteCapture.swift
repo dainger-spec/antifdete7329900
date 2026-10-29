@@ -141,8 +141,8 @@ final class SiteCapture {
             configuration.webRTCRelay = WebRTCRelay(urls: route.turnURLs, username: route.username, credential: route.password)
         }
         defer { relayHost?.stop() }
-        UserDefaults.standard.set(profileSpec.allInterfaces ?? false, forKey: "PBTunnelAllInterfaces")
-        defer { UserDefaults.standard.removeObject(forKey: "PBTunnelAllInterfaces") }
+        DebugSwitches.captureOverride.value = profileSpec.allInterfaces ?? false
+        defer { DebugSwitches.captureOverride.value = nil }
         let session = try BrowserSession(profileID: summary.id, profileName: summary.name, configuration: configuration,
                                          passwordVault: try repository.passwordVault(for: summary.id),
                                          passwordSettings: ProfilePasswordSettings(repository: repository, profileID: summary.id,

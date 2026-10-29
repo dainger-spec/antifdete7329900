@@ -40,6 +40,12 @@ final class SafariHomeVault {
         return home
     }
 
+    /// The profile process's temporary folder (`TMPDIR`), inside its home: plaintext only while the
+    /// profile runs, and emptied rather than sealed when it stops.
+    nonisolated static func temporaryDirectory(inHome home: URL) -> URL {
+        home.appendingPathComponent("tmp", isDirectory: true)
+    }
+
     /// Makes `home` exist, excluded from backups (the exclusion is an attribute of the folder, so
     /// it is set again each time the folder is made anew).
     private func excludeFromCopies(_ home: URL) throws {
@@ -105,6 +111,8 @@ final class SafariHomeVault {
             log.notice("Discarded Safari's state of the ephemeral profile \(profileID.uuidString, privacy: .public)")
             return
         }
+        // Temporary files are the run's: they are not kept for the next one.
+        try? FileManager.default.removeItem(at: Self.temporaryDirectory(inHome: home))
         let stats = try EncryptedDirectoryArchive.seal(roots: [Self.label: home], to: archiveURL(for: profileID), key: key)
         try FileManager.default.removeItem(at: home)
         log.notice("Sealed Safari's home for \(profileID.uuidString, privacy: .public): \(stats.files, privacy: .public) files, \(stats.bytes, privacy: .public) bytes")

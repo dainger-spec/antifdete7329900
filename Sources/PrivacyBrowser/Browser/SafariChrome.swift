@@ -203,7 +203,9 @@ enum SafariChrome {
     /// piece is there, 1 when any is missing, 2 when the frameworks do not load (a sandboxed build,
     /// or a macOS without them). Absent stubs are listed only. Touches nothing else: no window, no
     /// application object, no preferences.
-    static func checkPieces() -> Int32 {
+    static func checkPieces(arguments: [String]) -> Int32 {
+        isolateForCheck(arguments: arguments)
+        defer { removeCheckHome() }
         guard load() else {
             print("SAFARI-CHROME frameworks did not load")
             return 2
@@ -345,11 +347,12 @@ enum SafariChrome {
                 free(symbols)
             }
             let logger = Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
-            let description = (thrown as? NSException).map { "\($0.name.rawValue): \($0.reason ?? "-")" }
-                ?? String(describing: thrown)
+            // The exception's name in clear; its reason can quote a page's address or a path.
+            let exceptionName = (thrown as? NSException)?.name.rawValue ?? String(describing: type(of: thrown))
+            let reason = (thrown as? NSException)?.reason ?? String(describing: thrown)
             // One line per frame: os_log truncates a long message, and the frames that matter are
             // the ones at the end of it (that is how the first dictionary-key crash stayed hidden).
-            logger.error("\(description, privacy: .public)")
+            logger.error("\(exceptionName, privacy: .public): \(reason, privacy: .private)")
             for frame in frames { logger.error("  \(frame, privacy: .public)") }
             return thrown
         })
@@ -439,7 +442,7 @@ enum SafariChrome {
             let replacement: @convention(block) (AnyObject) -> AnyObject? = { _ in searchProviders }
             method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
-        log.notice("Search providers: \(String(describing: controller.value(forKey: "defaultSearchEngineName")), privacy: .public)")
+        log.notice("Search providers: \(String(describing: controller.value(forKey: "defaultSearchEngineName")), privacy: .private)")
         return controller
     }
 
@@ -854,6 +857,48 @@ extension SafariChrome {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         NSApp.run()
+    }
+
+    /// The check loads Safari's frameworks to see what they have, and nothing more — as a
+    /// profile's process does: in a home of its own (a temporary folder, removed afterwards), so
+    /// that nothing their initializers read or write is the user's, and with the whole process held
+    /// to a proxy that goes nowhere (`ProfileNetworkGuard`), so that nothing they start reaches the
+    /// network as this Mac. The home is only read when the process starts, so the process replaces
+    /// itself with one that has it set.
+    private static let checkHomePrefix = "pb-check-safari-chrome-"
+
+    private static func isolateForCheck(arguments: [String]) {
+        guard ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] == nil else {
+            let closed = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 1)
+            do {
+                try ProfileNetworkGuard.engage(profileID: UUID(), proxy: closed)
+            } catch {
+                print("SAFARI-CHROME the process could not be held to a closed proxy: \(error)")
+                exit(3)
+            }
+            return
+        }
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(checkHomePrefix + UUID().uuidString, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        } catch {
+            print("SAFARI-CHROME no temporary home: \(error)")
+            exit(3)
+        }
+        setenv("CFFIXED_USER_HOME", home.path, 1)
+        setenv("HOME", home.path, 1)
+        guard let executable = Bundle.main.executableURL?.path ?? arguments.first else { exit(3) }
+        var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) }
+        argv.append(nil)
+        execv(executable, &argv)
+        print("SAFARI-CHROME could not restart in a home of its own: \(String(cString: strerror(errno)))")
+        exit(3)
+    }
+
+    private static func removeCheckHome() {
+        guard let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"],
+              URL(fileURLWithPath: home).lastPathComponent.hasPrefix(checkHomePrefix) else { return }
+        try? FileManager.default.removeItem(atPath: home)
     }
 
     /// Safari's chrome reads and writes the `com.apple.Safari` preferences domain and its own

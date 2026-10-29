@@ -34,6 +34,10 @@ jobs:
       # text a user reads is written into the code (scripts/check_localization.py).
       - name: Localization is complete in both languages
         run: python3 scripts/check_localization.py
+      # Nothing of the user's (profile names, proxy hosts, addresses, paths, error texts) is
+      # written to the system log in clear (scripts/check_log_privacy.py).
+      - name: Log lines keep the user's data private
+        run: python3 scripts/check_log_privacy.py
 
   macos:
     name: macOS build, core tests, WebKit self-test

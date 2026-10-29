@@ -108,7 +108,7 @@ final class HostedPageAutoFillHost: PasswordAutoFillHost {
     var url: URL? { webView.url }
 
     func showMessage(_ text: String) {
-        Logger(subsystem: "PrivacyBrowser", category: "PasswordAutoFill").notice("\(text, privacy: .public)")
+        Logger(subsystem: "PrivacyBrowser", category: "PasswordAutoFill").notice("\(text, privacy: .private)")
     }
 
     func presentAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {

@@ -138,8 +138,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 - around the unsandboxed self-test, a capture of every packet leaving the runner with its process
   (`scripts/egress_check.py`) and of every file the app and WebKit write (`scripts/disk_check.py`):
   nothing of a profile may leave outside its proxy, or land where the real Safari keeps its data;
-- `--check-safari-chrome`: the private Safari classes and methods the hosted chrome relies on;
+- `--check-safari-chrome`: the private Safari classes and methods the hosted chrome relies on
+  (loaded in a temporary home, held to a closed proxy, as in a profile's process);
 - `scripts/check_localization.py`: ru and en hold the same keys, and no UI text is written into the code;
+- `scripts/check_log_privacy.py`: nothing of the user's is written to the system log in clear;
 - a container-migration check.
 
 ## Using it

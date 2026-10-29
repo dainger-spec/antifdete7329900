@@ -57,7 +57,7 @@ final class WarmUpCoordinator: ObservableObject {
             do {
                 if let schedule = try repository.warmUpSchedule(for: profile.id) { schedules[profile.id] = schedule }
             } catch {
-                log.error("Could not read the warm-up schedule of \(profile.id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+                log.error("Could not read the warm-up schedule of \(profile.id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             }
         }
         scheduler = WarmUpScheduler(schedules: schedules)
@@ -233,8 +233,7 @@ final class WarmUpCoordinator: ObservableObject {
         schedule.everyHours = min(max(everyHours, WarmUpSchedule.hourRange.lowerBound), WarmUpSchedule.hourRange.upperBound)
         try repository.saveWarmUpSchedule(schedule, for: id)
         scheduler.set(schedule, for: id)
-        let description = enabled ? "every \(schedule.everyHours) h" : "off"
-        log.notice("Warm-up schedule of \(id.uuidString, privacy: .public): \(description, privacy: .public)")
+        log.notice("Warm-up schedule of \(id.uuidString, privacy: .public): \(enabled ? schedule.everyHours : 0, privacy: .public) h (0: off)")
     }
 
     /// Puts the runs the schedule finds due into the queue, and starts the next when nothing of
@@ -273,7 +272,7 @@ final class WarmUpCoordinator: ObservableObject {
         do {
             try repository.saveWarmUpSchedule(schedule, for: id)
         } catch {
-            log.error("Could not store the warm-up schedule of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            log.error("Could not store the warm-up schedule of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
         }
     }
 }

@@ -490,8 +490,8 @@ enum ProfileNetworkGuard {
                       "SafariNotificationAgent", "SharedWebCredentials",
                       // Stores that keep page titles, addresses or usage outside the profile: the
                       // Spotlight index, usage tracking and Biome, the knowledge store; and sharing.
-                      "corespotlight", "spotlight.IndexAgent", "UsageTracking", "biome", "knowledge-agent",
-                      "duetexpert", "sharingd",
+                      "corespotlight", "spotlight.IndexAgent", "UsageTracking", "biome", "knowledge",
+                      "duetexpert", "coreduet", "intelligenceplatform", "sharingd",
                       // iCloud Keychain's AutoFill (off in the profile's Safari settings; its agent
                       // was seen fetching as this Mac while the hosted chrome ran).
                       "AuthenticationServices"]
@@ -702,7 +702,7 @@ enum ProfileNetworkGuard {
     /// hardware checks asked for it (`BrowserSession.applyPrivacyPreferences`).
     private static var allInterfacesAllowed: Bool {
         guard let session, case .relay = session.configuration.webRTCRouting else { return false }
-        return UserDefaults.standard.bool(forKey: "PBTunnelAllInterfaces")
+        return DebugSwitches.tunnelAllInterfaces
     }
 
     /// Each way of turning on what the profile has off, tried on preferences of no web view: the
@@ -773,7 +773,7 @@ enum ProfileNetworkGuard {
         guard sandboxInit(profile, 0, &error) == 0 else {
             let reason = error.map { String(cString: $0) } ?? "unknown"
             Logger(subsystem: "PrivacyBrowser", category: "ProfileNetworkGuard")
-                .error("The process could not be closed: \(reason, privacy: .public) (\(profile, privacy: .public))")
+                .error("The process could not be closed: \(reason, privacy: .private) (\(profile, privacy: .private))")
             return ["sandbox: not applied (\(reason))"]
         }
         if udp { closures.insert("udp") }
@@ -925,7 +925,7 @@ enum ProfileNetworkGuard {
             guard let method = class_getClassMethod(URLSessionConfiguration.self, background) else { continue }
             let replacement: @convention(block) (AnyObject, AnyObject?) -> URLSessionConfiguration = { _, identifier in
                 Logger(subsystem: "PrivacyBrowser", category: "ProfileNetworkGuard")
-                    .notice("A background URL session was asked for (\(String(describing: identifier), privacy: .public)); it runs in this process, through the profile's proxy")
+                    .notice("A background URL session was asked for (\(String(describing: identifier), privacy: .private)); it runs in this process, through the profile's proxy")
                 let configuration = URLSessionConfiguration.ephemeral
                 configuration.proxyConfigurations = proxies
                 return configuration
@@ -1014,6 +1014,10 @@ enum ProfileNetworkGuard {
         report.safariPathsRedirected = SafariPaths.redirected
         report.workerPreferences = BrowserSession.workerPreferencesApplied
         report.webKitVersion = WebKitBuild.version
+        let environment = ProcessInfo.processInfo.environment
+        report.environmentNames = environment.keys.sorted()
+        for name in ["HOME", "TMPDIR", "CFFIXED_USER_HOME"] { report.places[name] = environment[name] ?? "" }
+        report.places["temporaryDirectory"] = FileManager.default.temporaryDirectory.path
         report.webViewsCaughtByNet = webViewsCaughtByNet
         report.defaultStoreClosed = realDefaultStore.map { !$0.proxyConfigurations.isEmpty } ?? false
         report.processProxy = !report.hasProxy
@@ -1174,6 +1178,11 @@ struct ProfileNetworkReport: Codable, Equatable {
     var credentialsKept = false
     /// What `HandOffs` refused, by kind ("open", "share", "clipboard").
     var handOffsRefused: [String: Int] = [:]
+    /// The names in the process's environment (`ProfileProcess.childEnvironment`), and where its
+    /// home and temporary files go: `HOME`, `TMPDIR`, `CFFIXED_USER_HOME` and Foundation's
+    /// temporary directory, by those names.
+    var environmentNames: [String] = []
+    var places: [String: String] = [:]
 
     /// Nothing in the process is outside the profile's data or proxy, as far as it can tell.
     var isClean: Bool {

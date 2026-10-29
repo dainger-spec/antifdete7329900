@@ -35,7 +35,7 @@ final class ProxyListModel: ObservableObject {
         } catch {
             list = ProxyList()
             loadError = (error as? CoreError)?.description ?? error.localizedDescription
-            log.error("The proxy list could not be read: \(String(describing: error), privacy: .public)")
+            log.error("The proxy list could not be read: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
         }
     }
 
@@ -117,7 +117,7 @@ final class ProxyListModel: ObservableObject {
             list = updated
             return true
         } catch {
-            log.error("The proxy list could not be saved: \(String(describing: error), privacy: .public)")
+            log.error("The proxy list could not be saved: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             onError(String(format: L("proxies.error.save"), error.localizedDescription))
             return false
         }

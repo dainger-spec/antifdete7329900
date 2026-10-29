@@ -26,9 +26,10 @@ MainActor.assumeIsolated {
         ProfileSessionHost.start(arguments: arguments)
     } else if arguments.contains("--check-safari-chrome") {
         // Which of the private classes and methods the hosted Safari chrome relies on this macOS
-        // still has (SafariChrome.expectedPieces): run after a macOS update, and in CI.
+        // still has (SafariChrome.expectedPieces): run after a macOS update, and in CI. In a
+        // temporary home of its own and held to a closed proxy, as a profile's process is.
         setvbuf(stdout, nil, _IOLBF, 0)
-        exit(SafariChrome.checkPieces())
+        exit(SafariChrome.checkPieces(arguments: arguments))
     } else if arguments.contains("--safari-chrome") {
         // Safari's own window hosted in this process, with one of our web views in its tab
         // (SafariChrome.swift). Needs a build without the App Sandbox and with library validation

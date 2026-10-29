@@ -493,7 +493,24 @@ manager. So a compromise of the process that loads websites and Safari's framewo
 profile it runs, not the vault (`ProfileGrantTests`). It quits — sealing
 its data — when the manager's channel closes (the manager quit or crashed), and holds a lock on its
 home while it runs, so that a manager started after a crash seals a home left in plaintext only
-once its process is gone. The self-test's environment variables are not passed to it.
+once its process is gone.
+
+Its environment is built from a list (`ProfileProcess.childEnvironment`), not inherited: the
+user's name and shell, the text encoding, the app's language and Safari-chrome switches, a fixed
+`PATH`, and the profile's own home, vault folder, time zone and warm-up switch. Nothing else of
+the manager's reaches it — not a shell's or CI's variables, debug switches or the self-test's.
+`HOME` is the profile's home as well as `CFFIXED_USER_HOME`, and `TMPDIR` a folder inside it, so
+temporary files of the run are in the home (excluded from backups), and are removed, not sealed,
+when the profile stops. **Checked by the self-test**: two variables set in the manager before the
+launch (one that would make the process windowless) are not in the process, and its `HOME` and
+`TMPDIR` are in the profile's home. Foundation's own temporary directory is reported, not
+checked: where it reads it from is the system's.
+
+**The system log.** Lines the app writes to the unified log (kept on disk at notice level and
+above, and in a sysdiagnose) carry the user's data only as `<private>`: profile names, proxy hosts
+and exit IPs, addresses, paths, settings and error texts. In clear are only a profile's random id,
+counts, statuses, an error's type, domain and code, and the names of classes and hooks from the
+code. `scripts/check_log_privacy.py` fails CI on a public interpolation that is none of those.
 
 **Not covered:** traffic of system daemons that run for every app and are not started on the
 profile's behalf (the capture lists them: `webprivacyd`, `mobileassetd`, the system's time

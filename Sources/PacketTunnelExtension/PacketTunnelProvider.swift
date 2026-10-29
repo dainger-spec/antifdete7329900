@@ -50,7 +50,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         setTunnelNetworkSettings(settings) { [weak self] error in
             guard let self else { return }
             if let error {
-                self.logger.error("setTunnelNetworkSettings: \(error.localizedDescription, privacy: .public)")
+                self.logger.error("setTunnelNetworkSettings: \(error.localizedDescription, privacy: .private)")
                 completionHandler(error)
                 return
             }
@@ -96,12 +96,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     // MARK: Packets
 
     private func startRouter() {
-        let relays = SOCKS5RelayFactory(queue: queue, log: { [logger] in logger.info("\($0, privacy: .public)") })
+        let relays = SOCKS5RelayFactory(queue: queue, log: { [logger] in logger.info("\($0, privacy: .private)") })
         router = PacketRouter(relays: relays, emit: { [weak self] packet in
             guard let self, let version = packet.first.map({ $0 >> 4 }) else { return }
             let family = NSNumber(value: version == 6 ? AF_INET6 : AF_INET)
             self.packetFlow.writePackets([Data(packet)], withProtocols: [family])
-        }, log: { [logger] in logger.info("\($0, privacy: .public)") })
+        }, log: { [logger] in logger.info("\($0, privacy: .private)") })
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 10, repeating: 10)
         timer.setEventHandler { [weak self] in

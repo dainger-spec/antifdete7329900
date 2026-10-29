@@ -228,9 +228,9 @@ def leak_page(run: str) -> bytes:
     page = r"""<!doctype html><html><head><title>PB leak page RUN</title>
 <link rel="dns-prefetch" href="//prefetch-RUN.leak.example.com">
 <link rel="preconnect" href="http://preconnect-RUN.leak.example.com">
-<link rel="search" type="application/opensearchdescription+xml" title="PB" href="http://osd-RUN.leak.example.com/pb-leak/osd.xml?run=RUN">
-<link rel="apple-touch-icon" href="http://touchicon-RUN.leak.example.com/pb-leak/touch.png?run=RUN">
-<link rel="icon" href="http://icon-RUN.leak.example.com/pb-leak/icon.png?run=RUN">
+<link rel="search" type="application/opensearchdescription+xml" title="PB" href="https://osd-RUN.leak.example.com/pb-leak/osd.xml?run=RUN">
+<link rel="apple-touch-icon" href="https://touchicon-RUN.leak.example.com/pb-leak/touch.png?run=RUN">
+<link rel="icon" href="https://icon-RUN.leak.example.com/pb-leak/icon.png?run=RUN">
 <style>@font-face{font-family:pbleak;src:url(http://font-RUN.leak.example.com/pb-leak/font.woff?run=RUN)} body{font-family:pbleak,serif}</style>
 </head><body>
 <p>PB-LEAK-PAGE RUN</p>
@@ -513,8 +513,9 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
 
 # The hosts whose tunnels are answered with TLS: the leak page's certificate checks and the
 # process's own HTTPS probes. Any other tunnel a client starts TLS in (Safari tries HTTPS first for
-# an http address) gets no handshake, as from a server with no HTTPS, and the client goes on with
-# http — which the leak page's own requests are.
+# an http address; the page's icons are https) is noted — the CONNECT is the proof of where it
+# went — and closed at once, as by a server with no HTTPS, and the client goes on with http where
+# it can — which the leak page's own requests do.
 TLS_HOSTS = ("aia-", "tls-", "probe-", "192.0.2.14:")
 
 
@@ -551,6 +552,11 @@ def respond_with_page(conn: socket.socket, via: str) -> None:
             serve_request(conn, via)
         finally:
             conn.close()
+        return
+    if first == b"\x16":
+        # Waiting for a request that never comes (the client waits for the server's hello) would
+        # hold the client until its own timeout.
+        note(via, "(tls, no https here)")
         return
     serve_request(conn, via)
 

@@ -95,7 +95,7 @@ final class AppModel: ObservableObject {
                             log.notice("Vault key derivation upgraded from PBKDF2 to Argon2id")
                         }
                     } catch {
-                        log.error("Vault key derivation upgrade failed: \(String(describing: error), privacy: .public)")
+                        log.error("Vault key derivation upgrade failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
                     }
                     return vault
                 }.value

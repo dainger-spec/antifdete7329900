@@ -230,14 +230,14 @@ final class WebDataStoreVault {
                 return result
             } catch {
                 lastError = error
-                log.notice("Seal attempt \(result.attempts) for \(profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                log.notice("Seal attempt \(result.attempts) for \(profileID.uuidString, privacy: .public) failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             }
         }
         if activeStore && forceSealWhenStoreStaysInUse {
-            log.error("WebKit kept the data store of \(profileID.uuidString, privacy: .public) in use through \(result.attempts) attempts (\(String(describing: lastError), privacy: .public)); forcing the seal before quitting")
+            log.error("WebKit kept the data store of \(profileID.uuidString, privacy: .public) in use through \(result.attempts) attempts (\(lastError.map { $0.logKind } ?? "no error", privacy: .public) \(String(describing: lastError), privacy: .private)); forcing the seal before quitting")
             return try await forceSeal(profileID: profileID, key: key, result: result)
         }
-        log.error("Giving up sealing \(profileID.uuidString, privacy: .public): \(String(describing: lastError), privacy: .public)")
+        log.error("Giving up sealing \(profileID.uuidString, privacy: .public): \(lastError.map { $0.logKind } ?? "no error", privacy: .public) \(String(describing: lastError), privacy: .private)")
         throw VaultError.storeStillInUse(profileID)
     }
 
@@ -269,14 +269,14 @@ final class WebDataStoreVault {
                         try FileManager.default.removeItem(at: directory)
                     } catch {
                         // Left for the next launch or unlock to discard (the marker is in place).
-                        log.error("Forced seal of \(profileID.uuidString, privacy: .public) could not delete \(directory.path, privacy: .public): \(String(describing: error), privacy: .public)")
+                        log.error("Forced seal of \(profileID.uuidString, privacy: .public) could not delete \(directory.path, privacy: .private): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
                     }
                 }
                 result.forced = true
                 log.error("Force-sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes")
                 return result
             } catch {
-                log.error("Forced seal attempt for \(profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                log.error("Forced seal attempt for \(profileID.uuidString, privacy: .public) failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             }
         }
         throw VaultError.storeStillInUse(profileID)
@@ -291,7 +291,7 @@ final class WebDataStoreVault {
         let marker = forcedSealMarkerURL(for: profileID)
         guard FileManager.default.fileExists(atPath: marker.path) else { return false }
         for directory in Self.discoverDirectories(for: profileID) {
-            log.notice("Discarding WebKit data written after the forced seal of \(profileID.uuidString, privacy: .public): \(directory.path, privacy: .public)")
+            log.notice("Discarding WebKit data written after the forced seal of \(profileID.uuidString, privacy: .public): \(directory.path, privacy: .private)")
             try FileManager.default.removeItem(at: directory)
         }
         try FileManager.default.removeItem(at: marker)
@@ -309,7 +309,7 @@ final class WebDataStoreVault {
             do {
                 try await Self.removeStore(for: profileID)
             } catch {
-                log.notice("remove(forIdentifier:) for \(profileID.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+                log.notice("remove(forIdentifier:) for \(profileID.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             }
         }
         for directory in Self.discoverDirectories(for: profileID) {

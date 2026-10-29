@@ -47,7 +47,7 @@ enum AppEnvironment {
             try UnsandboxedMigration.perform(moves)
             log.notice("Moved a sandboxed build's vault out of its container (\(moves.count, privacy: .public) items)")
         } catch {
-            log.error("Could not move the sandboxed build's vault out of its container: \(String(describing: error), privacy: .public)")
+            log.error("Could not move the sandboxed build's vault out of its container: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
         }
     }
 }

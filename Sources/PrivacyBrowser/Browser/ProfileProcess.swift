@@ -60,7 +60,7 @@ final class ProfileProcess {
         do {
             try commands.write(contentsOf: data)
         } catch {
-            log.error("Could not reach profile \(self.profileID.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            log.error("Could not reach profile \(self.profileID.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
         }
     }
 
@@ -90,26 +90,8 @@ final class ProfileProcess {
         if let locale { arguments += ["-AppleLocale", locale] }
         process.arguments = arguments
 
-        var environment = ProcessInfo.processInfo.environment
-        // Safari's frameworks, and anything else asking for the user's home, land here.
-        environment["CFFIXED_USER_HOME"] = home.path
-        // ...which would take the vault with them, so it is named explicitly (AppEnvironment).
-        environment["PRIVACYBROWSER_VAULT_DIR"] = vaultRoot.path
-        if let timeZone {
-            environment["TZ"] = timeZone
-            // And for the WebKit processes the child starts (pages and workers run there): libxpc
-            // hands an `__XPC_`-prefixed variable to the services it launches, without the prefix.
-            environment["__XPC_TZ"] = timeZone
-        }
-        // Started to warm the profile up and nothing else: it opens no window of its own and
-        // quits when the run ends, which is what seals what the run collected.
-        if forWarmUpOnly { environment["PB_WARM_UP_ONLY"] = "1" }
-        environment.removeValue(forKey: "PB_PROFILE_PROCESS")
-        // The self-test's own switches are the self-test's: a profile's process runs as in use.
-        for name in environment.keys where name.hasPrefix("PB_SELFTEST_") {
-            environment.removeValue(forKey: name)
-        }
-        process.environment = environment
+        process.environment = try childEnvironment(inheriting: ProcessInfo.processInfo.environment, home: home,
+                                                   vaultRoot: vaultRoot, timeZone: timeZone, forWarmUpOnly: forWarmUpOnly)
 
         let keyPipe = Pipe()
         process.standardInput = keyPipe
@@ -145,6 +127,50 @@ final class ProfileProcess {
         }
         child.log.info("Profile \(profileID.uuidString, privacy: .public) runs as pid \(process.processIdentifier, privacy: .public), home \(home.path, privacy: .private), languages \(languages.joined(separator: ","), privacy: .private), TZ \(timeZone ?? "(system)", privacy: .private)")
         return child
+    }
+
+    /// What a profile's process inherits from this one's environment, by name: what the system's
+    /// own code expects of any process, and this app's switches that apply to a profile too.
+    /// Everything else stays here — a shell's or CI's variables, debug switches, the self-test's
+    /// own (`PB_SELFTEST_*`), `PB_PROFILE_PROCESS` — so that what a profile's process does does
+    /// not depend on how the manager happened to be started.
+    static let inheritedEnvironment: Set<String> = [
+        "USER", "LOGNAME", "SHELL", "__CF_USER_TEXT_ENCODING", "COMMAND_MODE",
+        "APP_SANDBOX_CONTAINER_ID", "PRIVACYBROWSER_LANG", "PB_SAFARI_CHROME",
+    ]
+
+    /// Every name a profile's process can find in its environment (the self-test checks it).
+    static let environmentNames = inheritedEnvironment.union([
+        "HOME", "TMPDIR", "PATH", "CFFIXED_USER_HOME", "PRIVACYBROWSER_VAULT_DIR", "TZ", "__XPC_TZ", "PB_WARM_UP_ONLY",
+    ])
+
+    /// The environment of a profile's process, built from `inheritedEnvironment` and the profile.
+    static func childEnvironment(inheriting parent: [String: String], home: URL, vaultRoot: URL,
+                                 timeZone: String?, forWarmUpOnly: Bool) throws -> [String: String] {
+        var environment = parent.filter { inheritedEnvironment.contains($0.key) }
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        // Safari's frameworks, and anything else asking for the user's home through Foundation,
+        // land here; POSIX code reading HOME as well, and temporary files go into the home too, so
+        // that they are sealed with it rather than left in this user's shared temporary folder
+        // (`SafariHomeVault` removes them before sealing: they do not outlive the run).
+        environment["CFFIXED_USER_HOME"] = home.path
+        environment["HOME"] = home.path
+        let temporary = SafariHomeVault.temporaryDirectory(inHome: home)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        environment["TMPDIR"] = temporary.path + "/"
+        // ...which would take the vault with them, so it is named explicitly (AppEnvironment).
+        environment["PRIVACYBROWSER_VAULT_DIR"] = vaultRoot.path
+        if let timeZone {
+            environment["TZ"] = timeZone
+            // And for the WebKit processes the child starts (pages and workers run there): libxpc
+            // hands an `__XPC_`-prefixed variable to the services it launches, without the prefix.
+            environment["__XPC_TZ"] = timeZone
+        }
+        // Started to warm the profile up and nothing else: it opens no window of its own and
+        // quits when the run ends, which is what seals what the run collected.
+        if forWarmUpOnly { environment["PB_WARM_UP_ONLY"] = "1" }
+        return environment
     }
 
     /// Asks the child to quit, which is what seals its data. The command is the ordinary way and
