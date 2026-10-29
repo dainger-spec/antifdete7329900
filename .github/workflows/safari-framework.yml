@@ -9,6 +9,7 @@ on:
     paths:
       - "Sources/PrivacyBrowser/Browser/Safari*.swift"
       - "Sources/PrivacyBrowser/App/SafariFrameworkProbe.swift"
+      - "Sources/ExceptionCatcher/**"
       - "scripts/safari_framework/**"
       - ".github/workflows/safari-framework.yml"
   workflow_dispatch:

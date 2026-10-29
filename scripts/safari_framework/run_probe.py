@@ -33,7 +33,17 @@ STEPS = [
     "create",           # the application-controller window path
     "create-bootstrap", # the same, after the launch callbacks
     "window",           # the whole path as the app runs it, data store included
+    "popupfield",       # the popup's own address field against the one that raises in layout
+    "popup",            # initAsPopupWindow:YES
+    "popup-nofield",    # the same, with the popup's address field turned off before it loads
+    "popup-mode",       # initWithBrowsingMode:0 isPopupWindow:YES
+    "popup-hidden",     # +hiddenEmptyBrowserWindowControllerWithBrowsingMode:profileIdentifier:isPopupWindow:
 ]
+
+# Run as the app runs them, without NSApplicationCrashOnExceptions: whether an exception raised
+# inside the framework can be caught is what these measure, and that setting would end the
+# process first. They record each exception as it is raised, so a hang still says why.
+AS_THE_APP_RUNS = {"popup", "popup-nofield", "popup-mode", "popup-hidden"}
 
 CRASH_DIRS = [
     os.path.expanduser("~/Library/Logs/DiagnosticReports"),
@@ -107,7 +117,9 @@ def run_step(binary, step, out_dir, timeout):
     since = (datetime.datetime.now() - datetime.timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
     # -NSApplicationCrashOnExceptions on the command line as well as in code: AppKit otherwise
     # swallows an exception raised under its run loop, and the step hangs with nothing to read.
-    command = [binary, "--safari-probe", step, "--out", step_dir, "-NSApplicationCrashOnExceptions", "YES"]
+    command = [binary, "--safari-probe", step, "--out", step_dir]
+    if step not in AS_THE_APP_RUNS:
+        command += ["-NSApplicationCrashOnExceptions", "YES"]
     start = time.time()
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
@@ -127,8 +139,9 @@ def run_step(binary, step, out_dir, timeout):
     else:
         result["outcome"] = "exited %d" % status
 
-    # A crash leaves its report a moment later.
-    if status is None or (status is not None and status != 0):
+    # A crash leaves its report a moment later. The steps run as the app runs them keep the log
+    # even when they exit cleanly: it is where AppKit says what it did with an exception it caught.
+    if status is None or status != 0:
         time.sleep(8)
         new = crash_snapshot() - before
         result["crashes"] = []
@@ -137,6 +150,7 @@ def run_step(binary, step, out_dir, timeout):
                 continue
             shutil.copy(path, os.path.join(step_dir, os.path.basename(path)))
             result["crashes"].append(read_crash(path))
+    if status is None or status != 0 or step in AS_THE_APP_RUNS:
         result["log"] = system_log(since, "PrivacyBrowser")
 
     with open(os.path.join(step_dir, "output.txt"), "w") as handle:
@@ -167,6 +181,22 @@ def crash_reason(result):
         if pieces:
             return " / ".join(str(piece).strip() for piece in pieces if str(piece).strip())
     return ""
+
+
+def headline(result):
+    """Why the step ended, in one line: the crash report, else the first exception raised, else
+    the result the step printed."""
+    reason = crash_reason(result)
+    if reason:
+        return reason
+    raised = result_line = ""
+    for line in result["output"].splitlines():
+        text = line.strip()
+        if not raised and "RAISED" in text:
+            raised = text.split("RAISED", 1)[1].strip(" ,:")
+        if text.startswith("PROBE RESULT"):
+            result_line = text[len("PROBE RESULT"):].strip()
+    return "; ".join(piece for piece in (raised and "raised " + raised, result_line) if piece)
 
 
 def main():
@@ -209,7 +239,7 @@ def main():
     lines.append("|---|---|---|---|")
     for result in results:
         lines.append("| %s | %s | %s | %s |" % (result["step"], result["outcome"], result["seconds"],
-                                                crash_reason(result).replace("|", "/") or ""))
+                                                headline(result).replace("|", "/")))
     lines.append("")
     for result in results:
         lines.append("## %s — %s" % (result["step"], result["outcome"]))
@@ -240,7 +270,7 @@ def main():
             handle.write("| step | outcome | why |\n|---|---|---|\n")
             for result in results:
                 handle.write("| %s | %s | %s |\n" % (result["step"], result["outcome"],
-                                                     crash_reason(result).replace("|", "/") or ""))
+                                                     headline(result).replace("|", "/")))
     return 0
 
 

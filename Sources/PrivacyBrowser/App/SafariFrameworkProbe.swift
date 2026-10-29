@@ -1,4 +1,5 @@
 import AppKit
+import ExceptionCatcher
 import Foundation
 import MachO
 import ObjectiveC
@@ -27,6 +28,10 @@ import WebKit
 ///   `create-bootstrap` the same, after the launch callbacks
 ///   `create-direct`    allocating the window controller directly
 ///   `window`           the whole path as the app runs it, data store included
+///   `popupfield`       the popup's own address field against the one that raises in layout
+///   `popup`, `popup-nofield`, `popup-mode`, `popup-hidden`
+///                      one popup variant each (`SafariBrowserWindowController.PopupVariant`),
+///                      data store included, run without NSApplicationCrashOnExceptions
 @MainActor
 enum SafariFrameworkProbe {
     private static var outputFolder: URL?
@@ -47,16 +52,26 @@ enum SafariFrameworkProbe {
         // Written to this app's preferences by the create-bootstrap step; every other step has
         // to start without it, or the riskiest call in the path runs where it was not asked for.
         if step != "create-bootstrap" { UserDefaults.standard.removeObject(forKey: "PBSafariBootstrapAppController") }
-        // AppKit catches an exception raised under its run loop and carries on, which turns a
-        // clean failure into a hang with nothing to read. This makes it a crash instead, so the
-        // driver gets the backtrace that says which framework call raised.
-        UserDefaults.standard.set(true, forKey: "NSApplicationCrashOnExceptions")
+        let popup = SafariBrowserWindowController.PopupVariant(rawValue: step)
+        if popup != nil {
+            // The popup steps run as the app does. Whether an exception raised inside the
+            // framework can be caught is what they measure, and crashing on exceptions would
+            // end the process before anything had the chance to catch one. The popup path
+            // records every exception as it is raised instead, so nothing is lost to a hang.
+            UserDefaults.standard.removeObject(forKey: "NSApplicationCrashOnExceptions")
+        } else {
+            // AppKit catches an exception raised under its run loop and carries on, which turns
+            // a clean failure into a hang with nothing to read. This makes it a crash instead, so
+            // the driver gets the backtrace that says which framework call raised.
+            UserDefaults.standard.set(true, forKey: "NSApplicationCrashOnExceptions")
+        }
         say("step \(step)")
         say("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         say("sandboxed: \(ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil)")
+        say("NSApplicationCrashOnExceptions: \(UserDefaults.standard.bool(forKey: "NSApplicationCrashOnExceptions"))")
 
         // The steps that build a window need a running application; the rest must not wait for one.
-        if ["shared", "create", "create-bootstrap", "create-direct", "window", "documentcontroller-create"].contains(step) {
+        if popup != nil || ["shared", "create", "create-bootstrap", "create-direct", "window", "documentcontroller-create"].contains(step) {
             // Before NSApplication exists, let alone finishes launching: AppKit makes its own
             // document controller on the way up, and the framework's subclass can only be the
             // shared one if it got there first.
@@ -71,7 +86,13 @@ enum SafariFrameworkProbe {
                 exit(3)
             }
             Task { @MainActor in
-                if step == "window" { await windowStep() } else { run(step) }
+                if let popup {
+                    await popupStep(popup)
+                } else if step == "window" {
+                    await windowStep()
+                } else {
+                    run(step)
+                }
                 say("step \(step) finished")
                 exit(0)
             }
@@ -94,6 +115,7 @@ enum SafariFrameworkProbe {
         case "documentcontroller": dumpClassStep(candidates: ["BrowserDocumentController", "BrowserDocument"],
                                                  fallback: "BrowserDocumentController")
         case "documentcontroller-create": documentControllerCreateStep()
+        case "popupfield": popupFieldStep()
         case "webconfig": webConfigurationStep()
         case "shared": sharedStep()
         case "create": createStep(bootstrap: false)
@@ -237,6 +259,40 @@ enum SafariFrameworkProbe {
         write(report, to: "framework-\(fallback).txt")
     }
 
+    /// The popup's own address field against the toolbar's, which raises in layout: whether the
+    /// popup's is that class underneath, and so lays out — and raises — the same way.
+    private static func popupFieldStep() {
+        guard SafariLoader.load() else { return say("framework not loaded") }
+        guard let unifiedField = NSClassFromString("UnifiedField") else { return say("UnifiedField -> nil") }
+        let failing = ["_notSecureAnnotation", "_layOutFaviconAndMainContentView", "layout"]
+        for name in ["UnifiedField", "PopupWindowUnifiedField", "InteriorUnifiedField",
+                     "PopupWindowUnifiedFieldContainerView", "PopupWindowUnifiedFieldViewController"] {
+            guard let cls = NSClassFromString(name) else {
+                say("\(name) -> nil")
+                continue
+            }
+            let chain = ObjCRuntime.chain(of: cls)
+            say("\(name): \(chain.joined(separator: " <- ")); a UnifiedField: \(chain.contains("UnifiedField"))")
+            let declared = Set(ObjCRuntime.declaredSelectors(of: cls))
+            for selector in failing {
+                let sel = NSSelectorFromString(selector)
+                guard let method = class_getInstanceMethod(cls, sel) else {
+                    say("  -\(selector): not implemented")
+                    continue
+                }
+                // The same implementation as UnifiedField's is the one that raised there.
+                let sameAsField = class_getInstanceMethod(unifiedField, sel).map {
+                    unsafeBitCast(method_getImplementation($0), to: UnsafeRawPointer.self) ==
+                        unsafeBitCast(method_getImplementation(method), to: UnsafeRawPointer.self)
+                } ?? false
+                say("  -\(selector): \(declared.contains(selector) ? "declared here" : "inherited")" +
+                    (name != "UnifiedField" && sameAsField ? ", UnifiedField's own implementation" : ""))
+            }
+        }
+        dumpClassStep(candidates: ["PopupWindowUnifiedField", "PopupWindowUnifiedFieldViewController", "BrowserViewController"],
+                      fallback: "PopupWindowUnifiedField")
+    }
+
     /// Which way of getting the framework's document controller works, and whether AppKit then
     /// agrees it is the shared one. Runs under a running application on purpose: it is the one
     /// step that measures what happens when AppKit got there first.
@@ -312,14 +368,32 @@ enum SafariFrameworkProbe {
     /// in it. The configuration copy on the web view cannot answer that (see the note in
     /// `SafariBrowserWindowController.reportDataStore`).
     private static func windowStep() async {
+        await openAndCheck { controller, store, target in controller.open(dataStore: store, startURL: target) }
+    }
+
+    /// One popup variant on its own, then the same check.
+    private static func popupStep(_ variant: SafariBrowserWindowController.PopupVariant) async {
+        await openAndCheck { controller, store, target in controller.openPopup(variant, dataStore: store, startURL: target) }
+    }
+
+    private static func openAndCheck(_ opening: (SafariBrowserWindowController, WKWebsiteDataStore, URL) -> NSWindow?) async {
         WebDataStoreVault.ensureWebKitInitialized()
         let profileID = UUID()
         let store = WKWebsiteDataStore(forIdentifier: profileID)
         let target = URL(string: "https://example.com/")!
         say("profile store: \(SafariHooks.describe(store))")
+        // Outside the popup attempt, which records its own: an exception raised by work the
+        // framework queued for a later turn of the run loop would otherwise reach AppKit's
+        // handler with nothing here to say so.
+        _ = PBObserveRaisedExceptions { exception, stack in
+            MainActor.assumeIsolated { () -> Void in
+                say("RAISED, seen by the probe: \(exception.name.rawValue): \(exception.reason ?? "no reason")")
+                for frame in stack { say("  \(frame)") }
+            }
+        }
         let controller = SafariBrowserWindowController(profileID: profileID)
         controller.onNote = { say("  \($0)") }
-        let window = controller.open(dataStore: store, startURL: target)
+        let window = opening(controller, store, target)
         guard let window else {
             say("RESULT no window")
             say("activation policy afterwards: \(NSApp.activationPolicy().rawValue) (0 = regular, 1 = accessory)")
@@ -341,6 +415,39 @@ enum SafariFrameworkProbe {
         let names = records.map(\.displayName).sorted()
         say("records in the PROFILE's store after the load: \(names.isEmpty ? "none" : names.joined(separator: ", "))")
         say("the profile's store holds the loaded origin: \(names.contains { target.host?.hasSuffix($0) == true })")
+        // The page is in and the address field has something to show: one more layout and
+        // display pass, as the window gets on screen.
+        let late = PBCatchException {
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+        }
+        say("layout and display after the load: " +
+            (late.map { "raised \($0.name.rawValue): \($0.reason ?? "no reason")" } ?? "nothing raised") +
+            "; visible=\(window.isVisible)")
+        await snapshot(window, webView: webView)
+    }
+
+    /// The window as drawn, for the report: its views rendered into a bitmap, which needs no
+    /// screen recording permission, and the page as WebKit renders it.
+    private static func snapshot(_ window: NSWindow, webView: WKWebView) async {
+        var windowPNG: Data?
+        let raised = PBCatchException {
+            guard let root = window.contentView?.superview ?? window.contentView,
+                  let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return }
+            root.cacheDisplay(in: root.bounds, to: rep)
+            windowPNG = rep.representation(using: .png, properties: [:])
+        }
+        if let raised { say("drawing the window raised \(raised.name.rawValue): \(raised.reason ?? "no reason")") }
+        if let windowPNG { write(windowPNG, to: "window.png") } else { say("window drawing: nothing to write") }
+        let page: NSImage? = await withCheckedContinuation { continuation in
+            webView.takeSnapshot(with: nil) { image, _ in continuation.resume(returning: image) }
+        }
+        if let tiff = page?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]) {
+            write(png, to: "page.png")
+        } else {
+            say("page snapshot: none")
+        }
     }
 
     // MARK: Reporting
@@ -355,6 +462,16 @@ enum SafariFrameworkProbe {
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
             say("wrote \(name) (\(text.utf8.count) bytes)")
+        } catch {
+            say("could not write \(name): \(error)")
+        }
+    }
+
+    private static func write(_ data: Data, to name: String) {
+        guard let folder = outputFolder else { return }
+        do {
+            try data.write(to: folder.appendingPathComponent(name))
+            say("wrote \(name) (\(data.count) bytes)")
         } catch {
             say("could not write \(name): \(error)")
         }
