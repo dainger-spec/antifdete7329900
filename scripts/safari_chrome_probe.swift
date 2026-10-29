@@ -25,7 +25,17 @@ setvbuf(stdout, nil, _IOLBF, 0)
 // Safari's frameworks assert and abort when a singleton they expect has not been set up. Each
 // such abort names the next thing to prepare, so the probe prints its own backtrace instead of
 // leaving it to a crash report.
-func installCrashReporter() {
+func installCrashReporter()
+
+// Safari's window lays out its content inside -windowDidLoad; an Objective-C exception thrown
+// there is turned into a crash by +[NSApplication _crashOnException:], which prints nothing
+// useful. Print the exception itself, and let --tolerate-exceptions ask AppKit to log and carry
+// on instead of aborting, so one run can show how far the window gets.
+NSSetUncaughtExceptionHandler { exception in
+    var text = "\n== NSException ==\n\(exception.name.rawValue): \(exception.reason ?? "-")\n"
+    for frame in exception.callStackSymbols { text += "   " + frame + "\n" }
+    text.withUTF8 { buffer in _ = write(2, buffer.baseAddress, buffer.count) }
+} {
     let handler: @convention(c) (Int32) -> Void = { signalNumber in
         var frames = [UnsafeMutableRawPointer?](repeating: nil, count: 64)
         let count = backtrace(&frames, 64)
@@ -45,6 +55,14 @@ func flag(_ name: String) -> Bool { arguments.contains(name) }
 func value(after name: String) -> String? {
     guard let index = arguments.firstIndex(of: name), arguments.indices.contains(index + 1) else { return nil }
     return arguments[index + 1]
+}
+
+if CommandLine.arguments.contains("--tolerate-exceptions") {
+    // The argument domain only, as WebKit and this project do elsewhere: nothing is written to
+    // any preferences file.
+    var domain = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+    domain["NSApplicationCrashOnExceptions"] = false
+    UserDefaults.standard.setVolatileDomain(domain, forName: UserDefaults.argumentDomain)
 }
 
 // Loaded through their /System/Library paths; on a cryptex system those resolve into
