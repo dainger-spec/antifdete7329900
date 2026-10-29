@@ -98,15 +98,45 @@ final class BrowserSession {
 
     /// Applies this profile to a `WKWebViewConfiguration` that Safari's chrome built for one of
     /// its own web views (`SafariChromeHost`): the profile's data store — which carries its proxy,
-    /// since the proxy is set on the store — and the profile's scripts.
+    /// since the proxy is set on the store — and, into Safari's own content controller, the
+    /// profile's scripts, its DNS-prefetch blocker and its AutoFill.
     ///
-    /// What does not come across: the script message handlers, which have no enumerable API, so
-    /// AutoFill through the hosted chrome is not wired yet. Safari's own preferences are left as
-    /// they are: it is Safari's chrome, and they are what make its own UI behave.
-    func applyProfile(to configuration: WKWebViewConfiguration) {
-        if let dataStore { configuration.websiteDataStore = dataStore }
-        for script in userContentController.userScripts {
-            configuration.userContentController.addUserScript(script)
+    /// Safari's content controller is kept rather than replaced with ours: it holds the scripts
+    /// Safari injects into every page it shows, and the point of hosting its chrome is that pages
+    /// see what they would see in Safari. Ours are added to it. AutoFill is installed the same way
+    /// it is installed in our own web views — its message handlers cannot be copied from one
+    /// controller to another (WebKit has no API that lists them), so they are installed again
+    /// here, which is why this is a method of the session and not a copy loop somewhere else.
+    func applyProfile(to webConfiguration: WKWebViewConfiguration) {
+        if let dataStore { webConfiguration.websiteDataStore = dataStore }
+        let controller = webConfiguration.userContentController
+        // Safari reuses a configuration's controller across the web views of a tab; everything
+        // below would otherwise be injected again on each of them.
+        guard appliedControllers.add(controller) else { return }
+        // Built fresh rather than copied from our own controller: ours also carries AutoFill, and
+        // that is installed below with its handlers rather than as a lone script.
+        for script in BehaviorSets.makeUserContentController(for: configuration).userScripts {
+            controller.addUserScript(script)
+        }
+        if configuration.proxy != nil, let blocker = ContentRules.dnsPrefetchBlocker {
+            controller.add(blocker)
+        }
+        PasswordAutoFill.install(in: controller, handler: passwordHandler,
+                                 testHooks: CommandLine.arguments.contains("--self-test"))
+    }
+
+    /// Content controllers this profile has already been applied to, held weakly.
+    private let appliedControllers = WeakSet()
+
+    /// A set that does not keep what it remembers alive, so that a controller Safari released is
+    /// not applied to a second time by mistake and is not kept in memory either.
+    private final class WeakSet {
+        private let table = NSHashTable<AnyObject>.weakObjects()
+        /// True when `object` was not in the set and has been added.
+        func add(_ object: AnyObject) -> Bool {
+            guard !table.contains(object) else { return false }
+            table.add(object)
+            return true
         }
     }
 
