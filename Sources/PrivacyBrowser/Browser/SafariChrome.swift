@@ -371,6 +371,12 @@ enum SafariChrome {
         let nothing: [(String, String)] = [
             ("BrowserWindowController", "_setUpClusterManagerIfNeeded"),
             ("BrowserNavigationDelegate", "donatePageTextMetadata:allowingDonationWithoutReaderText:"),
+            // WebKit gates a few of its private setters on the caller being Safari itself and
+            // throws NSObjectNotAvailableException otherwise ("may only be used by Safari"). The
+            // web-extensions configuration Safari's menu builds on launch walks into one of them.
+            // Doing nothing is also the behaviour we want: this is the switch that relaxes
+            // third-party cookie blocking, and no profile here should have it relaxed.
+            ("WKWebViewConfiguration", "_setShouldRelaxThirdPartyCookieBlocking:"),
             // The start page's onboarding section: Swift code that traps when it cannot reach
             // Safari's own services, and it takes every new tab down with it.
             ("StartPageOnboardingSectionProvider", "reloadData"),
