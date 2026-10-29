@@ -34,9 +34,65 @@ enum SafariChromeHost {
         SafariChrome.installApplication()
         SafariChrome.prepare()
         SafariChrome.installMainMenu()
+        routeNavigationToOurWebViews()
+        keepOurWebViewsOnTop()
         isPrepared = true
         return true
     }
+
+    /// Safari's address bar, its bookmarks and its menu all navigate by telling the tab to load a
+    /// URL. Left alone, that drives Safari's own web view — the one with Safari's data store, no
+    /// proxy of ours and none of the profile's scripts — and the window shows nothing useful,
+    /// which is exactly what typing an address did before this. Routed into the profile's web
+    /// view instead, so that the chrome drives our engine.
+    private static func routeNavigationToOurWebViews() {
+        typealias LoadURL = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+        let selector = NSSelectorFromString("loadURL:")
+        guard let cls = NSClassFromString("BrowserTabViewItem"),
+              let method = class_getInstanceMethod(cls, selector) else {
+            log.notice("No -[BrowserTabViewItem loadURL:]: the address bar will not reach our web view")
+            return
+        }
+        let original = unsafeBitCast(method_getImplementation(method), to: LoadURL.self)
+        let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { tab, url in
+            guard let url = url as? URL, let webView = webView(of: tab) else {
+                original(tab, selector, url)
+                return
+            }
+            log.info("\(url.absoluteString, privacy: .public) into the profile's web view")
+            webView.load(URLRequest(url: url))
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
+    /// Safari installs the view of whatever it thinks the tab shows — its start page, its own web
+    /// view — into the same place ours sits, and ours ends up underneath. After each of those,
+    /// ours is put back on top and resized to fit.
+    private static func keepOurWebViewsOnTop() {
+        typealias InstallView = @convention(c) (AnyObject, Selector) -> Void
+        let selector = NSSelectorFromString("_installCurrentViewControllerView")
+        guard let cls = NSClassFromString("TabContentViewController"),
+              let method = class_getInstanceMethod(cls, selector) else { return }
+        let original = unsafeBitCast(method_getImplementation(method), to: InstallView.self)
+        let replacement: @convention(block) (AnyObject) -> Void = { controller in
+            original(controller, selector)
+            guard let view = (controller as? NSViewController)?.viewIfLoaded else { return }
+            for webView in hostedWebViews where webView.superview === view {
+                webView.frame = view.bounds
+                view.addSubview(webView, positioned: .above, relativeTo: nil)
+            }
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
+    /// The profile's web view in that tab. One profile has one window for now, so the tab the web
+    /// view was put into is remembered and anything else falls back to it.
+    private static func webView(of tab: AnyObject) -> WKWebView? {
+        if let known = webViewsByTab.object(forKey: tab) { return known }
+        return hostedWebViews.last
+    }
+
+    private static let webViewsByTab = NSMapTable<AnyObject, WKWebView>.weakToStrongObjects()
 
     /// Opens Safari's window for `session` and puts the profile's web view in its tab. False when
     /// the chrome is not hosted here, and the caller opens our own window as before.
@@ -51,6 +107,7 @@ enum SafariChromeHost {
             return false
         }
         hostedWebViews.append(webView)
+        if let tab = SafariChrome.lastHostedTab { webViewsByTab.setObject(webView, forKey: tab) }
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)

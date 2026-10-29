@@ -577,6 +577,7 @@ enum SafariChrome {
             log.error("Safari's tab has no content view controller")
             return controller
         }
+        lastHostedTab = tab
         let host = content.view
         webView.frame = host.bounds
         webView.autoresizingMask = [.width, .height]
@@ -588,6 +589,10 @@ enum SafariChrome {
         log.info("Safari's chrome is up, with our web view in its tab")
         return controller
     }
+
+    /// The tab the last `openWindow(embedding:addressText:)` put a web view into, so that the
+    /// navigation Safari's chrome drives can be routed to that web view (`SafariChromeHost`).
+    private(set) static weak var lastHostedTab: NSObject?
 
     /// The tab of the window just opened. Safari hands out its tabs per process, newest last.
     private static func firstTab(of windowClass: AnyObject) -> NSObject? {
