@@ -533,6 +533,57 @@ alongside the public `WKWebsiteDataStore(forIdentifier:)` already used, in the s
 frameworks is a separate decision with a different risk profile: it requires giving up the App
 Sandbox, and Apple can change or remove those frameworks in any update.
 
+### 9.1 Hosting Safari's own window: measured, and what each blocker was
+
+Safari's window class does run in a foreign process. On macOS 27.0.1 (Safari 26, framework build
+22625), from an ad-hoc signed probe (`scripts/safari_chrome_probe.swift`), `BrowserWindowController`
+was created, its window nib read, and the window shown on screen. Getting there meant four
+blockers, each named by its own crash:
+
+1. **A missing singleton.** `-windowDidLoad` sends new-window telemetry, which reads
+   `WBSFeatureAvailability` and asserts: *"sharedSearchEngineObserver" in
+   `+[WBSSearchEnginePreferenceObserver sharedObserver]`*. The frame under it in the trace names the
+   cure, `+setUpSharedObserverWithSearchProviderContext:`, and it accepts `nil` — no context object
+   is needed. In Safari this call comes from its app delegate.
+2. **Safari's preferences are unreadable.** Its frameworks read the `com.apple.Safari` domain,
+   which in a foreign process resolves to Safari's own container and is refused: *"accessing these
+   preferences requires user-preference-read or file-read-data sandbox access"*. Everything they
+   would have read comes back `nil`, and the first `-addAttribute:value:range:` with a `nil`
+   `NSColor` (the address bar's "Not Secure" badge) is turned into a crash by
+   `+[NSApplication _crashOnException:]`. `CFFIXED_USER_HOME` moves the domain into a directory of
+   ours (§9, and `--paths` confirms `NSHomeDirectory()`, Application Support and Caches all follow),
+   which is both the fix and the per-profile layout; a seeded `com.apple.Safari.plist` there is what
+   supplies the values rather than skipping them.
+3. **The main bundle is not Safari's.** Its chrome asks the main bundle for icons by name — CoreUI
+   says so: *"unable to find a bundle 'NSBundle </tmp>' with identifier '(null)'"* — so icons are
+   `nil` and an array built from one throws, in
+   `-[UnifiedField _assistantButtonIconForContentOption:withSparkle:]`. Falling back to the private
+   frameworks' own bundles in `+[NSImage imageNamed:]` was not enough for that button, which fetches
+   its icon another way; stubbing that one method cleared the address bar entirely.
+4. **Swift preconditions in features that need Safari's services.** Past layout,
+   `-windowDidLoad` calls `autoTabClusteringEnabledDidChange` →
+   `_setUpClusterManagerIfNeeded`, whose Swift code traps (SIGTRAP, `__swift__destructor` in the
+   frames). Stubbing that method got the window on screen.
+
+The working invocation, as a record of the minimum set:
+
+```
+CFFIXED_USER_HOME=<profile dir> ./sprobe \
+  --prepare \                      # +[WBSSearchEnginePreferenceObserver setUpSharedObserver…:nil]
+  --tolerate-nil-attributes \      # skip nil values in -addAttribute:value:range:
+  --bridge-images \                # +[NSImage imageNamed:] falls back to the Safari bundles
+  --stub image/UnifiedField/_assistantButtonIconForContentOption:withSparkle: \
+  --stub nil/BrowserWindowController/_setUpClusterManagerIfNeeded \
+  --try-init BrowserWindowController --show-window
+```
+
+Two things this does not tell us. The window was reached with telemetry and two features stubbed and
+`nil` attribute values dropped, so what it draws is Safari's chrome minus whatever those supplied;
+and the list is specific to this Safari build — each of the four is a private method or an
+undocumented singleton, and any macOS update can add to it. That is the cost the competitor pays
+with its own patch dylib and its `BB_FULLGRAPH_*` switches, and it is the reason items 1-3 of §9's
+"what is worth taking" do not depend on any of this.
+
 ## Sources
 
 Primary: Apple developer documentation and DTS answers linked above; WebKit source

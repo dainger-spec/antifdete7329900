@@ -11,6 +11,15 @@
 //   CFFIXED_USER_HOME=/tmp/pbprofile /tmp/sprobe --paths
 //   /tmp/sprobe --try-init <ClassName> [--load-view]
 //
+// Safari's own window on screen, in this process (the minimum set found on macOS 27.0.1 /
+// Safari 26; docs/SAFARI_PROCESS.md §9.1 says what each argument answers):
+//
+//   CFFIXED_USER_HOME=/tmp/pbprofile /tmp/sprobe --prepare --tolerate-nil-attributes \
+//     --bridge-images \
+//     --stub image/UnifiedField/_assistantButtonIconForContentOption:withSparkle: \
+//     --stub nil/BrowserWindowController/_setUpClusterManagerIfNeeded \
+//     --try-init BrowserWindowController --show-window
+//
 // --try-init is a separate run on purpose: a controller that needs Safari's own singletons can
 // abort the process, and that must not take the class listing down with it.
 
