@@ -19,6 +19,11 @@ MainActor.assumeIsolated {
         // The app icon's iconset, drawn from the Lumen mark (AppIcon.swift; scripts/build-app.sh).
         let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "AppIcon.iconset"
         exit(AppIcon.writeIconset(to: URL(fileURLWithPath: folder)) ? 0 : 1)
+    } else if arguments.contains("--safari-chrome") {
+        // Safari's own window hosted in this process, with one of our web views in its tab
+        // (SafariChrome.swift). Needs a build without the App Sandbox and with library validation
+        // off; it exits with a message when the frameworks cannot be loaded.
+        SafariChrome.startStandalone(arguments: arguments)
     } else if arguments.contains("--render-ui-snapshots") {
         // The app's screens with sample data, as PNG files for design review (UISnapshots.swift).
         UISnapshots.start(arguments: arguments)
