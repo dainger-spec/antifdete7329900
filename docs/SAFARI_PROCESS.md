@@ -425,6 +425,114 @@ not measured here; this project's own match with Safari was measured separately
 - Research hosts some subagents could not reach (eclecticlight.co, support.apple.com, webkit.org)
   were read through search excerpts; claims that rest on them are marked by their links.
 
+## 9. What a shipping competitor does: BlackBird 2.5.19 (measured)
+
+BlackBird (`cc.blckbrd.BlackBirdMac`, Team ID `DC2528FGSC`) is an anti-detect browser for macOS that
+looks, to a user, as if it opened Safari's own window per profile. It does not run Safari, and it does
+not run one of Safari's Apple-signed siblings (§1). It hosts **Safari's private UI frameworks inside
+its own process**, one such process per profile. Measured on macOS (Apple silicon) with the app
+running and one profile open: `pgrep`, `sudo launchctl procinfo`, `sudo lsof`, `ps -Eww`,
+`codesign -d --entitlements`, `nm -mu` and `strings` over the bundle.
+
+**One process per profile.** The manager process (`.../MacOS/BlackBird`, no arguments) spawns the same
+executable again per profile:
+
+```
+BlackBird --session-id=<profile UUID> --native-storage-proof=<base64 JSON> \
+          -AppleLanguages ("de-DE") -AppleLocale de-DE
+```
+
+Every WebKit helper of that profile reports `responsible pid` = the child and
+`responsible path = /Applications/BlackBird.app/Contents/MacOS/BlackBird`, so the `WebContent`,
+`Networking` and `GPU` processes seen while it runs are plain WKWebView helpers of the child, not
+Safari's. The base64 argument is a licence binding (`"purpose":
+"blackbird.native-profile-storage-binding"`, an account ID, a profile ID and a digest) and names the
+scheme `"construction": "safari-profile-v2"`; passing it in `argv` makes it readable by any process of
+the user.
+
+**Why the separate process.** It buys what a single process cannot: `AppleLanguages`, `AppleLocale`
+and `TZ` are read once per process, by WebKit for `Accept-Language`, `navigator.language(s)` and
+`Intl`/`Date` — the limitation this project documents in `HostIdentity.swift` (`WebContentLanguage`),
+where the first profile launched decides for the whole run. A process per profile makes each profile's
+language and time zone native rather than a script override.
+
+**Safari's own UI, by `dlopen`.** The profile process has
+`/System/Library/PrivateFrameworks/Safari.framework` and `SafariShared.framework` open, down to
+Safari's nibs (`StartPageCollectionSectionTitleView.nib`, `StartPageEmptyFolderItem.nib`,
+`StartPagePasswordBreachWarningCollectionViewItem.nib`) and Safari's localized strings for the
+profile's language (`de.lproj/Localizable.strings`), plus `PasswordManagerUI.framework`. The binaries
+carry `" SafariShared not loaded?"` as a diagnostic, so this is the normal path, not a fallback.
+
+**Private WebKit API.** `strings` over the main binary and `BBNativeNoiseSafari.framework` shows
+`_WKWebsiteDataStoreConfiguration`, `_WKProcessPoolConfiguration`, `setInjectedBundleURL:`,
+`setInjectedBundlePath:`, `injectedBundleInitializationUserData`, `_WKInspector`,
+`_WKIconLoadingDelegate`, `_WKResourceLoadInfo`, and a path to Safari's injected bundle
+(`Safari.framework/.../PlugIns/Safari.wkbundle`). None of these appear in `nm -mu`: they are loaded by
+name at runtime. **The injected bundle was not in use when measured** — `lsof` over the profile's
+`WebContent` processes shows no `.wkbundle` and nothing of BlackBird's mapped into them, so the web
+processes run stock WebKit.
+
+**Profile state in Safari's own file formats.** Under
+`~/Library/Application Support/BlackBird/SafariFullGraph/<profile UUID>/`: `Bookmarks.plist`,
+`History/History.db`, and a `PrivateSafariState/` directory holding `PerSitePreferences.db`,
+`TabSnapshots/Metadata.db`, `BlockedBannerHighlights.db`, `Embeddings.db`,
+`IgnoredSiriSuggestedSites.db`, `UserDefinedContentBlockers.db` — the databases Safari keeps in its
+container, written per profile by Safari's frameworks pointed at that directory. Favicon and link
+metadata caches (`Cache/favicons.db`, `Cache/LPLinkMetadata.db`) sit alongside.
+
+**Everything is configured by environment variable** on the child process (`ps -Eww`), which is also
+how the feature set reads:
+
+```
+BB_WK_DATASTORE_MODE=safari-profile-v2     BB_WK_DATASTORE_MODE_SOURCE=default
+BB_SAFARI_CHROME=1                         BB_FULL_SAFARI_APPGRAPH=1
+BB_FULLGRAPH_APPLE_HISTORY_VIEW=0           BB_FULLGRAPH_BLACKBIRD_HISTORY_WINDOW=1
+BB_FULLGRAPH_KEEP_APPLE_HISTORY_MENU=1      BB_FULLGRAPH_ALLOW_NATIVE_BOOKMARKS_VISUALS=1
+BB_FULLGRAPH_ALLOW_NATIVE_SIDEBAR_UPDATE=1  BB_FULLGRAPH_FAST_STARTUP=1
+BB_OVERRIDE_LANGUAGES=de-DE                 BB_OVERRIDE_TIMEZONE=Europe/Berlin
+BB_APP_LANGUAGE=1                           BB_UPDATE_USER_AGENT_AUTOMATICALLY=1
+BB_NATIVE_AUTOFILL_ENABLED=1                BB_SEARCH_ENGINE=google
+BB_ALLOW_QUIC=1                             BB_QUIC_FULL_TRANSPORT=0
+BB_STORE_BROWSER_CACHE=1                    BB_SHOW_IP_CHANGE_WARNING=0
+BB_RANDOMIZE_NEW_PROFILE_WINDOW_SIZE=1
+DYLD_INSERT_LIBRARIES=/Applications/BlackBird.app/Contents/Frameworks/SafariZoomFix.dylib
+```
+
+So: Safari's chrome with their own history window over it, per-profile language and time zone at the
+process level, a per-profile randomized window size, and a dylib of their own inserted into each
+profile process to patch Safari's zoom behaviour.
+
+**No special entitlements.** The signature carries only Developer ID keys, and notably **no
+`com.apple.security.app-sandbox`**:
+
+```
+com.apple.security.cs.disable-library-validation       com.apple.security.cs.allow-jit
+com.apple.security.cs.allow-dyld-environment-variables com.apple.security.cs.allow-unsigned-executable-memory
+com.apple.developer.authentication-services.autofill-credential-provider
+com.apple.developer.system-extension.install           com.apple.security.automation.apple-events
+com.apple.security.network.client / .server            com.apple.security.device.camera / .audio-input / .microphone
+com.apple.security.personal-information.location       keychain-access-groups: <team>.cc.blckbrd.BlackBirdMac,
+                                                                               <team>.cc.blckbrd.vault.autofill
+```
+
+Its provisioning profile ("BlackBird Host") adds the NetworkExtension provider types, including
+`packet-tunnel-provider-systemextension` — the same mechanism as this project's
+`PacketTunnelExtension`. Nothing in the list is Apple-granted private entitlement: the whole of the
+above follows from **not being sandboxed** plus `disable-library-validation` and
+`allow-dyld-environment-variables`, which is what lets an unsandboxed process `dlopen` the private
+Safari frameworks and insert its own dylib. This project signs its default build **with** App Sandbox
+(`Resources/PrivacyBrowser.entitlements`) and treats `PrivacyBrowser-NoSandbox.entitlements` as a
+debugging build, so this route is closed in the shipping configuration as it stands.
+
+**What is worth taking, in order.** (1) One process per profile, for native per-profile
+`AppleLanguages`/`AppleLocale`/`TZ` — the only item here that removes a limitation this project has
+documented rather than adding surface. Keys must not travel in `argv`, where BlackBird puts its
+licence blob. (2) `_WKWebsiteDataStoreConfiguration` for explicit per-profile WebKit directories,
+alongside the public `WKWebsiteDataStore(forIdentifier:)` already used, in the style of
+`WebKitPreferences.setBool`. (3) Per-profile window-size randomization. Hosting Safari's private UI
+frameworks is a separate decision with a different risk profile: it requires giving up the App
+Sandbox, and Apple can change or remove those frameworks in any update.
+
 ## Sources
 
 Primary: Apple developer documentation and DTS answers linked above; WebKit source
