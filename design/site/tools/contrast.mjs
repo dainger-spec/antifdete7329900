@@ -11,8 +11,12 @@ const lum = (rgb) => {
 };
 const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
 
+// The page is #060709 (the glass-and-code layer, a tone deeper than Theme's #0B0C0F); panes and glass are
+// white at 5 % and 8.5 % over it, at their lightest (the top of the gradient).
+const PAGE = hex('#060709');
 const BG = {
-  backdrop: hex('#0B0C0F'), surface: hex('#161920'), card: hex('#1B1F27'), raised: hex('#1E222A'), 'raised-inset': hex('#252A33'), field: hex('#0F1115'),
+  backdrop: PAGE, pane: over([255, 255, 255], 0.05, PAGE), glass: over([255, 255, 255], 0.085, PAGE),
+  surface: hex('#161920'), card: hex('#1B1F27'), raised: hex('#1E222A'), 'raised-inset': hex('#252A33'), field: hex('#0F1115'),
 };
 const T = {
   'text-primary': hex('#ECEEF2'), 'text-secondary': hex('#A2A9B6'), 'text-tertiary': hex('#8A93A3'), accent: hex('#6F8FEA'),
@@ -33,7 +37,10 @@ for (const b of ['backdrop', 'surface']) {
   add(T.warning, 'warning', BG[b], b, 3, 'глиф «не измерено» (не текст)');
 }
 // Buttons and tinted labels
-add(hex('#121419'), 'primary-text', hex('#E6E8ED'), 'primary-fill', 4.5, 'основная кнопка');
+add(hex('#121419'), 'primary-text', hex('#E6E8ED'), 'primary-fill', 4.5, 'основная кнопка внутри приложения (рисунки)');
+add(hex('#0A0B0E'), '#0A0B0E', hex('#F4F5F8'), '#F4F5F8', 4.5, 'основная кнопка сайта (капсула)');
+add(hex('#A9BBEE'), '#A9BBEE', over([255, 255, 255], 0.05, PAGE), 'pane', 4.5, '«как у Safari» в плитке');
+add(hex('#BFCDF6'), '#BFCDF6', over([111, 143, 234], 0.14, over([255, 255, 255], 0.05, PAGE)), 'accent 14 % на pane', 4.5, '«IP скрыт» в плитке');
 add(hex('#FFFFFF'), 'white', hex('#4469D6'), 'accent-fill-strong', 4.5, 'включённый переключатель, флажок');
 add(hex('#AFC2F5'), '#AFC2F5', over([111, 143, 234], 0.14, BG.surface), 'accent-tint на surface', 4.5, 'метка «рекомендуем», «через прокси»');
 add(hex('#8FDDB6'), '#8FDDB6', over([76, 195, 138], 0.14, BG.surface), 'running-tint на surface', 4.5, 'метка «активна»');

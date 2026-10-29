@@ -4,7 +4,7 @@ import { icon } from '../../lib/kit.mjs';
 export default function legal(c, { lang, slug, state }) {
   const doc = c[state];
   const tabs = `<nav class="seg" aria-label="${esc(c.title)}" style="margin-bottom:28px">${c.tabs.map(([href, t]) => `<a href="${href}"${href === `${slug}.html` ? ' aria-current="page"' : ''}>${esc(t)}</a>`).join('')}</nav>`;
-  const hero = `<section class="page-hero" style="padding-bottom:40px"><div class="container">
+  const hero = `<section class="page-hero" style="padding-bottom:40px"><canvas class="codetex" data-codeart="texture" aria-hidden="true"></canvas><div class="container">
     ${tabs}
     <h1 class="h1">${inline(doc.title, lang)}</h1>
     <p class="lead">${inline(doc.lead, lang)}</p>

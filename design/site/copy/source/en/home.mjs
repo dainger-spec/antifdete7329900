@@ -1,4 +1,4 @@
-// Home — short, only what matters: the first screen, five animated tiles (what we are good at), three
+// Home — short, only what matters: the first screen (the mark drawn in code, glass), five animated tiles (what we are good at), three
 // verification numbers, a call to try it. The detail is on Features. Numbers from copy/facts.mjs; the tiles'
 // values (4 of 12, 84 cookies) are the app's samples (UISnapshots.swift). Periods and prices are the owner's.
 export default {
@@ -12,14 +12,11 @@ export default {
     secondary: 'Features',
     meta: ['{{tbd:q3:7 days free}}', 'No card needed', 'macOS 14 or later'],
   },
-  globe: {
-    label: 'A planet cut by a seam: profiles go online from different countries and never mix',
-    pins: [
-      { name: 'Store', code: 'DE', lat: 52.52, lon: 13.40 },
-      { name: 'Ads', code: 'US', lat: 40.71, lon: -74.0 },
-      { name: 'Client', code: 'SE', lat: 59.33, lon: 18.07, side: 'l' },
-      { name: 'QA', code: 'JP', lat: 35.68, lon: 139.69 },
-      { name: 'Sales', code: 'BR', lat: -23.55, lon: -46.63 },
+  art: {
+    label: 'The Lumen mark drawn in code: two halves, two profiles with data of their own, and the seam between them',
+    chips: [
+      { name: 'Store', code: 'DE', id: 'de-DE · Europe/Berlin' },
+      { name: 'Ads', code: 'US', id: 'en-US · America/New_York' },
     ],
   },
   bentoTitle: 'Why {{name}}',

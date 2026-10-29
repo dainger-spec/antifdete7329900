@@ -10,9 +10,9 @@ Search description: Lumen pricing: every protection in every plan; plans differ 
 
 Pricing
 
-# Every protection, in every plan
+# Simple plans, every feature in each
 
-Plans differ by how many profiles and Macs you get. Real Safari, encryption, a proxy with no way around it, warm-up and sync are in all of them.
+Plans differ only by how many profiles and Macs you get. Start with a free trial.
 
 Monthly
 
@@ -85,6 +85,11 @@ Macs
 Seats
 
 ⟦q2: 5⟧
+
+- ⟦q3: 7 days free⟧
+- No card needed
+- Money back within ⟦q10: 14 days⟧
+- Card or crypto
 
 ## In every plan
 

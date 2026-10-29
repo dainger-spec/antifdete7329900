@@ -3,7 +3,7 @@ import { icon } from '../../lib/kit.mjs';
 
 export default function blog(c, { lang }) {
   const l = c.list;
-  const hero = `<section class="page-hero"><div class="container">
+  const hero = `<section class="page-hero"><canvas class="codetex" data-codeart="texture" aria-hidden="true"></canvas><div class="container">
     <p class="eyebrow">${inline(l.eyebrow, lang)}</p>
     <h1 class="h1">${inline(l.title, lang)}</h1>
     <p class="lead">${inline(l.lead, lang)}</p>

@@ -4,266 +4,154 @@
 
 Window title: Lumen — a macOS browser where every profile is real Safari
 
-Search description: Lumen is a macOS browser where every profile is real Safari in its own process: its own cookies, language, time zone and a proxy it never goes around. What it stores is encrypted.
+Search description: Lumen is a multi-account browser for Mac. Every account gets its own Safari: its own cookies, IP, language and time zone. A proxy that never leaks, warm-up and encryption.
 
 ---
 
-A browser with profiles, for macOS
+A multi-account browser for Mac
 
-# Real Safari for every profile
+# Every account gets its own Safari
 
-Every profile is a process of its own, running Safari’s interface on the system WebKit — not Chromium behind a borrowed User-Agent. Its own cookies, language, time zone and a proxy with no direct connections. Everything on disk is encrypted with your master password.
+Its own cookies, IP, language and time zone for every profile. No signing in and out, and no leaks.
 
-[Download for Mac]
+[Try it free]
 
-[How we verify it]
+[Features]
 
-macOS 14 Sonoma or later · Free trial — ⟦q3: 7 days⟧ · Pay by card or in crypto
+⟦q3: 7 days free⟧ No card needed macOS 14 or later
 
-Profiles
+Store
 
-- Name — Status — Exit
-- Northwind — Warming up 4/12 · cookies: 84 — Germany
-- Research — Stopped — Netherlands
-- Personal — Running — Direct
-- Shopping — Stopped — Direct
-- Banking — Stopped — `10.20.0.2:3128`
+de-DE · Europe/Berlin
 
-The network of “Northwind”
+Ads
 
-through the proxy
+en-US · America/New_York
 
-- Profile process — Northwind — its own home, language and time zone
+The Lumen mark drawn in code: two halves, two profiles with data of their own, and the seam between them
 
-- Proxy — SOCKS5 — proxy.northwind.example:1080
+## Why Lumen
 
-- Sites see — Germany — the proxy’s address
+### It is real Safari
 
-- Direct connection — closed
+The engine, the network handshake and the headers are those of Safari on your Mac.
 
-Time zone: Europe/Berlin · Language: de-DE · Appears as: Mac · Safari 26
+WebKit engine
 
-Warming up in a hidden window
+as in Safari
 
-Page 4 of 12
+TLS handshake
+
+as in Safari
+
+HTTP/2
+
+as in Safari
+
+Header order
+
+as in Safari
+
+Canvas and WebGL
+
+as in Safari
+
+Fonts
+
+as in Safari
+
+448 signals compared with Safari on every build
+
+### A proxy that never leaks
+
+Proxy down, and the profile does not go online directly. Your IP stays hidden.
+
+Ads
+
+Proxy
+
+down
+
+Site
+
+Direct — closed
+
+IP hidden
+
+### Accounts never mix
+
+Its own cookies, passwords and history for every profile. And its own process.
+
+Store
+
+cookies · passwords · history
+
+cookies · passwords · history
+
+Ads
+
+### Warm-up runs itself
+
+A profile browses its country’s sites in a hidden window and collects cookies.
 
 84
 
-cookies collected
+cookies
 
-google.de · spiegel.de · zeit.de · idealo.de · otto.de · chefkoch.de
+Page 4 of 12
 
-No window appears — carry on working
+google.se
 
-Shown with the app’s own sample data: the Northwind profile, with a proxy in Germany.
+aftonbladet.se
 
-[Replay]
+svt.se
 
-## Who it’s for
+dn.se
 
-For anyone who keeps accounts and roles apart: no signing out and in, no shared cookies, no request going around the proxy.
+expressen.se
 
-### Teams and agencies
+blocket.se
 
-Each client’s accounts in a profile of their own, with their own cookies, passwords and history. Hand a profile to a colleague as a file under a password of its own.
+### Not even we can read it
 
-### Regions and localisation
+Everything on disk is encrypted with a key from your master password.
 
-A profile lives in the time zone and language of its proxy’s country, so sites open the way people there see them.
+Passwords
 
-### Development and testing
+••••••••••••
 
-Your site in real Safari, from the right country, in the right language, with clean cookies — one profile per scenario.
+Cookies
 
-### Privacy
+••••••••••••
 
-Personal, work and side projects never mix. A stopped profile is encrypted; without the master password it does not open.
+History
 
-## What makes Lumen different
+••••••••••••
 
-The product is these decisions. Each is explained in detail on the features page.
+Bookmarks
 
-All features
+••••••••••••
 
-It is real Safari Safari’s interface and the system WebKit, inside the Lumen process. Sites see Safari on a Mac because that is what it is.
-
-A process per profile Home, language and time zone are given to the process when it starts — not painted over the page by a script. The page and its workers see the same.
-
-Encrypted on disk Argon2id and AES-256-GCM, with the key derived from your master password. A profile’s data is decrypted only while it runs.
-
-A proxy with no way around it A profile with a proxy never falls back to a direct connection. If the proxy is down, the page does not open — it does not show your address.
-
-Measured, not claimed Every build compares a profile with real Safari on the same Mac: 448 page signals, the request headers, TLS and HTTP/2.
-
-No noise Nothing random in canvas, WebGL or fonts: added noise is the first thing fingerprint tests find.
-
-Profile warm-up A profile browses on its own in a hidden window — by its proxy’s country or by interest, with a queue, a schedule and a cookie count.
-
-Your data, as in Safari Cookie import, password AutoFill, history and bookmarks — separate in every profile. Sync between Macs, end-to-end encrypted.
-
-How we verify
-
-## We measure instead of promising
-
-Every build runs on a Mac with real Safari. The profile and Safari open the same pages, and separate checks look for any request that goes around the proxy.
+AES-256-GCM
 
 448
 
-page signals compared with Safari
-
-434 identical; the 14 differences are explained, and the list is public
+signals compared with Safari
 
 31/31
 
-request headers in the same set and order
-
-navigation, fetch and XHR
-
-15/15
-
-TLS and HTTP/2 values identical
-
-JA3, JA4, HTTP/2 SETTINGS, pseudo-header order
+headers as in Safari
 
 0
 
 packets around the proxy
 
-out of 2,410 captured with the process that sent each
+How we verify
 
-CI runs of 29 October 2026 · macOS 26.6.2 · Safari 26.6.2
+## Try Lumen free
 
-What is measured, and how
-
-Why no noise
-
-## Noise gives you away. A match does not
-
-Many multi-account browsers add random noise to canvas, WebGL and fonts. It looks like protection, and it works against you.
-
-### Noise contradicts everything else
-
-A faked canvas does not agree with WebGL, the fonts or what workers see. Fingerprint tests look for exactly these mismatches — and flag the forgery.
-
-### Noise never reaches the server
-
-A script in the page cannot change the TLS handshake, HTTP/2 or the order of headers. A service sees those before the page — and a profile’s are Safari’s.
-
-### A match can be checked
-
-A profile gives what Safari gives on this Mac: the same canvas, byte for byte. That is compared on every build.
-
-Article: why a profile has no noise
-
-With noise
-
-Safari on this Mac
-
-fingerprint S
-
-Profile, launch 1
-
-fingerprint A
-
-Profile, launch 2
-
-fingerprint B
-
-The profile looks neither like Safari nor like itself yesterday.
-
-Lumen
-
-Safari on this Mac
-
-fingerprint S
-
-Profile, launch 1
-
-fingerprint S
-
-Profile, launch 2
-
-fingerprint S
-
-The profile is Safari on this Mac. What tells profiles apart is their storage, network, language and time zone.
-
-Warm-up
-
-## A profile builds its history while you work
-
-A robot visits sites in a hidden window of the profile — with its proxy, cookies and fingerprint. No window appears, and whatever the sites leave stays with the profile.
-
-- Ready-made lists: “An ordinary day”, “Short”, by interest and for 26 countries
-- Put together for you: the sites of the proxy’s country lead and come twice as often
-- How thoroughly: “Quick” — 4–12 s per page, “Normal” — 10–35 s, “Deep” — 25–90 s with one link followed
-- A queue of several profiles, and repeats on a schedule
-- A report: how many cookies were collected, and on which sites
-- Nothing is typed, submitted or bought
-
-More about warm-up
-
-Warm Up — Northwind
-
-Ready-made list
-
-Put together for me
-
-My own list
-
-Proxy exits in: Germany
-
-The sites of the proxy’s country lead and come twice as often as the rest, in a fresh order every run.
-
-How thoroughly
-
-Quick
-
-Normal
-
-Deep
-
-10–35 s per page, scrolling: as when you read it.
-
-Repeat on a schedule
-
-Page 4 of 12
-
-84
-
-cookies collected
-
-The warm-up runs in a hidden window of the profile: nothing opens in front of you.
-
-[Stop]
-
-Your data
-
-## You hold the key. The server holds ciphertext
-
-The encryption key is derived from your master password and never leaves your Mac. The sync server keeps encrypted blocks it cannot read.
-
-### What the server knows
-
-- **Your email** — if you sign in with one; with a licence key, not even that
-- **The IP address** of your requests to it
-- **How many devices** the account has
-- **The sizes and times** of changes to encrypted blocks
-
-### What it does not and cannot know
-
-- Profile names, or exactly how many there are
-- Proxies, passwords, cookies
-- History, bookmarks and the sites you visit
-- Your master password or keys
-
-A forgotten master password cannot be recovered — not by us, not by anyone. That is the other side of us being unable to decrypt your data.
-
-Privacy policy
-
-## Try it on your Mac
-
-Free trial — ⟦q3: 7 days, no card needed⟧.
+⟦q3: 7 days⟧, every feature, no card needed.
 
 [Download for Mac]
 
-[See pricing]
+[Pricing]

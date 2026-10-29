@@ -1,8 +1,10 @@
 // Lumen website prototype — the little JavaScript the pages use. Everything works without it:
-// the content is in the HTML, menus and FAQ are <details>, the billing switch is CSS, and the hero
-// demonstration shows its final state. This file only adds motion and conveniences:
+// the content is in the HTML, menus and FAQ are <details>, the billing switch and the proxy demo are
+// CSS, and every picture shows its final state. This file only adds motion and conveniences:
 //   - reveal on scroll (once, 240 ms), never with Reduce Motion;
-//   - the hero demonstration: a profile launched through its proxy, then warmed up (plays once);
+//   - home: the mark drawn in code (comes up once, then rests; a pointer is a soft light over it),
+//     the tiles (each plays once when first seen, again on hover) and the three numbers (count once);
+//   - features: the proxy demo switches itself off once when first seen;
 //   - the local navigation's active section (features, docs);
 //   - copy buttons on code;
 //   - the prototype's strip (decision marks, Reduce Motion stand-in).
@@ -95,13 +97,7 @@
     targets.forEach((t) => io.observe(t));
   });
 
-  // MARK: Home: the scene comes together once
-  document.querySelectorAll('.stage').forEach((stage) => {
-    if (shot || reduced()) { stage.classList.add('in'); return; }
-    requestAnimationFrame(() => requestAnimationFrame(() => stage.classList.add('in')));
-  });
-
-  // MARK: Home: "proxy down, IP hidden" — switches itself once when first seen, then waits for clicks
+  // MARK: Features: "proxy down, IP hidden" — switches itself once when first seen, then waits for clicks
   document.querySelectorAll('[data-pdemo]').forEach((demo) => {
     const box = demo.querySelector('#pd-off');
     if (!box) return;
@@ -116,157 +112,241 @@
     io.observe(demo);
   });
 
-  // MARK: Home: the warm-up card counts its cookies once, when first seen
-  document.querySelectorAll('[data-warm]').forEach((card) => {
-    const n = card.querySelector('[data-count-to]');
-    const bar = card.querySelector('.wbar i');
-    if (!n || shot || reduced() || !('IntersectionObserver' in window)) return;
-    const to = +n.getAttribute('data-count-to');
-    const width = bar ? bar.style.width : '';
-    n.textContent = '0';
-    if (bar) bar.style.width = '0%';
-    const io = new IntersectionObserver((entries) => {
-      if (!entries.some((e) => e.isIntersecting)) return;
-      io.disconnect();
-      if (bar) bar.style.width = width;
-      const t0 = performance.now(), dur = 1400;
-      const tick = (t) => {
-        const p = Math.min(1, (t - t0) / dur);
-        n.textContent = String(Math.round(to * (1 - Math.pow(1 - p, 3))));
-        if (p < 1) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    }, { threshold: 0.5 });
-    io.observe(card);
-  });
+  // MARK: Code art: the mark drawn in characters (home)
+  // The split disc of the mark (LumenMarkGeometry: radius 19, gap 3, slide 6) set in a monospace grid.
+  // Each half is a profile: its own binary and a few of its own values (language, time zone), and the
+  // seam between them is a line of light. "field": the first screen, a faint code texture with the figure
+  // in [data-art]; "mark": the figure alone (the last call). On first sight the seam lights, the halves
+  // part and the code comes up from the seam outwards, once (about 1.4 s); after that nothing moves by
+  // itself. A mouse pointer is a soft light over the code. Reduce Motion and shots: drawn once, finished,
+  // no light. Without JavaScript the plain mark stands in (.art-fallback). "texture": the same faint
+  // code behind a page's title, still, stronger to the right so the words stay clear.
+  const SEAM_LEN = Math.hypot(1, 3), SD = [1 / SEAM_LEN, -3 / SEAM_LEN], SN = [3 / SEAM_LEN, 1 / SEAM_LEN];
+  const GAP = 3 / 19, SLIDE = 6 / 19;
+  const LIGHT = (() => { const v = [-0.42, -0.58, 0.7], l = Math.hypot(v[0], v[1], v[2]); return v.map((x) => x / l); })();
+  const CODE = [
+    'profile.store { exit: "DE"; lang: "de-DE"; tz: "Europe/Berlin"; proxy: socks5 }',
+    'profile.ads { exit: "US"; lang: "en-US"; tz: "America/New_York"; proxy: https }',
+    'cookies(profile) -> own; passwords(profile) -> own; history(profile) -> own',
+    'webkit.process(per: profile); window = safari',
+    'route(profile) = proxy; direct = closed; udp = closed; webrtc = closed',
+    'tls.handshake == safari; headers.order == safari; http2 == safari',
+    'vault.seal(aes-256-gcm, key: argon2id(master))',
+    'warmup(profile, sites: country(proxy)) -> cookies',
+  ];
+  // Each profile's own values, set into its half: [row, first column] in radii from the half's centre.
+  const TOKENS = [
+    [[-0.42, -0.66, 'de-DE'], [-0.08, -0.84, 'Europe/Berlin'], [0.3, -0.72, 'cookies'], [0.62, -0.46, 'store']],
+    [[-0.58, 0.2, 'en-US'], [-0.24, 0.1, 'America/New_York'], [0.14, 0.08, 'cookies'], [0.5, 0.06, 'ads']],
+  ];
+  const HALF_RGB = ['226,231,240', '196,211,255'];
+  const EDGE_RGB = '160,184,252';
+  const hash = (a, b, c) => { let h = (a * 73856093) ^ (b * 19349663) ^ (c * 83492791); h = Math.imul(h ^ (h >>> 13), 1274126177); return (h ^ (h >>> 16)) >>> 0; };
+  const smooth = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+  const easeOut = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+  const easeInOut = (x) => { x = Math.min(1, Math.max(0, x)); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+  const fieldChar = (i, j) => { const line = CODE[j % CODE.length] + '    '; return line[(i + j * 23) % line.length]; };
 
-  // MARK: Home v3: the split planet
-  // A dotted globe (land points from world.js) in orthographic projection, cut by the mark's steep seam
-  // (one across for three up); on first sight its halves slide apart along the seam to the mark's
-  // proportions (gap 3, slide 6 of radius 19), then it turns slowly while it is on screen. Profiles' exit
-  // countries carry chips. Reduce Motion: drawn once, split, still.
-  document.querySelectorAll('[data-globe]').forEach((canvas) => {
-    const raw = window.LUMEN_WORLD;
-    if (!raw || !canvas.getContext) return;
-    const wrap = canvas.closest('[data-globe-wrap]');
-    const chips = Array.from(wrap.querySelectorAll('.gchip'));
-    const bin = atob(raw);
-    const count = bin.length / 4;
-    const P = new Float32Array(count * 3);
-    const i16 = (k) => { const v = bin.charCodeAt(k) | (bin.charCodeAt(k + 1) << 8); return v & 0x8000 ? v - 0x10000 : v; };
-    const toVec = (latDeg, lonDeg, out, o) => {
-      const lat = latDeg * Math.PI / 180, lon = lonDeg * Math.PI / 180;
-      out[o] = Math.cos(lat) * Math.sin(lon); out[o + 1] = Math.sin(lat); out[o + 2] = Math.cos(lat) * Math.cos(lon);
-    };
-    for (let i = 0; i < count; i++) toVec(i16(i * 4) / 100, i16(i * 4 + 2) / 100, P, i * 3);
-    const pins = chips.map((c) => { const v = new Float32Array(3); toVec(+c.dataset.lat, +c.dataset.lon, v, 0); return v; });
+  document.querySelectorAll('canvas[data-codeart]').forEach((canvas) => {
+    const kind = canvas.dataset.codeart;
+    const host = canvas.parentElement;
+    const anchor = kind === 'field' ? host.querySelector('[data-art]') : host;
+    const texture = kind === 'texture';
+    if (!anchor) return;
     const ctx = canvas.getContext('2d');
-    const SL = Math.hypot(1, 3), D = { x: 1 / SL, y: -3 / SL }, N = { x: -D.y, y: D.x };
-    const TILT = 0.36, LAMBDA0 = 25 * Math.PI / 180, SPEED = 0.03; // radians, radians per second
-    let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0, lambda = LAMBDA0, split = 0, t0 = 0, last = 0, raf = 0, running = false;
     const still = () => shot || reduced();
+    let FS = 12, LH = 15, FONT = '';
+    let W = 0, H = 0, cw = 7, cx = 0, cy = 0, R = 0, quiet = null, field = null, tok = [new Map(), new Map()];
+    let fig = null, fctx = null, fx = 0, fy = 0, fbox = 0;
+    const glow = 'filter' in ctx;
+    let t0 = 0, started = false, done = false, raf = 0;
+    const light = { x: 0, y: 0, tx: 0, ty: 0, a: 0, ta: 0 };
+    const LR = 190;
 
     function layout() {
       const r = canvas.getBoundingClientRect();
-      dpr = Math.min(2, window.devicePixelRatio || 1);
       W = r.width; H = r.height;
+      if (!W || !H) return false;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
-      const wide = W >= 900;
-      cx = wide ? W * 0.735 : W / 2;
-      cy = wide ? H * 0.5 : H * 0.5;
-      R = wide ? Math.min(H * 0.40, W * 0.255) : Math.min(W * 0.40, H * 0.40);
-    }
-
-    function project(v, out) {
-      const cl = Math.cos(lambda), sl = Math.sin(lambda), ct = Math.cos(TILT), st = Math.sin(TILT);
-      const x1 = v[0] * cl + v[2] * sl, z1 = -v[0] * sl + v[2] * cl, y1 = v[1];
-      const y2 = y1 * ct - z1 * st, z2 = y1 * st + z1 * ct;
-      out.x = cx + R * x1; out.y = cy - R * y2; out.z = z2;
-      return out;
-    }
-
-    const BUCKETS = 7;
-    function draw(elapsed) {
-      const gap = (R * 3 / 19) * 0.85 * split, slide = (R * 6 / 19) * 0.85 * split;
+      if (texture) {
+        FS = 12; LH = 15; FONT = `${FS}px ui-monospace, "SF Mono", Menlo, "DejaVu Sans Mono", monospace`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.font = FONT; ctx.textBaseline = 'middle';
+        cw = ctx.measureText('0').width;
+        field = drawField(dpr);
+        return true;
+      }
+      const a = anchor.getBoundingClientRect();
+      cx = a.left - r.left + a.width / 2; cy = a.top - r.top + a.height / 2;
+      R = Math.min(a.width, a.height) / 2 / 1.2;
+      // The grid gets finer as the figure gets smaller, so the disc keeps its shape on a phone.
+      FS = R > 200 ? 12 : R > 120 ? 10 : 8.5; LH = Math.round(FS * 1.24 * 2) / 2;
+      FONT = `${FS}px ui-monospace, "SF Mono", Menlo, "DejaVu Sans Mono", monospace`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, W, H);
-      // A faint haze behind the planet.
-      const haze = ctx.createRadialGradient(cx, cy, R * 0.15, cx, cy, R * 1.5);
-      haze.addColorStop(0, 'rgba(94,132,235,0.11)'); haze.addColorStop(1, 'rgba(94,132,235,0)');
-      ctx.fillStyle = haze; ctx.fillRect(0, 0, W, H);
-      // The two halves' outlines and bodies, as in the mark.
-      for (const side of [1, -1]) {
-        const ox = side * slide / 2 * D.x, oy = side * slide / 2 * D.y;
-        const h = side * gap / 2, half = Math.sqrt(Math.max(0, R * R - h * h));
-        const ax = cx + ox + N.x * h - D.x * half, ay = cy + oy + N.y * h - D.y * half;
-        const bx = cx + ox + N.x * h + D.x * half, by = cy + oy + N.y * h + D.y * half;
-        const angA = Math.atan2(ay - cy - oy, ax - cx - ox), angB = Math.atan2(by - cy - oy, bx - cx - ox);
-        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
-        ctx.arc(cx + ox, cy + oy, R, angB, angA, side < 0);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(111,143,234,0.035)'; ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.09)'; ctx.lineWidth = 1; ctx.stroke();
-      }
-      // Land.
-      const paths = Array.from({ length: BUCKETS }, () => new Path2D());
-      const q = { x: 0, y: 0, z: 0 };
-      for (let i = 0; i < count; i++) {
-        project([P[i * 3], P[i * 3 + 1], P[i * 3 + 2]], q);
-        if (q.z <= 0.02) continue;
-        const dist = (q.x - cx) * N.x + (q.y - cy) * N.y;
-        if (Math.abs(dist) < gap / 2) continue;
-        const side = dist >= 0 ? 1 : -1;
-        const x = q.x + side * slide / 2 * D.x, y = q.y + side * slide / 2 * D.y;
-        const b = Math.min(BUCKETS - 1, Math.floor(q.z * BUCKETS));
-        const r = 0.65 + q.z * 1.0;
-        paths[b].moveTo(x + r, y); paths[b].arc(x, y, r, 0, Math.PI * 2);
-      }
-      for (let b = 0; b < BUCKETS; b++) {
-        ctx.fillStyle = `rgba(124,152,236,${(0.16 + 0.7 * (b + 0.5) / BUCKETS).toFixed(3)})`;
-        ctx.fill(paths[b]);
-      }
-      // Exit countries.
-      chips.forEach((chip, k) => {
-        project(pins[k], q);
-        const dist = (q.x - cx) * N.x + (q.y - cy) * N.y, side = dist >= 0 ? 1 : -1;
-        const x = q.x + side * slide / 2 * D.x, y = q.y + side * slide / 2 * D.y;
-        const face = Math.max(0, Math.min(1, (q.z - 0.08) / 0.25));
-        const appear = still() ? 1 : Math.max(0, Math.min(1, (elapsed - 1000 - k * 140) / 240));
-        const a = face * appear;
-        if (a > 0.01) {
-          ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.strokeStyle = `rgba(169,189,245,${0.4 * a})`; ctx.lineWidth = 1.2; ctx.stroke();
-          ctx.beginPath(); ctx.arc(x, y, 3.2, 0, Math.PI * 2); ctx.fillStyle = `rgba(214,224,252,${a})`; ctx.fill();
+      ctx.font = FONT; ctx.textBaseline = 'middle';
+      cw = ctx.measureText('0').width;
+      fbox = Math.ceil(2.7 * R); fx = cx - fbox / 2; fy = cy - fbox / 2;
+      fig = document.createElement('canvas'); fig.width = Math.ceil(fbox * dpr); fig.height = Math.ceil(fbox * dpr);
+      fctx = fig.getContext('2d'); fctx.setTransform(dpr, 0, 0, dpr, 0, 0); fctx.font = FONT; fctx.textBaseline = 'middle';
+      const text = kind === 'field' && host.querySelector('.hero4-text');
+      const tr = text && text.getBoundingClientRect();
+      quiet = tr ? { l: tr.left - r.left, t: tr.top - r.top, r: tr.right - r.left, b: tr.bottom - r.top } : null;
+      tok = kind === 'field' && R > 200 ? TOKENS.map((list) => {
+        const m = new Map();
+        list.forEach(([v, u, s]) => {
+          const r0 = Math.round(v * R / LH), c0 = Math.round(u * R / cw);
+          m.set(r0 * 10000 + c0 - 1, ' '); m.set(r0 * 10000 + c0 + s.length, ' ');
+          for (let k = 0; k < s.length; k++) m.set(r0 * 10000 + c0 + k, s[k]);
+        });
+        return m;
+      }) : [new Map(), new Map()];
+      field = kind === 'field' ? drawField(dpr) : null;
+      return true;
+    }
+
+    // The faint code all over the first screen: quieter behind the words, a dark halo round the figure.
+    function fieldAlpha(px, py) {
+      const d = Math.hypot(px - cx, py - cy) / R;
+      let a = (0.034 + 0.05 * Math.exp(-Math.pow((d - 1.4) / 0.55, 2))) * smooth((d - 1.22) / 0.3);
+      a *= (0.25 + 0.75 * smooth((py - 40) / 160)) * smooth((H - py) / 180);
+      if (quiet) { const out = Math.max(quiet.l - px, px - quiet.r, quiet.t - py, py - quiet.b, 0); a *= 0.4 + 0.6 * smooth(out / 140); }
+      return a;
+    }
+    const textureAlpha = (px, py) => 0.05 * smooth((px / W) * 1.5 - 0.4) * smooth((H - py) / 140) * (0.3 + 0.7 * smooth((py - 30) / 140));
+    function drawField(dpr) {
+      const alpha = texture ? textureAlpha : fieldAlpha;
+      const off = document.createElement('canvas');
+      off.width = canvas.width; off.height = canvas.height;
+      const o = off.getContext('2d');
+      o.setTransform(dpr, 0, 0, dpr, 0, 0); o.font = FONT; o.textBaseline = 'middle';
+      const cols = Math.ceil(W / cw), rows = Math.ceil(H / LH);
+      for (let j = 0; j < rows; j++) {
+        const py = (j + 0.5) * LH;
+        for (let i = 0; i < cols; i++) {
+          const ch = fieldChar(i, j);
+          if (ch === ' ') continue;
+          const a = alpha((i + 0.5) * cw, py);
+          if (a < 0.008) continue;
+          o.fillStyle = `rgba(160,170,190,${a.toFixed(3)})`;
+          o.fillText(ch, i * cw, py);
         }
-        chip.style.opacity = a.toFixed(3);
-        const left = chip.dataset.side === 'l';
-        chip.style.transform = `translate(${Math.round(left ? x - 12 - chip.offsetWidth : x + 12)}px, ${Math.round(y - 15)}px)`;
+      }
+      return off;
+    }
+
+    function drawSeam(len, alpha) {
+      const l = R * 1.02 * len;
+      const line = () => { ctx.beginPath(); ctx.moveTo(cx - SD[0] * l, cy - SD[1] * l); ctx.lineTo(cx + SD[0] * l, cy + SD[1] * l); ctx.stroke(); };
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.shadowColor = 'rgba(111,143,234,0.9)';
+      ctx.shadowBlur = 26; ctx.lineWidth = 7; ctx.strokeStyle = `rgba(111,143,234,${(0.2 * alpha).toFixed(3)})`; line();
+      ctx.shadowBlur = 8; ctx.lineWidth = 1.3; ctx.strokeStyle = `rgba(178,198,255,${(0.9 * alpha).toFixed(3)})`; line();
+      ctx.restore();
+    }
+
+    function draw(now) {
+      const t = done ? Infinity : now - t0;
+      ctx.clearRect(0, 0, W, H);
+      if (texture) { ctx.drawImage(field, 0, 0, W, H); return; }
+      if (field) { ctx.globalAlpha = done ? 1 : smooth(t / 900); ctx.drawImage(field, 0, 0, W, H); ctx.globalAlpha = 1; }
+      const k = done ? 1 : easeInOut((t - 300) / 1000);
+      const ox = k * (GAP / 2 * SN[0] + SLIDE / 2 * SD[0]), oy = k * (GAP / 2 * SN[1] + SLIDE / 2 * SD[1]);
+      drawSeam(done ? 1 : easeOut(t / 450), done ? 1 : smooth(t / 200));
+      fctx.clearRect(0, 0, fbox, fbox);
+      const lit = light.a > 0.01;
+      const i0 = Math.max(0, Math.floor((cx - 1.3 * R) / cw)), i1 = Math.ceil((cx + 1.3 * R) / cw);
+      const j0 = Math.max(0, Math.floor((cy - 1.3 * R) / LH)), j1 = Math.ceil((cy + 1.3 * R) / LH);
+      for (let j = j0; j <= j1; j++) {
+        const py = (j + 0.5) * LH;
+        for (let i = i0; i <= i1; i++) {
+          const px = (i + 0.5) * cw, x = (px - cx) / R, y = (py - cy) / R;
+          let half = -1, qx = x - ox, qy = y - oy;
+          if (qx * qx + qy * qy <= 1 && qx * SN[0] + qy * SN[1] >= 0) half = 1;
+          else { qx = x + ox; qy = y + oy; if (qx * qx + qy * qy <= 1 && qx * SN[0] + qy * SN[1] <= 0) half = 0; }
+          if (half < 0) continue;
+          const r2 = qx * qx + qy * qy, z = Math.sqrt(1 - r2);
+          const shade = Math.max(0, qx * LIGHT[0] + qy * LIGHT[1] + z * LIGHT[2]);
+          const lc = Math.round(qx * R / cw), lr = Math.round(qy * R / LH);
+          const h = hash(lc, lr, half);
+          const fromSeam = Math.abs(qx * SN[0] + qy * SN[1]) * R;
+          const edge = fromSeam < cw * 1.4;
+          const tk = tok[half].get(lr * 10000 + lc);
+          if (tk === ' ') continue;
+          let a = 0.07 + 0.86 * Math.pow(shade, 1.9) + 0.22 * Math.pow(shade, 14) + ((h >>> 9) & 15) / 160 - 0.045;
+          if (r2 > 0.92) a += 0.08;
+          if (edge) a += 0.25;
+          if (tk) a += 0.12;
+          if (!done) a *= smooth((t - 150 - fromSeam * 1.5) / 380);
+          if (lit) { const dx = px - light.x, dy = py - light.y, dd = Math.sqrt(dx * dx + dy * dy); if (dd < LR) a += 0.32 * light.a * Math.pow(1 - dd / LR, 2); }
+          if (a < 0.03) continue;
+          fctx.fillStyle = `rgba(${edge ? EDGE_RGB : HALF_RGB[half]},${Math.min(1, a).toFixed(3)})`;
+          fctx.fillText(tk || ((h >>> 3) & 1 ? '1' : '0'), i * cw - fx, py - fy);
+        }
+      }
+      // A soft glow under the characters (the figure blurred once), then the characters themselves.
+      if (glow) { ctx.save(); ctx.filter = `blur(${Math.max(4, FS * 0.6)}px)`; ctx.globalAlpha = 0.7; ctx.drawImage(fig, fx, fy, fbox, fbox); ctx.restore(); }
+      ctx.drawImage(fig, fx, fy, fbox, fbox);
+      if (lit && field) {
+        // Under the light the faint code reads: what each profile is.
+        const i0f = Math.max(0, Math.floor((light.x - LR) / cw)), i1f = Math.ceil((light.x + LR) / cw);
+        const j0f = Math.max(0, Math.floor((light.y - LR) / LH)), j1f = Math.ceil((light.y + LR) / LH);
+        for (let j = j0f; j <= j1f; j++) {
+          const py = (j + 0.5) * LH;
+          for (let i = i0f; i <= i1f; i++) {
+            const ch = fieldChar(i, j);
+            if (ch === ' ') continue;
+            const px = (i + 0.5) * cw, dd = Math.hypot(px - light.x, py - light.y);
+            if (dd >= LR) continue;
+            const a = 0.24 * light.a * Math.pow(1 - dd / LR, 2) * (fieldAlpha(px, py) / 0.1);
+            if (a < 0.01) continue;
+            ctx.fillStyle = `rgba(190,200,220,${Math.min(0.5, a).toFixed(3)})`;
+            ctx.fillText(ch, i * cw, py);
+          }
+        }
+      }
+    }
+
+    function frame(now) {
+      raf = 0;
+      if (!done && now - t0 >= 1700) done = true;
+      light.x += (light.tx - light.x) * 0.2; light.y += (light.ty - light.y) * 0.2; light.a += (light.ta - light.a) * 0.12;
+      const moving = Math.abs(light.tx - light.x) > 0.4 || Math.abs(light.ty - light.y) > 0.4 || Math.abs(light.ta - light.a) > 0.01;
+      if (!moving) light.a = light.ta;
+      draw(now);
+      if (!done || moving) raf = requestAnimationFrame(frame);
+    }
+    const kick = () => { if (!raf && started && !still()) raf = requestAnimationFrame(frame); };
+
+    function start() {
+      if (started || !layout()) return;
+      started = true;
+      if (still() || texture) { done = true; anchor.classList.add('in'); draw(0); return; }
+      t0 = performance.now();
+      setTimeout(() => anchor.classList.add('in'), 1150);
+      kick();
+    }
+    if (still() || !('IntersectionObserver' in window)) start();
+    else {
+      const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) { io.disconnect(); start(); } }, { threshold: 0.2 });
+      io.observe(canvas);
+    }
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (started && layout()) { if (done) draw(0); else kick(); } });
+    let rt = 0;
+    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (started && layout()) { if (done) draw(0); else kick(); } }, 120); });
+    if (kind === 'field' && matchMedia('(hover: hover) and (pointer: fine)').matches) {
+      host.addEventListener('pointermove', (e) => {
+        if (still()) return;
+        const r = canvas.getBoundingClientRect();
+        light.tx = e.clientX - r.left; light.ty = e.clientY - r.top;
+        if (light.a < 0.01) { light.x = light.tx; light.y = light.ty; }
+        light.ta = 1; kick();
       });
+      host.addEventListener('pointerleave', () => { light.ta = 0; kick(); });
     }
-
-    function tick(now) {
-      if (!running) return;
-      if (!t0) { t0 = now; last = now; }
-      const elapsed = now - t0;
-      const p = Math.max(0, Math.min(1, (elapsed - 200) / 1100));
-      split = 1 - Math.pow(1 - p, 3);
-      lambda += SPEED * Math.min(64, now - last) / 1000;
-      last = now;
-      draw(elapsed);
-      raf = requestAnimationFrame(tick);
-    }
-    function start() { if (running || still()) return; running = true; last = 0; raf = requestAnimationFrame((n) => { last = n; tick(n); }); }
-    function stop() { running = false; cancelAnimationFrame(raf); }
-
-    layout();
-    if (still()) { split = 1; draw(1e9); }
-    window.addEventListener('resize', () => { layout(); if (still()) draw(1e9); });
-    if ('IntersectionObserver' in window) {
-      new IntersectionObserver((entries) => { entries.forEach((e) => (e.isIntersecting && !document.hidden ? start() : stop())); }, { threshold: 0.05 }).observe(canvas);
-    } else start();
-    document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (canvas.getBoundingClientRect().bottom > 0) start(); });
   });
 
-  // MARK: Home v3: the tiles play once when first seen, and again on hover
+  // MARK: Home: the tiles play once when first seen, and again on hover
   const TILE = {
     safari(el, done) {
       const rows = Array.from(el.querySelectorAll('.srow')), bar = el.querySelector('.scanbar'), foot = el.querySelector('.sfoot');
@@ -307,20 +387,21 @@
       sites.slice(0, 4).forEach((s, i) => later(250 + i * 300, () => { s.classList.remove('todo'); s.classList.add('done'); }));
     },
     encryption(el, done) {
+      // Each value wipes into dots, left to right: no random letters, nothing flickers.
       const rows = Array.from(el.querySelectorAll('.crow'));
-      const AB = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
       rows.forEach((row, i) => {
-        const bits = row.querySelector('[data-cipher]'), word = row.firstElementChild.textContent.toLowerCase();
+        const bits = row.querySelector('[data-cipher]'), word = row.firstElementChild.textContent.toLowerCase().padEnd(12, ' ');
         row.classList.add('busy'); bits.textContent = word;
-        later(250 + i * 160, () => {
+        later(300 + i * 180, () => {
           const t0 = performance.now();
           const tick = (t) => {
-            const p = (t - t0) / 520;
-            if (p >= 1) { bits.textContent = '••••••••••••'; row.classList.remove('busy'); if (i === rows.length - 1) done(); return; }
+            const p = Math.min(1, (t - t0) / 640);
             let s = '';
-            for (let k = 0; k < 12; k++) s += k / 12 < p ? '•' : AB[(Math.random() * AB.length) | 0];
+            for (let k = 0; k < 12; k++) s += k / 12 < p ? '•' : word[k];
             bits.textContent = s;
-            requestAnimationFrame(tick);
+            if (p < 1) { requestAnimationFrame(tick); return; }
+            row.classList.remove('busy');
+            if (i === rows.length - 1) done();
           };
           requestAnimationFrame(tick);
         });
@@ -341,7 +422,7 @@
     if (matchMedia('(hover: hover) and (pointer: fine)').matches) el.addEventListener('mouseenter', () => { if (seen) run(); });
   });
 
-  // MARK: Home v3: the three numbers count up once
+  // MARK: Home: the three numbers count up once
   document.querySelectorAll('.proof3 [data-count-to]').forEach((n) => {
     const to = +n.dataset.countTo;
     if (!to || shot || reduced() || !('IntersectionObserver' in window)) return;
@@ -354,129 +435,5 @@
       requestAnimationFrame(tick);
     }, { threshold: 0.6 });
     io.observe(n);
-  });
-
-  // MARK: The hero demonstration
-
-  document.querySelectorAll('[data-demo-root]').forEach((demo) => {
-    const L = JSON.parse(demo.getAttribute('data-labels') || '{}');
-    const $ = (sel) => demo.querySelector(sel);
-    const at = (name) => demo.querySelector(`[data-at="${name}"]`);
-    const statusBox = $('[data-demo="status"]');
-    const press = $('[data-demo="press"]');
-    const cookiesEl = $('[data-demo="cookies"]');
-    const pageEl = $('[data-demo="page"]');
-    const bar = $('[data-demo="bar"]');
-    const sites = Array.from(demo.querySelectorAll('[data-site]'));
-    const TOTAL = 12, FINAL_PAGES = 4, FINAL_COOKIES = 84; // UISnapshots: Northwind, warm-up 4/12, cookies 84
-    const ICON_PLAY = '<svg class="icon" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 3.4L12.6 8L5.2 12.6Z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
-    const ICON_STOP = '<svg class="icon" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><rect x="4.2" y="4.2" width="7.6" height="7.6" rx="1.4" fill="currentColor"/></svg>';
-    const CHECK = '<svg class="icon" width="10" height="10" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.4l3 3 6.6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    const MINUS = '<svg class="icon" width="10" height="10" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
-    let timers = [];
-    let raf = 0;
-
-    function ring(fraction) {
-      const size = 12, r = size / 2 - 1.25, c = 2 * Math.PI * r, done = Math.max(0.04, Math.min(1, fraction)) * c;
-      return `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="${r}" fill="none" stroke="rgba(111,143,234,0.25)" stroke-width="2.5"/><circle cx="6" cy="6" r="${r}" fill="none" stroke="#6F8FEA" stroke-width="2.5" stroke-dasharray="${done.toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 6 6)"/></svg>`;
-    }
-    function setStatus(kind, pages = 0, cookies = 0) {
-      let glyph, label, tail = '';
-      if (kind === 'stopped') { glyph = '<i class="ring"></i>'; label = L.stopped; }
-      else if (kind === 'starting') { glyph = '<i class="spin"></i>'; label = L.starting; }
-      else if (kind === 'running') { glyph = '<i class="dot"></i>'; label = L.running; }
-      else { glyph = ring(pages / TOTAL); label = `${L.warmup} ${pages}/${TOTAL}`; tail = ` · cookies: ${cookies}`; }
-      statusBox.innerHTML = `<span class="status s-${kind}"><span class="glyph">${glyph}</span><span class="label">${label}</span>${tail ? `<span class="tail">${tail}</span>` : ''}</span>`;
-      press.innerHTML = kind === 'stopped' ? ICON_PLAY : ICON_STOP;
-    }
-    function setSites(visited) {
-      sites.forEach((s, k) => {
-        s.classList.toggle('done', k < visited);
-        s.classList.toggle('todo', k >= visited);
-        s.classList.toggle('now', k === visited - 1);
-        s.querySelector('svg').outerHTML = k < visited ? CHECK : MINUS;
-      });
-      if (pageEl) pageEl.textContent = String(Math.max(1, visited));
-      if (bar) bar.style.width = `${(visited / TOTAL) * 100}%`;
-    }
-    const show = (name, on = true) => { const el = at(name); if (el) { el.classList.toggle('is-hidden', !on); el.classList.remove('is-off'); } };
-    const off = (name, on = true) => { const el = at(name); if (el) el.classList.toggle('is-off', on); };
-    const draw = (name, on = true) => { const el = at(name); if (el) el.classList.toggle('is-undrawn', !on); };
-
-    function initial() {
-      setStatus('stopped');
-      ['process', 'proxy', 'sites'].forEach((n) => off(n));
-      ['link1', 'link2'].forEach((n) => draw(n, false));
-      ['direct', 'tz', 'lang', 'appears', 'warm', 'live'].forEach((n) => show(n, false));
-      press.classList.remove('on');
-      cookiesEl.textContent = '0';
-      setSites(0);
-      demo.setAttribute('data-step', '0');
-    }
-    function final() {
-      timers.forEach(clearTimeout); timers = [];
-      cancelAnimationFrame(raf);
-      ['process', 'proxy', 'sites'].forEach((n) => off(n, false));
-      ['link1', 'link2'].forEach((n) => draw(n, true));
-      ['direct', 'tz', 'lang', 'appears', 'warm', 'live'].forEach((n) => show(n, true));
-      press.classList.remove('on');
-      setStatus('warmup', FINAL_PAGES, FINAL_COOKIES);
-      cookiesEl.textContent = String(FINAL_COOKIES);
-      setSites(FINAL_PAGES);
-      demo.setAttribute('data-step', 'final');
-    }
-    const later = (ms, fn) => timers.push(setTimeout(fn, ms));
-
-    function play() {
-      timers.forEach(clearTimeout); timers = [];
-      cancelAnimationFrame(raf);
-      initial();
-      if (reduced()) {
-        // No motion: three plain states, each shown for a moment.
-        later(500, () => { setStatus('running'); ['process', 'proxy', 'sites'].forEach((n) => off(n, false)); ['link1', 'link2'].forEach((n) => draw(n, true)); ['direct', 'tz', 'lang', 'appears', 'live'].forEach((n) => show(n)); });
-        later(1300, final);
-        return;
-      }
-      later(450, () => { press.classList.add('on'); });
-      later(600, () => { press.classList.remove('on'); setStatus('starting'); off('process', false); });
-      later(950, () => { draw('link1'); });
-      later(1150, () => { off('proxy', false); });
-      later(1450, () => { draw('link2'); });
-      later(1650, () => { off('sites', false); show('live'); });
-      later(2000, () => { show('direct'); });
-      later(2350, () => { show('tz'); });
-      later(2450, () => { show('lang'); });
-      later(2800, () => { show('appears'); setStatus('running'); });
-      later(3400, () => { show('warm'); setStatus('warmup', 1, 0); setSites(1); });
-      // Pages 1 → 4 while the count rises to the sample's 84 (UISnapshots), then it stops.
-      const start = 3400, perPage = 650;
-      later(start, () => {
-        const t0 = performance.now(), dur = perPage * (FINAL_PAGES - 1) + 300;
-        const tick = (now) => {
-          const p = Math.min(1, (now - t0) / dur);
-          const pages = Math.min(FINAL_PAGES, 1 + Math.floor(((now - t0) / perPage)));
-          const cookies = Math.round(FINAL_COOKIES * (1 - Math.pow(1 - p, 2)));
-          cookiesEl.textContent = String(cookies);
-          setStatus('warmup', pages, cookies);
-          setSites(pages);
-          if (p < 1) raf = requestAnimationFrame(tick); else final();
-        };
-        raf = requestAnimationFrame(tick);
-      });
-    }
-
-    const replay = $('[data-demo="replay"]');
-    if (replay) replay.addEventListener('click', play);
-    if (shot) { final(); return; }
-    // Plays once, when it is first seen; then it rests on its final state (nothing moves in rest).
-    if ('IntersectionObserver' in window) {
-      initial();
-      const io = new IntersectionObserver((entries) => {
-        if (entries.some((e) => e.isIntersecting)) { io.disconnect(); play(); }
-      }, { threshold: 0.35 });
-      io.observe(demo);
-    } else {
-      final();
-    }
   });
 })();

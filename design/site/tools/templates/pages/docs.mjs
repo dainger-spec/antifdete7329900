@@ -7,7 +7,7 @@ const ARTICLE = 'docs-import-cookies.html';
 
 export default function docs(c, { lang }) {
   const x = c.index;
-  const hero = `<section class="page-hero"><div class="container">
+  const hero = `<section class="page-hero"><canvas class="codetex" data-codeart="texture" aria-hidden="true"></canvas><div class="container">
     <p class="eyebrow">${inline(x.eyebrow, lang)}</p>
     <h1 class="h1">${inline(x.title, lang)}</h1>
     <p class="lead">${inline(x.lead, lang)}</p>

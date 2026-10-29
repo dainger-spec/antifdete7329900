@@ -21,7 +21,7 @@ export function header(ctx) {
     `<a href="${href}.html"${navCurrent(slug, href) ? ' aria-current="page"' : ''}>${esc(label)}</a>`).join('') +
     `<a href="login.html"${slug.startsWith('login') || slug.startsWith('account') || slug === 'signup' ? ' aria-current="page"' : ''}>${esc(c.header.login)}</a>`;
   return `<header class="site-header">
-  <div class="container">
+  <div class="container glass bar">
     <a class="brand" href="index.html" aria-label="${esc(productName())} — ${esc(c.a11y.home)}">${lockup()}</a>
     <nav class="nav" aria-label="${esc(c.a11y.mainNav)}">${nav}</nav>
     <div class="header-end">
@@ -92,7 +92,7 @@ export function document(ctx, { title, description, body, bodyClass = '', hideFo
 <title>${esc(fullTitle)}</title>
 <meta name="description" content="${esc(description)}">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#0B0C0F">
+<meta name="theme-color" content="#060709">
 <link rel="icon" type="image/svg+xml" href="${FAVICON}">
 <link rel="alternate" hreflang="ru" href="../ru/${ctx.other}">
 <link rel="alternate" hreflang="en" href="../en/${ctx.other}">

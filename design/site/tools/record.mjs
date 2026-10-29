@@ -50,22 +50,45 @@ async function clickAt(page, locator) {
 }
 
 const SCENES = {
-  'hero-1440': { w: 1440, h: 1180, async run(page, base) {
+  'hero-1440': { w: 1440, h: 900, async run(page, base) {
+    // The mark comes up from the seam (once), then a pointer moves over it: a soft light, nothing else moves.
     await page.goto(`${base}/ru/index.html?rec=1`);
-    await pause(page, 7600);
+    await pause(page, 2600);
+    await page.mouse.move(1300, 760, { steps: 1 });
+    await page.mouse.move(1000, 420, { steps: 40 });
+    await pause(page, 300);
+    await page.mouse.move(820, 560, { steps: 40 });
+    await pause(page, 300);
+    await page.mouse.move(1180, 300, { steps: 40 });
+    await pause(page, 700);
+    await page.mouse.move(700, 860, { steps: 30 });
+    await pause(page, 900);
   } },
   'hero-390': { w: 390, h: 844, mobile: true, async run(page, base) {
     await page.goto(`${base}/ru/index.html?rec=1`);
-    await pause(page, 700);
-    const y = await page.evaluate(() => document.querySelector('[data-demo-root]').getBoundingClientRect().top + scrollY - 70);
-    await smoothScroll(page, y, 900);
-    await pause(page, 7200);
-  } },
-  'hero-reduced-1440': { w: 1440, h: 1180, reduced: true, async run(page, base) {
-    await page.goto(`${base}/ru/index.html?rec=1`);
-    await pause(page, 900);
-    await clickAt(page, page.locator('[data-demo="replay"]'));
+    await pause(page, 600);
+    const y = await page.evaluate(() => document.querySelector('[data-art]').getBoundingClientRect().top + scrollY - 160);
+    await smoothScroll(page, y, 700);
     await pause(page, 2600);
+  } },
+  'hero-reduced-1440': { w: 1440, h: 900, reduced: true, async run(page, base) {
+    // Reduce Motion: the mark is simply there, finished; the pointer brings no light.
+    await page.goto(`${base}/ru/index.html?rec=1`);
+    await pause(page, 1200);
+    await page.mouse.move(1000, 420, { steps: 30 });
+    await pause(page, 1200);
+  } },
+  'tiles-1440': { w: 1440, h: 900, async run(page, base) {
+    await page.goto(`${base}/ru/index.html?rec=1`);
+    await pause(page, 1800);
+    const y = await page.evaluate(() => document.querySelector('.bento-sec').getBoundingClientRect().top + scrollY - 40);
+    await smoothScroll(page, y, 900);
+    await pause(page, 3600);
+    await smoothScroll(page, y + 470, 700);
+    await pause(page, 3200);
+    await page.mouse.move(700, 120, { steps: 20 });
+    await page.mouse.move(1100, 300, { steps: 20 });
+    await pause(page, 2200);
   } },
   'reveal-1440': { w: 1440, h: 900, async run(page, base) {
     await page.goto(`${base}/ru/features.html?rec=1`);

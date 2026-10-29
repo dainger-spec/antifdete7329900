@@ -5,8 +5,10 @@ import { btn, linkArrow, avatar, ring } from '../components.mjs';
 // Sites of the Swedish warm-up preset (WarmUpPreset.swift, id "se"), in its order.
 const SE_SITES = ['google.se', 'aftonbladet.se', 'svt.se', 'dn.se', 'expressen.se', 'blocket.se'];
 
-/// The two halves of the mark's disc, drawn whole (no gap, no slide) so CSS can slide them apart along
-/// the seam to the mark's own proportions (LumenMarkGeometry.large: radius 19, gap 3, slide 6).
+/// The two halves of the mark, drawn whole (no gap, no slide) so CSS can slide them apart along the seam to
+/// the mark's own proportions (LumenMarkGeometry.large: radius 19, gap 3, slide 6). Each half is filled
+/// with its own binary (a pattern of monospace text, like the first screen), and a line of light lies in
+/// the seam.
 function splitDisc(size = 200, radius = 78) {
   const L = globalThis.Lumen;
   const path = L.geometry.glyphPath({ grid: size, cx: size / 2, cy: size / 2, radius, gap: 0, slide: 0 }, 0, 0, size);
@@ -16,30 +18,42 @@ function splitDisc(size = 200, radius = 78) {
   const gap = (radius * 3) / 19, slide = (radius * 6) / 19;
   const off = (side) => [side * (gap / 2 * n[0] + slide / 2 * d[0]), side * (gap / 2 * n[1] + slide / 2 * d[1])].map((v) => v.toFixed(2));
   const [ax, ay] = off(1), [bx, by] = off(-1);
+  // Binary rows from a fixed seed, so every build draws the same pattern.
+  let seed = 7;
+  const bit = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return (seed >> 16) & 1; };
+  const rows = (tint) => Array.from({ length: 12 }, (_, r) => `<text x="0" y="${(r * 8 + 6.4).toFixed(1)}" fill="${tint}">${Array.from({ length: 24 }, bit).join('')}</text>`).join('');
+  const r = radius * 1.02, c = size / 2;
   return `<svg class="disc" viewBox="0 0 ${size} ${size}" aria-hidden="true">
-    <path class="half a" d="${a}" style="--tx:${ax}px;--ty:${ay}px"/>
-    <path class="half b" d="${b}" style="--tx:${bx}px;--ty:${by}px"/>
+    <defs>
+      <pattern id="bin-a" width="105.6" height="96" patternUnits="userSpaceOnUse"><g font-family="ui-monospace, SF Mono, Menlo, DejaVu Sans Mono, monospace" font-size="7.3">${rows('#C4D3FF')}</g></pattern>
+      <pattern id="bin-b" width="105.6" height="96" patternUnits="userSpaceOnUse" patternTransform="translate(37 21)"><g font-family="ui-monospace, SF Mono, Menlo, DejaVu Sans Mono, monospace" font-size="7.3">${rows('#E2E7F0')}</g></pattern>
+    </defs>
+    <line class="seam" x1="${(c - d[0] * r).toFixed(2)}" y1="${(c - d[1] * r).toFixed(2)}" x2="${(c + d[0] * r).toFixed(2)}" y2="${(c + d[1] * r).toFixed(2)}"/>
+    <path class="half a" d="${a}" fill="url(#bin-a)" style="--tx:${ax}px;--ty:${ay}px"/>
+    <path class="half b" d="${b}" fill="url(#bin-b)" style="--tx:${bx}px;--ty:${by}px"/>
   </svg>`;
 }
 
 export default function home(c, { lang }) {
   const h = c.hero;
-  const hero = `<section class="hero3">
-  <div class="globe-wrap" data-globe-wrap>
-    <canvas class="globe" data-globe aria-hidden="true"></canvas>
-    <div class="globe-fallback" aria-hidden="true">${glyph(420, '#1B1F27')}</div>
-    <div class="gchips" aria-hidden="true">${c.globe.pins.map((p, i) => `<span class="gchip" data-lat="${p.lat}" data-lon="${p.lon}"${p.side ? ` data-side="${p.side}"` : ''} style="--i:${i}">${avatar(p.name, [2, 3, 5, 4, 1][i], 18)}<span>${esc(p.name)}</span>${flag(p.code, 14)}</span>`).join('')}</div>
-  </div>
-  <div class="container hero3-inner">
-    <div class="hero3-text">
-      <p class="pill-eyebrow">${glyph(14)}<span>${inline(h.eyebrow, lang)}</span></p>
+  // The mark drawn in code (site.js, "Code art"): a canvas behind the whole first screen; the figure sits
+  // in .art. Without JavaScript the plain mark stands in. The chips are glass over the code.
+  const hero = `<section class="hero4">
+  <canvas class="codefield" data-codeart="field" aria-hidden="true"></canvas>
+  <div class="container hero4-inner">
+    <div class="hero4-text">
+      <p class="pill-eyebrow glass">${glyph(14)}<span>${inline(h.eyebrow, lang)}</span></p>
       <h1 class="mega">${inline(h.title, lang)}</h1>
       <p class="lead">${inline(h.lead, lang)}</p>
       <div class="btn-row">${btn('download.html', h.primary, 'primary', { size: 'lg', iconName: 'download', lang })}${btn('features.html', h.secondary, 'secondary', { size: 'lg', lang })}</div>
       <p class="hero-dots">${h.meta.map((m) => `<span>${icon('check', 13)}${inline(m, lang)}</span>`).join('')}</p>
     </div>
+    <div class="art" data-art>
+      <div class="art-fallback" aria-hidden="true">${glyph(380, '#2A2F3A')}</div>
+      ${c.art.chips.map((p, i) => `<span class="achip glass ${i ? 'r' : 'l'}" style="--i:${i}">${avatar(p.name, [2, 3][i], 22)}<span class="an"><b>${esc(p.name)}</b><code>${esc(p.id)}</code></span>${flag(p.code, 16)}</span>`).join('')}
+      <p class="visually-hidden">${esc(c.art.label)}</p>
+    </div>
   </div>
-  <p class="visually-hidden">${esc(c.globe.label)}</p>
 </section>`;
 
   const t = c.tiles;
@@ -111,11 +125,11 @@ export default function home(c, { lang }) {
 
   const ct = c.cta;
   const cta = `<section class="final"><div class="container center-text">
-    ${glyph(56)}
+    <div class="final-art"><canvas data-codeart="mark" aria-hidden="true"></canvas><div class="art-fallback">${glyph(96, '#2A2F3A')}</div></div>
     <h2 class="mega" style="margin-top:28px;font-size:56px;line-height:60px">${inline(ct.title, lang)}</h2>
     <p class="lead" style="margin:16px auto 0;max-width:560px">${inline(ct.lead, lang)}</p>
     <div class="btn-row center" style="margin-top:32px">${btn('download.html', ct.primary, 'primary', { size: 'lg', iconName: 'download', lang })}${btn('pricing.html', ct.secondary, 'secondary', { size: 'lg', lang })}</div>
   </div></section>`;
 
-  return { body: [hero, bento, proof, cta].join('\n'), bodyClass: 'page-home', scripts: ['world.js'] };
+  return { body: [hero, bento, proof, cta].join('\n'), bodyClass: 'page-home' };
 }

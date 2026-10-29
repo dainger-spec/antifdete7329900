@@ -4,7 +4,7 @@ import { linkArrow } from '../components.mjs';
 
 export default function download(c, { lang }) {
   const h = c.hero;
-  const hero = `<section class="page-hero"><div class="container"><div class="split" style="align-items:center">
+  const hero = `<section class="page-hero"><canvas class="codetex" data-codeart="texture" aria-hidden="true"></canvas><div class="container"><div class="split" style="align-items:center">
     <div>
       <p class="eyebrow">${inline(h.eyebrow, lang)}</p>
       <h1 class="h1">${inline(h.title, lang)}</h1>

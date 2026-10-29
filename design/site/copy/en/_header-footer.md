@@ -10,11 +10,11 @@ Pricing
 
 Docs
 
-Updates
-
 Sign in
 
-Download
+Try it free
+
+Try it
 
 A macOS browser where every profile is real Safari in a process of its own, with its data encrypted on disk.
 

@@ -5,7 +5,7 @@ import { linkArrow, btn, checkList, note, result, stat, warmupSheet, avatar } fr
 export default async function features(c, { lang, copy }) {
   const ru = lang === 'ru';
 
-  const hero = `<section class="page-hero">
+  const hero = `<section class="page-hero"><canvas class="codetex" data-codeart="texture" aria-hidden="true"></canvas>
   <div class="container">
     <p class="eyebrow">${inline(c.hero.eyebrow, lang)}</p>
     <h1 class="h1">${inline(c.hero.title, lang)}</h1>

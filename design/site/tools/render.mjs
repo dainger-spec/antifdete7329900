@@ -6,8 +6,9 @@
 //   node design/site/tools/render.mjs --preview home  # quick look at scale 1 into $PREVIEW_DIR
 //
 // Pages are loaded from disk (file://); any other request fails the render. The shots are taken
-// with prefers-reduced-motion and ?shot=1, so every element is at rest and the prototype's strip
-// is hidden. Decision marks (yellow) stay on: they show what the owner still decides.
+// with prefers-reduced-motion and ?shot=1, so every element is at rest (the mark drawn in code
+// finished) and the prototype's strip is hidden. Decision marks are off, as on the real site:
+// the review page lists where they are, and ?tbd=1 shows them.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
