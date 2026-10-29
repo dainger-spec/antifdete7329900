@@ -34,6 +34,9 @@ final class ProfileManager: ObservableObject {
 
     private let repository: ProfileRepository
     private let webDataVault: WebDataStoreVault
+    /// The directory Safari's frameworks use as their home in a profile's own process, encrypted
+    /// between runs like everything else (`SafariHomeVault`).
+    private let safariHomeVault: SafariHomeVault
     /// The packet tunnel that carries proxied profiles' WebRTC (when it is on).
     private let tunnel = TunnelManager.shared
     private var sessions: [UUID: BrowserSession] = [:]
@@ -87,6 +90,7 @@ final class ProfileManager: ObservableObject {
     init(repository: ProfileRepository) {
         self.repository = repository
         self.webDataVault = WebDataStoreVault(repository: repository)
+        self.safariHomeVault = SafariHomeVault(repository: repository)
     }
 
     var hasRunningProfiles: Bool { !sessions.isEmpty || !children.isEmpty }
@@ -244,12 +248,16 @@ final class ProfileManager: ObservableObject {
         guard let executable = Bundle.main.executableURL else { throw CoreError.corruptData("no executable path") }
         let location = stored.needsProxyLocation ? stored.rememberedProxyLocation : nil
         let languages = location.map { [$0.webLanguage] } ?? WebContentLanguage.systemLanguages
+        // Safari's own state has to be on disk before its frameworks read it, which happens while
+        // the child builds its window — before the launch inside the child unseals the WebKit data.
+        let key = try repository.profileKey(for: id)
+        try safariHomeVault.prepareForLaunch(profileID: id, key: key)
         let child = try ProfileProcess.start(
             profileID: id,
             executable: executable,
             vaultRoot: repository.root,
             masterKeyMaterial: repository.vault.masterKeyMaterial,
-            home: repository.directory(for: id).appendingPathComponent("home", isDirectory: true),
+            home: safariHomeVault.homeDirectory(for: id),
             languages: languages,
             locale: languages.first.map { $0.replacingOccurrences(of: "-", with: "_") },
             timeZone: stored.timeZoneIdentifier ?? location?.timeZoneIdentifier)
@@ -257,6 +265,12 @@ final class ProfileManager: ObservableObject {
             guard let self, self.children[id] === child else { return }
             self.children[id] = nil
             self.runningProfileIDs.remove(id)
+            // Nothing holds those files now.
+            do {
+                try self.safariHomeVault.seal(profileID: id, key: key)
+            } catch {
+                self.log.error("Could not seal Safari's home for \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
             if status != 0 {
                 self.log.error("Profile \(id.uuidString, privacy: .public) exited with status \(status, privacy: .public)")
             }
@@ -403,10 +417,14 @@ final class ProfileManager: ObservableObject {
             runningProfileIDs.remove(id)
             busyProfileIDs.insert(id)
             defer { busyProfileIDs.remove(id) }
-            // Its own quit path seals the data; this returns when that finished.
+            // Its own quit path seals the WebKit data; this returns when that finished, and then
+            // Safari's home is sealed here, where nothing is writing in it any more.
             child.onExit = nil
             child.terminate()
             await child.waitUntilExit(timeout: 30)
+            if let key = try? repository.profileKey(for: id) {
+                try safariHomeVault.seal(profileID: id, key: key)
+            }
             return
         }
         guard let session = sessions.removeValue(forKey: id) else { return }
@@ -495,6 +513,7 @@ final class ProfileManager: ObservableObject {
         busyProfileIDs.insert(id)
         defer { busyProfileIDs.remove(id) }
         await webDataVault.deleteData(profileID: id)
+        safariHomeVault.delete(profileID: id)
         warmUpRobots[id] = nil
         try repository.delete(id)
     }
