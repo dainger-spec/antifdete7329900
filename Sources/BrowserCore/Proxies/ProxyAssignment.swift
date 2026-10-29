@@ -83,19 +83,21 @@ extension ProfileRepository {
         return outcome
     }
 
-    /// The profiles that use the list's entry as it was (`previous`: the same host, port and user
-    /// name, `ProxyList.identity(of:)`) take its connection as it is now — after an edit, or a
-    /// check that found its type — each keeping its own bypass list, saved as an edit of the proxy
-    /// alone. Profiles with another proxy, or none, are not touched.
+    /// The profiles that use the list's entry as it was (`previous`) take its connection as it is
+    /// now — after an edit, or a check that found its type — each keeping its own bypass list,
+    /// saved as an edit of the proxy alone. "As it was": the same proxy (host, port, user name)
+    /// reached the same way (type, TLS, password: `ProxyList.sameConnection`). A profile whose own
+    /// copy went another way — a password changed in its editor, not in the list — keeps it: the
+    /// list never overwrites what a profile was given since. Profiles with another proxy, or none,
+    /// are not touched.
     @discardableResult
     public func follow(_ entry: ProxyListEntry, previous: ProxySettings, at time: Date = Date()) -> ProxyAssignmentOutcome {
         var outcome = ProxyAssignmentOutcome()
         guard let proxy = entry.usableProxy else { return outcome }
-        let identity = ProxyList.identity(of: previous)
         for summary in list() {
             do {
                 let stored = try loadConfiguration(summary.id)
-                guard let current = stored.proxy, ProxyList.identity(of: current) == identity else { continue }
+                guard let current = stored.proxy, ProxyList.sameConnection(current, previous) else { continue }
                 let followed = stored.assigning(current.withConnection(of: proxy), check: entry.lastCheck, at: time)
                 guard followed != stored else {
                     outcome.unchanged.append(summary.id)

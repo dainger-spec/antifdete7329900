@@ -47,7 +47,9 @@ struct ProfileListView: View {
     @State private var showingAutomation = false
     @State private var filter: ProfileFilter = .all
     @State private var search = ""
-    @State private var showingProxies = false
+    /// The Proxies sheet, or what a profile whose proxy does not work says: one at a time, so
+    /// that "Show in Proxies" can go from the one to the other.
+    @State private var proxySheet: ProxySheet?
     @State private var assigningProxies: ProxyAssignView.Request?
     /// Profiles of the selection waiting for the one confirmation that deletes them all.
     @State private var pendingBulkDelete: [UUID] = []
@@ -81,7 +83,16 @@ struct ProfileListView: View {
             } message: { _ in
                 Text(L("profiles.delete.message"))
             }
-            .sheet(isPresented: $showingProxies) { ProxyListView() }
+            .sheet(item: $proxySheet, onDismiss: showProxyProblems) { sheet in
+                switch sheet {
+                case let .list(selecting): ProxyListView(initialSelection: selecting)
+                case .problems: ProxyProblemView { id in proxySheet = .list(selecting: [id]) }
+                }
+            }
+            // A profile that was started with a proxy that does not work.
+            .onReceive(model.$proxyProblems) { problems in
+                if !problems.isEmpty, proxySheet == nil { proxySheet = .problems }
+            }
             .sheet(item: $assigningProxies) { request in ProxyAssignView(request: request) }
             .confirmationDialog(String(format: L("profiles.bulk.delete.title"), pendingBulkDelete.count),
                                 isPresented: Binding(get: { !pendingBulkDelete.isEmpty }, set: { if !$0 { pendingBulkDelete = [] } }),
@@ -93,6 +104,11 @@ struct ProfileListView: View {
             } message: { ids in
                 Text(String(format: L("profiles.bulk.delete.message"), names(ids)))
             }
+    }
+
+    /// After the Proxies sheet: what profiles said about their proxies meanwhile.
+    private func showProxyProblems() {
+        if proxySheet == nil, !model.proxyProblems.isEmpty { proxySheet = .problems }
     }
 
     /// Warm-up of several profiles (the selection's bar): the warm-up queue, with them ticked.
@@ -159,12 +175,27 @@ struct ProfileListView: View {
             openAutomation: { showingAutomation = true },
             changePassword: { changingPassword = true },
             warmUpQueue: { queuePreselection = []; warmingUpSeveral = true },
-            openProxies: { showingProxies = true },
+            openProxies: { proxySheet = .list(selecting: []) },
             launchSeveral: { ids in Task { await model.launchProfiles(ids) } },
             stopSeveral: { ids in Task { await model.stopProfiles(ids) } },
             warmUpSeveral: { ids in warmUpSeveral(ids) },
             assignProxies: { ids in assigningProxies = ProxyAssignView.Request(profileIDs: Set(ids), proxyIDs: []) },
             deleteSeveral: { ids in pendingBulkDelete = ids })
+    }
+}
+
+/// The proxy sheets of the Profiles window.
+enum ProxySheet: Identifiable, Equatable {
+    /// The Proxies sheet, with these proxies selected.
+    case list(selecting: Set<UUID>)
+    /// What profiles whose proxy does not work say (`AppModel.proxyProblems`).
+    case problems
+
+    var id: String {
+        switch self {
+        case .list: return "list"
+        case .problems: return "problems"
+        }
     }
 }
 

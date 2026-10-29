@@ -19,14 +19,21 @@ enum ProxyGeoLookup {
         let timeZoneKeyPath: [String]
         let countryKeyPath: [String]
         var ipKeyPath: [String] = ["ip"]
+        /// Where the answer says the exit's city and network (`ProxyExitDetails`), when it does.
+        var cityKeyPath: [String]? = nil
+        var asnKeyPath: [String]? = nil
+        var organizationKeyPath: [String]? = nil
     }
 
     /// HTTPS services that need no API key, tried in order until one answers. Replaced by the
     /// self-test with an endpoint of its local proxy.
     static var services: [Service] = [
-        Service(url: URL(string: "https://ipinfo.io/json")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
-        Service(url: URL(string: "https://get.geojs.io/v1/ip/geo.json")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country_code"]),
-        Service(url: URL(string: "https://ipwho.is/")!, timeZoneKeyPath: ["timezone", "id"], countryKeyPath: ["country_code"]),
+        Service(url: URL(string: "https://ipinfo.io/json")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"],
+                cityKeyPath: ["city"], asnKeyPath: ["org"], organizationKeyPath: ["org"]),
+        Service(url: URL(string: "https://get.geojs.io/v1/ip/geo.json")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country_code"],
+                cityKeyPath: ["city"], asnKeyPath: ["asn"], organizationKeyPath: ["organization_name"]),
+        Service(url: URL(string: "https://ipwho.is/")!, timeZoneKeyPath: ["timezone", "id"], countryKeyPath: ["country_code"],
+                cityKeyPath: ["city"], asnKeyPath: ["connection", "asn"], organizationKeyPath: ["connection", "org"]),
     ]
 
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "ProxyGeoLookup")
@@ -44,6 +51,8 @@ enum ProxyGeoLookup {
         /// How long the first request that got an answer took: the connection to the proxy, the
         /// tunnel through it and the service's reply. Nil when nothing answered.
         var latency: TimeInterval?
+        /// The exit's city and network, from the answer that gave the location.
+        var details = ProxyExitDetails()
         /// Every connection the lookup's requests were made on, as the URL loading system reports
         /// them (`URLSessionTaskMetrics`): the proxy's own address, never a service's. The
         /// self-test checks that a dead proxy was not gone around.
@@ -91,6 +100,8 @@ enum ProxyGeoLookup {
                                                                      ipKeyPath: service.ipKeyPath, proxyEndpoint: endpoint) {
                     log.info("Proxy \(endpoint, privacy: .private) exits in \(location.timeZoneIdentifier, privacy: .private) (\(location.countryCode ?? "?", privacy: .private)) per \(service.url.host ?? "?", privacy: .public)")
                     result.location = location
+                    result.details = ProxyExitDetails.parse(data, cityKeyPath: service.cityKeyPath, asnKeyPath: service.asnKeyPath,
+                                                            organizationKeyPath: service.organizationKeyPath)
                     break lookup
                 }
                 log.notice("\(service.url.host ?? "?", privacy: .public) gave no location (HTTP \(status))")

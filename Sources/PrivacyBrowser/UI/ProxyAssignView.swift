@@ -43,11 +43,14 @@ private struct ProxyAssignPanel: View {
         startsWithAliveProxies = request.proxyIDs.isEmpty && !request.profileIDs.isEmpty
     }
 
-    private var aliveProxies: Set<UUID> { Set(proxies.entries.filter { $0.lastCheck?.isAlive == true }.map(\.id)) }
+    private var aliveProxies: Set<UUID> { Set(proxies.entries.filter { $0.kindKnown && $0.lastCheck?.isAlive == true }.map(\.id)) }
 
-    /// The chosen profiles in the order of the list, and the chosen proxies in theirs.
+    /// The chosen profiles in the order of the list, and the chosen proxies in theirs — but for
+    /// those whose type no check has found yet: a profile would connect with a guess.
     private var profileOrder: [ProfileSummary] { model.profiles.filter { chosenProfiles.contains($0.id) } }
-    private var proxyOrder: [ProxyListEntry] { proxies.entries.filter { chosenProxies.contains($0.id) } }
+    private var proxyOrder: [ProxyListEntry] { proxies.entries.filter { chosenProxies.contains($0.id) && $0.kindKnown } }
+    /// Chosen, and left out for their unknown type.
+    private var unknownKindChosen: Int { proxies.entries.filter { chosenProxies.contains($0.id) && !$0.kindKnown }.count }
     private var plan: [ProxyAssignment] { ProxyList.rotation(of: proxyOrder, over: profileOrder.map(\.id)) }
 
     var body: some View {
@@ -79,22 +82,31 @@ private struct ProxyAssignPanel: View {
                 }
                 checklist(title: L("proxies.assign.proxies"), chosen: chosenProxies.intersection(proxies.entries.map(\.id)).count,
                           total: proxies.entries.count,
-                          all: { chosenProxies = Set(proxies.entries.map(\.id)) }, none: { chosenProxies = [] },
+                          all: { chosenProxies = Set(proxies.entries.filter(\.kindKnown).map(\.id)) }, none: { chosenProxies = [] },
                           alive: { chosenProxies = aliveProxies }) {
                     ForEach(proxies.entries) { entry in
                         Toggle(isOn: member(entry.id, of: $chosenProxies)) {
                             HStack(spacing: 8) {
-                                ProxyStatusDot(check: entry.lastCheck, checking: proxies.checking.contains(entry.id))
+                                ProxyStatusIcon(state: entry.state(checking: proxies.checking.contains(entry.id)))
                                 Text(entry.displayName)
                                     .font(.lumenBody)
-                                    .foregroundStyle(Theme.textPrimary)
+                                    .foregroundStyle(entry.kindKnown ? Theme.textPrimary : Theme.textTertiary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
                                 Spacer(minLength: 6)
-                                ProxyExitLabel(check: entry.lastCheck)
+                                if entry.kindKnown {
+                                    ProxyExitLabel(check: entry.lastCheck)
+                                } else {
+                                    Text(L("proxies.assign.unknownType"))
+                                        .font(.lumenSecondary)
+                                        .foregroundStyle(Theme.textTertiary)
+                                        .lineLimit(1)
+                                }
                             }
                         }
                         .toggleStyle(.checkbox)
+                        .disabled(!entry.kindKnown)
+                        .help(entry.kindKnown ? "" : L("proxies.type.unknown.help"))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -170,6 +182,13 @@ private struct ProxyAssignPanel: View {
                 .font(.lumenLabel)
                 .foregroundStyle(plan.isEmpty ? Theme.textSecondary : Theme.textPrimary)
                 .monospacedDigit()
+            if unknownKindChosen > 0 {
+                Text(String(format: L("proxies.assign.unknownLeftOut"), unknownKindChosen))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.warning)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if !plan.isEmpty {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 4) {

@@ -287,11 +287,13 @@ public struct ProxyList: Codable, Equatable, Sendable {
         case alreadyListed(UUID)
     }
 
-    /// Changes entry `id`: its label, and its proxy as typed in the editor (the type known from
-    /// then on). A changed proxy drops the last check, which was about the other one. Returns the
-    /// proxy as it was, for the profiles that used it to follow (`ProfileRepository.follow`).
+    /// Changes entry `id`: its label, and its proxy as typed in the editor — its type known from
+    /// then on, unless `kindKnown` is false (left to a check to find; until then the entry is
+    /// given to no profile). A changed proxy drops the last check, which was about the other one.
+    /// Returns the proxy as it was, for the profiles that used it to follow
+    /// (`ProfileRepository.follow`).
     @discardableResult
-    public mutating func update(_ id: UUID, label: String, proxy: ProxySettings) throws -> ProxySettings {
+    public mutating func update(_ id: UUID, label: String, proxy: ProxySettings, kindKnown: Bool = true) throws -> ProxySettings {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { throw EditProblem.notFound }
         do { try proxy.validate() } catch { throw EditProblem.invalid((error as? CoreError)?.description ?? "\(error)") }
         let identity = Self.identity(of: proxy)
@@ -302,12 +304,20 @@ public struct ProxyList: Codable, Equatable, Sendable {
         var listed = proxy
         listed.excludedDomains = []
         entries[index].label = Self.cleanLabel(label)
-        if listed != before || !entries[index].kindKnown {
+        if listed != before || entries[index].kindKnown != kindKnown {
             entries[index].proxy = listed
-            entries[index].kindKnown = true
+            entries[index].kindKnown = kindKnown
             entries[index].lastCheck = nil
         }
         return before
+    }
+
+    /// `a` and `b` are the same proxy (`identity(of:)`) reached the same way: the same type, TLS
+    /// and password. A profile's proxy and an entry that are not have gone apart — say a password
+    /// changed in the profile's editor — and the one never overwrites the other.
+    public static func sameConnection(_ a: ProxySettings, _ b: ProxySettings) -> Bool {
+        identity(of: a) == identity(of: b) && a.kind == b.kind && a.tlsToProxy == b.tlsToProxy
+            && (a.password ?? "") == (b.password ?? "")
     }
 
     /// The entries as text, one per line, in the form the import reads back

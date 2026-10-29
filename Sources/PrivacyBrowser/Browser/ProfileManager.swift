@@ -43,6 +43,9 @@ final class ProfileManager: ObservableObject {
     /// A profile's stored configuration changed outside the editor (a proxy lookup remembered a
     /// new exit location): the Profiles list shows it.
     var onConfigurationChanged: ((UUID) -> Void)?
+    /// A profile that was started has a proxy that does not work, and the probe says how
+    /// (`diagnoseProxy`): it would load no page — fail-closed — and this is what says why.
+    var onProxyProblem: ((UUID, ProxySettings, ProxyDiagnosis) -> Void)?
 
     private let repository: ProfileRepository
     private let webDataVault: WebDataStoreVault
@@ -144,6 +147,9 @@ final class ProfileManager: ObservableObject {
         let summary = try repository.summary(for: id)
         let key = try repository.profileKey(for: id)
         let stored = try repository.loadConfiguration(id, key: key)
+        // A proxy that does not work leaves the profile with no page loaded: said in words, by the
+        // same probe the Proxies sheet's check runs, while the profile starts.
+        if let proxy = stored.proxy, !runsInProfileProcess { diagnoseProxy(of: id, proxy, startURL: stored.startURL) }
         // A profile's own process runs its profile itself: it never starts another process.
         if ProfileProcess.isEnabled, !runsInProfileProcess {
             var stored = stored
@@ -366,6 +372,27 @@ final class ProfileManager: ObservableObject {
         children[id] = child
         runningProfileIDs.insert(id)
         try? repository.markLaunched(id)
+    }
+
+    /// Probes the proxy of a profile that is starting (`ProxyProbe`), and says what is wrong with it
+    /// when it does not work (`onProxyProblem`) — unless the profile was stopped meanwhile. The
+    /// tunnel it asks for goes to the profile's own start page, which the profile is about to ask
+    /// the same proxy for (no start page: the first geolocation service), and only one: no latency
+    /// is measured here. The probe talks to the proxy alone.
+    private func diagnoseProxy(of id: UUID, _ proxy: ProxySettings, startURL: URL?) {
+        guard onProxyProblem != nil, (try? proxy.validate()) != nil else { return }
+        var configured = ProxyChecker.probe(latencySamples: 1)
+        if let url = startURL, ["http", "https"].contains(url.scheme?.lowercased() ?? ""), let host = url.host, !host.isEmpty {
+            configured.targetHost = host
+            configured.targetPort = url.port ?? (url.scheme?.lowercased() == "http" ? 80 : 443)
+        }
+        let probe = configured
+        Task { @MainActor [weak self] in
+            let diagnosis = await probe.run(proxy)
+            guard let self, !diagnosis.isWorking, self.isRunning(id) || self.busyProfileIDs.contains(id) else { return }
+            self.log.notice("The proxy of \(id.uuidString, privacy: .public) does not work: \(diagnosis.verdict.rawValue, privacy: .public)")
+            self.onProxyProblem?(id, proxy, diagnosis)
+        }
     }
 
     /// The task's value if it finishes within `seconds`, else nil; the task keeps running.

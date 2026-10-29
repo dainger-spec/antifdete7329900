@@ -24,6 +24,52 @@ extension AppModel {
         return outcome
     }
 
+    /// The profiles that used the list's entry as it was (`previous`) take it as it is now — an
+    /// edit in the Proxies sheet, or a check that found its type (`ProfileRepository.follow`).
+    /// Says which profiles could not be changed (they keep their proxy as it was).
+    func followProxyEntry(_ entry: ProxyListEntry, previous: ProxySettings) {
+        guard let repository else { return }
+        let outcome = repository.follow(entry, previous: previous)
+        for (id, reason) in outcome.failed {
+            let name = profiles.first { $0.id == id }?.name ?? id.uuidString
+            showError(String(format: L("proxies.follow.failed"), name, reason))
+        }
+        if !outcome.changed.isEmpty { refresh() }
+    }
+
+    /// How many profiles use each proxy of the list, by `ProxyList.identity(of:)`.
+    var proxyUseCounts: [String: Int] {
+        details.values.reduce(into: [:]) { counts, details in
+            if let identity = details.proxyIdentity { counts[identity, default: 0] += 1 }
+        }
+    }
+
+    // MARK: A profile whose proxy does not work
+
+    /// A profile that was started has a proxy that does not work: the Profiles window comes to the
+    /// front and says so (one problem per profile: the latest).
+    func reportProxyProblem(of id: UUID, proxy: ProxySettings, diagnosis: ProxyDiagnosis) {
+        guard let profile = profiles.first(where: { $0.id == id }) else { return }
+        proxyProblems.removeAll { $0.profileID == id }
+        proxyProblems.append(ProxyProblem(profileID: id, profileName: profile.name, proxy: proxy, diagnosis: diagnosis))
+        activateProfilesWindow()
+    }
+
+    func dismissProxyProblem(_ problem: ProxyProblem) {
+        proxyProblems.removeAll { $0.id == problem.id }
+    }
+
+    /// Check, from a problem: the profile's proxy checked as the Proxies sheet checks one
+    /// (`ProxyListModel.checkProfileProxy`). Nil while locked.
+    func checkProxy(of problem: ProxyProblem) async -> ProxyCheckResult? {
+        await proxyList?.checkProfileProxy(problem.proxy)
+    }
+
+    /// The problem's proxy in the list (added when it is not there), for the Proxies sheet to show.
+    func proxyEntryID(of problem: ProxyProblem) -> UUID? {
+        proxyList?.entryID(for: problem.proxy)
+    }
+
     // MARK: Several profiles at once
 
     /// Launches each of `ids` that is stopped, one after the other (each opens its window), as
@@ -58,4 +104,14 @@ extension AppModel {
             await deleteProfile(id)
         }
     }
+}
+
+/// A profile that was started with a proxy that does not work, and how it does not
+/// (`ProfileManager.onProxyProblem`).
+struct ProxyProblem: Identifiable, Equatable {
+    var id: UUID { profileID }
+    let profileID: UUID
+    let profileName: String
+    let proxy: ProxySettings
+    let diagnosis: ProxyDiagnosis
 }

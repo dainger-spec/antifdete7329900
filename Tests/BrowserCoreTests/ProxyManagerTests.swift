@@ -137,6 +137,9 @@ final class ProxyManagerTests: XCTestCase {
         var list = ProxyList()
         list.takeIn(profileProxies: repository.profileProxies())
         XCTAssertEqual(list.entries.count, 2)
+        // E has that proxy too, with a password changed in its own editor since: its own copy.
+        let e = try repository.create(name: "E", configuration: ProfileConfiguration(proxy: ProxySettings(
+            kind: .socks5, host: "gw.example", port: 9000, username: "u", password: "changed in E")))
         let entry = try XCTUnwrap(list.entry(for: used))
         // A new password and type for that proxy, in the list.
         var changed = entry.proxy
@@ -153,6 +156,9 @@ final class ProxyManagerTests: XCTestCase {
         XCTAssertEqual(try repository.loadConfiguration(b.id).proxy?.password, "new")
         XCTAssertEqual(try repository.loadConfiguration(c.id).proxy?.host, "other.example")
         XCTAssertNil(try repository.loadConfiguration(d.id).proxy)
+        let savedE = try XCTUnwrap(repository.loadConfiguration(e.id).proxy)
+        XCTAssertEqual(savedE.password, "changed in E", "a profile's own later change is never overwritten")
+        XCTAssertEqual(savedE.kind, .socks5)
         // Followed again: nothing to change.
         XCTAssertEqual(Set(repository.follow(try XCTUnwrap(list.entry(entry.id)), previous: changed).unchanged), [a.id, b.id])
     }
@@ -178,6 +184,23 @@ final class ProxyManagerTests: XCTestCase {
             guard case .invalid? = error as? ProxyList.EditProblem else { return XCTFail("\(error)") }
         }
         XCTAssertThrowsError(try list.update(UUID(), label: "", proxy: changed))
+        // An entry of unknown type, edited without choosing one, stays for a check to find.
+        var unknown = ProxyList()
+        let id = try XCTUnwrap(unknown.add(ProxyListImport.read("gw.example:9000:u:p").proxies).added.first)
+        var typed = unknown.entries[0].proxy
+        typed.password = "p2"
+        try unknown.update(id, label: "Gateway", proxy: typed, kindKnown: false)
+        XCTAssertFalse(unknown.entries[0].kindKnown)
+        XCTAssertNil(unknown.entries[0].usableProxy)
+        XCTAssertEqual(unknown.entries[0].proxy.password, "p2")
+        // Choosing one makes it known.
+        typed.kind = .httpConnect
+        try unknown.update(id, label: "Gateway", proxy: typed)
+        XCTAssertEqual(unknown.entries[0].usableProxy?.kind, .httpConnect)
+        // The same connection: the same proxy, type, TLS and password (host in any case).
+        XCTAssertTrue(ProxyList.sameConnection(typed, ProxySettings(kind: .httpConnect, host: "GW.example", port: 9000, username: "u", password: "p2")))
+        XCTAssertFalse(ProxyList.sameConnection(typed, ProxySettings(kind: .httpConnect, host: "gw.example", port: 9000, username: "u", password: "p")))
+        XCTAssertFalse(ProxyList.sameConnection(typed, ProxySettings(kind: .socks5, host: "gw.example", port: 9000, username: "u", password: "p2")))
     }
 
     func testAnEntryOfUnknownTypeIsGivenToNoProfile() throws {
@@ -211,6 +234,28 @@ final class ProxyManagerTests: XCTestCase {
         XCTAssertEqual(read.proxies.map(\.proxy), list.entries.map(\.proxy))
         XCTAssertEqual(read.proxies.map(\.label), ["Berlin # 1", "", "", ""])
         XCTAssertEqual(read.proxies.map(\.kindGiven), [true, true, true, false])
+    }
+
+    func testTheExportFileIsTheOwnersAlone() throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("proxies.txt")
+        // A file chosen to be replaced, readable by everyone and longer than the export.
+        XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: Data(String(repeating: "x", count: 500).utf8),
+                                                     attributes: [.posixPermissions: 0o644]))
+        let text = ProxyList.exportText([ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "203.0.113.5", port: 1080,
+                                                                             username: "u", password: "secret"))])
+        try SecureFile.writeOwnerOnly(Data(text.utf8), over: url)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), text)
+        let mode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
+        XCTAssertEqual(mode.map { $0 & 0o777 }, 0o600)
+        // A new file too; and a link is refused, never followed.
+        let fresh = root.appendingPathComponent("fresh.txt")
+        try SecureFile.writeOwnerOnly(Data(text.utf8), over: fresh)
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: fresh.path)[.posixPermissions] as? Int).map { $0 & 0o777 }, 0o600)
+        let link = root.appendingPathComponent("link.txt")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: url)
+        XCTAssertThrowsError(try SecureFile.writeOwnerOnly(Data("other".utf8), over: link))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), text)
     }
 
     // MARK: What the check keeps

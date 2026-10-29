@@ -19,6 +19,10 @@ final class ProxyListModel: ObservableObject {
     /// empty and never written, so nothing of it is lost by saving over it.
     let loadError: String?
 
+    /// An entry's proxy changed — edited, or a check found its type — and the profiles that used it
+    /// as it was (`previous`) are to follow (`ProfileRepository.follow`, done by `AppModel`).
+    var onEntryChanged: ((ProxyListEntry, ProxySettings) -> Void)?
+
     private let vault: UnlockedVault
     private let onError: (String) -> Void
     private var checkTask: Task<Void, Never>?
@@ -59,10 +63,56 @@ final class ProxyListModel: ObservableObject {
         checking.subtract(ids)
     }
 
-    func rename(_ id: UUID, to label: String) {
+    /// The profiles' own proxies, taken into the list the first time this vault's list is opened by
+    /// a build that has the list (`ProxyList.takeIn`): nothing for the user to do, nothing of a
+    /// profile changed. Returns how many entries that added.
+    @discardableResult
+    func takeIn(profileProxies: @autoclosure () -> [ProxySettings]) -> Int {
+        guard loadError == nil, !list.profilesTakenIn else { return 0 }
         var updated = list
-        updated.rename(id, to: label)
-        save(updated)
+        let added = updated.takeIn(profileProxies: profileProxies())
+        guard save(updated) else { return 0 }
+        if !added.isEmpty { log.notice("Took \(added.count) proxies of profiles into the list") }
+        return added.count
+    }
+
+    /// Changes an entry as the Edit sheet asks (`kindKnown` false: its type is left to a check);
+    /// the profiles that used it follow. Nil when done, otherwise what to tell the user.
+    func update(_ id: UUID, label: String, proxy: ProxySettings, kindKnown: Bool = true) -> String? {
+        var updated = list
+        let previous: ProxySettings
+        do {
+            previous = try updated.update(id, label: label, proxy: proxy, kindKnown: kindKnown)
+        } catch let problem as ProxyList.EditProblem {
+            switch problem {
+            case .notFound: return L("proxies.edit.gone")
+            case .invalid(let message): return message
+            case .alreadyListed(let other):
+                return String(format: L("proxies.edit.alreadyListed"), list.entry(other)?.displayName ?? "")
+            }
+        } catch {
+            return error.localizedDescription
+        }
+        guard save(updated) else { return L("proxies.error.unreadable") }
+        if let entry = list.entry(id), entry.proxy != previous { onEntryChanged?(entry, previous) }
+        return nil
+    }
+
+    /// The entry for `proxy` — a profile's — in the list, added when it is not there (a proxy typed
+    /// into a profile after the list took the profiles in). Nil when the list cannot be written.
+    func entryID(for proxy: ProxySettings) -> UUID? {
+        if let entry = list.entry(for: proxy) { return entry.id }
+        var updated = list
+        var listed = proxy
+        listed.excludedDomains = []
+        let line = ProxyListImport.Line(line: 1, proxy: listed)
+        guard let id = updated.add([line]).added.first, save(updated) else { return nil }
+        return id
+    }
+
+    /// The text of an export of `ids` (all: nil), passwords in plaintext (`ProxyList.exportText`).
+    func exportText(_ ids: Set<UUID>?) -> String {
+        ProxyList.exportText(list.entries.filter { ids?.contains($0.id) ?? true })
     }
 
     // MARK: Checks
@@ -81,12 +131,30 @@ final class ProxyListModel: ObservableObject {
         checkTask = Task { [weak self] in
             await ProxyChecker.checkAll(targets) { [weak self] id, result in
                 guard let self, self.checkRun == run else { return }
-                self.list.record(result, for: id)
+                // The type it found is the entry's from now on, and the profiles on it follow.
+                if let previous = self.list.record(result, for: id), let entry = self.list.entry(id) {
+                    self.onEntryChanged?(entry, previous)
+                }
                 self.checking.remove(id)
                 self.checkedCount += 1
             }
             self?.finishCheck(run)
         }
+    }
+
+    /// Checks a profile's own proxy (a launch found it not working) as the list checks its
+    /// entries (`ProxyChecker`). What it finds is kept by the proxy's entry — added when the list
+    /// does not have it — when the profile reaches it the same way (`ProxyList.sameConnection`);
+    /// a type it finds is then the entry's, and the profiles on it follow.
+    func checkProfileProxy(_ proxy: ProxySettings) async -> ProxyCheckResult {
+        let result = await ProxyChecker.check(proxy)
+        guard let id = entryID(for: proxy), let entry = list.entry(id), entry.kindKnown,
+              ProxyList.sameConnection(entry.proxy, proxy), !checking.contains(id) else { return result }
+        var updated = list
+        let previous = updated.record(result, for: id)
+        guard save(updated) else { return result }
+        if let previous, let entry = list.entry(id) { onEntryChanged?(entry, previous) }
+        return result
     }
 
     /// Stops the running check; what it found so far is kept.

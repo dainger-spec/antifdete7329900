@@ -19,6 +19,9 @@ final class AppModel: ObservableObject {
     @Published var errorMessage: String?
     /// A profile whose password manager should open (from "Passwords…" in a browser window).
     @Published var passwordsRequest: ProfileSummary?
+    /// Profiles that were started with a proxy that does not work, and what the probe found
+    /// (`ProfileManager.onProxyProblem`): the Profiles window says it in words, with Check.
+    @Published var proxyProblems: [ProxyProblem] = []
     /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
     /// vault it tried).
     @Published private(set) var unlockFailed = false
@@ -177,7 +180,14 @@ final class AppModel: ObservableObject {
         warmUps.forwardChanges(to: self)
         self.warmUps = warmUps
         warmUps.begin()
-        proxyList = ProxyListModel(vault: vault) { [weak self] message in self?.showError(message) }
+        let proxyList = ProxyListModel(vault: vault) { [weak self] message in self?.showError(message) }
+        // The proxies typed into profiles before there was a list are in it from now on (once).
+        proxyList.takeIn(profileProxies: repository.profileProxies())
+        proxyList.onEntryChanged = { [weak self] entry, previous in self?.followProxyEntry(entry, previous: previous) }
+        self.proxyList = proxyList
+        manager.onProxyProblem = { [weak self] id, proxy, diagnosis in
+            self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis)
+        }
         deviceSettings = (try? DeviceSettings.load(from: vault)) ?? DeviceSettings()
         restartAutomation()
         phase = .unlocked
@@ -222,6 +232,7 @@ final class AppModel: ObservableObject {
         await manager?.shutDown()
         proxyList?.stopChecking()
         proxyList = nil
+        proxyProblems = []
         managerObservation = nil
         manager = nil
         repository = nil
@@ -604,6 +615,8 @@ final class AppModel: ObservableObject {
 struct ProfileDetails: Equatable {
     /// "host:port" of its proxy; nil when it connects directly.
     var proxyEndpoint: String?
+    /// Which proxy of the list it uses (`ProxyList.identity(of:)`): the Proxies sheet counts them.
+    var proxyIdentity: String?
     /// Where the proxy was last seen exiting (ISO 3166-1 alpha-2), when a lookup found it.
     var exitCountryCode: String?
     var ephemeral: Bool
@@ -611,6 +624,7 @@ struct ProfileDetails: Equatable {
 
     init(_ configuration: ProfileConfiguration) {
         proxyEndpoint = configuration.proxy.map { "\($0.host):\($0.port)" }
+        proxyIdentity = configuration.proxy.map(ProxyList.identity(of:))
         exitCountryCode = configuration.rememberedProxyLocation?.countryCode
         ephemeral = configuration.ephemeral
         deviceGeneration = configuration.deviceGeneration

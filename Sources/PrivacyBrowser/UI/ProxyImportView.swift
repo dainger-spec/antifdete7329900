@@ -13,7 +13,9 @@ struct ProxyImportView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var text = ""
-    @State private var kind: ProxySettings.Kind = .socks5
+    /// The type of lines without a scheme; nil: found by the first check (until then such a
+    /// proxy is given to no profile).
+    @State private var kind: ProxySettings.Kind?
     @State private var report = ProxyListImport.Report()
     @State private var choosingFile = false
     @State private var error: String?
@@ -22,7 +24,7 @@ struct ProxyImportView: View {
     /// What the report is read from: re-read shortly after either changes.
     private struct Input: Equatable {
         var text: String
-        var kind: ProxySettings.Kind
+        var kind: ProxySettings.Kind?
     }
 
     /// A pasted file larger than this is not a proxy list.
@@ -37,12 +39,14 @@ struct ProxyImportView: View {
                         .font(.lumenLabel)
                         .foregroundStyle(Theme.textPrimary)
                     Picker(L("proxies.import.kind"), selection: $kind) {
-                        Text(verbatim: "SOCKS5").tag(ProxySettings.Kind.socks5)
-                        Text(verbatim: "HTTP").tag(ProxySettings.Kind.httpConnect)
+                        Text(L("proxies.import.kind.auto")).tag(ProxySettings.Kind?.none)
+                        Text(verbatim: "SOCKS5").tag(ProxySettings.Kind?.some(.socks5))
+                        Text(verbatim: "HTTP").tag(ProxySettings.Kind?.some(.httpConnect))
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(width: 180)
+                    .frame(width: 320)
+                    .help(L("proxies.import.kind.help"))
                     .disabled(added != nil)
                     Spacer(minLength: 12)
                     Button { choosingFile = true } label: { Label(L("proxies.import.chooseFile"), systemImage: "doc") }
@@ -127,6 +131,14 @@ struct ProxyImportView: View {
                     .font(.lumenSection)
                     .foregroundStyle(Theme.textPrimary)
                     .monospacedDigit()
+                let unknownKinds = report.proxies.filter { !$0.kindGiven }.count
+                if unknownKinds > 0 {
+                    Text(String(format: L("proxies.import.unknownKinds"), unknownKinds))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .monospacedDigit()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if !report.problems.isEmpty {
                 Text(String(format: L("proxies.import.problemsTitle"), report.failures.count, report.problems.count - report.failures.count))

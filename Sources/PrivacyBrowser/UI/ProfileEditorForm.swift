@@ -31,7 +31,8 @@ struct ProfileEditorForm: View {
     var onCancel: () -> Void = {}
     var onSave: () -> Void = {}
     var onTunnelSettings: () -> Void = {}
-    /// The proxy list, for "Choose from list…" (empty: the picker is not shown).
+    /// The proxy list, for "Choose from list…" (empty: the picker is not shown); proxies whose
+    /// type no check has found yet are not in it.
     var savedProxies: [ProxyListEntry] = []
 
     static let size = CGSize(width: 600, height: 660)

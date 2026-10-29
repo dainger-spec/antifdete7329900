@@ -93,7 +93,8 @@ struct ProfileDraft {
     }
 
     /// Fills the proxy fields with a proxy of the list ("Choose from list…"), as if typed: Save
-    /// stores it as any edit of the proxy.
+    /// stores it as any edit of the proxy. The bypass list stays the profile's own, as an
+    /// assignment from the Proxies sheet keeps it (`ProxySettings.withConnection(of:)`).
     mutating func useProxy(_ proxy: ProxySettings) {
         proxyEnabled = true
         proxyKind = proxy.kind
@@ -102,7 +103,6 @@ struct ProfileDraft {
         proxyUsername = proxy.username ?? ""
         proxyPassword = proxy.password ?? ""
         proxyTLS = proxy.tlsToProxy
-        proxyExcludedDomains = proxy.excludedDomains.joined(separator: ", ")
     }
 
     /// The proxy these fields describe (nil without one). The Host field often holds a pasted
@@ -222,7 +222,7 @@ struct ProfileEditorView: View {
         ProfileEditorForm(draft: $draft, tab: $tab, isNew: target.isNew, avatarID: avatarID, error: error,
                           tunnelCarriesWebRTC: tunnel.canCarryWebRTC,
                           onCancel: { dismiss() }, onSave: save, onTunnelSettings: { showingTunnel = true },
-                          savedProxies: model.proxyList?.entries ?? [])
+                          savedProxies: model.proxyList?.entries.filter(\.kindKnown) ?? [])
             .onAppear(perform: load)
             .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
     }
