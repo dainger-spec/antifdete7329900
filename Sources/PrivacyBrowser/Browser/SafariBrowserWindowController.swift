@@ -6,19 +6,25 @@ import WebKit
 /// Opens a profile's window with the system browser framework's own window controller instead of
 /// the app's `BrowserWindowController`.
 ///
-/// The sequence is the one the framework uses on itself: the application controller is obtained
-/// (or built), asked for a new window with the frontmost profile, and the controller it hands
-/// back is forced to load its window, finish its content setup and show it. None of those names
-/// is hard-coded as the only possibility — each step takes a list of candidates and reports which
-/// were present, which returned nil and which worked, because the names move between releases
-/// and the point of this path is to find out what this macOS actually offers.
+/// The sequence: make the framework's document controller the process's shared one (which must
+/// happen before the application finishes launching — see `prepareProcess`), create a window
+/// controller, force its nib to load, finish its content setup, show it, and open a first tab.
+/// None of the names is hard-coded as the only possibility — each step takes a list of
+/// candidates and reports which were present, which returned nil and which worked, because the
+/// names move between releases and the point of this path is to find out what this macOS
+/// actually offers.
 ///
-/// The profile's `WKWebsiteDataStore` is bound through `SafariHooks.bindDataStore`, which has to
-/// wrap creation rather than follow it: see the note there on `-[WKWebView configuration]`
-/// returning a copy.
+/// The profile's `WKWebsiteDataStore` is bound through `SafariHooks.bindDataStore`, which wraps
+/// creation rather than following it: the framework makes its own store from a profile
+/// identifier, so the binding replaces that factory.
 ///
 /// Every failure returns nil with the trace intact and leaves the process a regular app, so the
-/// caller can fall back to the in-process web view path with nothing to undo.
+/// caller can fall back to the in-process web view path with nothing to undo. On macOS 15 and 26
+/// the path does not reach a usable window: it gets as far as the window's address bar laying
+/// itself out and dies there on a nil attribute. That failure is a raised `NSException`, which
+/// Swift cannot catch, so it takes the process with it — which is why nothing here runs unless
+/// the framework path was asked for on the command line. docs/SAFARI_FRAMEWORK_PATH.md has the
+/// measurements.
 @MainActor
 final class SafariBrowserWindowController: NSObject {
     let profileID: UUID
@@ -96,11 +102,19 @@ final class SafariBrowserWindowController: NSObject {
         guard installDocumentController() else { return fail() }
 
         // Everything that can create a web view runs inside the binding.
+        //
+        // Direct creation first, and the application controller only as the fallback — the
+        // opposite of the order the sample stacks suggest. Measured reason: `-[AppController
+        // init]` eagerly builds its web-extension controllers, which reach
+        // `-[WKWebViewConfiguration _setShouldRelaxThirdPartyCookieBlocking:]`, and WebKit
+        // raises "may only be used by Safari" on any process that is not. Creating the window
+        // controller directly never touches that branch and gets as far as laying out the
+        // window. See docs/SAFARI_FRAMEWORK_PATH.md.
         SafariHooks.forgetObservations()
         let controller = SafariHooks.bindDataStore(dataStore) { () -> NSObject? in
-            if let viaApp = createViaApplicationController() { return viaApp }
-            note("application-controller path produced no controller; trying direct creation")
-            return createDirectly()
+            if let direct = createDirectly() { return direct }
+            note("direct creation produced no controller; trying the application controller")
+            return createViaApplicationController()
         }
         guard let controller else {
             note("no window controller from any path")
