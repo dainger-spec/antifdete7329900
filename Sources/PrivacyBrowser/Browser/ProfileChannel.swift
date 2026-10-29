@@ -34,6 +34,8 @@ enum ProfileEvent: Codable {
     case warmUpProgress(visited: Int, total: Int)
     case warmUpFinished(completed: Bool)
     case cookiesImported(accepted: Int, refused: Int)
+    /// How many cookies a finished warm-up run added to the profile.
+    case cookiesCollected(Int)
 }
 
 /// One line of JSON per message, and a prefix on the way back so that Safari's own output on the

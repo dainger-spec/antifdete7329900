@@ -83,6 +83,11 @@ final class WarmUpRobot: ObservableObject {
     static let world = WKContentWorld.world(name: "PrivacyBrowser.WarmUp")
     private weak var session: BrowserSession?
     private weak var tab: BrowserTab?
+    /// The window this run browses in, off every screen (`BrowserSession.openOffscreenWindow`).
+    private var offscreenWindow: BrowserWindowController?
+    private var cookiesBefore: Int?
+    /// Cookies the last finished run added to the profile.
+    @Published private(set) var cookiesCollected = 0
     private var task: Task<Void, Never>?
     private var run = 0
     private let log = Logger(subsystem: "PrivacyBrowser", category: "WarmUp")
@@ -93,15 +98,18 @@ final class WarmUpRobot: ObservableObject {
 
     // MARK: Start and stop
 
-    /// Starts a run of `plan` in a new tab of `session`'s front window. False when it is already
-    /// running, the plan has no page, or the profile has no window.
+    /// Starts a run of `plan` for `session`, in a window of its own that is placed off every
+    /// screen: the user keeps browsing, or keeps doing something else entirely, while the profile
+    /// is warmed. False when it is already running or the plan has no page.
     @discardableResult
     func start(_ plan: WarmUpPlan, in session: BrowserSession) -> Bool {
         guard !isRunning, session.dataStore != nil else { return false }
         let pages = plan.pages().pages
-        guard !pages.isEmpty, let controller = session.frontmostWindow,
-              let tab = controller.addTab(url: URL(string: "about:blank"), select: true) else { return false }
-        controller.window?.makeKeyAndOrderFront(nil)
+        guard !pages.isEmpty else { return false }
+        let controller = session.openOffscreenWindow()
+        guard let tab = controller.tabs.first else { return false }
+        offscreenWindow = controller
+        countCookies { [weak self] count in self?.cookiesBefore = count }
         tab.refusesDownloads = true
         run += 1
         let current = run
@@ -129,11 +137,28 @@ final class WarmUpRobot: ObservableObject {
         log.notice("Warm-up stopped: \(String(describing: reason), privacy: .public)")
     }
 
-    /// Gives the tab back to the user (downloads as usual) and lets go of it.
+    /// Closes the warm-up's own window and lets go of everything it held.
     private func release() {
         tab?.refusesDownloads = false
+        countCookies { [weak self] count in
+            guard let self, let before = self.cookiesBefore else { return }
+            self.cookiesCollected = max(0, count - before)
+            self.onProgress?()
+        }
         tab = nil
+        offscreenWindow?.tearDown()
+        offscreenWindow?.close()
+        offscreenWindow = nil
         session = nil
+    }
+
+    /// How many cookies the profile holds right now. Counted before the run and after it, which is
+    /// what "collected" means in the profile list.
+    private func countCookies(_ answer: @escaping @MainActor (Int) -> Void) {
+        guard let store = session?.dataStore else { return }
+        store.httpCookieStore.getAllCookies { cookies in
+            MainActor.assumeIsolated { answer(cookies.count) }
+        }
     }
 
     /// Changes visit `index` of run `run`; nothing once that run has ended (its last awaits can

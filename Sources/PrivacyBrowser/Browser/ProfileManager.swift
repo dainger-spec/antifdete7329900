@@ -28,6 +28,9 @@ final class ProfileManager: ObservableObject {
     var onReturnToProfiles: (() -> Void)?
     /// "Passwords…" in a profile's AutoFill list: open that profile's password manager.
     var onShowPasswords: ((UUID) -> Void)?
+    /// A warm-up run of a profile moved on: another page visited, or it finished. The per-profile
+    /// process reports it to the manager over the channel (`ProfileChannel`).
+    var onWarmUpProgress: ((UUID) -> Void)?
     /// A profile's stored configuration changed outside the editor (a proxy lookup remembered a
     /// new exit location): the Profiles list shows it.
     var onConfigurationChanged: ((UUID) -> Void)?
@@ -61,6 +64,8 @@ final class ProfileManager: ObservableObject {
     private var lookupsInFlight: Set<UUID> = []
     /// The session warm-up robot of each profile that used one since unlock.
     private var warmUpRobots: [UUID: WarmUpRobot] = [:]
+    /// What the last warm-up run of a profile in its own process collected, for the profile list.
+    private var warmUpCookies: [UUID: Int] = [:]
 
     /// A lookup through a profile's proxy is still running (self-test hook).
     var hasProxyLookupsInFlight: Bool { !lookupsInFlight.isEmpty }
@@ -269,10 +274,17 @@ final class ProfileManager: ObservableObject {
                 self.onError?(message)
             case .running:
                 self.objectWillChange.send()
-            case .warmUpProgress, .warmUpFinished:
+            case .warmUpProgress(let visited, let total):
+                self.warmUpProgress[id] = (visited, total)
+                self.objectWillChange.send()
+            case .warmUpFinished:
+                self.warmUpProgress[id] = nil
                 self.objectWillChange.send()
             case .cookiesImported(let accepted, let refused):
                 self.log.notice("Profile \(id.uuidString, privacy: .public) imported \(accepted, privacy: .public) cookies, \(refused, privacy: .public) refused")
+            case .cookiesCollected(let count):
+                self.warmUpCookies[id] = count
+                self.objectWillChange.send()
             }
         }
         child.onExit = { [weak self] status in
@@ -553,19 +565,41 @@ final class ProfileManager: ObservableObject {
     func warmUpRobot(for id: UUID) -> WarmUpRobot {
         if let robot = warmUpRobots[id] { return robot }
         let robot = WarmUpRobot(profileID: id)
-        robot.onProgress = { [weak self] in self?.objectWillChange.send() }
+        robot.onProgress = { [weak self] in
+            self?.objectWillChange.send()
+            self?.onWarmUpProgress?(id)
+        }
         warmUpRobots[id] = robot
         return robot
     }
 
     /// A warm-up robot of a profile is running (the profile list shows it).
-    func isWarmingUp(_ id: UUID) -> Bool { warmUpRobots[id]?.isRunning ?? false }
+    func isWarmingUp(_ id: UUID) -> Bool {
+        if let progress = warmUpProgress[id] { return progress.visited < progress.total }
+        return warmUpRobots[id]?.isRunning ?? false
+    }
+
+    /// How far the warm-up of a profile running in its own process has got, and how many cookies
+    /// the last finished run of it collected: both come over the channel, since the robot itself
+    /// is in that process.
+    func warmUpProgress(of id: UUID) -> (visited: Int, total: Int)? { warmUpProgress[id] }
+    func warmUpCookiesCollected(of id: UUID) -> Int? { warmUpCookies[id] }
+
+    private var warmUpProgress: [UUID: (visited: Int, total: Int)] = [:]
 
     /// Starts `plan` in the running profile. False when the profile is not running, or the robot
     /// cannot start (already running, nothing to visit).
     @discardableResult
     func startWarmUp(_ id: UUID, plan: WarmUpPlan) -> Bool {
-        guard !isShuttingDown, let session = sessions[id] else { return false }
+        guard !isShuttingDown else { return false }
+        if let child = children[id] {
+            warmUpProgress[id] = (0, plan.pages().pages.count)
+            warmUpCookies[id] = nil
+            child.send(.startWarmUp(plan))
+            objectWillChange.send()
+            return true
+        }
+        guard let session = sessions[id] else { return false }
         return warmUpRobot(for: id).start(plan, in: session)
     }
 

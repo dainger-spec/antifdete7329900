@@ -186,6 +186,27 @@ final class BrowserSession {
         return controller
     }
 
+    /// A window for the warm-up robot: a real window with a real tab, because WebKit only loads,
+    /// scrolls and runs scripts for content that is in one, but placed far off every screen so the
+    /// user never sees it and it never takes focus. Closed when the run ends.
+    ///
+    /// Not an off-screen `WKWebView` without a window: WebKit suspends rendering and throttles
+    /// timers for a view that is in no window, and a warm-up that does not render is not a warm-up
+    /// — the sites it visits are exactly the ones that measure it.
+    @discardableResult
+    func openOffscreenWindow() -> BrowserWindowController {
+        let controller = BrowserWindowController(session: self)
+        windows.append(controller)
+        if let window = controller.window {
+            window.setFrameOrigin(NSPoint(x: -30000, y: -30000))
+            window.isExcludedFromWindowsMenu = true
+            window.collectionBehavior.insert(.stationary)
+            window.orderFront(nil)
+        }
+        controller.addTab(url: URL(string: "about:blank"))
+        return controller
+    }
+
     /// Opens `url` in a new tab of this profile's frontmost window (or a new window).
     func openInNewTab(_ url: URL) {
         if let controller = frontmostWindow {

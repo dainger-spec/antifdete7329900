@@ -104,6 +104,16 @@ enum ProfileSessionHost {
                 // The profile's last window closed: this process exists for that profile only, so
                 // it quits — and quitting is what seals the data.
                 manager.onReturnToProfiles = { MainActor.assumeIsolated { NSApp.terminate(nil) } }
+                manager.onWarmUpProgress = { [weak manager] id in
+                    guard let robot = manager?.warmUpRobot(for: id) else { return }
+                    let visited = robot.visits.filter { $0.outcome != nil }.count
+                    if robot.isRunning {
+                        ProfileSessionHost.send(.warmUpProgress(visited: visited, total: robot.pageCount))
+                    } else {
+                        ProfileSessionHost.send(.warmUpFinished(completed: visited >= robot.pageCount))
+                        ProfileSessionHost.send(.cookiesCollected(robot.cookiesCollected))
+                    }
+                }
                 self.manager = manager
                 quitCoordinator = QuitCoordinator(
                     hasActivity: { manager.hasActivity },
