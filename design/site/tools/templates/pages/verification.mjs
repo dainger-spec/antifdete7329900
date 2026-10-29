@@ -14,8 +14,8 @@ export default function verification(c, { lang }) {
   </div></section>`;
 
   const chipnav = `<nav class="chipnav" data-chipnav aria-label="${esc(c.navTitle)}"><div class="scroller">${c.nav.map(([id, t]) => `<a href="#${id}">${esc(t)}</a>`).join('')}</div></nav>`;
-  const localnav = `<aside class="local-nav" data-localnav aria-label="${esc(c.navTitle)}"><h2>${esc(c.navTitle)}</h2><div class="track"><ol>${c.nav.map(([id, t]) => `<li><a href="#${id}"><span class="n" aria-hidden="true"></span>${esc(t)}</a></li>`).join('')}</ol><span class="indicator" style="opacity:0"></span></div></aside>`;
-  const sec = (id, title, lead, inner) => `<section class="fblock" id="${id}"><span class="num-tag" aria-hidden="true"></span><h2 class="h2">${inline(title, lang)}</h2>${lead ? `<p class="lead">${inline(lead, lang)}</p>` : ''}${inner}</section>`;
+  const localnav = `<aside class="local-nav" data-localnav aria-label="${esc(c.navTitle)}"><h2>${esc(c.navTitle)}</h2><div class="track"><ol>${c.nav.map(([id, t]) => `<li><a href="#${id}">${esc(t)}</a></li>`).join('')}</ol><span class="indicator" style="opacity:0"></span></div></aside>`;
+  const sec = (id, title, lead, inner) => `<section class="fblock" id="${id}"><h2 class="h2">${inline(title, lang)}</h2>${lead ? `<p class="lead">${inline(lead, lang)}</p>` : ''}${inner}</section>`;
 
   const cp = c.compare;
   const compare = sec('compare', cp.title, cp.lead, `<div class="table-wrap reveal" style="margin-top:36px">

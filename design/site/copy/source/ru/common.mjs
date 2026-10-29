@@ -12,11 +12,11 @@ export default {
     ['verification', 'Проверка'],
     ['pricing', 'Цены'],
     ['docs', 'Документация'],
-    ['blog', 'Обновления'],
   ],
   header: {
     login: 'Войти',
-    download: 'Скачать',
+    download: 'Попробовать бесплатно',
+    downloadShort: 'Попробовать',
     downloadLong: 'Скачать для Mac',
   },
   footer: {

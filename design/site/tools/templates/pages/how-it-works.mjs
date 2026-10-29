@@ -9,9 +9,9 @@ export default function howItWorks(c, { lang }) {
     <p class="lead">${inline(c.hero.lead, lang)}</p>
   </div></section>`;
   const chipnav = `<nav class="chipnav" data-chipnav aria-label="${esc(c.navTitle)}"><div class="scroller">${c.nav.map(([id, t]) => `<a href="#${id}">${esc(t)}</a>`).join('')}</div></nav>`;
-  const localnav = `<aside class="local-nav" data-localnav aria-label="${esc(c.navTitle)}"><h2>${esc(c.navTitle)}</h2><div class="track"><ol>${c.nav.map(([id, t]) => `<li><a href="#${id}"><span class="n" aria-hidden="true"></span>${esc(t)}</a></li>`).join('')}</ol><span class="indicator" style="opacity:0"></span></div></aside>`;
+  const localnav = `<aside class="local-nav" data-localnav aria-label="${esc(c.navTitle)}"><h2>${esc(c.navTitle)}</h2><div class="track"><ol>${c.nav.map(([id, t]) => `<li><a href="#${id}">${esc(t)}</a></li>`).join('')}</ol><span class="indicator" style="opacity:0"></span></div></aside>`;
   const paras = (list) => list.map((p) => `<p>${inline(p, lang)}</p>`).join('');
-  const sec = (id, title, inner) => `<section class="fblock" id="${id}"><span class="num-tag" aria-hidden="true"></span><h2 class="h2">${inline(title, lang)}</h2>${inner}</section>`;
+  const sec = (id, title, inner) => `<section class="fblock" id="${id}"><h2 class="h2">${inline(title, lang)}</h2>${inner}</section>`;
 
   // Overview: manager → profile process (inside the kernel's sandbox) → proxy → internet
   const d = c.overview.diagram;

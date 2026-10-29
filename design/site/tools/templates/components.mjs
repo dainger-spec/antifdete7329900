@@ -156,7 +156,7 @@ export function warmupSheet(s, lang) {
   <div class="titlebar" style="background:var(--raised)"><span class="wtitle">${esc(s.title)}</span></div>
   <div style="padding:18px 18px 6px;display:grid;gap:14px">
     ${seg(s.sources, 1)}
-    <div class="row" style="gap:8px;font:500 13px/18px var(--font)">${flag('DE', 14)}${esc(s.country)}</div>
+    <div class="row" style="gap:8px;font:500 13px/18px var(--font)">${flag(s.flag || 'SE', 14)}${esc(s.country)}</div>
     <p style="font:400 12px/17px var(--font);color:var(--text-tertiary);margin-top:-6px">${esc(s.explain)}</p>
     <div style="display:grid;gap:8px"><div style="font:500 12px/16px var(--font);color:var(--text-secondary)">${esc(s.quality)}</div>${seg(s.qualities, 1)}<div style="font:400 12px/16px var(--font);color:var(--text-tertiary)">${esc(s.qualityDetail)}</div></div>
     <label class="check" style="font-size:13px"><input type="checkbox" checked tabindex="-1"><span>${esc(s.schedule)}</span></label>

@@ -3,7 +3,6 @@ import { icon, flag } from '../../lib/kit.mjs';
 import { linkArrow, btn, checkList, note, result, stat, warmupSheet, avatar } from '../components.mjs';
 
 export default async function features(c, { lang, copy }) {
-  const home = await copy('home');
   const ru = lang === 'ru';
 
   const hero = `<section class="page-hero">
@@ -15,9 +14,9 @@ export default async function features(c, { lang, copy }) {
 </section>`;
 
   const chipnav = `<nav class="chipnav" data-chipnav aria-label="${esc(c.navTitle)}"><div class="scroller">${c.nav.map(([id, t]) => `<a href="#${id}">${esc(t)}</a>`).join('')}</div></nav>`;
-  const localnav = `<aside class="local-nav" data-localnav aria-label="${esc(c.navTitle)}"><h2>${esc(c.navTitle)}</h2><div class="track"><ol>${c.nav.map(([id, t]) => `<li><a href="#${id}"><span class="n" aria-hidden="true"></span>${esc(t)}</a></li>`).join('')}</ol><span class="indicator" style="opacity:0"></span></div></aside>`;
+  const localnav = `<aside class="local-nav" data-localnav aria-label="${esc(c.navTitle)}"><h2>${esc(c.navTitle)}</h2><div class="track"><ol>${c.nav.map(([id, t]) => `<li><a href="#${id}">${esc(t)}</a></li>`).join('')}</ol><span class="indicator" style="opacity:0"></span></div></aside>`;
 
-  const head = (b) => `<span class="num-tag" aria-hidden="true"></span><h2 class="h2">${inline(b.title, lang)}</h2><p class="lead">${inline(b.lead, lang)}</p>`;
+  const head = (b) => `<h2 class="h2">${inline(b.title, lang)}</h2><p class="lead">${inline(b.lead, lang)}</p>`;
 
   // 1. Safari
   const s = c.safari;
@@ -43,14 +42,14 @@ export default async function features(c, { lang, copy }) {
       </div></div>`;
   const process = `<section class="fblock" id="process">${head(p)}
   <div class="fgrid">
-    <div>${checkList(p.points, lang)}</div>
+    <div>${checkList(p.points, lang, { accent: true })}</div>
     <figure class="diagram reveal" style="display:grid;gap:0">
       <div class="node on" style="display:flex;align-items:center;gap:10px"><span class="tile-icon neutral" style="margin:0;width:28px;height:28px">${icon('lockFill', 14)}</span><div><div class="nv">${inline(tree.manager, lang)}</div><div class="ns">${inline(tree.managerSub, lang)}</div></div></div>
       <div style="display:grid;grid-template-columns:18px minmax(0,1fr);">
         <div style="border-left:1.5px solid var(--strong-border);margin-left:14px;margin-bottom:34px"></div>
         <div style="display:grid;gap:10px;padding-top:12px">${tree.procs.map((x, i) => `<div style="position:relative">${proc(x, [2, 4, 1][i])}<span style="position:absolute;left:-4px;top:22px;width:4px;border-top:1.5px solid var(--strong-border)"></span></div>`).join('')}</div>
       </div>
-      <figcaption class="caption" style="margin-top:14px">${inline(tree.caption, lang)}</figcaption>
+
     </figure>
   </div>
 </section>`;
@@ -64,23 +63,28 @@ export default async function features(c, { lang, copy }) {
   </div></figure>`;
   const encryption = `<section class="fblock" id="encryption">${head(e)}
   <div class="fgrid">
-    <div class="stack-lg">${checkList(e.points, lang)}${note(e.note, lang, '', 'infoCircle')}</div>
-    <div class="stack">${keys}${note(e.passwordNote, lang, 'warn', 'exclamationTriangle')}</div>
+    <div>${checkList(e.points, lang, { accent: true })}</div>
+    <div>${keys}</div>
   </div>
 </section>`;
 
   // 4. Proxy
   const x = c.proxy;
-  const failWin = `<figure class="reveal" style="margin:0"><div class="appwin" aria-hidden="true">
-    <div class="titlebar"><span class="traffic"><i></i><i></i><i></i></span>
-      <span style="flex:1;display:flex;justify-content:center"><span style="display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 12px;border-radius:7px;background:var(--field);border:1px solid var(--hairline);color:var(--text-secondary);font:400 12px/16px var(--font);min-width:220px;justify-content:center">${icon('lock', 11)}${esc(x.fail.url)}</span></span>
-      <span class="tag" style="height:22px">${flag('DE', 12)}Northwind</span></div>
-    <div style="padding:44px 24px 48px;text-align:center;display:grid;justify-items:center;gap:10px">
-      <span style="color:var(--text-tertiary)">${icon('shieldSlash', 28)}</span>
-      <div style="font:600 17px/22px var(--font)">${esc(x.fail.heading)}</div>
-      <div style="font:400 13px/18px var(--font);color:var(--text-secondary);max-width:320px">${inline(x.fail.body, lang)}</div>
-    </div></div>
-    <figcaption class="caption" style="margin-top:12px">${inline(x.fail.caption, lang)}</figcaption></figure>`;
+  const dm = x.demo;
+  const failWin = `<div class="pdemo" data-pdemo>
+    <input type="checkbox" id="pd-off" class="visually-hidden">
+    <div class="pdemo-bar">
+      <span class="pstate"><i></i><span class="when-on">${esc(dm.on)}</span><span class="when-off">${esc(dm.off)}</span></span>
+      <label for="pd-off" class="btn secondary sm" role="button"><span class="when-on">${icon('xmark', 13)}${esc(dm.toggleOff)}</span><span class="when-off">${icon('refresh', 13)}${esc(dm.toggleOn)}</span></label>
+    </div>
+    <div class="swin front pwin" aria-live="polite">
+      <div class="sbar"><span class="traffic color"><i></i><i></i><i></i></span><span class="snav">${icon('chevronLeft', 13)}${icon('chevronRight', 13)}</span><span class="surl">${icon('lock', 10)}example.com</span><span class="schip">${avatar(dm.profile, 3, 16)}<span>${esc(dm.profile)}</span>${flag('US', 13)}</span></div>
+      <div class="pstage">
+        <div class="ppage when-on-block"><div class="sk-row"><i class="sk w30"></i><i class="sk w15 r"></i></div><div class="sk-hero"></div><div class="sk-cards"><i></i><i></i><i></i></div><span class="pseen ok">${flag('US', 13)}${esc(dm.seesOn)}</span></div>
+        <div class="ppage err when-off-block"><span class="perr-ic">${icon('shieldSlash', 30)}</span><strong>${esc(dm.error)}</strong><span class="pseen good">${icon('check', 13)}${esc(dm.seesOff)}</span></div>
+      </div>
+    </div>
+  </div>`;
   const l = x.list;
   const plist = `<div class="table-wrap reveal"><table class="table compact stack-mobile">
     <thead><tr><th>${esc(l.head[0])}</th><th>${esc(l.head[2])}</th><th class="num">${esc(l.head[3])}</th></tr></thead>
@@ -96,7 +100,7 @@ export default async function features(c, { lang, copy }) {
   <div class="fgrid" style="margin-top:56px">
     <div><h3 class="h3">${inline(l.title, lang)}</h3><p class="muted" style="margin-top:10px">${inline(l.lead, lang)}</p>
       <ul class="list-check" style="margin-top:20px">${[l.check, l.diagnose, l.assign].map((t) => `<li>${icon('check', 16)}<span>${inline(t, lang)}</span></li>`).join('')}</ul></div>
-    <figure style="margin:0">${plist}<figcaption class="caption" style="margin-top:10px">${inline(l.caption, lang)}</figcaption></figure>
+    <figure style="margin:0">${plist}</figure>
   </div>
 </section>`;
 
@@ -118,7 +122,6 @@ export default async function features(c, { lang, copy }) {
     <div class="stack">
       <div class="table-wrap reveal"><div class="panel-head" style="border-bottom:1px solid var(--hairline)"><div><h3 style="font:600 15px/22px var(--font)">${ru ? 'Профиль против Safari на том же Mac' : 'A profile against Safari on the same Mac'}</h3><p>${ru ? 'Каждая сборка, страница-зонд' : 'Every build, the probe page'}</p></div></div>
         <table class="table compact"><tbody>${same.map(([k, d]) => `<tr><td class="strong">${esc(k)}<span class="sub">${esc(d)}</span></td><td class="num">${result('same', ru ? 'совпадает' : 'identical', lang)}</td></tr>`).join('')}</tbody></table></div>
-      ${note(n.honest, lang, '', 'infoCircle')}
     </div>
   </div>
 </section>`;
@@ -128,7 +131,7 @@ export default async function features(c, { lang, copy }) {
   const warmup = `<section class="fblock" id="warmup">${head(w)}
   <div class="fgrid">
     <div>${checkList(w.points, lang, { accent: true, glyph: 'flame' })}</div>
-    <div class="reveal" style="position:sticky;top:calc(var(--header-h) + 80px)">${warmupSheet(home.warmup.sheet, lang)}</div>
+    <div class="reveal" style="position:sticky;top:calc(var(--header-h) + 80px)">${warmupSheet(c.warmup.sheet, lang)}</div>
   </div>
 </section>`;
 
@@ -139,13 +142,23 @@ export default async function features(c, { lang, copy }) {
 </section>`;
 
   const ct = c.cta;
+  const st = c.steps;
+  const steps = `<section class="band"><div class="container">
+    <h2 class="h2 big center-text">${inline(st.title, lang)}</h2>
+    <ol class="steps3">${st.items.map((it) => `<li class="reveal"><h3>${inline(it.t, lang)}</h3><p>${inline(it.d, lang)}</p></li>`).join('')}</ol>
+  </div></section>`;
+  const faq = `<section class="section" id="faq"><div class="container medium">
+    <h2 class="h2 big" style="margin-bottom:32px">${inline(c.faqTitle, lang)}</h2>
+    <div class="faq">${c.faq.map((f, i) => `<details${i === 0 ? ' open' : ''}><summary>${inline(f.q, lang)}${icon('chevronDown', 16)}</summary><div class="answer"><p>${inline(f.a, lang)}</p></div></details>`).join('')}</div>
+  </div></section>`;
+
   const cta = `<section class="cta-band"><div class="container"><div class="inner">
     <div><h2 class="h2">${inline(ct.title, lang)}</h2><p class="lead" style="margin-top:12px">${inline(ct.lead, lang)}</p></div>
-    <div class="btn-row stretch">${btn('how-it-works.html', ct.primary, 'primary', { size: 'lg', lang })}${btn('download.html', ct.secondary, 'secondary', { size: 'lg', iconName: 'download', lang })}</div>
+    <div class="btn-row stretch">${btn('download.html', ct.primary, 'primary', { size: 'lg', iconName: 'download', lang })}${btn('pricing.html', ct.secondary, 'secondary', { size: 'lg', lang })}</div>
   </div></div></section>`;
 
   return {
-    body: `${hero}\n${chipnav}\n<div class="container"><div class="with-nav" style="padding-top:56px;padding-bottom:40px">${localnav}<div class="fblocks">${[safari, process, encryption, proxy, verification, noise, warmup, data].join('\n')}</div></div></div>\n${cta}`,
+    body: `${hero}\n${chipnav}\n<div class="container"><div class="with-nav" style="padding-top:56px;padding-bottom:40px">${localnav}<div class="fblocks">${[safari, process, encryption, proxy, verification, noise, warmup, data].join('\n')}</div></div></div>\n${steps}\n${faq}\n${cta}`,
     bodyClass: 'page-features',
   };
 }

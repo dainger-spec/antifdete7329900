@@ -27,7 +27,7 @@ export function header(ctx) {
     <div class="header-end">
       ${langSwitch}
       <a class="btn ghost sm login" href="login.html">${esc(c.header.login)}</a>
-      <a class="btn primary sm" href="download.html">${icon('download', 15)}${esc(c.header.download)}</a>
+      <a class="btn primary sm" href="download.html"><span class="long">${esc(c.header.download)}</span><span class="short">${esc(c.header.downloadShort)}</span></a>
       <details class="menu">
         <summary aria-label="${esc(c.a11y.menu)}">${icon('menu', 20, 'open')}${icon('xmark', 18, 'close')}</summary>
         <div class="menu-panel">
@@ -80,7 +80,7 @@ function protoBar(ctx) {
 </div>`;
 }
 
-export function document(ctx, { title, description, body, bodyClass = '', hideFooter = false }) {
+export function document(ctx, { title, description, body, bodyClass = '', hideFooter = false, scripts = [] }) {
   const { lang, c } = ctx;
   const fullTitle = title ? `${plain(title)} — ${productName()}` : `${productName()} — ${plain(c.meta.tagline)}`;
   description = plain(description || c.meta.description);
@@ -97,7 +97,7 @@ export function document(ctx, { title, description, body, bodyClass = '', hideFo
 <link rel="alternate" hreflang="ru" href="../ru/${ctx.other}">
 <link rel="alternate" hreflang="en" href="../en/${ctx.other}">
 <link rel="stylesheet" href="../assets/site.css">
-<script>document.documentElement.classList.replace('no-js','js');(function(){var q=new URLSearchParams(location.search),h=document.documentElement;if(q.get('shot')==='1')h.classList.add('shot');if(q.get('rec')==='1')h.classList.add('rec');try{if(q.get('tbd')==='0'||localStorage.getItem('lumen-site-tbd')==='0')h.classList.add('no-tbd');if(q.get('rm')==='1'||localStorage.getItem('lumen-site-rm')==='1')h.classList.add('rm');}catch(e){}})();</script>
+<script>document.documentElement.classList.replace('no-js','js');(function(){var q=new URLSearchParams(location.search),h=document.documentElement;if(q.get('shot')==='1')h.classList.add('shot');if(q.get('rec')==='1')h.classList.add('rec');try{if(q.get('tbd')==='1'||localStorage.getItem('lumen-site-tbd')==='1')h.classList.add('tbd-on');if(q.get('rm')==='1'||localStorage.getItem('lumen-site-rm')==='1')h.classList.add('rm');}catch(e){}})();</script>
 </head>
 <body class="${esc(bodyClass)}">
 <a class="skip-link" href="#main">${esc(c.a11y.skip)}</a>
@@ -107,6 +107,7 @@ ${body}
 </main>
 ${hideFooter ? '' : footer(ctx)}
 ${protoBar(ctx)}
+${scripts.map((x) => `<script src="../assets/${x}" defer></script>`).join('\n')}
 <script src="../assets/site.js" defer></script>
 </body>
 </html>

@@ -75,6 +75,7 @@ export async function build({ only } = {}) {
         body: out.body,
         bodyClass: out.bodyClass,
         hideFooter: out.hideFooter,
+        scripts: out.scripts,
       });
       const file = path.join(SITE, 'prototype', lang, `${page.slug}.html`);
       fs.mkdirSync(path.dirname(file), { recursive: true });

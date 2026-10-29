@@ -5,11 +5,12 @@ export default {
   description: '{{name}} pricing: every protection in every plan; plans differ by the number of profiles and devices. Free trial, card or crypto, refunds.',
   hero: {
     eyebrow: 'Pricing',
-    title: 'Every protection, in every plan',
-    lead: 'Plans differ by how many profiles and Macs you get. Real Safari, encryption, a proxy with no way around it, warm-up and sync are in all of them.',
+    title: 'Simple plans, every feature in each',
+    lead: 'Plans differ only by how many profiles and Macs you get. Start with a free trial.',
   },
   billing: { monthly: 'Monthly', yearly: 'Yearly', yearlyNote: '{{tbd:q2:two months free}}' },
   per: { month: 'per month', year: 'per year' },
+  assurances: ['{{tbd:q3:7 days free}}', 'No card needed', 'Money back within {{tbd:q10:14 days}}', 'Card or crypto'],
   plans: [
     { name: 'Personal', for: 'For yourself: work, personal and a few projects.', month: '{{tbd:q2:$19}}', year: '{{tbd:q2:$190}}', limits: [['Profiles', '{{tbd:q2:10}}'], ['Macs', '{{tbd:q2:2}}'], ['Seats', '{{tbd:q2:1}}']], cta: 'Try it' },
     { name: 'Professional', for: 'For people who run dozens of accounts.', month: '{{tbd:q2:$49}}', year: '{{tbd:q2:$490}}', limits: [['Profiles', '{{tbd:q2:50}}'], ['Macs', '{{tbd:q2:3}}'], ['Seats', '{{tbd:q2:1}}']], cta: 'Try it', featured: 'Recommended' },

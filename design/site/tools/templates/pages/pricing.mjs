@@ -24,6 +24,7 @@ export default function pricing(c, { lang }) {
       <a class="btn ${p.featured ? 'primary' : 'secondary'} block" href="download.html">${inline(p.cta, lang)}</a>
       <div class="limits">${p.limits.map(([k, v]) => `<div><span>${inline(k, lang)}</span><strong>${inline(v, lang)}</strong></div>`).join('')}</div>
     </div>`).join('')}</div>
+    <ul class="assure">${c.assurances.map((a) => `<li>${icon('check', 15)}<span>${inline(a, lang)}</span></li>`).join('')}</ul>
   </div></section>`;
 
   const inc = `<section class="section"><div class="container"><div class="split even">

@@ -10,7 +10,7 @@ export default function legal(c, { lang, slug, state }) {
     <p class="lead">${inline(doc.lead, lang)}</p>
     <p class="doc-meta"><span>${inline(c.updatedLabel, lang)} ${inline(c.updated, lang)}</span></p>
   </div></section>`;
-  const toc = `<aside class="local-nav" data-localnav aria-label="${esc(c.tocTitle)}"><h2>${esc(c.tocTitle)}</h2><div class="track"><ol>${doc.toc.map(([id, t]) => `<li><a href="#${id}"><span class="n" aria-hidden="true"></span>${inline(t, lang)}</a></li>`).join('')}</ol><span class="indicator" style="opacity:0"></span></div></aside>`;
+  const toc = `<aside class="local-nav" data-localnav aria-label="${esc(c.tocTitle)}"><h2>${esc(c.tocTitle)}</h2><div class="track"><ol>${doc.toc.map(([id, t]) => `<li><a href="#${id}">${inline(t, lang)}</a></li>`).join('')}</ol><span class="indicator" style="opacity:0"></span></div></aside>`;
   const body = `<div class="container"><div class="with-nav" style="padding-bottom:96px;border-top:1px solid var(--divider);padding-top:48px">${toc}<div class="prose legal">${markdown(doc.body, lang, { icon })}</div></div></div>`;
   return { title: doc.title, description: doc.lead, body: hero + body, bodyClass: `page-legal page-${state}` };
 }

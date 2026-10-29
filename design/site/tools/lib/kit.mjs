@@ -80,8 +80,16 @@ export const mark = (size, opts) => L.geometry.markSVG(size, opts);
 export const glyph = (size, color = '#F4F5F7') => L.geometry.glyphSVG(size, color);
 /// LUMEN, drawn from its outlines (no font).
 export const wordmark = (height, color = 'currentColor') => L.geometry.wordmarkSVG(height, color);
-/// A flat circle flag (CountryFlag.swift).
-export const flag = (code, size = 14) => L.flagSVG(code, size);
+/// A flat circle flag (CountryFlag.swift); Brazil, which the app's set lacks, drawn here the same way.
+let siteFlagSerial = 0;
+export function flag(code, size = 14) {
+  if (code !== 'BR') return L.flagSVG(code, size);
+  const id = `sfl${++siteFlagSerial}`, s = size, h = s / 2, ring = s >= 14 ? 1 : 0.75;
+  const f = (n) => (Math.round(n * 1000) / 1000).toString();
+  return `<svg class="flag" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" aria-hidden="true"><clipPath id="${id}"><circle cx="${h}" cy="${h}" r="${h}"/></clipPath>` +
+    `<g clip-path="url(#${id})"><rect width="${s}" height="${s}" fill="#2E8B57"/><path d="M${f(s * 0.08)} ${h}L${h} ${f(s * 0.2)}L${f(s * 0.92)} ${h}L${h} ${f(s * 0.8)}Z" fill="#F2C13D"/><circle cx="${h}" cy="${h}" r="${f(s * 0.2)}" fill="#2B4FA3"/></g>` +
+    `<circle cx="${h}" cy="${h}" r="${h - ring / 2}" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="${ring}"/></svg>`;
+}
 /// The profile glyph's palette (ProfileAvatar) and the sample profiles' palette index (UISnapshots).
 export const avatarPalette = L.avatar.PALETTE;
 export const sampleAvatarIndex = L.avatar.sampleAvatarIndex;

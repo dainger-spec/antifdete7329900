@@ -17,12 +17,12 @@
 
   document.querySelectorAll('[data-toggle]').forEach((b) => {
     const kind = b.getAttribute('data-toggle');
-    const cls = kind === 'tbd' ? 'no-tbd' : 'rm';
-    const sync = () => b.classList.toggle('on', kind === 'tbd' ? !root.classList.contains('no-tbd') : root.classList.contains('rm'));
+    const cls = kind === 'tbd' ? 'tbd-on' : 'rm';
+    const sync = () => b.classList.toggle('on', root.classList.contains(cls));
     sync();
     b.addEventListener('click', () => {
       root.classList.toggle(cls);
-      try { localStorage.setItem(kind === 'tbd' ? 'lumen-site-tbd' : 'lumen-site-rm', root.classList.contains(cls) ? (kind === 'tbd' ? '0' : '1') : (kind === 'tbd' ? '1' : '0')); } catch (e) { /* private mode */ }
+      try { localStorage.setItem(kind === 'tbd' ? 'lumen-site-tbd' : 'lumen-site-rm', root.classList.contains(cls) ? '1' : '0'); } catch (e) { /* private mode */ }
       sync();
       if (cls === 'rm') revealAll();
     });
@@ -93,6 +93,267 @@
       if (visible.length) { current = visible[0].target.id; mark(current); }
     }, { rootMargin: '-30% 0px -60% 0px', threshold: 0 });
     targets.forEach((t) => io.observe(t));
+  });
+
+  // MARK: Home: the scene comes together once
+  document.querySelectorAll('.stage').forEach((stage) => {
+    if (shot || reduced()) { stage.classList.add('in'); return; }
+    requestAnimationFrame(() => requestAnimationFrame(() => stage.classList.add('in')));
+  });
+
+  // MARK: Home: "proxy down, IP hidden" — switches itself once when first seen, then waits for clicks
+  document.querySelectorAll('[data-pdemo]').forEach((demo) => {
+    const box = demo.querySelector('#pd-off');
+    if (!box) return;
+    if (shot) { box.checked = true; return; }
+    if (!('IntersectionObserver' in window)) return;
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      setTimeout(() => { if (!box.dataset.touched) box.checked = true; }, reduced() ? 0 : 1100);
+    }, { threshold: 0.5 });
+    box.addEventListener('change', () => { box.dataset.touched = '1'; });
+    io.observe(demo);
+  });
+
+  // MARK: Home: the warm-up card counts its cookies once, when first seen
+  document.querySelectorAll('[data-warm]').forEach((card) => {
+    const n = card.querySelector('[data-count-to]');
+    const bar = card.querySelector('.wbar i');
+    if (!n || shot || reduced() || !('IntersectionObserver' in window)) return;
+    const to = +n.getAttribute('data-count-to');
+    const width = bar ? bar.style.width : '';
+    n.textContent = '0';
+    if (bar) bar.style.width = '0%';
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      if (bar) bar.style.width = width;
+      const t0 = performance.now(), dur = 1400;
+      const tick = (t) => {
+        const p = Math.min(1, (t - t0) / dur);
+        n.textContent = String(Math.round(to * (1 - Math.pow(1 - p, 3))));
+        if (p < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }, { threshold: 0.5 });
+    io.observe(card);
+  });
+
+  // MARK: Home v3: the split planet
+  // A dotted globe (land points from world.js) in orthographic projection, cut by the mark's steep seam
+  // (one across for three up); on first sight its halves slide apart along the seam to the mark's
+  // proportions (gap 3, slide 6 of radius 19), then it turns slowly while it is on screen. Profiles' exit
+  // countries carry chips. Reduce Motion: drawn once, split, still.
+  document.querySelectorAll('[data-globe]').forEach((canvas) => {
+    const raw = window.LUMEN_WORLD;
+    if (!raw || !canvas.getContext) return;
+    const wrap = canvas.closest('[data-globe-wrap]');
+    const chips = Array.from(wrap.querySelectorAll('.gchip'));
+    const bin = atob(raw);
+    const count = bin.length / 4;
+    const P = new Float32Array(count * 3);
+    const i16 = (k) => { const v = bin.charCodeAt(k) | (bin.charCodeAt(k + 1) << 8); return v & 0x8000 ? v - 0x10000 : v; };
+    const toVec = (latDeg, lonDeg, out, o) => {
+      const lat = latDeg * Math.PI / 180, lon = lonDeg * Math.PI / 180;
+      out[o] = Math.cos(lat) * Math.sin(lon); out[o + 1] = Math.sin(lat); out[o + 2] = Math.cos(lat) * Math.cos(lon);
+    };
+    for (let i = 0; i < count; i++) toVec(i16(i * 4) / 100, i16(i * 4 + 2) / 100, P, i * 3);
+    const pins = chips.map((c) => { const v = new Float32Array(3); toVec(+c.dataset.lat, +c.dataset.lon, v, 0); return v; });
+    const ctx = canvas.getContext('2d');
+    const SL = Math.hypot(1, 3), D = { x: 1 / SL, y: -3 / SL }, N = { x: -D.y, y: D.x };
+    const TILT = 0.36, LAMBDA0 = 25 * Math.PI / 180, SPEED = 0.03; // radians, radians per second
+    let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0, lambda = LAMBDA0, split = 0, t0 = 0, last = 0, raf = 0, running = false;
+    const still = () => shot || reduced();
+
+    function layout() {
+      const r = canvas.getBoundingClientRect();
+      dpr = Math.min(2, window.devicePixelRatio || 1);
+      W = r.width; H = r.height;
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+      const wide = W >= 900;
+      cx = wide ? W * 0.735 : W / 2;
+      cy = wide ? H * 0.5 : H * 0.5;
+      R = wide ? Math.min(H * 0.40, W * 0.255) : Math.min(W * 0.40, H * 0.40);
+    }
+
+    function project(v, out) {
+      const cl = Math.cos(lambda), sl = Math.sin(lambda), ct = Math.cos(TILT), st = Math.sin(TILT);
+      const x1 = v[0] * cl + v[2] * sl, z1 = -v[0] * sl + v[2] * cl, y1 = v[1];
+      const y2 = y1 * ct - z1 * st, z2 = y1 * st + z1 * ct;
+      out.x = cx + R * x1; out.y = cy - R * y2; out.z = z2;
+      return out;
+    }
+
+    const BUCKETS = 7;
+    function draw(elapsed) {
+      const gap = (R * 3 / 19) * 0.85 * split, slide = (R * 6 / 19) * 0.85 * split;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      // A faint haze behind the planet.
+      const haze = ctx.createRadialGradient(cx, cy, R * 0.15, cx, cy, R * 1.5);
+      haze.addColorStop(0, 'rgba(94,132,235,0.11)'); haze.addColorStop(1, 'rgba(94,132,235,0)');
+      ctx.fillStyle = haze; ctx.fillRect(0, 0, W, H);
+      // The two halves' outlines and bodies, as in the mark.
+      for (const side of [1, -1]) {
+        const ox = side * slide / 2 * D.x, oy = side * slide / 2 * D.y;
+        const h = side * gap / 2, half = Math.sqrt(Math.max(0, R * R - h * h));
+        const ax = cx + ox + N.x * h - D.x * half, ay = cy + oy + N.y * h - D.y * half;
+        const bx = cx + ox + N.x * h + D.x * half, by = cy + oy + N.y * h + D.y * half;
+        const angA = Math.atan2(ay - cy - oy, ax - cx - ox), angB = Math.atan2(by - cy - oy, bx - cx - ox);
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+        ctx.arc(cx + ox, cy + oy, R, angB, angA, side < 0);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(111,143,234,0.035)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.09)'; ctx.lineWidth = 1; ctx.stroke();
+      }
+      // Land.
+      const paths = Array.from({ length: BUCKETS }, () => new Path2D());
+      const q = { x: 0, y: 0, z: 0 };
+      for (let i = 0; i < count; i++) {
+        project([P[i * 3], P[i * 3 + 1], P[i * 3 + 2]], q);
+        if (q.z <= 0.02) continue;
+        const dist = (q.x - cx) * N.x + (q.y - cy) * N.y;
+        if (Math.abs(dist) < gap / 2) continue;
+        const side = dist >= 0 ? 1 : -1;
+        const x = q.x + side * slide / 2 * D.x, y = q.y + side * slide / 2 * D.y;
+        const b = Math.min(BUCKETS - 1, Math.floor(q.z * BUCKETS));
+        const r = 0.65 + q.z * 1.0;
+        paths[b].moveTo(x + r, y); paths[b].arc(x, y, r, 0, Math.PI * 2);
+      }
+      for (let b = 0; b < BUCKETS; b++) {
+        ctx.fillStyle = `rgba(124,152,236,${(0.16 + 0.7 * (b + 0.5) / BUCKETS).toFixed(3)})`;
+        ctx.fill(paths[b]);
+      }
+      // Exit countries.
+      chips.forEach((chip, k) => {
+        project(pins[k], q);
+        const dist = (q.x - cx) * N.x + (q.y - cy) * N.y, side = dist >= 0 ? 1 : -1;
+        const x = q.x + side * slide / 2 * D.x, y = q.y + side * slide / 2 * D.y;
+        const face = Math.max(0, Math.min(1, (q.z - 0.08) / 0.25));
+        const appear = still() ? 1 : Math.max(0, Math.min(1, (elapsed - 1000 - k * 140) / 240));
+        const a = face * appear;
+        if (a > 0.01) {
+          ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.strokeStyle = `rgba(169,189,245,${0.4 * a})`; ctx.lineWidth = 1.2; ctx.stroke();
+          ctx.beginPath(); ctx.arc(x, y, 3.2, 0, Math.PI * 2); ctx.fillStyle = `rgba(214,224,252,${a})`; ctx.fill();
+        }
+        chip.style.opacity = a.toFixed(3);
+        const left = chip.dataset.side === 'l';
+        chip.style.transform = `translate(${Math.round(left ? x - 12 - chip.offsetWidth : x + 12)}px, ${Math.round(y - 15)}px)`;
+      });
+    }
+
+    function tick(now) {
+      if (!running) return;
+      if (!t0) { t0 = now; last = now; }
+      const elapsed = now - t0;
+      const p = Math.max(0, Math.min(1, (elapsed - 200) / 1100));
+      split = 1 - Math.pow(1 - p, 3);
+      lambda += SPEED * Math.min(64, now - last) / 1000;
+      last = now;
+      draw(elapsed);
+      raf = requestAnimationFrame(tick);
+    }
+    function start() { if (running || still()) return; running = true; last = 0; raf = requestAnimationFrame((n) => { last = n; tick(n); }); }
+    function stop() { running = false; cancelAnimationFrame(raf); }
+
+    layout();
+    if (still()) { split = 1; draw(1e9); }
+    window.addEventListener('resize', () => { layout(); if (still()) draw(1e9); });
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver((entries) => { entries.forEach((e) => (e.isIntersecting && !document.hidden ? start() : stop())); }, { threshold: 0.05 }).observe(canvas);
+    } else start();
+    document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (canvas.getBoundingClientRect().bottom > 0) start(); });
+  });
+
+  // MARK: Home v3: the tiles play once when first seen, and again on hover
+  const TILE = {
+    safari(el, done) {
+      const rows = Array.from(el.querySelectorAll('.srow')), bar = el.querySelector('.scanbar'), foot = el.querySelector('.sfoot');
+      rows.forEach((r) => r.classList.remove('ok'));
+      foot.style.opacity = '0';
+      const step = 190, h = rows[0] ? rows[0].offsetHeight : 40;
+      bar.style.transform = 'translateY(0)';
+      later(120, () => { bar.style.opacity = '1'; });
+      rows.forEach((r, i) => {
+        later(200 + i * step, () => { bar.style.transform = `translateY(${i * h}px)`; });
+        later(320 + i * step, () => r.classList.add('ok'));
+      });
+      later(320 + rows.length * step, () => { bar.style.opacity = '0'; foot.style.opacity = '1'; done(); });
+    },
+    proxy(el, done) {
+      const route = el.querySelector('.route');
+      route.classList.remove('down', 'flow');
+      void route.offsetWidth;
+      later(150, () => route.classList.add('flow'));
+      later(1500, () => { route.classList.remove('flow'); route.classList.add('down'); done(); });
+    },
+    isolation(el, done) {
+      const sp = el.querySelector('.split');
+      sp.classList.remove('on');
+      void sp.offsetWidth;
+      later(250, () => sp.classList.add('on'));
+      later(800, done);
+    },
+    warmup(el, done) {
+      const n = el.querySelector('[data-count-to]'), bar = el.querySelector('.wbar i'), sites = Array.from(el.querySelectorAll('.wsites span'));
+      const to = +n.dataset.countTo, width = '33.3%';
+      sites.forEach((s, i) => { s.classList.toggle('done', false); s.classList.add('todo'); });
+      bar.style.width = '0%'; n.textContent = '0';
+      later(150, () => { bar.style.width = width; });
+      const t0 = performance.now(), dur = 1400;
+      const tick = (t) => { const p = Math.min(1, (t - t0) / dur); n.textContent = String(Math.round(to * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(tick); else done(); };
+      requestAnimationFrame(tick);
+      sites.slice(0, 4).forEach((s, i) => later(250 + i * 300, () => { s.classList.remove('todo'); s.classList.add('done'); }));
+    },
+    encryption(el, done) {
+      const rows = Array.from(el.querySelectorAll('.crow'));
+      const AB = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+      rows.forEach((row, i) => {
+        const bits = row.querySelector('[data-cipher]'), word = row.firstElementChild.textContent.toLowerCase();
+        row.classList.add('busy'); bits.textContent = word;
+        later(250 + i * 160, () => {
+          const t0 = performance.now();
+          const tick = (t) => {
+            const p = (t - t0) / 520;
+            if (p >= 1) { bits.textContent = '••••••••••••'; row.classList.remove('busy'); if (i === rows.length - 1) done(); return; }
+            let s = '';
+            for (let k = 0; k < 12; k++) s += k / 12 < p ? '•' : AB[(Math.random() * AB.length) | 0];
+            bits.textContent = s;
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+      });
+    },
+  };
+  let laterTimers = [];
+  function later(ms, fn) { laterTimers.push(setTimeout(fn, ms)); }
+  document.querySelectorAll('[data-tile]').forEach((el) => {
+    const play = TILE[el.dataset.tile];
+    if (!play || shot || reduced()) return;
+    let busy = false, seen = false;
+    const run = () => { if (busy) return; busy = true; play(el, () => { busy = false; }); };
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting) && !seen) { seen = true; io.disconnect(); run(); } }, { threshold: 0.45 });
+      io.observe(el);
+    }
+    if (matchMedia('(hover: hover) and (pointer: fine)').matches) el.addEventListener('mouseenter', () => { if (seen) run(); });
+  });
+
+  // MARK: Home v3: the three numbers count up once
+  document.querySelectorAll('.proof3 [data-count-to]').forEach((n) => {
+    const to = +n.dataset.countTo;
+    if (!to || shot || reduced() || !('IntersectionObserver' in window)) return;
+    n.textContent = '0';
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      const t0 = performance.now(), dur = to > 100 ? 1300 : 900;
+      const tick = (t) => { const p = Math.min(1, (t - t0) / dur); n.textContent = String(Math.round(to * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+    }, { threshold: 0.6 });
+    io.observe(n);
   });
 
   // MARK: The hero demonstration

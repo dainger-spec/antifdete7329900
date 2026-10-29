@@ -1,108 +1,121 @@
 import { inline, esc } from '../../lib/html.mjs';
-import { icon } from '../../lib/kit.mjs';
-import { sectionHead, linkArrow, btn, featureCard, checkList, heroDemo, warmupSheet, stat } from '../components.mjs';
+import { icon, flag, glyph } from '../../lib/kit.mjs';
+import { btn, linkArrow, avatar, ring } from '../components.mjs';
+
+// Sites of the Swedish warm-up preset (WarmUpPreset.swift, id "se"), in its order.
+const SE_SITES = ['google.se', 'aftonbladet.se', 'svt.se', 'dn.se', 'expressen.se', 'blocket.se'];
+
+/// The two halves of the mark's disc, drawn whole (no gap, no slide) so CSS can slide them apart along
+/// the seam to the mark's own proportions (LumenMarkGeometry.large: radius 19, gap 3, slide 6).
+function splitDisc(size = 200, radius = 78) {
+  const L = globalThis.Lumen;
+  const path = L.geometry.glyphPath({ grid: size, cx: size / 2, cy: size / 2, radius, gap: 0, slide: 0 }, 0, 0, size);
+  const k = path.indexOf('M', 1);
+  const [a, b] = [path.slice(0, k), path.slice(k)];
+  const len = Math.hypot(1, 3), d = [1 / len, -3 / len], n = [-d[1], d[0]];
+  const gap = (radius * 3) / 19, slide = (radius * 6) / 19;
+  const off = (side) => [side * (gap / 2 * n[0] + slide / 2 * d[0]), side * (gap / 2 * n[1] + slide / 2 * d[1])].map((v) => v.toFixed(2));
+  const [ax, ay] = off(1), [bx, by] = off(-1);
+  return `<svg class="disc" viewBox="0 0 ${size} ${size}" aria-hidden="true">
+    <path class="half a" d="${a}" style="--tx:${ax}px;--ty:${ay}px"/>
+    <path class="half b" d="${b}" style="--tx:${bx}px;--ty:${by}px"/>
+  </svg>`;
+}
 
 export default function home(c, { lang }) {
   const h = c.hero;
-  const hero = `<section class="hero">
-  <div class="container">
-    <p class="eyebrow"><span class="dot"></span>${inline(h.eyebrow, lang)}</p>
-    <h1 class="display">${inline(h.title, lang)}</h1>
-    <p class="lead">${inline(h.lead, lang)}</p>
-    <div class="btn-row stretch">
-      ${btn('download.html', h.primary, 'primary', { size: 'lg', iconName: 'download', lang })}
-      ${btn('verification.html', h.secondary, 'secondary', { size: 'lg', lang })}
-    </div>
-    <p class="hero-meta">${h.meta.map((m) => `<span>${inline(m, lang)}</span>`).join('')}</p>
-    ${heroDemo(c.demo, lang)}
+  const hero = `<section class="hero3">
+  <div class="globe-wrap" data-globe-wrap>
+    <canvas class="globe" data-globe aria-hidden="true"></canvas>
+    <div class="globe-fallback" aria-hidden="true">${glyph(420, '#1B1F27')}</div>
+    <div class="gchips" aria-hidden="true">${c.globe.pins.map((p, i) => `<span class="gchip" data-lat="${p.lat}" data-lon="${p.lon}"${p.side ? ` data-side="${p.side}"` : ''} style="--i:${i}">${avatar(p.name, [2, 3, 5, 4, 1][i], 18)}<span>${esc(p.name)}</span>${flag(p.code, 14)}</span>`).join('')}</div>
   </div>
+  <div class="container hero3-inner">
+    <div class="hero3-text">
+      <p class="pill-eyebrow">${glyph(14)}<span>${inline(h.eyebrow, lang)}</span></p>
+      <h1 class="mega">${inline(h.title, lang)}</h1>
+      <p class="lead">${inline(h.lead, lang)}</p>
+      <div class="btn-row">${btn('download.html', h.primary, 'primary', { size: 'lg', iconName: 'download', lang })}${btn('features.html', h.secondary, 'secondary', { size: 'lg', lang })}</div>
+      <p class="hero-dots">${h.meta.map((m) => `<span>${icon('check', 13)}${inline(m, lang)}</span>`).join('')}</p>
+    </div>
+  </div>
+  <p class="visually-hidden">${esc(c.globe.label)}</p>
 </section>`;
 
-  const a = c.audience;
-  const audience = `<section class="section" id="audience">
-  <div class="container">
-    ${sectionHead({ title: a.title, lead: a.lead }, lang)}
-    <div class="grid c4">${a.items.map((it) => featureCard(it, lang)).join('')}</div>
-  </div>
-</section>`;
-
-  const p = c.pillars;
-  const pillars = `<section class="section" id="why">
-  <div class="container">
-    <div class="row" style="justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:48px">
-      <div class="section-head" style="margin:0">${`<h2 class="h2">${inline(p.title, lang)}</h2><p class="lead">${inline(p.lead, lang)}</p>`}</div>
-      ${linkArrow('features.html', p.more, lang)}
+  const t = c.tiles;
+  const safari = `<article class="tile w7" data-tile="safari">
+    <div class="ttext"><h3>${inline(t.safari.title, lang)}</h3><p>${inline(t.safari.text, lang)}</p></div>
+    <div class="viz scan">
+      <span class="scanbar" aria-hidden="true"></span>
+      ${t.safari.rows.map((r) => `<div class="srow ok"><span>${inline(r, lang)}</span><span class="sok">${icon('check', 13)}${inline(t.safari.ok, lang)}</span></div>`).join('')}
+      <div class="sfoot">${glyph(14)}<span>${inline(t.safari.foot, lang)}</span></div>
     </div>
-    <div class="pillars">${p.items.map((it) => `<a class="pillar reveal" href="${it.href}"><span class="pi">${icon(it.icon, 18)}${icon('arrowRight', 14, 'go')}</span><h3>${inline(it.title, lang)}</h3><p>${inline(it.text, lang)}</p></a>`).join('')}</div>
-  </div>
-</section>`;
+  </article>`;
+
+  const p = t.proxy;
+  const proxy = `<article class="tile w5" data-tile="proxy">
+    <div class="ttext"><h3>${inline(p.title, lang)}</h3><p>${inline(p.text, lang)}</p></div>
+    <div class="viz route down">
+      <div class="rline">
+        <span class="rnode me">${avatar(p.profile, 3, 22)}<b>${esc(p.profile)}</b>${flag('US', 13)}</span>
+        <span class="rseg s1"><i class="pk"></i></span>
+        <span class="rnode px"><span class="pxic">${icon('network', 15)}</span><b>${esc(p.proxy)}</b><em>${icon('xmark', 11)}${esc(p.down)}</em></span>
+        <span class="rseg s2"><i class="pk"></i></span>
+        <span class="rnode site">${icon('globe', 15)}<b>${esc(p.site)}</b></span>
+      </div>
+      <div class="rdirect"><span class="dline"></span><span class="dlabel">${icon('lock', 11)}${esc(p.direct)} — ${esc(p.closed)}</span></div>
+      <span class="rhidden">${icon('shieldCheck', 14)}${esc(p.hidden)}</span>
+    </div>
+  </article>`;
+
+  const s = t.isolation;
+  const isolation = `<article class="tile" data-tile="isolation">
+    <div class="ttext"><h3>${inline(s.title, lang)}</h3><p>${inline(s.text, lang)}</p></div>
+    <div class="viz split on">
+      ${splitDisc()}
+      <div class="side l"><span class="ichip">${avatar(s.left.name, 2, 18)}${esc(s.left.name)}${flag(s.left.code, 13)}</span><span class="itag">${s.tags.map(esc).join(' · ')}</span></div>
+      <div class="side r"><span class="itag">${s.tags.map(esc).join(' · ')}</span><span class="ichip">${avatar(s.right.name, 3, 18)}${esc(s.right.name)}${flag(s.right.code, 13)}</span></div>
+    </div>
+  </article>`;
+
+  const w = t.warmup;
+  const warmup = `<article class="tile" data-tile="warmup">
+    <div class="ttext"><h3>${inline(w.title, lang)}</h3><p>${inline(w.text, lang)}</p></div>
+    <div class="viz warm2">
+      <div class="wbig"><span class="n" data-count-to="84">84</span><span class="u">${esc(w.unit)}</span></div>
+      <div class="wp">${ring(4 / 12, 14)}<span>${esc(w.page)}</span>${flag('SE', 13)}</div>
+      <div class="wbar"><i style="width:33.3%"></i></div>
+      <div class="wsites">${SE_SITES.map((x, i) => `<span class="${i < 4 ? 'done' : 'todo'}">${icon(i < 4 ? 'check' : 'minus', 10)}${x}</span>`).join('')}</div>
+    </div>
+  </article>`;
+
+  const e = t.encryption;
+  const encryption = `<article class="tile" data-tile="encryption">
+    <div class="ttext"><h3>${inline(e.title, lang)}</h3><p>${inline(e.text, lang)}</p></div>
+    <div class="viz cipher">
+      ${e.items.map((x) => `<div class="crow"><span>${esc(x)}</span><code class="cbits" data-cipher>••••••••••••</code><span class="clock">${icon('lockFill', 12)}</span></div>`).join('')}
+      <span class="tag accent ctag">${icon('key', 12)}${esc(e.tag)}</span>
+    </div>
+  </article>`;
+
+  const bento = `<section class="bento-sec"><div class="container">
+    <h2 class="h2 big">${inline(c.bentoTitle, lang)}</h2>
+    <div class="bento">${safari}${proxy}${isolation}${warmup}${encryption}</div>
+  </div></section>`;
 
   const pr = c.proof;
-  const proof = `<section class="section" id="proof">
-  <div class="container">
-    ${sectionHead({ eyebrow: pr.eyebrow, title: pr.title, lead: pr.lead }, lang)}
-    <div class="stats reveal">${pr.stats.map((s) => stat(s, lang)).join('')}</div>
-    <div class="row" style="justify-content:space-between;margin-top:20px;gap:12px 24px">
-      <span class="caption">${inline(pr.run, lang)}</span>
-      ${linkArrow('verification.html', pr.link, lang)}
-    </div>
-  </div>
-</section>`;
-
-  const n = c.noise;
-  const vrow = (rows, odd) => `<div class="runs">${rows.map(([k, v], i) => `<div${odd && i > 0 ? ' class="odd"' : ''}><span>${inline(k, lang)}</span><span>${inline(v, lang)}</span></div>`).join('')}</div>`;
-  const noise = `<section class="section" id="noise">
-  <div class="container">
-    <div class="split even">
-      <div>
-        ${sectionHead({ eyebrow: n.eyebrow, title: n.title, lead: n.lead }, lang).replace('section-head', 'section-head reveal')}
-        <div class="stack-lg">${n.points.map((pt) => `<div class="reveal"><h3 class="h4">${inline(pt.title, lang)}</h3><p class="muted small" style="margin-top:6px">${inline(pt.text, lang)}</p></div>`).join('')}</div>
-        <p style="margin-top:32px">${linkArrow('blog-no-noise.html', n.link, lang)}</p>
-      </div>
-      <div class="versus reveal" style="align-self:center">
-        <div><div class="vt">${icon('wave', 13)} ${inline(n.versus.noise, lang)}</div>${vrow(n.versus.noiseRows, true)}<p class="verdict">${inline(n.versus.noiseVerdict, lang)}</p></div>
-        <div><div class="vt">${icon('equal', 13)} ${inline(n.versus.none, lang)}</div>${vrow(n.versus.noneRows)}<p class="verdict">${inline(n.versus.noneVerdict, lang)}</p></div>
-      </div>
-    </div>
-  </div>
-</section>`;
-
-  const w = c.warmup;
-  const warm = `<section class="section" id="warmup">
-  <div class="container">
-    <div class="split even">
-      <div>
-        ${sectionHead({ eyebrow: w.eyebrow, title: w.title, lead: w.lead }, lang)}
-        ${checkList(w.bullets, lang, { accent: true })}
-        <p style="margin-top:32px">${linkArrow('features.html#warmup', w.link, lang)}</p>
-      </div>
-      <div class="reveal" style="max-width:520px;width:100%;justify-self:end">${warmupSheet(w.sheet, lang)}</div>
-    </div>
-  </div>
-</section>`;
-
-  const pv = c.privacy;
-  const privacy = `<section class="section" id="privacy">
-  <div class="container">
-    ${sectionHead({ eyebrow: pv.eyebrow, title: pv.title, lead: pv.lead }, lang)}
-    <div class="knows reveal">
-      <div><h3>${icon('server', 16)}${inline(pv.knowsTitle, lang)}</h3><ul>${pv.knows.map((k) => `<li><span>${inline(k, lang)}</span></li>`).join('')}</ul></div>
-      <div><h3>${icon('lockFill', 16)}${inline(pv.notTitle, lang)}</h3><ul>${pv.not.map((k) => `<li><span>${inline(k, lang)}</span></li>`).join('')}</ul></div>
-    </div>
-    <div class="row" style="justify-content:space-between;align-items:flex-start;margin-top:20px;gap:16px 32px">
-      <p class="small muted measure">${inline(pv.note, lang)}</p>
-      ${linkArrow('privacy.html#server', pv.link, lang)}
-    </div>
-  </div>
-</section>`;
+  const proof = `<section class="proof3"><div class="container">
+    <div class="bignums">${pr.stats.map((x) => `<div><div class="bn"><span data-count-to="${esc(x.n)}">${esc(x.n)}</span>${x.of ? `<small>/${esc(x.of)}</small>` : ''}</div><div class="bt">${inline(x.t, lang)}</div></div>`).join('')}</div>
+    <p class="center-text" style="margin-top:28px">${linkArrow('verification.html', pr.link, lang)}</p>
+  </div></section>`;
 
   const ct = c.cta;
-  const cta = `<section class="cta-band">
-  <div class="container"><div class="inner">
-    <div><h2 class="h2">${inline(ct.title, lang)}</h2><p class="lead" style="margin-top:12px">${inline(ct.lead, lang)}</p></div>
-    <div class="btn-row stretch">${btn('download.html', ct.primary, 'primary', { size: 'lg', iconName: 'download', lang })}${btn('pricing.html', ct.secondary, 'secondary', { size: 'lg', lang })}</div>
-  </div></div>
-</section>`;
+  const cta = `<section class="final"><div class="container center-text">
+    ${glyph(56)}
+    <h2 class="mega" style="margin-top:28px;font-size:56px;line-height:60px">${inline(ct.title, lang)}</h2>
+    <p class="lead" style="margin:16px auto 0;max-width:560px">${inline(ct.lead, lang)}</p>
+    <div class="btn-row center" style="margin-top:32px">${btn('download.html', ct.primary, 'primary', { size: 'lg', iconName: 'download', lang })}${btn('pricing.html', ct.secondary, 'secondary', { size: 'lg', lang })}</div>
+  </div></section>`;
 
-  return { body: [hero, audience, pillars, proof, noise, warm, privacy, cta].join('\n'), bodyClass: 'page-home' };
+  return { body: [hero, bento, proof, cta].join('\n'), bodyClass: 'page-home', scripts: ['world.js'] };
 }
