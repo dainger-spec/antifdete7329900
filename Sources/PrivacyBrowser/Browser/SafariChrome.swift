@@ -100,6 +100,7 @@ enum SafariChrome {
         tolerateNilAttributeValues()
         tolerateNilDictionaryKeys()
         tolerateMissingSafariDirectories()
+        tolerateNilDirectoryEnumeration()
         bridgeNibLookups()
         stubChromeFeatures()
     }
@@ -274,6 +275,25 @@ enum SafariChrome {
                 return [] as NSArray
             }
             return original(manager, selector, url)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
+    /// And the enumerator itself, because Safari reaches it by more paths than the one above: it
+    /// is `-enumeratorAtURL:…` that throws on a nil URL, and it is always there to patch, while a
+    /// category method may not be registered yet when this runs. No URL, no enumerator.
+    private static func tolerateNilDirectoryEnumeration() {
+        typealias EnumeratorAtURL = @convention(c) (AnyObject, Selector, AnyObject?, AnyObject?, UInt, AnyObject?) -> AnyObject?
+        let selector = NSSelectorFromString("enumeratorAtURL:includingPropertiesForKeys:options:errorHandler:")
+        guard let method = class_getInstanceMethod(FileManager.self, selector) else { return }
+        let original = unsafeBitCast(method_getImplementation(method), to: EnumeratorAtURL.self)
+        let replacement: @convention(block) (AnyObject, AnyObject?, AnyObject?, UInt, AnyObject?) -> AnyObject? = { manager, url, keys, options, handler in
+            guard let url else {
+                Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
+                    .notice("Safari asked to enumerate a directory it has no path for")
+                return nil
+            }
+            return original(manager, selector, url, keys, options, handler)
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
