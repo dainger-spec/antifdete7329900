@@ -150,12 +150,21 @@ enum SafariChrome {
         method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
 
-    /// Two features of Safari's chrome need services only Safari has, and take the window down
-    /// while it loads: the address bar's assistant button (its icon comes from somewhere we cannot
-    /// serve) and automatic tab clustering (Swift code that traps). Neither is wanted here.
+    /// Features of Safari's chrome that need services only Safari has, and take the process down
+    /// when they do not find them. None of them is wanted here.
+    ///
+    ///   * automatic tab clustering: Swift code that traps while the window loads.
+    ///   * the address bar's assistant button: its icon comes from somewhere we cannot serve, and
+    ///     an array built from the nil throws.
+    ///   * donating the page's text to Siri intelligence: a timer about five seconds after a page
+    ///     loads (`-[BrowserNavigationDelegate _cachePageTextSoon]`) asks
+    ///     `+[WBSHistoryController existingSharedHistoryController]`, which traps because this
+    ///     process never built Safari's history controller. This one kills a window that is
+    ///     already up and rendering, so it has to be stubbed even though nothing visible uses it.
     private static func stubChromeFeatures() {
         let nothing: [(String, String)] = [
             ("BrowserWindowController", "_setUpClusterManagerIfNeeded"),
+            ("BrowserNavigationDelegate", "donatePageTextMetadata:allowingDonationWithoutReaderText:"),
         ]
         for (className, selectorName) in nothing {
             replaceWithConstant(className, selectorName) { nil }

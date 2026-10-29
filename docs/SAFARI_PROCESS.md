@@ -565,6 +565,14 @@ blockers, each named by its own crash:
    `_setUpClusterManagerIfNeeded`, whose Swift code traps (SIGTRAP, `__swift__destructor` in the
    frames). Stubbing that method got the window on screen.
 
+5. **A delayed trap, after the window is already up.** About five seconds after the page loads, a
+   timer in `-[BrowserNavigationDelegate _cachePageTextSoon]` donates the page's text to Siri
+   intelligence, which asks `+[WBSHistoryController existingSharedHistoryController]` and traps
+   (`EXC_BREAKPOINT`, `SIGKILL`, `termination namespace FOUNDATION`), because this process never
+   built Safari's history controller. Nothing visible uses it, and stubbing the donation keeps the
+   window alive. Worth noting as a kind: a hosted chrome can be killed by something that runs on a
+   timer, so "the window opened" is not the end of the measurement.
+
 The working invocation, as a record of the minimum set:
 
 ```
