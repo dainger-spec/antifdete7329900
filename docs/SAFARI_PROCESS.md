@@ -587,10 +587,43 @@ away on their own; the nil-tolerance patch that stood in for them was then remov
 needed it. Hosting Safari's chrome therefore *requires* the per-profile process, rather than merely
 benefiting from it (§9 item 1).
 
+**The second wave: the menu bar.** Nothing on the keyboard worked at first — no ⌘T, no ⌘N, no ⌘L —
+and not because those commands failed: on macOS the shortcuts live in the menu bar, and this process
+had none. Safari's is in `MainMenu.nib` inside Safari.app; loaded with `NSApplication.shared` as the
+nib's owner (which works precisely because `NSApp` is Safari's own `BrowserApplication`), it comes up
+with eight menus, and its items reach Safari's window controller through the responder chain by
+themselves. Installing it also starts the rest of Safari's application, which brought four more
+blockers, each closed in one line:
+
+7. **WebKit's own "Safari only" check.** Safari's web-extension configuration calls
+   `-[WKWebViewConfiguration _setShouldRelaxThirdPartyCookieBlocking:]`, and WebKit refuses anyone
+   else: *"may only be used by Safari"* (`NSObjectNotAvailableException`). Not the sandbox and not
+   the signature — a check inside WebKit on who the caller is. Made to do nothing, which is also
+   what we want: that switch relaxes third-party cookie blocking.
+8. **Safari's web extensions.** Their SQLite store migrator walks a directory derived from Safari's
+   container. Stubbed, and not only to stop the throw: extensions installed in Safari have no place
+   in a profile here, and one set of them would be shared by every profile.
+9. **Directories Safari has no path for.** Several of its background services list directories that
+   do not exist in this process, and `-[NSFileManager enumeratorAtURL:…]` and
+   `-contentsOfDirectoryAtURL:…` throw on a nil URL. Both answer "nothing" now. The lesson that
+   saved the round: patch the method that *throws*, not the one that is at fault — the latter may
+   live in a framework that is not loaded yet, and a class that is not registered cannot be patched.
+10. **A keyless dictionary write.** Something scheduled on the main queue stores under a nil key.
+    The block tail-calls `-setObject:forKeyedSubscript:`, so it never appears in a backtrace and no
+    debugger can name it; the write is dropped and logged.
+
+Two things about method: every stack logged through `os_log` was cut off after about seven frames,
+which hid the callers that mattered for three rounds — log one frame per line. And an exception has
+no `callStackSymbols` before it is raised, so the preprocessor reads the live stack with
+`backtrace()` instead.
+
 What the hosted chrome does once all of that is in place, measured by hand: the window with Safari's
 toolbar, tab bar and address bar; our `WKWebView` rendering in its tab; the sidebar, built from
-`LibraryViewController.nib` out of Safari.app; the start page; a new tab; and search from the address
-bar with Google as the engine.
+`LibraryViewController.nib` out of Safari.app; the start page; new tabs and new windows; tab groups;
+the keyboard; and the address bar searching and completing with Google as the engine — the providers
+come up loaded (six of them, with both a search and a suggestions template), once
+`+[WBSSearchProvidersController shared]` is made to hand out the instance that was loaded rather than
+the bare one the base class creates.
 
 The working invocation of the probe, as a record of what each piece answers:
 ```
