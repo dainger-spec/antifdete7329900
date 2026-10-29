@@ -21,6 +21,7 @@ import WebKit
 ///   `windowcontroller` the window controller's methods, ivars, properties, superclasses
 ///   `documentcontroller` the document controller and the document it makes
 ///   `documentcontroller-create` what happens when AppKit already made one
+///   `webconfig`        the framework's web view configuration factory, called on its own
 ///   `shared`           obtaining the application controller instance
 ///   `create`           the application-controller window path
 ///   `create-bootstrap` the same, after the launch callbacks
@@ -43,6 +44,9 @@ enum SafariFrameworkProbe {
             outputFolder = folder
         }
         installExceptionReporting()
+        // Written to this app's preferences by the create-bootstrap step; every other step has
+        // to start without it, or the riskiest call in the path runs where it was not asked for.
+        if step != "create-bootstrap" { UserDefaults.standard.removeObject(forKey: "PBSafariBootstrapAppController") }
         // AppKit catches an exception raised under its run loop and carries on, which turns a
         // clean failure into a hang with nothing to read. This makes it a crash instead, so the
         // driver gets the backtrace that says which framework call raised.
@@ -90,6 +94,7 @@ enum SafariFrameworkProbe {
         case "documentcontroller": dumpClassStep(candidates: ["BrowserDocumentController", "BrowserDocument"],
                                                  fallback: "BrowserDocumentController")
         case "documentcontroller-create": documentControllerCreateStep()
+        case "webconfig": webConfigurationStep()
         case "shared": sharedStep()
         case "create": createStep(bootstrap: false)
         case "create-bootstrap": createStep(bootstrap: true)
@@ -125,6 +130,30 @@ enum SafariFrameworkProbe {
         }
         say("loaded images of interest (\(related.count)):")
         related.forEach { say("  \($0)") }
+        say("what the framework bundle holds on disk:")
+        SafariLoader.bundleContents().forEach { say("  \($0)") }
+    }
+
+    /// The framework's own web view configuration factory, called directly. Everything the
+    /// window path does with web content goes through it, so whatever it does here is the
+    /// ceiling for the whole approach — measured on its own rather than inferred from a
+    /// backtrace five frames deep.
+    private static func webConfigurationStep() {
+        guard SafariLoader.load() else { return say("framework not loaded") }
+        guard let cls = NSClassFromString("WebKitPreferencesManager") else {
+            return say("WebKitPreferencesManager -> nil")
+        }
+        let classSide = object_getClass(cls).map { ObjCRuntime.declaredSelectors(of: $0).sorted() } ?? []
+        let factories = classSide.filter { $0.range(of: "configuration", options: .caseInsensitive) != nil }
+        say("configuration factories: \(factories.isEmpty ? "none" : factories.joined(separator: ", "))")
+        let name = "contentWebViewConfigurationForBrowsingMode:profileIdentifier:automationSessionIdentifier:"
+        guard classSide.contains(name) else { return say("\(name) -> not declared") }
+        say("calling +[WebKitPreferencesManager \(name)] with the ordinary browsing mode and no profile …")
+        let call = ObjCRuntime.callReturningObject(cls, name, integer: 0, first: nil, second: nil)
+        say("  \(call.reason)")
+        if let configuration = call.value as? WKWebViewConfiguration {
+            say("  websiteDataStore: \(SafariHooks.describe(configuration.websiteDataStore))")
+        }
     }
 
     private static func classesStep() {

@@ -20,6 +20,28 @@ enum SafariLoader {
         "/System/Library/PrivateFrameworks/Safari.framework/Safari",
     ]
 
+    /// What the framework's bundle holds on disk. The binary lives in the dyld shared cache and
+    /// is not a file, but a bundle's resources — the strings its interface is built from — are
+    /// ordinary files, and whether they are there decides whether its views can draw.
+    static func bundleContents() -> [String] {
+        let root = "/System/Library/PrivateFrameworks/Safari.framework"
+        var lines: [String] = []
+        for relative in ["", "/Versions/A", "/Versions/A/Resources", "/Resources"] {
+            let path = root + relative
+            guard let entries = try? FileManager.default.contentsOfDirectory(atPath: path) else {
+                lines.append("\(path): unreadable or absent")
+                continue
+            }
+            let lproj = entries.filter { $0.hasSuffix(".lproj") }
+            lines.append("\(path): \(entries.count) entries" +
+                         (lproj.isEmpty ? "" : ", \(lproj.count) .lproj (\(lproj.prefix(4).joined(separator: ", ")))") +
+                         "; \(entries.prefix(10).sorted().joined(separator: ", "))")
+        }
+        let bundle = Bundle(path: root)
+        lines.append("Bundle(path:) -> \(bundle == nil ? "nil" : "loaded=\(bundle!.isLoaded), identifier=\(bundle!.bundleIdentifier ?? "nil")")")
+        return lines
+    }
+
     /// Where to look when none of the candidates opened: the private-framework directories, and
     /// what in them is named after the framework. A path that is in the dyld shared cache and
     /// not on disk will not show up here, which is itself worth knowing.
@@ -252,6 +274,24 @@ enum ObjCRuntime {
         guard let method = class_getInstanceMethod(cls, selector) else { return (nil, "\(name) -> not implemented") }
         typealias Init = @convention(c) (AnyObject, Selector, Int, ObjCBool) -> UnsafeRawPointer?
         guard let returned = unsafeBitCast(method_getImplementation(method), to: Init.self)(instance, selector, integer, ObjCBool(flag)) else {
+            return (nil, "\(name) -> nil")
+        }
+        guard let value = Unmanaged<AnyObject>.fromOpaque(returned).takeUnretainedValue() as? NSObject else {
+            return (nil, "\(name) -> a non-NSObject")
+        }
+        return (value, "\(name) -> \(NSStringFromClass(type(of: value)))")
+    }
+
+    /// A three-argument class or instance method taking an integer and two objects — the shape
+    /// the framework's web view configuration factory has.
+    static func callReturningObject(_ receiver: Any, _ name: String,
+                                    integer: Int, first: AnyObject?, second: AnyObject?) -> (value: NSObject?, reason: String) {
+        let target = receiver as AnyObject
+        let selector = NSSelectorFromString(name)
+        guard let cls: AnyClass = object_getClass(target),
+              let method = class_getInstanceMethod(cls, selector) else { return (nil, "\(name) -> not implemented") }
+        typealias Call = @convention(c) (AnyObject, Selector, Int, AnyObject?, AnyObject?) -> UnsafeRawPointer?
+        guard let returned = unsafeBitCast(method_getImplementation(method), to: Call.self)(target, selector, integer, first, second) else {
             return (nil, "\(name) -> nil")
         }
         guard let value = Unmanaged<AnyObject>.fromOpaque(returned).takeUnretainedValue() as? NSObject else {

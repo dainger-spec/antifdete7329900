@@ -27,6 +27,7 @@ STEPS = [
     "windowcontroller", # the window controller's methods, ivars, properties
     "documentcontroller", # the document controller the window path goes through
     "documentcontroller-create", # what happens when AppKit made one of its own first
+    "webconfig",        # the framework's web view configuration factory, on its own
     "shared",           # obtaining the application controller instance
     "create-direct",    # allocating the window controller directly
     "create",           # the application-controller window path
@@ -128,7 +129,7 @@ def run_step(binary, step, out_dir, timeout):
 
     # A crash leaves its report a moment later.
     if status is None or (status is not None and status != 0):
-        time.sleep(3)
+        time.sleep(8)
         new = crash_snapshot() - before
         result["crashes"] = []
         for path in sorted(new):
