@@ -45,31 +45,34 @@ enum SafariChromeHost {
     /// tab: the chrome navigates, opens tabs, keeps history and shows its start page exactly as
     /// Safari does, and the pages it loads do so with the profile's cookies, storage and proxy.
     private static func giveSafarisWebViewsTheProfilesData() {
-        typealias ContentConfiguration = @convention(c) (AnyObject, Selector, Int, AnyObject?, AnyObject?) -> AnyObject?
-        guard let cls = NSClassFromString("WebKitPreferencesManager") else {
-            log.notice("No WebKitPreferencesManager: Safari's chrome would load pages with its own data")
-            return
-        }
+        // Opaque arguments and an unmanaged return on purpose. These three factories do not share
+        // one signature — one of them takes a BOOL where the others take an object — and letting
+        // Swift treat that BOOL as an object would have ARC retain the value 1 and take the
+        // process down. Nothing here touches the arguments: they are passed through as the bits
+        // they arrived as, and only the configuration that comes back is read.
+        typealias Factory = @convention(c) (AnyObject, Selector, Int, OpaquePointer?, OpaquePointer?) -> Unmanaged<AnyObject>?
         var patched = 0
         for selectorName in ["contentWebViewConfigurationForBrowsingMode:profileIdentifier:automationSessionIdentifier:",
                              "contentWebViewConfigurationForBrowsingMode:profileIdentifier:jitEnabled:",
                              "readerWebViewConfigurationForBrowsingMode:profileIdentifier:relatedWebView:"] {
             let selector = NSSelectorFromString(selectorName)
             guard let method = class_getClassMethod(cls, selector) else { continue }
-            let original = unsafeBitCast(method_getImplementation(method), to: ContentConfiguration.self)
-            let replacement: @convention(block) (AnyObject, Int, AnyObject?, AnyObject?) -> AnyObject? = { receiver, mode, profile, third in
-                let configuration = original(receiver, selector, mode, profile, third)
-                if let configuration = configuration as? WKWebViewConfiguration, let session {
+            let original = unsafeBitCast(method_getImplementation(method), to: Factory.self)
+            let replacement: @convention(block) (AnyObject, Int, OpaquePointer?, OpaquePointer?) -> Unmanaged<AnyObject>? = { receiver, mode, second, third in
+                let result = original(receiver, selector, mode, second, third)
+                if let configuration = result?.takeUnretainedValue() as? WKWebViewConfiguration, let session {
                     session.applyProfile(to: configuration)
                     log.notice("A web view of Safari's chrome got the data of \(session.profileName, privacy: .public)")
                 }
-                return configuration
+                return result
             }
             method_setImplementation(method, imp_implementationWithBlock(replacement))
             patched += 1
         }
         if patched == 0 {
             log.notice("None of WebKitPreferencesManager's configuration factories is in this Safari")
+        } else {
+            log.notice("Safari's web views will be built with the profile's data (\(patched, privacy: .public) factories)")
         }
     }
 
