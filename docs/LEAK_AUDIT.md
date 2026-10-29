@@ -22,9 +22,9 @@ canary, a packet in the pktap capture (`scripts/egress_check.py`), a line of
 | | |
 |---|---|
 | Channel | The page itself, and everything it loads, from this Mac's IP: a web view built with a data store that has no proxy. |
-| Why reachable here | Safari's chrome builds its web views from `+[WebKitPreferencesManager …]` configuration factories, which `SafariChromeHost` patches by name; a Safari that renamed them (the working hypothesis for Safari 27) gets no profile store from them. Under them, `ProfileNetworkGuard.everyWebViewGetsTheProfilesData` hooks `-[WKWebView initWithFrame:configuration:]` and `-[WKWebView _initializeWithConfiguration:]`, which do not depend on Safari's names, and WebKit's default store is replaced by a closed one. |
-| Proof | CI 382: `PASS Safari chrome: every web view of the process is on the profile's store, with its proxy`; the report says `webViewsCaughtByNet: 1` — even on macOS 26 Safari's factories missed the chrome's web view and only the initializer hook gave it the profile's store. On macOS 27: the owner's 5-minute run below — the log lines `None of WebKitPreferencesManager's configuration factories is in this Safari` and `A web view reached its initializer without the profile's store (Safari's factories missed it); given the profile's now` settle the hypothesis, `A web view is NOT on the profile's data` or the real IP on the page would mean it is still open. |
-| Close / cost | Closed in code (initializer hooks, closed default store, a web view off the profile loads nothing). **Not verified on macOS 27** — GitHub has no macOS 27 runner; verified by the owner's run below. |
+| Why reachable here | Safari's chrome builds web views from `+[WebKitPreferencesManager …]` configuration factories, which `SafariChromeHost` patches by name, **and builds its content web view without them**. Established on macOS 27.0.1 / Safari 27 (owner, 2026-10-29): the factories are there — `Safari's configuration factories patched: contentWebViewConfigurationForBrowsingMode, …, readerWebViewConfigurationForBrowsingMode` — so the earlier hypothesis that Safari 27 renamed them is **wrong**; and still `[Error] [ProfileNetworkGuard] A web view reached its initializer without the profile's store (Safari's factories missed it); given the profile's now`. The content web view gets the profile's store **only** from `ProfileNetworkGuard.everyWebViewGetsTheProfilesData`, which hooks `-[WKWebView initWithFrame:configuration:]` and `-[WKWebView _initializeWithConfiguration:]` (names of WebKit, not of Safari); WebKit's default store is replaced by a closed one. Without that hook this web view is on a store with no proxy: **that is the leak the owner saw on macOS 27.** The same happens on macOS 26 (CI 382 below). |
+| Proof | CI 382: `PASS Safari chrome: every web view of the process is on the profile's store, with its proxy`; the report says `webViewsCaughtByNet: 1` — on macOS 26 too Safari's factories missed the chrome's web view and only the initializer hook gave it the profile's store. **macOS 27.0.1, measured by the owner (2026-10-29)**, the run below with a profile on HTTP CONNECT `127.0.0.1:18080` (`scripts/selftest_proxy.py --http 18080`): `http://proxied.selftest.invalid/check` → `PB-PROXY-OK via=connect target=proxied.selftest.invalid:80 path=/check` (a name that resolves nowhere: it could only load through the proxy), `http://example.com/` → `PB-PROXY-OK via=connect target=example.com:80 path=/` (an ordinary name: no way around the proxy for real addresses either); the log: `Profile: has a proxy=true store proxies=1`, the factories patched, the initializer line above, `A web view is up: proxies=1` four times, not one `is NOT on the profile`. |
+| Close / cost | Closed in code (initializer hooks, closed default store, a web view off the profile loads nothing), **verified on macOS 27 by the owner** — with a local proxy. Measured only through a proxy on this Mac (the vendor's proxy, `54.194.87.51:62804`, was dead: TCP opens, no SOCKS5 or HTTP handshake, `curl` exit 28 by timeout both ways); a remote proxy over the internet on macOS 27 is **not measured** yet. With this verified, a process per profile is on by default in the unsandboxed build (e496808, held until this run as d7f9284). |
 
 ## 2. Requests to this Mac (127.0.0.1, localhost, ::1) — measured open, fixed in this commit
 
@@ -34,6 +34,7 @@ canary, a packet in the pktap capture (`scripts/egress_check.py`), a line of
 | Why reachable here | The system never sends loopback through a proxy (`WKWebsiteDataStore.proxyConfigurations` / `ProxyConfiguration` have no setting for it). |
 | Proof | CI 382: `FAIL … a fetch to 127.0.0.1 / localhost / ::1 goes through the profile's proxy`, and the canary listener on the runner logged `127.0.0.1:18087 GET /pb-leak/lo4`, `::1:18087 GET /pb-leak/lohost`, `/pb-leak/lo6`. |
 | Close / cost | WebKit's content blocker in every proxied profile's web views (`ProxiedContentRules`, compiled by `ContentRules`): every load to 127.0.0.0/8, `localhost`, `*.localhost`, `::1`, its IPv4-mapped form, `0.0.0.0`, `::` is blocked unless the page itself is on this Mac. Check in the same commit: the leak page's fetches to all of them, a frame on 127.0.0.1 and a worker's fetch are `rejected`, and the canary takes no connection. **Closed — CI 383** (7c9c7eb): `PASS … a page cannot reach this Mac (127.0.0.1, localhost, ::1, 0.0.0.0, from the page and from a worker): each is refused`, `PASS … nothing reached this Mac directly`. A private-network address (10.255.255.1) was measured going through the proxy, and is checked so from then on. Cost: a page of a proxied profile cannot reach a local service (a dev server, a local wallet bridge) unless the user opens it as a page. Not covered: a remote HTTPS site's service worker (not provable now, see the deferred list). |
+| Must stay so | **The block and a proxy on this Mac coexist** — established on macOS 27.0.1 (owner, 2026-10-29): a profile whose proxy is HTTP CONNECT `127.0.0.1:18080` loads its pages through it (item 1's two pages). The rule stops what a *page* loads from loopback; the data store's own connection to its proxy is not a page load and is not touched. Any later widening must keep that: a rule that cut the profile's process off from loopback as a whole (a kernel or sandbox closure, a broader content rule, a port filter) would break every proxy on this Mac — an `ssh -D` port, a local proxy chain, the self-test proxy CI proves this list with. Measured with a local proxy only. |
 
 ## 3. A certificate that makes the system fetch (AIA / OCSP) — critical in the audit
 
@@ -107,7 +108,14 @@ canary, a packet in the pktap capture (`scripts/egress_check.py`), a line of
 | Proof | CI 382: `PASS … the profile's time zone in the page, a dedicated worker and a service worker`, `PASS … a new proxy's first launch: the page is asked for in the proxy's country's language`, `PASS … the start page goes out with the profile's User-Agent`. |
 | Close / cost | Closed. |
 
-## The owner's 5 minutes (macOS 27)
+## The owner's 5 minutes (macOS 27) — run 2026-10-29
+
+**Done, macOS 27.0.1.** Outcome (item 1): `factories patched` (the hypothesis of renamed factories
+was wrong), the content web view `reached its initializer` without the profile's store and got it
+there, every web view `is up: proxies=1`, none `is NOT on the profile`, both pages answered by the
+proxy. Conditions: the vendor's proxy was dead, so the run used `scripts/selftest_proxy.py --http
+18080` with the profile on HTTP CONNECT `127.0.0.1:18080`; a remote proxy over the internet was not
+measured. The scenario, kept for the next macOS:
 
 `PB_CHROME_NETS=0` is no longer in the code (removed in 50580f4): a run with it could load pages
 as this Mac, a switch that weakens fail-closed in the shipped app. The same question is answered
@@ -128,8 +136,9 @@ grep -E "chrome is hosted|factories patched|factories is in this Safari|reached 
 Closed: `Safari's chrome is hosted in this process`, `has a proxy=true store proxies=1`, every web
 view `is up: proxies=1`, no `is NOT on the profile's data`, `The kernel closes to this process:
 safari-places, udp`, and the address on the page is the proxy's, not the one `curl` printed.
-`None of … factories is in this Safari` plus `reached its initializer …` confirms the hypothesis
-and that the hook closes it. Anything else: send the output.
+`None of … factories is in this Safari` would mean Safari renamed them; on macOS 27 they matched
+(`factories patched`) and `reached its initializer …` still appeared: the content web view is built
+without them, and the hook is what closes it. Anything else: send the output.
 
 ## Deferred
 
