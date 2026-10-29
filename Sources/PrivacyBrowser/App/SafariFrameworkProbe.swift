@@ -97,7 +97,11 @@ enum SafariFrameworkProbe {
         }
         say("opened path: \(SafariLoader.openedPath ?? "nil")")
         say("dyld image name: \(SafariLoader.loadedImageName ?? "nil")")
-        guard loaded else { return }
+        guard loaded else {
+            say("searching for it instead:")
+            SafariLoader.searchForFramework().forEach { say("  \($0)") }
+            return
+        }
         let related = (0..<_dyld_image_count()).compactMap { index -> String? in
             guard let name = _dyld_get_image_name(index) else { return nil }
             let path = String(cString: name)

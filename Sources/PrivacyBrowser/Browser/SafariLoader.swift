@@ -14,9 +14,33 @@ enum SafariLoader {
     static let candidatePaths = [
         "/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari",
         "/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari",
+        "/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari",
+        "/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari",
         "/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari",
         "/System/Library/PrivateFrameworks/Safari.framework/Safari",
     ]
+
+    /// Where to look when none of the candidates opened: the private-framework directories, and
+    /// what in them is named after the framework. A path that is in the dyld shared cache and
+    /// not on disk will not show up here, which is itself worth knowing.
+    static func searchForFramework() -> [String] {
+        let parents = [
+            "/System/Library/PrivateFrameworks",
+            "/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks",
+            "/System/Cryptexes/App/System/Library/PrivateFrameworks",
+            "/System/Volumes/Preboot/Cryptexes/App/System/Library/Frameworks",
+        ]
+        var found: [String] = []
+        for parent in parents {
+            guard let entries = try? FileManager.default.contentsOfDirectory(atPath: parent) else {
+                found.append("\(parent): unreadable")
+                continue
+            }
+            let matches = entries.filter { $0.range(of: "safari", options: .caseInsensitive) != nil }.sorted()
+            found.append("\(parent): \(entries.count) entries, matching the name: \(matches.isEmpty ? "none" : matches.joined(separator: ", "))")
+        }
+        return found
+    }
 
     private static var handle: UnsafeMutableRawPointer?
     /// The candidate that opened, and the `dlerror()` of each that did not.
