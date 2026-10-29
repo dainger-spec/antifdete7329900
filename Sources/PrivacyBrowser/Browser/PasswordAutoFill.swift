@@ -82,18 +82,67 @@ extension WebOrigin {
 
 /// Receives the AutoFill script's messages for one profile and hands each to its tab.
 @MainActor
+/// What AutoFill needs from whatever shows the page: our own tab, or a web view inside Safari's
+/// chrome, where there is no tab of ours at all (`SafariChromeHost`). Small on purpose — this is
+/// the whole surface `TabPasswordAutoFill` ever used from a tab.
+@MainActor
+protocol PasswordAutoFillHost: AnyObject {
+    var webView: WKWebView { get }
+    /// The page is the one in front: suggestions are not shown over another tab.
+    var isSelected: Bool { get }
+    var url: URL? { get }
+    func showMessage(_ text: String)
+    func presentAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void)
+}
+
+/// A page in Safari's chrome, which has no tab of ours behind it. Everything AutoFill asks for is
+/// answered from the web view itself.
+@MainActor
+final class HostedPageAutoFillHost: PasswordAutoFillHost {
+    let webView: WKWebView
+    init(webView: WKWebView) { self.webView = webView }
+    var isSelected: Bool { webView.window != nil }
+    var url: URL? { webView.url }
+
+    func showMessage(_ text: String) {
+        Logger(subsystem: "PrivacyBrowser", category: "PasswordAutoFill").notice("\(text, privacy: .public)")
+    }
+
+    func presentAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        guard let window = webView.window else {
+            completion(alert.runModal())
+            return
+        }
+        alert.beginSheetModal(for: window, completionHandler: completion)
+    }
+}
+
 final class PasswordAutoFillHandler: NSObject, WKScriptMessageHandlerWithReply {
     weak var session: BrowserSession?
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping (Any?, String?) -> Void) {
         guard message.world == PasswordAutoFill.world, let body = message.body as? [String: Any],
-              let webView = message.webView, let tab = session?.tab(for: webView) else {
+              let webView = message.webView, let session,
+              let autoFill = autoFill(for: webView, of: session) else {
             replyHandler(nil, nil)
             return
         }
-        tab.passwords.handle(body, from: message.frameInfo, reply: { replyHandler($0, nil) })
+        autoFill.handle(body, from: message.frameInfo, reply: { replyHandler($0, nil) })
     }
+
+    /// Our own tab's AutoFill when the page is in one of our windows; otherwise one made for this
+    /// web view, which is the case in Safari's chrome, kept for as long as the web view lives.
+    private func autoFill(for webView: WKWebView, of session: BrowserSession) -> TabPasswordAutoFill? {
+        if let tab = session.tab(for: webView) { return tab.passwords }
+        if let known = hosted.object(forKey: webView) { return known }
+        let autoFill = TabPasswordAutoFill(host: HostedPageAutoFillHost(webView: webView),
+                                           vault: session.passwordVault, settings: session.passwordSettings)
+        hosted.setObject(autoFill, forKey: webView)
+        return autoFill
+    }
+
+    private let hosted = NSMapTable<WKWebView, TabPasswordAutoFill>.weakToStrongObjects()
 }
 
 /// The user's answer to "Save password?" / "Update password?".
@@ -112,7 +161,7 @@ struct PasswordPromptRecord: Equatable {
 /// One tab's AutoFill: suggestions under login fields, filling, and the save question after a sign-in.
 @MainActor
 final class TabPasswordAutoFill {
-    private weak var tab: BrowserTab?
+    private weak var host: PasswordAutoFillHost?
     private let vault: PasswordVault
     private let settings: ProfilePasswordSettings
     /// The user name of the first page of a two-step sign-in, for its password page.
@@ -129,8 +178,8 @@ final class TabPasswordAutoFill {
     /// "host:count" for each login field that got focus, while `testAnswer` is set (self-test hook).
     static var testFocusLog: [String] = []
 
-    init(tab: BrowserTab, vault: PasswordVault, settings: ProfilePasswordSettings) {
-        self.tab = tab
+    init(host: PasswordAutoFillHost, vault: PasswordVault, settings: ProfilePasswordSettings) {
+        self.host = host
         self.vault = vault
         self.settings = settings
     }
@@ -187,9 +236,9 @@ final class TabPasswordAutoFill {
     }
 
     private func showSuggestions(_ entries: [PasswordEntry], for field: FieldReference, rect: [String: Any]?, pointer: [String: Any]?) {
-        guard let tab, tab.isSelected, let window = tab.webView.window,
-              let anchor = Self.anchor(rect: rect, pointer: pointer, in: tab.webView) else { return }
-        let webView = tab.webView
+        guard let host, host.isSelected, let window = host.webView.window,
+              let anchor = Self.anchor(rect: rect, pointer: pointer, in: host.webView) else { return }
+        let webView = host.webView
         closeSuggestions()
         let header = field.frame?.isMainFrame == false ? String(format: L("pw.panel.frameHeader"), field.origin.host) : nil
         panel = AutoFillPanel.show(entries: entries, pageHost: field.origin.host, header: header, field: field,
@@ -234,11 +283,11 @@ final class TabPasswordAutoFill {
 
     /// Fills `entry` into the field's form, after checking again that it belongs on the frame's site.
     func fill(_ entry: PasswordEntry, into field: FieldReference) {
-        guard let tab, let saved = WebOrigin(entry.origin), PasswordMatching.offers(saved, on: field.origin) else {
+        guard let host, let saved = WebOrigin(entry.origin), PasswordMatching.offers(saved, on: field.origin) else {
             log.error("A login was not filled: it is not one for this site")
             return
         }
-        let webView = tab.webView
+        let webView = host.webView
         var arguments: [String: Any] = ["username": entry.username, "password": entry.password,
                                         "origin": field.origin.serialized, "token": field.token ?? ""]
         arguments["field"] = field.field ?? 0
@@ -249,17 +298,17 @@ final class TabPasswordAutoFill {
             if result as? String == "filled" {
                 try? self.vault.markUsed(id: id)
             } else if field.field == nil {
-                self.tab?.showMessage(L("pw.noField"))
+                self.host?.showMessage(L("pw.noField"))
             }
         }
     }
 
     /// The toolbar's key button: the page's saved logins under the button.
     func showSuggestionsFromToolbar(anchor button: NSView) {
-        guard let tab, let url = tab.url, let origin = WebOrigin(url: url), let window = button.window else { return }
+        guard let host, let url = host.url, let origin = WebOrigin(url: url), let window = button.window else { return }
         let entries = vault.candidates(for: origin)
         guard !entries.isEmpty else {
-            tab.showMessage(String(format: L("pw.noSaved"), origin.host))
+            host.showMessage(String(format: L("pw.noSaved"), origin.host))
             return
         }
         closeSuggestions()
@@ -280,14 +329,14 @@ final class TabPasswordAutoFill {
 
     /// The toolbar's save button: what the page's password fields hold, typed or not.
     func saveFromPage() {
-        guard let tab, let url = tab.url, let origin = WebOrigin(url: url) else { return }
+        guard let host, let url = host.url, let origin = WebOrigin(url: url) else { return }
         PasswordAutoFill.call("return globalThis.__pbPasswords ? globalThis.__pbPasswords.capture() : null;",
-                              in: nil, of: tab.webView) { [weak self] value in
+                              in: nil, of: host.webView) { [weak self] value in
             guard let self else { return }
             // Saved for the page's own origin only: the document must still be the one the address names.
             guard let fields = value as? [String: Any], let password = fields["password"] as? String, !password.isEmpty,
                   fields["origin"] as? String == origin.serialized else {
-                self.tab?.showMessage(L("pw.typeFirst"))
+                self.host?.showMessage(L("pw.typeFirst"))
                 return
             }
             self.offerToSave(username: fields["username"] as? String ?? "", password: password, at: origin, explicit: true)
@@ -297,14 +346,14 @@ final class TabPasswordAutoFill {
     /// A form submission seen as a navigation (`form.submit()` sends no `submit` event): reads the
     /// password the user typed in that frame, then lets the navigation go on — at most 0.3 s later.
     func formSubmitted(from frame: WKFrameInfo, proceed: @escaping () -> Void) {
-        guard let tab, settings.autoFill, let origin = WebOrigin(frame.securityOrigin) else {
+        guard let host, settings.autoFill, let origin = WebOrigin(frame.securityOrigin) else {
             proceed()
             return
         }
         let once = Once(proceed)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { once.run() }
         PasswordAutoFill.call("return globalThis.__pbPasswords ? globalThis.__pbPasswords.submitted() : null;",
-                              in: frame, of: tab.webView) { [weak self] value in
+                              in: frame, of: host.webView) { [weak self] value in
             once.run()
             guard let self, let fields = value as? [String: Any], let password = fields["password"] as? String else { return }
             self.offerToSave(username: fields["username"] as? String ?? "", password: password, at: origin, explicit: false)
@@ -314,7 +363,7 @@ final class TabPasswordAutoFill {
     /// Asks whether to save (or update) a password typed on `origin`. Not when AutoFill is off or the
     /// site is in the never list, unless the user asked (`explicit`, the toolbar).
     func offerToSave(username typedUsername: String, password: String, at origin: WebOrigin, explicit: Bool) {
-        guard let tab, !password.isEmpty else { return }
+        guard let host, !password.isEmpty else { return }
         if !explicit {
             guard settings.autoFill, !settings.isNeverSaved(origin) else { return }
         }
@@ -332,7 +381,7 @@ final class TabPasswordAutoFill {
         let record: PasswordPromptRecord
         switch decision {
         case .alreadySaved:
-            if explicit { tab.showMessage(L("pw.alreadySaved")) }
+            if explicit { host.showMessage(L("pw.alreadySaved")) }
             return
         case .save:
             record = PasswordPromptRecord(kind: .save, username: username, host: origin.host)
@@ -355,7 +404,7 @@ final class TabPasswordAutoFill {
                 }
                 if answer == .save { self.pendingUsername = nil }
             } catch {
-                self.tab?.showMessage(String(format: L("pw.couldNotSave"), error.localizedDescription))
+                self.host?.showMessage(String(format: L("pw.couldNotSave"), error.localizedDescription))
             }
         }
         if let answer = Self.testAnswer {
@@ -363,7 +412,7 @@ final class TabPasswordAutoFill {
             apply(answer(record))
             return
         }
-        tab.presentAlert(Self.alert(for: record, profileName: settings.profileName)) { response in
+        host.presentAlert(Self.alert(for: record, profileName: settings.profileName)) { response in
             switch (record.kind, response) {
             case (_, .alertFirstButtonReturn): apply(.save)
             case (.save, .alertThirdButtonReturn): apply(.never)

@@ -37,7 +37,7 @@ struct BrowserTabContext {
 /// configuration created by `BrowserSession`), so they share cookies and storage — exactly
 /// like tabs of one browser profile. Tabs of different profiles never share anything.
 @MainActor
-final class BrowserTab: NSObject {
+final class BrowserTab: NSObject, PasswordAutoFillHost {
     let id = UUID()
     let webView: WKWebView
     weak var host: BrowserTabHost?
@@ -82,7 +82,7 @@ final class BrowserTab: NSObject {
     var refusesDownloads = false
 
     /// Password AutoFill in this tab: suggestions, filling, the save question.
-    private(set) lazy var passwords = TabPasswordAutoFill(tab: self, vault: context.passwordVault,
+    private(set) lazy var passwords = TabPasswordAutoFill(host: self, vault: context.passwordVault,
                                                           settings: context.passwordSettings)
 
     init(configuration: WKWebViewConfiguration, context: BrowserTabContext) {
