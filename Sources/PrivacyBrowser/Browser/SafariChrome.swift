@@ -87,12 +87,38 @@ enum SafariChrome {
     /// what one measured crash asked for; see `docs/SAFARI_PROCESS.md` §9.1.
     static func prepare() {
         guard isAvailable else { return }
+        installExceptionLogging()
         setUpSearchEnginePreferenceObserver()
         bridgeImageLookups()
         bridgeColorLookups()
         tolerateNilAttributeValues()
         bridgeNibLookups()
         stubChromeFeatures()
+    }
+
+    /// Every failure of a hosted chrome so far has been an Objective-C exception or a trap inside
+    /// Safari's code, and AppKit turns the ones thrown during layout into a crash that prints
+    /// nothing. The objc runtime's exception preprocessor runs at the throw itself, which is the
+    /// only place the reason and the frames below it can still be read. Logged, never swallowed:
+    /// the exception goes on to be thrown as before.
+    private static func installExceptionLogging() {
+        typealias Preprocessor = @convention(c) (AnyObject) -> AnyObject
+        typealias Install = @convention(c) (Preprocessor) -> Preprocessor
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "objc_setExceptionPreprocessor") else { return }
+        let install = unsafeBitCast(symbol, to: Install.self)
+        _ = install({ thrown in
+            let logger = Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
+            if let exception = thrown as? NSException {
+                let frames = exception.callStackSymbols.prefix(24).joined(separator: "\n")
+                logger.error("""
+                    \(exception.name.rawValue, privacy: .public): \(exception.reason ?? "-", privacy: .public)
+                    \(frames, privacy: .public)
+                    """)
+            } else {
+                logger.error("Thrown: \(String(describing: thrown), privacy: .public)")
+            }
+            return thrown
+        })
     }
 
     /// `-windowDidLoad` sends new-window telemetry that asserts this observer exists. It accepts a
