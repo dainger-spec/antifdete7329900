@@ -107,16 +107,24 @@ enum SafariChrome {
         guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "objc_setExceptionPreprocessor") else { return }
         let install = unsafeBitCast(symbol, to: Install.self)
         _ = install({ thrown in
-            let logger = Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
-            if let exception = thrown as? NSException {
-                let frames = exception.callStackSymbols.prefix(24).joined(separator: "\n")
-                logger.error("""
-                    \(exception.name.rawValue, privacy: .public): \(exception.reason ?? "-", privacy: .public)
-                    \(frames, privacy: .public)
-                    """)
-            } else {
-                logger.error("Thrown: \(String(describing: thrown), privacy: .public)")
+            // The exception's own callStackSymbols are empty at this point — it has not been
+            // raised yet — so the live stack is read instead.
+            var addresses = [UnsafeMutableRawPointer?](repeating: nil, count: 48)
+            let count = backtrace(&addresses, 48)
+            var frames: [String] = []
+            if let symbols = backtrace_symbols(&addresses, count) {
+                for index in 0..<Int(count) {
+                    if let symbol = symbols[index] { frames.append(String(cString: symbol)) }
+                }
+                free(symbols)
             }
+            let logger = Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
+            let description = (thrown as? NSException).map { "\($0.name.rawValue): \($0.reason ?? "-")" }
+                ?? String(describing: thrown)
+            logger.error("""
+                \(description, privacy: .public)
+                \(frames.joined(separator: "\n"), privacy: .public)
+                """)
             return thrown
         })
     }
