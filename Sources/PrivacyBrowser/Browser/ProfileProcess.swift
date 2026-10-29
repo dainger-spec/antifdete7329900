@@ -95,8 +95,12 @@ final class ProfileProcess {
         }
 
         let child = ProfileProcess(profileID: profileID, process: process)
+        // Called on one of Foundation's queues, not the main one.
         process.terminationHandler = { finished in
-            MainActor.assumeIsolated { child.onExit?(finished.terminationStatus) }
+            let status = finished.terminationStatus
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { child.onExit?(status) }
+            }
         }
         child.log.info("Profile \(profileID.uuidString, privacy: .public) runs as pid \(process.processIdentifier, privacy: .public), home \(home.path, privacy: .public), languages \(languages.joined(separator: ","), privacy: .public), TZ \(timeZone ?? "(system)", privacy: .public)")
         return child
