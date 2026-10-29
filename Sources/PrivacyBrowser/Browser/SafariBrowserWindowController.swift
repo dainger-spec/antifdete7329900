@@ -24,9 +24,14 @@ final class SafariBrowserWindowController: NSObject {
     let profileID: UUID
     /// What each step found. Carried into the log and the probe's report, nils included.
     private(set) var trace: [String] = []
+    /// Called with each trace line as it happens. The probe prints them: a step that hangs
+    /// inside the framework never reaches the end, and the trace would be lost with it.
+    var onNote: ((String) -> Void)?
 
     /// The framework's window controller. Held so the window is not torn down under us.
     private var frameworkController: NSObject?
+    /// Held for the process's lifetime: AppKit's shared document controller is never replaced.
+    private static var documentController: NSObject?
     private(set) var window: NSWindow?
     private(set) var webView: WKWebView?
     /// The store the window's web view was actually created with, to compare with the profile's.
@@ -37,6 +42,10 @@ final class SafariBrowserWindowController: NSObject {
     /// without the argument is back to the profile's own setting.
     static let enabledByLaunchArgument = CommandLine.arguments.contains("-safari-chrome")
 
+    /// The framework's `NSDocumentController` subclass. Its window creation goes through
+    /// `+[NSDocumentController sharedDocumentController]` and sends it selectors only this
+    /// subclass has, so it must exist before anything else asks for the shared one.
+    private static let documentControllerClasses = ["BrowserDocumentController", "SafariDocumentController"]
     /// Classes that may own the application-controller side of the sequence.
     private static let appControllerClasses = [
         "AppController", "BrowserApplicationController", "SafariApplicationController", "ApplicationController",
@@ -82,6 +91,9 @@ final class SafariBrowserWindowController: NSObject {
                  SafariLoader.classNames(containing: "WindowController").prefix(12).joined(separator: ", ").ifEmpty("none"))
             return nil
         }
+
+        // Before anything else asks AppKit for the shared document controller.
+        guard installDocumentController() else { return fail() }
 
         // Everything that can create a web view runs inside the binding.
         SafariHooks.forgetObservations()
@@ -140,6 +152,48 @@ final class SafariBrowserWindowController: NSObject {
         webView = nil
         note("giving up; the in-process web view path remains")
         return nil
+    }
+
+    // MARK: The document controller
+
+    /// AppKit gives `+sharedDocumentController` to the *first* `NSDocumentController` created in
+    /// the process, so creating the framework's subclass here is what makes the shared one the
+    /// kind the rest of the framework expects. Without this, the window path dies on
+    /// `-[NSDocumentController frontmostBrowserDocument]: unrecognized selector` — measured on
+    /// macOS 15 and 26, see docs/SAFARI_FRAMEWORK_PATH.md.
+    ///
+    /// Nothing in this app may read `NSDocumentController.shared` before this runs: that read is
+    /// itself what creates a plain one, and AppKit never replaces it afterwards.
+    ///
+    /// This is the one step of the path that cannot be undone. If a later step fails and the
+    /// caller falls back to the in-process window, the framework's document controller stays the
+    /// process's shared one for the rest of the run. That is why it happens only when the
+    /// framework path was asked for, never on the way to the ordinary window.
+    private func installDocumentController() -> Bool {
+        if let existing = Self.documentController {
+            note("document controller: already installed (\(NSStringFromClass(type(of: existing))))")
+            return true
+        }
+        for className in Self.documentControllerClasses {
+            guard let cls = NSClassFromString(className) as? NSObject.Type else {
+                note("class \(className) -> nil")
+                continue
+            }
+            let instance = cls.init()
+            let shared = NSDocumentController.shared
+            guard shared === instance else {
+                note("created \(className), but +sharedDocumentController is " +
+                     "\(NSStringFromClass(type(of: shared))) — something made a document controller first, " +
+                     "and AppKit never replaces it")
+                return false
+            }
+            Self.documentController = instance
+            note("document controller: +sharedDocumentController is now \(className)")
+            return true
+        }
+        note("no document controller class found; framework classes named *DocumentController*: " +
+             SafariLoader.classNames(containing: "DocumentController").prefix(12).joined(separator: ", ").ifEmpty("none"))
+        return false
     }
 
     // MARK: The application-controller path
@@ -213,6 +267,14 @@ final class SafariBrowserWindowController: NSObject {
         note("BrowserWindowController declares these initialisers: " + declared.joined(separator: ", ").ifEmpty("none"))
         // Only the argument-free one can be sent without knowing what the others want; the list
         // above is what the report carries, so the next round knows which argument to supply.
+        // `initWithBrowsingMode:isPopupWindow:` is the one that takes the arguments the others
+        // default; 0 is the ordinary (non-private) browsing mode, and this is not a popup.
+        let designated = "initWithBrowsingMode:isPopupWindow:"
+        if declared.contains(designated) {
+            let call = ObjCRuntime.allocating(cls, designated, integer: 0, flag: false)
+            note("[[BrowserWindowController alloc] \(designated)]: \(call.reason)")
+            if let instance = call.value { return instance }
+        }
         guard cls.instancesRespond(to: NSSelectorFromString("init")) else {
             note("BrowserWindowController does not respond to -init")
             return nil
@@ -334,6 +396,7 @@ final class SafariBrowserWindowController: NSObject {
     private func note(_ message: String) {
         trace.append(message)
         NSLog("SafariWindow[\(profileID.uuidString.prefix(8))]: \(message)")
+        onNote?(message)
     }
 }
 

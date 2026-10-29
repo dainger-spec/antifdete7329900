@@ -234,6 +234,32 @@ enum ObjCRuntime {
         return (value, "\(name) -> \(NSStringFromClass(type(of: value)))")
     }
 
+    /// `[[cls alloc] name:integer isPopup:flag]` — an initialiser taking an integer and a flag,
+    /// the shape the framework's own window initialiser has. Scalar arguments cannot go through
+    /// `send`, whose arguments are objects.
+    static func allocating(_ cls: AnyClass, _ name: String, integer: Int, flag: Bool) -> (value: NSObject?, reason: String) {
+        let allocSelector = NSSelectorFromString("alloc")
+        guard let meta: AnyClass = object_getClass(cls),
+              let allocMethod = class_getInstanceMethod(meta, allocSelector) else {
+            return (nil, "+alloc -> not implemented")
+        }
+        typealias Alloc = @convention(c) (AnyObject, Selector) -> UnsafeRawPointer?
+        guard let allocated = unsafeBitCast(method_getImplementation(allocMethod), to: Alloc.self)(cls as AnyObject, allocSelector) else {
+            return (nil, "+alloc -> nil")
+        }
+        let instance = Unmanaged<AnyObject>.fromOpaque(allocated).takeUnretainedValue()
+        let selector = NSSelectorFromString(name)
+        guard let method = class_getInstanceMethod(cls, selector) else { return (nil, "\(name) -> not implemented") }
+        typealias Init = @convention(c) (AnyObject, Selector, Int, ObjCBool) -> UnsafeRawPointer?
+        guard let returned = unsafeBitCast(method_getImplementation(method), to: Init.self)(instance, selector, integer, ObjCBool(flag)) else {
+            return (nil, "\(name) -> nil")
+        }
+        guard let value = Unmanaged<AnyObject>.fromOpaque(returned).takeUnretainedValue() as? NSObject else {
+            return (nil, "\(name) -> a non-NSObject")
+        }
+        return (value, "\(name) -> \(NSStringFromClass(type(of: value)))")
+    }
+
     /// Sends `name` for its effect, with no assumption about what it returns. False when the
     /// receiver does not implement it or it takes more than one argument.
     @discardableResult

@@ -19,6 +19,7 @@ import WebKit
 ///   `selectors`        which class owns the window-creation selectors, found by scanning
 ///   `appcontroller`    the application controller's methods and ivars
 ///   `windowcontroller` the window controller's methods, ivars, properties, superclasses
+///   `documentcontroller` the document controller and the document it makes
 ///   `shared`           obtaining the application controller instance
 ///   `create`           the application-controller window path
 ///   `create-bootstrap` the same, after the launch callbacks
@@ -41,6 +42,10 @@ enum SafariFrameworkProbe {
             outputFolder = folder
         }
         installExceptionReporting()
+        // AppKit catches an exception raised under its run loop and carries on, which turns a
+        // clean failure into a hang with nothing to read. This makes it a crash instead, so the
+        // driver gets the backtrace that says which framework call raised.
+        UserDefaults.standard.set(true, forKey: "NSApplicationCrashOnExceptions")
         say("step \(step)")
         say("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         say("sandboxed: \(ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil)")
@@ -74,6 +79,8 @@ enum SafariFrameworkProbe {
         case "appcontroller": dumpClassStep(candidates: SafariLoader.classNames(containing: "AppController"), fallback: "AppController")
         case "windowcontroller": dumpClassStep(candidates: SafariLoader.classNames(containing: "BrowserWindowController"),
                                                fallback: "BrowserWindowController")
+        case "documentcontroller": dumpClassStep(candidates: ["BrowserDocumentController", "BrowserDocument"],
+                                                 fallback: "BrowserDocumentController")
         case "shared": sharedStep()
         case "create": createStep(bootstrap: false)
         case "create-bootstrap": createStep(bootstrap: true)
@@ -198,8 +205,8 @@ enum SafariFrameworkProbe {
         if bootstrap { UserDefaults.standard.set(true, forKey: "PBSafariBootstrapAppController") }
         WebDataStoreVault.ensureWebKitInitialized()
         let controller = SafariBrowserWindowController(profileID: UUID())
+        controller.onNote = { say("  \($0)") }
         let window = controller.open(dataStore: WKWebsiteDataStore.nonPersistent(), startURL: URL(string: "about:blank"))
-        controller.trace.forEach { say("  \($0)") }
         say("window: \(window.map { NSStringFromClass(type(of: $0)) } ?? "nil")")
         say("activation policy afterwards: \(NSApp.activationPolicy().rawValue) (0 = regular, 1 = accessory)")
     }
@@ -207,6 +214,13 @@ enum SafariFrameworkProbe {
     private static func createDirectStep() {
         guard let cls = SafariLoader.browserWindowControllerClass as? NSObject.Type else {
             return say("BrowserWindowController -> nil")
+        }
+        if let documentControllerClass = NSClassFromString("BrowserDocumentController") as? NSObject.Type {
+            let created = documentControllerClass.init()
+            say("document controller created: \(NSStringFromClass(type(of: created))); " +
+                "+sharedDocumentController is \(NSStringFromClass(type(of: NSDocumentController.shared)))")
+        } else {
+            say("BrowserDocumentController -> nil")
         }
         say("initialisers it declares: " +
             ObjCRuntime.declaredSelectors(of: cls).filter { $0.hasPrefix("init") }.sorted().joined(separator: ", "))
@@ -232,8 +246,8 @@ enum SafariFrameworkProbe {
         let target = URL(string: "https://example.com/")!
         say("profile store: \(SafariHooks.describe(store))")
         let controller = SafariBrowserWindowController(profileID: profileID)
+        controller.onNote = { say("  \($0)") }
         let window = controller.open(dataStore: store, startURL: target)
-        controller.trace.forEach { say("  \($0)") }
         guard let window else {
             say("RESULT no window")
             say("activation policy afterwards: \(NSApp.activationPolicy().rawValue) (0 = regular, 1 = accessory)")

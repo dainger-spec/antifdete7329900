@@ -25,6 +25,7 @@ STEPS = [
     "selectors",        # which class owns the window-creation selectors
     "appcontroller",    # the application controller's methods and ivars
     "windowcontroller", # the window controller's methods, ivars, properties
+    "documentcontroller", # the document controller the window path goes through
     "shared",           # obtaining the application controller instance
     "create-direct",    # allocating the window controller directly
     "create",           # the application-controller window path
@@ -102,7 +103,9 @@ def run_step(binary, step, out_dir, timeout):
     before = crash_snapshot()
     # `log show --start` wants local time, and wants to be a little earlier than the step.
     since = (datetime.datetime.now() - datetime.timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
-    command = [binary, "--safari-probe", step, "--out", step_dir]
+    # -NSApplicationCrashOnExceptions on the command line as well as in code: AppKit otherwise
+    # swallows an exception raised under its run loop, and the step hangs with nothing to read.
+    command = [binary, "--safari-probe", step, "--out", step_dir, "-NSApplicationCrashOnExceptions", "YES"]
     start = time.time()
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
