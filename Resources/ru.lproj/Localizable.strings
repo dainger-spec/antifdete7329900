@@ -591,3 +591,17 @@
 "warmupQueue.skipped.profileGone" = "Пропущен: профиль удалён";
 "warmupQueue.deletedProfile" = "Удалённый профиль";
 "warmupQueue.status.waiting" = "В очереди ещё: %ld";
+
+/* Cookie export */
+"profiles.row.exportCookies" = "Экспорт cookies…";
+"cookieExport.title" = "Экспорт cookies профиля «%@»";
+"cookieExport.explanation" = "Все cookies профиля, включая сеансовые, в файле, который читают другие браузеры, расширения для cookies и инструменты автоматизации.";
+"cookieExport.format" = "Формат";
+"cookieExport.format.netscape" = "cookies.txt (Netscape: curl, yt-dlp, расширения)";
+"cookieExport.format.extension" = "JSON (EditThisCookie, Cookie-Editor)";
+"cookieExport.format.playwright" = "JSON (Playwright, Puppeteer)";
+"cookieExport.warning" = "Файл не зашифрован. Тот, у кого он окажется, войдёт как этот профиль везде, где cookies — это вход.";
+"cookieExport.stopped" = "Профиль не запущен: чтобы прочитать cookies, он будет запущен без окна, затем остановлен и снова зашифрован.";
+"cookieExport.action" = "Экспортировать…";
+"cookieExport.done" = "Сохранено cookies: %1$ld — %2$@";
+"cookieExport.failed" = "Не удалось экспортировать cookies: %@";

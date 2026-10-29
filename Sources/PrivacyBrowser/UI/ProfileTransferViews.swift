@@ -226,3 +226,87 @@ struct ProfileImportView: View {
         }
     }
 }
+
+/// Writes a profile's cookies to a file another browser, a cookie extension or an automation tool
+/// reads (`CookieExport`). The file is not encrypted — a session cookie in it is the session —
+/// which the sheet says before anything is written. A stopped profile is started without a window
+/// to be read, and stopped again.
+struct CookieExportView: View {
+    let profile: ProfileSummary
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var format: CookieExport.Format = .netscape
+    @State private var working = false
+    @State private var saved: (url: URL, count: Int)?
+    @State private var error: String?
+
+    private func label(_ format: CookieExport.Format) -> String {
+        switch format {
+        case .netscape: return L("cookieExport.format.netscape")
+        case .extensionJSON: return L("cookieExport.format.extension")
+        case .playwright: return L("cookieExport.format.playwright")
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SheetHeader(title: String(format: L("cookieExport.title"), profile.name), subtitle: L("cookieExport.explanation"))
+            Form {
+                Picker(L("cookieExport.format"), selection: $format) {
+                    ForEach(CookieExport.Format.allCases, id: \.self) { Text(label($0)).tag($0) }
+                }
+                .disabled(working || saved != nil)
+                Label(L("cookieExport.warning"), systemImage: "exclamationmark.triangle")
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                if !model.isRunning(profile.id) && saved == nil {
+                    Text(L("cookieExport.stopped")).font(.caption).foregroundStyle(.secondary)
+                }
+                if let saved {
+                    Label(String(format: L("cookieExport.done"), saved.count, saved.url.lastPathComponent), systemImage: "checkmark.circle")
+                        .foregroundStyle(Theme.textPrimary)
+                }
+                if let error {
+                    Text(error).foregroundStyle(Theme.danger).font(.lumenSecondary)
+                }
+            }
+            .lumenForm()
+            SheetFooter(leading: {
+                if working { ProgressView().controlSize(.small) }
+            }, buttons: {
+                Button(L(saved == nil ? "common.cancel" : "common.done")) { dismiss() }
+                    .buttonStyle(.lumenSecondary)
+                    .keyboardShortcut(.cancelAction)
+                if saved == nil {
+                    Button(L("cookieExport.action"), action: export)
+                        .buttonStyle(.lumenPrimary)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(working)
+                }
+            })
+        }
+        .frame(width: 480)
+        .background(Theme.raised)
+    }
+
+    private func export() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(profile.name) cookies.\(format.fileExtension)"
+        panel.allowedContentTypes = [format == .netscape ? .plainText : .json]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        working = true
+        error = nil
+        let format = format
+        Task {
+            do {
+                let cookies = try await model.exportCookies(of: profile.id)
+                try CookieExport.data(cookies, format: format).write(to: url, options: .atomic)
+                saved = (url, CookieExport.count(cookies, format: format))
+            } catch {
+                self.error = String(format: L("cookieExport.failed"), error.localizedDescription)
+            }
+            working = false
+        }
+    }
+}

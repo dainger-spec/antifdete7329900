@@ -843,6 +843,9 @@ final class SelfTest {
         let importOutcome = try? await manager.importCookies([imported], into: profile.id)
         check("Safari chrome: cookies imported into the running profile go into its own process's store",
               importOutcome == .applied(stored: 1, refused: []), String(describing: importOutcome))
+        let exportedCookies = (try? await manager.exportCookies(of: profile.id)) ?? []
+        check("Safari chrome: the profile's own process exports its cookies, the imported one with them",
+              exportedCookies.contains { $0.name == "pbimported" && $0.value == run }, exportedCookies.map(\.name).joined(separator: " "))
 
         // Another window, as ⌘N opens one: Safari builds a new web view for it, and its start page
         // goes through the proxy as well.
@@ -1958,8 +1961,24 @@ final class SelfTest {
               "\(live) \(second)")
 
         info("cookie import: WebKit can write cookies to disk on request: \(CookieStoreImport.canFlush)")
+        // Exported from the running profile: the file holds what the store holds, the session
+        // cookie included, and this app's own import reads it back.
+        let exported = (try? await manager.exportCookies(of: profile.id)) ?? []
+        let exportedFile = CookieExport.data(exported, format: .netscape)
+        let readBack = CookieImporter.read(exportedFile).cookies
+        check("cookie export: a running profile's cookies, session ones too, in a cookies.txt this app reads back",
+              exported.contains { $0.name == "live" && $0.value == "imported-live-value" }
+                  && exported.contains { $0.name == "session" && $0.expires == nil }
+                  && readBack.count == CookieExport.count(exported, format: .netscape) && !readBack.isEmpty,
+              exported.map { "\($0.name)=\($0.value)" }.joined(separator: " "))
         // Stop (sealed) and launch: persistent imported cookies kept, the session cookie gone.
         try await manager.stop(profile.id)
+        // Exported while stopped: started without a window, read, and stopped again.
+        let fromStopped = (try? await manager.exportCookies(of: profile.id)) ?? []
+        let stoppedAgain = await waitUntil(timeout: 30) { !manager.isRunning(profile.id) && !manager.busyProfileIDs.contains(profile.id) }
+        check("cookie export: a stopped profile's cookies are read and the profile is stopped again",
+              fromStopped.contains { $0.name == "live" } && !fromStopped.contains { $0.name == "session" } && stoppedAgain,
+              "\(fromStopped.map(\.name)) running=\(manager.isRunning(profile.id))")
         try await manager.launch(profile.id)
         let third = await pageText()
         check("cookie import: imported persistent cookies survive a stop and a launch; the session cookie does not",

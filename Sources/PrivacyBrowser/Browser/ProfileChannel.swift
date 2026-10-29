@@ -25,6 +25,8 @@ enum ProfileCommand: Codable {
     case showLibrary(section: String)
     case showPasswords
     case importCookies([ImportedCookie])
+    /// Every cookie of the profile's store, for an export (`CookieExport`).
+    case exportCookies
     case startWarmUp(WarmUpPlan)
     case stopWarmUp
     /// Say where this profile's traffic goes (`ProfileNetworkGuard.report`); with `probe`, also
@@ -44,6 +46,9 @@ enum ProfileEvent: Codable {
     /// The answer to `importCookies`: what the profile's store did with them, or nil when the
     /// profile could not take them (it was starting or stopping).
     case cookiesImported(ProfileManager.CookieImportOutcome?)
+    /// The answer to `exportCookies`; nil when the profile could not give them (starting or
+    /// stopping).
+    case cookiesExported([ImportedCookie]?)
     /// The answer to `checkNetwork`.
     case networkReport(ProfileNetworkReport)
 }

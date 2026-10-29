@@ -349,6 +349,12 @@ final class AppModel: ObservableObject {
         return try await manager.importCookies(cookies, into: id)
     }
 
+    /// Every cookie of a profile, for an export (`ProfileManager.exportCookies`).
+    func exportCookies(of id: UUID) async throws -> [ImportedCookie] {
+        guard let manager else { throw CoreError.vaultNotFound }
+        return try await manager.exportCookies(of: id)
+    }
+
     // MARK: Session warm-up
 
     /// The profile's last warm-up plan, or a new one.

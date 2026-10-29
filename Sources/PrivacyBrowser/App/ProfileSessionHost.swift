@@ -233,6 +233,15 @@ enum ProfileSessionHost {
                     let outcome = try? await manager.importCookies(cookies, into: self.profileID)
                     ProfileSessionHost.send(.cookiesImported(outcome))
                 }
+            case .exportCookies:
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    guard let store = self.manager?.session(for: self.profileID)?.dataStore?.httpCookieStore else {
+                        ProfileSessionHost.send(.cookiesExported(nil))
+                        return
+                    }
+                    ProfileSessionHost.send(.cookiesExported(await CookieStoreSync.exportableCookies(in: store)))
+                }
             case .stopWarmUp:
                 manager?.stopWarmUp(profileID)
             case .checkNetwork(let probe):

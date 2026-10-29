@@ -74,6 +74,7 @@ final class ProfileManager: ObservableObject {
     /// The session warm-up robot of each profile that used one since unlock.
     private var warmUpRobots: [UUID: WarmUpRobot] = [:]
     /// A cookie import sent to a profile's own process, waiting for its answer.
+    private var pendingCookieExports: [UUID: CheckedContinuation<[ImportedCookie], Error>] = [:]
     private var pendingCookieImports: [UUID: CheckedContinuation<CookieImportOutcome, Error>] = [:]
     /// Where the warm-up of each profile running in its own process has got to, as that process
     /// last reported it. The one the manager keeps for a profile it runs itself comes from the
@@ -313,6 +314,9 @@ final class ProfileManager: ObservableObject {
             case .cookiesImported(let outcome):
                 let pending = self.pendingCookieImports.removeValue(forKey: id)
                 if let outcome { pending?.resume(returning: outcome) } else { pending?.resume(throwing: CookieImportError.busy) }
+            case .cookiesExported(let cookies):
+                let pending = self.pendingCookieExports.removeValue(forKey: id)
+                if let cookies { pending?.resume(returning: cookies) } else { pending?.resume(throwing: CookieImportError.busy) }
             case .networkReport(let report):
                 self.onNetworkReport?(id, report)
             }
@@ -320,6 +324,7 @@ final class ProfileManager: ObservableObject {
         child.onExit = { [weak self] status in
             guard let self, self.children[id] === child else { return }
             self.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
+            self.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.children[id] = nil
             self.runningProfileIDs.remove(id)
             // A warm-up cannot outlive the process it ran in; what it collected is still shown.
@@ -731,6 +736,42 @@ final class ProfileManager: ObservableObject {
         // Starting or being encrypted: its store is about to exist or to go.
         guard !busyProfileIDs.contains(id), !isShuttingDown else { throw CookieImportError.busy }
         return .queued(try repository.queueImportedCookies(cookies, for: id))
+    }
+
+    /// Every cookie of a profile, session cookies included, for an export (`CookieExport`). A
+    /// running profile is asked as it runs, in its own process or here. A stopped one is started
+    /// without a window, asked, and stopped — which seals its data again — as a warm-up does.
+    func exportCookies(of id: UUID) async throws -> [ImportedCookie] {
+        let wasRunning = isRunning(id)
+        if !wasRunning {
+            guard !busyProfileIDs.contains(id), !isShuttingDown else { throw CookieImportError.busy }
+            try await launch(id, openingWindow: false)
+        }
+        do {
+            let cookies = try await cookiesOf(id)
+            if !wasRunning { try? await stop(id) }
+            return cookies
+        } catch {
+            if !wasRunning { try? await stop(id) }
+            throw error
+        }
+    }
+
+    private func cookiesOf(_ id: UUID) async throws -> [ImportedCookie] {
+        if let child = children[id] {
+            guard pendingCookieExports[id] == nil else { throw CookieImportError.busy }
+            return try await withCheckedThrowingContinuation { continuation in
+                pendingCookieExports[id] = continuation
+                // Sent at once: a process that is still starting acts on it once the profile is up.
+                child.send(.exportCookies)
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
+                    self?.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
+                }
+            }
+        }
+        guard let store = sessions[id]?.dataStore?.httpCookieStore else { throw CookieImportError.busy }
+        return await CookieStoreSync.exportableCookies(in: store)
     }
 
     // MARK: Synced cookies

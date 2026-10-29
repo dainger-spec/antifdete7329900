@@ -591,3 +591,17 @@
 "warmupQueue.skipped.profileGone" = "Skipped: the profile was deleted";
 "warmupQueue.deletedProfile" = "Deleted profile";
 "warmupQueue.status.waiting" = "Still waiting: %ld";
+
+/* Cookie export */
+"profiles.row.exportCookies" = "Export Cookies…";
+"cookieExport.title" = "Export the Cookies of “%@”";
+"cookieExport.explanation" = "Every cookie of the profile, session cookies included, in a file another browser, a cookie extension or an automation tool reads.";
+"cookieExport.format" = "Format";
+"cookieExport.format.netscape" = "cookies.txt (Netscape: curl, yt-dlp, extensions)";
+"cookieExport.format.extension" = "JSON (EditThisCookie, Cookie-Editor)";
+"cookieExport.format.playwright" = "JSON (Playwright, Puppeteer)";
+"cookieExport.warning" = "The file is not encrypted. Anyone who has it is signed in as this profile wherever its cookies are a sign-in.";
+"cookieExport.stopped" = "The profile is not running: it is started without a window to read its cookies, then stopped and encrypted again.";
+"cookieExport.action" = "Export…";
+"cookieExport.done" = "%1$ld cookies saved to %2$@";
+"cookieExport.failed" = "The cookies could not be exported: %@";

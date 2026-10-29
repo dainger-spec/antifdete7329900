@@ -36,6 +36,7 @@ struct ProfileListView: View {
     @State private var warmingUp: ProfileSummary?
     @State private var warmingUpSeveral = false
     @State private var exporting: ProfileSummary?
+    @State private var exportingCookies: ProfileSummary?
     @State private var importingProfile = false
     @State private var pendingDelete: ProfileSummary?
     @State private var changingPassword = false
@@ -53,6 +54,7 @@ struct ProfileListView: View {
             .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
             .sheet(isPresented: $warmingUpSeveral) { WarmUpQueueView() }
             .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }
+            .sheet(item: $exportingCookies) { profile in CookieExportView(profile: profile) }
             .sheet(isPresented: $importingProfile) { ProfileImportView() }
             // "Passwords…" in a browser window's AutoFill list.
             .onReceive(model.$passwordsRequest.compactMap { $0 }) { profile in
@@ -112,6 +114,7 @@ struct ProfileListView: View {
             },
             passwords: { id in passwordsFor = summary(id) },
             importCookies: { id in importingCookiesFor = summary(id) },
+            exportCookies: { id in exportingCookies = summary(id) },
             warmUp: { id in warmingUp = summary(id) },
             exportProfile: { id in exporting = summary(id) },
             importProfile: { importingProfile = true },
@@ -215,6 +218,7 @@ struct ProfileActions {
     var edit: (UUID) -> Void = { _ in }
     var passwords: (UUID) -> Void = { _ in }
     var importCookies: (UUID) -> Void = { _ in }
+    var exportCookies: (UUID) -> Void = { _ in }
     var warmUp: (UUID) -> Void = { _ in }
     var exportProfile: (UUID) -> Void = { _ in }
     var importProfile: () -> Void = {}
@@ -714,6 +718,7 @@ private struct ProfileMenuItems: View {
         Button(L("profiles.row.edit")) { actions.edit(row.id) }
         Button(L("profiles.row.passwords")) { actions.passwords(row.id) }
         Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
+        Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
         Button(L("profiles.row.warmUp")) { actions.warmUp(row.id) }
         Divider()
         Button(L("profiles.row.export")) { actions.exportProfile(row.id) }
