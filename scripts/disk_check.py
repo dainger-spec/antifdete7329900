@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Does a profile's process (or the WebKit processes working for it) write outside its own home?
 
-    sudo fs_usage -w -f filesys PrivacyBrowser   > fs-app.txt &
-    sudo fs_usage -w -f filesys com.apple.WebKit > fs-webkit.txt &
+    sudo fs_usage -w -f filesys PrivacyBrowser com.apple.WebKit cfprefsd > fs.txt &
     PrivacyBrowser --self-test | tee selftest.txt
-    python3 scripts/disk_check.py --trace fs-app.txt --trace fs-webkit.txt --selftest-log selftest.txt
+    python3 scripts/disk_check.py --trace fs.txt --selftest-log selftest.txt
+
+(One fs_usage for all the processes: the kernel trace is exclusive, and a second fs_usage
+sees nothing.)
 
 A profile whose window is Safari's chrome runs Safari's own frameworks, which keep their history,
 tab snapshots, per-site settings and preferences in the user's home. In a profile's process that
@@ -99,6 +101,9 @@ def main():
             lines = open(trace, encoding="utf-8", errors="replace").read().splitlines()
         except OSError as error:
             print(f"::warning::disk check: no trace {trace} ({error})")
+            continue
+        if len(lines) < 10 and any("ktrace" in line or "Resource busy" in line for line in lines):
+            print(f"::warning::disk check: {trace} is not a trace ({' '.join(lines)[:200]}): another kernel trace held it")
             continue
         lines_read += len(lines)
         print(f"disk check: {trace}: {len(lines)} lines; first ones, for the format:")

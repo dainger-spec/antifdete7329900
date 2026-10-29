@@ -93,9 +93,9 @@ jobs:
                 > build/egress/capture.txt 2> build/egress/tcpdump.err &
               # And every file-system call of the app's processes and of WebKit's, for
               # scripts/disk_check.py: nothing may be written where the real Safari keeps its data.
-              sudo fs_usage -w -f filesys PrivacyBrowser > build/egress/fs-app.txt 2>&1 &
-              sudo fs_usage -w -f filesys com.apple.WebKit > build/egress/fs-webkit.txt 2>&1 &
-              sudo fs_usage -w -f filesys cfprefsd > build/egress/fs-cfprefsd.txt 2>&1 &
+              # One fs_usage for all three (the kernel trace is exclusive: a second one gets
+              # "ktrace_start: Resource busy" and sees nothing).
+              sudo fs_usage -w -f filesys PrivacyBrowser com.apple.WebKit cfprefsd > build/egress/fs.txt 2>&1 &
               sleep 2
             fi
             build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test | tee "build/egress/selftest-$variant.txt" || status=1
@@ -110,7 +110,7 @@ jobs:
             --selftest-log build/egress/selftest-unsandboxed.txt --tcpdump-errors build/egress/tcpdump.err || status=1
           echo "::endgroup::"
           echo "::group::files written while a profile ran in Safari's chrome"
-          python3 scripts/disk_check.py --trace build/egress/fs-app.txt --trace build/egress/fs-webkit.txt --trace build/egress/fs-cfprefsd.txt \
+          python3 scripts/disk_check.py --trace build/egress/fs.txt \
             --selftest-log build/egress/selftest-unsandboxed.txt || status=1
           echo "::endgroup::"
           exit $status

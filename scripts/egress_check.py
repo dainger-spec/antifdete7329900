@@ -27,7 +27,10 @@ During the check, packets of Safari's own services and of the daemons a profile'
 to fetch for it (search suggestions, Safe Browsing, Safari Suggestions, background URL sessions,
 CloudKit, Web Push) fail too, whether they are the packet's process or the one it was sent for
 (`eproc`: a DNS query mDNSResponder makes for Safari's service is that service's): nothing here
-runs the real Safari, so they can only be the profile's. Packets of other processes are listed,
+runs the real Safari, so they can only be the profile's — unless the service was already running
+before the profile's first process started (a lower pid): then it was not started for the profile,
+and its traffic (Safe Browsing's periodic update) cannot be told from the system's; it is listed.
+Packets of other processes are listed,
 never failed on. Any DNS question for a name under leak.example.com fails, whenever it is asked —
 those names are the leak pages', and through the proxy they are never resolved here — except the
 controls'.
@@ -138,8 +141,15 @@ def main() -> int:
     def ours(owner):
         return owner is not None and (owner[1] in pids or owner[0].startswith("PrivacyBrowser"))
 
+    # A service that was running before the profile's first process started was not started for
+    # it; its traffic cannot be told apart from the system's own (Safe Browsing's periodic update),
+    # and is listed rather than failed on. One started during the check is the profile's.
+    first_profile_pid = min(pids) if pids else None
+
     def service(owner):
-        return owner is not None and any(name in owner[0] for name in SERVICES)
+        if owner is None or not any(name in owner[0] for name in SERVICES):
+            return False
+        return first_profile_pid is None or owner[1] >= first_profile_pid
 
     failures, others, seen_controls = [], {}, {}
     for packet in packets:

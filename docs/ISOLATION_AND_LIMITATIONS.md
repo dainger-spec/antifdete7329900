@@ -499,7 +499,10 @@ cannot be pinned; the report reads every web view's engine instead. With WebRTC 
 tunnel, profile processes each keep their own view of the tunnel, and one can stop it under
 another (code reading, not measured: the tunnel has not yet run on a Mac, docs/TUNNEL.md); until
 the manager owns the tunnel alone, a profile whose WebRTC goes through the tunnel should not run in
-a process of its own. In Safari's chrome, Safari's own context menu keeps Look Up, Translate and
+a process of its own. A site whose certificate holds only with a fetch fails in a proxied profile
+rather than being completed, and Safari's automatic upgrade of an `http://` address to HTTPS does
+not fall back to http after such a refusal (it is a cancelled check, not a failed one). In Safari's
+chrome, Safari's own context menu keeps Look Up, Translate and
 Writing Tools (the system's services, which send the selection to Apple); a profile's process
 shares the user's temporary and cache folders under `/var/folders` with the others; a crash
 report of a profile's process goes to the user's DiagnosticReports.

@@ -100,7 +100,7 @@ final class BrowserSession {
         if configuration.proxy != nil {
             // The challenges of loads no page is behind (a service worker's) come to the store's
             // own delegate; without one they get the system's default handling (`ServerTrust`).
-            let setDelegate = NSSelectorFromString("_setDelegate:")
+            let setDelegate = NSSelectorFromString("set_delegate:")
             if store.responds(to: setDelegate) { store.perform(setDelegate, with: storeChallenges) }
         }
         // A service worker of this profile has the profile's preferences, not those of whichever
@@ -408,6 +408,12 @@ final class BrowserSession {
         userContentController.removeAllUserScripts()
         // The controller holds its handlers strongly.
         userContentController.removeAllScriptMessageHandlers()
+        // Nothing of this session left on the store WebKit may keep a while longer.
+        if let store = dataStore {
+            for name in ["set_delegate:", "_setServiceWorkerOverridePreferences:"] where store.responds(to: NSSelectorFromString(name)) {
+                store.perform(NSSelectorFromString(name), with: nil)
+            }
+        }
         dataStore = nil
     }
 }

@@ -64,8 +64,9 @@ enum ProfileNetworkGuard {
     private static var missingHooks: [String] = []
     /// How this process answers its loads' challenges (`everyChallengeIsTheProfiles`).
     private static var challengePolicy: ProfileChallengePolicy?
-    /// The web view every worker of the process takes its preferences from (`ensureWorkerTemplate`).
-    private static var workerTemplate: WKWebView?
+    /// The web view every worker of the process takes its preferences from was made
+    /// (`ensureWorkerTemplate`).
+    private static var workerTemplateMade = false
     /// Set while that web view is being built: it is the one web view of the process that is
     /// meant to be on the closed store, and the initializer's net leaves it as it is.
     private static var makingTemplate = false
@@ -147,17 +148,22 @@ enum ProfileNetworkGuard {
     /// web view a profile's without a proxy, a page of a profile with one could start a shared
     /// worker with WebTransport in it, which no proxy carries. So the first one is this. A
     /// profile's service workers get the profile's own preferences besides
-    /// (`BrowserSession`, `_setServiceWorkerOverridePreferences:`). Idempotent; in the manager
-    /// process it is built at start-up, in a profile's process when its default store is closed.
+    /// (`BrowserSession`, `_setServiceWorkerOverridePreferences:`). Idempotent; built before the
+    /// first profile's session, and in a profile's process when its default store is closed.
+    ///
+    /// Released as soon as it is made: WebKit has copied its preferences by then, and a page left
+    /// open would keep WebKit's process pool holding on to what the profiles' pages used (a
+    /// stopped profile's session cookies were still there at its next launch).
     static func ensureWorkerTemplate() {
-        guard workerTemplate == nil else { return }
+        guard !workerTemplateMade else { return }
+        workerTemplateMade = true
         WebDataStoreVault.ensureWebKitInitialized()
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = closedStore
         WebKitPreferences.setBool(configuration.preferences, "_setPeerConnectionEnabled:", false)
         for key in BrowserSession.featuresOffWithAProxy { WebKitFeatures.set(configuration.preferences, key, false) }
         makingTemplate = true
-        workerTemplate = WKWebView(frame: .zero, configuration: configuration)
+        _ = WKWebView(frame: .zero, configuration: configuration)
         makingTemplate = false
     }
 
@@ -377,7 +383,7 @@ enum ProfileNetworkGuard {
         for (owner, setter, question, takesSubject) in [
             (WKWebView.self as AnyClass, "setNavigationDelegate:", "webView:didReceiveAuthenticationChallenge:completionHandler:", true),
             (WKDownload.self as AnyClass, "setDelegate:", "download:didReceiveAuthenticationChallenge:completionHandler:", true),
-            (WKWebsiteDataStore.self as AnyClass, "_setDelegate:", "didReceiveAuthenticationChallenge:completionHandler:", false),
+            (WKWebsiteDataStore.self as AnyClass, "set_delegate:", "didReceiveAuthenticationChallenge:completionHandler:", false),
         ] {
             let selector = NSSelectorFromString(setter)
             guard let method = class_getInstanceMethod(owner, selector) else {
@@ -481,7 +487,10 @@ enum ProfileNetworkGuard {
                       // Stores that keep page titles, addresses or usage outside the profile: the
                       // Spotlight index, usage tracking and Biome, the knowledge store; and sharing.
                       "corespotlight", "spotlight.IndexAgent", "UsageTracking", "biome", "knowledge-agent",
-                      "duetexpert", "sharingd"]
+                      "duetexpert", "sharingd",
+                      // iCloud Keychain's AutoFill (off in the profile's Safari settings; its agent
+                      // was seen fetching as this Mac while the hosted chrome ran).
+                      "AuthenticationServices"]
         if !safeBrowsing { denied.append("SafeBrowsing") }
         let deny = denied
         var missing: [String] = []

@@ -62,8 +62,8 @@ target and path), the page's reports, and the connections the canary listener to
 there, so that is where their absence means something — in the page, a dedicated worker, a shared
 worker and a service worker (`/pb-leak/sw.js`) — and it reports `isSecureContext` with them.
 
-TLS: a tunnel whose client starts a TLS handshake (any HTTPS request through either proxy) is
-answered with a certificate made at start-up whose chain cannot be completed without fetching its
+TLS: a tunnel to one of the TLS test hosts (`aia-`, `tls-`, `probe-` names, 192.0.2.14) whose client
+starts a TLS handshake is answered with a certificate made at start-up whose chain cannot be completed without fetching its
 intermediate, from the address it names: `http://pbaiacanary.leak.example.com/` (its OCSP
 responder is `pbocspcanary`). Only a certificate check that fetches from the network asks for that
 name, so a DNS query for it in the capture is the system's trust service fetching for a profile, as
@@ -511,6 +511,18 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
     print(f"[selftest-proxy] served {via} path={path} accept-language={accept_language}", flush=True)
 
 
+# The hosts whose tunnels are answered with TLS: the leak page's certificate checks and the
+# process's own HTTPS probes. Any other tunnel a client starts TLS in (Safari tries HTTPS first for
+# an http address) gets no handshake, as from a server with no HTTPS, and the client goes on with
+# http — which the leak page's own requests are.
+TLS_HOSTS = ("aia-", "tls-", "probe-", "192.0.2.14:")
+
+
+def is_tls_host(via: str) -> bool:
+    target = next((part[len("target="):] for part in via.split() if part.startswith("target=")), "")
+    return target.lower().startswith(TLS_HOSTS)
+
+
 def note(via: str, path: str) -> None:
     """A request this proxy saw but did not answer with a page (a TLS handshake, say)."""
     target = next((part[len("target="):] for part in via.split() if part.startswith("target=")), "")
@@ -525,7 +537,7 @@ def respond_with_page(conn: socket.socket, via: str) -> None:
         first = conn.recv(1, socket.MSG_PEEK)
     except OSError:
         first = b""
-    if first == b"\x16" and "canary" in TLS:
+    if first == b"\x16" and "canary" in TLS and is_tls_host(via):
         note(via, "(tls handshake)")
         try:
             conn = TLS["canary"].wrap_socket(conn, server_side=True)
