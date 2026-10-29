@@ -31,6 +31,9 @@ final class SelfTest {
 
     static func start() {
         setvbuf(stdout, nil, _IOLBF, 0)
+        // Every check but the Safari-chrome one drives sessions of this process; that one asks for a
+        // process of its own explicitly.
+        setenv("PB_PROFILE_PROCESS", "0", 1)
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
@@ -117,6 +120,8 @@ final class SelfTest {
 
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
+        // scripts/disk_check.py: what is written in here is the self-test's own.
+        info("vault \(root.path)")
         do {
             let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
             try await firstWebKitUse(repository) // must run before anything else touches WebKit
@@ -593,11 +598,11 @@ final class SelfTest {
         do {
             try await manager.launch(profile.id)
         } catch {
-            unsetenv("PB_PROFILE_PROCESS")
+            setenv("PB_PROFILE_PROCESS", "0", 1)
             check("Safari chrome: the profile's own process started", false, String(describing: error))
             return
         }
-        unsetenv("PB_PROFILE_PROCESS")
+        setenv("PB_PROFILE_PROCESS", "0", 1)
         if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
         let started = await waitUntil(timeout: 90) { hostsChrome != nil }
         check("Safari chrome: the profile's own process started and reported its window",
@@ -731,6 +736,17 @@ final class SelfTest {
         // Long enough for what Safari's chrome does on a timer (the page-text donation runs about
         // five seconds after a load) to happen while the capture is still looking.
         try? await Task.sleep(nanoseconds: 8_000_000_000)
+        // What Safari's frameworks keep in the profile's home (its history, bookmarks, snapshots…):
+        // listed, for the record of where a hosted chrome puts its own state.
+        let home = repository.directory(for: profile.id).appendingPathComponent("home")
+        if let files = FileManager.default.enumerator(at: home, includingPropertiesForKeys: [.fileSizeKey]) {
+            var listed: [String] = []
+            for case let file as URL in files where listed.count < 80 {
+                let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                if size > 0 { listed.append("\(file.path.replacingOccurrences(of: home.path, with: "~")) \(size)") }
+            }
+            info("Safari chrome: the profile's home holds \(listed.joined(separator: ", "))")
+        }
         // The page's https request is answered by WebKit's own timing, which can be after the page
         // reported: looked for last.
         log = await leakLog()

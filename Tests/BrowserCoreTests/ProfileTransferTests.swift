@@ -71,7 +71,12 @@ final class ProfileTransferTests: XCTestCase {
         for secret in ["s3cret", "Warmed DE", "203.0.113.5", "binary cookies", "safari history", "news.example"] {
             XCTAssertNil(bytes.range(of: Data(secret.utf8)), "\(secret) is readable in the export")
         }
-        XCTAssertEqual(try ProfileTransfer.manifest(of: file, password: "transfer pw"), exported)
+        // Read back as written (dates to the second: JSON keeps no more).
+        let read = try ProfileTransfer.manifest(of: file, password: "transfer pw")
+        XCTAssertEqual(read.name, exported.name)
+        XCTAssertEqual(read.configuration, exported.configuration)
+        XCTAssertEqual([read.passwordCount, read.historyCount, read.bookmarkCount], [1, 1, 1])
+        XCTAssertEqual(read.exportedAt.timeIntervalSince1970, exported.exportedAt.timeIntervalSince1970, accuracy: 1)
         XCTAssertThrowsError(try ProfileTransfer.manifest(of: file, password: "wrong"))
 
         let imported = try ProfileTransfer.importProfile(from: file, password: "transfer pw", into: target)

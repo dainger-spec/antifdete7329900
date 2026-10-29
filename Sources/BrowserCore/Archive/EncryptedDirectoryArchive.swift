@@ -165,7 +165,7 @@ public enum EncryptedDirectoryArchive {
 
     /// An archive to read: where it starts in its file (after whatever the file holds before it)
     /// and its key.
-    public struct TranscodeSource: Sendable {
+    public struct TranscodeSource {
         public let url: URL
         public let offset: UInt64
         public let key: SymmetricKey
@@ -177,7 +177,7 @@ public enum EncryptedDirectoryArchive {
     }
 
     /// An archive to write, after `prefix` (bytes the file starts with), under `key`.
-    public struct TranscodeDestination: Sendable {
+    public struct TranscodeDestination {
         public let url: URL
         public let key: SymmetricKey
         public let prefix: Data
