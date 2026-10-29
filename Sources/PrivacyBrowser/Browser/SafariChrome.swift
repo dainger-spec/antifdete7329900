@@ -419,14 +419,16 @@ enum SafariChrome {
             return false
         }
         let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
-        var objects: [Any]?
+        // This overload takes an NSArray, not [Any].
+        var objects: NSArray?
         guard NSNib(nibData: data, bundle: owner).instantiate(withOwner: NSApplication.shared, topLevelObjects: &objects) else {
             log.error("Safari's MainMenu.nib did not instantiate")
             return false
         }
         // The nib's other top-level objects are owned by nobody once this returns.
-        menuObjects = objects
-        guard let menu = objects?.compactMap({ $0 as? NSMenu }).first else {
+        let topLevel = objects as? [Any] ?? []
+        menuObjects = topLevel
+        guard let menu = topLevel.compactMap({ $0 as? NSMenu }).first else {
             log.error("Safari's MainMenu.nib holds no menu")
             return false
         }
