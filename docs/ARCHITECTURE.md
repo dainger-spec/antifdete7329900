@@ -27,7 +27,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │  SwiftUI: Setup / Unlock / ProfileList / ProfileEditor / Passwords / SyncSettings / Library │
 │        │                                                                                   │
 │  AppModel ── lock state, vault, DeviceSettings (sync target), errors                       │
-│        ├── ProxyListModel ── proxies.bin, checks (ProxyChecker → ProxyGeoLookup)           │
+│        ├── ProxyListModel ── proxies.bin, checks (ProxyChecker: ProxyProbe → ProxyGeoLookup)│
 │        ├── AutomationServer ── 127.0.0.1 API, off by default → AutomationHandler → manager │
 │        │                                                                                   │
 │  ProfileManager ── launch / stop / delete / crash recovery                                 │
@@ -46,6 +46,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │  MasterVault / UnlockedVault ── Argon2id, key hierarchy; DeviceSettings (settings.bin)     │
 │  ProfileRepository ── encrypted index + per-profile config, store factories                │
 │  ProxyList / ProxyListImport ── proxy list, pasted-list reader, round-robin assignment     │
+│  ProxyProbe / ProbeSocket ── a proxy checked step by step (POSIX sockets, only to it)      │
 │  ProfileGrant ── a profile's process opens the vault for its one profile                   │
 │  AutomationHTTP / AutomationGate / AutomationRoute ── the local API's wire, gate, routes   │
 │  PasswordVault / HistoryStore / BookmarkStore ── per-profile encrypted documents           │
@@ -300,12 +301,29 @@ session's data store is gone, or the tab has a dialog waiting. ISOLATION_AND_LIM
 
 ```
 ProxyListView (sheet, ⋯ → Proxies…) ── ProxyListModel (AppModel.proxyList, made at unlock, dropped at lock)
-   │  Import…   ProxyImportView: ProxyListImport.read(text) → report per line → ProxyList.add (dedupe, limit)
-   │  Check     ProxyChecker.checkAll: ≤ 8 at a time, each ProxyGeoLookup.lookUp through the proxy
-   │            (ProxyConfigurationFactory, allowFailover = false) → ProxyCheckResult → ProxyList.record
+   │  unlock    ProxyList.takeIn(profileProxies:) once: the profiles' own proxies become entries
+   │  Import…   ProxyImportView: ProxyListImport.read(text) → report per line → ProxyList.add
+   │            (dedupe by host:port:user, limit; a line without a scheme: type unknown until checked)
+   │  Check     ProxyChecker.checkAll: ≤ 8 at a time, each
+   │              1. ProxyProbe.run (on a thread, sockets only to the proxy): resolve → connect →
+   │                 SOCKS5 and HTTP CONNECT handshakes at once → login → tunnel (target named to the
+   │                 proxy) → 2 more tunnels for the latency → ProxyDiagnosis (one verdict per way of failing)
+   │              2. working: ProxyGeoLookup.lookUp through the proxy, as the type found
+   │                 (ProxyConfigurationFactory, allowFailover = false) → exit IP, country, city, network
+   │            → ProxyCheckResult → ProxyList.record (a type found is the entry's) → profiles follow
+   │  Edit…     ProxyEditView → ProxyList.update → ProfileRepository.follow (the profiles that use it as it was)
+   │  Export…   ProxyExportView: plaintext warning → ProxyList.exportText → SecureFile.writeOwnerOnly (0600)
    │  Assign…   ProxyAssignView: ProxyList.rotation(of: proxies, over: profiles) → AppModel.assignProxies
    │            → ProfileRepository.assign → ProfileConfiguration.assigning (savingEdit of the proxy alone)
+   │  report    ProxyReport (ProxyReportView): the state, the step that failed, in words, with advice
    └─ every change saved at once (proxies.bin); check results when the run ends or is stopped
+
+ProfileManager.launch ── a proxy: ProxyProbe (one tunnel, to the start page's site) → not working →
+   onProxyProblem → AppModel.proxyProblems → ProxyProblemView (the same report; Check Proxy:
+   ProxyListModel.checkProfileProxy; Show in Proxies)
+
+ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── ProfileBulkBar (2 or more selected)
+   └─ ProfileActions.launchSeveral / stopSeveral / warmUpSeveral (hook) / assignProxies / deleteSeveral
 
 ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── ProfileBulkBar (2 or more selected)
    └─ ProfileActions.launchSeveral / stopSeveral / warmUpSeveral (hook) / assignProxies / deleteSeveral
@@ -314,11 +332,30 @@ ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── Pr
 - The list (`ProxyList`, BrowserCore) is a vault-level document like `settings.bin`, under its own
   HKDF key; entries that a later build wrote and this one cannot read are left out rather than
   costing the whole list, and an unreadable list is shown empty and never written over.
-- A check is the launch's lookup (`ProxyGeoLookup`), so it goes through exactly the configuration a
-  profile's data store would get. It is alive when a service's answer came back through the proxy,
-  dead otherwise (no answer, or a 407 without credentials); a proxy whose settings cannot be applied
-  is not checked at all. Results carry the exit IP, country, time zone and latency (the first
-  answering request: connection to the proxy, tunnel, TLS and reply).
+- A check is two parts, both talking to the proxy only. The probe (`ProxyProbe`, BrowserCore, POSIX
+  sockets) takes the steps a connection takes and stops at the first that fails, so that each way
+  of failing is its own verdict: the name does not exist or the resolver failed; the port refuses,
+  cannot be reached or does not answer the connection; it takes the connection and then says
+  nothing (`silent` — an IP whitelist without this Mac, a dead back end), closes at once, or
+  answers as something else; it wants a login, refuses the one given, or refuses this Mac (403);
+  it cannot reach the site. SOCKS5 and HTTP CONNECT are tried at once on two connections, so the
+  type is found, not assumed; the tunnel's target is a name the proxy resolves (SOCKS5 ATYP 3,
+  `CONNECT host:port`); a proxy behind TLS is only connected to (inside TLS, the lookup decides).
+  When it works, the launch's lookup (`ProxyGeoLookup`) goes through the proxy as the type found,
+  through exactly the configuration a profile's data store would get. Results carry the
+  diagnosis, the exit IP, country, time zone, city and network, and the median latency of the
+  probe's three tunnels; a proxy whose settings cannot be applied is not checked at all. Nothing in
+  a diagnosis is secret: no user name or password, only what the proxy answered.
+- The list and the profiles: each profile keeps its own copy of its proxy (what it connects with,
+  what syncs); the link to the list is the proxy itself — host, port, user name
+  (`ProxyList.identity(of:)`). An edit of an entry, or a check that found its type, reaches the
+  profiles whose copy is the entry as it was (`ProxyList.sameConnection`: the same type, TLS and
+  password too); a copy changed in a profile's editor since is never overwritten. A type left to
+  the check (`kindKnown == false`) is given to no profile. The profiles' proxies from before the
+  list are taken in once (`profilesTakenIn`), so a proxy deleted from the list does not come back.
+- A launch with a proxy runs the probe once (one tunnel, to the profile's start page's site, or the
+  first geolocation service without one) beside the launch; a proxy that does not work is said in
+  the Profiles window with the same report and a Check button. The launch itself never waits on it.
 - Assigning writes each profile's configuration as the editor would change its proxy alone: the
   newer-wins time for sync moves only when the proxy changes; the location found through the old
   proxy goes (it is about another proxy), and the check's location of the new one is remembered,
@@ -367,7 +404,7 @@ configs read as the default generation).
 
 | Layer | How | Where it runs |
 |---|---|---|
-| Core (crypto, vault, profiles, archive, layout, history, bookmarks, passwords, cookie import and export, sync incl. cookies and settings conflicts, warm-up plans and link rules, warm-up queue, schedule and per-site report, HTTP transport, UA presets, proxy location, proxy list: pasted-list reader, storage, rotation and assignment, profile export and import, a profile's process granted its one profile, the proxied profiles' rule list, the automation API's reader, gate and routes) | XCTest, 191 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| Core (crypto, vault, profiles, archive, layout, history, bookmarks, passwords, cookie import and export, sync incl. cookies and settings conflicts, warm-up plans and link rules, warm-up queue, schedule and per-site report, HTTP transport, UA presets, proxy location, proxy list: pasted-list reader, storage, rotation and assignment, the profiles' link and migration into it, the stepwise proxy probe against scripted SOCKS5 and HTTP servers (every verdict, no credentials in a diagnosis), exit details of the geolocation services, the export file, profile export and import, a profile's process granted its one profile, the proxied profiles' rule list, the automation API's reader, gate and routes) | XCTest, 215 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
 | Tunnel protocols (STUN/TURN against RFC 5769 vectors, IPv4/IPv6 UDP packets, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy, several profiles through one router) | XCTest, 32 tests | Linux and macOS, every push |
 | Packet-tunnel extension | builds against the macOS SDK and is laid out as a system extension, plists linted, provider class checked (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner. Its router runs on a raw utun interface opened as root (`--utun-relay`, `UTunDevice`) against real WebKit, inside the leak check | macOS 26 runner, every push |
 | JS shims (logic, CreepJS-style shape checks) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages) | Linux, every push |

@@ -44,7 +44,7 @@ since):
 | Time zone from the proxy | a profile with a proxy and *Time zone of the proxy's location* runs in the time zone the lookup through the proxy returned, cached per profile |
 | Several SOCKS5 profiles at once | three profiles behind three SOCKS5 proxies, one with username/password authentication, are launched together through the app's launch path and load at the same time: each page arrives through its own proxy, by name, with its own credentials; after one stops the others keep loading through theirs; wrong or missing SOCKS5 credentials fail closed |
 | Launch speed | with a location remembered for the proxy, a launch waits at most 1 s for a 4 s lookup (the lookup finishes in the background, and its new time zone is remembered and noted for the next launch); with nothing remembered it waits at most 3 s |
-| Proxy list checker | through the HTTP CONNECT self-test proxy a proxy of the list is alive, with the exit IP, country and time zone the stand-in service gave and a latency; through an unreachable proxy, and one whose host does not resolve, it is dead, and a real website among the services, which a direct request would reach, did not answer either (the unreachable proxy's check connected to nothing else, as the URL loading system reports it); a proxy answering 407 to a check without credentials is dead for that reason; settings that cannot be applied are not checked (no request); the list's model checks several at a time and keeps the results encrypted, and a profile given a checked proxy knows where it exits before its first launch (added with the checker; not yet in the count above) |
+| Proxy list checker | *not yet observed on CI (added with the proxy manager, not in the count above)*: the probe tells every listener of the self-test proxy apart — HTTP CONNECT listed as SOCKS5 and SOCKS5 listed as HTTP each found as what it is, the login of the HTTP and the SOCKS5 proxy not given (needs a login), wrong (rejected) and right (taken), the IPv6 listener, a listener that takes the connection and never answers (silent), a closed port (refused), a host name that does not exist (host not found); end to end through a working proxy listed with the wrong type, the exit IP, country, time zone, city and network the stand-in service gave and the probe's median latency; through an unreachable proxy, and one whose host does not resolve, it is dead, and a real website among the services, which a direct request would reach, did not answer either (the unreachable proxy's check connected to nothing else, as the URL loading system reports it); a proxy answering 407 to a check without credentials is dead for that reason; settings that cannot be applied are not checked (no request); the list's model checks several at a time and keeps the results encrypted, gives a line without a scheme the type found and corrects a wrong one; a profile given a checked proxy knows where it exits before its first launch; a profile started with the silent proxy says why (silent), one with a working proxy says nothing, and Check from there is the list's check. All of it but the unknown host runs in an egress window: the capture fails on any packet of the app past loopback, and on a DNS question for the service's name, which carries the run id |
 | Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy and credentials) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported or stored, and turning it off, or replacing the proxy, while a lookup is under way leaves no new IP stored and nothing reported |
 | Password AutoFill | in a profile window on the self-test proxy's sign-in pages: the page world has no `window.webkit` and no trace of the script; a password a page script wrote and submitted is not offered; a typed sign-in is offered (Save, saved with its user name), a new password for it as Update, nothing anywhere on the site after Never for This Website; a login field lists the site's saved login and choosing it fills both fields with `input` and `change` (and `:autofill` where WebKit allows the world); a filled-in login submitted again asks nothing; a sign-in by script (fields removed after the button's click) and a sign-up form (new password = confirmation) are offered; a frame of another site is offered none, a frame of the same site its logins under a header naming it. Synthesized key events do not reach the page on the CI runner, so typing is stood in for by marking the fields typed inside the isolated world (reported by the self-test); real clicks and keys are used where they arrive |
 | Cookie import | a Netscape file with CRLF, comments, an HttpOnly line and damaged bytes: the five readable cookies are read, the four other lines reported (field count, public suffix, expired, damaged text); into a stopped profile they are queued encrypted (no cookie value in the file) and put into its store at launch before the start page is requested: the request carries the host-only, domain, HttpOnly and session cookies, not the Secure one or another path's over http; the store holds each with the file's attributes; a cut-off JSON export's complete entry goes into the running profile at once and the next request carries it; after a stop (sealed) and a launch the persistent imported cookies are back and the session cookie is not |
@@ -56,13 +56,13 @@ since):
 
 Run it yourself: `build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test`. For the
 proxy checks, start the self-test proxy as CI does,
-`python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 --tls-control 18086 --canary 18087`,
+`python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 --tls-control 18086 --canary 18087 --silent 18088`,
 and set `PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081
 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
 PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
-PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087`. Without a variable its checks
-(407, IPv6, several SOCKS5 profiles at once, the certificate control, the loopback canary) are
-skipped and the count is lower. The
+PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088`.
+Without a variable its checks (407, IPv6, several SOCKS5 profiles at once, the certificate control,
+the loopback canary, the silent proxy) are skipped and the count is lower. The
 self-test uses a temporary vault and removes everything it creates.
 
 ## 1. Storage isolation between profiles
@@ -416,18 +416,53 @@ profile is saved. A lookup still under way when the option is turned off, or the
 or replaced, neither stores an IP nor warns.
 
 **Proxy list and its checker** (Profiles → ⋯ → Proxies…): proxies kept to give to profiles, encrypted
-in the vault under their own key (`proxies.bin`, this Mac only; §3). A check is the launch's lookup
-made for one proxy: the same geolocation services, over HTTPS, through the proxy itself with the
-`ProxyConfiguration` a profile's data store would get (`allowFailover = false`), in a URLSession of
-its own (no cookies, no cache, this Mac's Safari User-Agent), at most eight at a time. A proxy is
-alive when a service's answer came back through it; otherwise it is dead — it never falls back to
-a direct connection, so this Mac's own address is never what a service sees. A proxy whose
-settings cannot be applied is not checked at all (there would be nothing to send the request
-through). The self-test checks this against an unreachable proxy with a real website among the
-services, which a request made directly would have reached (§0). Like the launch's lookup, a check
-is a request to a third-party service, made only when the user asks for one. The latency shown is
-that of the first answering request: the connection to the proxy, the tunnel, TLS to the service
-and its reply.
+in the vault under their own key (`proxies.bin`, this Mac only; §3). A check talks to the proxy
+and to nothing else, in two parts:
+
+1. The probe (`ProxyProbe`): this Mac resolves the proxy's own name (there is nothing else to reach
+   a proxy by), connects to it, and tries a SOCKS5 greeting and an HTTP `CONNECT` at once, on two
+   connections; with the login it has, it asks for a tunnel to the first geolocation service (at a
+   profile's launch: to its start page's site). The target is a name the proxy resolves (SOCKS5
+   ATYP 3, `CONNECT host:port`): this Mac never resolves it and never connects to it. The tunnel
+   is closed as soon as the proxy says it is open; two more are opened for the latency (the median
+   of three is shown). Each way of failing is its own verdict, so that the report can say what to
+   do: the name does not exist, or the resolver failed; the port refuses the connection, cannot be
+   reached, or never answers it; the port takes the connection and then says nothing — the most
+   common case, what a proxy whose IP whitelist does not have this Mac's address does, or one
+   whose back end is gone; it closes at once, or answers as something that is not a proxy; it
+   wants a login, refuses the one given, or refuses this Mac (403); it cannot reach the site.
+2. When it works: the launch's lookup made for this proxy, as the type the probe found — the same
+   geolocation services through the proxy itself with the `ProxyConfiguration` a profile's data
+   store would get (`allowFailover = false`), in a URLSession of its own (no cookies, no cache,
+   this Mac's Safari User-Agent): exit IP, country, time zone, city and network.
+
+At most eight proxies are checked at a time, and only when the user asks (the Proxies sheet, or
+**Check Proxy** after a launch), never in the background. A proxy that does not work never falls
+back to a direct connection, so this Mac's own address is never what a service sees; a proxy whose
+settings cannot be applied is not checked at all. The self-test checks this against an
+unreachable proxy with a real website among the services, which a request made directly would
+have reached, and runs every check of the checker inside a packet capture that fails on any packet
+of the app past loopback (§0). Like the launch's lookup, a check is a request to a third-party
+service. What a check keeps — the verdict, what the proxy answered (a status line, never a user
+name or password), the exit details — is stored with the list, encrypted; the system log gets the
+verdict, never the proxy's address or login.
+
+**A profile whose proxy does not work** is not left blank without a word: its launch runs the
+probe once beside it (one tunnel, to the start page's site, or the first geolocation service
+without a start page; through the proxy only, and the launch never waits for it), and a proxy that
+does not work is said in the Profiles window — which profile, which step failed, what to do — with
+Check (the list's check of that profile's own proxy) and Show in Proxies. The profile itself still
+loads nothing until its proxy answers: fail-closed is unchanged.
+
+**The list and the profiles' copies.** Each profile keeps its own copy of its proxy (what it
+connects with, what syncs); the list knows which of its entries a profile uses by the proxy itself
+— host, port and user name. The proxies typed into profiles before the list existed are taken into
+it once, at the first unlock. An edit of an entry, or a check that found its type, reaches the
+profiles whose copy is that entry as it was (same type, TLS and password); a copy changed in a
+profile's own editor since is never overwritten. An entry whose type is still unknown (an import
+line without a scheme) is given to no profile until a check finds it. **Export** writes the list
+in the form Import reads, with the user names and passwords in plaintext — said in the sheet before
+anything is written — into a file only its owner can read (0600).
 
 **Giving profiles proxies of the list** (one to many, or several in turn, round-robin; the editor's
 *Choose from List…*) writes each profile's own configuration as an edit of its proxy would
