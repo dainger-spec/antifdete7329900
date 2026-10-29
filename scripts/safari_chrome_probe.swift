@@ -110,6 +110,24 @@ print("\n== classes ==\n\(classes.count) classes from the private Safari framewo
 
 if flag("--all") {
     for entry in classes { print("\(entry.image)\t\(entry.name) : \(entry.superclass)") }
+} else if let needle = value(after: "--grep") {
+    for entry in classes where entry.name.range(of: needle, options: .caseInsensitive) != nil {
+        print("   \(entry.name) : \(entry.superclass)   [\(entry.image)]")
+    }
+} else if let className = value(after: "--methods") {
+    guard let cls = NSClassFromString(className) else {
+        print("no such class")
+        exit(1)
+    }
+    func dump(_ target: AnyClass, _ mark: String) {
+        var count: UInt32 = 0
+        guard let list = class_copyMethodList(target, &count) else { return }
+        let names = (0..<Int(count)).map { String(cString: sel_getName(method_getName(list[$0]))) }.sorted()
+        for name in names { print("  \(mark)\(name)") }
+        free(list)
+    }
+    if let meta = object_getClass(cls) { dump(meta, "+") }
+    dump(cls, "-")
 } else {
     // The parts of Safari's chrome worth hosting, by what their names contain.
     let groups: [(String, [String])] = [
@@ -146,6 +164,37 @@ if let root = resourceRoots.first(where: { FileManager.default.fileExists(atPath
 }
 
 // MARK: Instantiate one class
+
+if flag("--prepare") {
+    // Safari's BrowserWindowController aborts in -windowDidLoad unless the shared search engine
+    // observer exists: "ASSERTION FAILURE: sharedSearchEngineObserver in
+    // +[WBSSearchEnginePreferenceObserver sharedObserver], WBSSearchEnginePreferenceObserver.m:52".
+    // The frame below it in the trace names the setup method, so call that first. (The competitor's
+    // per-profile process carries BB_SEARCH_ENGINE=google, i.e. it configures the same thing.)
+    print("\n== prepare ==")
+    let candidates = classes.map(\.name).filter { $0.contains("SearchProviderContext") || $0.contains("SearchProviderSetup") }
+    print("context candidates: \(candidates.isEmpty ? ["(none)"] : candidates)")
+    var context: NSObject?
+    for name in candidates {
+        guard let type = NSClassFromString(name) as? NSObject.Type else { continue }
+        print("building \(name)…")
+        context = type.init()
+        print("built: \(context.map { String(describing: $0) } ?? "nil")")
+        break
+    }
+    if let observer = NSClassFromString("WBSSearchEnginePreferenceObserver") {
+        let selector = NSSelectorFromString("setUpSharedObserverWithSearchProviderContext:")
+        if (observer as AnyObject).responds(to: selector) {
+            print("calling setUpSharedObserverWithSearchProviderContext: \(context == nil ? "nil" : "context")…")
+            _ = (observer as AnyObject).perform(selector, with: context)
+            print("called; sharedObserver = \(String(describing: (observer as AnyObject).perform(NSSelectorFromString("sharedObserver"))?.takeUnretainedValue()))")
+        } else {
+            print("WBSSearchEnginePreferenceObserver has no setUpSharedObserverWithSearchProviderContext:")
+        }
+    } else {
+        print("WBSSearchEnginePreferenceObserver not found")
+    }
+}
 
 if let className = value(after: "--try-init") {
     print("\n== \(className) ==")
