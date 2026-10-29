@@ -22,20 +22,11 @@ import ObjectiveC.runtime
 // what was being tried on the terminal.
 setvbuf(stdout, nil, _IOLBF, 0)
 
-// Safari's frameworks assert and abort when a singleton they expect has not been set up. Each
-// such abort names the next thing to prepare, so the probe prints its own backtrace instead of
-// leaving it to a crash report.
-func installCrashReporter()
-
-// Safari's window lays out its content inside -windowDidLoad; an Objective-C exception thrown
-// there is turned into a crash by +[NSApplication _crashOnException:], which prints nothing
-// useful. Print the exception itself, and let --tolerate-exceptions ask AppKit to log and carry
-// on instead of aborting, so one run can show how far the window gets.
-NSSetUncaughtExceptionHandler { exception in
-    var text = "\n== NSException ==\n\(exception.name.rawValue): \(exception.reason ?? "-")\n"
-    for frame in exception.callStackSymbols { text += "   " + frame + "\n" }
-    text.withUTF8 { buffer in _ = write(2, buffer.baseAddress, buffer.count) }
-} {
+// Safari's frameworks assert and abort when a singleton they expect has not been set up, and
+// its window layout throws Objective-C exceptions that +[NSApplication _crashOnException:] turns
+// into a crash with nothing printed. Each such failure names the next thing to prepare, so the
+// probe reports both itself rather than leaving them to a crash report.
+func installCrashReporter() {
     let handler: @convention(c) (Int32) -> Void = { signalNumber in
         var frames = [UnsafeMutableRawPointer?](repeating: nil, count: 64)
         let count = backtrace(&frames, 64)
@@ -46,6 +37,11 @@ NSSetUncaughtExceptionHandler { exception in
     }
     for signalNumber in [SIGABRT, SIGTRAP, SIGSEGV, SIGILL, SIGBUS] {
         signal(signalNumber, handler)
+    }
+    NSSetUncaughtExceptionHandler { exception in
+        var text = "\n== NSException ==\n\(exception.name.rawValue): \(exception.reason ?? "-")\n"
+        for frame in exception.callStackSymbols { text += "   " + frame + "\n" }
+        text.withUTF8 { buffer in _ = write(2, buffer.baseAddress, buffer.count) }
     }
 }
 installCrashReporter()
