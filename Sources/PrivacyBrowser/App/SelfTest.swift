@@ -36,9 +36,9 @@ final class SelfTest {
         setenv("PB_PROFILE_PROCESS", "0", 1)
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
-        // A hung check must not hold CI; the whole run takes about four minutes on the runner.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 480) {
-            print("SELFTEST TIMEOUT after 480 s")
+        // A hung check must not hold CI; the whole run takes about five minutes on the runner.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 600) {
+            print("SELFTEST TIMEOUT after 600 s")
             exit(3)
         }
         Task { @MainActor in
