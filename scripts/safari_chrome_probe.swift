@@ -233,6 +233,30 @@ if let root = resourceRoots.first(where: { FileManager.default.fileExists(atPath
 
 // MARK: Instantiate one class
 
+// Safari's own window factory calls -[NSApp isRestoringWindows], which plain NSApplication does
+// not have: the selector belongs to Safari's own NSApplication subclass. So the process's NSApp
+// has to be that class, which is what --safari-app does, before anything else touches NSApp.
+if flag("--safari-app") {
+    print("\n== safari application ==")
+    var candidates: [String] = []
+    for entry in classes {
+        guard let cls = NSClassFromString(entry.name) else { continue }
+        var walk: AnyClass? = class_getSuperclass(cls)
+        while let current = walk {
+            if current == NSApplication.self { candidates.append(entry.name); break }
+            walk = class_getSuperclass(current)
+        }
+    }
+    print("NSApplication subclasses in the Safari frameworks: \(candidates.isEmpty ? ["(none)"] : candidates)")
+    let requested = value(after: "--safari-app").flatMap { $0.hasPrefix("--") ? nil : $0 }
+    if let name = requested ?? candidates.first, let cls: AnyObject = NSClassFromString(name) {
+        print("calling +[\(name) sharedApplication]…")
+        let app = cls.perform(NSSelectorFromString("sharedApplication"))?.takeUnretainedValue()
+        print("NSApp is now \(app.map { String(describing: type(of: $0)) } ?? "nil")")
+        print("responds to isRestoringWindows: \((app as? NSObject)?.responds(to: NSSelectorFromString("isRestoringWindows")) ?? false)")
+    }
+}
+
 /// Our own content, to be put inside a tab of Safari's window.
 final class HostedWebViewController: NSViewController {
     let webView = WKWebView()
