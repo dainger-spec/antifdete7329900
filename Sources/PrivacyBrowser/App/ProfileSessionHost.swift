@@ -78,6 +78,9 @@ enum ProfileSessionHost {
         private let isForWarmUpOnly = ProcessInfo.processInfo.environment["PB_WARM_UP_ONLY"] == "1"
         /// A window of the profile has been opened (at launch, or asked for since).
         private var showedWindow = false
+        /// Quitting has been asked for once: the last cookie count of a run comes back after the
+        /// run is over and must not ask again, since quitting is what seals the profile's data.
+        private var isQuitting = false
         /// The profile's session exists and commands can be acted on.
         private var isReady = false
         /// Commands that arrived before it did, in the order they came: the manager sends them as
@@ -125,7 +128,8 @@ enum ProfileSessionHost {
                     ProfileSessionHost.send(.warmUp(status))
                     // Warmed up and nothing has asked for a window: there is nothing left for this
                     // process to do, and quitting is what seals the cookies the run collected.
-                    if let self, self.isForWarmUpOnly, !self.showedWindow, !status.isRunning {
+                    if let self, self.isForWarmUpOnly, !self.showedWindow, !status.isRunning, !self.isQuitting {
+                        self.isQuitting = true
                         ProfileSessionHost.log.notice("The warm-up is over and this profile has no window: quitting")
                         NSApp.terminate(nil)
                     }
@@ -210,7 +214,9 @@ enum ProfileSessionHost {
                     ProfileSessionHost.send(.warmUp(WarmUpStatus(phase: .stopped, visited: 0, total: pages)))
                     // Nothing else was asked of this process, so it has nothing left to do —
                     // unless a run is already going, which is one reason a second one is refused.
-                    if isForWarmUpOnly, !showedWindow, manager?.warmUpStatus(of: profileID)?.isRunning != true {
+                    if isForWarmUpOnly, !showedWindow, !isQuitting,
+                       manager?.warmUpStatus(of: profileID)?.isRunning != true {
+                        isQuitting = true
                         NSApp.terminate(nil)
                     }
                 }
@@ -227,6 +233,7 @@ enum ProfileSessionHost {
         /// up with the profile's data like every other (`SafariChromeHost`). From here on this
         /// process has a window of its own, so a warm-up ending no longer quits it.
         private func openWindow(of session: BrowserSession) {
+            guard !isQuitting else { return } // this process is sealing its data and going
             showedWindow = true
             if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
             if !SafariChromeHost.open(session: session, url: nil) {
