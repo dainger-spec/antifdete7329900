@@ -18,6 +18,10 @@ import AppKit
 import Foundation
 import ObjectiveC.runtime
 
+// Line-buffered: a class that aborts inside Safari's own code must still leave the marker of
+// what was being tried on the terminal.
+setvbuf(stdout, nil, _IOLBF, 0)
+
 let arguments = Array(CommandLine.arguments.dropFirst())
 func flag(_ name: String) -> Bool { arguments.contains(name) }
 func value(after name: String) -> String? {
@@ -149,16 +153,49 @@ if let className = value(after: "--try-init") {
         print("no such class after loading the frameworks")
         exit(1)
     }
+    var chain: [String] = []
+    var walk: AnyClass? = cls
+    while let current = walk {
+        chain.append(String(cString: class_getName(current)))
+        walk = class_getSuperclass(current)
+    }
+    print("chain: \(chain.joined(separator: " < "))")
     guard let objectType = cls as? NSObject.Type else {
         print("not an NSObject subclass; cannot be created this way")
         exit(1)
     }
+
+    // NSApplication must exist before anything builds a window or reads a nib.
+    let application = NSApplication.shared
+    application.setActivationPolicy(flag("--show-window") ? .regular : .accessory)
+
+    print("init…")
     let object = objectType.init()
     print("init ok: \(object)")
+
     if flag("--load-view"), let controller = object as? NSViewController {
-        // Where the nib is actually read, and where a controller that wants Safari's own
-        // singletons gives up.
+        print("nibName: \(controller.nibName ?? "-")")
+        print("loading view… (this is where the nib is read)")
         let view = controller.view
-        print("view ok: \(type(of: view)) \(view.frame)  nibName=\(controller.nibName ?? "-")")
+        print("view ok: \(String(describing: Swift.type(of: view))) \(view.frame)")
+    }
+
+    if let controller = object as? NSWindowController {
+        print("windowNibName: \(controller.windowNibName ?? "-")")
+        print("reading .window… (this is where the window nib is read)")
+        if let window = controller.window {
+            print("window ok: \(String(describing: Swift.type(of: window))) \(window.frame) title=\(window.title)")
+            print("contentViewController: \(String(describing: window.contentViewController))")
+            if flag("--show-window") {
+                print("showing it for 10 s…")
+                controller.showWindow(nil)
+                window.makeKeyAndOrderFront(nil)
+                application.activate(ignoringOtherApps: true)
+                RunLoop.main.run(until: Date().addingTimeInterval(10))
+                print("still alive after 10 s")
+            }
+        } else {
+            print("window is nil")
+        }
     }
 }
