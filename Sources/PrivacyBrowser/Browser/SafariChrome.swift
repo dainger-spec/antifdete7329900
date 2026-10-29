@@ -127,10 +127,10 @@ enum SafariChrome {
             let logger = Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
             let description = (thrown as? NSException).map { "\($0.name.rawValue): \($0.reason ?? "-")" }
                 ?? String(describing: thrown)
-            logger.error("""
-                \(description, privacy: .public)
-                \(frames.joined(separator: "\n"), privacy: .public)
-                """)
+            // One line per frame: os_log truncates a long message, and the frames that matter are
+            // the ones at the end of it (that is how the first dictionary-key crash stayed hidden).
+            logger.error("\(description, privacy: .public)")
+            for frame in frames { logger.error("  \(frame, privacy: .public)") }
             return thrown
         })
     }
