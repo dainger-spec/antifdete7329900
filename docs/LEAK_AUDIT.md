@@ -138,6 +138,7 @@ One line each; back to them once the list above is closed.
 - Main-process profiles (sandboxed build) have no process-wide net — not the Safari-chrome path.
 - Profiles in their own processes stop each other's packet tunnel — WebRTC relay; such profiles stay in the main process.
 - `leak_check.py` covers our own windows only, not Safari's chrome or WebTransport — test gap.
+- `leak_check.py`: "relay candidates … NOT at the proxy address" flips between runs with no relay change (at: 378–380, 383; not: 382, 384, 385) — candidates are relay-only and the data channel goes through the proxy each time; suspected IPv4 vs IPv6 of the trace it compares with — not verified.
 - A remote HTTPS site's service worker fetching this Mac — not provable now: the test proxy serves no trusted HTTPS origin.
 - Private-network addresses — 10.255.255.1 measured through the proxy (CI 383) and checked; 192.168/16 and 172.16/12 not probed.
 - Foundation's per-app stores (cookie jar, HSTS, URL cache) shared between profile processes — not provable now; proof: a Set-Cookie on an icon, then a second profile.
