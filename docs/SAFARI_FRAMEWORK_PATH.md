@@ -15,8 +15,9 @@ The popup window path (§9) was measured the same way, with the app built agains
 [40834795505](https://github.com/dainger-spec/antifdete7329900/actions/runs/40834795505),
 [40835764560](https://github.com/dainger-spec/antifdete7329900/actions/runs/40835764560),
 [40837072147](https://github.com/dainger-spec/antifdete7329900/actions/runs/40837072147),
-[40838154367](https://github.com/dainger-spec/antifdete7329900/actions/runs/40838154367) and
-[40839991411](https://github.com/dainger-spec/antifdete7329900/actions/runs/40839991411).
+[40838154367](https://github.com/dainger-spec/antifdete7329900/actions/runs/40838154367),
+[40839991411](https://github.com/dainger-spec/antifdete7329900/actions/runs/40839991411) and
+[40841056975](https://github.com/dainger-spec/antifdete7329900/actions/runs/40841056975).
 
 ## 1. Answer
 
@@ -275,8 +276,8 @@ on the failing path, but a Mac with an account signed in may travel further befo
 - On macOS 26 a raise inside the layout pass ends the process whatever
   `NSApplicationCrashOnExceptions` says (§9). Whether that follows the OS or the SDK the app is
   built with (26.5 there, 15.5 on the macOS 15 runner) was not measured.
-- Sandboxed, the framework is denied its tab-group sync agent, and once in these runs its proxy
-  aborted the process from a background queue (§9). Keeping it from starting that work was not
+- Sandboxed, the framework is denied its tab-group sync agent, and twice in these runs its proxy
+  then ended the process from a background queue (§9). Keeping it from starting that work was not
   pursued.
 - `-[AppController init]`'s extension-controller branch (§3) is a hard stop for that route on any
   process that is not Safari, whatever is done about the UI.
@@ -455,8 +456,8 @@ by the app through `NSLog` as much as by the probe — but nothing in the proces
 `popup-hidden`'s raise, which is not in a layout pass, is caught there, and the in-process window
 then loads its page.
 
-**Sandboxed, one more way to end.** In run 40839991411 the sandboxed `popup` step on macOS 15
-ended before `-window` was even sent, on a thread of the framework's own:
+**Sandboxed, one more way to end.** Twice the sandboxed build on macOS 15 ended before `-window`
+was even sent, on a thread of the framework's own. The `popup` step in run 40839991411:
 
 ```
 objc[3210]: Cannot form weak reference to instance (0x600002a30a00) of class NSXPCConnection. It is possible that this object was over-released, or is in the process of deallocation.
@@ -469,13 +470,25 @@ objc[3210]: Cannot form weak reference to instance (0x600002a30a00) of class NSX
     …   queue com.apple.WebBookmarks.WBTabGroupSyncAgentProxy.…._syncObserverQueue
 ```
 
+And the `popup-nofield` step in run 40841056975, the run of the commit that added this section,
+from the same block:
+
+```
+EXC_BAD_ACCESS (SIGSEGV), KERN_INVALID_ADDRESS at 0x0000782df1450fc0
+ 0  libobjc.A.dylib  objc_retain
+ 1  Foundation       -[_NSXPCDistantObject _initWithConnection:proxyNumber:generationCount:interface:options:error:]
+ 2  Foundation       -[NSXPCConnection remoteObjectProxy]
+ 3  WebBookmarks     __44-[WBTabGroupSyncAgentProxy addSyncObserver:]_block_invoke
+    …   queue com.apple.WebBookmarks.WBTabGroupSyncAgentProxy.…._syncObserverQueue
+```
+
 The App Sandbox denies the framework its tab-group sync agent (`deny(1) mach-lookup
 com.apple.SafariBookmarksSyncAgent`, in the sandboxed steps' logs and in none of the unsandboxed
 ones); the framework logs `Connection to TabGroups sync agent was invalidated`, and its proxy, on
-its own queue, messages the connection as it goes away. That is an abort in the Objective-C
-runtime, not an exception, so nothing can catch it. It happened once in the five runs here —
-never unsandboxed, and not in the same run's `popup-nofield` and `popup-mode`, which take the
-same path — so it is a race, and the sandboxed build can lose it.
+its own queue, goes on using the connection as it goes away — an abort in the Objective-C runtime
+one time, a bad access the next. Neither is an exception, so nothing can catch them. Two
+sandboxed steps in six runs, a different one each time, and never unsandboxed: a race, and the
+sandboxed build can lose it.
 
 **Running every variant first.** In run 40837072147 `window:chrome` tried all four variants
 before the ordinary window, on macOS 15. All four raises were caught; then the ordinary window's
