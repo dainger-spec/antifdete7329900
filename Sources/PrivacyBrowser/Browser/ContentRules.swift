@@ -1,7 +1,9 @@
+import BrowserCore
 import os
 import WebKit
 
-/// Content rule lists added to every web view of a profile with a proxy.
+/// The content rule list added to every web view of a profile with a proxy
+/// (`ProxiedContentRules`, which says what it blocks and why).
 ///
 /// `<link rel="dns-prefetch">` (also sent as a `Link:` header) makes WebKit's network process
 /// resolve the host through the system resolver, outside the profile's proxy: WebKit only skips
@@ -12,25 +14,25 @@ import WebKit
 /// lists as a `ping`-type load, so a rule blocking `ping` stops it there; before 7621 the prefetch
 /// is a preference instead, which `BrowserSession.applyPrivacyPreferences` turns off. The same rule
 /// stops `<a ping>` (a click tracker, which content blockers block too); a beacon is another type
-/// of load and goes through the proxy like any other.
+/// of load and goes through the proxy like any other. Loads to this Mac itself, which the system
+/// never sends through a proxy, are blocked from every page not itself on this Mac.
 @MainActor
 enum ContentRules {
-    /// Blocks every ping-type load; nil until `prepare()` compiled it (or when compiling failed).
-    private(set) static var dnsPrefetchBlocker: WKContentRuleList?
+    /// The compiled list; nil until `prepare()` compiled it (or when compiling failed).
+    private(set) static var proxiedProfileRules: WKContentRuleList?
     /// `prepare()` ran and WebKit refused the list: a profile with a proxy then does not start.
     private(set) static var failedToCompile = false
+    /// What WebKit said when it refused the list (the self-test shows it).
+    private(set) static var compileErrors: [String] = []
     private static var preparation: Task<Void, Never>?
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "ContentRules")
 
-    static let dnsPrefetchBlockerIdentifier = "pb-block-ping-loads-v1"
-    static let dnsPrefetchBlockerJSON = """
-    [{"trigger": {"url-filter": ".*", "resource-type": ["ping"]}, "action": {"type": "block"}}]
-    """
+    static let identifier = ProxiedContentRules.identifier
 
     /// Compiles the lists once per process (the store caches the compiled form on disk). Call
     /// before a `BrowserSession` with a proxy is created; a failure is logged, not fatal.
     static func prepare() async {
-        if dnsPrefetchBlocker != nil { return }
+        if proxiedProfileRules != nil { return }
         if preparation == nil {
             preparation = Task { @MainActor in
                 // The store completes on WebKit's main run loop, which exists only once WebKit is
@@ -46,17 +48,18 @@ enum ContentRules {
                 for store in stores {
                     guard let store = store() else { continue }
                     do {
-                        dnsPrefetchBlocker = try await store.compileContentRuleList(
-                            forIdentifier: dnsPrefetchBlockerIdentifier, encodedContentRuleList: dnsPrefetchBlockerJSON)
-                        log.info("Compiled the ping-load blocker")
+                        proxiedProfileRules = try await store.compileContentRuleList(
+                            forIdentifier: identifier, encodedContentRuleList: ProxiedContentRules.json)
+                        log.notice("Compiled the rule list of profiles with a proxy (\(identifier, privacy: .public))")
                         break
                     } catch {
-                        log.error("Could not compile the ping-load blocker in a store: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
+                        compileErrors.append(String(describing: error))
+                        log.error("Could not compile the rule list of profiles with a proxy in a store: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
                     }
                 }
-                if dnsPrefetchBlocker == nil {
+                if proxiedProfileRules == nil {
                     failedToCompile = true
-                    log.error("No ping-load blocker: profiles with a proxy will not start")
+                    log.error("No rule list for profiles with a proxy: they will not start")
                 }
             }
         }

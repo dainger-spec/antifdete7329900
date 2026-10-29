@@ -51,12 +51,12 @@ final class BrowserSession {
     init(profileID: UUID, profileName: String, configuration: ProfileConfiguration,
          passwordVault: PasswordVault, passwordSettings: ProfilePasswordSettings, library: ProfileLibrary) throws {
         let proxies = try ProxyConfigurationFactory.make(configuration.proxy)
-        // Without the ping-load blocker a page's dns-prefetch would be resolved by this Mac: a
+        // Without the proxied profile's rule list a page's dns-prefetch would be resolved by this Mac: a
         // profile with a proxy does not start (fail-closed), as with a proxy that cannot be applied.
         // (`ContentRules.prepare` comes first wherever a profile is launched.)
-        if configuration.proxy != nil, ContentRules.dnsPrefetchBlocker == nil {
+        if configuration.proxy != nil, ContentRules.proxiedProfileRules == nil {
             throw CoreError.invalidConfiguration(ContentRules.failedToCompile
-                ? "the ping-load blocker did not compile" : "the ping-load blocker is not ready")
+                ? "the proxied profile's rule list did not compile" : "the proxied profile's rule list is not ready")
         }
         self.profileID = profileID
         self.profileName = profileName
@@ -70,7 +70,7 @@ final class BrowserSession {
         WebDataStoreVault.ensureWebKitInitialized()
         // Before the first web view of any profile: the one every worker of the process copies
         // its preferences from.
-        ProfileNetworkGuard.ensureWorkerTemplate()
+        if !Self.selfTestLeavesOut("worker-template") { ProfileNetworkGuard.ensureWorkerTemplate() }
         let store: WKWebsiteDataStore = configuration.ephemeral
             ? .nonPersistent()
             : WebDataStoreVault.makeStore(for: profileID)
@@ -84,7 +84,7 @@ final class BrowserSession {
             .notice("Profile \(profileName, privacy: .private): has a proxy=\(configuration.proxy != nil, privacy: .public) store proxies=\(store.proxyConfigurations.count, privacy: .public)")
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
         self.userContentController = BehaviorSets.makeUserContentController(for: configuration)
-        if configuration.proxy != nil, let blocker = ContentRules.dnsPrefetchBlocker {
+        if configuration.proxy != nil, let blocker = ContentRules.proxiedProfileRules {
             // Loads WebKit would otherwise make outside the proxy (see ContentRules).
             userContentController.add(blocker)
         }
@@ -109,7 +109,7 @@ final class BrowserSession {
         applyPrivacyPreferences(to: workerPreferences)
         let override = NSSelectorFromString("_setServiceWorkerOverridePreferences:")
         Self.workerPreferencesApplied = store.responds(to: override)
-        if store.responds(to: override) { store.perform(override, with: workerPreferences) }
+        if store.responds(to: override), !Self.selfTestLeavesOut("worker-override") { store.perform(override, with: workerPreferences) }
     }
 
     /// The scripts every page of this profile gets (the privacy scripts of its device generation),
@@ -118,6 +118,14 @@ final class BrowserSession {
     private let autoFillScript: WKUserScript
     /// The data store's delegate (`StoreChallenges`); the store holds it weakly.
     private let storeChallenges: StoreChallenges
+    /// The self-test's measurement of which of two worker settings keeps a stopped profile's
+    /// store alive (run 380 on: a session cookie outlived a stop and a launch): one CI variant
+    /// leaves out one, the other variant the other (`PB_SELFTEST_DIAG`). Only with `--self-test`,
+    /// in the self-test's own process — a profile's process gets no `PB_SELFTEST_` variable.
+    static func selfTestLeavesOut(_ part: String) -> Bool {
+        CommandLine.arguments.contains("--self-test") && ProcessInfo.processInfo.environment["PB_SELFTEST_DIAG"] == "no-\(part)"
+    }
+
     /// Whether this WebKit let a profile's service workers have the profile's preferences.
     private(set) static var workerPreferencesApplied: Bool?
 
@@ -140,7 +148,7 @@ final class BrowserSession {
     /// chrome's above all: the profile's data store, which carries its proxy since the proxy is
     /// set on the store; the profile's privacy preferences (WebRTC, Safe Browsing and the rest of
     /// `applyPrivacyPreferences`), which Safari's own configuration has the other way round; and,
-    /// into that configuration's content controller, the profile's scripts, its ping-load blocker
+    /// into that configuration's content controller, the profile's scripts, its rule list
     /// and its AutoFill.
     ///
     /// The data store is replaced even when this session has none any more (it is shutting
@@ -158,7 +166,7 @@ final class BrowserSession {
         applyContent(to: webConfiguration.userContentController)
     }
 
-    /// The profile's scripts, its ping-load blocker and its AutoFill, into a content controller
+    /// The profile's scripts, its rule list and its AutoFill, into a content controller
     /// something else made (a configuration's, or one a navigation brings: `ProfileNetworkGuard`).
     func applyContent(to controller: WKUserContentController) {
         // Our own controller already has all of it (`makeWebViewConfiguration`); a second copy of
@@ -171,7 +179,7 @@ final class BrowserSession {
         for script in profileScripts {
             controller.addUserScript(script)
         }
-        if configuration.proxy != nil, let blocker = ContentRules.dnsPrefetchBlocker {
+        if configuration.proxy != nil, let blocker = ContentRules.proxiedProfileRules {
             controller.add(blocker)
         }
         PasswordAutoFill.install(in: controller, handler: passwordHandler, script: autoFillScript)
@@ -191,7 +199,7 @@ final class BrowserSession {
             controller.addUserScript(script)
             restored += 1
         }
-        if configuration.proxy != nil, let blocker = ContentRules.dnsPrefetchBlocker {
+        if configuration.proxy != nil, let blocker = ContentRules.proxiedProfileRules {
             controller.add(blocker)
         }
         Self.contentRestorations += 1

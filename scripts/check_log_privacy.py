@@ -72,6 +72,7 @@ ALLOWED_IN_FILE = {
     ("SafariChromeHost.swift", "structural.joined(separator: \", \")"): "names of Safari's classes this macOS lacks",
     ("SafariChromeHost.swift", "patched.joined(separator: \", \")"): "names of Safari's configuration factories",
     ("ProxyGeoLookup.swift", "service.url.host ?? \"?\""): "a geolocation service of the app's own list, not the proxy",
+    ("ContentRules.swift", "identifier"): "the rule list's identifier, a constant of the code",
 }
 
 def interpolations(text):

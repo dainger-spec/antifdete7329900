@@ -270,7 +270,7 @@ enum ProfileNetworkGuard {
         return []
     }
 
-    /// The profile's scripts and its ping-load blocker stay in every page of the process, whatever
+    /// The profile's scripts and its rule list stay in every page of the process, whatever
     /// Safari's chrome does to the content controllers they were put in.
     ///
     ///   * A navigation can carry a content controller of its own (`WKWebpagePreferences`, as it
@@ -278,7 +278,7 @@ enum ProfileNetworkGuard {
     ///   * Safari empties a controller's scripts or rule lists when it reloads its own: the
     ///     profile's are put back right after (`BrowserSession.restoreContent`).
     ///   * With a proxy, "Reload Without Content Blockers" and a site's "content blockers off"
-    ///     switch everything off but the ping-load blocker, which is what keeps a page's
+    ///     switch everything off but the proxied profile's rule list, which is what keeps a page's
     ///     dns-prefetch from being resolved by this Mac (`ContentRules`): the blocker is the
     ///     exception every such switch keeps on, and the reload without blockers is a reload.
     private static func theProfilesContentStays() -> [String] {
@@ -323,7 +323,7 @@ enum ProfileNetworkGuard {
         }
 
         guard !(proxies ?? []).isEmpty else { return [] }
-        let blocker: Set<String> = [ContentRules.dnsPrefetchBlockerIdentifier]
+        let blocker: Set<String> = [ContentRules.identifier]
         let lists = NSSelectorFromString("_setContentRuleListsEnabled:exceptions:")
         typealias ListsSetter = @convention(c) (AnyObject, Selector, Bool, NSSet?) -> Void
         let listsMethod = class_getInstanceMethod(pagePreferences, lists)
@@ -346,10 +346,10 @@ enum ProfileNetworkGuard {
                 if enabled {
                     original(preferences, blockers, true)
                 } else if let listsOriginal {
-                    log.notice("Content blockers off for a page: every list but the ping-load blocker")
+                    log.notice("Content blockers off for a page: every list but the proxied profile's rule list")
                     listsOriginal(preferences, lists, false, blocker as NSSet)
                 } else {
-                    log.notice("Content blockers off for a page refused: this WebKit cannot keep the ping-load blocker on alone")
+                    log.notice("Content blockers off for a page refused: this WebKit cannot keep the proxied profile's rule list on alone")
                     original(preferences, blockers, true)
                 }
             }
@@ -358,7 +358,7 @@ enum ProfileNetworkGuard {
         let reloadWithout = NSSelectorFromString("_reloadWithoutContentBlockers")
         if let method = class_getInstanceMethod(WKWebView.self, reloadWithout) {
             let replacement: @convention(block) (AnyObject) -> WKNavigation? = { webView in
-                log.notice("Reload without content blockers: reloaded with the ping-load blocker")
+                log.notice("Reload without content blockers: reloaded with the proxied profile's rule list")
                 return (webView as? WKWebView)?.reload()
             }
             method_setImplementation(method, imp_implementationWithBlock(replacement))

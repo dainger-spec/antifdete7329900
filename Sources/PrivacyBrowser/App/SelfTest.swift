@@ -126,9 +126,10 @@ final class SelfTest {
         do {
             let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
             try await firstWebKitUse(repository) // must run before anything else touches WebKit
-            // A profile with a proxy does not start without the ping-load blocker (ContentRules).
+            // A profile with a proxy does not start without the proxied profile's rule list (ContentRules).
             await ContentRules.prepare()
             info("WebKit \(WebKitBuild.version)")
+            info("PB_SELFTEST_DIAG=\(ProcessInfo.processInfo.environment["PB_SELFTEST_DIAG"] ?? "none") (a measurement: a worker setting left out of this process's profiles)")
             debugSwitchesStayDebugSwitches()
             try await storageIsolationAndShims(repository)
             try await deviceGenerations(repository)
@@ -407,10 +408,11 @@ final class SelfTest {
         check("proxy: a bracketed IPv6 proxy address is split into host and port",
               (try? ProxyHostField.parse("[::1]:1080")) == ProxyHostField(host: "::1", port: 1080))
 
-        // Every proxied session carries the ping-load blocker (dns-prefetch would resolve outside
+        // Every proxied session carries the proxied profile's rule list (dns-prefetch would resolve outside
         // the proxy; see ContentRules).
         await ContentRules.prepare()
-        check("proxy: the ping-load blocker compiled", ContentRules.dnsPrefetchBlocker != nil)
+        check("proxy: the rule list of profiles with a proxy compiled (pings, dns-prefetch, this Mac)", ContentRules.proxiedProfileRules != nil,
+              ContentRules.compileErrors.joined(separator: " | "))
 
         let environment = ProcessInfo.processInfo.environment
         guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init),
@@ -457,7 +459,7 @@ final class SelfTest {
                                                     url: URL(string: "http://example.com/")!)
         check("proxy: fail-closed when the proxy host does not resolve", unresolved == nil, "page loaded: \(unresolved ?? "")")
 
-        // What WebKit would send outside the proxy is blocked by the ping-load blocker: an
+        // What WebKit would send outside the proxy is blocked by the proxied profile's rule list: an
         // <a ping> (the same load type as a dns-prefetch) never reaches the proxy, a fetch does.
         let served = try await servedPathsAfterPing(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort))
         check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
@@ -618,7 +620,8 @@ final class SelfTest {
         check("backups: WebKit's directories of this app are excluded from Time Machine",
               WebDataStoreVault.layout.searchRoots.allSatisfy {
                   (try? $0.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup == true
-              }, WebDataStoreVault.layout.searchRoots.map(\.path).joined(separator: ", "))
+              }, WebDataStoreVault.layout.searchRoots.map(\.path).joined(separator: ", ")
+                  + " — failures: \(WebDataStoreVault.exclusionFailures)")
         let profile = try repository.create(name: "Hand-offs", configuration: ProfileConfiguration(ephemeral: true))
         let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
         defer { session.shutDown() }
@@ -786,16 +789,21 @@ final class SelfTest {
             ("a worker's fetch", "192.0.2.15:8080", "/pb-leak/worker"),
             ("an image", "img-\(run).\(domain):80", "/pb-leak/img.png"),
             ("a frame of another site", "frame-\(run).\(domain):80", "/pb-leak/frame"),
-            // Loopback and the local network are not exceptions to the proxy.
-            ("a fetch to 127.0.0.1", "127.0.0.1:\(canaryPort)", "/pb-leak/lo4"),
-            ("a fetch to localhost", "localhost:\(canaryPort)", "/pb-leak/lohost"),
-            ("a fetch to ::1", "[::1]:\(canaryPort)", "/pb-leak/lo6"),
+            // The local network is not an exception to the proxy.
             ("a fetch to a .local name", "lan-\(run).local:80", "/pb-leak/lan"),
         ] {
             check("Safari chrome: \(what) goes through the profile's proxy", reached(target, path),
                   "not seen by the proxy: \(target)\(path)")
         }
-        // The ping-load blocker (dns-prefetch, <a ping>) reaches the web views Safari builds.
+        // This Mac itself: the system never sends loopback through a proxy (measured in run 382: the
+        // page's fetches reached the canary listener directly), so a proxied profile's pages are
+        // refused it — a fetch, a frame and a worker's fetch (`ProxiedContentRules`).
+        let refusedHere = ["loopback4", "loopbackName", "loopback6", "loopbackAny", "loopbackWorker"]
+        check("Safari chrome: a page cannot reach this Mac (127.0.0.1, localhost, ::1, 0.0.0.0, from the page and from a worker): each is refused",
+              refusedHere.allSatisfy { page[$0] as? String == "rejected" },
+              refusedHere.map { "\($0)=\(page[$0] ?? "nil")" }.joined(separator: " "))
+        info("Safari chrome: a fetch to a private-network address (10.255.255.1) \(reached("10.255.255.1:8080", "/pb-leak/lan10") ? "went through the proxy" : "did not reach the proxy (\(page["lan10"] ?? "nil"))")")
+        // The proxied profile's rule list (dns-prefetch, <a ping>) reaches the web views Safari builds.
         check("Safari chrome: <a ping> is blocked in Safari's web views (and dns-prefetch with it)",
               !log.targets.contains { $0.path.hasPrefix("/pb-leak/ping") }, "the ping reached the proxy")
         for (what, path) in [("the font", "/pb-leak/font.woff"), ("the video", "/pb-leak/media.mp4"), ("the beacon", "/pb-leak/beacon")] {
@@ -912,9 +920,9 @@ final class SelfTest {
             worker = log.reports.first { $0["sw"] != nil } ?? [:]
             if !secure.isEmpty && !worker.isEmpty { break }
         }
-        check("Safari chrome: a page on loopback goes through the proxy too",
-              log.targets.contains { $0.via != "via=forward" && $0.target == "127.0.0.1:\(httpPort)" && $0.path.hasPrefix(securePath) },
-              log.targets.filter { $0.path.hasPrefix(securePath) }.map { "\($0.via) \($0.target)" }.joined(separator: " | "))
+        // A page opened on this Mac is loaded from this Mac (the system never proxies loopback); it
+        // is the user's own machine, and its own loads stay there (`ProxiedContentRules`).
+        info("Safari chrome: the page on this Mac was loaded \(log.targets.filter { $0.path.hasPrefix(securePath) }.map { "\($0.via) \($0.target)" }.joined(separator: " | "))")
         info("Safari chrome: the secure page reported \(secure), its service worker \(worker)")
         if secure["secure"] as? Bool == true {
             check("Safari chrome: WebTransport and WebRTC are absent in a secure context (page, worker, shared worker)",
@@ -960,7 +968,7 @@ final class SelfTest {
         check("Safari chrome: an HTTPS image whose certificate needs a fetch reached the proxy, and its certificate was refused",
               log.targets.contains { $0.target == "aia-\(run).\(domain):443" && $0.path.hasPrefix("(tls refused") },
               log.targets.filter { $0.target.hasPrefix("aia-") }.map(\.path).joined(separator: " | "))
-        check("Safari chrome: nothing reached loopback directly (the canary listener took no connection)",
+        check("Safari chrome: nothing reached this Mac directly (the canary listener took no connection: no fetch, frame or worker)",
               log.canary.isEmpty, log.canary.joined(separator: " | "))
         // Whether Safari fetches these is Safari's business; where it does, it is through the proxy
         // (https: the CONNECT is the proof), and anything it fetched another way is in the capture.
@@ -2183,7 +2191,13 @@ final class SelfTest {
                   && readBack.count == CookieExport.count(exported, format: .netscape) && !readBack.isEmpty,
               exported.map { "\($0.name)=\($0.value)" }.joined(separator: " "))
         // Stop (sealed) and launch: persistent imported cookies kept, the session cookie gone.
+        // WebKit lets go of a stopped profile's store: one still alive is handed back at the next
+        // launch (`WKWebsiteDataStore(forIdentifier:)`), session cookies and all.
+        weak var storeBeforeStop = manager.session(for: profile.id)?.dataStore
         try await manager.stop(profile.id)
+        let storeReleased = await waitUntil(timeout: 10) { storeBeforeStop == nil }
+        check("cookie import: WebKit lets go of a stopped profile's data store", storeReleased,
+              "still alive 10 s after the stop (PB_SELFTEST_DIAG=\(ProcessInfo.processInfo.environment["PB_SELFTEST_DIAG"] ?? "none"))")
         // Exported while stopped: started without a window, read, and stopped again.
         let fromStopped = (try? await manager.exportCookies(of: profile.id)) ?? []
         let stoppedAgain = await waitUntil(timeout: 30) { !manager.isRunning(profile.id) && !manager.busyProfileIDs.contains(profile.id) }

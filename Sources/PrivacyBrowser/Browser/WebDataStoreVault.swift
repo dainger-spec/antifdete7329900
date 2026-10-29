@@ -142,13 +142,22 @@ final class WebDataStoreVault {
         guard !rootsExcluded else { return }
         rootsExcluded = true
         for root in layout.searchRoots {
-            try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            var url = root
-            try? url.setResourceValues(values)
+            do {
+                try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                var values = URLResourceValues()
+                values.isExcludedFromBackup = true
+                var url = root
+                try url.setResourceValues(values)
+            } catch {
+                exclusionFailures.append("\(root.lastPathComponent): \(error.logKind) \(error.localizedDescription)")
+                Logger(subsystem: "PrivacyBrowser", category: "WebDataStoreVault")
+                    .error("Could not keep \(root.path, privacy: .private) out of backups: \(error.logKind, privacy: .public)")
+            }
         }
     }
+
+    /// The roots `excludeRootsFromCopies` could not mark, and why (the self-test shows them).
+    private(set) static var exclusionFailures: [String] = []
 
     // MARK: Launch
 

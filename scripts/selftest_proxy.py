@@ -237,6 +237,7 @@ def leak_page(run: str) -> bytes:
 <a id="ping" href="#pinged" ping="http://ping-RUN.leak.example.com/pb-leak/ping?run=RUN">ping</a>
 <img src="http://img-RUN.leak.example.com/pb-leak/img.png?run=RUN" width="1" height="1">
 <iframe src="http://frame-RUN.leak.example.com/pb-leak/frame?run=RUN" width="200" height="40"></iframe>
+<iframe src="http://127.0.0.1:CANARY/pb-leak/lo4frame?run=RUN" width="20" height="20"></iframe>
 <video src="http://media-RUN.leak.example.com/pb-leak/media.mp4?run=RUN" preload="auto" muted width="1" height="1"></video>
 <a id="anchor" href="http://anchor-RUN.leak.example.com/pb-leak/anchor?run=RUN">a link, which a browser may prefetch the name of</a>
 <img src="https://aia-RUN.leak.example.com/pb-leak/aia.png?run=RUN" width="1" height="1">
@@ -264,12 +265,20 @@ def leak_page(run: str) -> bytes:
   await attempt('fetchName', noCors('http://fetch-RUN.leak.example.com/pb-leak/fetchname?run=RUN'));
   await attempt('fetchTLS', noCors('https://192.0.2.14/pb-leak/tls?run=RUN'));
   await attempt('fetchTLSName', noCors('https://tls-RUN.leak.example.com/pb-leak/tlsname?run=RUN'));
-  // Loopback and the local network: through the proxy like anything else, or the canary
-  // listener (loopback) or the capture (mDNS) sees them.
+  // This Mac: the system never sends loopback through a proxy, so a proxied profile refuses it
+  // (anything that reaches the canary listener went around the proxy). The local network: through
+  // the proxy like anything else, or the capture sees it.
   await attempt('loopback4', noCors('http://127.0.0.1:CANARY/pb-leak/lo4?run=RUN'));
   await attempt('loopbackName', noCors('http://localhost:CANARY/pb-leak/lohost?run=RUN'));
   await attempt('loopback6', noCors('http://[::1]:CANARY/pb-leak/lo6?run=RUN'));
+  await attempt('loopbackAny', noCors('http://0.0.0.0:CANARY/pb-leak/lo0?run=RUN'));
+  await attempt('loopbackWorker', () => new Promise((resolve) => {
+    const source = "fetch('http://127.0.0.1:CANARY/pb-leak/lo4w?run=RUN',{mode:'no-cors'}).then(()=>postMessage('resolved'),()=>postMessage('rejected'))";
+    const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+    worker.onmessage = (e) => resolve(e.data);
+  }));
   await attempt('lan', noCors('http://lan-RUN.local/pb-leak/lan?run=RUN'));
+  await attempt('lan10', noCors('http://10.255.255.1:8080/pb-leak/lan10?run=RUN'));
   await attempt('ws', () => new Promise((resolve) => {
     const ws = new WebSocket('ws://192.0.2.11:8080/pb-leak/ws?run=RUN');
     ws.onopen = () => resolve('open'); ws.onerror = () => resolve('error');

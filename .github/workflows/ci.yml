@@ -88,6 +88,10 @@ jobs:
           status=0
           for variant in sandboxed unsandboxed; do
             echo "::group::self-test ($variant)"
+            # A measurement, for one run: which worker setting keeps a stopped profile's data store
+            # alive (a session cookie outlived a stop since run 380). Each variant leaves one out,
+            # in the self-test's own process only (BrowserSession.selfTestLeavesOut).
+            if [ "$variant" = sandboxed ]; then export PB_SELFTEST_DIAG=no-worker-override; else export PB_SELFTEST_DIAG=no-worker-template; fi
             # The surface dump goes to the repository folder, which only the unsandboxed build may write.
             if [ "$variant" = unsandboxed ]; then
               export PB_SELFTEST_SURFACE_OUT="$PWD/build/surface-$variant"

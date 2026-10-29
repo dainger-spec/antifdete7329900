@@ -35,7 +35,7 @@ since):
 | Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the packet tunnel cannot carry it (§5) |
 | Packet tunnel | a build without the network extension reports it (the tunnel sheet says what a signed build needs), and proxied profiles keep WebRTC off. The tunnel's TURN server and SOCKS5 relay are measured by the leak check instead ([TUNNEL.md](TUNNEL.md)) |
 | Proxy: dns-prefetch leak | an `<a ping>` (the load type WebKit gives dns-prefetch) reaches neither the proxy nor the network; a fetch to the same origin does |
-| Safari's chrome, in a profile's own process | through the app's launch path, a proxied profile whose window is Safari's chrome loads the self-test proxy's leak page: its page load, a fetch to an IPv4 and an IPv6 literal, to a host name, an https request, a WebSocket, a worker's fetch, an image and a frame of another site all reach the proxy; `<a ping>` does not; fetches to `127.0.0.1`, `localhost`, `::1` and a `.local` name go to the proxy like any other, and nothing reaches loopback directly; an HTTPS image whose certificate needs a fetch reaches the proxy and its certificate is refused; `RTCPeerConnection` exists in neither the page, a frame of another site nor an about:blank frame, `WebTransport` in neither; on loopback (a secure context) the leak page's secure half, loaded through the proxy, has neither in the page and no `WebTransport` in a dedicated, a shared or a service worker; the profile's process reports every web view on its store with its proxy, none with WebRTC or with a feature that leaves the proxy, no setter that turns them on again, WebKit's default store closed, UDP and the real Safari's places closed to it by the kernel, its certificate checks made without fetching, and its own three probe requests at the proxy as one CONNECT each; a cookie imported while it runs is sent by the next window's first request; a second window loads through the proxy too. Around it, the egress capture and the file-system trace (§4a) |
+| Safari's chrome, in a profile's own process | through the app's launch path, a proxied profile whose window is Safari's chrome loads the self-test proxy's leak page: its page load, a fetch to an IPv4 and an IPv6 literal, to a host name, an https request, a WebSocket, a worker's fetch, an image and a frame of another site all reach the proxy; `<a ping>` does not; a fetch to a `.local` name goes to the proxy like any other; this Mac itself — `127.0.0.1`, `localhost`, `::1`, `0.0.0.0`, from the page, a frame and a worker — is refused (the system never sends loopback through a proxy: measured in CI run 382, those fetches reached a listener on the runner directly), and nothing reaches the loopback canary; an HTTPS image whose certificate needs a fetch reaches the proxy and its certificate is refused; `RTCPeerConnection` exists in neither the page, a frame of another site nor an about:blank frame, `WebTransport` in neither; on loopback (a secure context) the leak page's secure half, opened as a page of this Mac (loaded from it directly, as any page on this Mac is), has neither in the page and no `WebTransport` in a dedicated, a shared or a service worker; the profile's process reports every web view on its store with its proxy, none with WebRTC or with a feature that leaves the proxy, no setter that turns them on again, WebKit's default store closed, UDP and the real Safari's places closed to it by the kernel, its certificate checks made without fetching, and its own three probe requests at the proxy as one CONNECT each; a cookie imported while it runs is sent by the next window's first request; a second window loads through the proxy too. Around it, the egress capture and the file-system trace (§4a) |
 | Nothing handed outside the profile | in a profile's tab of ours: no link preview, even when asked for; no Services requestor for the selection; the context menu keeps Copy and the link items and loses Search with Google, Look Up, Translate, Share, Quick Note, Writing Tools and Services; WebKit's directories of this app are excluded from Time Machine |
 | Certificates with a proxy | the self-test proxy answers every TLS handshake in its tunnels with a certificate whose chain is complete only for a client that fetches the intermediate from the address the certificate names (`pbaiacanary.leak.example.com`): in a proxied profile's tab the certificate is checked without a fetch and refused at the handshake, through the proxy; the same kind of certificate (`pbaiacontrol`) loaded without a proxy is the control, which the system does fetch and the capture must see (§4a) |
 | Profile export and import | a profile whose sealed WebKit store holds a cookie is exported to a `.pbprofile` file (in which neither the cookie nor the profile's name is readable; a wrong password opens nothing), imported as a new profile, and the new profile's first request carries the cookie |
@@ -472,7 +472,7 @@ WebSocket, a worker, an image, a frame, a font, a video, dns-prefetch, preconnec
 beacon, an icon, a touch icon, an OpenSearch description, WebRTC and WebTransport where they
 exist, a link whose name a browser may prefetch (with `X-DNS-Prefetch-Control: on`), a dns-prefetch
 added after load, an HTTPS request to a host name, an HTTPS image whose certificate needs a fetch,
-fetches to loopback and to a `.local` name; and its secure half on loopback, with workers.
+fetches to this Mac (refused) and to a `.local` name; and its secure half on loopback, with workers.
 `scripts/egress_check.py` fails on any packet to a documentation address, any packet carrying the
 run id or the canary certificate's names, any DNS question for a leak page's name, any non-loopback
 packet of the app's processes (or made on their behalf), and any packet of the services above —
@@ -483,6 +483,20 @@ cfprefsd's processes write, and `scripts/disk_check.py` fails on a write into th
 places (`~/Library/Safari`, its container, cookies, caches, preferences); a call the sandbox
 refused is listed, not failed on. The checks that each request reached the proxy are in the
 self-test (§0).
+
+**This Mac's own addresses.** The system never sends a request to this Mac through a proxy: in
+CI (run 382, macOS 26) a page in Safari's chrome fetched `127.0.0.1`, `localhost` and `::1` and
+each reached a listener on the runner directly. A page could so probe which ports this Mac has open
+— the same in every profile, and a way to tell the profiles apart from other people's or link them.
+A profile with a proxy therefore refuses every load to this Mac (127.0.0.0/8, `localhost` and
+`*.localhost`, `::1` and its IPv4-mapped form, `0.0.0.0`, `::`) from a page that is not itself on
+this Mac, in WebKit's own content blocker (`ProxiedContentRules`): fetches, frames, images,
+WebSockets and dedicated workers. A page the user opens on this Mac (`http://127.0.0.1:…`) is the
+user's own machine: it loads from it directly, as in any browser, and keeps its own loads.
+**Checked by the self-test** in Safari's chrome: each of those fetches is refused and the loopback
+canary takes no connection. **Not proven now:** a service worker of a remote HTTPS site — whether
+content blockers apply to its fetches; the self-test proxy cannot serve a trusted HTTPS origin to
+register one. A private-network address (10/8, 192.168/16) is measured (reported), not yet checked.
 
 **The process itself.** It is not given the vault's master key: only its own profile's key and
 that profile's entry in the index (`ProfileGrant`), on its standard input — never in `argv`, the
