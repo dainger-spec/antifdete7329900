@@ -345,6 +345,12 @@ enum SafariChrome {
         // state worth restoring anyway (the profile decides what opens), and the windows are
         // marked not restorable as well, in openWindow.
         replaceWithConstant("BrowserDocument", "fileType") { "public.html" as NSString }
+        // Search suggestions: typing in the address bar asks the provider for its suggestions URL
+        // template, which the providers built here do not carry, and the fetcher throws on the nil.
+        // Stubbed rather than supplied on purpose — suggestions send every keystroke to the search
+        // engine, which is the last thing a profile of this browser should do.
+        replaceWithConstant("WebSearchSuggestionsFetcherController",
+                            "addSuggestionsURLTemplate:forDefaultSearchProvider:") { nil }
     }
 
     /// Replaces one object-returning method with a constant. On arm64 a block that only returns a
