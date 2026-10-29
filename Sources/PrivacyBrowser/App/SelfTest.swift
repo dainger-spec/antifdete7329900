@@ -1752,7 +1752,8 @@ final class SelfTest {
     /// All of it but the host name that does not resolve (this Mac's resolver is asked for the
     /// proxy's own name: there is nothing else to reach a proxy by) runs inside an egress window:
     /// scripts/egress_check.py fails on any packet of this process past loopback during it, and on
-    /// any DNS question for the geolocation service's name, which carries the run's id.
+    /// any DNS question for the geolocation service's name, which carries the run's id. The host
+    /// name that does not resolve is the capture's control for such questions (`egress-control`).
     private func proxyChecker(_ repository: ProfileRepository) async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
@@ -1770,10 +1771,11 @@ final class SelfTest {
             ProxyChecker.concurrentChecks = concurrentChecks
         }
         // The service's name carries the run's id: asked of this Mac's resolver instead of named to
-        // the proxy, it is in the capture (scripts/egress_check.py).
+        // the proxy, it is in the capture (scripts/egress_check.py). Under selftest.invalid, the one
+        // name the app's App Transport Security lets a URLSession ask over plain HTTP.
         let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
         ProxyGeoLookup.services = [
-            .init(url: URL(string: "http://geo-\(run).leak.example.com/pb-geo.json?ip=203.0.113.21")!,
+            .init(url: URL(string: "http://geo-\(run).selftest.invalid/pb-geo.json?ip=203.0.113.21")!,
                   timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"],
                   cityKeyPath: ["city"], asnKeyPath: ["org"], organizationKeyPath: ["org"]),
             // A real website, as the fail-closed checks above use one: a request made directly would
@@ -1782,12 +1784,16 @@ final class SelfTest {
         ]
         ProxyChecker.timeout = 8
 
-        // Before the window: the proxy's own name is asked of this Mac's resolver.
-        let unresolvedProbe = await ProxyChecker.probe(latencySamples: 1).run(ProxySettings(kind: .socks5, host: "proxy.selftest.invalid", port: 1080))
+        // Before the window: the proxy's own name is asked of this Mac's resolver. It is a control
+        // for the capture: seen there, a question this Mac asks for a .invalid name reaches the
+        // network, and one for the service's name inside the window would have been caught too.
+        let control = "pbinvalid\(run.prefix(6))"
+        info("egress-control \(control)")
+        let unknownHost = "proxy-\(control).selftest.invalid"
+        let unresolvedProbe = await ProxyChecker.probe(latencySamples: 1).run(ProxySettings(kind: .socks5, host: unknownHost, port: 1080))
         check("proxy probe: a proxy whose host name does not exist is told apart (host not found)",
               unresolvedProbe.verdict == .hostNotFound, String(describing: unresolvedProbe))
-        let unresolved = ProxyChecker.result(of: await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: "proxy.selftest.invalid",
-                                                                                         port: 1080)))
+        let unresolved = ProxyChecker.result(of: await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: unknownHost, port: 1080)))
         check("proxy checker: a proxy whose host does not resolve is dead (nothing goes direct)",
               unresolved.failure == .noAnswer, String(describing: unresolved))
 

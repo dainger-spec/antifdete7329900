@@ -43,9 +43,11 @@ controls'.
 
 A control (`INFO egress-control <name>`) is something the self-test makes this Mac do on purpose,
 outside any proxy, so that the capture must show it: the TLS check's `pbaiacontrol`, a certificate
-whose intermediate the system's trust service fetches, from a profile without a proxy. Seen, the
-capture is known to see such fetches, and their absence for the profiles with a proxy means
-something; not seen, that part is inconclusive, and said so.
+whose intermediate the system's trust service fetches, from a profile without a proxy; and the
+proxy checker's `pbinvalid…`, a proxy host name under selftest.invalid that this Mac's resolver
+is asked for (the proxy checker's geolocation service is a name under selftest.invalid too). Seen,
+the capture is known to see such packets, and their absence where a proxy should have been used
+means something; not seen, that part is inconclusive, and said so.
 
 A capture that could not be made (no pktap, no sudo) makes the result inconclusive: a warning,
 exit code 0.
@@ -189,10 +191,10 @@ def main() -> int:
     for control in controls:
         if control in seen_controls:
             print(f"egress check: control {control} seen {len(seen_controls[control])} times "
-                  f"({sorted(set(seen_controls[control]))[:4]}): the capture sees such fetches")
+                  f"({sorted(set(seen_controls[control]))[:4]}): the capture sees such packets")
         else:
-            print(f"::warning::egress check: control {control} was never seen — this macOS did not fetch it, or the "
-                  f"capture cannot see it; the matching check for the profiles with a proxy is inconclusive")
+            print(f"::warning::egress check: control {control} was never seen — this macOS did not send it, or the "
+                  f"capture cannot see it; the matching check where a proxy is used is inconclusive")
 
     if others:
         print("other processes during the check (listed, not failed on):")
