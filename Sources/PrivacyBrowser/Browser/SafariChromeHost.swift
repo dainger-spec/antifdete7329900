@@ -124,3 +124,46 @@ enum SafariChromeHost {
         return true
     }
 }
+
+/// The profile's history is the profile's encrypted library (`ProfileLibrary`), whatever window
+/// the pages were in: what a page of Safari's chrome visits goes there too, as a tab of ours
+/// records it — committed loads and same-document navigations, with their titles. Safari keeps its
+/// own history besides, in the profile's home (sealed with it), for its own menus; the library is
+/// what the Library window shows, what syncs and what an export carries.
+@MainActor
+enum HostedPageHistory {
+    private static let followed = NSMapTable<WKWebView, Follower>.weakToStrongObjects()
+
+    private final class Follower {
+        var observations: [NSKeyValueObservation] = []
+        var lastRecorded: URL?
+    }
+
+    /// Records `webView`'s visits from now on. Our own tabs record theirs themselves, and are left
+    /// alone; so are pages that are not web addresses (Safari's start page, a file).
+    static func follow(_ webView: WKWebView) {
+        guard followed.object(forKey: webView) == nil else { return }
+        let follower = Follower()
+        follower.observations = [
+            webView.observe(\.url, options: [.new]) { webView, _ in
+                MainActor.assumeIsolated {
+                    guard let url = webView.url, isRecorded(webView, url),
+                          webView.backForwardList.currentItem?.url == url, url != follower.lastRecorded else { return }
+                    follower.lastRecorded = url
+                    ProfileNetworkGuard.session?.library.recordVisit(url: url, title: webView.title)
+                }
+            },
+            webView.observe(\.title, options: [.new]) { webView, _ in
+                MainActor.assumeIsolated {
+                    guard let url = webView.url, isRecorded(webView, url) else { return }
+                    ProfileNetworkGuard.session?.library.updateTitle(url: url, title: webView.title)
+                }
+            },
+        ]
+        followed.setObject(follower, forKey: webView)
+    }
+
+    private static func isRecorded(_ webView: WKWebView, _ url: URL) -> Bool {
+        !(webView.navigationDelegate is BrowserTab) && ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+    }
+}

@@ -927,6 +927,10 @@ final class SelfTest {
             info("Safari chrome: \(what) \(log.targets.contains { $0.target.hasPrefix(host + run) } ? "was fetched through the proxy" : "was not fetched through the proxy")")
         }
         try? await manager.stop(profile.id)
+        // What Safari's window visited is in the profile's own, encrypted history (`HostedPageHistory`).
+        let visited = (try? repository.historyStore(for: profile.id, key: repository.profileKey(for: profile.id)).entries().map(\.url)) ?? []
+        check("Safari chrome: the pages Safari's window visited are in the profile's own encrypted history",
+              visited.contains { $0.contains("start-\(run).\(domain)/pb-leak") }, visited.prefix(10).joined(separator: " "))
         await manager.shutDown()
         info("egress-window end \(Date().timeIntervalSince1970)")
         check("Safari chrome: nothing went wrong while it ran", messages.isEmpty, messages.joined(separator: " | "))

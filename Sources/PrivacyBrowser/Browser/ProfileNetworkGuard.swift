@@ -556,6 +556,7 @@ enum ProfileNetworkGuard {
     private static func inspect(_ webView: WKWebView) {
         webViews.add(webView)
         webView.allowsLinkPreview = false // and kept off (`HandOffs`)
+        HostedPageHistory.follow(webView)
         // A web view nobody gives a navigation delegate would have its challenges answered the
         // system's default way: until someone does, it has one that answers only those.
         if webView.navigationDelegate == nil, let challengePolicy {
