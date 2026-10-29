@@ -747,8 +747,7 @@ final class SelfTest {
         let startAgent = log.targets.first { $0.path.hasPrefix(startPath) }?.userAgent ?? ""
         let wantedAgent = ProfileConfiguration(proxy: proxy).userAgent(hostSafariVersion: HostSafari.version)
         check("Safari chrome: the start page goes out with the profile's User-Agent",
-              wantedAgent.map { startAgent == $0 } ?? (startAgent.contains("Safari/") && startAgent.contains("Version/")),
-              "sent \(startAgent), wanted \(wantedAgent ?? "Safari's own")")
+              startAgent == wantedAgent, "sent \(startAgent), wanted \(wantedAgent)")
         check("Safari chrome: an iPhone or iPad profile gets our own window, not Safari's desktop chrome",
               !SafariChromeHost.canHost(ProfileConfiguration(deviceGenerationID: "ios-26"))
                 && SafariChromeHost.canHost(ProfileConfiguration()))
