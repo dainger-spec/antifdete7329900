@@ -124,6 +124,13 @@ enum SafariChrome {
                 break
             }
         }
+        // Safari's chrome also reads the shared controller of the base class; make sure it exists
+        // and carries the same engine, or the address bar has a provider list nobody asked.
+        if let base: AnyObject = NSClassFromString("WBSSearchProvidersController"),
+           base.responds(to: NSSelectorFromString("shared")),
+           let shared = base.perform(NSSelectorFromString("shared"))?.takeUnretainedValue() as? NSObject {
+            setDefaultSearchEngine("Google", on: shared)
+        }
         setDefaultSearchEngine("Google", on: controller)
         log.info("Search providers: \(String(describing: controller.value(forKey: "defaultSearchEngineName")), privacy: .public)")
         return controller
@@ -268,6 +275,9 @@ enum SafariChrome {
         let nothing: [(String, String)] = [
             ("BrowserWindowController", "_setUpClusterManagerIfNeeded"),
             ("BrowserNavigationDelegate", "donatePageTextMetadata:allowingDonationWithoutReaderText:"),
+            // The start page's onboarding section: Swift code that traps when it cannot reach
+            // Safari's own services, and it takes every new tab down with it.
+            ("StartPageOnboardingSectionProvider", "reloadData"),
         ]
         for (className, selectorName) in nothing {
             replaceWithConstant(className, selectorName) { nil }
@@ -347,6 +357,7 @@ extension SafariChrome {
     /// without running anything when the frameworks cannot be loaded, which is what a sandboxed
     /// build does.
     static func startStandalone(arguments: [String]) {
+        relaunchWithProfileHomeIfNeeded(arguments: arguments)
         guard load() else {
             FileHandle.standardError.write(Data("Safari's private frameworks did not load: this build is sandboxed or library validation is on (see SafariChrome.swift)\n".utf8))
             exit(1)
@@ -369,5 +380,27 @@ extension SafariChrome {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         NSApp.run()
+    }
+
+    /// Safari's chrome reads and writes the `com.apple.Safari` preferences domain and its own
+    /// databases. Without `CFFIXED_USER_HOME` those resolve into Safari's container, where this
+    /// process is refused — the address bar then draws with nil colours and metrics, and the
+    /// autofill store cannot be opened. The variable is only read when the process starts, so the
+    /// process replaces itself with one that has it set. This is also the shape the per-profile
+    /// child process will take, with the profile's own directory in place of this one.
+    private static func relaunchWithProfileHomeIfNeeded(arguments: [String]) {
+        guard ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] == nil else { return }
+        // Read before the home moves: our own vault must stay where it is.
+        let vault = AppEnvironment.vaultDirectory
+        let home = vault.appendingPathComponent("SafariChromeHome", isDirectory: true)
+        try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        setenv("CFFIXED_USER_HOME", home.path, 1)
+        setenv("PRIVACYBROWSER_VAULT_DIR", vault.path, 1)
+        guard let executable = Bundle.main.executableURL?.path ?? arguments.first else { return }
+        var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) }
+        argv.append(nil)
+        execv(executable, &argv)
+        // Only reached if execv failed; carry on without the profile home.
+        log.error("Could not restart with CFFIXED_USER_HOME: \(String(cString: strerror(errno)), privacy: .public)")
     }
 }
