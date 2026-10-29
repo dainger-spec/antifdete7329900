@@ -129,7 +129,7 @@ final class ProfileLibrary: ObservableObject {
     }
 
     private func report(_ message: String) {
-        log.error("\(message, privacy: .public)")
+        log.error("\(message, privacy: .private)")
         onError?(message)
     }
 }

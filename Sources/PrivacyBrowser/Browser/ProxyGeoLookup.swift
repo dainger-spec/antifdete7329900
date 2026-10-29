@@ -67,13 +67,13 @@ enum ProxyGeoLookup {
                 if status == 200, let location = ProxyLocation.parse(data, timeZoneKeyPath: service.timeZoneKeyPath,
                                                                      countryKeyPath: service.countryKeyPath,
                                                                      ipKeyPath: service.ipKeyPath, proxyEndpoint: endpoint) {
-                    log.info("Proxy \(endpoint, privacy: .private) exits in \(location.timeZoneIdentifier, privacy: .public) (\(location.countryCode ?? "?", privacy: .public)) per \(service.url.host ?? "?", privacy: .public)")
+                    log.info("Proxy \(endpoint, privacy: .private) exits in \(location.timeZoneIdentifier, privacy: .private) (\(location.countryCode ?? "?", privacy: .private)) per \(service.url.host ?? "?", privacy: .public)")
                     result.location = location
                     return result
                 }
                 log.notice("\(service.url.host ?? "?", privacy: .public) gave no location (HTTP \(status))")
             } catch {
-                log.notice("\(service.url.host ?? "?", privacy: .public) through the proxy failed: \(error.localizedDescription, privacy: .public)")
+                log.notice("\(service.url.host ?? "?", privacy: .public) through the proxy failed: \(error.localizedDescription, privacy: .private)")
             }
             if challenges.proxyRequiredCredentials {
                 result.proxyRequiresCredentials = true

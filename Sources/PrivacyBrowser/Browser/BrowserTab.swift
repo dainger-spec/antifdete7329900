@@ -98,6 +98,9 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
         webView.customUserAgent = context.userAgent
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
+        // A link preview is fetched by Quick Look, outside the profile's store and proxy, and a
+        // click on it opens the link in the default browser (`HandOffs`).
+        webView.allowsLinkPreview = false
         webView.navigationDelegate = self
         webView.uiDelegate = self
         observe()
@@ -423,6 +426,15 @@ extension BrowserTab: WKNavigationDelegate {
 // MARK: - WKUIDelegate
 
 extension BrowserTab: WKUIDelegate {
+    /// The page's context menu without the items that hand its content to something outside the
+    /// profile — "Search with Google" (the real Safari, with the owner's cookies), Look Up,
+    /// Translate, Share, Quick Note, Writing Tools — and without Services (`HandOffs.strip`).
+    @objc(_webView:getContextMenuFromProposedMenu:forElement:userInfo:completionHandler:)
+    func webView(_ webView: WKWebView, contextMenuFromProposedMenu menu: NSMenu, forElement element: AnyObject?,
+                 userInfo: AnyObject?, completionHandler: @escaping (NSMenu?) -> Void) {
+        completionHandler(HandOffs.strip(menu))
+    }
+
     /// The window's frame, which WebKit turns into window.outerWidth/outerHeight and
     /// screenX/screenY. WebKit asks the UI delegate for it (`WKUIDelegatePrivate`, the method Safari
     /// answers); a delegate without it gets outerWidth = outerHeight = 0 and a screen position

@@ -285,6 +285,8 @@ enum SafariChrome {
             ("PreloadTopHit", false),
             ("CanPromptForPushNotifications", false),
             ("ExtensionsEnabled", false),
+            // A finished download is not opened in another app by itself.
+            ("AutoOpenSafeDownloads", false),
         ]
     }
 
@@ -366,8 +368,16 @@ enum SafariChrome {
         // The argument domain only: nothing is written to any preferences file.
         var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         arguments["ApplePersistenceIgnoreState"] = true
+        arguments["ApplePersistence"] = false
         arguments["NSQuitAlwaysKeepsWindows"] = false
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+
+        // No window of this process is restorable: AppKit would keep page titles in the saved
+        // state, in the shared temporary folder, outside the profile's home.
+        if let method = class_getInstanceMethod(NSWindow.self, NSSelectorFromString("isRestorable")) {
+            let replacement: @convention(block) (AnyObject) -> Bool = { _ in false }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
 
         // And the encoding itself, for the state AppKit asks for anyway. This process has no
         // documents of its own, so replacing these on NSDocument affects Safari's and nothing else.

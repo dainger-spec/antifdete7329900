@@ -46,6 +46,8 @@ final class AppModel: ObservableObject {
         AppEnvironment.adoptSandboxedDataIfNeeded()
         root = AppEnvironment.vaultDirectory
         phase = MasterVault.exists(in: root) ? .locked : .setup
+        // No profile's page is handed to Quick Look, Services or another app (`HandOffs`).
+        HandOffs.closeForWebViews()
     }
 
     var hasRunningProfiles: Bool { manager?.hasRunningProfiles ?? false }

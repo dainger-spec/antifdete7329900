@@ -128,7 +128,26 @@ final class WebDataStoreVault {
     /// `WKWebsiteDataStore(forIdentifier:)` directly, so `deleteData` knows it may remove it.
     static func makeStore(for profileID: UUID) -> WKWebsiteDataStore {
         registeredStoreIDs.insert(profileID)
+        excludeRootsFromCopies()
         return WKWebsiteDataStore(forIdentifier: profileID)
+    }
+
+    private static var rootsExcluded = false
+
+    /// WebKit's directories of this app hold a running profile's data in plaintext: excluded from
+    /// Time Machine and its local snapshots, which would keep that plaintext after the seal. The
+    /// exclusion is an attribute of the folder, which the app never removes (only the profiles'
+    /// directories inside it), so once per process is enough.
+    private static func excludeRootsFromCopies() {
+        guard !rootsExcluded else { return }
+        rootsExcluded = true
+        for root in layout.searchRoots {
+            try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var url = root
+            try? url.setResourceValues(values)
+        }
     }
 
     // MARK: Launch

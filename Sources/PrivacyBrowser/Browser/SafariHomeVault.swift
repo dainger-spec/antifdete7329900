@@ -25,8 +25,40 @@ final class SafariHomeVault {
     }
 
     /// The home directory itself, handed to the child as `CFFIXED_USER_HOME`.
+    ///
+    /// Plaintext for as long as the profile runs, so it is kept out of what copies a disk behind
+    /// the vault's back: its name ends in `.noindex`, which Spotlight does not index, and it is
+    /// excluded from Time Machine (and so from its local snapshots) whenever it is made
+    /// (`excludeFromCopies`). A home of an earlier build, named `home`, is moved here.
     func homeDirectory(for profileID: UUID) -> URL {
-        repository.directory(for: profileID).appendingPathComponent("home", isDirectory: true)
+        let folder = repository.directory(for: profileID)
+        let home = folder.appendingPathComponent("home.noindex", isDirectory: true)
+        let earlier = folder.appendingPathComponent("home", isDirectory: true)
+        if FileManager.default.fileExists(atPath: earlier.path), !FileManager.default.fileExists(atPath: home.path) {
+            try? FileManager.default.moveItem(at: earlier, to: home)
+        }
+        return home
+    }
+
+    /// Makes `home` exist, excluded from backups (the exclusion is an attribute of the folder, so
+    /// it is set again each time the folder is made anew).
+    private func excludeFromCopies(_ home: URL) throws {
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var url = home
+        try url.setResourceValues(values)
+    }
+
+    /// An ephemeral profile keeps nothing between runs: Safari's state of it neither.
+    private func isEphemeral(_ profileID: UUID, key: SymmetricKey) -> Bool {
+        (try? repository.loadConfiguration(profileID, key: key))?.ephemeral ?? false
+    }
+
+    /// Removes Safari's state of the profile, the plaintext and the archive.
+    func discard(profileID: UUID) {
+        try? FileManager.default.removeItem(at: homeDirectory(for: profileID))
+        try? FileManager.default.removeItem(at: archiveURL(for: profileID))
     }
 
     private func archiveURL(for profileID: UUID) -> URL {
@@ -40,6 +72,12 @@ final class SafariHomeVault {
     /// (a crash), it is newer than the archive, and the next seal takes it.
     func prepareForLaunch(profileID: UUID, key: SymmetricKey) throws {
         let home = homeDirectory(for: profileID)
+        if isEphemeral(profileID, key: key) {
+            discard(profileID: profileID)
+            try excludeFromCopies(home)
+            return
+        }
+        defer { try? excludeFromCopies(home) }
         let contents = try? FileManager.default.contentsOfDirectory(atPath: home.path)
         if let contents, !contents.isEmpty {
             log.notice("Using Safari's unsealed home left by a previous run of \(profileID.uuidString, privacy: .public)")
@@ -62,6 +100,11 @@ final class SafariHomeVault {
     func seal(profileID: UUID, key: SymmetricKey) throws {
         let home = homeDirectory(for: profileID)
         guard FileManager.default.fileExists(atPath: home.path) else { return }
+        if isEphemeral(profileID, key: key) {
+            discard(profileID: profileID)
+            log.notice("Discarded Safari's state of the ephemeral profile \(profileID.uuidString, privacy: .public)")
+            return
+        }
         let stats = try EncryptedDirectoryArchive.seal(roots: [Self.label: home], to: archiveURL(for: profileID), key: key)
         try FileManager.default.removeItem(at: home)
         log.notice("Sealed Safari's home for \(profileID.uuidString, privacy: .public): \(stats.files, privacy: .public) files, \(stats.bytes, privacy: .public) bytes")

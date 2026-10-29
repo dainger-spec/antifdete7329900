@@ -49,7 +49,7 @@ enum ProfileSessionHost {
             stored = try repository.loadConfiguration(profileID)
             try ProfileNetworkGuard.engage(profileID: profileID, proxy: stored.proxy, safeBrowsing: stored.safeBrowsingEnabled)
         } catch {
-            log.error("Could not open the vault or hold \(profileID.uuidString, privacy: .public) to its proxy: \(String(describing: error), privacy: .public)")
+            log.error("Could not open the vault or hold \(profileID.uuidString, privacy: .public) to its proxy: \(String(describing: error), privacy: .private)")
             exit(3)
         }
         key.withUnsafeMutableBytes { bytes in
@@ -150,7 +150,7 @@ enum ProfileSessionHost {
             let manager = ProfileManager(repository: repository)
             manager.runsInProfileProcess = true
             manager.onError = { message in
-                ProfileSessionHost.log.error("\(message, privacy: .public)")
+                ProfileSessionHost.log.error("\(message, privacy: .private)")
                 // Shown by the manager, which is where the user is looking.
                 ProfileSessionHost.send(.error(message))
             }
@@ -188,7 +188,7 @@ enum ProfileSessionHost {
                     self.pendingCommands = []
                     for command in waiting { self.handle(command) }
                 } catch {
-                    ProfileSessionHost.log.error("Launching \(self.profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                    ProfileSessionHost.log.error("Launching \(self.profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .private)")
                     NSApp.terminate(nil)
                 }
             }

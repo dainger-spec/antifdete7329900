@@ -188,7 +188,7 @@ final class WarmUpRobot: ObservableObject {
         task = nil
         release()
         setState(.stopped(reason))
-        log.notice("Warm-up stopped: \(String(describing: reason), privacy: .public)")
+        log.notice("Warm-up stopped: \(String(describing: reason), privacy: .private)")
     }
 
     /// Closes the warm-up's own window and lets go of everything it held.

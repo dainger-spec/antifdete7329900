@@ -100,6 +100,7 @@ enum ProfileNetworkGuard {
         missingHooks += everyChallengeIsTheProfiles(policy)
         missingHooks += noServiceOutsideTheProxy(safeBrowsing: safeBrowsing)
         missingHooks += nothingIsHandedOff()
+        HandOffs.closeForProfileProcess()
         log.notice("This process is held to its profile's proxy: \(proxies.count, privacy: .public) proxies, \(missingHooks.count, privacy: .public) hooks missing")
         for hook in missingHooks {
             log.error("Not in this macOS: \(hook, privacy: .public)")
@@ -473,7 +474,11 @@ enum ProfileNetworkGuard {
                       // notifications, and the shared web credentials daemon, which fetches a site's
                       // associated-domains file as this Mac.
                       "ScreenTime", "suggestd", "PersonalizationPortrait", "synapse", "linkd", "inputanalyticsd",
-                      "SafariNotificationAgent", "SharedWebCredentials"]
+                      "SafariNotificationAgent", "SharedWebCredentials",
+                      // Stores that keep page titles, addresses or usage outside the profile: the
+                      // Spotlight index, usage tracking and Biome, the knowledge store; and sharing.
+                      "corespotlight", "spotlight.IndexAgent", "UsageTracking", "biome", "knowledge-agent",
+                      "duetexpert", "sharingd"]
         if !safeBrowsing { denied.append("SafeBrowsing") }
         let deny = denied
         var missing: [String] = []
@@ -550,6 +555,7 @@ enum ProfileNetworkGuard {
     /// proxy the profile has, is a web view that would have loaded as this Mac without lock 2.
     private static func inspect(_ webView: WKWebView) {
         webViews.add(webView)
+        webView.allowsLinkPreview = false // and kept off (`HandOffs`)
         // A web view nobody gives a navigation delegate would have its challenges answered the
         // system's default way: until someone does, it has one that answers only those.
         if webView.navigationDelegate == nil, let challengePolicy {
@@ -931,6 +937,7 @@ enum ProfileNetworkGuard {
             if !webRTCWanted, WebKitPreferences.bool(configuration.preferences, "_peerConnectionEnabled") == true {
                 report.webViewsWithWebRTC += 1
             }
+            if view.allowsLinkPreview { report.webViewsWithLinkPreview += 1 }
             if report.hasProxy {
                 if WebKitPreferences.bool(configuration.preferences, "_dnsPrefetchingEnabled") == true {
                     report.webViewsWithDNSPrefetch += 1
@@ -972,6 +979,18 @@ enum ProfileNetworkGuard {
                 explicit.invalidateAndCancel()
             }
         }
+        // What would be handed to another app, to the owner's devices or to their keychain: an
+        // address to open (through the proxy's leak host, so that one that did open would be seen
+        // in a capture), the sharing services, a copy, a password to keep (`HandOffs`).
+        if let probe, var parts = URLComponents(url: probe, resolvingAgainstBaseURL: false) {
+            parts.host = parts.host.map { $0.replacingOccurrences(of: "probe-", with: "open-") }
+            parts.path = "/pb-leak/opened"
+            if let address = parts.url { report.openedInAnotherApp = NSWorkspace.shared.open(address) }
+        }
+        report.sharingServices = NSSharingService.sharingServices(forItems: [probe ?? URL(string: "https://example.org/")!]).count
+        NSPasteboard.general.clearContents()
+        report.credentialsKept = URLCredential(user: "pb", password: "pb", persistence: .permanent).persistence != .forSession
+        report.handOffsRefused = HandOffs.refused
         if report.hasProxy {
             // UDP and QUIC to addresses nothing answers: refused by the kernel here, and a packet
             // to either in a capture is one that left (scripts/egress_check.py).
@@ -1088,6 +1107,15 @@ struct ProfileNetworkReport: Codable, Equatable {
     var workerPreferences: Bool?
     /// WebKit's version (`CFBundleVersion`), for telling apart what differs between versions.
     var webKitVersion = ""
+    /// Web views that would show a link preview (fetched by Quick Look, outside the profile).
+    var webViewsWithLinkPreview = 0
+    /// An address handed to another app opened there; the sharing services offered; a password
+    /// marked permanent would be kept (in the owner's keychain). All three false or 0 is right.
+    var openedInAnotherApp = false
+    var sharingServices = 0
+    var credentialsKept = false
+    /// What `HandOffs` refused, by kind ("open", "share", "clipboard").
+    var handOffsRefused: [String: Int] = [:]
 
     /// Nothing in the process is outside the profile's data or proxy, as far as it can tell.
     var isClean: Bool {

@@ -844,20 +844,43 @@ final class ProfileManager: ObservableObject {
         try safariHomeVault.seal(profileID: id, key: key)
     }
 
+    /// A home still held by a profile's process that a crashed manager left behind is sealed once
+    /// that process has gone (it quits by itself when its channel closes): looked at every two
+    /// seconds for up to ten minutes, unless the profile is started again meanwhile.
+    private func sealHomeWhenFree(_ summary: ProfileSummary) {
+        log.notice("Safari's home of \(summary.id.uuidString, privacy: .public) is still in use; sealed once its process is gone")
+        Task { @MainActor [weak self] in
+            for _ in 0..<300 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, !self.isShuttingDown,
+                      self.sessions[summary.id] == nil, self.children[summary.id] == nil else { return }
+                guard !self.safariHomeVault.isInUse(profileID: summary.id) else { continue }
+                do {
+                    try self.safariHomeVault.seal(profileID: summary.id, key: self.repository.profileKey(for: summary.id))
+                } catch {
+                    self.onError?(String(format: L("recovery.homeNotSealed"), summary.name, error.localizedDescription))
+                }
+                return
+            }
+        }
+    }
+
     /// Seals WebKit data left unencrypted by a crash or forced quit, and Safari's home of a
     /// profile whose process ended without the manager sealing it (the manager itself crashed, or
     /// was killed, while the profile ran). Run after unlock.
     func recoverUnsealedProfiles() async {
         for summary in repository.list() where sessions[summary.id] == nil && children[summary.id] == nil {
             guard !isShuttingDown else { break }
-            if FileManager.default.fileExists(atPath: safariHomeVault.homeDirectory(for: summary.id).path),
-               !safariHomeVault.isInUse(profileID: summary.id) {
-                log.notice("Re-sealing Safari's unencrypted home of \(summary.id.uuidString, privacy: .public)")
-                do {
-                    try safariHomeVault.seal(profileID: summary.id, key: repository.profileKey(for: summary.id))
-                } catch {
-                    onError?(String(format: L("recovery.homeNotSealed"), summary.name, error.localizedDescription))
-                }
+            guard FileManager.default.fileExists(atPath: safariHomeVault.homeDirectory(for: summary.id).path) else { continue }
+            if safariHomeVault.isInUse(profileID: summary.id) {
+                sealHomeWhenFree(summary)
+                continue
+            }
+            log.notice("Re-sealing Safari's unencrypted home of \(summary.id.uuidString, privacy: .public)")
+            do {
+                try safariHomeVault.seal(profileID: summary.id, key: repository.profileKey(for: summary.id))
+            } catch {
+                onError?(String(format: L("recovery.homeNotSealed"), summary.name, error.localizedDescription))
             }
         }
         for summary in repository.list() where sessions[summary.id] == nil && children[summary.id] == nil {

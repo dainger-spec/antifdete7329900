@@ -136,6 +136,7 @@ final class SelfTest {
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
+            try await handOffsInOurWindows(repository)
             try await proxyLocationAtLaunch(repository)
             try await socksProfilesSideBySide(repository)
             try await proxyLookupAndExitIP(repository)
@@ -604,6 +605,42 @@ final class SelfTest {
               log.contains("tls refused by the client"), String(log.prefix(400)))
     }
 
+    // MARK: Nothing of a page handed outside the profile
+
+    /// A profile's tab in a window of ours: no link preview (Quick Look fetches the link outside
+    /// the profile, and a click opens it in the default browser), no Services for the selection,
+    /// and a context menu without the items that send the page's content elsewhere (`HandOffs`).
+    private func handOffsInOurWindows(_ repository: ProfileRepository) async throws {
+        HandOffs.closeForWebViews()
+        // (And the plaintext of profiles running in this process is out of backups.)
+        check("backups: WebKit's directories of this app are excluded from Time Machine",
+              WebDataStoreVault.layout.searchRoots.allSatisfy {
+                  (try? $0.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup == true
+              }, WebDataStoreVault.layout.searchRoots.map(\.path).joined(separator: ", "))
+        let profile = try repository.create(name: "Hand-offs", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+        defer { tab.tearDown() }
+        tab.webView.allowsLinkPreview = true
+        check("hand-offs: a profile's web view shows no link preview, and cannot be given one", !tab.webView.allowsLinkPreview)
+        check("hand-offs: a profile's page offers its selection to no Service",
+              tab.webView.validRequestor(forSendType: .string, returnType: nil) == nil)
+        let menu = NSMenu()
+        let kept = ["WKMenuItemIdentifierCopy", "WKMenuItemIdentifierOpenLinkInNewWindow"]
+        for identifier in kept + HandOffs.refusedMenuItems.sorted() {
+            let item = NSMenuItem(title: identifier, action: nil, keyEquivalent: "") // l10n: not text
+            item.identifier = NSUserInterfaceItemIdentifier(identifier)
+            menu.addItem(item)
+            menu.addItem(.separator())
+        }
+        var stripped: NSMenu?
+        tab.webView(tab.webView, contextMenuFromProposedMenu: menu, forElement: nil, userInfo: nil) { stripped = $0 }
+        check("hand-offs: the context menu keeps Copy and the link items, and loses Search with Google, Look Up, Translate, Share, Quick Note and Writing Tools, and Services",
+              stripped?.items.compactMap(\.identifier?.rawValue) == kept && stripped?.allowsContextMenuPlugIns == false,
+              "\(stripped?.items.map(\.title) ?? [])")
+    }
+
     // MARK: Safari's chrome, in a profile's own process, through that profile's proxy
 
     /// The check this product cannot do without: a profile whose window is Safari's own chrome
@@ -774,6 +811,10 @@ final class SelfTest {
                   report.pinBypasses.isEmpty, report.pinBypasses.joined(separator: ", "))
             check("Safari chrome: the profile's service workers have the profile's preferences",
                   report.workerPreferences != false, "this WebKit has no service-worker preferences of a store's own")
+            check("Safari chrome: nothing of a page is handed outside the profile (no link preview, no address opened in another app, no sharing service, no password kept in the keychain, copies local)",
+                  report.webViewsWithLinkPreview == 0 && !report.openedInAnotherApp && report.sharingServices == 0
+                    && !report.credentialsKept && (report.handOffsRefused["clipboard"] ?? 0) > 0,
+                  "link previews \(report.webViewsWithLinkPreview), opened \(report.openedInAnotherApp), sharing \(report.sharingServices), credentials kept \(report.credentialsKept), refused \(report.handOffsRefused)")
             check("Safari chrome: the real Safari's places are closed to the profile's process",
                   report.safariPlacesClosed, "no sandbox over ~/Library/Safari and the rest")
             info("Safari chrome: \(report.safariPathsRedirected.count) path getters of Safari's frameworks answer with the profile's home: \(report.safariPathsRedirected.prefix(80).joined(separator: " "))")
@@ -855,7 +896,11 @@ final class SelfTest {
         try? await Task.sleep(nanoseconds: 8_000_000_000)
         // What Safari's frameworks keep in the profile's home (its history, bookmarks, snapshots…):
         // listed, for the record of where a hosted chrome puts its own state.
-        let home = repository.directory(for: profile.id).appendingPathComponent("home")
+        let home = repository.directory(for: profile.id).appendingPathComponent("home.noindex")
+        // Plaintext while the profile runs: out of Spotlight (the name) and out of Time Machine.
+        check("Safari chrome: the profile's home is kept out of backups and Spotlight while it runs",
+              (try? home.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup == true,
+              home.path)
         if let files = FileManager.default.enumerator(at: home, includingPropertiesForKeys: [.fileSizeKey]) {
             var listed: [String] = []
             for case let file as URL in files where listed.count < 80 {
