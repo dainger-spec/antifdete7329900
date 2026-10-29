@@ -47,7 +47,10 @@ final class SafariHomeVault {
         }
         let archive = archiveURL(for: profileID)
         guard FileManager.default.fileExists(atPath: archive.path) else { return }
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        // The archive restores the directory itself and refuses to write over one that is there,
+        // so an empty leftover (the child creates the directory before it runs, and a profile that
+        // never wrote anything leaves it behind) is removed first.
+        if contents != nil { try FileManager.default.removeItem(at: home) }
         try EncryptedDirectoryArchive.unseal(from: archive, key: key) { label in
             guard label == Self.label else { throw CoreError.corruptData("unexpected label \(label) in Safari's home archive") }
             return home
