@@ -80,8 +80,6 @@ extension WebOrigin {
     }
 }
 
-/// Receives the AutoFill script's messages for one profile and hands each to its tab.
-@MainActor
 /// What AutoFill needs from whatever shows the page: our own tab, or a web view inside Safari's
 /// chrome, where there is no tab of ours at all (`SafariChromeHost`). Small on purpose — this is
 /// the whole surface `TabPasswordAutoFill` ever used from a tab.
@@ -117,6 +115,9 @@ final class HostedPageAutoFillHost: PasswordAutoFillHost {
     }
 }
 
+/// Receives the AutoFill script's messages for one profile and hands each to the page that sent
+/// them — our tab, or a page in Safari's chrome.
+@MainActor
 final class PasswordAutoFillHandler: NSObject, WKScriptMessageHandlerWithReply {
     weak var session: BrowserSession?
 
