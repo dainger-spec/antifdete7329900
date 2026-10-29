@@ -950,6 +950,42 @@ final class SelfTest {
         let visited = (try? repository.historyStore(for: profile.id, key: repository.profileKey(for: profile.id)).entries().map(\.url)) ?? []
         check("Safari chrome: the pages Safari's window visited are in the profile's own encrypted history",
               visited.contains { $0.contains("start-\(run).\(domain)/pb-leak") }, visited.prefix(10).joined(separator: " "))
+
+        // Again, as an owner's profile usually runs: its second launch, on the home restored from
+        // its archive, through SOCKS5, following its proxy's location (the lookup goes through
+        // the proxy from the profile's process). Still inside the capture's window.
+        if let socksPort = ProcessInfo.processInfo.environment["PB_SELFTEST_SOCKS_PROXY_PORT"].flatMap(Int.init) {
+            var again = try repository.loadConfiguration(profile.id)
+            again.proxy = ProxySettings(kind: .socks5, host: "127.0.0.1", port: socksPort)
+            again.matchProxyLocation = true
+            again.timeZoneIdentifier = nil
+            try repository.saveConfiguration(again, for: profile.id)
+            hostsChrome = nil
+            networkReport = nil
+            let before = (await leakLog()).targets.filter { $0.path.hasPrefix(startPath) }.count
+            setenv("PB_PROFILE_PROCESS", "1", 1)
+            do { try await manager.launch(profile.id) } catch {
+                check("Safari chrome, second launch: the profile's process started", false, String(describing: error))
+            }
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+            let restarted = await waitUntil(timeout: 90) { hostsChrome != nil }
+            var arrived: [Entry] = []
+            for _ in 0..<15 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                arrived = (await leakLog()).targets.filter { $0.path.hasPrefix(startPath) }
+                if arrived.count > before { break }
+            }
+            check("Safari chrome, second launch on the restored home through SOCKS5: Safari's window again, its start page through the proxy, by name",
+                  restarted && hostsChrome == true && arrived.dropFirst(before).contains { $0.via == "via=socks5" },
+                  "chrome \(String(describing: hostsChrome)), start page requests \(arrived.map(\.via))")
+            _ = manager.checkNetwork(profile.id, probe: URL(string: "https://probe-\(run).\(domain)/pb-leak/second?run=\(run)"))
+            _ = await waitUntil(timeout: 40) { networkReport != nil }
+            check("Safari chrome, second launch: every web view on the profile's store, none with WebRTC, the kernel's closures in place",
+                  networkReport.map { $0.webViews > 0 && $0.webViewsOffProfile == 0 && $0.webViewsWithWebRTC == 0 && $0.udpClosed && $0.safariPlacesClosed } == true,
+                  String(describing: networkReport))
+            try? await manager.stop(profile.id)
+        }
         await manager.shutDown()
         info("egress-window end \(Date().timeIntervalSince1970)")
         check("Safari chrome: nothing went wrong while it ran", messages.isEmpty, messages.joined(separator: " | "))
