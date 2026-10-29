@@ -95,6 +95,17 @@ public enum MasterVault {
         return UnlockedVault(root: root, header: header, masterKey: SymmetricKey(data: raw))
     }
 
+    /// Opens the vault with the master key itself, without a password.
+    ///
+    /// For one purpose: the app hands this key to its own per-profile child process over a pipe, so
+    /// that the child opens the same vault without asking for the master password a second time
+    /// (`ProfileProcess`). The key never goes into a file, a command line or the environment.
+    public static func open(in root: URL, masterKeyMaterial: Data) throws -> UnlockedVault {
+        let header = try readHeader(in: root)
+        guard masterKeyMaterial.count == 32 else { throw CoreError.corruptData("master key length") }
+        return UnlockedVault(root: root, header: header, masterKey: SymmetricKey(data: masterKeyMaterial))
+    }
+
     /// Moves the whole vault folder aside — nothing is deleted — so that a new vault can be created
     /// in `root`: the way out when the master password is unknown. The backup is a sibling folder
     /// named `<root>-backup-<yyyy-MM-dd-HHmmss>` (with a counter if that exists); renaming it back
@@ -144,6 +155,12 @@ public final class UnlockedVault: @unchecked Sendable {
     }
 
     public var vaultID: UUID { header.vaultID }
+
+    /// The vault master key, to be handed to this app's own per-profile child process over a pipe
+    /// and opened there with `MasterVault.open(in:masterKeyMaterial:)`. Everything else derives
+    /// purpose-specific keys from it below, and nothing else should read it: it must never be
+    /// written to a file, a command line or the environment.
+    public var masterKeyMaterial: Data { masterKey.rawBytes }
 
     var indexKey: SymmetricKey { masterKey.derive(info: "profile-index", salt: vaultSalt) }
     var profileKeyWrappingKey: SymmetricKey { masterKey.derive(info: "profile-key-wrap", salt: vaultSalt) }

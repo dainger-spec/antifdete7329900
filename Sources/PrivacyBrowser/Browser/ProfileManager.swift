@@ -37,6 +37,9 @@ final class ProfileManager: ObservableObject {
     /// The packet tunnel that carries proxied profiles' WebRTC (when it is on).
     private let tunnel = TunnelManager.shared
     private var sessions: [UUID: BrowserSession] = [:]
+    /// Profiles running in their own process (`ProfileProcess`, off unless asked for). A profile is
+    /// in this or in `sessions`, never both.
+    private var children: [UUID: ProfileProcess] = [:]
     /// Profile keys are held only while the profile runs (needed to seal on stop).
     private var keys: [UUID: SymmetricKey] = [:]
     /// The password vault a launch opened, until its session holds it (`passwordVault(for:)`).
@@ -86,12 +89,12 @@ final class ProfileManager: ObservableObject {
         self.webDataVault = WebDataStoreVault(repository: repository)
     }
 
-    var hasRunningProfiles: Bool { !sessions.isEmpty }
+    var hasRunningProfiles: Bool { !sessions.isEmpty || !children.isEmpty }
 
     /// A profile is running, launching or being sealed: Lock / Quit must wait for it.
-    var hasActivity: Bool { !sessions.isEmpty || !busyProfileIDs.isEmpty }
+    var hasActivity: Bool { !sessions.isEmpty || !children.isEmpty || !busyProfileIDs.isEmpty }
 
-    func isRunning(_ id: UUID) -> Bool { sessions[id] != nil }
+    func isRunning(_ id: UUID) -> Bool { sessions[id] != nil || children[id] != nil }
 
     // MARK: Launch
 
@@ -101,6 +104,10 @@ final class ProfileManager: ObservableObject {
             session.bringToFront()
             return
         }
+        if let child = children[id] {
+            child.bringToFront()
+            return
+        }
         guard !busyProfileIDs.contains(id) else { return }
         busyProfileIDs.insert(id)
         defer { busyProfileIDs.remove(id) }
@@ -108,6 +115,10 @@ final class ProfileManager: ObservableObject {
         let summary = try repository.summary(for: id)
         let key = try repository.profileKey(for: id)
         let stored = try repository.loadConfiguration(id, key: key)
+        if ProfileProcess.isEnabled {
+            try startInOwnProcess(id, summary: summary, stored: stored)
+            return
+        }
         // Refuse a proxy that cannot be applied before decrypting anything: the profile must not
         // start on a direct connection, and there is then nothing to seal again.
         if let proxy = stored.proxy {
@@ -213,6 +224,42 @@ final class ProfileManager: ObservableObject {
                 self?.lookupsInFlight.remove(pending)
             }
         }
+    }
+
+    /// Hands the profile to a process of its own, and does nothing else: the child runs the launch
+    /// itself, from the same vault, and seals on its way out (`ProfileProcess`,
+    /// `ProfileSessionHost`).
+    ///
+    /// What the language and time zone are decided from here, before the child starts: the
+    /// location remembered for this profile's proxy. They are read once per process by the system,
+    /// so they have to be known before it exists; the child looks the proxy up again and a changed
+    /// answer applies at its next launch. For a profile that does not follow its proxy, the user's
+    /// own languages, as Safari uses them.
+    private func startInOwnProcess(_ id: UUID, summary: ProfileSummary, stored: ProfileConfiguration) throws {
+        guard let executable = Bundle.main.executableURL else { throw CoreError.corruptData("no executable path") }
+        let location = stored.needsProxyLocation ? stored.rememberedProxyLocation : nil
+        let languages = location.map { [$0.webLanguage] } ?? WebContentLanguage.systemLanguages
+        let child = try ProfileProcess.start(
+            profileID: id,
+            executable: executable,
+            vaultRoot: repository.root,
+            masterKeyMaterial: repository.vault.masterKeyMaterial,
+            home: repository.directory(for: id).appendingPathComponent("home", isDirectory: true),
+            languages: languages,
+            locale: languages.first.map { $0.replacingOccurrences(of: "-", with: "_") },
+            timeZone: stored.timeZoneIdentifier ?? location?.timeZoneIdentifier)
+        child.onExit = { [weak self] status in
+            guard let self, self.children[id] === child else { return }
+            self.children[id] = nil
+            self.runningProfileIDs.remove(id)
+            if status != 0 {
+                self.log.error("Profile \(id.uuidString, privacy: .public) exited with status \(status, privacy: .public)")
+            }
+            self.onReturnToProfiles?()
+        }
+        children[id] = child
+        runningProfileIDs.insert(id)
+        try? repository.markLaunched(id)
     }
 
     /// The task's value if it finishes within `seconds`, else nil; the task keeps running.
@@ -347,6 +394,16 @@ final class ProfileManager: ObservableObject {
     // MARK: Stop
 
     func stop(_ id: UUID) async throws {
+        if let child = children.removeValue(forKey: id) {
+            runningProfileIDs.remove(id)
+            busyProfileIDs.insert(id)
+            defer { busyProfileIDs.remove(id) }
+            // Its own quit path seals the data; this returns when that finished.
+            child.onExit = nil
+            child.terminate()
+            await child.waitUntilExit(timeout: 30)
+            return
+        }
         guard let session = sessions.removeValue(forKey: id) else { return }
         // First of all, before anything waits: the robot must not act in a session going away
         // (a tab it opened now would get no store, proxy or scripts of the profile).
@@ -406,7 +463,7 @@ final class ProfileManager: ObservableObject {
     }
 
     func stopAll() async {
-        let ids = Array(sessions.keys)
+        let ids = Array(sessions.keys) + Array(children.keys)
         await withTaskGroup(of: Void.self) { group in
             for id in ids {
                 group.addTask { @MainActor in await self.stopReportingErrors(id) }
@@ -426,7 +483,7 @@ final class ProfileManager: ObservableObject {
     // MARK: Delete
 
     func delete(_ id: UUID) async throws {
-        if sessions[id] != nil {
+        if sessions[id] != nil || children[id] != nil {
             // WebKit must release the store first: remove(forIdentifier:) fails while it is in use.
             try? await stop(id)
         }
