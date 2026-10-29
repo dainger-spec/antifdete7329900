@@ -281,6 +281,40 @@ if flag("--tolerate-nil-attributes") {
     if patched == 0 { print("no attributed-string class to patch") }
 }
 
+// --stub <kind>/<Class>/<selector> replaces one object-returning method with a harmless value,
+// repeatable. Each round of hosting Safari's chrome names another method that assumes it is
+// inside Safari; this turns answering that into another argument rather than another build. On
+// arm64 a block that only returns a value can stand in for a method of any arity, as long as the
+// method returns an object: the arguments stay untouched in their registers.
+// Kinds: image, string, attributed, array, nil.
+let stubs: [String] = arguments.indices.compactMap { index in
+    guard arguments[index] == "--stub", arguments.indices.contains(index + 1) else { return nil }
+    return arguments[index + 1]
+}
+if !stubs.isEmpty {
+    print("\n== stubs ==")
+    for spec in stubs {
+        let parts = spec.split(separator: "/", maxSplits: 2).map(String.init)
+        guard parts.count == 3, let cls = NSClassFromString(parts[1]),
+              let method = class_getInstanceMethod(cls, NSSelectorFromString(parts[2])) else {
+            print("could not stub \(spec)")
+            continue
+        }
+        let kind = parts[0]
+        let replacement: @convention(block) (AnyObject) -> AnyObject? = { _ in
+            switch kind {
+            case "image": return NSImage(size: NSSize(width: 1, height: 1))
+            case "string": return "" as NSString
+            case "attributed": return NSAttributedString(string: "")
+            case "array": return [] as NSArray
+            default: return nil
+            }
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        print("stubbed -[\(parts[1]) \(parts[2])] -> \(kind)")
+    }
+}
+
 if flag("--bridge-images") {
     // Safari's chrome asks for its icons by name from the *main* bundle, and in a foreign process
     // that is the probe's own executable — CoreUI says so above the crash ("unable to find a
