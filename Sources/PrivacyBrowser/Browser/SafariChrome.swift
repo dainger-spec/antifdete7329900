@@ -97,6 +97,7 @@ enum SafariChrome {
         setUpSearchEnginePreferenceObserver()
         tolerateNilAttributeValues()
         bridgeImageLookups()
+        bridgeNibLookups()
         stubChromeFeatures()
     }
 
@@ -148,6 +149,33 @@ enum SafariChrome {
             return NSImage(systemSymbolName: name as String, accessibilityDescription: nil)
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
+    /// Safari's view controllers load their nib from the bundle they were built with, which
+    /// `NSViewController` works out as the *main* bundle unless told otherwise — in this process,
+    /// our own executable. `-[NSNib _initWithNibNamed:bundle:options:]` then throws, and opening a
+    /// second window dies in `-[StartPageViewController loadView]`. Give any controller whose class
+    /// comes from Safari's frameworks the bundle that class lives in.
+    private static func bridgeNibLookups() {
+        typealias NibBundle = @convention(c) (AnyObject, Selector) -> Bundle?
+        let selector = NSSelectorFromString("nibBundle")
+        let bundles = resourceBundlePaths.compactMap(Bundle.init(path:))
+        guard let fallback = bundles.first else { return }
+        for cls in [NSViewController.self, NSWindowController.self] as [AnyClass] {
+            guard let method = class_getInstanceMethod(cls, selector) else { continue }
+            let original = unsafeBitCast(method_getImplementation(method), to: NibBundle.self)
+            let replacement: @convention(block) (AnyObject) -> Bundle? = { object in
+                guard let imagePointer = object_getClass(object).flatMap({ class_getImageName($0) }) else {
+                    return original(object, selector)
+                }
+                let image = String(cString: imagePointer)
+                guard image.contains("Safari") || image.contains("PasswordManagerUI") else {
+                    return original(object, selector)
+                }
+                return bundles.first { $0.executableURL?.resolvingSymlinksInPath().path == image } ?? fallback
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
     }
 
     /// Features of Safari's chrome that need services only Safari has, and take the process down
