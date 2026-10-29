@@ -339,6 +339,12 @@ enum SafariChrome {
         replaceWithConstant("UnifiedField", "_assistantButtonIconForContentOption:withSparkle:") {
             NSImage(size: NSSize(width: 1, height: 1))
         }
+        // Safari's windows are documents, and macOS asks a document for its restorable state a
+        // few seconds after it opens and on every new tab. -[BrowserDocument fileType] reads an
+        // empty array on the way and throws, which is what killed ⌘T. A document of ours has no
+        // state worth restoring anyway (the profile decides what opens), and the windows are
+        // marked not restorable as well, in openWindow.
+        replaceWithConstant("BrowserDocument", "fileType") { "public.html" as NSString }
     }
 
     /// Replaces one object-returning method with a constant. On arm64 a block that only returns a
@@ -374,6 +380,8 @@ enum SafariChrome {
             log.error("Safari's window factory returned nothing")
             return nil
         }
+        // No restorable state: see the note by the BrowserDocument stub.
+        controller.window?.isRestorable = false
         guard let tab = firstTab(of: windowClass) else {
             log.error("Safari's new window reported no tab")
             return controller
