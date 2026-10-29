@@ -25,6 +25,9 @@ enum ProfileCommand: Codable {
     case importCookies([ImportedCookie])
     case startWarmUp(WarmUpPlan)
     case stopWarmUp
+    /// Say where this profile's traffic goes (`ProfileNetworkGuard.report`); with `probe`, also
+    /// fetch it once by each of the process's own ways of making a request.
+    case checkNetwork(probe: URL?)
 }
 
 enum ProfileEvent: Codable {
@@ -37,6 +40,8 @@ enum ProfileEvent: Codable {
     /// it ends. Everything the warm-up screen and the profile list show comes from here.
     case warmUp(WarmUpStatus)
     case cookiesImported(accepted: Int, refused: Int)
+    /// The answer to `checkNetwork`.
+    case networkReport(ProfileNetworkReport)
 }
 
 /// One line of JSON per message, and a prefix on the way back so that Safari's own output on the

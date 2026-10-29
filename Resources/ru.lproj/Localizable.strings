@@ -491,3 +491,7 @@
 "window.browser.title" = "[%@] %@";
 "window.library.title" = "[%@] Библиотека";
 "window.profiles.title" = "Профили";
+
+/* Network guard of a profile's own process */
+"network.webViewOffProfile" = "Страница этого профиля чуть не открылась вне его данных и прокси — загрузка остановлена: лучше не открыть страницу, чем открыть её с реального адреса этого Mac. Сообщите об этом и приложите лог (subsystem PrivacyBrowser).";
+"safari.chrome.missingPieces" = "В Safari этой версии macOS нет частей, на которые опирается окно Safari профиля (%@). Профиль по-прежнему ходит только через свой прокси, но часть окна Safari может работать неправильно; нужно обновление PrivacyBrowser.";

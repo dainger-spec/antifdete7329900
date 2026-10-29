@@ -42,6 +42,19 @@ world can see of a robot (`window.webkit`, globals named like one) at its first 
 jump to a fragment `#x` is rewritten to `#/x`, as a single-page app's router might. `<name>` `alert`
 shows an alert; `broken` closes the connection without an answer (a page that does not load). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
 User-Agent headers and the time it came.
+
+`/pb-leak?run=<id>` is the leak page for a profile hosted in Safari's chrome (SelfTest's
+`safariChromeThroughTheProxy`, scripts/egress_check.py): served for any host, it makes every kind of
+request a page can make — fetches to IPv4 and IPv6 literals in the documentation ranges (TEST-NET
+192.0.2.0/24, 2001:db8::/32, which nothing answers and nothing routes), to host names carrying the
+run id, a WebSocket, a worker's fetch, an image, a frame, a font, a video, a `<link rel=dns-prefetch>`
+and `rel=preconnect`, an `<a ping>`, a beacon, WebRTC and WebTransport where the page has them —
+and reports what it could see (`typeof RTCPeerConnection`, in the page, in a frame and in an
+about:blank frame) to `/pb-leak/report`. Through this proxy every one of those requests reaches it
+(it answers any CONNECT itself); anything that goes around it is a packet to a documentation
+address or a DNS query with the run id in it, which a capture on the machine sees.
+`/pb-leak/log.json?run=<id>` lists, for that run, every request this proxy answered (its via,
+target and path) and the page's reports.
 """
 import argparse
 import base64
@@ -71,6 +84,10 @@ GEO_ANSWER = b'{"ip":"203.0.113.7","country":"DE","timezone":"Europe/Berlin"}'
 SERVED: list = []
 SERVED_LOCK = threading.Lock()
 WARMUP_LOG: list = []
+# Every request answered, with how it came (`via`), where it was for (`target`) and its path.
+TARGETS: list = []
+# The leak page's reports, by run id.
+LEAK_REPORTS: dict = {}
 
 
 def header(request: str, name: str) -> str:
@@ -116,6 +133,87 @@ def warmup_page(name: str, run: str) -> bytes:
             f'<body style="font: 15px -apple-system; margin: 20px">{links}{filler}{script}</body></html>').encode()
 
 
+def leak_page(run: str) -> bytes:
+    """The leak page for `run` (see the module docstring)."""
+    page = r"""<!doctype html><html><head><title>PB leak page RUN</title>
+<link rel="dns-prefetch" href="//prefetch-RUN.leak.example.com">
+<link rel="preconnect" href="http://preconnect-RUN.leak.example.com">
+<style>@font-face{font-family:pbleak;src:url(http://font-RUN.leak.example.com/pb-leak/font.woff?run=RUN)} body{font-family:pbleak,serif}</style>
+</head><body>
+<p>PB-LEAK-PAGE RUN</p>
+<a id="ping" href="#pinged" ping="http://ping-RUN.leak.example.com/pb-leak/ping?run=RUN">ping</a>
+<img src="http://img-RUN.leak.example.com/pb-leak/img.png?run=RUN" width="1" height="1">
+<iframe src="http://frame-RUN.leak.example.com/pb-leak/frame?run=RUN" width="200" height="40"></iframe>
+<video src="http://media-RUN.leak.example.com/pb-leak/media.mp4?run=RUN" preload="auto" muted width="1" height="1"></video>
+<script>
+(async () => {
+  const run = 'RUN';
+  const result = { run, rtc: typeof RTCPeerConnection, webTransport: typeof WebTransport, candidates: [], errors: {} };
+  const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve(value), ms));
+  const attempt = async (name, body) => {
+    try { result[name] = await Promise.race([body(), timeout(4000, 'timeout')]); }
+    catch (e) { result[name] = 'rejected'; result.errors[name] = String((e && e.message) || e); }
+  };
+  try {
+    const blank = document.createElement('iframe');
+    document.body.appendChild(blank);
+    result.rtcBlankFrame = typeof blank.contentWindow.RTCPeerConnection;
+  } catch (e) { result.rtcBlankFrame = 'error'; }
+  document.getElementById('ping').click();
+  try { result.beacon = navigator.sendBeacon('http://beacon-RUN.leak.example.com/pb-leak/beacon?run=RUN', 'x'); } catch (e) { result.beacon = 'error'; }
+  const noCors = (url) => async () => { await fetch(url, { mode: 'no-cors', cache: 'no-store' }); return 'resolved'; };
+  await attempt('fetch4', noCors('http://192.0.2.10:8080/pb-leak/fetch4?run=RUN'));
+  await attempt('fetch6', noCors('http://[2001:db8::10]:8080/pb-leak/fetch6?run=RUN'));
+  await attempt('fetchName', noCors('http://fetch-RUN.leak.example.com/pb-leak/fetchname?run=RUN'));
+  await attempt('fetchTLS', noCors('https://192.0.2.14/pb-leak/tls?run=RUN'));
+  await attempt('ws', () => new Promise((resolve) => {
+    const ws = new WebSocket('ws://192.0.2.11:8080/pb-leak/ws?run=RUN');
+    ws.onopen = () => resolve('open'); ws.onerror = () => resolve('error');
+  }));
+  await attempt('worker', () => new Promise((resolve) => {
+    const source = "fetch('http://192.0.2.15:8080/pb-leak/worker?run=RUN',{mode:'no-cors'}).then(()=>postMessage('resolved'),()=>postMessage('rejected'))";
+    const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+    worker.onmessage = (e) => resolve(e.data);
+  }));
+  if (typeof RTCPeerConnection === 'function') {
+    await attempt('rtcGather', async () => {
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:192.0.2.12:3478' }] });
+      pc.onicecandidate = (e) => { if (e.candidate && e.candidate.candidate) result.candidates.push((/ typ (\w+)/.exec(e.candidate.candidate) || [])[1]); };
+      pc.createDataChannel('leak');
+      await pc.setLocalDescription(await pc.createOffer());
+      await timeout(3000);
+      pc.close();
+      return 'gathered';
+    });
+  }
+  if (typeof WebTransport === 'function') {
+    await attempt('webTransportConnect', async () => {
+      const transport = new WebTransport('https://192.0.2.13:4433/pb-leak/wt?run=RUN');
+      const state = await Promise.race([transport.ready.then(() => 'ready', () => 'rejected'), timeout(3500, 'timeout')]);
+      try { transport.close(); } catch (e) {}
+      return state;
+    });
+  }
+  await timeout(800);
+  await fetch('/pb-leak/report?run=RUN&data=' + encodeURIComponent(JSON.stringify(result)), { cache: 'no-store' });
+})();
+</script></body></html>"""
+    return page.replace("RUN", run).encode()
+
+
+def leak_frame(run: str) -> bytes:
+    """The frame of the leak page: what a frame of another site can see."""
+    page = r"""<!doctype html><html><head><title>PB leak frame</title></head><body>frame RUN<script>
+fetch('/pb-leak/report?run=RUN&frame=1&data=' + encodeURIComponent(JSON.stringify({ frame: true, rtc: typeof RTCPeerConnection, webTransport: typeof WebTransport })), { cache: 'no-store' });
+</script></body></html>"""
+    return page.replace("RUN", run).encode()
+
+
+def safe_run(query: str) -> str:
+    run = parse_qs(query).get("run", [""])[0]
+    return "".join(c for c in run.lower() if c.isalnum())[:32]
+
+
 def login_page(params: dict) -> bytes:
     """The sign-in form of the password AutoFill checks; page-world listeners log the events
     the fields receive (`pbEvents`)."""
@@ -143,9 +241,12 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
                             if line.lower().startswith("accept-language:")), "-")
     plain_path, _, query = path.partition("?")
     extra_headers = ""
+    target = next((part[len("target="):] for part in via.split() if part.startswith("target=")), "")
     with SERVED_LOCK:
         if plain_path != "/pb-served.json":
             SERVED.append(plain_path)
+        if not plain_path.startswith("/pb-leak/log.json"):
+            TARGETS.append({"via": via.split()[0] if via else "", "target": target, "path": path})
         served = list(SERVED)
     if plain_path == "/pb-geo.json":
         params = {key: values[0] for key, values in parse_qs(query).items()}
@@ -156,6 +257,32 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         body, content_type = json.dumps(answer_json).encode(), "application/json"
     elif plain_path == "/pb-served.json":
         body, content_type = json.dumps(served).encode(), "application/json"
+    elif plain_path == "/pb-leak":
+        run = safe_run(query)
+        body, content_type = leak_page(run), "text/html; charset=utf-8"
+        # The same prefetch as a header, which WebKit also acts on.
+        extra_headers = f"Link: <//header-{run}.leak.example.com>; rel=dns-prefetch\r\n"
+    elif plain_path == "/pb-leak/frame":
+        body, content_type = leak_frame(safe_run(query)), "text/html; charset=utf-8"
+    elif plain_path == "/pb-leak/report":
+        params = parse_qs(query)
+        run = safe_run(query)
+        try:
+            report = json.loads(params.get("data", ["{}"])[0])
+        except ValueError:
+            report = {"unreadable": params.get("data", [""])[0][:200]}
+        with SERVED_LOCK:
+            LEAK_REPORTS.setdefault(run, []).append(report)
+        body, content_type = b"reported", "text/plain"
+    elif plain_path == "/pb-leak/log.json":
+        run = safe_run(query)
+        with SERVED_LOCK:
+            # This run's requests, and every request for an address in the documentation ranges
+            # (only the leak page asks for those; a TLS request's path is its encrypted bytes).
+            entries = [entry for entry in TARGETS if run and (run in entry["path"].lower() or run in entry["target"].lower()
+                                                              or entry["target"].startswith(("192.0.2.", "[2001:db8:")))]
+            body = json.dumps({"targets": entries, "reports": LEAK_REPORTS.get(run, [])}).encode()
+        content_type = "application/json"
     elif plain_path == "/pb-cookies":
         cookie = next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
                        if line.lower().startswith("cookie:")), "")

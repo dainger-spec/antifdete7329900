@@ -44,6 +44,7 @@ final class ProfileProcess {
     private var commands: FileHandle?
 
     var isRunning: Bool { process.isRunning }
+    var processIdentifier: Int32 { process.processIdentifier }
 
     private init(profileID: UUID, process: Process) {
         self.profileID = profileID
@@ -96,6 +97,10 @@ final class ProfileProcess {
         // quits when the run ends, which is what seals what the run collected.
         if forWarmUpOnly { environment["PB_WARM_UP_ONLY"] = "1" }
         environment.removeValue(forKey: "PB_PROFILE_PROCESS")
+        // The self-test's own switches are the self-test's: a profile's process runs as in use.
+        for name in environment.keys where name.hasPrefix("PB_SELFTEST_") {
+            environment.removeValue(forKey: name)
+        }
         process.environment = environment
 
         let keyPipe = Pipe()

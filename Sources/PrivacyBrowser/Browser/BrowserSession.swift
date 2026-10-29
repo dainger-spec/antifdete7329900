@@ -101,10 +101,16 @@ final class BrowserSession {
                           })
     }
 
-    /// Applies this profile to a `WKWebViewConfiguration` that Safari's chrome built for one of
-    /// its own web views (`SafariChromeHost`): the profile's data store — which carries its proxy,
-    /// since the proxy is set on the store — and, into Safari's own content controller, the
-    /// profile's scripts, its DNS-prefetch blocker and its AutoFill.
+    /// Applies this profile to a `WKWebViewConfiguration` that something else built — in a
+    /// profile's own process, every web view goes through here (`ProfileNetworkGuard`), Safari's
+    /// chrome's above all: the profile's data store, which carries its proxy since the proxy is
+    /// set on the store; the profile's privacy preferences (WebRTC, Safe Browsing and the rest of
+    /// `applyPrivacyPreferences`), which Safari's own configuration has the other way round; and,
+    /// into that configuration's content controller, the profile's scripts, its ping-load blocker
+    /// and its AutoFill.
+    ///
+    /// The data store is replaced even when this session has none any more (it is shutting
+    /// down): a configuration that kept the store it came with would load as this Mac.
     ///
     /// Safari's content controller is kept rather than replaced with ours: it holds the scripts
     /// Safari injects into every page it shows, and the point of hosting its chrome is that pages
@@ -113,8 +119,12 @@ final class BrowserSession {
     /// controller to another (WebKit has no API that lists them), so they are installed again
     /// here, which is why this is a method of the session and not a copy loop somewhere else.
     func applyProfile(to webConfiguration: WKWebViewConfiguration) {
-        if let dataStore { webConfiguration.websiteDataStore = dataStore }
+        webConfiguration.websiteDataStore = dataStore ?? ProfileNetworkGuard.closedStore
+        applyPrivacyPreferences(to: webConfiguration.preferences)
         let controller = webConfiguration.userContentController
+        // Our own controller already has all of it (`makeWebViewConfiguration`); a second copy of
+        // the privacy scripts would patch what they patched once already, which a page can see.
+        guard controller !== userContentController else { return }
         // Safari reuses a configuration's controller across the web views of a tab; everything
         // below would otherwise be injected again on each of them.
         guard appliedControllers.add(controller) else { return }
@@ -130,6 +140,44 @@ final class BrowserSession {
                                  testHooks: CommandLine.arguments.contains("--self-test"))
         Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
             .notice("Profile scripts and AutoFill installed into a content controller of Safari's chrome")
+    }
+
+    /// The preferences that decide what a page of this profile can reach outside its proxy, or
+    /// what this Mac's own services are asked on its behalf. One place, for our own web views and
+    /// for the ones Safari's chrome builds, so that neither can have them the other way round.
+    ///
+    ///   * WebRTC opens its sockets outside the data store's proxy: off in the engine, as Lockdown
+    ///     Mode does, whenever the profile's WebRTC is off (the default, and always with a proxy
+    ///     the tunnel cannot carry: `webRTCRouting`). No RTC interface in any frame, nothing for a
+    ///     page to reach before the shim runs; the shim's removal stays as the fallback for a
+    ///     WebKit without this preference.
+    ///   * Safe Browsing lookups are made by a system service, outside the proxy: per profile,
+    ///     off by default. Safari's own configuration has it on.
+    ///   * With a proxy, the features whose traffic does not go through the data store's proxy
+    ///     at all: WebTransport (QUIC, which an HTTP or SOCKS5 proxy cannot carry) and
+    ///     Private Click Measurement (attribution reports sent later, outside the page's session).
+    ///     A Safari user can have both off as well; Safari's own switch for the second is in its
+    ///     Advanced settings.
+    ///   * As Safari: pages see the system's fonts only, not the ones the user installed.
+    func applyPrivacyPreferences(to preferences: WKPreferences) {
+        preferences.isFraudulentWebsiteWarningEnabled = configuration.safeBrowsingEnabled
+        // There is no public switch for installed fonts; this is the WKPreferences property Safari
+        // turns off, set only when this WebKit has it.
+        WebKitPreferences.setBool(preferences, "_setShouldAllowUserInstalledFonts:", false)
+        if configuration.effectiveWebRTCPolicy == .disabled {
+            WebKitPreferences.setBool(preferences, "_setPeerConnectionEnabled:", false)
+        }
+        // WebRTC through the packet tunnel: libwebrtc gathers on the tunnel interface for the relay
+        // addresses (measured with a utun in CI; the tunnel's enforced routes are a second line).
+        // For the hardware checks in docs/TUNNEL.md it can also be made to gather on every
+        // interface: `defaults write <bundle id> PBTunnelAllInterfaces -bool YES`.
+        if case .relay = configuration.webRTCRouting, UserDefaults.standard.bool(forKey: "PBTunnelAllInterfaces") {
+            WebKitPreferences.setBool(preferences, "_setEnumeratingAllNetworkInterfacesEnabled:", true)
+        }
+        if configuration.proxy != nil {
+            WebKitFeatures.set(preferences, "WebTransportEnabled", false)
+            WebKitFeatures.set(preferences, "PrivateClickMeasurementEnabled", false)
+        }
     }
 
     /// Content controllers this profile has already been applied to, held weakly.
@@ -149,34 +197,15 @@ final class BrowserSession {
 
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let webConfiguration = WKWebViewConfiguration()
-        if let dataStore { webConfiguration.websiteDataStore = dataStore }
+        // Never the default store: it has no proxy (a session that is shutting down has no store).
+        webConfiguration.websiteDataStore = dataStore ?? ProfileNetworkGuard.closedStore
         webConfiguration.userContentController = userContentController
-        // Safe Browsing lookups bypass the per-profile proxy; opt-in per profile.
-        webConfiguration.preferences.isFraudulentWebsiteWarningEnabled = configuration.safeBrowsingEnabled
         // Popups only in response to a user gesture.
         webConfiguration.preferences.javaScriptCanOpenWindowsAutomatically = false
         // As Safari: the Fullscreen API is available (a WKWebView has it off by default, which a
         // page sees as document.fullscreenEnabled === undefined).
         webConfiguration.preferences.isElementFullscreenEnabled = true
-        // As Safari: pages see the system's fonts only, not the ones the user installed (a WKWebView
-        // shows those by default, and a font list is among the strongest fingerprints). There is no
-        // public switch; this is the WKPreferences property Safari turns off, set only when this
-        // WebKit has it.
-        WebKitPreferences.setBool(webConfiguration.preferences, "_setShouldAllowUserInstalledFonts:", false)
-        // WebRTC off (the default, and with a proxy the tunnel cannot carry: `webRTCRouting`) is switched off
-        // in the engine, as Lockdown Mode does: no RTC interface in any frame, nothing for a page to
-        // reach before the shim runs. The shim's removal stays as the fallback for a WebKit without
-        // this WKPreferences property.
-        if configuration.effectiveWebRTCPolicy == .disabled {
-            WebKitPreferences.setBool(webConfiguration.preferences, "_setPeerConnectionEnabled:", false)
-        }
-        // WebRTC through the packet tunnel: libwebrtc gathers on the tunnel interface for the relay
-        // addresses (measured with a utun in CI; the tunnel's enforced routes are a second line).
-        // For the hardware checks in docs/TUNNEL.md it can also be made to gather on every
-        // interface: `defaults write <bundle id> PBTunnelAllInterfaces -bool YES`.
-        if case .relay = configuration.webRTCRouting, UserDefaults.standard.bool(forKey: "PBTunnelAllInterfaces") {
-            WebKitPreferences.setBool(webConfiguration.preferences, "_setEnumeratingAllNetworkInterfacesEnabled:", true)
-        }
+        applyPrivacyPreferences(to: webConfiguration.preferences)
         return webConfiguration
     }
 
@@ -327,4 +356,60 @@ enum WebKitPreferences {
         typealias Getter = @convention(c) (NSObject, Selector) -> Bool
         return unsafeBitCast(method_getImplementation(method), to: Getter.self)(object, selector)
     }
+}
+
+/// WebKit's feature switches (`_WKFeature`, the list behind Safari's Feature Flags settings), by
+/// key — "WebTransportEnabled", "PrivateClickMeasurementEnabled". Private API, looked up at run
+/// time: a WebKit without the list, or without a feature in it, is left as it is, and `applied`
+/// says which keys were found, for the network report.
+@MainActor
+enum WebKitFeatures {
+    /// Key → whether this WebKit has that feature, for every key `set` was asked about.
+    private(set) static var applied: [String: Bool] = [:]
+
+    @discardableResult
+    static func set(_ preferences: WKPreferences, _ key: String, _ enabled: Bool) -> Bool {
+        guard let feature = features[key] else {
+            applied[key] = false
+            return false
+        }
+        // -_setEnabled:forFeature: since 2023; the older WebKit split them in two lists.
+        for setter in ["_setEnabled:forFeature:", "_setEnabled:forExperimentalFeature:", "_setEnabled:forInternalDebugFeature:"] {
+            let selector = NSSelectorFromString(setter)
+            guard let method = class_getInstanceMethod(WKPreferences.self, selector) else { continue }
+            typealias Setter = @convention(c) (NSObject, Selector, Bool, AnyObject) -> Void
+            unsafeBitCast(method_getImplementation(method), to: Setter.self)(preferences, selector, enabled, feature)
+            applied[key] = true
+            return true
+        }
+        applied[key] = false
+        return false
+    }
+
+    /// Whether `key` is on in `preferences`, or nil when this WebKit cannot say.
+    static func isEnabled(_ preferences: WKPreferences, _ key: String) -> Bool? {
+        guard let feature = features[key] else { return nil }
+        for getter in ["_isEnabledForFeature:", "_isEnabledForExperimentalFeature:", "_isEnabledForInternalDebugFeature:"] {
+            let selector = NSSelectorFromString(getter)
+            guard let method = class_getInstanceMethod(WKPreferences.self, selector) else { continue }
+            typealias Getter = @convention(c) (NSObject, Selector, AnyObject) -> Bool
+            return unsafeBitCast(method_getImplementation(method), to: Getter.self)(preferences, selector, feature)
+        }
+        return nil
+    }
+
+    /// Every feature this WebKit lists, by key.
+    private static let features: [String: AnyObject] = {
+        var byKey: [String: AnyObject] = [:]
+        let preferencesClass: AnyObject = WKPreferences.self
+        for list in ["_features", "_experimentalFeatures", "_internalDebugFeatures"] {
+            let selector = NSSelectorFromString(list)
+            guard preferencesClass.responds(to: selector),
+                  let items = preferencesClass.perform(selector)?.takeUnretainedValue() as? [NSObject] else { continue }
+            for item in items where item.responds(to: NSSelectorFromString("key")) {
+                if let key = item.value(forKey: "key") as? String, byKey[key] == nil { byKey[key] = item }
+            }
+        }
+        return byKey
+    }()
 }

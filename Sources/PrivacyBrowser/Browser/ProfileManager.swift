@@ -34,6 +34,8 @@ final class ProfileManager: ObservableObject {
     /// A profile's own process reported that it is up, and whether its window is Safari's chrome
     /// (the self-test checks that the chrome's own web views load through the profile's proxy).
     var onProfileRunning: ((UUID, Bool) -> Void)?
+    /// A profile's own process answered `checkNetwork` (`ProfileNetworkGuard.report`).
+    var onNetworkReport: ((UUID, ProfileNetworkReport) -> Void)?
     /// This manager is the one inside a profile's own process (`ProfileSessionHost`), where the
     /// process *is* the profile: ending a warm-up there means quitting, which the host does, so
     /// this manager does not stop the profile itself.
@@ -139,7 +141,8 @@ final class ProfileManager: ObservableObject {
         let summary = try repository.summary(for: id)
         let key = try repository.profileKey(for: id)
         let stored = try repository.loadConfiguration(id, key: key)
-        if ProfileProcess.isEnabled {
+        // A profile's own process runs its profile itself: it never starts another process.
+        if ProfileProcess.isEnabled, !runsInProfileProcess {
             try startInOwnProcess(id, summary: summary, stored: stored, forWarmUpOnly: !openingWindow)
             return
         }
@@ -231,8 +234,8 @@ final class ProfileManager: ObservableObject {
         }
         sessions[id] = session
         // Before any web view of this process exists: in a profile's own process every web view is
-        // built with this session's data store, which is what carries its proxy (SafariChromeHost).
-        SafariChromeHost.register(session: session)
+        // built with this session's data store, which is what carries its proxy (ProfileNetworkGuard).
+        ProfileNetworkGuard.register(session: session)
         keys[id] = key
         launchTokens[id] = token
         runningProfileIDs.insert(id)
@@ -301,6 +304,8 @@ final class ProfileManager: ObservableObject {
                 self.objectWillChange.send()
             case .cookiesImported(let accepted, let refused):
                 self.log.notice("Profile \(id.uuidString, privacy: .public) imported \(accepted, privacy: .public) cookies, \(refused, privacy: .public) refused")
+            case .networkReport(let report):
+                self.onNetworkReport?(id, report)
             }
         }
         child.onExit = { [weak self] status in
@@ -429,6 +434,18 @@ final class ProfileManager: ObservableObject {
             log.error("Could not store the proxy location of \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
         }
     }
+
+    /// Asks a profile running in its own process where its traffic goes; the answer comes back
+    /// through `onNetworkReport`. False when the profile does not run in a process of its own.
+    @discardableResult
+    func checkNetwork(_ id: UUID, probe: URL? = nil) -> Bool {
+        guard let child = children[id] else { return false }
+        child.send(.checkNetwork(probe: probe))
+        return true
+    }
+
+    /// The process a profile runs in, when it runs in one of its own.
+    func processIdentifier(of id: UUID) -> Int32? { children[id]?.processIdentifier }
 
     /// Opens another window in an already running profile.
     func openNewWindow(_ id: UUID) {

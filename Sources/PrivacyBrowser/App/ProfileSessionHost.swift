@@ -34,16 +34,39 @@ enum ProfileSessionHost {
             exit(2)
         }
         // Everything after the key on this stream is commands from the manager.
-        guard let key = readMasterKey() else {
+        guard var key = readMasterKey() else {
             FileHandle.standardError.write(Data("--profile-session expects the vault master key on stdin\n".utf8))
             exit(2)
         }
+        // The profile's own settings first: what this process may send, and through which proxy,
+        // is decided before anything in it can send at all — before Safari's frameworks, which
+        // start clients of their own as soon as they load, are even loaded (ProfileNetworkGuard).
+        let repository: ProfileRepository
+        let stored: ProfileConfiguration
+        do {
+            let vault = try MasterVault.open(in: AppEnvironment.vaultDirectory, masterKeyMaterial: key)
+            repository = try ProfileRepository(vault: vault)
+            stored = try repository.loadConfiguration(profileID)
+            try ProfileNetworkGuard.engage(profileID: profileID, proxy: stored.proxy)
+        } catch {
+            log.error("Could not open the vault or hold \(profileID.uuidString, privacy: .public) to its proxy: \(String(describing: error), privacy: .public)")
+            exit(3)
+        }
+        key.withUnsafeMutableBytes { bytes in
+            guard let base = bytes.baseAddress else { return }
+            memset_s(base, bytes.count, 0, bytes.count)
+        }
+        // A web view that turns out not to be on the profile's data loads nothing (the guard's
+        // second lock); the user is told why the page did not open.
+        ProfileNetworkGuard.onWebViewOffProfile = {
+            ProfileSessionHost.send(.error(L("network.webViewOffProfile")))
+        }
         // Before NSApplication exists: hosting Safari's chrome means this process has to *be* the
         // kind of application its chrome expects, starting with NSApp itself.
-        if SafariChromeHost.prepareForChildProcess() {
+        if SafariChromeHost.prepareForChildProcess(configuration: stored) {
             log.notice("Safari's chrome is hosted in this process")
         }
-        let delegate = Delegate(profileID: profileID, masterKeyMaterial: key)
+        let delegate = Delegate(profileID: profileID, repository: repository)
         Self.delegate = delegate
         let application = NSApplication.shared
         application.delegate = delegate
@@ -69,7 +92,7 @@ enum ProfileSessionHost {
     @MainActor
     private final class Delegate: NSObject, NSApplicationDelegate {
         private let profileID: UUID
-        private var masterKeyMaterial: Data
+        private let repository: ProfileRepository
         private var manager: ProfileManager?
         private var quitCoordinator: QuitCoordinator?
         private var terminationSource: DispatchSourceSignal?
@@ -87,9 +110,9 @@ enum ProfileSessionHost {
         /// soon as this process exists, which is before the profile is launched inside it.
         private var pendingCommands: [ProfileCommand] = []
 
-        init(profileID: UUID, masterKeyMaterial: Data) {
+        init(profileID: UUID, repository: ProfileRepository) {
             self.profileID = profileID
-            self.masterKeyMaterial = masterKeyMaterial
+            self.repository = repository
         }
 
         func applicationDidFinishLaunching(_ notification: Notification) {
@@ -105,61 +128,59 @@ enum ProfileSessionHost {
                 guard let command = ProfileChannel.decode(ProfileCommand.self, from: line) else { return }
                 self?.handle(command)
             }
-            do {
-                let vault = try MasterVault.open(in: AppEnvironment.vaultDirectory, masterKeyMaterial: masterKeyMaterial)
-                masterKeyMaterial.withUnsafeMutableBytes { bytes in
-                    guard let base = bytes.baseAddress else { return }
-                    memset_s(base, bytes.count, 0, bytes.count)
+            // A process without Safari's chrome has its default store closed here, before the
+            // launch builds anything (with the chrome, that happened before its menu came up).
+            ProfileNetworkGuard.takeOverDefaultStore()
+            // What Safari's chrome needs and this macOS does not have is said where the user is
+            // looking, not only in the log: a renamed method can be a feature gone quiet.
+            let missing = SafariChrome.missingPieces()
+            if !missing.isEmpty {
+                ProfileSessionHost.send(.error(String(format: L("safari.chrome.missingPieces"), missing.joined(separator: ", "))))
+            }
+            let manager = ProfileManager(repository: repository)
+            manager.runsInProfileProcess = true
+            manager.onError = { message in
+                ProfileSessionHost.log.error("\(message, privacy: .public)")
+                // Shown by the manager, which is where the user is looking.
+                ProfileSessionHost.send(.error(message))
+            }
+            // The profile's last window closed: this process exists for that profile only, so
+            // it quits — and quitting is what seals the data.
+            manager.onReturnToProfiles = { MainActor.assumeIsolated { NSApp.terminate(nil) } }
+            manager.onWarmUpProgress = { [weak self, weak manager] id in
+                guard let robot = manager?.warmUpRobot(for: id) else { return }
+                let status = robot.status
+                ProfileSessionHost.send(.warmUp(status))
+                // Warmed up and nothing has asked for a window: there is nothing left for this
+                // process to do, and quitting is what seals the cookies the run collected.
+                if let self, self.isForWarmUpOnly, !self.showedWindow, !status.isRunning, !self.isQuitting {
+                    self.isQuitting = true
+                    ProfileSessionHost.log.notice("The warm-up is over and this profile has no window: quitting")
+                    NSApp.terminate(nil)
                 }
-                let repository = try ProfileRepository(vault: vault)
-                let manager = ProfileManager(repository: repository)
-                manager.runsInProfileProcess = true
-                manager.onError = { message in
-                    ProfileSessionHost.log.error("\(message, privacy: .public)")
-                    // Shown by the manager, which is where the user is looking.
-                    ProfileSessionHost.send(.error(message))
+            }
+            self.manager = manager
+            quitCoordinator = QuitCoordinator(
+                hasActivity: { manager.hasActivity },
+                lockForQuit: {
+                    manager.prepareForQuit()
+                    await manager.shutDown()
+                },
+                terminate: { NSApp.terminate(nil) })
+            Task { @MainActor in
+                do {
+                    try await manager.launch(self.profileID, openingWindow: !self.isForWarmUpOnly)
+                    self.showedWindow = !self.isForWarmUpOnly
+                    self.isReady = true
+                    ProfileSessionHost.send(.running(hostsSafariChrome: SafariChromeHost.isHosting))
+                    // Whatever the manager asked for while the profile was still starting.
+                    let waiting = self.pendingCommands
+                    self.pendingCommands = []
+                    for command in waiting { self.handle(command) }
+                } catch {
+                    ProfileSessionHost.log.error("Launching \(self.profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                    NSApp.terminate(nil)
                 }
-                // The profile's last window closed: this process exists for that profile only, so
-                // it quits — and quitting is what seals the data.
-                manager.onReturnToProfiles = { MainActor.assumeIsolated { NSApp.terminate(nil) } }
-                manager.onWarmUpProgress = { [weak self, weak manager] id in
-                    guard let robot = manager?.warmUpRobot(for: id) else { return }
-                    let status = robot.status
-                    ProfileSessionHost.send(.warmUp(status))
-                    // Warmed up and nothing has asked for a window: there is nothing left for this
-                    // process to do, and quitting is what seals the cookies the run collected.
-                    if let self, self.isForWarmUpOnly, !self.showedWindow, !status.isRunning, !self.isQuitting {
-                        self.isQuitting = true
-                        ProfileSessionHost.log.notice("The warm-up is over and this profile has no window: quitting")
-                        NSApp.terminate(nil)
-                    }
-                }
-                self.manager = manager
-                quitCoordinator = QuitCoordinator(
-                    hasActivity: { manager.hasActivity },
-                    lockForQuit: {
-                        manager.prepareForQuit()
-                        await manager.shutDown()
-                    },
-                    terminate: { NSApp.terminate(nil) })
-                Task { @MainActor in
-                    do {
-                        try await manager.launch(self.profileID, openingWindow: !self.isForWarmUpOnly)
-                        self.showedWindow = !self.isForWarmUpOnly
-                        self.isReady = true
-                        ProfileSessionHost.send(.running(hostsSafariChrome: SafariChromeHost.isHosting))
-                        // Whatever the manager asked for while the profile was still starting.
-                        let waiting = self.pendingCommands
-                        self.pendingCommands = []
-                        for command in waiting { self.handle(command) }
-                    } catch {
-                        ProfileSessionHost.log.error("Launching \(self.profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-                        NSApp.terminate(nil)
-                    }
-                }
-            } catch {
-                ProfileSessionHost.log.error("Could not open the vault for \(self.profileID.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
-                exit(3)
             }
         }
 
@@ -207,6 +228,10 @@ enum ProfileSessionHost {
                 }
             case .stopWarmUp:
                 manager?.stopWarmUp(profileID)
+            case .checkNetwork(let probe):
+                Task { @MainActor in
+                    ProfileSessionHost.send(.networkReport(await ProfileNetworkGuard.report(probe: probe)))
+                }
             case .startWarmUp(let plan):
                 if manager?.startWarmUp(profileID, plan: plan) != true {
                     ProfileSessionHost.log.error("Warm-up of \(self.profileID.uuidString, privacy: .public) did not start")

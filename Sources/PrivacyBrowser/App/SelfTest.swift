@@ -544,15 +544,20 @@ final class SelfTest {
     // MARK: Safari's chrome, in a profile's own process, through that profile's proxy
 
     /// The check this product cannot do without: a profile whose window is Safari's own chrome
-    /// loads its pages through the profile's proxy.
+    /// sends nothing outside the profile's proxy — not its pages, not anything in them, not
+    /// Safari's own clients in its process.
     ///
     /// Every other proxy check here runs in a window of ours, where the web view is built from our
-    /// own configuration and carries the profile's data store — which is what carries the proxy. In
-    /// Safari's chrome the web views are Safari's to build, and one built by a path we do not reach
-    /// would load as this Mac. So this runs the real thing: a profile in a process of its own
-    /// (`ProfileProcess`), its window Safari's, its start page on a host that does not resolve
-    /// (".invalid"), which can therefore only be reached through the proxy at all. The proxy then
-    /// says which paths it has served, and that answer is read from a profile of our own.
+    /// own configuration. In Safari's chrome the web views are Safari's to build, with Safari's
+    /// preferences, next to Safari's own network clients; so this runs the real thing: a profile in
+    /// a process of its own (`ProfileProcess`), its window Safari's, its start page the leak page
+    /// of the self-test proxy (`/pb-leak`), on a host that only the proxy answers. That page makes
+    /// every kind of request a page can make, to addresses in the documentation ranges and to host
+    /// names carrying this run's id, and says what it could see. Here it is checked that each of
+    /// those requests reached the proxy, and what the page and the profile's process report; the
+    /// other half — that nothing went around the proxy — is a capture of the machine's traffic
+    /// around this check (scripts/egress_check.py, in CI), for which the lines `egress-*` below
+    /// say when this check ran and which run id to look for.
     private func safariChromeThroughTheProxy(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             info("Safari-chrome proxy check skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
@@ -565,16 +570,23 @@ final class SelfTest {
             return
         }
         let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
-        let run = String(UUID().uuidString.prefix(8)).lowercased()
-        let path = "/pb-chrome-\(run)"
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        // An ordinary name rather than ".invalid": the system resolver would really ask the network
+        // about it (and the capture would see the run id), where ".invalid" may be answered on the Mac.
+        let domain = "leak.example.com"
+        let startPath = "/pb-leak?run=\(run)"
         let profile = try repository.create(name: "Safari chrome", configuration: ProfileConfiguration(
-            startURL: URL(string: "http://proxied.selftest.invalid\(path)"), proxy: proxy, matchProxyLocation: false))
+            startURL: URL(string: "http://start-\(run).\(domain)\(startPath)"), proxy: proxy, matchProxyLocation: false))
         let manager = ProfileManager(repository: repository)
         var messages: [String] = []
         manager.onError = { messages.append($0) }
         var hostsChrome: Bool?
         manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        var networkReport: ProfileNetworkReport?
+        manager.onNetworkReport = { _, report in networkReport = report }
 
+        info("egress-token \(run)")
+        info("egress-window begin \(Date().timeIntervalSince1970)")
         // The per-profile process is off by default; this one check is what it is for.
         setenv("PB_PROFILE_PROCESS", "1", 1)
         do {
@@ -585,27 +597,132 @@ final class SelfTest {
             return
         }
         unsetenv("PB_PROFILE_PROCESS")
+        if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
         let started = await waitUntil(timeout: 90) { hostsChrome != nil }
         check("Safari chrome: the profile's own process started and reported its window",
               started, "no 'running' came back (the process may have died; see its own log)")
-        if hostsChrome == false {
-            info("the window was ours, not Safari's chrome: this Mac would not load its frameworks")
-        }
+        check("Safari chrome: the window is Safari's own chrome", hostsChrome == true,
+              "the profile opened our own window: this Mac would not host Safari's chrome")
 
-        // What the proxy has served, asked through the same proxy from a window of ours. Polled,
-        // because the chrome's first page load is on its own schedule.
-        let served = URL(string: "http://proxied.selftest.invalid/pb-served.json")!
-        var answer = ""
-        for _ in 0..<12 {
-            answer = (try await loadThroughProxy(repository, proxy, url: served)) ?? ""
-            if answer.contains(path) { break }
+        // What the proxy answered for this run, and what the page reported, asked through the same
+        // proxy from a window of ours. Polled: the chrome's page loads are on their own schedule.
+        struct Entry { let target: String; let path: String }
+        func leakLog() async -> (targets: [Entry], reports: [[String: Any]]) {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            let text = try? await loadThroughProxy(repository, proxy, url: url)
+            guard let data = text?.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], []) }
+            let targets = (object["targets"] as? [[String: Any]] ?? []).map {
+                Entry(target: ($0["target"] as? String ?? "").lowercased(), path: $0["path"] as? String ?? "")
+            }
+            return (targets, object["reports"] as? [[String: Any]] ?? [])
+        }
+        var log = (targets: [Entry](), reports: [[String: Any]]())
+        for _ in 0..<25 {
+            log = await leakLog()
+            if log.reports.contains(where: { $0["frame"] == nil }) && log.reports.contains(where: { $0["frame"] != nil }) { break }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
+        func reached(_ target: String, _ path: String) -> Bool {
+            log.targets.contains { $0.target == target.lowercased() && $0.path.hasPrefix(path) }
+        }
         check("Safari chrome: a profile in its own process loads its pages through its own proxy",
-              answer.contains(path), "the proxy served: \(answer.isEmpty ? "nothing" : answer)")
+              reached("start-\(run).\(domain):80", startPath),
+              "the proxy answered: \(log.targets.map { "\($0.target)\($0.path.prefix(40))" }.joined(separator: " "))")
+        let page = log.reports.first { $0["frame"] == nil } ?? [:]
+        let frame = log.reports.first { $0["frame"] != nil } ?? [:]
+        check("Safari chrome: the leak page ran and reported", !page.isEmpty, "no report from the page")
+        info("Safari chrome: the leak page reported \(page)")
+        // WebRTC opens its sockets outside the data store's proxy: in a proxied profile without
+        // the tunnel it must not exist at all, in the page, in a frame of another site and in an
+        // about:blank frame (where a script-only removal is classically got round).
+        check("Safari chrome: WebRTC is off in Safari's web views (page, frame, about:blank frame)",
+              page["rtc"] as? String == "undefined" && frame["rtc"] as? String == "undefined"
+                && page["rtcBlankFrame"] as? String == "undefined",
+              "page \(page["rtc"] ?? "nil"), frame \(frame["rtc"] ?? "nil"), blank frame \(page["rtcBlankFrame"] ?? "nil")")
+        // WebTransport is QUIC, which an HTTP or SOCKS5 proxy cannot carry.
+        check("Safari chrome: WebTransport is off in a proxied profile",
+              page["webTransport"] as? String == "undefined" && frame["webTransport"] as? String == "undefined",
+              "page \(page["webTransport"] ?? "nil"), frame \(frame["webTransport"] ?? "nil")")
+        for (what, target, path) in [
+            ("a fetch to an IPv4 address", "192.0.2.10:8080", "/pb-leak/fetch4"),
+            ("a fetch to an IPv6 address", "[2001:db8::10]:8080", "/pb-leak/fetch6"),
+            ("a fetch to a host name", "fetch-\(run).\(domain):80", "/pb-leak/fetchname"),
+            ("a WebSocket", "192.0.2.11:8080", "/pb-leak/ws"),
+            ("a worker's fetch", "192.0.2.15:8080", "/pb-leak/worker"),
+            ("an image", "img-\(run).\(domain):80", "/pb-leak/img.png"),
+            ("a frame of another site", "frame-\(run).\(domain):80", "/pb-leak/frame"),
+        ] {
+            check("Safari chrome: \(what) goes through the profile's proxy", reached(target, path),
+                  "not seen by the proxy: \(target)\(path)")
+        }
+        check("Safari chrome: an HTTPS request goes through the proxy too (as a CONNECT)",
+              log.targets.contains { $0.target == "192.0.2.14:443" })
+        // The ping-load blocker (dns-prefetch, <a ping>) reaches the web views Safari builds.
+        check("Safari chrome: <a ping> is blocked in Safari's web views (and dns-prefetch with it)",
+              !log.targets.contains { $0.path.hasPrefix("/pb-leak/ping") }, "the ping reached the proxy")
+        for (what, path) in [("the font", "/pb-leak/font.woff"), ("the video", "/pb-leak/media.mp4"), ("the beacon", "/pb-leak/beacon")] {
+            info("Safari chrome: \(what) \(log.targets.contains { $0.path.hasPrefix(path) } ? "reached" : "did not reach") the proxy")
+        }
 
+        // The profile's process, from inside: where its web views are, what WebRTC their engines
+        // have, and a request made by each of the process's own ways of making one — to a host
+        // that only the proxy answers.
+        let probePath = "/pb-leak/urlsession?run=\(run)"
+        _ = manager.checkNetwork(profile.id, probe: URL(string: "http://probe-\(run).\(domain)\(probePath)"))
+        _ = await waitUntil(timeout: 40) { networkReport != nil }
+        if let report = networkReport {
+            info("Safari chrome: the profile's process reports \(report)")
+            check("Safari chrome: every web view of the process is on the profile's store, with its proxy",
+                  report.webViews > 0 && report.webViewsOffProfile == 0, "\(report.webViewsOffProfile) of \(report.webViews) are not")
+            check("Safari chrome: no web view of the process has WebRTC in its engine",
+                  report.webViewsWithWebRTC == 0, "\(report.webViewsWithWebRTC) of \(report.webViews) have")
+            check("Safari chrome: WebKit's own default store is closed", report.defaultStoreClosed)
+            check("Safari chrome: the process's own connections carry the profile's proxy", report.processProxy)
+            for name in ["shared", "ephemeral", "explicit"] {
+                let answer = report.probes[name] ?? "not run"
+                check("Safari chrome: a request of the process's own (\(name) URLSession) goes through the proxy",
+                      answer.hasPrefix("ok 200") && answer.contains("PB-PROXY-OK"), answer)
+            }
+            check("Safari chrome: this Safari has every class and method the chrome relies on",
+                  report.missing.isEmpty, report.missing.joined(separator: ", "))
+            check("Safari chrome: Safari's own services are set as the profile needs them",
+                  report.safariPreferences["UniversalSearchEnabled"] == "0"
+                    && report.safariPreferences["AutoFillPasswords"] == "0",
+                  "\(report.safariPreferences)")
+        } else {
+            check("Safari chrome: the profile's process reported where its traffic goes", false, "no report in 40 s")
+        }
+
+        // Each of those requests reached the proxy as itself — one proxy, not the profile's proxy
+        // reached through the process's own (a request whose session names its proxy explicitly,
+        // as the proxy lookup's does, must not be sent through the process-wide one as well).
+        log = await leakLog()
+        let probes = log.targets.filter { $0.path.hasPrefix("/pb-leak/urlsession") || $0.path.hasPrefix("probe-") }
+        check("Safari chrome: each of the process's own requests went to the proxy once, directly",
+              probes.count == 3 && probes.allSatisfy { $0.target == "probe-\(run).\(domain):80" },
+              probes.map { "\($0.target) \($0.path)" }.joined(separator: " | "))
+
+        // Another window, as ⌘N opens one: Safari builds a new web view for it, and its start page
+        // goes through the proxy as well.
+        let before = log.targets.filter { $0.path.hasPrefix(startPath) }.count
+        manager.openNewWindow(profile.id)
+        var after = before
+        for _ in 0..<10 {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            log = await leakLog()
+            after = log.targets.filter { $0.path.hasPrefix(startPath) }.count
+            if after > before { break }
+        }
+        check("Safari chrome: a second window of the profile loads through its proxy", after > before,
+              "start page requests: \(before) before, \(after) after")
+
+        // Long enough for what Safari's chrome does on a timer (the page-text donation runs about
+        // five seconds after a load) to happen while the capture is still looking.
+        try? await Task.sleep(nanoseconds: 8_000_000_000)
         try? await manager.stop(profile.id)
         await manager.shutDown()
+        info("egress-window end \(Date().timeIntervalSince1970)")
         check("Safari chrome: nothing went wrong while it ran", messages.isEmpty, messages.joined(separator: " | "))
     }
 

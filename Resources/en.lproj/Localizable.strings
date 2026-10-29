@@ -491,3 +491,7 @@
 "window.browser.title" = "[%@] %@";
 "window.library.title" = "[%@] Library";
 "window.profiles.title" = "Profiles";
+
+/* Network guard of a profile's own process */
+"network.webViewOffProfile" = "A page of this profile was about to open outside its data and proxy, and was stopped: better a page that does not open than one opened from this Mac's own address. Please report this with the log (subsystem PrivacyBrowser).";
+"safari.chrome.missingPieces" = "This macOS's Safari no longer has parts the Safari window of a profile relies on (%@). The profile still loads only through its proxy, but some of Safari's window may misbehave; an update of PrivacyBrowser is needed.";

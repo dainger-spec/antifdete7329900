@@ -1,4 +1,5 @@
 import AppKit
+import BrowserCore
 import os
 import WebKit
 
@@ -70,6 +71,9 @@ enum SafariChrome {
             }
         }
         isAvailable = true
+        for missing in missingPieces() {
+            log.error("This Safari does not have \(missing, privacy: .public)")
+        }
         return true
     }
 
@@ -84,6 +88,109 @@ enum SafariChrome {
         let installed = NSApp?.isKind(of: applicationClass) ?? false
         log.notice("NSApp is \(String(describing: NSApp.map { type(of: $0) }), privacy: .public), Safari's own: \(installed, privacy: .public)")
         return installed
+    }
+
+    // MARK: What this file expects of Safari
+
+    /// The configuration factories of `WebKitPreferencesManager` that `SafariChromeHost` patches.
+    /// One `jitEnabled:` variant, one reader sibling: Safari has used each of them.
+    static let configurationFactories = [
+        "contentWebViewConfigurationForBrowsingMode:profileIdentifier:automationSessionIdentifier:",
+        "contentWebViewConfigurationForBrowsingMode:profileIdentifier:jitEnabled:",
+        "readerWebViewConfigurationForBrowsingMode:profileIdentifier:relatedWebView:",
+    ]
+
+    /// A class, or a method of one, that something here relies on.
+    struct Piece {
+        enum Kind { case type, classMethod, instanceMethod }
+        let className: String
+        let selector: String?
+        let kind: Kind
+        /// Without it the chrome cannot be hosted at all: the profile opens our own window.
+        let isStructural: Bool
+
+        var name: String {
+            guard let selector else { return className }
+            return "\(kind == .classMethod ? "+" : "-")[\(className) \(selector)]"
+        }
+
+        var isPresent: Bool {
+            guard let cls = NSClassFromString(className) else { return false }
+            guard let selector else { return true }
+            let sel = NSSelectorFromString(selector)
+            switch kind {
+            case .type: return true
+            case .classMethod: return class_getClassMethod(cls, sel) != nil
+            case .instanceMethod: return class_getInstanceMethod(cls, sel) != nil
+            }
+        }
+    }
+
+    /// Everything this file and `SafariChromeHost` reach for by name, in one list, so that a
+    /// macOS update that renames or removes any of it is caught — by `--check-safari-chrome` in
+    /// CI, and in front of the user by the profile's process — instead of degrading in silence.
+    /// Structural pieces decide whether the chrome is hosted at all. The rest are the measured
+    /// crashes of §9.1 (docs/SAFARI_PROCESS.md): a stub whose method is gone may be a crash that
+    /// moved somewhere else, so it is reported, but the chrome is still tried.
+    static let expectedPieces: [Piece] = [
+        Piece(className: "BrowserApplication", selector: "sharedApplication", kind: .classMethod, isStructural: true),
+        Piece(className: "BrowserWindowController", selector: "openEmptyBrowserWindowController", kind: .classMethod, isStructural: true),
+        Piece(className: "BrowserWindowController", selector: "allBrowserTabViewItemsFromAllWindows", kind: .classMethod, isStructural: true),
+        Piece(className: "BrowserTabViewItem", selector: "loadURL:", kind: .instanceMethod, isStructural: true),
+        Piece(className: "WBSSearchEnginePreferenceObserver", selector: "setUpSharedObserverWithSearchProviderContext:", kind: .classMethod, isStructural: true),
+        Piece(className: "SearchProvidersController", selector: "setDefaultSearchEngine:forPrivateBrowsing:", kind: .instanceMethod, isStructural: false),
+        Piece(className: "WBSSearchProvidersController", selector: "shared", kind: .classMethod, isStructural: false),
+        Piece(className: "WebKitPreferencesManager", selector: nil, kind: .type, isStructural: false),
+        Piece(className: "NSViewController", selector: "_nibWithName:bundle:", kind: .instanceMethod, isStructural: true),
+        Piece(className: "BrowserWindowController", selector: "_setUpClusterManagerIfNeeded", kind: .instanceMethod, isStructural: false),
+        Piece(className: "BrowserNavigationDelegate", selector: "donatePageTextMetadata:allowingDonationWithoutReaderText:", kind: .instanceMethod, isStructural: false),
+        Piece(className: "WKWebViewConfiguration", selector: "_setShouldRelaxThirdPartyCookieBlocking:", kind: .instanceMethod, isStructural: false),
+        Piece(className: "WBSWebExtensionSQLiteStoreMigrator", selector: "_migrateExtensionSQLiteStoresForDefaultProfile", kind: .instanceMethod, isStructural: false),
+        Piece(className: "StartPageOnboardingSectionProvider", selector: "reloadData", kind: .instanceMethod, isStructural: false),
+        Piece(className: "UnifiedField", selector: "_assistantButtonIconForContentOption:withSparkle:", kind: .instanceMethod, isStructural: false),
+        Piece(className: "BrowserDocument", selector: "fileType", kind: .instanceMethod, isStructural: false),
+        Piece(className: "NSFileManager", selector: "safari_topLevelDirectoriesAtURL:", kind: .instanceMethod, isStructural: false),
+    ]
+
+    /// The expected pieces this macOS does not have, by name; one entry more when none of the
+    /// configuration factories is there. Meaningful once `load()` has run.
+    static func missingPieces() -> [String] {
+        guard isAvailable else { return [] }
+        var missing = expectedPieces.filter { !$0.isPresent }.map(\.name)
+        if let factories = NSClassFromString("WebKitPreferencesManager"),
+           !configurationFactories.contains(where: { class_getClassMethod(factories, NSSelectorFromString($0)) != nil }) {
+            missing.append("+[WebKitPreferencesManager contentWebViewConfigurationFor…] (none of \(configurationFactories.count))")
+        }
+        return missing
+    }
+
+    /// The structural pieces that are missing: with any of them, the chrome is not hosted.
+    static func missingStructuralPieces() -> [String] {
+        guard isAvailable else { return [] }
+        return expectedPieces.filter { $0.isStructural && !$0.isPresent }.map(\.name)
+    }
+
+    /// `PrivacyBrowser --check-safari-chrome`: loads Safari's frameworks and says which of the
+    /// pieces this build relies on this macOS has. Exit code 0 when all of them are there, 1 when
+    /// any is missing, 2 when the frameworks do not load (a sandboxed build, or a macOS without
+    /// them). Touches nothing else: no window, no application object, no preferences.
+    static func checkPieces() -> Int32 {
+        guard load() else {
+            print("SAFARI-CHROME frameworks did not load")
+            return 2
+        }
+        let missing = missingPieces()
+        for piece in expectedPieces {
+            print("\(piece.isPresent ? "PRESENT" : "MISSING") \(piece.isStructural ? "structural" : "stub      ") \(piece.name)")
+        }
+        if let factories = NSClassFromString("WebKitPreferencesManager") {
+            for name in configurationFactories {
+                let present = class_getClassMethod(factories, NSSelectorFromString(name)) != nil
+                print("\(present ? "PRESENT" : "absent ") factory    +[WebKitPreferencesManager \(name)]")
+            }
+        }
+        print("SAFARI-CHROME \(missing.isEmpty ? "OK" : "MISSING \(missing.count)"): \(missing.joined(separator: ", "))")
+        return missing.isEmpty ? 0 : 1
     }
 
     // MARK: Preparing
@@ -106,18 +213,62 @@ enum SafariChrome {
         stubChromeFeatures()
     }
 
-    /// Safari's own AutoFill offers to save passwords into the user's iCloud Keychain — shared by
-    /// every profile and by the real Safari, which is the opposite of what a profile is for, and
-    /// next to this project's own password vault it would be a second manager in one window.
-    /// Turned off in the profile's `com.apple.Safari` domain, which is the profile's own file
-    /// because the process has its own home (`CFFIXED_USER_HOME`).
-    private static func turnOffSafarisOwnAutoFill() {
+    // MARK: Safari's own services
+
+    /// The `com.apple.Safari` keys this file sets for a profile, and what each one is set to.
+    /// Safari's chrome reads them from the profile's own preferences (the process has a home of its
+    /// own, `CFFIXED_USER_HOME`), so they are the profile's and nobody else's.
+    ///
+    ///   * Safari's own AutoFill saves passwords into the user's iCloud Keychain — shared by every
+    ///     profile and by the real Safari, the opposite of what a profile is for, and next to this
+    ///     project's own password vault it would be a second manager in one window.
+    ///   * Safari Suggestions are asked of Apple's servers by a system daemon, as this Mac, with
+    ///     whatever is typed into the address bar: off.
+    ///   * Search engine suggestions: asked from this process, which is held to the profile's proxy
+    ///     (`ProfileNetworkGuard`), but nothing else on the address bar needs them: off, so a
+    ///     keystroke is never a request.
+    ///   * Safe Browsing: asked by a system service, outside the proxy; as the profile says, off by
+    ///     default.
+    ///   * Privacy-preserving ad measurement: its reports are sent later, outside the page's
+    ///     session; off for a profile with a proxy (the web views have it off as well,
+    ///     `BrowserSession.applyPrivacyPreferences`).
+    static func servicePreferenceValues(for configuration: ProfileConfiguration) -> [(String, Bool)] {
+        [
+            ("AutoFillPasswords", false),
+            ("AutoFillCreditCardData", false),
+            ("AutoFillMiscellaneousForms", false),
+            ("AutoFillFromAddressBook", false),
+            ("UniversalSearchEnabled", false),
+            ("SuppressSearchSuggestions", true),
+            ("WarnAboutFraudulentWebsites", configuration.safeBrowsingEnabled),
+            ("WebKitPreferences.privateClickMeasurementEnabled", configuration.proxy == nil),
+        ]
+    }
+
+    /// Writes `servicePreferenceValues` into the profile's `com.apple.Safari` domain. Called before
+    /// anything of Safari's reads it.
+    static func configureSafarisOwnServices(for configuration: ProfileConfiguration) {
         let domain = "com.apple.Safari" as CFString
-        for key in ["AutoFillPasswords", "AutoFillCreditCardData", "AutoFillMiscellaneousForms",
-                    "AutoFillFromAddressBook"] {
-            CFPreferencesSetAppValue(key as CFString, kCFBooleanFalse, domain)
+        for (key, value) in servicePreferenceValues(for: configuration) {
+            CFPreferencesSetAppValue(key as CFString, value ? kCFBooleanTrue : kCFBooleanFalse, domain)
         }
         CFPreferencesAppSynchronize(domain)
+        servicePreferenceKeys = servicePreferenceValues(for: configuration).map(\.0)
+        log.notice("Safari's own services are set for this profile (\(servicePreferenceKeys.count, privacy: .public) keys)")
+    }
+
+    private static var servicePreferenceKeys: [String] = []
+
+    /// What the profile's `com.apple.Safari` domain says now for every key set above, read back
+    /// (the network report shows it, so a Safari that rewrote one is seen).
+    static func servicePreferences() -> [String: String] {
+        let domain = "com.apple.Safari" as CFString
+        var values: [String: String] = [:]
+        for key in servicePreferenceKeys {
+            let value = CFPreferencesCopyAppValue(key as CFString, domain)
+            values[key] = value.map { String(describing: $0) } ?? "unset"
+        }
+        return values
     }
 
     /// Every failure of a hosted chrome so far has been an Objective-C exception or a trap inside
