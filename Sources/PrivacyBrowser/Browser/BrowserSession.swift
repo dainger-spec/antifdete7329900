@@ -96,6 +96,20 @@ final class BrowserSession {
                           })
     }
 
+    /// Applies this profile to a `WKWebViewConfiguration` that Safari's chrome built for one of
+    /// its own web views (`SafariChromeHost`): the profile's data store — which carries its proxy,
+    /// since the proxy is set on the store — and the profile's scripts.
+    ///
+    /// What does not come across: the script message handlers, which have no enumerable API, so
+    /// AutoFill through the hosted chrome is not wired yet. Safari's own preferences are left as
+    /// they are: it is Safari's chrome, and they are what make its own UI behave.
+    func applyProfile(to configuration: WKWebViewConfiguration) {
+        if let dataStore { configuration.websiteDataStore = dataStore }
+        for script in userContentController.userScripts {
+            configuration.userContentController.addUserScript(script)
+        }
+    }
+
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let webConfiguration = WKWebViewConfiguration()
         if let dataStore { webConfiguration.websiteDataStore = dataStore }

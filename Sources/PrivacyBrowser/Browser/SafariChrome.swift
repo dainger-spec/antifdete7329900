@@ -548,15 +548,16 @@ enum SafariChrome {
 
     // MARK: Opening a window
 
-    /// Opens one of Safari's browser windows and puts `webView` in its tab, with `addressText` in
-    /// its address bar. Returns the window's controller (Safari's `BrowserWindowController`), or nil
-    /// when any step of it did not work — the caller then opens our own window instead.
+    /// Opens one of Safari's browser windows and, if `address` is given, navigates its tab there
+    /// the way Safari does it — through the tab, so that the chrome's own bookkeeping (its label,
+    /// its history, its back-forward list) is written as it would be for any page.
     ///
-    /// Safari's own content controller stays in place and the web view is added to its view:
-    /// replacing the controller means implementing the tab protocol Safari's own one implements
-    /// (`-currentBrowserViewController` and whatever follows it), which buys nothing here.
+    /// What the page loads with is decided elsewhere: `SafariChromeHost` has already given the
+    /// factory that builds Safari's web view configurations the profile's data store, so the web
+    /// view this window creates is Safari's in every respect except whose cookies, storage and
+    /// proxy it uses.
     @discardableResult
-    static func openWindow(embedding webView: WKWebView, addressText: String?) -> NSWindowController? {
+    static func openWindow(address: URL?) -> NSWindowController? {
         guard isAvailable, let windowClass: AnyObject = NSClassFromString("BrowserWindowController") else { return nil }
         let factory = NSSelectorFromString("openEmptyBrowserWindowController")
         guard windowClass.responds(to: factory) else {
@@ -567,32 +568,17 @@ enum SafariChrome {
             log.error("Safari's window factory returned nothing")
             return nil
         }
-        // No restorable state: see the note by the BrowserDocument stub.
+        // Nothing of this window is worth restoring: what opens is the profile's business.
         controller.window?.isRestorable = false
-        guard let tab = firstTab(of: windowClass) else {
-            log.error("Safari's new window reported no tab")
-            return controller
+        if let address, let tab = firstTab(of: windowClass) {
+            let selector = NSSelectorFromString("loadURL:")
+            if tab.responds(to: selector) {
+                _ = tab.perform(selector, with: address as NSURL)
+            }
         }
-        guard let content = tab.perform(NSSelectorFromString("tabContentViewController"))?.takeUnretainedValue() as? NSViewController else {
-            log.error("Safari's tab has no content view controller")
-            return controller
-        }
-        lastHostedTab = tab
-        let host = content.view
-        webView.frame = host.bounds
-        webView.autoresizingMask = [.width, .height]
-        host.addSubview(webView)
-        if let addressText {
-            let selector = NSSelectorFromString("setURLString:")
-            if tab.responds(to: selector) { _ = tab.perform(selector, with: addressText as NSString) }
-        }
-        log.notice("Safari's chrome is up, with our web view in its tab")
+        log.notice("Safari's chrome is up\(address.map { ", at " + $0.absoluteString } ?? "")")
         return controller
     }
-
-    /// The tab the last `openWindow(embedding:addressText:)` put a web view into, so that the
-    /// navigation Safari's chrome drives can be routed to that web view (`SafariChromeHost`).
-    private(set) static weak var lastHostedTab: NSObject?
 
     /// The tab of the window just opened. Safari hands out its tabs per process, newest last.
     private static func firstTab(of windowClass: AnyObject) -> NSObject? {
@@ -622,11 +608,7 @@ extension SafariChrome {
         let address = arguments.firstIndex(of: "--safari-chrome")
             .flatMap { arguments.indices.contains($0 + 1) && !arguments[$0 + 1].hasPrefix("--") ? arguments[$0 + 1] : nil }
             ?? "https://example.com"
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        if let url = URL(string: address) { webView.load(URLRequest(url: url)) }
-        guard let controller = openWindow(embedding: webView, addressText: address) else {
+        guard let controller = openWindow(address: URL(string: address)) else {
             FileHandle.standardError.write(Data("Safari's window did not open; the log says which step\n".utf8))
             exit(1)
         }
