@@ -88,6 +88,7 @@ enum SafariChrome {
     static func prepare() {
         guard isAvailable else { return }
         installExceptionLogging()
+        disableStateRestoration()
         setUpSearchEnginePreferenceObserver()
         bridgeImageLookups()
         bridgeColorLookups()
@@ -127,6 +128,33 @@ enum SafariChrome {
                 """)
             return thrown
         })
+    }
+
+    /// Safari's windows are documents, and macOS keeps asking a document to encode its restorable
+    /// state — a few seconds after a window opens, on every new tab, and on quit. Safari's
+    /// document answers that from state this process does not have: one path threw out of
+    /// `-[BrowserDocument fileType]` (stubbed below), another puts a nil key in a dictionary from
+    /// a block on the main queue, where the stack no longer says who scheduled it.
+    ///
+    /// Rather than chase each one, the whole mechanism is turned off here. A hosted chrome has
+    /// nothing worth restoring: which profile opens, and what it opens, is decided by the profile,
+    /// never by state macOS saved from a previous run.
+    private static func disableStateRestoration() {
+        // The argument domain only: nothing is written to any preferences file.
+        var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        arguments["ApplePersistenceIgnoreState"] = true
+        arguments["NSQuitAlwaysKeepsWindows"] = false
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+
+        // And the encoding itself, for the state AppKit asks for anyway. This process has no
+        // documents of its own, so replacing these on NSDocument affects Safari's and nothing else.
+        for selectorName in ["_encodeRestorableStateWithCoder:backgroundQueue:",
+                             "encodeRestorableStateWithCoder:backgroundQueue:",
+                             "encodeRestorableStateWithCoder:"] {
+            guard let method = class_getInstanceMethod(NSDocument.self, NSSelectorFromString(selectorName)) else { continue }
+            let replacement: @convention(block) (AnyObject) -> Void = { _ in }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
     }
 
     /// `-windowDidLoad` sends new-window telemetry that asserts this observer exists. It accepts a
