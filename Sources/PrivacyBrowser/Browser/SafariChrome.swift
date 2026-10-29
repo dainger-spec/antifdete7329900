@@ -82,7 +82,7 @@ enum SafariChrome {
         guard (applicationClass as AnyObject).responds(to: shared) else { return false }
         _ = (applicationClass as AnyObject).perform(shared)
         let installed = NSApp?.isKind(of: applicationClass) ?? false
-        log.info("NSApp is \(String(describing: NSApp.map { type(of: $0) }), privacy: .public), Safari's own: \(installed, privacy: .public)")
+        log.notice("NSApp is \(String(describing: NSApp.map { type(of: $0) }), privacy: .public), Safari's own: \(installed, privacy: .public)")
         return installed
     }
 
@@ -215,7 +215,7 @@ enum SafariChrome {
             let replacement: @convention(block) (AnyObject) -> AnyObject? = { _ in searchProviders }
             method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
-        log.info("Search providers: \(String(describing: controller.value(forKey: "defaultSearchEngineName")), privacy: .public)")
+        log.notice("Search providers: \(String(describing: controller.value(forKey: "defaultSearchEngineName")), privacy: .public)")
         return controller
     }
 
@@ -407,7 +407,7 @@ enum SafariChrome {
             // that what the nib itself refers to still resolves.
             if let url = nibURL(named: name as String), let data = try? Data(contentsOf: url) {
                 let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
-                log.info("\(name, privacy: .public).nib from \(url.path, privacy: .public)")
+                log.notice("\(name, privacy: .public).nib from \(url.path, privacy: .public)")
                 return NSNib(nibData: data, bundle: owner)
             }
             log.notice("No Safari framework holds \(name, privacy: .public).nib; letting AppKit try \(bundle?.bundlePath ?? "the main bundle", privacy: .public)")
@@ -540,7 +540,7 @@ enum SafariChrome {
             return false
         }
         NSApplication.shared.mainMenu = menu
-        log.info("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
+        log.notice("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
         return true
     }
 
@@ -586,7 +586,7 @@ enum SafariChrome {
             let selector = NSSelectorFromString("setURLString:")
             if tab.responds(to: selector) { _ = tab.perform(selector, with: addressText as NSString) }
         }
-        log.info("Safari's chrome is up, with our web view in its tab")
+        log.notice("Safari's chrome is up, with our web view in its tab")
         return controller
     }
 

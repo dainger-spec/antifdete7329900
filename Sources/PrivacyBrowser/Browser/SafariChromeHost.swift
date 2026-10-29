@@ -59,7 +59,7 @@ enum SafariChromeHost {
                 original(tab, selector, url)
                 return
             }
-            log.info("\(url.absoluteString, privacy: .public) into the profile's web view")
+            log.notice("\(url.absoluteString, privacy: .public) into the profile's web view")
             webView.load(URLRequest(url: url))
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
@@ -111,7 +111,7 @@ enum SafariChromeHost {
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
-        log.info("\(session.profileName, privacy: .public) runs in Safari's chrome")
+        log.notice("\(session.profileName, privacy: .public) runs in Safari's chrome")
         return true
     }
 }

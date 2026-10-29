@@ -33,7 +33,7 @@ enum ProfileSessionHost {
         // Before NSApplication exists: hosting Safari's chrome means this process has to *be* the
         // kind of application its chrome expects, starting with NSApp itself.
         if SafariChromeHost.prepareForChildProcess() {
-            log.info("Safari's chrome is hosted in this process")
+            log.notice("Safari's chrome is hosted in this process")
         }
         let delegate = Delegate(profileID: profileID, masterKeyMaterial: key)
         Self.delegate = delegate
