@@ -211,7 +211,12 @@ final class ProfileManager: ObservableObject {
         runningProfileIDs.insert(id)
         // This launch's lookup (also one made only for the exit IP), else what was found before.
         session.exitLocation = lookup?.location ?? stored.rememberedProxyLocation
-        session.openWindow(url: configuration.startURL)
+        // In a per-profile child process, Safari's own chrome is the window and the profile's web
+        // view is its content (SafariChromeHost); everywhere else, and on a macOS where that is
+        // not available, our own window as before.
+        if !SafariChromeHost.open(session: session, url: configuration.startURL) {
+            session.openWindow(url: configuration.startURL)
+        }
         try? repository.markLaunched(id)
         if lookup == nil, let lookupTask {
             let runningZone = configuration.timeZoneIdentifier

@@ -30,6 +30,11 @@ enum ProfileSessionHost {
             FileHandle.standardError.write(Data("--profile-session expects the vault master key on stdin\n".utf8))
             exit(2)
         }
+        // Before NSApplication exists: hosting Safari's chrome means this process has to *be* the
+        // kind of application its chrome expects, starting with NSApp itself.
+        if SafariChromeHost.prepareForChildProcess() {
+            log.info("Safari's chrome is hosted in this process")
+        }
         let delegate = Delegate(profileID: profileID, masterKeyMaterial: key)
         Self.delegate = delegate
         let application = NSApplication.shared
