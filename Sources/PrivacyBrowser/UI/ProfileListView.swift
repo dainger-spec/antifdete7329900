@@ -73,14 +73,14 @@ struct ProfileListView: View {
             let busy = model.isBusy(profile.id)
             let details = model.details[profile.id]
             let activity: ProfileRowItem.Activity = busy ? (running ? .starting : .sealing) : (running ? .running : .stopped)
-            let robot = model.manager?.isWarmingUp(profile.id) == true ? model.manager?.warmUpRobot(for: profile.id) : nil
+            let warmUp = model.manager?.warmUpStatus(of: profile.id)
             return ProfileRowItem(
                 id: profile.id, name: profile.name, activity: activity,
                 exit: details?.proxyEndpoint.map { ProfileExit.proxy(endpoint: $0, countryCode: details?.exitCountryCode) } ?? .direct,
                 ephemeral: details?.ephemeral ?? false,
                 appearsAs: ProfileRowItem.appearsAs(details?.deviceGeneration ?? DeviceGenerations.resolved(id: nil)),
                 lastUsed: profile.lastLaunchedAt,
-                warmUp: robot.map { ProfileRowItem.WarmUp.live($0) })
+                warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil })
         }
     }
 
@@ -121,12 +121,6 @@ struct ProfileListView: View {
 struct ProfileRowItem: Identifiable {
     enum Activity: Equatable { case stopped, starting, running, sealing }
 
-    /// A warm-up's progress: the live robot (observed), or fixed numbers (previews).
-    enum WarmUp {
-        case live(WarmUpRobot)
-        case fixed(page: Int, of: Int)
-    }
-
     let id: UUID
     var name: String
     var activity: Activity
@@ -134,7 +128,8 @@ struct ProfileRowItem: Identifiable {
     var ephemeral: Bool
     var appearsAs: String
     var lastUsed: Date?
-    var warmUp: WarmUp?
+    /// The warm-up of this profile while one runs, as the profile's process last reported it.
+    var warmUp: WarmUpStatus?
 
     var isRunning: Bool { activity == .running }
     var isBusy: Bool { activity == .starting || activity == .sealing }
@@ -622,12 +617,9 @@ private struct ProfileRow: View {
         case .sealing:
             busyLine(L("profiles.row.encrypting"))
         case .running:
-            switch row.warmUp {
-            case .live(let robot)?:
-                LiveWarmUpLine(robot: robot)
-            case let .fixed(page, total)?:
-                WarmUpLine(page: page, total: total)
-            case nil:
+            if let warmUp = row.warmUp {
+                WarmUpLine(status: warmUp)
+            } else {
                 secondaryLine(L("profiles.row.running"))
             }
         case .stopped:
@@ -740,31 +732,30 @@ struct ExitLabel: View {
     }
 }
 
-/// A warm-up's page count and a progress bar.
+/// A warm-up's progress in the profile's row: which page of how many, a bar, and how many cookies
+/// the run has collected so far — the number the whole thing is for.
 private struct WarmUpLine: View {
-    let page: Int
-    let total: Int
+    let status: WarmUpStatus
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(String(format: L("profiles.row.warmUpShort"), max(page, 1), total))
+            Text(String(format: L("profiles.row.warmUpShort"), status.currentPage, status.total))
                 .font(.lumenSecondary)
                 .foregroundStyle(Theme.accent)
                 .lineLimit(1)
                 .monospacedDigit()
                 .fixedSize()
-            LumenProgressBar(fraction: total > 0 ? Double(page) / Double(total) : 0, width: 48)
+            LumenProgressBar(fraction: status.fraction, width: 48)
+            if status.cookies > 0 {
+                Text(String(format: L("profiles.row.warmUpCookies"), status.cookies))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .monospacedDigit()
+                    .fixedSize()
+            }
         }
-    }
-}
-
-/// The same, following a running robot.
-private struct LiveWarmUpLine: View {
-    @ObservedObject var robot: WarmUpRobot
-
-    var body: some View {
-        WarmUpLine(page: robot.visits.count, total: robot.pageCount)
-            .help(String(format: L("profiles.row.warmingUp"), max(robot.visits.count, 1), robot.pageCount))
+        .help(String(format: L("profiles.row.warmingUp"), status.currentPage, status.total))
     }
 }
 

@@ -72,7 +72,8 @@ final class ProfileProcess {
                       home: URL,
                       languages: [String],
                       locale: String?,
-                      timeZone: String?) throws -> ProfileProcess {
+                      timeZone: String?,
+                      forWarmUpOnly: Bool = false) throws -> ProfileProcess {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
         let process = Process()
@@ -91,6 +92,9 @@ final class ProfileProcess {
         // ...which would take the vault with them, so it is named explicitly (AppEnvironment).
         environment["PRIVACYBROWSER_VAULT_DIR"] = vaultRoot.path
         if let timeZone { environment["TZ"] = timeZone }
+        // Started to warm the profile up and nothing else: it opens no window of its own and
+        // quits when the run ends, which is what seals what the run collected.
+        if forWarmUpOnly { environment["PB_WARM_UP_ONLY"] = "1" }
         environment.removeValue(forKey: "PB_PROFILE_PROCESS")
         process.environment = environment
 

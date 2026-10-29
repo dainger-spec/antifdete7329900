@@ -31,6 +31,10 @@ final class ProfileManager: ObservableObject {
     /// A warm-up run of a profile moved on: another page visited, or it finished. The per-profile
     /// process reports it to the manager over the channel (`ProfileChannel`).
     var onWarmUpProgress: ((UUID) -> Void)?
+    /// This manager is the one inside a profile's own process (`ProfileSessionHost`), where the
+    /// process *is* the profile: ending a warm-up there means quitting, which the host does, so
+    /// this manager does not stop the profile itself.
+    var runsInProfileProcess = false
     /// A profile's stored configuration changed outside the editor (a proxy lookup remembered a
     /// new exit location): the Profiles list shows it.
     var onConfigurationChanged: ((UUID) -> Void)?
@@ -64,8 +68,10 @@ final class ProfileManager: ObservableObject {
     private var lookupsInFlight: Set<UUID> = []
     /// The session warm-up robot of each profile that used one since unlock.
     private var warmUpRobots: [UUID: WarmUpRobot] = [:]
-    /// What the last warm-up run of a profile in its own process collected, for the profile list.
-    private var warmUpCookies: [UUID: Int] = [:]
+    /// Where the warm-up of each profile running in its own process has got to, as that process
+    /// last reported it. The one the manager keeps for a profile it runs itself comes from the
+    /// robot instead (`warmUpStatus(of:)`).
+    private var reportedWarmUp: [UUID: WarmUpStatus] = [:]
 
     /// A lookup through a profile's proxy is still running (self-test hook).
     var hasProxyLookupsInFlight: Bool { !lookupsInFlight.isEmpty }
@@ -107,9 +113,14 @@ final class ProfileManager: ObservableObject {
 
     // MARK: Launch
 
-    func launch(_ id: UUID) async throws {
+    func launch(_ id: UUID, openingWindow: Bool = true) async throws {
         guard !isShuttingDown else { return }
         if let session = sessions[id] {
+            // A profile that is only being warmed up has no window yet: a launch now gives it one.
+            if !session.hasVisibleWindow, openingWindow,
+               !SafariChromeHost.open(session: session, url: session.configuration.startURL) {
+                session.openWindow(url: session.configuration.startURL)
+            }
             session.bringToFront()
             return
         }
@@ -126,7 +137,7 @@ final class ProfileManager: ObservableObject {
         let key = try repository.profileKey(for: id)
         let stored = try repository.loadConfiguration(id, key: key)
         if ProfileProcess.isEnabled {
-            try startInOwnProcess(id, summary: summary, stored: stored)
+            try startInOwnProcess(id, summary: summary, stored: stored, forWarmUpOnly: !openingWindow)
             return
         }
         // Refuse a proxy that cannot be applied before decrypting anything: the profile must not
@@ -223,8 +234,9 @@ final class ProfileManager: ObservableObject {
         session.exitLocation = lookup?.location ?? stored.rememberedProxyLocation
         // In a per-profile child process, Safari's own chrome is the window and the profile's web
         // view is its content (SafariChromeHost); everywhere else, and on a macOS where that is
-        // not available, our own window as before.
-        if !SafariChromeHost.open(session: session, url: configuration.startURL) {
+        // not available, our own window as before. A launch for a warm-up opens none: the robot
+        // browses in a window of its own that the user never sees.
+        if openingWindow, !SafariChromeHost.open(session: session, url: configuration.startURL) {
             session.openWindow(url: configuration.startURL)
         }
         try? repository.markLaunched(id)
@@ -250,7 +262,8 @@ final class ProfileManager: ObservableObject {
     /// so they have to be known before it exists; the child looks the proxy up again and a changed
     /// answer applies at its next launch. For a profile that does not follow its proxy, the user's
     /// own languages, as Safari uses them.
-    private func startInOwnProcess(_ id: UUID, summary: ProfileSummary, stored: ProfileConfiguration) throws {
+    private func startInOwnProcess(_ id: UUID, summary: ProfileSummary, stored: ProfileConfiguration,
+                                   forWarmUpOnly: Bool = false) throws {
         guard let executable = Bundle.main.executableURL else { throw CoreError.corruptData("no executable path") }
         let location = stored.needsProxyLocation ? stored.rememberedProxyLocation : nil
         let languages = location.map { [$0.webLanguage] } ?? WebContentLanguage.systemLanguages
@@ -266,7 +279,8 @@ final class ProfileManager: ObservableObject {
             home: safariHomeVault.homeDirectory(for: id),
             languages: languages,
             locale: languages.first.map { $0.replacingOccurrences(of: "-", with: "_") },
-            timeZone: stored.timeZoneIdentifier ?? location?.timeZoneIdentifier)
+            timeZone: stored.timeZoneIdentifier ?? location?.timeZoneIdentifier,
+            forWarmUpOnly: forWarmUpOnly)
         child.onEvent = { [weak self] event in
             guard let self else { return }
             switch event {
@@ -274,23 +288,20 @@ final class ProfileManager: ObservableObject {
                 self.onError?(message)
             case .running:
                 self.objectWillChange.send()
-            case .warmUpProgress(let visited, let total):
-                self.warmUpProgress[id] = (visited, total)
-                self.objectWillChange.send()
-            case .warmUpFinished:
-                self.warmUpProgress[id] = nil
+            case .warmUp(let status):
+                self.reportedWarmUp[id] = status
+                self.onWarmUpProgress?(id)
                 self.objectWillChange.send()
             case .cookiesImported(let accepted, let refused):
                 self.log.notice("Profile \(id.uuidString, privacy: .public) imported \(accepted, privacy: .public) cookies, \(refused, privacy: .public) refused")
-            case .cookiesCollected(let count):
-                self.warmUpCookies[id] = count
-                self.objectWillChange.send()
             }
         }
         child.onExit = { [weak self] status in
             guard let self, self.children[id] === child else { return }
             self.children[id] = nil
             self.runningProfileIDs.remove(id)
+            // A warm-up cannot outlive the process it ran in; what it collected is still shown.
+            if self.reportedWarmUp[id]?.isRunning == true { self.reportedWarmUp[id]?.phase = .stopped }
             // Nothing holds those files now.
             do {
                 try self.safariHomeVault.seal(profileID: id, key: key)
@@ -551,6 +562,7 @@ final class ProfileManager: ObservableObject {
         await webDataVault.deleteData(profileID: id)
         safariHomeVault.delete(profileID: id)
         warmUpRobots[id] = nil
+        reportedWarmUp[id] = nil
         try repository.delete(id)
     }
 
@@ -566,26 +578,46 @@ final class ProfileManager: ObservableObject {
         if let robot = warmUpRobots[id] { return robot }
         let robot = WarmUpRobot(profileID: id)
         robot.onProgress = { [weak self] in
-            self?.objectWillChange.send()
-            self?.onWarmUpProgress?(id)
+            guard let self else { return }
+            self.objectWillChange.send()
+            self.onWarmUpProgress?(id)
+            // Started for the warm-up alone, so it has no window of its own: the run is over, so
+            // the profile stops, and stopping is what seals what it collected. (In a profile's own
+            // process that quit is the process's; see ProfileSessionHost.)
+            if !self.runsInProfileProcess, let robot = self.warmUpRobots[id], !robot.isRunning, robot.state != .idle,
+               let session = self.sessions[id], !session.hasVisibleWindow {
+                Task { @MainActor [weak self] in try? await self?.stop(id) }
+            }
         }
         warmUpRobots[id] = robot
         return robot
     }
 
-    /// A warm-up robot of a profile is running (the profile list shows it).
-    func isWarmingUp(_ id: UUID) -> Bool {
-        if let progress = warmUpProgress[id] { return progress.visited < progress.total }
-        return warmUpRobots[id]?.isRunning ?? false
+    /// Where the profile's warm-up has got to, wherever it runs: from its own process, what that
+    /// process last reported; in the manager's process, the robot's own state. Nil when this
+    /// profile has not been warmed up since unlock.
+    func warmUpStatus(of id: UUID) -> WarmUpStatus? {
+        if children[id] != nil { return reportedWarmUp[id] }
+        guard let robot = warmUpRobots[id], robot.state != .idle else { return reportedWarmUp[id] }
+        return robot.status
     }
 
-    /// How far the warm-up of a profile running in its own process has got, and how many cookies
-    /// the last finished run of it collected: both come over the channel, since the robot itself
-    /// is in that process.
-    func warmUpProgress(of id: UUID) -> (visited: Int, total: Int)? { warmUpProgress[id] }
-    func warmUpCookiesCollected(of id: UUID) -> Int? { warmUpCookies[id] }
+    /// The pages of a warm-up running in this process, one by one, for the warm-up screen's list.
+    /// Empty for a profile in its own process: what that run reports is `warmUpStatus`.
+    func warmUpVisits(of id: UUID) -> [WarmUpVisit] {
+        children[id] == nil ? (warmUpRobots[id]?.visits ?? []) : []
+    }
 
-    private var warmUpProgress: [UUID: (visited: Int, total: Int)] = [:]
+    /// Stops the profile's warm-up, wherever it runs. The profile itself keeps running.
+    func stopWarmUp(_ id: UUID) {
+        if let child = children[id] {
+            child.send(.stopWarmUp)
+            if reportedWarmUp[id]?.isRunning == true { reportedWarmUp[id]?.phase = .stopped }
+            objectWillChange.send()
+            return
+        }
+        warmUpRobots[id]?.stop()
+    }
 
     /// Starts `plan` in the running profile. False when the profile is not running, or the robot
     /// cannot start (already running, nothing to visit).
@@ -598,8 +630,8 @@ final class ProfileManager: ObservableObject {
             // never starts.
             let pages = plan.pages().pages.count
             guard pages > 0 else { return false }
-            warmUpProgress[id] = (0, pages)
-            warmUpCookies[id] = nil
+            reportedWarmUp[id] = WarmUpStatus(phase: .running, visited: 0, total: pages,
+                                              secondsRemaining: Double(pages) * plan.secondsPerPage)
             child.send(.startWarmUp(plan))
             objectWillChange.send()
             return true

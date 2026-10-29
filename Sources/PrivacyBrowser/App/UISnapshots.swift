@@ -306,7 +306,7 @@ enum UISnapshots {
                            appearsAs: mac, lastUsed: now),
             ProfileRowItem(id: id(2), name: "Northwind", activity: .running,
                            exit: .proxy(endpoint: "proxy.northwind.example:1080", countryCode: "DE"), ephemeral: false,
-                           appearsAs: mac, lastUsed: now, warmUp: .fixed(page: 3, of: 12)),
+                           appearsAs: mac, lastUsed: now, warmUp: WarmUpStatus(phase: .running, visited: 3, total: 12, cookies: 84)),
             ProfileRowItem(id: id(3), name: "Launch Review", activity: .starting,
                            exit: .proxy(endpoint: "us-east.gateway.example:8080", countryCode: "US"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-3_600)),

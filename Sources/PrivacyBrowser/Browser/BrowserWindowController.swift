@@ -25,6 +25,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private let library: ProfileLibrary
 
     private(set) var tabs: [BrowserTab] = []
+    /// The window the warm-up robot browses in (`BrowserSession.openOffscreenWindow`): invisible,
+    /// not one of the profile's own, and closing it is not the profile's last window closing.
+    var isForWarmUp = false
     private var selectedIndex = 0
     /// URLs of recently closed tabs, most recent last (⇧⌘T).
     private var recentlyClosed: [URL] = []

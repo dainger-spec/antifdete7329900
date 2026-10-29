@@ -24,6 +24,7 @@ enum ProfileCommand: Codable {
     case showPasswords
     case importCookies([ImportedCookie])
     case startWarmUp(WarmUpPlan)
+    case stopWarmUp
 }
 
 enum ProfileEvent: Codable {
@@ -31,11 +32,10 @@ enum ProfileEvent: Codable {
     case error(String)
     /// The profile is up and its first window is on screen.
     case running
-    case warmUpProgress(visited: Int, total: Int)
-    case warmUpFinished(completed: Bool)
+    /// Where the warm-up of this profile has got to; sent as the run goes on, and once more when
+    /// it ends. Everything the warm-up screen and the profile list show comes from here.
+    case warmUp(WarmUpStatus)
     case cookiesImported(accepted: Int, refused: Int)
-    /// How many cookies a finished warm-up run added to the profile.
-    case cookiesCollected(Int)
 }
 
 /// One line of JSON per message, and a prefix on the way back so that Safari's own output on the

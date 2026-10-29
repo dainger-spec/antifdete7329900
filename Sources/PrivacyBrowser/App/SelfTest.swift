@@ -1815,9 +1815,14 @@ final class SelfTest {
         robot.limits.pauseOverride = 0.2...0.2
         let jumpStarted = Date()
         manager.startWarmUp(profile.id, plan: jump)
-        let jumped = await waitUntil(timeout: 20) { robot.state != .running }
+        // The address the robot's own tab last showed, read while the run is on: the warm-up
+        // browses in a window of its own that is closed when the run ends.
+        var jumpShown: URL?
+        let jumped = await waitUntil(timeout: 20) {
+            if let url = robot.currentTab?.url { jumpShown = url }
+            return robot.state != .running
+        }
         let jumpTime = Date().timeIntervalSince(jumpStarted)
-        let jumpShown = manager.session(for: profile.id)?.frontmostWindow?.selectedTab?.url
         check("warm-up: an address that only jumps within the page shown counts as visited at once (no new page comes for it), also when the page rewrites the fragment",
               jumped && robot.state == .finished && robot.visits.map(\.outcome) == [.loaded, .loaded] && jumpTime < 10
                   && jumpShown?.fragment == "/part",
@@ -1841,7 +1846,7 @@ final class SelfTest {
         // Its tab closed by the user.
         manager.startWarmUp(profile.id, plan: long)
         _ = await waitUntil(timeout: 20) { robot.visits.first?.outcome == .loaded }
-        if let tab = robot.currentTab, let controller = manager.session(for: profile.id)?.frontmostWindow,
+        if let tab = robot.currentTab, let controller = manager.session(for: profile.id)?.window(of: tab),
            let index = controller.tabs.firstIndex(where: { $0 === tab }) {
             controller.closeTab(at: index)
         }

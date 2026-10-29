@@ -196,6 +196,7 @@ final class BrowserSession {
     @discardableResult
     func openOffscreenWindow() -> BrowserWindowController {
         let controller = BrowserWindowController(session: self)
+        controller.isForWarmUp = true
         windows.append(controller)
         if let window = controller.window {
             // Not moved off screen: AppKit pulls an ordinary window back onto a screen when it is
@@ -224,11 +225,21 @@ final class BrowserSession {
         }
     }
 
-    /// The profile's window nearest the front (the warm-up robot opens its tab there).
+    /// The profile's window nearest the front. Never the warm-up's own window, which the user
+    /// cannot see: a new tab, or bringing the profile forward, has no business going there.
     var frontmostWindow: BrowserWindowController? {
+        let shown = windows.filter { !$0.isForWarmUp }
         let ordered = NSApp.orderedWindows.compactMap { $0.windowController as? BrowserWindowController }
-        return ordered.first { controller in windows.contains { $0 === controller } } ?? windows.last
+        return ordered.first { controller in shown.contains { $0 === controller } } ?? shown.last
     }
+
+    /// The window `tab` is in, the warm-up's own included.
+    func window(of tab: BrowserTab) -> BrowserWindowController? {
+        windows.first { controller in controller.tabs.contains { $0 === tab } }
+    }
+
+    /// A window of this profile that the user can see. False while it is only being warmed up.
+    var hasVisibleWindow: Bool { windows.contains { !$0.isForWarmUp } }
 
     /// The tab showing `webView`, in any window of this profile.
     func tab(for webView: WKWebView) -> BrowserTab? {
@@ -240,9 +251,11 @@ final class BrowserSession {
 
     func windowDidClose(_ controller: BrowserWindowController) {
         windows.removeAll { $0 === controller }
-        if windows.isEmpty && !isClosing {
-            onAllWindowsClosed?()
-        }
+        // The warm-up's own window is none of the user's: its closing is not the profile's last
+        // window closing, and a profile that is only being warmed up has not lost a window at all.
+        // (Without this, a warm-up ending would have quit a profile the user was browsing in.)
+        guard !isClosing, !controller.isForWarmUp, !hasVisibleWindow else { return }
+        onAllWindowsClosed?()
     }
 
     func bringToFront() {

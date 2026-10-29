@@ -258,10 +258,10 @@ final class AppModel: ObservableObject {
         refresh()
     }
 
-    func launch(_ id: UUID) async {
+    func launch(_ id: UUID, openingWindow: Bool = true) async {
         // A launch reads the files sync replaces (settings, synced cookies): after the sync.
         while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
-        await perform { try await self.manager?.launch(id) }
+        await perform { try await self.manager?.launch(id, openingWindow: openingWindow) }
         refresh()
     }
 
@@ -314,7 +314,10 @@ final class AppModel: ObservableObject {
         }
         // Starting or being encrypted (a launch or a stop under way): let that finish first.
         while manager.busyProfileIDs.contains(id) { try? await Task.sleep(nanoseconds: 100_000_000) }
-        if !manager.isRunning(id) { await launch(id) }
+        // A profile that is not running is started for the warm-up alone: no window of its own
+        // appears, the robot browses in one the user never sees, and when the run ends the profile
+        // stops and seals again. This is what "warm up without a window in my face" means.
+        if !manager.isRunning(id) { await launch(id, openingWindow: false) }
         // The manager of this unlock: a Lock while the profile started ends it.
         guard let current = self.manager, current === manager, current.isRunning(id) else { return false }
         guard current.startWarmUp(id, plan: plan) else {
@@ -323,6 +326,11 @@ final class AppModel: ObservableObject {
             return false
         }
         return true
+    }
+
+    /// Stops the profile's warm-up; the profile keeps running.
+    func stopWarmUp(_ id: UUID) {
+        manager?.stopWarmUp(id)
     }
 
     /// Whether `password` is the master password (asked before saved passwords are shown).

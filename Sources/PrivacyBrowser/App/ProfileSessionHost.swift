@@ -47,7 +47,11 @@ enum ProfileSessionHost {
         Self.delegate = delegate
         let application = NSApplication.shared
         application.delegate = delegate
-        application.setActivationPolicy(.regular)
+        // A process started only to warm a profile up stays out of the Dock and out of ⌘-Tab: the
+        // user asked for a warm-up, not for an app. It becomes an ordinary one the moment a window
+        // of the profile is asked for. (Its robot then scrolls from its own script world rather
+        // than with wheel events, which need a key window; the robot reports which it used.)
+        application.setActivationPolicy(ProcessInfo.processInfo.environment["PB_WARM_UP_ONLY"] == "1" ? .accessory : .regular)
         application.run()
     }
 
@@ -69,6 +73,16 @@ enum ProfileSessionHost {
         private var manager: ProfileManager?
         private var quitCoordinator: QuitCoordinator?
         private var terminationSource: DispatchSourceSignal?
+        /// This process was started to warm the profile up and nothing else: it opens no window,
+        /// and when the run ends it quits, which is what seals what the run collected.
+        private let isForWarmUpOnly = ProcessInfo.processInfo.environment["PB_WARM_UP_ONLY"] == "1"
+        /// A window of the profile has been opened (at launch, or asked for since).
+        private var showedWindow = false
+        /// The profile's session exists and commands can be acted on.
+        private var isReady = false
+        /// Commands that arrived before it did, in the order they came: the manager sends them as
+        /// soon as this process exists, which is before the profile is launched inside it.
+        private var pendingCommands: [ProfileCommand] = []
 
         init(profileID: UUID, masterKeyMaterial: Data) {
             self.profileID = profileID
@@ -96,6 +110,7 @@ enum ProfileSessionHost {
                 }
                 let repository = try ProfileRepository(vault: vault)
                 let manager = ProfileManager(repository: repository)
+                manager.runsInProfileProcess = true
                 manager.onError = { message in
                     ProfileSessionHost.log.error("\(message, privacy: .public)")
                     // Shown by the manager, which is where the user is looking.
@@ -104,14 +119,15 @@ enum ProfileSessionHost {
                 // The profile's last window closed: this process exists for that profile only, so
                 // it quits — and quitting is what seals the data.
                 manager.onReturnToProfiles = { MainActor.assumeIsolated { NSApp.terminate(nil) } }
-                manager.onWarmUpProgress = { [weak manager] id in
+                manager.onWarmUpProgress = { [weak self, weak manager] id in
                     guard let robot = manager?.warmUpRobot(for: id) else { return }
-                    let visited = robot.visits.filter { $0.outcome != nil }.count
-                    if robot.isRunning {
-                        ProfileSessionHost.send(.warmUpProgress(visited: visited, total: robot.pageCount))
-                    } else {
-                        ProfileSessionHost.send(.warmUpFinished(completed: visited >= robot.pageCount))
-                        ProfileSessionHost.send(.cookiesCollected(robot.cookiesCollected))
+                    let status = robot.status
+                    ProfileSessionHost.send(.warmUp(status))
+                    // Warmed up and nothing has asked for a window: there is nothing left for this
+                    // process to do, and quitting is what seals the cookies the run collected.
+                    if let self, self.isForWarmUpOnly, !self.showedWindow, !status.isRunning {
+                        ProfileSessionHost.log.notice("The warm-up is over and this profile has no window: quitting")
+                        NSApp.terminate(nil)
                     }
                 }
                 self.manager = manager
@@ -124,8 +140,14 @@ enum ProfileSessionHost {
                     terminate: { NSApp.terminate(nil) })
                 Task { @MainActor in
                     do {
-                        try await manager.launch(self.profileID)
+                        try await manager.launch(self.profileID, openingWindow: !self.isForWarmUpOnly)
+                        self.showedWindow = !self.isForWarmUpOnly
+                        self.isReady = true
                         ProfileSessionHost.send(.running)
+                        // Whatever the manager asked for while the profile was still starting.
+                        let waiting = self.pendingCommands
+                        self.pendingCommands = []
+                        for command in waiting { self.handle(command) }
                     } catch {
                         ProfileSessionHost.log.error("Launching \(self.profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
                         NSApp.terminate(nil)
@@ -140,20 +162,25 @@ enum ProfileSessionHost {
         /// What the manager asked for. Anything that needs the profile's session waits until it
         /// exists: a command can arrive while the launch is still running.
         private func handle(_ command: ProfileCommand) {
+            // Only quitting can be done before the profile is launched; everything else needs its
+            // session, and waits for it rather than being refused. (A warm-up asked for while the
+            // profile was still starting used to be dropped, which looked like a warm-up that
+            // simply did nothing.)
+            if !isReady, !isImmediate(command) {
+                pendingCommands.append(command)
+                return
+            }
             switch command {
             case .stop:
                 NSApp.terminate(nil)
             case .activate:
                 NSApp.activate(ignoringOtherApps: true)
-                manager?.session(for: profileID)?.bringToFront()
+                guard let session = manager?.session(for: profileID) else { return }
+                if showedWindow { session.bringToFront() } else { openWindow(of: session) }
             case .openWindow:
                 NSApp.activate(ignoringOtherApps: true)
                 guard let session = manager?.session(for: profileID) else { return }
-                // In Safari's chrome a window is Safari's to open, and it comes up with the
-                // profile's data like every other (SafariChromeHost).
-                if !SafariChromeHost.open(session: session, url: nil) {
-                    session.openWindow(url: nil)
-                }
+                openWindow(of: session)
             case .showLibrary(let section):
                 guard let section = LibraryView.Section(rawValue: section) else { return }
                 manager?.showLibrary(profileID, section: section)
@@ -174,11 +201,36 @@ enum ProfileSessionHost {
                         ProfileSessionHost.send(.error(L("cookies.error.busy")))
                     }
                 }
+            case .stopWarmUp:
+                manager?.stopWarmUp(profileID)
             case .startWarmUp(let plan):
                 if manager?.startWarmUp(profileID, plan: plan) != true {
                     ProfileSessionHost.log.error("Warm-up of \(self.profileID.uuidString, privacy: .public) did not start")
-                    ProfileSessionHost.send(.warmUpFinished(completed: false))
+                    let pages = plan.pages().pages.count
+                    ProfileSessionHost.send(.warmUp(WarmUpStatus(phase: .stopped, visited: 0, total: pages)))
+                    // Nothing else was asked of this process, so it has nothing left to do —
+                    // unless a run is already going, which is one reason a second one is refused.
+                    if isForWarmUpOnly, !showedWindow, manager?.warmUpStatus(of: profileID)?.isRunning != true {
+                        NSApp.terminate(nil)
+                    }
                 }
+            }
+        }
+
+        /// Whether a command can be acted on before the profile's session exists.
+        private func isImmediate(_ command: ProfileCommand) -> Bool {
+            if case .stop = command { return true }
+            return false
+        }
+
+        /// A window of the profile. In Safari's chrome a window is Safari's to open, and it comes
+        /// up with the profile's data like every other (`SafariChromeHost`). From here on this
+        /// process has a window of its own, so a warm-up ending no longer quits it.
+        private func openWindow(of session: BrowserSession) {
+            showedWindow = true
+            if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
+            if !SafariChromeHost.open(session: session, url: nil) {
+                session.openWindow(url: nil)
             }
         }
 

@@ -166,3 +166,58 @@ public enum WarmUpPresets {
 
     public static func preset(id: String) -> WarmUpPreset? { all.first { $0.id == id } }
 }
+
+extension WarmUpPresets {
+    /// The country preset for an ISO 3166-1 alpha-2 code, when the app ships one.
+    public static func country(_ code: String?) -> WarmUpPreset? {
+        guard let code, !code.isEmpty else { return nil }
+        return countries.first { $0.id.caseInsensitiveCompare(code) == .orderedSame }
+    }
+
+    /// A list put together here, from what the profile already says about itself: the country its
+    /// proxy exits in, and the kinds of browsing chosen on the screen. The country's own sites
+    /// lead and come twice as often as the rest, because that is what the profile is meant to look
+    /// like; the order is shuffled within that, so two runs of the same choice are not the same
+    /// list.
+    ///
+    /// Put together here, in the app: nothing is asked of any service and nothing about the
+    /// profile leaves this Mac. A question like "sites for a German shopping profile" would tell a
+    /// service more about the profile than the warm-up could gain from the answer.
+    public static func composed(countryCode: String?, interests: [WarmUpPreset], name: String,
+                                shuffle: ([String]) -> [String] = { $0.shuffled() }) -> WarmUpPreset {
+        let local = country(countryCode)
+        var localSites = shuffle(local?.addresses ?? [])
+        var otherSites = shuffle(interests.flatMap(\.addresses) + (local == nil ? general.addresses : []))
+        var addresses: [String] = []
+        var seen: Set<String> = []
+        // Two of the country's sites, then one of the rest, until both are spent.
+        while !localSites.isEmpty || !otherSites.isEmpty {
+            for _ in 0..<2 where !localSites.isEmpty {
+                let site = localSites.removeFirst()
+                if seen.insert(site).inserted { addresses.append(site) }
+            }
+            if !otherSites.isEmpty {
+                let site = otherSites.removeFirst()
+                if seen.insert(site).inserted { addresses.append(site) }
+            }
+        }
+        let searches = shuffle((local?.searches ?? []) + interests.flatMap(\.searches))
+        return WarmUpPreset(id: "composed", name: name, group: .general,
+                            addresses: Array(addresses.prefix(WarmUpPlan.maximumPages)), searches: searches)
+    }
+}
+
+extension WarmUpPlan {
+    /// What one page of *this* plan costs on average — its own times, not a quality's — so that a
+    /// hand-written plan gets an estimate too.
+    public var secondsPerPage: TimeInterval {
+        let inLimits = normalized
+        let middle = (inLimits.minimumDwell + inLimits.maximumDwell) / 2
+        return middle + 3 + (followLinks ? middle + 3 : 0)
+    }
+
+    /// Roughly how long a run of this plan takes, for the warm-up screen to show before it starts.
+    public var estimatedSeconds: TimeInterval {
+        Double(pages().pages.count) * secondsPerPage
+    }
+}

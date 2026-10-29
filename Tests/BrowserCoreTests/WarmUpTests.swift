@@ -221,3 +221,95 @@ final class WarmUpStorageTests: XCTestCase {
         XCTAssertEqual(Set(report.pushed), ["index", "profile/\(id.uuidString)/config"])
     }
 }
+
+/// The ready-made lists, the two dials over them, and what a plan made from them visits.
+final class WarmUpPresetTests: XCTestCase {
+    func testEveryShippedPresetIsUsableAsIs() {
+        XCTAssertFalse(WarmUpPresets.all.isEmpty)
+        for preset in WarmUpPresets.all {
+            XCTAssertFalse(preset.addresses.isEmpty, "\(preset.id) has no sites")
+            let plan = WarmUpPlan(addresses: preset.addresses.joined(separator: "\n"))
+            let reading = plan.pages()
+            XCTAssertEqual(reading.problems.count, 0,
+                           "\(preset.id): \(reading.problems.map(\.text))")
+            XCTAssertEqual(reading.pages.count, preset.addresses.count, preset.id)
+            XCTAssertEqual(Set(preset.addresses).count, preset.addresses.count, "\(preset.id) lists a site twice")
+        }
+        // Every country list is named by its ISO 3166-1 alpha-2 code, which is how the screen
+        // finds the one for a profile's exit country and draws its flag.
+        for preset in WarmUpPresets.countries {
+            XCTAssertEqual(preset.id.count, 2, preset.id)
+            XCTAssertEqual(preset.id, preset.id.lowercased(), preset.id)
+            XCTAssertNotNil(WarmUpPresets.country(preset.id.uppercased()))
+        }
+    }
+
+    func testTheTimeGivenDecidesHowManySitesAreVisitedAndTheQualityHowLongEachTakes() {
+        let quick = WarmUpPlan.from(preset: WarmUpPresets.general, minutes: 10, quality: .quick)
+        let deep = WarmUpPlan.from(preset: WarmUpPresets.general, minutes: 10, quality: .deep)
+        XCTAssertGreaterThan(quick.pages().pages.count, deep.pages().pages.count,
+                             "the same ten minutes read fewer pages, more closely")
+        XCTAssertEqual(deep.minimumDwell, WarmUpQuality.deep.dwell.lowerBound)
+        XCTAssertTrue(deep.followLinks)
+        XCTAssertFalse(quick.scroll)
+        // What fits is what runs: the estimate for the plan stays inside the time given.
+        for minutes in [5, 20, 60] {
+            for quality in WarmUpQuality.allCases {
+                let plan = WarmUpPlan.from(preset: WarmUpPresets.general, minutes: minutes, quality: quality)
+                XCTAssertGreaterThan(plan.pages().pages.count, 0, "\(minutes) min, \(quality)")
+                XCTAssertLessThanOrEqual(plan.estimatedSeconds, TimeInterval(minutes * 60) + plan.secondsPerPage,
+                                         "\(minutes) min, \(quality)")
+            }
+        }
+    }
+
+    func testAComposedListLeadsWithTheProxysCountryAndMixesInWhatWasChosen() {
+        let preset = WarmUpPresets.composed(countryCode: "de", interests: [WarmUpPresets.shopping],
+                                            name: "mine", shuffle: { $0 })
+        let german = Set(WarmUpPresets.country("de")!.addresses)
+        XCTAssertEqual(Array(preset.addresses.prefix(2)), Array(WarmUpPresets.country("de")!.addresses.prefix(2)))
+        XCTAssertTrue(preset.addresses.contains(where: WarmUpPresets.shopping.addresses.contains))
+        XCTAssertEqual(Set(preset.addresses).count, preset.addresses.count, "a site is listed once")
+        // Two of the country's own sites for every one of the rest, as long as it has them.
+        let first = preset.addresses.prefix(6)
+        XCTAssertEqual(first.filter(german.contains).count, 4)
+        XCTAssertTrue(preset.searches.contains(where: WarmUpPresets.country("de")!.searches.contains))
+    }
+
+    func testAComposedListFallsBackToTheEverydayOneWithoutAKnownCountry() {
+        for code in [nil, "", "zz"] as [String?] {
+            let preset = WarmUpPresets.composed(countryCode: code, interests: [], name: "mine", shuffle: { $0 })
+            XCTAssertEqual(preset.addresses, WarmUpPresets.general.addresses, "code=\(code ?? "nil")")
+        }
+    }
+
+    func testTheChoiceIsKeptWithThePlanSoTheScreenOpensWhereItWasLeft() throws {
+        let choice = WarmUpChoice(source: .composed, presetID: "general", interestIDs: ["work"], minutes: 45, quality: .deep)
+        let plan = try XCTUnwrap(choice.plan(countryCode: "fr", composedName: "mine"))
+        XCTAssertEqual(plan.choice, choice)
+        XCTAssertEqual(plan.followLinks, true)
+        let restored = try JSONDecoder().decode(WarmUpPlan.self, from: JSONEncoder().encode(plan))
+        XCTAssertEqual(restored.choice, choice)
+        XCTAssertNotNil(choice.plan(countryCode: nil), "a composed choice has a list even without a country")
+        XCTAssertNil(WarmUpChoice(source: .manual).plan(countryCode: "fr"), "a hand-written list is the plan's own")
+    }
+
+    func testAPlanSavedBeforeTheScreenHadReadyMadeListsStillReads() throws {
+        let json = Data("""
+            {"addresses":"example.com","searchQuery":"","minimumDwell":5,"maximumDwell":15,"scroll":true,"followLinks":false}
+            """.utf8)
+        let plan = try JSONDecoder().decode(WarmUpPlan.self, from: json)
+        XCTAssertNil(plan.choice)
+        XCTAssertEqual(plan.pages().pages.count, 1)
+    }
+
+    func testTheStatusSaysHowFarAlongARunIs() {
+        var status = WarmUpStatus(phase: .running, visited: 3, total: 12, failed: 1, cookies: 84, secondsRemaining: 300)
+        XCTAssertEqual(status.fraction, 0.25)
+        XCTAssertTrue(status.isRunning)
+        status.phase = .finished
+        XCTAssertFalse(status.isRunning)
+        XCTAssertEqual(WarmUpStatus(phase: .running, visited: 0, total: 0).fraction, 0, "no pages, no bar")
+        XCTAssertEqual(WarmUpStatus(phase: .finished, visited: 20, total: 12).fraction, 1, "never past the end")
+    }
+}
