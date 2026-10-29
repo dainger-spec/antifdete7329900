@@ -129,6 +129,7 @@ final class SelfTest {
             try await proxyLocationAtLaunch(repository)
             try await socksProfilesSideBySide(repository)
             try await proxyLookupAndExitIP(repository)
+            try await proxyChecker(repository)
             try await tabsAndLibrary(repository)
             try await windowLifecycle(repository)
             try await dialogTeardown(repository)
@@ -1270,6 +1271,114 @@ final class SelfTest {
               quiet.isEmpty && optionOff && !ipKept, "\(quiet) | \(String(describing: unwatchedStored.lastProxyLocation))")
         try repository.delete(watched.id)
         try repository.delete(unwatched.id)
+    }
+
+    // MARK: The proxy list's checker
+
+    /// The proxy list's checker (`ProxyChecker`) against the self-test proxy, whose stand-in
+    /// geolocation service (`/pb-geo.json`) only answers through it:
+    ///   * a working proxy is alive, with the exit IP, country and time zone the service saw and a
+    ///     latency;
+    ///   * an unreachable proxy, and one whose host does not resolve, are dead — and a real website
+    ///     among the services, which a request made directly would reach, did not answer either, nor
+    ///     was any connection made but to the proxy: a dead proxy is never gone around;
+    ///   * a proxy that wants credentials it was not given is dead for that reason, and settings
+    ///     that cannot be applied are not checked at all (no request is made);
+    ///   * the list's model checks several at a time and keeps each result with its proxy,
+    ///     encrypted; a profile given a checked proxy knows at once where it exits.
+    private func proxyChecker(_ repository: ProfileRepository) async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("proxy checker checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let services = ProxyGeoLookup.services
+        let timeout = ProxyChecker.timeout
+        let concurrentChecks = ProxyChecker.concurrentChecks
+        defer {
+            ProxyGeoLookup.services = services
+            ProxyChecker.timeout = timeout
+            ProxyChecker.concurrentChecks = concurrentChecks
+        }
+        ProxyGeoLookup.services = [
+            .init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json?ip=203.0.113.21")!,
+                  timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
+            // A real website, as the fail-closed checks above use one: a request made directly would
+            // reach it and be answered, so any answer through a dead proxy would have gone around it.
+            .init(url: URL(string: "https://example.com/")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
+        ]
+        ProxyChecker.timeout = 8
+
+        let working = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let alive = await ProxyChecker.lookUp(working)
+        let aliveResult = ProxyChecker.result(of: alive)
+        info("proxy checker: through the working proxy \(aliveResult), on \(alive?.connections.map(\.description) ?? [])")
+        check("proxy checker: a working proxy is alive, with the exit IP, country and time zone the service saw through it, and a latency",
+              aliveResult.isAlive && aliveResult.exitIP == "203.0.113.21" && aliveResult.countryCode == "DE"
+                  && aliveResult.timeZoneIdentifier == "Europe/Berlin" && (aliveResult.latencyMilliseconds ?? 0) > 0,
+              String(describing: aliveResult))
+        // How the URL loading system reports a proxied connection's peer is not documented: said, not checked.
+        info("proxy checker: the working proxy's check was made on connections "
+             + ((alive?.connections ?? []).allSatisfy { ($0.port ?? httpPort) == httpPort } ? "to the proxy only" : "NOT all to the proxy"))
+
+        // Port 9 (discard) on localhost is closed on CI runners, as in the fail-closed check above.
+        let unreachable = await ProxyChecker.lookUp(ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9))
+        let unreachableResult = ProxyChecker.result(of: unreachable)
+        check("proxy checker: an unreachable proxy is dead, and nothing answered — not the website a direct request would reach either",
+              unreachableResult.failure == .noAnswer && unreachable?.answered == false && unreachableResult.exitIP == nil,
+              String(describing: unreachableResult))
+        check("proxy checker: checking the unreachable proxy connected to nothing but it",
+              unreachable?.connections.allSatisfy { ($0.port ?? 9) == 9 } == true,
+              unreachable?.connections.map(\.description).joined(separator: ", ") ?? "no lookup")
+        let unresolved = ProxyChecker.result(of: await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: "proxy.selftest.invalid",
+                                                                                         port: 1080)))
+        check("proxy checker: a proxy whose host does not resolve is dead (nothing goes direct)",
+              unresolved.failure == .noAnswer, String(describing: unresolved))
+        let notApplicable = await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: "127.0.0.1:1080", port: 1080))
+        check("proxy checker: settings that cannot be applied are not checked at all (no request without the proxy)",
+              notApplicable == nil && ProxyChecker.result(of: notApplicable).failure == .invalidSettings)
+        if let authPort = environment["PB_SELFTEST_HTTP_AUTH_PROXY_PORT"].flatMap(Int.init) {
+            let noCredentials = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: authPort))
+            check("proxy checker: a proxy that wants credentials it was not given is dead for that reason",
+                  noCredentials.failure == .needsCredentials, String(describing: noCredentials))
+            let withCredentials = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: authPort,
+                                                                         username: "pb-user", password: "pb-pass"))
+            info("proxy checker: the HTTP proxy that wants credentials, given them: \(withCredentials)")
+        }
+
+        // The list's model: an import, a check of all of it two at a time, the results kept with
+        // their proxies in the encrypted file.
+        var lines = "http://127.0.0.1:\(httpPort)  # working\n127.0.0.1:9  # unreachable\n"
+        let socksAuthPort = environment["PB_SELFTEST_SOCKS_AUTH_PROXY_PORT"].flatMap(Int.init)
+        if let socksAuthPort { lines += "socks5://pb-user2:pb-pass2@127.0.0.1:\(socksAuthPort)  # socks with credentials\n" }
+        var messages: [String] = []
+        let model = ProxyListModel(vault: repository.vault) { messages.append($0) }
+        let added = model.add(ProxyListImport.read(lines, defaultKind: .httpConnect).proxies)
+        ProxyChecker.concurrentChecks = 2
+        model.check()
+        let finished = await waitUntil(timeout: 40) { !model.isChecking }
+        let stored = try ProxyList.load(from: repository.vault)
+        let found = Dictionary(stored.entries.compactMap { entry in entry.lastCheck.map { (entry.label, $0) } },
+                               uniquingKeysWith: { first, _ in first })
+        check("proxy list: several proxies checked at a time, each result kept with its proxy and saved encrypted",
+              finished && added?.added.count == (socksAuthPort == nil ? 2 : 3)
+                  && found["working"]?.isAlive == true && found["unreachable"]?.failure == .noAnswer
+                  && (socksAuthPort == nil || found["socks with credentials"]?.isAlive == true) && messages.isEmpty,
+              "\(found) \(messages)")
+
+        // Given that checked proxy, a profile has it, and where it exits, before any launch.
+        let profile = try repository.create(name: "Proxy from the list", configuration: ProfileConfiguration(ephemeral: true))
+        if let entry = stored.entries.first(where: { $0.label == "working" }) {
+            let outcome = repository.assign(ProxyList.rotation(of: [entry], over: [profile.id]))
+            let configuration = try repository.loadConfiguration(profile.id)
+            check("proxy list: a profile given a checked proxy has it, and knows where it exits without a launch",
+                  outcome.changed == [profile.id] && configuration.proxy == entry.proxy
+                      && configuration.rememberedProxyLocation?.countryCode == "DE"
+                      && configuration.rememberedProxyLocation?.timeZoneIdentifier == "Europe/Berlin",
+                  String(describing: configuration.lastProxyLocation))
+        }
+        try repository.delete(profile.id)
+        try? FileManager.default.removeItem(at: repository.root.appendingPathComponent("proxies.bin"))
     }
 
     // MARK: Profile deletion (regression for the delete crash)

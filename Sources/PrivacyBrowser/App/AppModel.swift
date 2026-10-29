@@ -28,6 +28,8 @@ final class AppModel: ObservableObject {
 
     private(set) var repository: ProfileRepository?
     private(set) var manager: ProfileManager?
+    /// The proxy list of the unlocked vault (`ProxyListModel`); nil while locked.
+    private(set) var proxyList: ProxyListModel?
     private var managerObservation: AnyCancellable?
     private var lockTask: Task<Void, Never>?
 
@@ -164,6 +166,7 @@ final class AppModel: ObservableObject {
         managerObservation = manager.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         self.repository = repository
         self.manager = manager
+        proxyList = ProxyListModel(vault: vault) { [weak self] message in self?.showError(message) }
         deviceSettings = (try? DeviceSettings.load(from: vault)) ?? DeviceSettings()
         phase = .unlocked
         refresh()
@@ -198,6 +201,8 @@ final class AppModel: ObservableObject {
 
     private func performLock() async {
         await manager?.shutDown()
+        proxyList?.stopChecking()
+        proxyList = nil
         managerObservation = nil
         manager = nil
         repository = nil

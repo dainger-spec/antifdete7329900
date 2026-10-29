@@ -92,6 +92,19 @@ struct ProfileDraft {
         syncCookies = c.syncCookies
     }
 
+    /// Fills the proxy fields with a proxy of the list ("Choose from list…"), as if typed: Save
+    /// stores it as any edit of the proxy.
+    mutating func useProxy(_ proxy: ProxySettings) {
+        proxyEnabled = true
+        proxyKind = proxy.kind
+        proxyHost = proxy.host
+        proxyPort = String(proxy.port)
+        proxyUsername = proxy.username ?? ""
+        proxyPassword = proxy.password ?? ""
+        proxyTLS = proxy.tlsToProxy
+        proxyExcludedDomains = proxy.excludedDomains.joined(separator: ", ")
+    }
+
     /// The proxy these fields describe (nil without one). The Host field often holds a pasted
     /// proxy string (socks5://user:pass@host:port, host:port, host:port:user:pass): it is split into
     /// its parts; what is not a host is rejected.
@@ -208,7 +221,8 @@ struct ProfileEditorView: View {
     var body: some View {
         ProfileEditorForm(draft: $draft, tab: $tab, isNew: target.isNew, avatarID: avatarID, error: error,
                           tunnelCarriesWebRTC: tunnel.canCarryWebRTC,
-                          onCancel: { dismiss() }, onSave: save, onTunnelSettings: { showingTunnel = true })
+                          onCancel: { dismiss() }, onSave: save, onTunnelSettings: { showingTunnel = true },
+                          savedProxies: model.proxyList?.entries ?? [])
             .onAppear(perform: load)
             .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
     }

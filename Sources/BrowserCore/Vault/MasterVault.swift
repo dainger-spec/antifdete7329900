@@ -167,6 +167,8 @@ public final class UnlockedVault: @unchecked Sendable {
     var syncEnvelopeKey: SymmetricKey { masterKey.derive(info: "sync-envelope", salt: vaultSalt) }
     var syncObjectIDKey: SymmetricKey { masterKey.derive(info: "sync-object-id", salt: vaultSalt) }
     var settingsKey: SymmetricKey { masterKey.derive(info: "device-settings", salt: vaultSalt) }
+    /// The proxy list (`proxies.bin`, `ProxyList`): this Mac's, never synced, like the settings.
+    var proxyListKey: SymmetricKey { masterKey.derive(info: "proxy-list", salt: vaultSalt) }
 
     private var vaultSalt: Data { withUnsafeBytes(of: header.vaultID.uuid) { Data($0) } }
 

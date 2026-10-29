@@ -39,6 +39,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Time zone from the proxy | a profile with a proxy and *Time zone of the proxy's location* runs in the time zone the lookup through the proxy returned, cached per profile |
 | Several SOCKS5 profiles at once | three profiles behind three SOCKS5 proxies, one with username/password authentication, are launched together through the app's launch path and load at the same time: each page arrives through its own proxy, by name, with its own credentials; after one stops the others keep loading through theirs; wrong or missing SOCKS5 credentials fail closed |
 | Launch speed | with a location remembered for the proxy, a launch waits at most 1 s for a 4 s lookup (the lookup finishes in the background, and its new time zone is remembered and noted for the next launch); with nothing remembered it waits at most 3 s |
+| Proxy list checker | through the HTTP CONNECT self-test proxy a proxy of the list is alive, with the exit IP, country and time zone the stand-in service gave and a latency; through an unreachable proxy, and one whose host does not resolve, it is dead, and a real website among the services, which a direct request would reach, did not answer either (the unreachable proxy's check connected to nothing else, as the URL loading system reports it); a proxy answering 407 to a check without credentials is dead for that reason; settings that cannot be applied are not checked (no request); the list's model checks several at a time and keeps the results encrypted, and a profile given a checked proxy knows where it exits before its first launch (added with the checker; not yet in the count above) |
 | Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy and credentials) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported or stored, and turning it off, or replacing the proxy, while a lookup is under way leaves no new IP stored and nothing reported |
 | Password AutoFill | in a profile window on the self-test proxy's sign-in pages: the page world has no `window.webkit` and no trace of the script; a password a page script wrote and submitted is not offered; a typed sign-in is offered (Save, saved with its user name), a new password for it as Update, nothing anywhere on the site after Never for This Website; a login field lists the site's saved login and choosing it fills both fields with `input` and `change` (and `:autofill` where WebKit allows the world); a filled-in login submitted again asks nothing; a sign-in by script (fields removed after the button's click) and a sign-up form (new password = confirmation) are offered; a frame of another site is offered none, a frame of the same site its logins under a header naming it. Synthesized key events do not reach the page on the CI runner, so typing is stood in for by marking the fields typed inside the isolated world (reported by the self-test); real clicks and keys are used where they arrive |
 | Cookie import | a Netscape file with CRLF, comments, an HttpOnly line and damaged bytes: the five readable cookies are read, the four other lines reported (field count, public suffix, expired, damaged text); into a stopped profile they are queued encrypted (no cookie value in the file) and put into its store at launch before the start page is requested: the request carries the host-only, domain, HttpOnly and session cookies, not the Secure one or another path's over http; the store holds each with the file's attributes; a cut-off JSON export's complete entry goes into the running profile at once and the next request carries it; after a stop (sealed) and a launch the persistent imported cookies are back and the session cookie is not |
@@ -268,6 +269,7 @@ storage and network (§1, §4).
 | History | encrypted (`history.bin`); ephemeral profiles: never written | encrypted | in memory, saved encrypted (debounced, ≤ 3 s) |
 | Bookmarks | encrypted (`bookmarks.bin`) | encrypted | in memory, saved encrypted on every change |
 | Sync target and token | encrypted (`settings.bin`, not synced) | in memory | — |
+| Proxy list (addresses, credentials, labels, last checks) | encrypted (`proxies.bin`, this Mac only, not synced) | in memory | — (a profile has its own copy of its proxy in `config.bin`) |
 | WebKit website data | encrypted (`webdata.pbsa`) | encrypted | **plaintext on disk** in WebKit's directories |
 
 **Why WebKit data is plaintext while a profile runs.** WebKit chooses the location of an
@@ -394,6 +396,29 @@ which then runs even without the time-zone matching. The last IP is stored, encr
 profile, only while the option is on: turning it off (or removing the proxy) deletes it when the
 profile is saved. A lookup still under way when the option is turned off, or the proxy removed
 or replaced, neither stores an IP nor warns.
+
+**Proxy list and its checker** (Profiles → ⋯ → Proxies…): proxies kept to give to profiles, encrypted
+in the vault under their own key (`proxies.bin`, this Mac only; §3). A check is the launch's lookup
+made for one proxy: the same geolocation services, over HTTPS, through the proxy itself with the
+`ProxyConfiguration` a profile's data store would get (`allowFailover = false`), in a URLSession of
+its own (no cookies, no cache, this Mac's Safari User-Agent), at most eight at a time. A proxy is
+alive when a service's answer came back through it; otherwise it is dead — it never falls back to
+a direct connection, so this Mac's own address is never what a service sees. A proxy whose
+settings cannot be applied is not checked at all (there would be nothing to send the request
+through). The self-test checks this against an unreachable proxy with a real website among the
+services, which a request made directly would have reached (§0). Like the launch's lookup, a check
+is a request to a third-party service, made only when the user asks for one. The latency shown is
+that of the first answering request: the connection to the proxy, the tunnel, TLS to the service
+and its reply.
+
+**Giving profiles proxies of the list** (one to many, or several in turn, round-robin; the editor's
+*Choose from List…*) writes each profile's own configuration as an edit of its proxy would
+(`ProfileConfiguration.assigning`): the profile keeps a copy, so removing a proxy from the list
+changes no profile, and the copy syncs with the profile. The location remembered for the previous
+proxy is about another proxy and is dropped; the check's location of the new one is remembered in
+its place (its exit IP only while the exit-IP warning is on). A running profile keeps the proxy it
+was launched with until it stops: like every setting, the proxy is given to the profile's data
+store when the profile launches.
 
 **Verify the proxy by hand:** set a SOCKS5 proxy, for example `ssh -D 1080 host`, open
 `https://ifconfig.me`, and confirm it shows the proxy's IP. Then stop the proxy and

@@ -95,12 +95,15 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 183 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build: 191 checks, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
   profiles launched and loading at once, the ping-load blocker, the proxy-location time zone,
-  launches that wait only briefly on the lookup through the proxy, the exit-IP warning, password
+  launches that wait only briefly on the lookup through the proxy, the exit-IP warning, the proxy
+  list's checker (alive through a working proxy with its exit IP, country and latency; dead
+  through an unreachable one, with nothing gone around it; a proxy wanting credentials; several
+  at a time, kept encrypted; a profile given a checked proxy), password
   AutoFill (save, update, never, suggestions and fill, sign-in by script, sign-up, frames of
   another and of the same site, nothing for a password a page script wrote), cookie import
   (a damaged Netscape file, queued for a stopped profile and applied before its first page,
@@ -174,6 +177,21 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    profile's settings, passwords, bookmarks, history and persistent cookies sync, encrypted;
    another Mac gets the cookies at its next launch of the profile, before the first page
    (**⋯ → Edit…** → **Sync cookies with other devices** turns that off for a profile).
+11. **Proxies:** **More → Proxies…** keeps a list of proxies, encrypted in the vault (this Mac
+   only, not synced):
+   - **Import…** takes a pasted list or a text file, one proxy per line: `host:port`,
+     `host:port:user:pass`, `user:pass@host:port` or `socks5://` / `http://` / `https://user:pass@host:port`
+     (a line without a scheme gets the type chosen in the sheet; ` # Berlin 1` after a proxy names
+     it). Lines that cannot be read are listed with their number and why before anything is added.
+   - **Check All / Check Selected** asks a geolocation service *through* each proxy, a few at a
+     time: alive or not, exit country (flag) and IP, latency. A check never goes direct.
+   - **Assign to Profiles…** gives the selected proxies to the profiles ticked: with one proxy all
+     of them get it, with several they get them in turn (round-robin). A running profile uses its
+     new proxy from its next launch. In the profile editor, **Choose from List…** fills the proxy
+     fields from the list.
+12. **Several profiles at once:** ⌘-click (or ⇧-click for a range) selects rows of the Profiles
+   list; with two or more selected, a bar above the list launches, stops, warms up, assigns
+   proxies to or deletes them all (deleting asks once, naming how many).
 
 ## What is implemented, and how
 
@@ -203,6 +221,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Encrypted sync client | Engine with CAS writes, per-record merges for bookmarks and history, tombstones; folder transport; HTTP transport for a documented API |
 | Session warm-up ("cookie robot") | **⋯ → Warm Up…**: the pages of a list (and a search first, if given) visited one after the other in a tab of the profile — its proxy, cookies, User-Agent and scripts, as when browsing — with a random time on each page (5–15 s by default), trackpad-like scrolling, and optionally one plain link followed (same site; from the search, a result; never sign-out, purchase, deletion, download or new-window links). Waits while its tab is not shown; stops on Stop, when its tab closes, when a page shows a dialog and when the profile stops. Scrolls with real wheel events while its window is key, otherwise from an isolated script world; clicks with real pointer events when they reach the link, otherwise with an (untrusted) script click — on the CI runner pointer events did not reach pages, so clicks there were script clicks; nothing is added to the page world, and nothing is downloaded. **Checked by the self-test** through the proxy (order, cookies and User-Agent on the requests, Referer of the followed link, links refused, the stop cases, sealing after a stop mid-run) |
 | Profile sync: cookies and settings | A profile's persistent cookies sync as `cookies.bin` (encrypted with the profile key), merged cookie by cookie — the newer change wins, deletions included; recorded when the profile stops, applied at its next launch before the first page loads, imported cookies joining at that launch. Settings changed on two Macs: the newer edit wins, the other kept as `config.bin.conflict`. Session and partitioned cookies, and ephemeral profiles, never sync ([docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md)). **Checked by the self-test** with a second vault set up from the sync folder, and by unit tests |
+| Proxy list: import, check, assign, rotate | **⋯ (header) → Proxies…**: a list kept encrypted in the vault (`proxies.bin`, this Mac only). Import reads pasted lines or a text file — `host:port`, `host:port:user:pass`, `user:pass@host:port`, `socks5://` / `http://` / `https://user:pass@host:port`, ` # label` — and reports every line it could not read, with its number and why (`ProxyListImport`). A check asks the launch's geolocation services through the proxy itself (`allowFailover = false`, several at a time): alive or dead, exit IP, country (flag), latency; a dead proxy never falls back to a direct connection. Assign gives one proxy to many profiles, or rotates the chosen proxies over them round-robin, saved as an editor change of the proxy (the location found through the old proxy is dropped, the check's location of the new one remembered); the editor's **Choose from List…** fills its proxy fields. **Checker checked by the self-test** (alive through the self-test proxy, dead through an unreachable one with a real website among the services unanswered); import, rotation and assignment by unit tests |
+| Several profiles at once | ⌘-click and ⇧-click select rows of the Profiles list; with two or more, a bar acts on all of them: Launch (the stopped ones, one after the other), Stop (the running ones, sealed together), Warm Up (opens the warm-up for the first; a hook for a queue), Assign Proxy (from the list, one or in turn), Delete (one confirmation naming the count) |
 
 ### Approximated (the platform offers no native API)
 
@@ -227,6 +247,9 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   only at its next launch.
 - Session restore, tab drag-and-drop between windows, find-in-page, extensions, and
   content blocking (`WKContentRuleList` would be the native route).
+- The proxy list is this Mac's only (profiles carry their own copy of a proxy, which syncs); its
+  checks ask third-party geolocation services (through the proxy, only when asked). Warming up
+  several profiles at once opens the warm-up of the first; there is no warm-up queue yet.
 
 ## Project layout
 
@@ -237,6 +260,7 @@ Sources/
     Crypto/                        AEAD (AES-GCM), Argon2id + BLAKE2b, PBKDF2, HKDF helpers
     Vault/                         MasterVault (key hierarchy), DeviceSettings
     Profiles/                      ProfileConfiguration, ProfileRepository
+    Proxies/                       ProxyList (encrypted list, check results, rotation), ProxyListImport (pasted lines, report), assignment
     Passwords/                     PasswordVault, PasswordMatching (site rules), PublicSuffixList
     Cookies/                       CookieImporter (JSON and Netscape readers, checks, report), CookieJar (synced cookies, merge)
     WarmUp/                        WarmUpPlan (pages, timing, which links), WebAddress (typed text → address or search)
@@ -246,12 +270,15 @@ Sources/
       Transports/                  LocalDirectorySyncTransport (local-only), HTTPSyncTransport (server-ready)
     Support/                       errors, atomic 0600 writes, encrypted document files
   PrivacyBrowser/                  macOS app (SwiftUI + AppKit + WebKit)
-    App/                           main.swift, PrivacyBrowserApp, AppModel, AppEnvironment, SelfTest, SiteCapture
+    App/                           main.swift, PrivacyBrowserApp, AppModel (+Proxies), ProxyListModel, AppEnvironment,
+                                   SelfTest, SiteCapture
     Browser/                       ProfileManager, BrowserSession, BrowserWindowController, BrowserTab,
                                    TabStripView, ProfileLibrary, LibraryWindowController, PasswordAutoFill
                                    (+ PasswordAutoFillScript, AutoFillPanel), WarmUpRobot,
-                                   WebDataStoreVault, ProxyConfigurationFactory, PrivacyScripts
-    UI/                            setup/unlock, profile list, editor, passwords, library, sync settings, warm-up
+                                   WebDataStoreVault, ProxyConfigurationFactory, ProxyGeoLookup, ProxyChecker,
+                                   PrivacyScripts
+    UI/                            setup/unlock, profile list (+ bulk bar), editor, passwords, library, sync settings,
+                                   warm-up, proxies (list, import, assign)
 Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
 Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist
 scripts/                           build-app.sh, test-shims.mjs, selftest_proxy.py, safari_reference.py,
