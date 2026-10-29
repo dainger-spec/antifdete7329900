@@ -95,6 +95,10 @@ enum ProfileNetworkGuard {
         // app's own cookie jar, cache or saved credentials with the other profiles' processes.
         missingHooks += proxyEverySessionConfiguration(proxies, delegate: StoreChallenges(policy: policy))
         missingHooks += closeTheProcess(udp: !proxies.isEmpty)
+        // QUIC goes around any proxy: a profile with one does not run with UDP open.
+        if !proxies.isEmpty, !closures.sorted.contains("udp") {
+            throw CoreError.invalidConfiguration("UDP could not be closed to the profile's process")
+        }
         missingHooks += everyStoreStartsClosed(except: profileID)
         missingHooks += everyWebViewGetsTheProfilesData()
         missingHooks += pinPrivacyPreferences()
@@ -685,6 +689,8 @@ enum ProfileNetworkGuard {
             return asked && allInterfacesAllowed
         case "DNSPrefetchingEnabled"?:
             return asked && !proxied
+        case "SafeBrowsingEnabled"?:
+            return asked && (session?.configuration.safeBrowsingEnabled ?? false)
         case let key? where proxied && BrowserSession.featuresOffWithAProxy.contains(key):
             return false
         default:
@@ -708,6 +714,9 @@ enum ProfileNetworkGuard {
         var off: [(key: String, getter: String?, setter: String?)] = []
         if session.configuration.effectiveWebRTCPolicy == .disabled {
             off.append(("PeerConnectionEnabled", "_peerConnectionEnabled", "_setPeerConnectionEnabled:"))
+        }
+        if !session.configuration.safeBrowsingEnabled {
+            off.append(("SafeBrowsingEnabled", "_isSafeBrowsingEnabled", "_setSafeBrowsingEnabled:"))
         }
         if proxied {
             off.append(("DNSPrefetchingEnabled", "_dnsPrefetchingEnabled", "_setDNSPrefetchingEnabled:"))
@@ -929,7 +938,14 @@ enum ProfileNetworkGuard {
         if let method = class_getClassMethod(URLSession.self, withDelegate) {
             let original = unsafeBitCast(method_getImplementation(method), to: Maker.self)
             let replacement: @convention(block) (AnyObject, AnyObject?, AnyObject?, AnyObject?) -> Unmanaged<AnyObject>? = { cls, configuration, given, queue in
-                original(cls, withDelegate, configuration, given ?? delegate, queue)
+                // A configuration made some other way (its own initializer, a private factory) or
+                // emptied since: the session is made with the profile's proxies all the same (a
+                // session copies its configuration when it is made).
+                if !proxies.isEmpty, let configuration = configuration as? URLSessionConfiguration,
+                   configuration.proxyConfigurations.isEmpty {
+                    configuration.proxyConfigurations = proxies
+                }
+                return original(cls, withDelegate, configuration, given ?? delegate, queue)
             }
             method_setImplementation(method, imp_implementationWithBlock(replacement))
             let plain = NSSelectorFromString("sessionWithConfiguration:")
