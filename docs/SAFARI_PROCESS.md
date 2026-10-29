@@ -643,6 +643,38 @@ undocumented singleton, and any macOS update can add to it. That is the cost the
 with its own patch dylib and its `BB_FULLGRAPH_*` switches, and it is the reason items 1-3 of §9's
 "what is worth taking" do not depend on any of this.
 
+### 9.2 A profile in Safari's chrome: how the two halves join
+
+Hosting Safari's window is one thing; making the pages in it belong to a profile is another, and the
+way that looked obvious is the wrong one. Putting a `WKWebView` of ours into Safari's tab works
+visually and achieves nothing: Safari's address bar, bookmarks, links and menu all navigate through
+`-[BrowserViewController _loadURLRequest:tabLabel:lifetime:…]`, which drives Safari's *own* web
+view, with Safari's data store and no proxy of ours, while our view sits underneath (measured: the
+window looked blank, and the page that did load came from Safari's engine). Taking that method over
+is worse: it also writes the pending navigation, the tab's label and the back-forward bookkeeping,
+so skipping it crashes the chrome on the next thing that reads any of them — on typing an address
+and on every new tab.
+
+The seam is one factory. Every web view Safari's chrome creates for page content comes from
+`+[WebKitPreferencesManager contentWebViewConfigurationForBrowsingMode:profileIdentifier:…]` (with a
+`jitEnabled:` variant and a `readerWebViewConfigurationForBrowsingMode:…` sibling). Patched, it
+returns Safari's own configuration — its preferences, its process pool, its content controller —
+with the profile's `WKWebsiteDataStore` in it, which carries the profile's proxy because that is
+where this project sets proxies, plus the profile's scripts. Measured: three factories patched, and
+one line in the log per web view Safari builds, each naming the profile whose data it got; the
+chrome navigates, opens tabs, keeps its history and draws its start page as Safari does, and the
+pages load as the profile.
+
+One trap worth naming: those three factories do not share a signature — one takes a `BOOL` where the
+others take an object. Typing that argument as `AnyObject?` in the replacement had ARC retain the
+value `1`, and no profile would start at all. The arguments are passed through as opaque pointers and
+the return is `Unmanaged`; only the configuration that comes back is touched.
+
+What is not across the boundary yet: script message handlers have no enumerable API, so AutoFill in
+the hosted chrome is unwired; and Safari's own state (its history, its tab snapshots) lands in the
+profile's `home` directory in Safari's formats, outside the encrypted archive this project keeps the
+WebKit data in.
+
 ## Sources
 
 Primary: Apple developer documentation and DTS answers linked above; WebKit source
