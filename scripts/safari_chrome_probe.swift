@@ -254,6 +254,33 @@ if flag("--prepare") {
     }
 }
 
+if flag("--tolerate-nil-attributes") {
+    // Safari's chrome reads its colours from the com.apple.Safari preferences domain, which in a
+    // foreign process resolves to Safari's own container and is refused ("accessing these
+    // preferences requires user-preference-read"), so every such colour arrives nil and the first
+    // -addAttribute:value:range: with it takes the window down. Patching each site one by one is
+    // whack-a-mole; skipping nil values once covers the whole class, which is what a hosted
+    // chrome needs until the preferences are supplied properly (CFFIXED_USER_HOME plus a seeded
+    // com.apple.Safari.plist).
+    print("\n== tolerate nil attributes ==")
+    typealias AddAttribute = @convention(c) (AnyObject, Selector, NSString, AnyObject?, NSRange) -> Void
+    let selector = NSSelectorFromString("addAttribute:value:range:")
+    var patched = 0
+    for className in ["NSConcreteMutableAttributedString", "NSMutableAttributedString"] {
+        guard let cls = NSClassFromString(className),
+              let method = class_getInstanceMethod(cls, selector) else { continue }
+        let original = unsafeBitCast(method_getImplementation(method), to: AddAttribute.self)
+        let replacement: @convention(block) (AnyObject, NSString, AnyObject?, NSRange) -> Void = { object, name, value, range in
+            guard let value else { return }
+            original(object, selector, name, value, range)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        patched += 1
+        print("patched -[\(className) addAttribute:value:range:]")
+    }
+    if patched == 0 { print("no attributed-string class to patch") }
+}
+
 if flag("--patch-unified-field") {
     // -[UnifiedField _notSecureAnnotation] builds an attributed string for the address bar's
     // "Not Secure" badge and passes a nil attribute value when Safari's own environment is not
