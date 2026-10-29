@@ -188,7 +188,14 @@ final class AppModel: ObservableObject {
         manager.onProxyProblem = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis)
         }
-        deviceSettings = (try? DeviceSettings.load(from: vault)) ?? DeviceSettings()
+        do {
+            deviceSettings = try DeviceSettings.load(from: vault)
+        } catch {
+            deviceSettings = DeviceSettings()
+            // A newer version's settings are neither shown nor saved over (the save refuses):
+            // said once, rather than showing defaults as if they were this device's settings.
+            if case CoreError.newerFormat = error { showError(errorText(error)) }
+        }
         restartAutomation()
         phase = .unlocked
         refresh()
@@ -512,7 +519,7 @@ final class AppModel: ObservableObject {
             }
             status = DeviceSettings.SyncStatus(report: report)
         } catch {
-            let message = (error as? CoreError)?.description ?? error.localizedDescription
+            let message = errorText(error)
             status = DeviceSettings.SyncStatus(error: message)
             showError("Sync failed: \(message)")
         }
@@ -605,7 +612,7 @@ final class AppModel: ObservableObject {
         do {
             try await work()
         } catch {
-            showError((error as? CoreError)?.description ?? error.localizedDescription)
+            showError(errorText(error))
         }
     }
 }

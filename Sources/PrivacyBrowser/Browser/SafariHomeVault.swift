@@ -83,7 +83,10 @@ final class SafariHomeVault {
             try excludeFromCopies(home)
             return
         }
-        defer { try? excludeFromCopies(home) }
+        // A newer version's archive is the one refusal that leaves no directory behind: an empty
+        // one would be sealed over that archive at the next stop or unlock (docs/UPDATES.md §4).
+        var leavesHome = true
+        defer { if leavesHome { try? excludeFromCopies(home) } }
         let contents = try? FileManager.default.contentsOfDirectory(atPath: home.path)
         if let contents, !contents.isEmpty {
             log.notice("Using Safari's unsealed home left by a previous run of \(profileID.uuidString, privacy: .public)")
@@ -95,9 +98,14 @@ final class SafariHomeVault {
         // so an empty leftover (the child creates the directory before it runs, and a profile that
         // never wrote anything leaves it behind) is removed first.
         if contents != nil { try FileManager.default.removeItem(at: home) }
-        try EncryptedDirectoryArchive.unseal(from: archive, key: key) { label in
-            guard label == Self.label else { throw CoreError.corruptData("unexpected label \(label) in Safari's home archive") }
-            return home
+        do {
+            try EncryptedDirectoryArchive.unseal(from: archive, key: key) { label in
+                guard label == Self.label else { throw CoreError.corruptData("unexpected label \(label) in Safari's home archive") }
+                return home
+            }
+        } catch let error as CoreError {
+            if case .newerFormat = error { leavesHome = false }
+            throw error
         }
     }
 

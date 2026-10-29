@@ -78,7 +78,8 @@ The engine keeps per-object local state in `sync-state.bin`, encrypted: the last
 revision and the SHA-256 of the last synced bytes.
 
 1. Publish `vault-header` if it is absent. If the server's header has a different vault
-   ID, refuse.
+   ID, refuse; if a newer version of the app wrote it (its `format`), stop with
+   `CoreError.newerFormat` — this device needs that version first (docs/UPDATES.md §4).
 2. **Index:** if the remote revision changed, fetch it and merge with the local index:
    the union by profile ID, the higher summary revision wins, and profiles in either
    side's `deletedProfileIDs` are dropped. Save the result locally, and push it if it
@@ -102,6 +103,12 @@ revision and the SHA-256 of the last synced bytes.
    the app also removes their WebKit stores.
 
 A lost CAS race leaves the object in `report.deferred`; the next sync retries it.
+
+Before a remote copy is pulled, merged, compared or written over — and before this device's copy
+is merged or compared with it — its `format` is checked (the index's, and each profile file's
+inside its envelope). A copy a newer version wrote stops the sync with `CoreError.newerFormat`:
+it is neither merged nor written over, on either side. So does a `sync-state.bin` a newer version
+wrote, before anything is fetched. The rules for each file: docs/UPDATES.md §4.
 
 ### Merge rules
 

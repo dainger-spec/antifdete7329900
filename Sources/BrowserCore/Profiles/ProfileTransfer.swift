@@ -227,6 +227,8 @@ public enum ProfileTransfer {
             throw CoreError.unsupportedFormat("not a PrivacyBrowser profile export")
         }
         let headerData = try readLengthPrefixed(handle)
+        // A newer version's export is refused before its header is decoded (docs/UPDATES.md §4).
+        try DocumentFormat.check(headerData, supported: format, what: url.lastPathComponent)
         let header = try JSONCoding.decoder.decode(Header.self, from: headerData)
         guard header.format == format else { throw CoreError.unsupportedFormat("profile export format \(header.format)") }
         let documents = try readLengthPrefixed(handle)

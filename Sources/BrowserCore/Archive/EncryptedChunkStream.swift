@@ -33,6 +33,20 @@ enum EncryptedChunkStream {
         key.derive(info: "webdata-archive", salt: salt)
     }
 
+    /// Throws `CoreError.newerFormat` when `url` holds an archive of a newer version than this one
+    /// writes: it is never replaced (docs/UPDATES.md §4). Anything else there — no file, not an
+    /// archive, an archive of this version — is left to the writer as before.
+    static func guardOverwrite(of url: URL) throws {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? handle.close() }
+        guard let head = try? handle.read(upToCount: magic.count + 1), head.count == magic.count + 1,
+              head.prefix(magic.count) == magic else { return }
+        let found = head[head.startIndex + magic.count]
+        guard found <= version else {
+            throw CoreError.newerFormat(what: url.lastPathComponent, found: Int(found), supported: Int(version))
+        }
+    }
+
     static func nonce(_ index: UInt64) throws -> AES.GCM.Nonce {
         var bytes = Data(count: 4)
         withUnsafeBytes(of: index.bigEndian) { bytes.append(contentsOf: $0) }
@@ -109,13 +123,17 @@ final class EncryptedChunkReader {
     private var index: UInt64 = 0
     private var sawFinal = false
 
-    init(handle: FileHandle, key: SymmetricKey) throws {
+    /// `name`: the archive's file name, for a refusal's message.
+    init(handle: FileHandle, key: SymmetricKey, name: String = "a PBSA archive") throws {
         self.handle = handle
         let header = try Self.readExactly(handle, EncryptedChunkStream.headerLength, context: "header")
         guard header.prefix(4) == EncryptedChunkStream.magic else { throw CoreError.unsupportedFormat("not a PBSA archive") }
-        guard header[header.startIndex + 4] == EncryptedChunkStream.version else {
-            throw CoreError.unsupportedFormat("PBSA version \(header[header.startIndex + 4])")
+        let version = header[header.startIndex + 4]
+        // A newer version's archive is refused before anything is read from it (docs/UPDATES.md §4).
+        guard version <= EncryptedChunkStream.version else {
+            throw CoreError.newerFormat(what: name, found: Int(version), supported: Int(EncryptedChunkStream.version))
         }
+        guard version == EncryptedChunkStream.version else { throw CoreError.unsupportedFormat("PBSA version \(version)") }
         let chunkSize = header.subdata(in: (header.startIndex + 5)..<(header.startIndex + 9))
             .reduce(0) { ($0 << 8) | Int($1) }
         guard chunkSize > 0, chunkSize <= EncryptedChunkStream.maxChunkSize else {

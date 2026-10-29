@@ -163,37 +163,57 @@ launches the new app, swaps back if it cannot, and leaves its outcome for the ne
 
 ## 4. Data on disk across versions
 
-Rules, each with tests:
+Rules, each with tests (`Tests/BrowserCoreTests/FormatPolicyTests.swift`; Safari's home archive also
+in the self-test, which runs the app's own code for it):
 
-- **R1 — the new reads the old.** Every format a released version wrote stays readable. Fixtures of
-  each format are kept in the tests.
-- **R2 — the old refuses the new, and never writes it.** Every file carries a format; a reader
-  checks it before decoding anything and refuses a newer one with `CoreError.newerFormat` (a message
-  that says a newer version wrote it). A refused file is never written over: not by a save of
-  defaults, not by sync, not by a migration.
-- **R3 — no downgrade.** The updater never installs an older build. The vault also records the data
-  generation it was last opened with (`vault.json`, `dataGeneration`): a version that would write
-  anything an older one cannot read raises it, and an older version refuses to unlock the vault at
-  all — one clear message instead of profiles failing one by one.
-- **R4 — a change an older reader would get wrong is a format change.** A new field that an older
-  version would silently drop when it rewrites the file is such a change.
+- **R1 — the new reads the old.** Every format a released version wrote stays readable. The tests
+  keep `vault.json` and a profile's settings exactly as released versions write them — frozen, never
+  regenerated: the vault opens with its password, the settings keep their values — and check that
+  this version writes the files that never had a format marker exactly as before, without one.
+- **R2 — the old refuses the new, and never writes it.** A file's JSON may carry a top-level
+  `format`; without one it is format 1 (`DocumentFormat`) — every file this version writes, and the
+  files whose JSON is an array or a map of its own. A reader checks the format before it decodes
+  anything and refuses a newer one, or one that is not a whole number, with `CoreError.newerFormat`;
+  the app says so in the person's language ("The file … was saved by a newer version of
+  PrivacyBrowser…"). A file that declares a newer format is never written over and never deleted:
+  every writer looks before it writes, whatever its caller read or failed to read first — a save of
+  defaults after a failed read included.
+- **R3 — no downgrade.** The updater never installs an older build. In the vault, the `format` of
+  `vault.json` is the generation of everything in it: a version that writes anything an older one
+  cannot read raises it first, and every older version then refuses to unlock the vault at all — one
+  clear message instead of profiles failing one by one. That includes the versions from before these
+  rules: they open only format 1 (their `readHeader` refuses anything else). A sync location is the
+  same: a newer `vault.json` there stops this version's sync, and the setup of a new device from it.
+  The versions from before these rules do not look at the header on the sync location, only at each
+  record's envelope (`pbsync-1`, anything else refused), so a version that raises the vault's format
+  raises the envelope's too. (A separate data-generation field was planned first; those versions
+  would have ignored it, as they ignore every key they do not know.)
+- **R4 — a change an older reader would get wrong is a format change.** The settings' decoder takes
+  what it knows from any JSON and defaults the rest, so a newer version's settings would be read as
+  this version's and written back without what it added; the proxy list skips entries of a kind it
+  does not know, and drops them when it saves. A later version that adds such a field or kind
+  raises the file's format.
 
-| File | Holds | Encoding today | Format marker today | Rule, from the format-policy commit on |
-|---|---|---|---|---|
-| `vault.json` | KDF parameters, the wrapped master key, the vault id | plaintext JSON | `format` = 1, refused unless equal | `format` ≤ known; `dataGeneration` (R3) refused when newer; header rewrites keep what they do not change |
-| `index.bin` | the profile list | AEAD JSON | `format` = 1, refused unless equal | refused when newer, never written then |
-| `config.bin`, `config.bin.conflict` | a profile's settings (synced) | AEAD JSON, tolerant decoder | **none** — an older version drops new fields and writes the rest back | `format` added (absent = 1); refused when newer; the profile does not open, nothing is written |
-| `passwords.bin` | saved passwords | AEAD JSON array | **none** | the array is format 1; an object with a newer `format` is refused; never written then |
-| `history.bin`, `bookmarks.bin` | history, bookmarks | AEAD JSON | `format` = 1, **not checked** | checked; refused when newer; the session does not open the library |
-| `cookies.bin` | the synced cookie jar | AEAD JSON | `format` = 1, **not checked** | checked; refused when newer; not merged, not overwritten |
-| `cookies-baseline.bin`, `cookies-import.bin` | this device's last cookie state; queued imports | AEAD JSON (object; array) | none | `format` (absent = 1); refused when newer |
-| `warmup.bin`, `warmup-schedule.bin` | the warm-up plan, its schedule | AEAD JSON | none | `format` (absent = 1); refused when newer |
-| `proxies.bin` | the proxy list | AEAD JSON | `format` = 1, refused unless equal, never written then | kept; newer refused |
-| `settings.bin` | sync target, automation API settings | AEAD JSON | none — and a failed read falls back to defaults that **are then saved over the file** | `format` added; a refused file makes the settings read-only for that run |
-| `sync-state.bin` | what sync last saw | AEAD JSON dictionary | none | an object with a newer `format` is refused; sync stops rather than starting over |
-| `webdata.pbsa`, `safarihome.pbsa` | WebKit's data, Safari's home, archived | `PBSA` stream: magic + version byte | version 1, refused unless equal | refused when newer; the profile does not start, the archive is untouched |
-| `*.pbprofile` | a profile export | own header + PBSA | `format` = 1, refused unless equal | kept; newer refused with the newer-version message |
-| sync envelopes | records on the sync server | envelope JSON | `format` string, refused unless equal | a newer record is neither merged nor overwritten; the device says it needs an update |
+| File | Holds | Before these rules | Now |
+|---|---|---|---|
+| `vault.json` | KDF parameters, the wrapped master key, the vault id | `format` = 1, anything else refused | newer: the vault does not open, and a password change does not write over it; also the generation of the vault (R3) |
+| `index.bin` | the profile list | `format` = 1, anything else refused | newer refused; not written over, by this device or by sync |
+| `config.bin`, `config.bin.conflict` | a profile's settings (synced) | **no marker** — an older version drops new fields and writes the rest back | `format` read (absent = 1; this version writes none); newer: the profile does not start, nothing is written |
+| `passwords.bin` | saved passwords | **no marker** (a JSON array) | the array is format 1; an object with a newer `format` is refused, and no change is written |
+| `history.bin`, `bookmarks.bin` | history, bookmarks | `format` = 1, **not checked** | checked; newer refused, never written |
+| `cookies.bin` | the synced cookie jar | `format` = 1, **not checked** | checked; newer refused: not merged, not emptied when cookie sync is turned off |
+| `cookies-baseline.bin` | this device's last cookie state | no marker | `format` read (absent = 1); newer refused, not written over, not deleted |
+| `cookies-import.bin` | cookies queued for the next launch | no marker (an array); **deleted when it could not be read** | newer refused, not written, **not deleted** |
+| `warmup.bin`, `warmup-schedule.bin` | the warm-up plan, its schedule | no marker | `format` read (absent = 1); newer refused, never written |
+| `proxies.bin` | the proxy list | `format` = 1, anything else refused | newer refused with the newer-version message, never written; unknown kinds of entry: R4 |
+| `settings.bin` | sync target, automation API settings | no marker — a failed read falls back to defaults **that are then saved over the file** | `format` read (absent = 1); newer: said at unlock, and the defaults are never saved over it |
+| `sync-state.bin` | what sync last saw | no marker (a map) | newer: the sync stops before it fetches or pushes anything (starting over would push this device's files over newer ones) |
+| `webdata.pbsa`, `safarihome.pbsa` | WebKit's data, Safari's home, archived | `PBSA` + version byte 1, anything else refused — **and a refused Safari home archive left an empty home behind, which the next unlock or an export of the profile sealed over the archive** | newer refused before anything is read from it; the profile does not start; no home is left; nothing is sealed over it |
+| `*.pbprofile` | a profile export | `format` = 1 in its header, anything else refused | newer: the newer-version message, nothing imported |
+| sync records | on the sync server | envelope `pbsync-1`, anything else refused | the envelope as before; the file inside a record is checked like the file itself, on the remote copy and on this device's: a newer one is neither pulled, nor merged, nor written over — the sync stops |
+
+Two of these lost a newer version's file whatever its format said, and were found while writing
+the rules: the queued cookie imports, deleted when they could not be read, and the Safari home above.
 
 The contents of the two archives are WebKit's and Safari's own files: those formats belong to macOS,
 which migrates them forward itself; going back to an older macOS is outside what this app can
@@ -259,7 +279,9 @@ In the UI snapshots.
   - an older build is refused;
   - with automatic checks off, not one request: the local server sees none, and the packet capture
     around it (scripts/egress_check.py) sees nothing of the app;
-  - after the replacement the app starts again and opens its data.
+  - after the replacement the app starts again and opens its data;
+  - Safari's home archive of a newer version is refused, leaves no home, and nothing is sealed over
+    it (`formatPolicy`).
 
 ## 9. Not done
 

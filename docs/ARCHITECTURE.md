@@ -146,6 +146,9 @@ WebKit/WebsiteDataStore/<uuid>/               sandboxed    ┘ while the profile
 Every file is written with mode 0600 through a temp file and `rename(2)`, so a crash
 never leaves a half-written ciphertext.
 
+What a version does with a file a newer version wrote — refuses to read it, never writes over or
+deletes it — and which format each file carries: docs/UPDATES.md §4 (`DocumentFormat`).
+
 ### `webdata.pbsa` format
 
 ```

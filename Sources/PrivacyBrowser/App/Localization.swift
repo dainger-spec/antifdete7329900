@@ -1,3 +1,4 @@
+import BrowserCore
 import Foundation
 
 /// Localization for the app's own strings.
@@ -51,3 +52,13 @@ enum Localization {
 
 /// Shorthand used throughout the UI and AppKit call sites.
 func L(_ key: String) -> String { Localization.string(key) }
+
+/// The text shown for `error`: a file that a newer version of the app wrote is said in the
+/// person's language, with what to do about it (docs/UPDATES.md §4); anything else as the error
+/// describes itself.
+func errorText(_ error: Error) -> String {
+    if case let .newerFormat(what, _, _)? = error as? CoreError {
+        return String(format: L("error.newerFormat"), what)
+    }
+    return error.localizedDescription
+}

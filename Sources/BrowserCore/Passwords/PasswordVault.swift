@@ -75,7 +75,7 @@ public final class PasswordVault: @unchecked Sendable {
     init(fileURL: URL, profileID: UUID, profileKey: SymmetricKey) throws {
         self.fileURL = fileURL
         self.profileID = profileID
-        self.key = profileKey.derive(info: "passwords", salt: withUnsafeBytes(of: profileID.uuid) { Data($0) })
+        self.key = Self.fileKey(profileID: profileID, profileKey: profileKey)
         self.storedEntries = []
         try reloadIfChanged()
     }
@@ -96,6 +96,8 @@ public final class PasswordVault: @unchecked Sendable {
             storedEntries = []
         } else {
             let plaintext = try AEAD.open(SecureFile.read(fileURL), key: key, aad: aad)
+            // An array is format 1; a newer version's file is refused, and with it every change.
+            try DocumentFormat.check(plaintext, supported: Self.supportedFormat, what: "passwords.bin")
             storedEntries = try JSONCoding.decoder.decode([PasswordEntry].self, from: plaintext)
         }
         loadedStamp = stamp
@@ -114,7 +116,21 @@ public final class PasswordVault: @unchecked Sendable {
         }
     }
 
-    private var aad: String { "passwords:v1:\(profileID.uuidString)" }
+    private var aad: String { Self.aad(profileID: profileID) }
+
+    /// The newest format of `passwords.bin` this version reads and writes (docs/UPDATES.md §4).
+    static let supportedFormat = 1
+
+    static func aad(profileID: UUID) -> String { "passwords:v1:\(profileID.uuidString)" }
+
+    static func fileKey(profileID: UUID, profileKey: SymmetricKey) -> SymmetricKey {
+        profileKey.derive(info: "passwords", salt: withUnsafeBytes(of: profileID.uuid) { Data($0) })
+    }
+
+    /// The JSON of a sealed `passwords.bin` (sync checks a remote copy's format before using it).
+    static func open(_ sealed: Data, profileID: UUID, profileKey: SymmetricKey) throws -> Data {
+        try AEAD.open(sealed, key: fileKey(profileID: profileID, profileKey: profileKey), aad: aad(profileID: profileID))
+    }
 
     /// Posted after every change, with the profile's id as `userInfo["profileID"]` (the password
     /// manager refreshes when the browser saves a login meanwhile).

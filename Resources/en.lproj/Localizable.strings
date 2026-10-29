@@ -180,6 +180,7 @@
 "editor.webrtc.tunnelSettings" = "Network extension…";
 "editor.webrtc.unrestricted" = "Unrestricted";
 "editor.webrtc.viaTunnel" = "With a proxy, WebRTC goes through the network extension: relay only, the proxy's address.";
+"error.newerFormat" = "The file %@ was saved by a newer version of PrivacyBrowser. This version neither reads nor changes it: install the newer version to open it.";
 "errorpage.proxy.noCredentials" = "The profile’s proxy requires a user name and password. Add them in the profile settings.";
 "errorpage.proxy.rejected" = "The proxy rejected the profile’s user name and password.";
 "errorpage.title" = "Page could not be loaded";

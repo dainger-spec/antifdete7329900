@@ -287,7 +287,7 @@ final class ProxyListTests: XCTestCase {
         future.format = 2
         try ProxyList.file(for: vault).save(future)
         XCTAssertThrowsError(try ProxyList.load(from: vault)) { error in
-            XCTAssertEqual(error as? CoreError, .unsupportedFormat("proxy list format 2"))
+            XCTAssertEqual(error as? CoreError, .newerFormat(what: "proxies.bin", found: 2, supported: 1))
         }
     }
 }

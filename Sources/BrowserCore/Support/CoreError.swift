@@ -11,6 +11,10 @@ public enum CoreError: Error, Equatable, CustomStringConvertible {
     case invalidConfiguration(String)
     case profileNotFound(UUID)
     case unsupportedFormat(String)
+    /// A file a newer version of the app wrote: `what` declares format `found` (nil: not a number
+    /// this version understands), this version reads up to `supported`. Nothing was read from it,
+    /// and nothing is written over it (docs/UPDATES.md §4).
+    case newerFormat(what: String, found: Int?, supported: Int)
     case unsafeArchivePath(String)
     case syncConflict(objectID: String, remoteRevision: Int)
     /// The sync server answered with an unexpected HTTP status (401/403 = bad token).
@@ -31,6 +35,9 @@ public enum CoreError: Error, Equatable, CustomStringConvertible {
         case .invalidConfiguration(let detail): return "Invalid configuration: \(detail)"
         case .profileNotFound(let id): return "Profile not found: \(id)"
         case .unsupportedFormat(let detail): return "Unsupported format: \(detail)"
+        case .newerFormat(let what, let found, let supported):
+            return "\(what) was written by a newer version of PrivacyBrowser (format \(found.map(String.init) ?? "unknown"), "
+                + "this version reads up to \(supported)); nothing was read from it or written over it"
         case .unsafeArchivePath(let path): return "Archive contains unsafe path: \(path)"
         case .syncConflict(let objectID, let revision): return "Sync conflict on \(objectID) (remote revision \(revision))"
         case .syncServer(let status, let message):

@@ -32,11 +32,13 @@ public enum EncryptedDirectoryArchive {
     private enum Kind: UInt8 { case end = 0, directory = 1, file = 2 }
 
     /// Seals `roots` (label → directory) into `archiveURL`, atomically replacing any
-    /// existing archive. Roots that do not exist are skipped.
+    /// existing archive — except one a newer version wrote, which is refused with
+    /// `CoreError.newerFormat` and left as it is. Roots that do not exist are skipped.
     @discardableResult
     public static func seal(roots: [String: URL], to archiveURL: URL, key: SymmetricKey,
                             chunkSize: Int = defaultChunkSize) throws -> Stats {
         for label in roots.keys { try validateComponent(label) }
+        try EncryptedChunkStream.guardOverwrite(of: archiveURL)
         let temp = archiveURL.deletingLastPathComponent()
             .appendingPathComponent(".\(archiveURL.lastPathComponent).\(UUID().uuidString).tmp")
         try SecureFile.ensureDirectory(archiveURL.deletingLastPathComponent())
@@ -109,7 +111,7 @@ public enum EncryptedDirectoryArchive {
         do {
             let handle = try FileHandle(forReadingFrom: archiveURL)
             defer { try? handle.close() }
-            let reader = try EncryptedChunkReader(handle: handle, key: key)
+            let reader = try EncryptedChunkReader(handle: handle, key: key, name: archiveURL.lastPathComponent)
             recordLoop: while true {
                 let kindByte = try reader.read(1)[0]
                 guard let kind = Kind(rawValue: kindByte) else { throw CoreError.corruptData("record kind \(kindByte)") }
@@ -235,7 +237,7 @@ public enum EncryptedDirectoryArchive {
                 let handle = try FileHandle(forReadingFrom: source.url)
                 defer { try? handle.close() }
                 try handle.seek(toOffset: source.offset)
-                let reader = try EncryptedChunkReader(handle: handle, key: source.key)
+                let reader = try EncryptedChunkReader(handle: handle, key: source.key, name: source.url.lastPathComponent)
                 var routes: [String: (destination: Int, label: String)?] = [:]
                 recordLoop: while true {
                     let kindByte = try reader.read(1)[0]

@@ -134,6 +134,7 @@ final class SelfTest {
             try await deviceGenerations(repository)
             try await fingerprintSurface(repository)
             try await recoverySealing(repository)
+            try formatPolicy(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
@@ -2152,6 +2153,53 @@ final class SelfTest {
         let restored = try await js(web2, "return localStorage.getItem('pb') ?? 'null';") as? String
         check("recovery: data restored after recovery seal", restored == token, restored ?? "nil")
         session2.shutDown()
+    }
+
+    // MARK: Format policy (docs/UPDATES.md §4)
+
+    /// Safari's home archive written by a newer version: refused as one, with no home left behind
+    /// — an empty one would be sealed over the archive at the next stop or unlock — and the seals
+    /// that follow leave the archive as it was. (The rules for every file: FormatPolicyTests.)
+    private func formatPolicy(_ repository: ProfileRepository) throws {
+        let profile = try repository.create(name: "Newer archive", configuration: ProfileConfiguration())
+        defer { try? repository.delete(profile.id) }
+        let key = try repository.profileKey(for: profile.id)
+        let homes = SafariHomeVault(repository: repository)
+        let home = homes.homeDirectory(for: profile.id)
+        let staging = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-home-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try FileManager.default.createDirectory(at: staging.appendingPathComponent("Library/Safari"), withIntermediateDirectories: true)
+        try Data("history".utf8).write(to: staging.appendingPathComponent("Library/Safari/History.db"))
+        let archive = repository.safariHomeArchiveURL(for: profile.id)
+        try EncryptedDirectoryArchive.seal(roots: [ProfileTransfer.safariHomeLabel: staging], to: archive, key: key)
+        var newer = try Data(contentsOf: archive)
+        newer[4] = 2 // the version, after "PBSA"
+        try newer.write(to: archive)
+
+        // A first launch, and one after a run that left an empty home (as a profile that wrote nothing does).
+        for leftover in [false, true] {
+            if leftover { try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true) }
+            var refusal: Error?
+            do { try homes.prepareForLaunch(profileID: profile.id, key: key) } catch { refusal = error }
+            var refusedAsNewer = false
+            if case .newerFormat? = refusal as? CoreError { refusedAsNewer = true }
+            let when = leftover ? "after an empty home was left" : "at a first launch"
+            check("format policy: Safari's home archive of a newer version is refused as one, \(when)", refusedAsNewer,
+                  String(describing: refusal))
+            check("format policy: the refused archive leaves no home to be sealed over it, \(when)",
+                  !FileManager.default.fileExists(atPath: home.path))
+            try? homes.seal(profileID: profile.id, key: key) // what a stop, or the recovery at unlock, does next
+            check("format policy: the newer version's archive is as it was, \(when)", (try? Data(contentsOf: archive)) == newer)
+        }
+        // Even with a home there, nothing is sealed over the archive.
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        var sealRefusal: Error?
+        do { try homes.seal(profileID: profile.id, key: key) } catch { sealRefusal = error }
+        var sealRefusedAsNewer = false
+        if case .newerFormat? = sealRefusal as? CoreError { sealRefusedAsNewer = true }
+        check("format policy: a home is not sealed over a newer version's archive",
+              sealRefusedAsNewer && (try? Data(contentsOf: archive)) == newer, String(describing: sealRefusal))
+        try? FileManager.default.removeItem(at: home)
     }
 
     // MARK: Window lifecycle (regression test for the close/quit crash)

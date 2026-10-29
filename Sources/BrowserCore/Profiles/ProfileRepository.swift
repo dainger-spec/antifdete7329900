@@ -223,8 +223,17 @@ public final class ProfileRepository: @unchecked Sendable {
 
     public func loadConfiguration(_ id: UUID, key: SymmetricKey) throws -> ProfileConfiguration {
         let sealed = try SecureFile.read(configURL(for: id))
-        let plaintext = try AEAD.open(sealed, key: key, aad: Self.configAAD(id))
-        return try JSONCoding.decoder.decode(ProfileConfiguration.self, from: plaintext)
+        return try Self.decodeConfiguration(AEAD.open(sealed, key: key, aad: Self.configAAD(id)))
+    }
+
+    /// The newest format of `config.bin` this version reads and writes (docs/UPDATES.md §4).
+    static let configurationFormat = 1
+
+    /// A configuration's JSON, refused when a newer version wrote it: its decoder is tolerant, so
+    /// without this a newer version's fields would be dropped here and the rest written back.
+    static func decodeConfiguration(_ json: Data) throws -> ProfileConfiguration {
+        try DocumentFormat.check(json, supported: configurationFormat, what: "config.bin")
+        return try JSONCoding.decoder.decode(ProfileConfiguration.self, from: json)
     }
 
     public func saveConfiguration(_ configuration: ProfileConfiguration, for id: UUID) throws {
@@ -254,7 +263,7 @@ public final class ProfileRepository: @unchecked Sendable {
 
     func importedCookiesURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("cookies-import.bin") }
 
-    private func importedCookiesFile(for id: UUID) throws -> EncryptedDocumentFile<[ImportedCookie]> {
+    func importedCookiesFile(for id: UUID) throws -> EncryptedDocumentFile<[ImportedCookie]> {
         EncryptedDocumentFile(url: importedCookiesURL(for: id),
                               key: try profileKey(for: id).derive(info: "cookie-import", salt: id.rawBytes),
                               aad: "cookie-import:v1:\(id.uuidString)")
@@ -281,9 +290,10 @@ public final class ProfileRepository: @unchecked Sendable {
         try importedCookiesFile(for: id).load() ?? []
     }
 
-    /// Drops the queue once the launch has put the cookies into the profile's store.
+    /// Drops the queue once the launch has put the cookies into the profile's store, or found it
+    /// unreadable — never a queue a newer version wrote (docs/UPDATES.md §4).
     public func clearImportedCookies(_ id: UUID) {
-        try? FileManager.default.removeItem(at: importedCookiesURL(for: id))
+        try? importedCookiesFile(for: id).remove()
     }
 
     // MARK: Synced cookies
@@ -295,7 +305,7 @@ public final class ProfileRepository: @unchecked Sendable {
         EncryptedDocumentFile(url: url, key: profileKey.derive(info: "cookies", salt: id.rawBytes), aad: "cookies:v1:\(id.uuidString)")
     }
 
-    private func cookieBaselineFile(for id: UUID) throws -> EncryptedDocumentFile<CookieBaseline> {
+    func cookieBaselineFile(for id: UUID) throws -> EncryptedDocumentFile<CookieBaseline> {
         EncryptedDocumentFile(url: cookieBaselineURL(for: id), key: try profileKey(for: id).derive(info: "cookie-baseline", salt: id.rawBytes),
                               aad: "cookie-baseline:v1:\(id.uuidString)")
     }
@@ -322,7 +332,7 @@ public final class ProfileRepository: @unchecked Sendable {
     /// document is emptied, so that sync empties it on the other devices too (their cookie stores
     /// keep what they have), and this device's baseline goes.
     public func clearSyncedCookies(for id: UUID) throws {
-        try? FileManager.default.removeItem(at: cookieBaselineURL(for: id))
+        try cookieBaselineFile(for: id).remove()
         guard FileManager.default.fileExists(atPath: cookieJarURL(for: id).path),
               (try? cookieJar(for: id)) != CookieJarDocument() else { return }
         try saveCookieJar(CookieJarDocument(), for: id)
@@ -332,7 +342,7 @@ public final class ProfileRepository: @unchecked Sendable {
 
     func warmUpPlanURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("warmup.bin") }
 
-    private func warmUpPlanFile(for id: UUID) throws -> EncryptedDocumentFile<WarmUpPlan> {
+    func warmUpPlanFile(for id: UUID) throws -> EncryptedDocumentFile<WarmUpPlan> {
         EncryptedDocumentFile(url: warmUpPlanURL(for: id), key: try profileKey(for: id).derive(info: "warm-up", salt: id.rawBytes),
                               aad: "warm-up:v1:\(id.uuidString)")
     }
@@ -350,7 +360,7 @@ public final class ProfileRepository: @unchecked Sendable {
 
     func warmUpScheduleURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("warmup-schedule.bin") }
 
-    private func warmUpScheduleFile(for id: UUID) throws -> EncryptedDocumentFile<WarmUpSchedule> {
+    func warmUpScheduleFile(for id: UUID) throws -> EncryptedDocumentFile<WarmUpSchedule> {
         EncryptedDocumentFile(url: warmUpScheduleURL(for: id),
                               key: try profileKey(for: id).derive(info: "warm-up-schedule", salt: id.rawBytes),
                               aad: "warm-up-schedule:v1:\(id.uuidString)")
@@ -372,7 +382,9 @@ public final class ProfileRepository: @unchecked Sendable {
     }
 
     func replaceIndex(_ incoming: ProfileIndex) throws {
-        guard incoming.format == 1 else { throw CoreError.unsupportedFormat("index format \(incoming.format)") }
+        guard incoming.format <= Self.indexFormat else {
+            throw CoreError.newerFormat(what: "index.bin", found: incoming.format, supported: Self.indexFormat)
+        }
         try lock.withLock {
             try saveIndex(incoming)
             index = incoming
@@ -390,6 +402,28 @@ public final class ProfileRepository: @unchecked Sendable {
         case .bookmarks: return bookmarksURL(for: id)
         case .history: return historyURL(for: id)
         case .cookies: return cookieJarURL(for: id)
+        }
+    }
+
+    /// Refuses a synced copy of `file` that a newer version of the app wrote (docs/UPDATES.md §4):
+    /// the sync then stops, and neither this device's copy nor the remote one is written.
+    func checkSyncedFileFormat(_ file: ProfileSyncFile, profileID id: UUID, data: Data) throws {
+        let key = try profileKey(for: id)
+        let what = url(of: file, for: id).lastPathComponent
+        switch file {
+        case .config:
+            try DocumentFormat.check(AEAD.open(data, key: key, aad: Self.configAAD(id)), supported: Self.configurationFormat, what: what)
+        case .passwords:
+            try DocumentFormat.check(PasswordVault.open(data, profileID: id, profileKey: key), supported: PasswordVault.supportedFormat, what: what)
+        case .bookmarks:
+            let codec = BookmarkStore.file(url: nil, profileID: id, profileKey: key)
+            try DocumentFormat.check(codec.open(data), supported: codec.supportedFormat, what: what)
+        case .history:
+            let codec = HistoryStore.file(url: nil, profileID: id, profileKey: key)
+            try DocumentFormat.check(codec.open(data), supported: codec.supportedFormat, what: what)
+        case .cookies:
+            let codec = Self.cookieJarFile(url: nil, profileID: id, profileKey: key)
+            try DocumentFormat.check(codec.open(data), supported: codec.supportedFormat, what: what)
         }
     }
 
@@ -435,7 +469,7 @@ public final class ProfileRepository: @unchecked Sendable {
         guard file == .config else { return nil }
         let key = try profileKey(for: id)
         func decode(_ data: Data) throws -> ProfileConfiguration {
-            try JSONCoding.decoder.decode(ProfileConfiguration.self, from: AEAD.open(data, key: key, aad: Self.configAAD(id)))
+            try Self.decodeConfiguration(AEAD.open(data, key: key, aad: Self.configAAD(id)))
         }
         let localConfiguration = try decode(local), remoteConfiguration = try decode(remote)
         if localConfiguration.hasSameSettings(as: remoteConfiguration) {
@@ -452,6 +486,10 @@ public final class ProfileRepository: @unchecked Sendable {
     // MARK: Private
 
     private func writeConfiguration(_ configuration: ProfileConfiguration, id: UUID, key: SymmetricKey) throws {
+        // Never over a newer version's file — whatever the caller read, or failed to read, first.
+        try DocumentFormat.guardOverwrite(of: configURL(for: id), supported: Self.configurationFormat, what: "config.bin") {
+            try AEAD.open($0, key: key, aad: Self.configAAD(id))
+        }
         let plaintext = try JSONCoding.encoder.encode(configuration)
         try SecureFile.write(AEAD.seal(plaintext, key: key, aad: Self.configAAD(id)), to: configURL(for: id))
     }
@@ -479,18 +517,23 @@ public final class ProfileRepository: @unchecked Sendable {
     private func loadIndex() throws -> ProfileIndex {
         guard FileManager.default.fileExists(atPath: indexURL.path) else { return ProfileIndex() }
         let plaintext = try AEAD.open(SecureFile.read(indexURL), key: vault.indexKey, aad: indexAAD)
-        let decoded = try JSONCoding.decoder.decode(ProfileIndex.self, from: plaintext)
-        guard decoded.format == 1 else { throw CoreError.unsupportedFormat("index format \(decoded.format)") }
-        return decoded
+        try DocumentFormat.check(plaintext, supported: Self.indexFormat, what: "index.bin")
+        return try JSONCoding.decoder.decode(ProfileIndex.self, from: plaintext)
     }
 
-    /// Caller must hold `lock`.
+    /// The newest format of `index.bin` this version reads and writes (docs/UPDATES.md §4).
+    static let indexFormat = 1
+
+    /// Caller must hold `lock`. Never over an index a newer version wrote since this one read it.
     private func saveIndex(_ index: ProfileIndex) throws {
+        try DocumentFormat.guardOverwrite(of: indexURL, supported: Self.indexFormat, what: "index.bin") {
+            try AEAD.open($0, key: vault.indexKey, aad: indexAAD)
+        }
         let plaintext = try JSONCoding.encoder.encode(index)
         try SecureFile.write(AEAD.seal(plaintext, key: vault.indexKey, aad: indexAAD), to: indexURL)
     }
 
-    private var indexAAD: String { "profile-index:v1:\(vault.vaultID.uuidString)" }
+    var indexAAD: String { "profile-index:v1:\(vault.vaultID.uuidString)" }
     static func keyAAD(_ id: UUID) -> String { "profile-key:v1:\(id.uuidString)" }
     static func configAAD(_ id: UUID) -> String { "profile-config:v1:\(id.uuidString)" }
 

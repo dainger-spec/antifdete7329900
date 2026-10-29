@@ -12,6 +12,10 @@ import Foundation
 /// only by the KDF cost. That is inherent to any password-only scheme; choose a
 /// strong master password.
 public struct VaultHeader: Codable, Equatable, Sendable {
+    /// The vault's format, and with it the generation of everything in the vault: a later version
+    /// raises it before it writes anything an older one could not read, and every older version
+    /// then refuses the whole vault — those from before this rule too, which open only format 1
+    /// (docs/UPDATES.md §4, R3).
     public static let currentFormat = 1
 
     public var format: Int
@@ -22,6 +26,15 @@ public struct VaultHeader: Codable, Equatable, Sendable {
     public var createdAt: Date
 
     static func aad(for vaultID: UUID) -> String { "vault-master-key:v1:\(vaultID.uuidString)" }
+
+    /// A header's JSON (`vault.json`, or its copy on the sync server), refused before it is decoded
+    /// when a newer version wrote it: nothing in the vault is opened then.
+    public static func decodeChecked(_ json: Data) throws -> VaultHeader {
+        try DocumentFormat.check(json, supported: currentFormat, what: "vault.json")
+        let header = try JSONCoding.decoder.decode(VaultHeader.self, from: json)
+        guard header.format == currentFormat else { throw CoreError.unsupportedFormat("vault format \(header.format)") }
+        return header
+    }
 }
 
 /// Key hierarchy
@@ -69,11 +82,7 @@ public enum MasterVault {
 
     public static func readHeader(in root: URL) throws -> VaultHeader {
         guard exists(in: root) else { throw CoreError.vaultNotFound }
-        let header = try JSONCoding.decoder.decode(VaultHeader.self, from: SecureFile.read(headerURL(in: root)))
-        guard header.format == VaultHeader.currentFormat else {
-            throw CoreError.unsupportedFormat("vault format \(header.format)")
-        }
-        return header
+        return try VaultHeader.decodeChecked(SecureFile.read(headerURL(in: root)))
     }
 
     public static func unlock(in root: URL, password: String) throws -> UnlockedVault {
@@ -131,9 +140,11 @@ public enum MasterVault {
         }
     }
 
-    /// Replaces the header of an existing vault (master-password change).
+    /// Replaces the header of an existing vault (master-password change) — never one that a newer
+    /// version wrote since this one read it (docs/UPDATES.md §4).
     static func writeHeader(_ header: VaultHeader, in root: URL) throws {
         try SecureFile.ensureDirectory(root)
+        _ = try VaultHeader.decodeChecked(SecureFile.read(headerURL(in: root)))
         try SecureFile.write(JSONCoding.encoder.encode(header), to: headerURL(in: root))
     }
 }
