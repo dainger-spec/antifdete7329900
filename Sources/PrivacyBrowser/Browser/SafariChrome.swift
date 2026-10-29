@@ -34,9 +34,14 @@ import WebKit
 enum SafariChrome {
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
 
+    /// Loaded up front, all of them: a class that is not registered yet cannot be patched, and
+    /// `prepare()` runs before Safari's menu pulls these in by itself. SafariSharedUI is where the
+    /// web-extension machinery lives, SafariCore where the assertions come from.
     private static let frameworkPaths = [
         "/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari",
         "/System/Library/PrivateFrameworks/SafariShared.framework/Versions/A/SafariShared",
+        "/System/Library/PrivateFrameworks/SafariSharedUI.framework/Versions/A/SafariSharedUI",
+        "/System/Library/PrivateFrameworks/SafariCore.framework/Versions/A/SafariCore",
         "/System/Library/PrivateFrameworks/SafariFoundation.framework/Versions/A/SafariFoundation",
     ]
 
