@@ -10,11 +10,13 @@ import SwiftUI
 /// goes and what each run came to; the rest can be cancelled at any time. Runs the schedule finds
 /// due join the same queue (`WarmUpCoordinator`), so they show here too.
 struct WarmUpQueueView: View {
+    /// Profiles ticked when the sheet opens (the profile list's selection).
+    var preselected: Set<UUID> = []
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
         if let manager = model.manager, let warmUps = model.warmUps {
-            WarmUpQueuePanel(manager: manager, warmUps: warmUps)
+            WarmUpQueuePanel(manager: manager, warmUps: warmUps, preselected: preselected)
         }
     }
 }
@@ -22,6 +24,7 @@ struct WarmUpQueueView: View {
 private struct WarmUpQueuePanel: View {
     @ObservedObject var manager: ProfileManager
     @ObservedObject var warmUps: WarmUpCoordinator
+    let preselected: Set<UUID>
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
@@ -78,6 +81,7 @@ private struct WarmUpQueuePanel: View {
         .onAppear {
             guard !loaded else { return }
             loaded = true
+            selected = preselected
             rebuild()
         }
         .onChange(of: choice) { _, _ in rebuild() }

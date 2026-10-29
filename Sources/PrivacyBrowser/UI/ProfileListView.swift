@@ -35,6 +35,8 @@ struct ProfileListView: View {
     @State private var importingCookiesFor: ProfileSummary?
     @State private var warmingUp: ProfileSummary?
     @State private var warmingUpSeveral = false
+    /// The profiles the warm-up queue opens with ticked (the selection's bar).
+    @State private var queuePreselection: Set<UUID> = []
     @State private var exporting: ProfileSummary?
     @State private var exportingCookies: ProfileSummary?
     @State private var importingProfile = false
@@ -44,6 +46,10 @@ struct ProfileListView: View {
     @State private var showingTunnel = false
     @State private var filter: ProfileFilter = .all
     @State private var search = ""
+    @State private var showingProxies = false
+    @State private var assigningProxies: ProxyAssignView.Request?
+    /// Profiles of the selection waiting for the one confirmation that deletes them all.
+    @State private var pendingBulkDelete: [UUID] = []
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: model.isWorking, sync: syncLine,
@@ -52,7 +58,7 @@ struct ProfileListView: View {
             .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
             .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
             .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
-            .sheet(isPresented: $warmingUpSeveral) { WarmUpQueueView() }
+            .sheet(isPresented: $warmingUpSeveral) { WarmUpQueueView(preselected: queuePreselection) }
             .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }
             .sheet(item: $exportingCookies) { profile in CookieExportView(profile: profile) }
             .sheet(isPresented: $importingProfile) { ProfileImportView() }
@@ -73,6 +79,31 @@ struct ProfileListView: View {
             } message: { _ in
                 Text(L("profiles.delete.message"))
             }
+            .sheet(isPresented: $showingProxies) { ProxyListView() }
+            .sheet(item: $assigningProxies) { request in ProxyAssignView(request: request) }
+            .confirmationDialog(String(format: L("profiles.bulk.delete.title"), pendingBulkDelete.count),
+                                isPresented: Binding(get: { !pendingBulkDelete.isEmpty }, set: { if !$0 { pendingBulkDelete = [] } }),
+                                titleVisibility: .visible,
+                                presenting: pendingBulkDelete.isEmpty ? nil : pendingBulkDelete) { ids in
+                Button(L("profiles.bulk.delete.confirm"), role: .destructive) {
+                    Task { await model.deleteProfiles(ids) }
+                }
+            } message: { ids in
+                Text(String(format: L("profiles.bulk.delete.message"), names(ids)))
+            }
+    }
+
+    /// Warm-up of several profiles (the selection's bar): the warm-up queue, with them ticked.
+    private func warmUpSeveral(_ ids: [UUID]) {
+        queuePreselection = Set(ids)
+        warmingUpSeveral = true
+    }
+
+    /// "Northwind, Harbor, Atlas and 2 more".
+    private func names(_ ids: [UUID]) -> String {
+        let names = ids.compactMap { summary($0)?.name }
+        guard names.count > 5 else { return names.joined(separator: ", ") }
+        return String(format: L("profiles.bulk.namesAndMore"), names.prefix(5).joined(separator: ", "), names.count - 5)
     }
 
     private var rows: [ProfileRowItem] {
@@ -124,7 +155,13 @@ struct ProfileListView: View {
             syncNow: model.syncTarget == nil ? nil : { Task { await model.syncNow() } },
             openTunnel: { showingTunnel = true },
             changePassword: { changingPassword = true },
-            warmUpSeveral: { warmingUpSeveral = true })
+            warmUpQueue: { queuePreselection = []; warmingUpSeveral = true },
+            openProxies: { showingProxies = true },
+            launchSeveral: { ids in Task { await model.launchProfiles(ids) } },
+            stopSeveral: { ids in Task { await model.stopProfiles(ids) } },
+            warmUpSeveral: { ids in warmUpSeveral(ids) },
+            assignProxies: { ids in assigningProxies = ProxyAssignView.Request(profileIDs: Set(ids), proxyIDs: []) },
+            deleteSeveral: { ids in pendingBulkDelete = ids })
     }
 }
 
@@ -230,7 +267,18 @@ struct ProfileActions {
     var openTunnel: () -> Void = {}
     var changePassword: () -> Void = {}
     /// Several profiles warmed up one after the other (`WarmUpQueueView`).
-    var warmUpSeveral: () -> Void = {}
+    var warmUpQueue: () -> Void = {}
+    /// The proxy list (import, checks, assignment).
+    var openProxies: () -> Void = {}
+    // Several selected profiles at once (`ProfileBulkBar`), in the order the list shows them.
+    var launchSeveral: ([UUID]) -> Void = { _ in }
+    var stopSeveral: ([UUID]) -> Void = { _ in }
+    /// The hook a warm-up queue takes the selection through.
+    var warmUpSeveral: ([UUID]) -> Void = { _ in }
+    /// Proxies of the list for these profiles, in turn.
+    var assignProxies: ([UUID]) -> Void = { _ in }
+    /// Asks once, naming how many, before deleting.
+    var deleteSeveral: ([UUID]) -> Void = { _ in }
 }
 
 // MARK: - The screen
@@ -245,6 +293,8 @@ struct ProfilesScreen: View {
     @Binding var filter: ProfileFilter
     @Binding var search: String
     var actions = ProfileActions()
+    /// Rows selected with ⌘- and ⇧-click; with two or more, `ProfileBulkBar` acts on them all.
+    @State private var selection = ProfileSelection()
 
     static let sidebarWidth: CGFloat = 208
     /// The table's columns drop "Appears as", then "Last used", below these content widths.
@@ -258,13 +308,31 @@ struct ProfilesScreen: View {
             VStack(spacing: 0) {
                 header
                 Rectangle().fill(Theme.divider).frame(height: 1)
+                if selectedRows.count >= 2 {
+                    ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
+                                   selectAll: { selection.select(displayOrder.map(\.id)) },
+                                   clear: { selection.clear() })
+                        .transition(.opacity)
+                }
                 content
             }
             .background(Theme.surface)
+            .animation(Theme.hoverAnimation, value: selectedRows.count >= 2)
         }
         .background(Theme.surface)
         .ignoresSafeArea(.container, edges: .top)
         .environment(\.colorScheme, .dark)
+        .onChange(of: rows.map(\.id)) { _, ids in selection.keep(only: Set(ids)) }
+    }
+
+    /// The rows in the order the list shows them: running ones first, then the others.
+    private var displayOrder: [ProfileRowItem] {
+        visibleRows.filter(\.isActive) + visibleRows.filter { !$0.isActive }
+    }
+
+    /// The selected rows the list shows (a row the filter or the search hides is never acted on unseen).
+    private var selectedRows: [ProfileRowItem] {
+        displayOrder.filter { selection.contains($0.id) }
     }
 
     private var visibleRows: [ProfileRowItem] {
@@ -294,8 +362,9 @@ struct ProfilesScreen: View {
             LumenSearchField(text: $search, prompt: L("profiles.search"))
                 .frame(width: 200)
             Menu {
-                Button(L("profiles.menu.warmUpSeveral"), action: actions.warmUpSeveral)
+                Button(L("profiles.menu.warmUpSeveral"), action: actions.warmUpQueue)
                     .disabled(rows.isEmpty)
+                Button(L("profiles.menu.proxies"), action: actions.openProxies)
                 Divider()
                 Button(L("profiles.menu.import"), action: actions.importProfile)
                 Divider()
@@ -412,7 +481,8 @@ struct ProfilesScreen: View {
             .padding(.bottom, 4)
             .accessibilityAddTraits(.isHeader)
             ForEach(rows) { row in
-                ProfileRow(row: row, columns: columns, actions: actions)
+                ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
+                           onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) })
                     .overlay(alignment: .bottom) {
                         Rectangle().fill(Theme.divider).frame(height: 1).padding(.leading, ProfileColumns.nameInset + ProfileColumns.rowPadding)
                     }
@@ -581,6 +651,9 @@ private struct ProfileRow: View {
     let row: ProfileRowItem
     let columns: ProfileColumns
     let actions: ProfileActions
+    var isSelected = false
+    /// A click on the row itself (not on its buttons or menu): selects it (`ProfileSelection`).
+    var onClick: (ProfileSelection.Click) -> Void = { _ in }
 
     var body: some View {
         HStack(spacing: ProfileColumns.gap) {
@@ -605,12 +678,17 @@ private struct ProfileRow: View {
         }
         .padding(.horizontal, ProfileColumns.rowPadding)
         .frame(height: 48)
+        .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+            .fill(isSelected ? Theme.rowSelected : .clear))
         .contentShape(Rectangle())
+        // The row's buttons and ⋯ menu take their own clicks; a click anywhere else selects.
+        .onTapGesture { onClick(.current) }
         .hoverHighlight(cornerRadius: Theme.controlRadius)
         .opacity(row.activity == .sealing ? 0.6 : 1)
         .contextMenu { ProfileMenuItems(row: row, actions: actions) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(row.name))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var nameCell: some View {

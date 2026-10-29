@@ -30,6 +30,8 @@ final class AppModel: ObservableObject {
     private(set) var manager: ProfileManager?
     /// The warm-up queue and schedule of this unlock (`WarmUpCoordinator`).
     private(set) var warmUps: WarmUpCoordinator?
+    /// The proxy list of the unlocked vault (`ProxyListModel`); nil while locked.
+    private(set) var proxyList: ProxyListModel?
     private var managerObservation: AnyCancellable?
     private var lockTask: Task<Void, Never>?
 
@@ -175,6 +177,7 @@ final class AppModel: ObservableObject {
         warmUps.forwardChanges(to: self)
         self.warmUps = warmUps
         warmUps.begin()
+        proxyList = ProxyListModel(vault: vault) { [weak self] message in self?.showError(message) }
         deviceSettings = (try? DeviceSettings.load(from: vault)) ?? DeviceSettings()
         phase = .unlocked
         refresh()
@@ -212,6 +215,8 @@ final class AppModel: ObservableObject {
         warmUps?.shutDown()
         warmUps = nil
         await manager?.shutDown()
+        proxyList?.stopChecking()
+        proxyList = nil
         managerObservation = nil
         manager = nil
         repository = nil

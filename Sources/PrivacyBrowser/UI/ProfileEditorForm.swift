@@ -31,8 +31,12 @@ struct ProfileEditorForm: View {
     var onCancel: () -> Void = {}
     var onSave: () -> Void = {}
     var onTunnelSettings: () -> Void = {}
+    /// The proxy list, for "Choose from list…" (empty: the picker is not shown).
+    var savedProxies: [ProxyListEntry] = []
 
     static let size = CGSize(width: 600, height: 660)
+    /// A menu is no place for thousands of items: the ones that answered, fastest first, lead.
+    static let pickerLimit = 200
 
     var body: some View {
         VStack(spacing: 0) {
@@ -199,6 +203,19 @@ struct ProfileEditorForm: View {
     private var network: some View {
         VStack(alignment: .leading, spacing: 14) {
             EditorToggle(L("editor.proxy.use.title"), detail: L("editor.proxy.detail"), isOn: $draft.proxyEnabled)
+            if !savedProxies.isEmpty {
+                EditorRow(L("editor.proxy.fromList")) {
+                    Menu {
+                        ForEach(Array(ProxyCheckText.pickingOrder(savedProxies).prefix(Self.pickerLimit))) { entry in
+                            Button(ProxyCheckText.menuTitle(entry)) { draft.useProxy(entry.proxy) }
+                        }
+                    } label: {
+                        Text(L("editor.proxy.chooseFromList"))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+            }
             if draft.proxyEnabled {
                 EditorField(L("editor.proxy.type")) {
                     Picker(L("editor.proxy.type"), selection: $draft.proxyKind) {

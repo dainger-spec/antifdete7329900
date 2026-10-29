@@ -37,6 +37,23 @@ enum ProxyGeoLookup {
         /// The proxy answered 407 and the profile has no credentials for it. Only this lookup sees
         /// that: WebKit keeps a proxy's challenge to itself and leaves the page loading forever.
         var proxyRequiresCredentials = false
+        /// A service's HTTP answer came back through the proxy, whatever it said (a rate-limited
+        /// service answers without a location): the proxy carries traffic. The proxy checker's
+        /// "alive" (`ProxyChecker`).
+        var answered = false
+        /// How long the first request that got an answer took: the connection to the proxy, the
+        /// tunnel through it and the service's reply. Nil when nothing answered.
+        var latency: TimeInterval?
+        /// Every connection the lookup's requests were made on, as the URL loading system reports
+        /// them (`URLSessionTaskMetrics`): the proxy's own address, never a service's. The
+        /// self-test checks that a dead proxy was not gone around.
+        var connections: [Connection] = []
+    }
+
+    struct Connection: Equatable, Sendable, CustomStringConvertible {
+        var address: String
+        var port: Int?
+        var description: String { "\(address.contains(":") ? "[\(address)]" : address):\(port.map(String.init) ?? "?")" }
     }
 
     static func lookUp(proxy: ProxySettings, userAgent: String, timeout: TimeInterval = 6) async -> Result {
@@ -56,31 +73,34 @@ enum ProxyGeoLookup {
         var result = Result()
         let deadline = Date().addingTimeInterval(timeout)
         let endpoint = ProxyLocation.endpoint(of: proxy)
-        for service in services {
+        lookup: for service in services {
             let remaining = deadline.timeIntervalSinceNow
             guard remaining > 0.5 else { break }
             var request = URLRequest(url: service.url)
             request.timeoutInterval = remaining
+            let asked = Date()
             do {
                 let (data, response) = try await session.data(for: request)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if response is HTTPURLResponse, !result.answered {
+                    result.answered = true
+                    result.latency = Date().timeIntervalSince(asked)
+                }
                 if status == 200, let location = ProxyLocation.parse(data, timeZoneKeyPath: service.timeZoneKeyPath,
                                                                      countryKeyPath: service.countryKeyPath,
                                                                      ipKeyPath: service.ipKeyPath, proxyEndpoint: endpoint) {
                     log.info("Proxy \(endpoint, privacy: .private) exits in \(location.timeZoneIdentifier, privacy: .private) (\(location.countryCode ?? "?", privacy: .private)) per \(service.url.host ?? "?", privacy: .public)")
                     result.location = location
-                    return result
+                    break lookup
                 }
                 log.notice("\(service.url.host ?? "?", privacy: .public) gave no location (HTTP \(status))")
             } catch {
                 log.notice("\(service.url.host ?? "?", privacy: .public) through the proxy failed: \(error.localizedDescription, privacy: .private)")
             }
-            if challenges.proxyRequiredCredentials {
-                result.proxyRequiresCredentials = true
-                return result
-            }
+            if challenges.proxyRequiredCredentials { break }
         }
         result.proxyRequiresCredentials = challenges.proxyRequiredCredentials
+        result.connections = challenges.connections
         return result
     }
 }
@@ -97,6 +117,17 @@ private final class ProxyChallengeObserver: NSObject, URLSessionTaskDelegate, @u
     }
 
     var proxyRequiredCredentials: Bool { lock.withLock { _proxyRequiredCredentials } }
+
+    private var _connections: [ProxyGeoLookup.Connection] = []
+    var connections: [ProxyGeoLookup.Connection] { lock.withLock { _connections } }
+
+    /// Delivered before the task completes, so a request's connections are known once it returned.
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        let connections = metrics.transactionMetrics.compactMap { transaction -> ProxyGeoLookup.Connection? in
+            transaction.remoteAddress.map { ProxyGeoLookup.Connection(address: $0, port: transaction.remotePort) }
+        }
+        lock.withLock { _connections += connections }
+    }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {

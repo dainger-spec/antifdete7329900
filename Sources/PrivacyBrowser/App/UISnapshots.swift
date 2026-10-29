@@ -114,6 +114,7 @@ enum UISnapshots {
         problems += await Shot(name: "sheet-change-password", size: CGSize(width: 420, height: 330), titled: false) {
             ChangePasswordView().environmentObject(model)
         }.capture(into: folder)
+        problems += await proxyList(into: folder)
         // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
         problems += await browserWindows(into: folder)
         // The launch screen (the Profiles window before unlocking), also while the vault opens.
@@ -138,6 +139,44 @@ enum UISnapshots {
             FlagSheet()
         }.capture(into: folder)
         return problems
+    }
+
+    // MARK: Proxy list
+
+    /// The Proxies sheet with a few proxies as checks left them (alive in three countries, one of
+    /// them slow, one dead, one not checked), from a temporary vault. Nothing is checked here and
+    /// nothing goes to the network.
+    private static func proxyList(into folder: URL) async -> Int {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-snapshots-proxies-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        do {
+            let vault = try MasterVault.create(in: root, password: "snapshots", iterations: 10_000)
+            let checked = Date().addingTimeInterval(-12 * 60)
+            func alive(_ ip: String, _ country: String, _ zone: String, _ milliseconds: Int) -> ProxyCheckResult {
+                ProxyCheckResult(checkedAt: checked, exitIP: ip, countryCode: country, timeZoneIdentifier: zone,
+                                 latencyMilliseconds: milliseconds)
+            }
+            let entries = [
+                ProxyListEntry(label: "Berlin 1", proxy: ProxySettings(kind: .socks5, host: "203.0.113.10", port: 1080,
+                                                                     username: "northwind", password: "sample"),
+                               lastCheck: alive("203.0.113.10", "DE", "Europe/Berlin", 84)),
+                ProxyListEntry(proxy: ProxySettings(kind: .httpConnect, host: "proxy.example.net", port: 3128),
+                               lastCheck: alive("198.51.100.23", "NL", "Europe/Amsterdam", 142)),
+                ProxyListEntry(label: "Tokyo", proxy: ProxySettings(kind: .httpConnect, host: "192.0.2.44", port: 8443, tlsToProxy: true),
+                               lastCheck: alive("192.0.2.44", "JP", "Asia/Tokyo", 1730)),
+                ProxyListEntry(label: "Old provider", proxy: ProxySettings(kind: .socks5, host: "192.0.2.7", port: 1080),
+                               lastCheck: .dead(.noAnswer, at: checked)),
+                ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "10.0.0.5", port: 9050)),
+            ]
+            try ProxyList(entries: entries).save(to: vault)
+            let proxies = ProxyListModel(vault: vault) { print("FAIL sample proxy list: \($0)") }
+            return await Shot(name: "sheet-proxies", size: CGSize(width: 860, height: 620), titled: false) {
+                ProxyListPanel(proxies: proxies)
+            }.capture(into: folder)
+        } catch {
+            print("FAIL could not make the sample proxy list: \(error)")
+            return 1
+        }
     }
 
     // MARK: Click test
