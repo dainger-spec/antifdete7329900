@@ -67,6 +67,8 @@ struct ProfileIndex: Codable, Equatable {
 ///                                  store held at the last record or apply (this device only)
 /// profiles/<uuid>/warmup.bin       AEAD(warmUpKey, WarmUpPlan JSON): the last session warm-up plan
 ///                                  (this device only)
+/// profiles/<uuid>/warmup-schedule.bin AEAD(warmUpScheduleKey, WarmUpSchedule JSON): "warm up every
+///                                  N hours" and when it last ran (this device only, not exported)
 /// ```
 /// Profile names are only readable after unlock. Profile configurations are only
 /// decrypted when launched or edited.
@@ -308,6 +310,25 @@ public final class ProfileRepository: @unchecked Sendable {
 
     public func saveWarmUpPlan(_ plan: WarmUpPlan, for id: UUID) throws {
         try warmUpPlanFile(for: id).save(plan)
+    }
+
+    // MARK: Warm-up schedule (this Mac only)
+
+    func warmUpScheduleURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("warmup-schedule.bin") }
+
+    private func warmUpScheduleFile(for id: UUID) throws -> EncryptedDocumentFile<WarmUpSchedule> {
+        EncryptedDocumentFile(url: warmUpScheduleURL(for: id),
+                              key: try profileKey(for: id).derive(info: "warm-up-schedule", salt: id.rawBytes),
+                              aad: "warm-up-schedule:v1:\(id.uuidString)")
+    }
+
+    /// The profile's warm-up schedule (`WarmUpSchedule`), or nil when none was ever set.
+    public func warmUpSchedule(for id: UUID) throws -> WarmUpSchedule? {
+        try warmUpScheduleFile(for: id).load()
+    }
+
+    public func saveWarmUpSchedule(_ schedule: WarmUpSchedule, for id: UUID) throws {
+        try warmUpScheduleFile(for: id).save(schedule)
     }
 
     // MARK: Sync support (raw encrypted files; see SyncEngine)

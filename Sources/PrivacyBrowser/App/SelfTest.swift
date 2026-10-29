@@ -36,8 +36,9 @@ final class SelfTest {
         setenv("PB_PROFILE_PROCESS", "0", 1)
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
-            print("SELFTEST TIMEOUT after 300 s")
+        // A hung check must not hold CI; the whole run takes about four minutes on the runner.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 480) {
+            print("SELFTEST TIMEOUT after 480 s")
             exit(3)
         }
         Task { @MainActor in
@@ -146,6 +147,7 @@ final class SelfTest {
             try await profileTransfer(repository)
             try await profileSync(repository)
             try await warmUp(repository)
+            try await warmUpQueue(repository)
             try await safariChromeThroughTheProxy(repository)
             try await lockDuringLaunch(repository)
             try await quitFromFocusedPage(repository)
@@ -2272,6 +2274,101 @@ final class SelfTest {
                   && !webKitDataDirectoriesExist(profile.id) && messages.isEmpty,
               "stoppedFirst=\(stoppedFirst) state=\(robot.state) seal=\(sealError ?? "ok") messages=\(messages)")
         try await manager.delete(profile.id)
+    }
+
+    /// Two profiles warmed up through the queue (`WarmUpCoordinator`), as "Warm Up Several…" does:
+    /// each started without a window, warmed up through the self-test proxy, stopped and sealed
+    /// again, and only then the next — never both at once. Each run's report counts the profile's
+    /// cookies per site (registrable domain) in its own store, telling the cookies the run added
+    /// from one the profile already had; and a run from the queue counts as the profile's last
+    /// run for its schedule.
+    private func warmUpQueue(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("warm-up queue checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let run = String(UUID().uuidString.prefix(8)).lowercased()
+        func page(_ host: String, _ name: String) -> String { "http://\(host)/pb-warmup/\(name)?run=\(run)" }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let first = try repository.create(name: "Queue 1", configuration: ProfileConfiguration(proxy: proxy, matchProxyLocation: false))
+        let second = try repository.create(name: "Queue 2", configuration: ProfileConfiguration(proxy: proxy, matchProxyLocation: false))
+        // The second profile already holds a cookie of the site it is going to visit: the report
+        // has to tell it from the one the run adds.
+        try repository.queueImportedCookies([ImportedCookie(name: "pbwarm_before", value: run, domain: "warmup.selftest.invalid",
+                                                            hostOnly: true, expires: Date().addingTimeInterval(86_400))],
+                                            for: second.id)
+        // The first repeats on a schedule (not due for a day): its run from the queue counts.
+        let queued = Date()
+        try repository.saveWarmUpSchedule(WarmUpSchedule(everyHours: 24, since: queued), for: first.id)
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        // As AppModel.startWarmUp: a stopped profile is launched without a window for its run.
+        let coordinator = WarmUpCoordinator(manager: manager, repository: repository) { plan, id in
+            if !manager.isRunning(id) {
+                do {
+                    try await manager.launch(id, openingWindow: false)
+                } catch {
+                    manager.onError?(String(describing: error))
+                    return false
+                }
+            }
+            guard manager.isRunning(id) else { return false }
+            manager.warmUpRobot(for: id).limits = .init(loadTimeout: 15, startTimeout: 8, scriptTimeout: 5,
+                                                         dwellOverride: 1...1.2, pauseOverride: 0.2...0.3)
+            return manager.startWarmUp(id, plan: plan)
+        }
+        defer { coordinator.shutDown() }
+        let policy = NSApp.activationPolicy()
+        NSApp.setActivationPolicy(.accessory)
+        defer { NSApp.setActivationPolicy(policy) }
+
+        let plans: [UUID: WarmUpPlan] = [
+            first.id: WarmUpPlan(addresses: [page("warmup.selftest.invalid", "qa"), page("www.queue-site.invalid", "qb")].joined(separator: "\n"),
+                                 scroll: false, followLinks: false),
+            second.id: WarmUpPlan(addresses: page("warmup.selftest.invalid", "qc"), scroll: false, followLinks: false),
+        ]
+        coordinator.enqueue([first.id, second.id]) { plans[$0] ?? WarmUpPlan() }
+        // Watched every tenth of a second while the queue goes.
+        var bothRunning = false
+        var windowShown = false
+        var order: [UUID] = []
+        let done = await waitUntil(timeout: 120) {
+            for id in [first.id, second.id] where manager.isRunning(id) {
+                if order.last != id { order.append(id) }
+                if manager.session(for: id)?.hasVisibleWindow == true { windowShown = true }
+            }
+            if manager.isRunning(first.id) && manager.isRunning(second.id) { bothRunning = true }
+            return !coordinator.queue.isActive
+        }
+        let entries = coordinator.queue.entries
+        func report(_ id: UUID) -> WarmUpStatus? {
+            guard let entry = entries.first(where: { $0.profileID == id }), case let .done(status) = entry.state else { return nil }
+            return status
+        }
+        let firstReport = report(first.id), secondReport = report(second.id)
+        check("warm-up queue: two profiles warmed up one after the other, each started without a window, then stopped and sealed before the next began",
+              done && !bothRunning && !windowShown && order == [first.id, second.id]
+                  && firstReport?.phase == .finished && secondReport?.phase == .finished
+                  && !manager.isRunning(first.id) && !manager.isRunning(second.id)
+                  && !webKitDataDirectoriesExist(first.id) && !webKitDataDirectoriesExist(second.id) && messages.isEmpty,
+              "done=\(done) both=\(bothRunning) window=\(windowShown) order=\(order.map { $0 == first.id ? 1 : 2 }) "
+                  + "states=\(entries.map(\.state)) messages=\(messages)")
+        func counts(_ status: WarmUpStatus?, _ site: String) -> [Int] {
+            guard let found = status?.sites?.first(where: { $0.site == site }) else { return [] }
+            return [found.cookies, found.added]
+        }
+        check("warm-up report: the profile's cookies per site (registrable domain) after the run, the run's own told from those it had",
+              counts(firstReport, "selftest.invalid") == [1, 1] && counts(firstReport, "queue-site.invalid") == [1, 1]
+                  && firstReport?.cookies == 2
+                  && counts(secondReport, "selftest.invalid") == [2, 1] && secondReport?.cookies == 1,
+              "first=\(firstReport?.sites ?? []) (\(firstReport?.cookies ?? -1)) second=\(secondReport?.sites ?? []) (\(secondReport?.cookies ?? -1))")
+        let stored = try repository.warmUpSchedule(for: first.id)
+        check("warm-up schedule: a run from the queue counts as the profile's last run, stored with its schedule",
+              (stored?.lastRunAt ?? .distantPast) >= queued && (coordinator.nextRun(of: first.id) ?? .distantPast) > Date().addingTimeInterval(23 * 3600),
+              "lastRunAt=\(String(describing: stored?.lastRunAt)) next=\(String(describing: coordinator.nextRun(of: first.id)))")
+        try await manager.delete(first.id)
+        try await manager.delete(second.id)
     }
 
     /// The profile's WebKit data is not on disk in plain form (sealed).

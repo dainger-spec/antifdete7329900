@@ -28,6 +28,8 @@ final class AppModel: ObservableObject {
 
     private(set) var repository: ProfileRepository?
     private(set) var manager: ProfileManager?
+    /// The warm-up queue and schedule of this unlock (`WarmUpCoordinator`).
+    private(set) var warmUps: WarmUpCoordinator?
     private var managerObservation: AnyCancellable?
     private var lockTask: Task<Void, Never>?
 
@@ -164,6 +166,13 @@ final class AppModel: ObservableObject {
         managerObservation = manager.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         self.repository = repository
         self.manager = manager
+        // Queued and scheduled warm-ups start the way the warm-up screen does (startWarmUp).
+        let warmUps = WarmUpCoordinator(manager: manager, repository: repository) { [weak self] plan, id in
+            await self?.startWarmUp(plan, for: id) ?? false
+        }
+        warmUps.forwardChanges(to: self)
+        self.warmUps = warmUps
+        warmUps.begin()
         deviceSettings = (try? DeviceSettings.load(from: vault)) ?? DeviceSettings()
         phase = .unlocked
         refresh()
@@ -197,6 +206,9 @@ final class AppModel: ObservableObject {
     var hasActivity: Bool { lockTask != nil || (manager?.hasActivity ?? false) }
 
     private func performLock() async {
+        // Before the profiles stop: nothing waiting in the warm-up queue may launch one again.
+        warmUps?.shutDown()
+        warmUps = nil
         await manager?.shutDown()
         managerObservation = nil
         manager = nil

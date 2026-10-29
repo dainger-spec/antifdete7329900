@@ -113,8 +113,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   session warm-up robot (pages in order through the proxy with the profile's cookies and
   User-Agent, time on each page measured at the proxy, scrolling, only the safe link followed,
   nothing in the page world while it acts, Stop, tab closed, a page dialog, the profile stopped
-  mid-run), a proxied profile in its own process with Safari's chrome on a leak page (every kind of
-  request through the proxy, the process's own report), profile export and import, tabs, history,
+  mid-run; a queue of two profiles warmed one after the other, each started without a window and
+  sealed again before the next, and each run's cookies per site), a proxied profile in its own
+  process with Safari's chrome on a leak page (every kind of request through the proxy, the
+  process's own report), profile export and import, tabs, history,
   bookmarks, the
   device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
@@ -171,10 +173,17 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 7. **Cookies:** **⋯ → Import Cookies…** reads a JSON or Netscape `cookies.txt` export, shows
    what can be imported and why the rest cannot (with line numbers), then imports into that
    profile: at once when it runs, otherwise when it next starts.
-8. **Warm-up:** **⋯ → Warm Up…** takes web addresses (one per line) and an optional search,
-   starts the profile if it is stopped, and visits the pages one after the other in a tab of
-   it: a random time on each page, scrolling, and if asked one plain link followed. **Stop**
-   in the sheet, closing the robot's tab or stopping the profile ends it.
+8. **Warm-up:** **⋯ → Warm Up…** takes a ready-made list (general, by interest, or by
+   country: 26 countries), one put together for the proxy's country, or web addresses of your
+   own; starts the profile without a window if it is stopped, and visits the pages one after
+   the other in a hidden window of it: a random time on each page, scrolling, and if asked one
+   plain link followed. **Stop** in the sheet, closing the robot's tab or stopping the profile
+   ends it. When the run is over the sheet lists the profile's cookies per site and how many
+   the run added. **Repeat on a schedule** runs the same plan every N hours while the app is
+   unlocked (never in a profile that is open; it is tried again 10 minutes later).
+   **More → Warm Up Several Profiles…** warms the ticked profiles one after the other with one
+   plan, each stopped and encrypted again before the next starts; the rest of the queue can be
+   cancelled.
 9. **Stop**, or closing the last window, saves history and encrypts the profile's website
    data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
    and waits until every profile is sealed.
@@ -210,7 +219,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Cookie import into a profile | **⋯ → Import Cookies…**: JSON (EditThisCookie, Cookie-Editor, Puppeteer/DevTools, Playwright, Selenium, Chrome and Firefox database exports, JSON Lines) and Netscape `cookies.txt`. Damaged files import whatever is readable (bad bytes, a broken or cut-off JSON entry or a malformed line cost only that cookie); the report lists every other entry with its line and reason (public-suffix domain, expired, `__Host-` rules, …). A running profile gets them at once (and the store is read back for any WebKit refused), a stopped one at its next launch before the first page loads (queued encrypted). **Checked by the self-test** end to end through the proxy |
 | App Sandbox | Default build; entitlements in `Resources/PrivacyBrowser.entitlements` (documented in the limitations doc, §9); container migration. **Sandbox enforcement and migration verified in CI** |
 | Encrypted sync client | Engine with CAS writes, per-record merges for bookmarks and history, tombstones; folder transport; HTTP transport for a documented API |
-| Session warm-up ("cookie robot") | **⋯ → Warm Up…**: the pages of a list (and a search first, if given) visited one after the other in a tab of the profile — its proxy, cookies, User-Agent and scripts, as when browsing — with a random time on each page (5–15 s by default), trackpad-like scrolling, and optionally one plain link followed (same site; from the search, a result; never sign-out, purchase, deletion, download or new-window links). Waits while its tab is not shown; stops on Stop, when its tab closes, when a page shows a dialog and when the profile stops. Scrolls with real wheel events while its window is key, otherwise from an isolated script world; clicks with real pointer events when they reach the link, otherwise with an (untrusted) script click — on the CI runner pointer events did not reach pages, so clicks there were script clicks; nothing is added to the page world, and nothing is downloaded. **Checked by the self-test** through the proxy (order, cookies and User-Agent on the requests, Referer of the followed link, links refused, the stop cases, sealing after a stop mid-run) |
+| Session warm-up ("cookie robot") | **⋯ → Warm Up…**: the pages of a list (and a search first, if given) visited one after the other in a tab of the profile — its proxy, cookies, User-Agent and scripts, as when browsing — with a random time on each page (5–15 s by default), trackpad-like scrolling, and optionally one plain link followed (same site; from the search, a result; never sign-out, purchase, deletion, download or new-window links). Waits while its tab is not shown; stops on Stop, when its tab closes, when a page shows a dialog and when the profile stops. Scrolls with real wheel events while its window is key, otherwise from an isolated script world; clicks with real pointer events when they reach the link, otherwise with an (untrusted) script click — on the CI runner pointer events did not reach pages, so clicks there were script clicks; nothing is added to the page world, and nothing is downloaded. After a run, the profile's cookies per site (registrable domain, Public Suffix List) and which of them the run added, counted in the profile's own cookie store where the robot ran (its own process included) and reported with the run's status. **More → Warm Up Several Profiles…**: a queue — the ticked profiles one after the other with one plan, each started without a window if stopped and stopped and sealed again before the next, "profile n of N", the rest cancellable. **Repeat on a schedule** (per profile, encrypted `warmup-schedule.bin`, this Mac only, not exported): every N hours with the saved plan while the app is unlocked, through the same queue (one run at a time); a profile that is running is left alone and tried again 10 minutes later; a Mac that slept runs it once, not once per missed interval. **Checked by the self-test** through the proxy (order, cookies and User-Agent on the requests, Referer of the followed link, links refused, the stop cases, sealing after a stop mid-run; a queue of two profiles never running at once, each without a window and sealed before the next; the per-site report against a cookie the profile already had); due times, postponing and the queue's order by unit tests |
 | A profile in its own process, with Safari's own window (unsandboxed build) | One process per profile (`ProfileProcess`; the master key only on its stdin), its language, locale and time zone native to it, its window Safari's chrome hosted from Safari's frameworks. The whole process is held to the profile's proxy (`ProfileNetworkGuard`): every web view on the profile's store at its initializers, every other store closed, the process's own connections through the proxy, privacy preferences pinned (workers included), certificates checked without this Mac fetching for them, Safari's and the system's services that would fetch from another process or keep the browsing refused, Handoff off; the kernel refuses the process UDP (with a proxy) and the real Safari's folders, which Safari's frameworks would otherwise use as the profile's ([ISOLATION_AND_LIMITATIONS.md §4a](docs/ISOLATION_AND_LIMITATIONS.md)). **Checked on every push**: a leak page in Safari's chrome (every request reaches the proxy, loopback and `.local` included; no WebRTC or WebTransport, in workers either; a certificate that needs a fetch refused), the process's own report, and a capture of every packet and every file written around it — nothing may leave the machine outside the proxy or be written where the real Safari keeps its data. `--check-safari-chrome` lists the private pieces a macOS update removed |
 | Profile export and import | **⋯ → Export Profile…** / **Import Profile…**: a profile whole — settings and proxy, passwords, history, bookmarks, warm-up plan, cookies and website data, Safari's state — in one `.pbprofile` file under a password of its own (Argon2id), for another Mac, a backup or a colleague. Nothing is written in plaintext on either side (the website data is re-encrypted from archive to archive in memory); an import is always a new profile. **Checked by the self-test** (a cookie of the original is sent by the imported profile's first request) and by unit tests |
 | Profile sync: cookies and settings | A profile's persistent cookies sync as `cookies.bin` (encrypted with the profile key), merged cookie by cookie — the newer change wins, deletions included; recorded when the profile stops, applied at its next launch before the first page loads, imported cookies joining at that launch. Settings changed on two Macs: the newer edit wins, the other kept as `config.bin.conflict`. Session and partitioned cookies, and ephemeral profiles, never sync ([docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md)). **Checked by the self-test** with a second vault set up from the sync folder, and by unit tests |
@@ -250,19 +259,22 @@ Sources/
     Profiles/                      ProfileConfiguration, ProfileRepository
     Passwords/                     PasswordVault, PasswordMatching (site rules), PublicSuffixList
     Cookies/                       CookieImporter (JSON and Netscape readers, checks, report), CookieJar (synced cookies, merge)
-    WarmUp/                        WarmUpPlan (pages, timing, which links), WebAddress (typed text → address or search)
+    WarmUp/                        WarmUpPlan (pages, timing, which links), WebAddress (typed text → address or search),
+                                   presets and choice, WarmUpQueue, WarmUpSchedule (what is due), WarmUpCookieReport (per site)
     Library/                       HistoryStore, BookmarkStore (mergeable, tombstones)
     Archive/                       encrypted chunk stream, directory archiver, WebKitDataLayout
     Sync/                          envelope/codec, engine, SyncTransport contract
       Transports/                  LocalDirectorySyncTransport (local-only), HTTPSyncTransport (server-ready)
     Support/                       errors, atomic 0600 writes, encrypted document files
   PrivacyBrowser/                  macOS app (SwiftUI + AppKit + WebKit)
-    App/                           main.swift, PrivacyBrowserApp, AppModel, AppEnvironment, SelfTest, SiteCapture
+    App/                           main.swift, PrivacyBrowserApp, AppModel, AppEnvironment, SelfTest, SiteCapture,
+                                   WarmUpCoordinator (warm-up queue and schedule)
     Browser/                       ProfileManager, BrowserSession, BrowserWindowController, BrowserTab,
                                    TabStripView, ProfileLibrary, LibraryWindowController, PasswordAutoFill
                                    (+ PasswordAutoFillScript, AutoFillPanel), WarmUpRobot,
                                    WebDataStoreVault, ProxyConfigurationFactory, PrivacyScripts
     UI/                            setup/unlock, profile list, editor, passwords, library, sync settings, warm-up
+                                   (one profile, and several in a queue)
 Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
 Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist
 scripts/                           build-app.sh, test-shims.mjs, selftest_proxy.py, safari_reference.py,
