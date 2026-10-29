@@ -1,0 +1,112 @@
+PROBE step window
+PROBE macOS Version 15.7.9 (Build 24G830)
+PROBE sandboxed: true
+PROBE NSApplicationCrashOnExceptions at start: reads true; arguments YES, app 1, registered unset
+PROBE prepareProcess: true
+PROBE shared document controller is now BrowserDocumentController
+PROBE NSApplicationCrashOnExceptions with the framework loaded: reads true; arguments YES, app 1, registered unset
+PROBE NSApplicationCrashOnExceptions with the application running: reads true; arguments YES, app 1, registered unset
+PROBE profile store: persistent 958B7427-F0CC-476C-8E84-4888155BCD9D
+PROBE   framework image: /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari
+PROBE   document controller: BrowserDocumentController
+PROBE   BrowserWindowController declares these initialisers: init, initAsPopupWindow:, initWithBrowsingMode:isPopupWindow:
+PROBE   [[BrowserWindowController alloc] initWithBrowsingMode:isPopupWindow:]: initWithBrowsingMode:isPopupWindow: -> BrowserWindowController
+PROBE   window controller: BrowserWindowController
+PROBE   RAISED NSInvalidArgumentException: NSConcreteMutableAttributedString addAttribute:value:range:: nil value
+PROBE     0   CoreFoundation                      0x00000001840878a0 __exceptionPreprocess + 176
+PROBE     1   PrivacyBrowser                      0x000000010482d498 PBPreprocessException + 52
+PROBE     2   libobjc.A.dylib                     0x0000000183b4ab90 objc_exception_throw + 88
+PROBE     3   Foundation                          0x0000000185601444 -[NSConcreteMutableAttributedString attribute:atIndex:effectiveRange:] + 0
+PROBE     4   Safari                              0x00000001b6d56810 -[UnifiedField _notSecureAnnotation] + 364
+PROBE     5   Safari                              0x00000001b6d62bf0 -[UnifiedField _layOutFaviconAndMainContentView] + 2288
+PROBE     6   Safari                              0x00000001b6d61b38 -[UnifiedField layout] + 56
+PROBE     7   AppKit                              0x0000000188a61b1c ___NSViewLayout_block_invoke + 632
+PROBE     8   AppKit                              0x0000000187f78000 NSPerformVisuallyAtomicChange + 108
+PROBE     9   AppKit                              0x0000000187f7c8d8 _NSViewLayout + 96
+PROBE     10  AppKit                              0x0000000188a57e40 __36-[NSView _layoutSubtreeWithOldSize:]_block_invoke + 372
+PROBE     11  AppKit                              0x0000000187f78000 NSPerformVisuallyAtomicChange + 108
+PROBE     12  AppKit                              0x0000000187f7c86c -[NSView _layoutSubtreeWithOldSize:] + 100
+PROBE     13  AppKit                              0x0000000188a58a1c __56-[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:]_block_invoke + 908
+PROBE     14  AppKit                              0x0000000187f78000 NSPerformVisuallyAtomicChange + 108
+PROBE     15  AppKit                              0x0000000187f7c444 -[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:] + 100
+PROBE     16  AppKit                              0x0000000187f78000 NSPerformVisuallyAtomicChange + 108
+PROBE     17  AppKit                              0x0000000187f7c3d4 -[NSView layoutSubtreeIfNeeded] + 96
+PROBE     18  Safari                              0x00000001b695a6b0 -[BrowserWindowController windowDidLoad] + 1068
+PROBE     19  AppKit                              0x000000018809c818 -[NSWindowController _windowDidLoad] + 620
+PROBE     20  Safari                              0x00000001b6e161a4 -[WindowController _windowDidLoad] + 52
+PROBE     21  AppKit                              0x0000000188098b2c -[NSWindowController window] + 100
+PROBE     22  PrivacyBrowser                      0x0000000104946064 $s14PrivacyBrowser11ObjCRuntimeO19callReturningObjectySo8NSObjectCSg5value_SS6reasontyXl_SStFZTf4nnd_n + 960
+PROBE     23  PrivacyBrowser                      0x000000010493a2c4 $s14PrivacyBrowser06SafariB16WindowControllerC04loadD033_D5663EB8AEBCFB374BED3A50E441DB28LL2ofSo8NSWindowCSgSo8NSObjectC_tF + 48
+PROBE     24  PrivacyBrowser                      0x000000010493df08 $s14PrivacyBrowser06SafariB16WindowControllerC4open9dataStore8startURLSo8NSWindowCSgSo013WKWebsiteDataH0CSg_10Foundation0J0VSgtFyycfU0_Tm + 32
+PROBE     25  PrivacyBrowser                      0x00000001049426c0 $s14PrivacyBrowser06SafariB16WindowControllerC10buildPopup33_D5663EB8AEBCFB374BED3A50E441DB28LLySbAC0G7VariantOFyycfU1_TA + 20
+PROBE     26  PrivacyBrowser                      0x00000001047de754 $sIeg_IeyB_TR + 28
+PROBE     27  PrivacyBrowser                      0x000000010482d2f4 PBCatchException + 32
+PROBE     28  PrivacyBrowser                      0x000000010493a068 $s14PrivacyBrowser06SafariB16WindowControllerC7guarded33_D5663EB8AEBCFB374BED3A50E441DB28LLySbSS_yyctF + 136
+PROBE     29  PrivacyBrowser                      0x00000001049374b4 $s14PrivacyBrowser06SafariB16WindowControllerC4open9dataStore8startURLSo8NSWindowCSgSo013WKWebsiteDataH0CSg_10Foundation0J0VSgtF + 1384
+PROBE     30  PrivacyBrowser                      0x000000010494c014 $s14PrivacyBrowser20SafariFrameworkProbeO12openAndCheck33_9F0153DCAF2CE7EC9F01CEB735D44942LLyySo8NSWindowCSgAA0cB16WindowControllerC_So18WKWebsiteDataStoreC10Foundation3URLVtXEYaFZ04$s14a9Browser20cde17O10windowStep33_9ijklmno11LLyyYaFZSo8p10CSgAA0cB16qr6C_So18stU24C10Foundation3URLVtXEfU_Tf1cn_nTY0_ + 1104
+PROBE     31  PrivacyBrowser                      0x000000010494ae2d $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TQ5_ + 1
+PROBE     32  PrivacyBrowser                      0x0000000104950d69 $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TATQ0_ + 1
+PROBE     33  PrivacyBrowser                      0x00000001049fa7c1 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TQ0_ + 1
+PROBE     34  PrivacyBrowser                      0x00000001049fa815 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TATQ0_ + 1
+PROBE     35  libswift_Concurrency.dylib          0x000000026c71e83d _ZL23completeTaskWithClosurePN5swift12AsyncContextEPNS_10SwiftErrorE + 1
+PROBE   -window raised NSInvalidArgumentException: NSConcreteMutableAttributedString addAttribute:value:range:: nil value; caught, so the attempt ends and the process does not
+PROBE   giving up; the in-process web view path remains
+PROBE RESULT no window
+PROBE activation policy afterwards: 0 (0 = regular, 1 = accessory)
+PROBE FALLBACK in-process window: visible=true url=https://example.com/ title=Example Domain
+PROBE wrote fallback-window.png (15340 bytes)
+PROBE wrote fallback-page.png (76051 bytes)
+PROBE step window finished
+2026-10-29 08:20:01.268 PrivacyBrowser[3011:14142] SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:20:01.268 PrivacyBrowser[3011:14142] SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:20:01.268 PrivacyBrowser[3011:14142] SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:20:01.268 PrivacyBrowser[3011:14142] SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:20:01.277 PrivacyBrowser[3011:14142] SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:20:01.278 PrivacyBrowser[3011:14142] SafariWindow: +[BrowserDocumentController sharedDocumentController]: sharedDocumentController -> BrowserDocumentController
+2026-10-29 08:20:01.278 PrivacyBrowser[3011:14142] SafariWindow: +sharedDocumentController is now BrowserDocumentController
+2026-10-29 08:20:01.392 PrivacyBrowser[3011:14142] SafariWindow[958B7427]: framework image: /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari
+2026-10-29 08:20:01.392 PrivacyBrowser[3011:14142] SafariWindow[958B7427]: document controller: BrowserDocumentController
+2026-10-29 08:20:01.392 PrivacyBrowser[3011:14142] SafariHooks: bound +[WKWebsiteDataStore _safari_dataStoreForProfileWithIdentifier:createIfNecessary:cacheNewDataStoreInMemory:]
+2026-10-29 08:20:01.392 PrivacyBrowser[3011:14142] SafariHooks: bound -[WKWebViewConfiguration websiteDataStore]
+2026-10-29 08:20:01.394 PrivacyBrowser[3011:14142] SafariWindow[958B7427]: BrowserWindowController declares these initialisers: init, initAsPopupWindow:, initWithBrowsingMode:isPopupWindow:
+2026-10-29 08:20:01.395 PrivacyBrowser[3011:14142] SafariWindow[958B7427]: [[BrowserWindowController alloc] initWithBrowsingMode:isPopupWindow:]: initWithBrowsingMode:isPopupWindow: -> BrowserWindowController
+2026-10-29 08:20:01.395 PrivacyBrowser[3011:14142] SafariWindow[958B7427]: window controller: BrowserWindowController
+2026-10-29 08:20:01.505 PrivacyBrowser[3011:14142] SafariWindow[958B7427]: RAISED NSInvalidArgumentException: NSConcreteMutableAttributedString addAttribute:value:range:: nil value
+2026-10-29 08:20:01.505 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   0   CoreFoundation                      0x00000001840878a0 __exceptionPreprocess + 176
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   1   PrivacyBrowser                      0x000000010482d498 PBPreprocessException + 52
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   2   libobjc.A.dylib                     0x0000000183b4ab90 objc_exception_throw + 88
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   3   Foundation                          0x0000000185601444 -[NSConcreteMutableAttributedString attribute:atIndex:effectiveRange:] + 0
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   4   Safari                              0x00000001b6d56810 -[UnifiedField _notSecureAnnotation] + 364
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   5   Safari                              0x00000001b6d62bf0 -[UnifiedField _layOutFaviconAndMainContentView] + 2288
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   6   Safari                              0x00000001b6d61b38 -[UnifiedField layout] + 56
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   7   AppKit                              0x0000000188a61b1c ___NSViewLayout_block_invoke + 632
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   8   AppKit                              0x0000000187f78000 NSPerformVisuallyAtomicChange + 108
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   9   AppKit                              0x0000000187f7c8d8 _NSViewLayout + 96
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   10  AppKit                              0x0000000188a57e40 __36-[NSView _layoutSubtreeWithOldSize:]_block_invoke + 372
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   11  AppKit                              0x0000000187f78000 NSPerformVisuallyAtomicChange + 108
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   12  AppKit                              0x0000000187f7c86c -[NSView _layoutSubtreeWithOldSize:] + 100
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   13  AppKit                              0x0000000188a58a1c __56-[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:]_block_invoke + 908
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   14  AppKit                              0x0000000187f78000 NSPerformVisuallyAtomicChange + 108
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   15  AppKit                              0x0000000187f7c444 -[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:] + 100
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   16  AppKit                              0x0000000187f78000 NSPerformVisuallyAtomicChange + 108
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   17  AppKit                              0x0000000187f7c3d4 -[NSView layoutSubtreeIfNeeded] + 96
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   18  Safari                              0x00000001b695a6b0 -[BrowserWindowController windowDidLoad] + 1068
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   19  AppKit                              0x000000018809c818 -[NSWindowController _windowDidLoad] + 620
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   20  Safari                              0x00000001b6e161a4 -[WindowController _windowDidLoad] + 52
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   21  AppKit                              0x0000000188098b2c -[NSWindowController window] + 100
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   22  PrivacyBrowser                      0x0000000104946064 $s14PrivacyBrowser11ObjCRuntimeO19callReturningObjectySo8NSObjectCSg5value_SS6reasontyXl_SStFZTf4nnd_n + 960
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   23  PrivacyBrowser                      0x000000010493a2c4 $s14PrivacyBrowser06SafariB16WindowControllerC04loadD033_D5663EB8AEBCFB374BED3A50E441DB28LL2ofSo8NSWindowCSgSo8NSObjectC_tF + 48
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   24  PrivacyBrowser                      0x000000010493df08 $s14PrivacyBrowser06SafariB16WindowControllerC4open9dataStore8startURLSo8NSWindowCSgSo013WKWebsiteDataH0CSg_10Foundation0J0VSgtFyycfU0_Tm + 32
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   25  PrivacyBrowser                      0x00000001049426c0 $s14PrivacyBrowser06SafariB16WindowControllerC10buildPopup33_D5663EB8AEBCFB374BED3A50E441DB28LLySbAC0G7VariantOFyycfU1_TA + 20
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   26  PrivacyBrowser                      0x00000001047de754 $sIeg_IeyB_TR + 28
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   27  PrivacyBrowser                      0x000000010482d2f4 PBCatchException + 32
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   28  PrivacyBrowser                      0x000000010493a068 $s14PrivacyBrowser06SafariB16WindowControllerC7guarded33_D5663EB8AEBCFB374BED3A50E441DB28LLySbSS_yyctF + 136
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   29  PrivacyBrowser                      0x00000001049374b4 $s14PrivacyBrowser06SafariB16WindowControllerC4open9dataStore8startURLSo8NSWindowCSgSo013WKWebsiteDataH0CSg_10Foundation0J0VSgtF + 1384
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   30  PrivacyBrowser                      0x000000010494c014 $s14PrivacyBrowser20SafariFrameworkProbeO12openAndCheck33_9F0153DCAF2CE7EC9F01CEB735D44942LLyySo8NSWindowCSgAA0cB16WindowControllerC_So18WKWebsiteDataStoreC10Foundation3URLVtXEYaFZ04$s14a9Browser20cde17O10windowStep33_9ijklmno11LLyyYaFZSo8p10CSgAA0cB16qr6C_So18stU24C10Foundation3URLVtXEfU_Tf1cn_nTY0_ + 1104
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   31  PrivacyBrowser                      0x000000010494ae2d $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TQ5_ + 1
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   32  PrivacyBrowser                      0x0000000104950d69 $s14PrivacyBrowser20SafariFrameworkProbeO5start9argumentsySaySSG_tFZyyYacfU0_TATQ0_ + 1
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   33  PrivacyBrowser                      0x00000001049fa7c1 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TQ0_ + 1
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   34  PrivacyBrowser                      0x00000001049fa815 $sxIeAgHr_xs5Error_pIegHrzo_s8SendableRzs5NeverORs_r0_lTRyt_Tg5TATQ0_ + 1
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]:   35  libswift_Concurrency.dylib          0x000000026c71e83d _ZL23completeTaskWithClosurePN5swift12AsyncContextEPNS_10SwiftErrorE + 1
+2026-10-29 08:20:01.506 PrivacyBrowser[3011:14142] SafariWindow[958B7427]: -window raised NSInvalidArgumentException: NSConcreteMutableAttributedString addAttribute:value:range:: nil value; caught, so the attempt ends and the process does not
+2026-10-29 08:20:01.509 PrivacyBrowser[3011:14142] SafariWindow[958B7427]: giving up; the in-process web view path remains

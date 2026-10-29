@@ -1,0 +1,34 @@
+PROBE step popup-nofield
+PROBE macOS Version 15.7.9 (Build 24G830)
+PROBE sandboxed: true
+PROBE NSApplicationCrashOnExceptions at start: reads false; arguments unset, app unset, registered unset
+PROBE prepareProcess: true
+PROBE shared document controller is now BrowserDocumentController
+PROBE NSApplicationCrashOnExceptions with the framework loaded: reads false; arguments unset, app unset, registered unset
+PROBE NSApplicationCrashOnExceptions with the application running: reads false; arguments unset, app unset, registered unset
+PROBE profile store: persistent E3925FEC-D94E-45B2-A753-76859EDC9A58
+PROBE   framework image: /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari
+PROBE   document controller: BrowserDocumentController
+PROBE   popup path, popup-nofield
+PROBE   NSApplicationCrashOnExceptions: reads false; arguments unset, app unset, registered unset
+PROBE   [[BrowserWindowController alloc] initAsPopupWindow:YES]: initAsPopupWindow: -> BrowserWindowController
+PROBE   popup controller: BrowserWindowController; isPopupWindow=true, isWindowLoaded=false
+PROBE   isPopupWindowUnifiedFieldVisible=false, isWindowLoaded=false
+PROBE   setPopupWindowUnifiedFieldVisible:NO -> sent; isPopupWindowUnifiedFieldVisible=false, isWindowLoaded=false
+2026-10-29 08:20:06.645 PrivacyBrowser[3029:14418] SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:20:06.645 PrivacyBrowser[3029:14418] SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:20:06.646 PrivacyBrowser[3029:14418] SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:20:06.646 PrivacyBrowser[3029:14418] SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:20:06.654 PrivacyBrowser[3029:14418] SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:20:06.654 PrivacyBrowser[3029:14418] SafariWindow: +[BrowserDocumentController sharedDocumentController]: sharedDocumentController -> BrowserDocumentController
+2026-10-29 08:20:06.654 PrivacyBrowser[3029:14418] SafariWindow: +sharedDocumentController is now BrowserDocumentController
+2026-10-29 08:20:06.740 PrivacyBrowser[3029:14418] SafariWindow[E3925FEC]: framework image: /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari
+2026-10-29 08:20:06.740 PrivacyBrowser[3029:14418] SafariWindow[E3925FEC]: document controller: BrowserDocumentController
+2026-10-29 08:20:06.740 PrivacyBrowser[3029:14418] SafariWindow[E3925FEC]: popup path, popup-nofield
+2026-10-29 08:20:06.741 PrivacyBrowser[3029:14418] SafariWindow[E3925FEC]: NSApplicationCrashOnExceptions: reads false; arguments unset, app unset, registered unset
+2026-10-29 08:20:06.741 PrivacyBrowser[3029:14418] SafariHooks: bound +[WKWebsiteDataStore _safari_dataStoreForProfileWithIdentifier:createIfNecessary:cacheNewDataStoreInMemory:]
+2026-10-29 08:20:06.741 PrivacyBrowser[3029:14418] SafariHooks: bound -[WKWebViewConfiguration websiteDataStore]
+2026-10-29 08:20:06.743 PrivacyBrowser[3029:14418] SafariWindow[E3925FEC]: [[BrowserWindowController alloc] initAsPopupWindow:YES]: initAsPopupWindow: -> BrowserWindowController
+2026-10-29 08:20:06.744 PrivacyBrowser[3029:14418] SafariWindow[E3925FEC]: popup controller: BrowserWindowController; isPopupWindow=true, isWindowLoaded=false
+2026-10-29 08:20:06.744 PrivacyBrowser[3029:14418] SafariWindow[E3925FEC]: isPopupWindowUnifiedFieldVisible=false, isWindowLoaded=false
+2026-10-29 08:20:06.744 PrivacyBrowser[3029:14418] SafariWindow[E3925FEC]: setPopupWindowUnifiedFieldVisible:NO -> sent; isPopupWindowUnifiedFieldVisible=false, isWindowLoaded=false

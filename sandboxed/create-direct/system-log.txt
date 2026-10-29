@@ -1,0 +1,972 @@
+Timestamp               Ty Process[PID:TID]
+2026-10-29 08:19:48.919 Df linkd[496:2d1e] [com.apple.appintents:Transcript] Creating sandbox exception for <private>...
+2026-10-29 08:19:49.372 Df kernel[0:351b] (AppleMobileFileIntegrity) AMFI: '/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser' is adhoc signed.
+2026-10-29 08:19:49.374 Df amfid[97:1365] /Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser not valid: Error Domain=AppleMobileFileIntegrityError Code=-423 "The file is adhoc signed or signed by an unknown certificate chain" UserInfo={NSURL=file:///Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser, NSLocalizedDescription=The file is adhoc signed or signed by an unknown certificate chain}
+2026-10-29 08:19:49.375 Df kernel[0:351b] (AppleMobileFileIntegrity) AMFI: code signature validation failed.
+2026-10-29 08:19:49.389 A  PrivacyBrowser[2883:351c] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:19:49.391 Df secinitd[344:2bd0] PrivacyBrowser[2883]: root path for bundle "<private>" of main executable "<private>"
+2026-10-29 08:19:49.405 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2883, sandboxed=0, platform=1 (1/1/0) [(null)]>, error=(null)
+2026-10-29 08:19:49.405 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2883, sandboxed=0, platform=1 (1/1/0) [(null)], cached>, error=(null)
+2026-10-29 08:19:49.447 E  kernel[0:3521] [com.apple.sandbox.reporting:violation] Sandbox: iconservicesagent(358) deny(1) file-write-create /private/var/folders/nj/vtw8zd2j31d1gdrtntc5y4600000gn/C/com.apple.iconservicesagent
+2026-10-29 08:19:49.447 F  iconservicesagent[358:3521] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.449 E  kernel[0:26a0] [com.apple.sandbox.reporting:violation] Sandbox: iconservicesagent(358) deny(1) mach-lookup com.apple.tccd.system
+2026-10-29 08:19:49.449 Df launchd[1:26a0] [system:] denied lookup: name = com.apple.tccd.system, flags = 0x8, requestor = iconservicesage[358], error = 159: Sandbox restriction
+2026-10-29 08:19:49.450 E  kernel[0:26a0] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: iconservicesagent(358) deny(1) mach-lookup com.apple.tccd.system
+2026-10-29 08:19:49.450 E  kernel[0:26a0] [com.apple.sandbox.reporting:violation] Sandbox: iconservicesagent(358) deny(1) mach-lookup com.apple.windowserver.active
+2026-10-29 08:19:49.450 Df launchd[1:26a0] [gui/501 [100003]:] denied lookup: name = com.apple.windowserver.active, flags = 0x9, requestor = iconservicesage[358], error = 159: Sandbox restriction
+2026-10-29 08:19:49.470 E  kernel[0:3526] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: iconservicesagent(358) deny(1) mach-lookup com.apple.windowserver.active
+2026-10-29 08:19:49.470 E  kernel[0:3526] [com.apple.sandbox.reporting:violation] Sandbox: iconservicesagent(358) deny(1) file-write-create /private/var/folders/nj/vtw8zd2j31d1gdrtntc5y4600000gn/C/com.apple.iconservicesagent
+2026-10-29 08:19:49.470 F  iconservicesagent[358:3526] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.470 F  iconservicesagent[358:3397] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.470 F  iconservicesagent[358:3524] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.523 F  iconservicesagent[358:3397] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.523 F  iconservicesagent[358:3397] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.526 F  iconservicesagent[358:3526] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.527 F  iconservicesagent[358:3526] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.538 F  iconservicesagent[358:3524] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.538 F  iconservicesagent[358:3524] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.564 Df containermanagerd[342:16a4] [com.apple.containermanager:fs] Wrote [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 25337, options = 0x1, mode = 0666
+2026-10-29 08:19:49.564 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=5, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=344, sandboxed=1, platform=1 (1/1/1) [(null)], cached>, error=(null)
+2026-10-29 08:19:49.565 Df containermanagerd[342:16a4] [com.apple.containermanager:fs] Wrote [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30229, options = 0x1, mode = 0666
+2026-10-29 08:19:49.565 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=5, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=344, sandboxed=1, platform=1 (1/1/1) [(null)], cached>, error=(null)
+2026-10-29 08:19:49.566 Df containermanagerd[342:16a4] [com.apple.containermanager:fs] Wrote [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30245, options = 0x1, mode = 0666
+2026-10-29 08:19:49.567 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=5, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=344, sandboxed=1, platform=1 (1/1/1) [(null)], cached>, error=(null)
+2026-10-29 08:19:49.567 Df secinitd[344:2bd0] PrivacyBrowser[2883]: AppSandbox request successful
+2026-10-29 08:19:49.593 Df ContainerMigrationService[2886:3539] (AppSandbox) AppSandboxUtilRealPathForUTF8StringPath_block_invoke: dispatch_once: 0
+2026-10-29 08:19:49.597 F  iconservicesagent[358:3397] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.599 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.ContainerMigrationService)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2883, sandboxed=0, platform=1 (1/1/0) [(null)], cs cached>, error=(null)
+2026-10-29 08:19:49.619 F  iconservicesagent[358:3524] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.644 F  iconservicesagent[358:3526] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.655 A  PrivacyBrowser[2883:351c] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:19:49.656 Df PrivacyBrowser[2883:351c] [com.apple.xpc:connection] [0x600003fd0000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:19:49.656 Df PrivacyBrowser[2883:353e] [com.apple.xpc:connection] [0x600003fd4000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:19:49.668 Df PrivacyBrowser[2883:351c] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:49.669 Df PrivacyBrowser[2883:351c] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:49.669 Df PrivacyBrowser[2883:351c] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:49.670 Df PrivacyBrowser[2883:351c] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:49.687 F  iconservicesagent[358:3524] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.693 F  iconservicesagent[358:3524] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.694 F  iconservicesagent[358:3524] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.704 Df PrivacyBrowser[2883:351c] (Foundation) SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:19:49.706 F  iconservicesagent[358:3524] (Metal) Failed to get cache main folder: mkdir failed to create cache path (errno = 1, path = <private>, attempting to create intermediate subdir '<private>', possible sandbox issue?)
+2026-10-29 08:19:49.739 A  PrivacyBrowser[2887:3543] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:19:49.740 Df secinitd[344:3520] PrivacyBrowser[2887]: root path for bundle "<private>" of main executable "<private>"
+2026-10-29 08:19:49.746 Df secinitd[344:3520] PrivacyBrowser[2887]: AppSandbox request successful
+2026-10-29 08:19:49.750 A  PrivacyBrowser[2887:3543] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:19:49.750 Df PrivacyBrowser[2887:3543] [com.apple.xpc:connection] [0x600002a74000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:19:49.750 Df PrivacyBrowser[2887:3544] [com.apple.xpc:connection] [0x600002a740f0] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:19:49.753 Df PrivacyBrowser[2887:3543] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:49.753 Df PrivacyBrowser[2887:3543] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:49.753 Df PrivacyBrowser[2887:3543] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:49.753 Df PrivacyBrowser[2887:3543] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:49.761 Df PrivacyBrowser[2887:3543] (Foundation) SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:19:49.766 A  PrivacyBrowser[2887:3543] (libsystem_containermanager.dylib) container_create_or_lookup_for_current_user
+2026-10-29 08:19:49.766 A  PrivacyBrowser[2887:3543] (libsystem_containermanager.dylib) container_create_or_lookup_for_platform
+2026-10-29 08:19:49.766 Df PrivacyBrowser[2887:3543] [com.apple.containermanager:xpc] Requesting container lookup; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], class = 2, identifier = <private>, group_identifier = <private>, create = 0, temp = 0, euid = 501, uid = 501
+2026-10-29 08:19:49.766 A  PrivacyBrowser[2887:3543] (libsystem_containermanager.dylib) container_query_t
+2026-10-29 08:19:49.766 Df PrivacyBrowser[2887:3543] [com.apple.containermanager:query] Query; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], euid = 501, uid = 501, class = 2, identifier = [(null)](0), flags = 900000002
+2026-10-29 08:19:49.768 Df containermanagerd[342:16a4] [com.apple.containermanager:fs] Read [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30245, options = 0x2
+2026-10-29 08:19:49.768 Df containermanagerd[342:16a4] [com.apple.containermanager:lifecycle] Using client sandbox path [<~~~>]; metadata = <<~~~>(2);<501/20/~~/0/1001>;u5F67D825-5AD0-4059-8576-67B8051D7CC7;pdev.local.PrivacyBrowser;dp-1;uma(null)>
+2026-10-29 08:19:49.768 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=2887, sandboxed=1, platform=1 (1/1/0) [<~~~>], cs cached>, error=(null)
+2026-10-29 08:19:49.768 Df PrivacyBrowser[2887:3543] [com.apple.containermanager:unspecified] container_query_get_single_result: success
+2026-10-29 08:19:49.768 A  PrivacyBrowser[2887:3543] (libsystem_containermanager.dylib) container_copy_object
+2026-10-29 08:19:49.768 Df PrivacyBrowser[2887:3543] [com.apple.containermanager:unspecified] container_create_or_lookup_for_platform: success
+2026-10-29 08:19:49.769 A  PrivacyBrowser[2887:3543] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:19:49.815 A  PrivacyBrowser[2888:3547] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:19:49.815 Df secinitd[344:2bd0] PrivacyBrowser[2888]: root path for bundle "<private>" of main executable "<private>"
+2026-10-29 08:19:49.820 Df secinitd[344:2bd0] PrivacyBrowser[2888]: AppSandbox request successful
+2026-10-29 08:19:49.824 A  PrivacyBrowser[2888:3547] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:19:49.824 Df PrivacyBrowser[2888:3547] [com.apple.xpc:connection] [0x600000cbc000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:19:49.824 Df PrivacyBrowser[2888:3548] [com.apple.xpc:connection] [0x600000cb4000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:19:49.827 Df PrivacyBrowser[2888:3547] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:49.827 Df PrivacyBrowser[2888:3547] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:49.827 Df PrivacyBrowser[2888:3547] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:49.828 Df PrivacyBrowser[2888:3547] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:49.839 Df PrivacyBrowser[2888:3547] (Foundation) SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:19:49.850 Df PrivacyBrowser[2888:3547] [com.apple.xpc:connection] [0x600000cbc0f0] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.launchservicesd
+2026-10-29 08:19:49.850 Df PrivacyBrowser[2888:3547] [com.apple.xpc:connection] [0x600000cb8000] activating connection: mach=true listener=false peer=false name=com.apple.pasteboard.1
+2026-10-29 08:19:49.850 Df PrivacyBrowser[2888:3547] [com.apple.xpc:connection] [0x600000cb80f0] activating connection: mach=true listener=false peer=false name=com.apple.distributed_notifications@Uv3
+2026-10-29 08:19:49.864 Df distnoted[307:354b] [com.apple.distnoted:diagnostic] register name: com.apple.xctest.FakeForceTouchDevice object: dev.local.PrivacyBrowser token: 700000006 pid: 2888
+2026-10-29 08:19:49.871 E  kernel[0:3547] [com.apple.sandbox.reporting:violation] 15 duplicate reports for Sandbox: iconservicesagent(358) deny(1) file-write-create /private/var/folders/nj/vtw8zd2j31d1gdrtntc5y4600000gn/C/com.apple.iconservicesagent
+2026-10-29 08:19:49.872 E  kernel[0:2b3a] [com.apple.sandbox.reporting:violation] 3 duplicate reports for Sandbox: PrivacyBrowser(2888) deny(1) file-read-data /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences
+2026-10-29 08:19:49.872 E  cfprefsd[316:2b3a] [com.apple.defaults:cfprefsd] rejecting read of { com.apple.Safari, runner, kCFPreferencesAnyHost, /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist, managed: 0 } from process 2888 (PrivacyBrowser) because accessing preferences outside an application's container requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:49.877 F  PrivacyBrowser[2888:3548] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x600001db5c00> (Domain: com.apple.Safari, User: kCFPreferencesCurrentUser, ByHost: No, Container: /Users/runner/Library/Containers/com.apple.Safari/Data, Contents Need Refresh: No): accessing preferences outside an application's container requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:49.877 A  PrivacyBrowser[2888:3548] (libsystem_trace.dylib) Activity for state dumps
+2026-10-29 08:19:50.016 Df containermanagerd[342:16a4] [com.apple.containermanager:fs] Wrote [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30296, options = 0x1, mode = 0666
+2026-10-29 08:19:50.017 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=5, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=344, sandboxed=1, platform=1 (1/1/1) [(null)], cached>, error=(null)
+2026-10-29 08:19:50.510 E  sandboxd[142:3122] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(2888) deny(1) file-read-data /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist
+Process:         PrivacyBrowser [2888]
+Path:            /Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+Load Address:    0x102d00000
+Identifier:      dev.local.PrivacyBrowser
+Version:         1 (0.1.0)
+Code Type:       arm64 (Native)
+Parent Process:  Python [2818]
+Responsible:     /opt/hca/hosted-compute-agent
+User ID:         501
+
+Date/Time:       2026-10-29 08:19:50.001 GMT
+OS Version:      macOS 15.7.9 (24G830)
+Release Type:    User
+Report Version:  8
+
+MetaData: {"primary-filter":"path","container":"\134/Users\134/runner\134/Library\134/Containers\134/dev.local.PrivacyBrowser\134/Data","hardware":"VMA2MACOS","parent-process-pid":2818,"translated":false,"action":"deny","binary-in-trust-cache":false,"vnode-type":"REGULAR-FILE","file-mode":384,"process_path":["Users","runner","work","antifdete7329900","antifdete7329900","build","sandboxed","PrivacyBrowser.app","Contents","MacOS","PrivacyBrowser"],"checker":"cfprefsd","apple-internal":false,"file-flags":0,"process":"PrivacyBrowser","normalized_target":["Users","runner","Library","Containers","com.apple.Safari","Data","Library","Preferences","com.apple.Safari.plist"],"appbundle-contains-path":false,"responsible-process-sdk":720896,"sandbox_checker":"cfprefsd","platform_binary":"no","primary-filter-value":"\134/Users\134/runner\134/Library\134/Containers\134/com.apple.Safari\134/Data\134/Library\134/Preferences\134/com.apple.Safari.plist","hardlinked":false,"policy-description":"Sandbox","signing-id":"dev.local.PrivacyBrowser","flags":5,"checker-pid":316,"profile-flags":0,"apfs-synthetic":false,"target":"\134/Users\134/runner\134/Library\134/Containers\134/com.apple.Safari\134/Data\134/Library\134/Preferences\134/com.apple.Safari.plist","profile-in-collection":false,"summary":"deny(1) file-read-data \134/Users\134/runner\134/Library\134/Containers\134/com.apple.Safari\134/Data\134/Library\134/Preferences\134/com.apple.Safari.plist","uid":501,"rdev":0,"responsible-process-signing-id":"a.out","platform-binary":false,"filesystem-name":"apfs","pid":2888,"operation":"file-read-data","responsible-process-path":"\134/opt\134/hca\134/hosted-compute-agent","build":"macOS 15.7.9 (24G830)","platform-policy":false,"process-path":"\134/Users\134/runner\134/work\134/antifdete7329900\134/antifdete7329900\134/build\134/sandboxed\134/PrivacyBrowser.app\134/Contents\134/MacOS\134/PrivacyBrowser","appbundle-contains-responsible-binary":false,"parent-process-name":"Python","path":"\134/Users\134/runner\134/Library\134/Containers\134/com.apple.Safari\134/Data\134/Library\134/Preferences\134/com.apple.Safari.plist","mount-flags":76582912,"errno":1,"release-type":"User"}
+
+Thread 0 (id: 13639):
+0   libsystem_kernel.dylib        	0x0000000183eeb9b8 __ulock_wait + 8
+1   libdispatch.dylib             	0x0000000183da89c0 _dispatch_once_wait.cold.1 + 148
+2   libdispatch.dylib             	0x0000000183d75c18 _dispatch_once_wait + 60
+3   libdispatch.dylib             	0x0000000183d88c10 _dispatch_apply_invoke_and_wait + 204
+4   libdispatch.dylib             	0x0000000183d87dac _dispatch_apply_with_attr_f + 1312
+5   libdispatch.dylib             	0x0000000183d87f34 dispatch_apply + 96
+6   CoreFoundation                	0x000000018414ba08 __103-[CFPrefsSearchListSource synchronouslySendSystemMessage:andUserMessage:andDirectMessage:replyHandler:]_block_invoke.49 + 132
+7   CoreFoundation                	0x0000000183fcbed8 CFPREFERENCES_IS_WAITING_FOR_SYSTEM_AND_USER_CFPREFSDS + 100
+8   CoreFoundation                	0x000000018418e1e0 -[CFPrefsSearchListSource synchronouslySendSystemMessage:andUserMessage:andDirectMessage:replyHandler:] + 240
+9   CoreFoundation                	0x0000000183fca7e4 -[CFPrefsSearchListSource alreadylocked_generationCountFromListOfSources:count:] + 260
+10  CoreFoundation                	0x0000000183fca4f4 -[CFPrefsSearchListSource alreadylocked_getDictionary:] + 476
+11  CoreFoundation                	0x0000000183fca07c -[CFPrefsSearchListSource alreadylocked_copyValueForKey:] + 172
+12  CoreFoundation                	0x0000000183fc9fb4 -[CFPrefsSource copyValueForKey:] + 44
+13  CoreFoundation                	0x0000000183fc9f70 __76-[_CFXPreferences copyAppValueForKey:identifier:container:configurationURL:]_block_invoke + 32
+14  CoreFoundation                	0x0000000183fc35b8 __108-[_CFXPreferences(SearchListAdditions) withSearchListForIdentifier:container:cloudConfigurationURL:perform:]_block_invoke + 380
+15  CoreFoundation                	0x000000018414c1bc -[_CFXPreferences withSearchListForIdentifier:container:cloudConfigurationURL:perform:] + 432
+16  CoreFoundation                	0x0000000183fc2f28 -[_CFXPreferences copyAppValueForKey:identifier:container:configurationURL:] + 156
+17  CoreFoundation                	0x0000000183fc2e60 _CFPreferencesCopyAppValueWithContainerAndConfiguration + 112
+18  CoreFoundation                	0x0000000183fdabd4 _CFPreferencesGetAppBooleanValueWithContainer + 28
+19  Foundation                    	0x00000001855947dc -[NSUserDefaults(NSUserDefaults) boolForKey:] + 84
+20  Safari                        	0x00000001b6a9ece0 +[FeatureAvailability isNarrowTabsEnabled] + 56
+21  Safari                        	0x00000001b6d06fc0 +[TabBarView _updateNarrowTabsEnabled] + 24
+22  libobjc.A.dylib               	0x0000000183b3ab9c CALLING_SOME_+initialize_METHOD + 24
+23  libobjc.A.dylib               	0x0000000183b3a83c initializeNonMetaClass + 728
+24  libobjc.A.dylib               	0x0000000183b56a64 initializeAndMaybeRelock(objc_class*, objc_object*, locker_mixin<lockdebug::lock_mixin<objc_lock_base_t>>&, bool) + 176
+25  libobjc.A.dylib               	0x0000000183b39f8c lookUpImpOrForward + 292
+26  libobjc.A.dylib               	0x0000000183b39b84 _objc_msgSend_uncached + 68
+27  PrivacyBrowser                	0x0000000102ee7558 specialized static SafariLoader.classesImplementing(_:) + 208 (SafariLoader.swift:134)
+28  PrivacyBrowser                	0x0000000102ef25c4 specialized static SafariFrameworkProbe.selectorsStep() + 416 (SafariFrameworkProbe.swift:214)
+29  PrivacyBrowser                	0x0000000102eea70c static SafariFrameworkProbe.start(arguments:) + 4052 (SafariFrameworkProbe.swift:103)
+30  PrivacyBrowser                	0x0000000102dce888 closure #1 in  + 392 (main.swift:29)
+31  PrivacyBrowser                	0x0000000102dceb84 specialized static MainActor.assumeIsolated<A>(_:file:line:) + 132 (/<compiler-generated>:0)
+32  PrivacyBrowser                	0x0000000102dce6e8 PrivacyBrowser_main + 72 (/<compiler-generated>:0)
+33  dyld                          	0x0000000183b8ab98 start + 6076
+
+Thread 1 (id: 13640):
+0   libsystem_kernel.dylib        	0x0000000183ee9c34 mach_msg2_trap + 8
+1   libsystem_kernel.dylib        	0x0000000183ef2764 mach_msg_overwrite + 484
+2   libsystem_kernel.dylib        	0x0000000183ee9fa8 mach_msg + 24
+3   libdispatch.dylib             	0x0000000183d8eee0 _dispatch_mach_send_and_wait_for_reply + 548
+4   libdispatch.dylib             	0x0000000183d8f280 dispatch_mach_send_with_result_and_wait_for_reply + 60
+5   libxpc.dylib                  	0x0000000183c30468 xpc_connection_send_message_with_reply_sync + 284
+6   CoreFoundation                	0x000000018414b93c __103-[CFPrefsSearchListSource synchronouslySendSystemMessage:andUserMessage:andDirectMessage:replyHandler:]_block_invoke_2 + 40
+7   CoreFoundation                	0x00000001841945d0 -[_CFXPreferences withConnectionForRole:andUserIdentifier:performBlock:] + 52
+8   CoreFoundation                	0x000000018414b8ec __103-[CFPrefsSearchListSource synchronouslySendSystemMessage:andUserMessage:andDirectMessage:replyHandler:]_block_invoke + 148
+9   libdispatch.dylib             	0x0000000183d8d874 _dispatch_client_callout2 + 16
+10  libdispatch.dylib             	0x0000000183d88610 _dispatch_apply_invoke3 + 336
+11  libdispatch.dylib             	0x0000000183d8d85c _dispatch_client_callout + 16
+12  libdispatch.dylib             	0x0000000183d76a28 _dispatch_once_callout + 32
+13  libdispatch.dylib             	0x0000000183d87750 _dispatch_apply_invoke + 252
+14  libdispatch.dylib             	0x0000000183d8d85c _dispatch_client_callout + 16
+15  libdispatch.dylib             	0x0000000183daa490 <deduplicated_symbol> + 32
+16  libdispatch.dylib             	0x0000000183d85fa4 _dispatch_root_queue_drain + 736
+17  libdispatch.dylib             	0x0000000183d865d4 _dispatch_worker_thread2 + 156
+18  libsystem_pthread.dylib       	0x0000000183f27de4 _pthread_wqthread + 232
+19  libsystem_pthread.dylib       	0x0000000183f26b74 start_wqthread + 8
+
+Thread 2 (id: 13641):
+0   libsystem_kernel.dylib        	0x0000000183eeb8b0 __workq_kernreturn + 8
+1   libsystem_pthread.dylib       	0x0000000183f26b74 start_wqthread + 8
+
+Binary Images:
+       0x102d00000 -        0x102d01a87  PrivacyBrowser <23b4cf75-c396-3fba-82aa-140f63bdeab7> build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+       0x183b30000 -        0x183b313ff  libobjc.A.dylib <e6f30eb4-facf-3381-ae46-10e556f1fc39> /usr/lib/libobjc.A.dylib
+       0x183b84000 -        0x183b84fff  com.apple.darwin.ignition (1.0.0 - 56) <aa296324-126c-32dd-9026-5b744f8eb283> /usr/lib/dyld
+       0x183c24000 -        0x183c25427  libxpc.dylib <8b32c66c-9490-3212-a213-db54fbfc6967> /usr/lib/system/libxpc.dylib
+       0x183d72000 -        0x183d7311f  libdispatch.dylib <63a54ce1-2ab6-3673-82e4-d8489d811475> /usr/lib/system/libdispatch.dylib
+       0x183ee9000 -        0x183ee97bf  libsystem_kernel.dylib <4d7a9e23-5b73-3c87-80e2-3b5e13f74f58> /usr/lib/system/libsystem_kernel.dylib
+       0x183f25000 -        0x183f25907  libsystem_pthread.dylib <2886f4f3-500b-36c8-a20c-c457eb754e3d> /usr/lib/system/libsystem_pthread.dylib
+       0x183f9a000 -        0x183f9b95f  com.apple.CoreFoundation (6.9 - 3603.1.411) <bdc82415-a029-3463-ac49-1a792208ce00> /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation
+       0x18558b000 -        0x18558d55f  com.apple.Foundation (6.9 - 3603.1.411) <39be75ac-350f-3b8c-9c10-8b2b5321ce8e> /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation
+       0x1b677c000 -        0x1b67804a7  com.apple.Safari.framework (20621 - 20621.3.11.11.3) <9884f80f-a8cf-33ac-81c1-00637f64d474> /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari
+2026-10-29 08:19:50.812 A  PrivacyBrowser[2888:3547] (libsystem_containermanager.dylib) container_create_or_lookup_for_current_user
+2026-10-29 08:19:50.812 A  PrivacyBrowser[2888:3547] (libsystem_containermanager.dylib) container_create_or_lookup_for_platform
+2026-10-29 08:19:50.812 Df PrivacyBrowser[2888:3547] [com.apple.containermanager:xpc] Requesting container lookup; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], class = 2, identifier = <private>, group_identifier = <private>, create = 0, temp = 0, euid = 501, uid = 501
+2026-10-29 08:19:50.812 A  PrivacyBrowser[2888:3547] (libsystem_containermanager.dylib) container_query_t
+2026-10-29 08:19:50.812 Df PrivacyBrowser[2888:3547] [com.apple.containermanager:query] Query; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], euid = 501, uid = 501, class = 2, identifier = [(null)](0), flags = 900000002
+2026-10-29 08:19:50.813 Df containermanagerd[342:16a4] [com.apple.containermanager:fs] Read [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30296, options = 0x2
+2026-10-29 08:19:50.813 Df containermanagerd[342:16a4] [com.apple.containermanager:lifecycle] Using client sandbox path [<~~~>]; metadata = <<~~~>(2);<501/20/~~/0/1001>;u5F67D825-5AD0-4059-8576-67B8051D7CC7;pdev.local.PrivacyBrowser;dp-1;uma(null)>
+2026-10-29 08:19:50.813 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=2888, sandboxed=1, platform=1 (1/1/0) [<~~~>], cs cached>, error=(null)
+2026-10-29 08:19:50.813 Df PrivacyBrowser[2888:3547] [com.apple.containermanager:unspecified] container_query_get_single_result: success
+2026-10-29 08:19:50.813 A  PrivacyBrowser[2888:3547] (libsystem_containermanager.dylib) container_copy_object
+2026-10-29 08:19:50.813 Df PrivacyBrowser[2888:3547] [com.apple.containermanager:unspecified] container_create_or_lookup_for_platform: success
+2026-10-29 08:19:50.813 A  PrivacyBrowser[2888:3547] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:19:50.825 A  PrivacyBrowser[2890:355c] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:19:50.825 Df secinitd[344:3520] PrivacyBrowser[2890]: root path for bundle "<private>" of main executable "<private>"
+2026-10-29 08:19:50.828 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2890, sandboxed=0, platform=1 (1/1/0) [(null)], cs cached>, error=(null)
+2026-10-29 08:19:50.828 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2890, sandboxed=0, platform=1 (1/1/0) [(null)], cached, cs cached>, error=(null)
+2026-10-29 08:19:50.829 Df secinitd[344:3520] PrivacyBrowser[2890]: AppSandbox request successful
+2026-10-29 08:19:50.832 A  PrivacyBrowser[2890:355c] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:19:50.832 Df PrivacyBrowser[2890:355c] [com.apple.xpc:connection] [0x600000ab0000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:19:50.833 Df PrivacyBrowser[2890:355d] [com.apple.xpc:connection] [0x600000ab00f0] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:19:50.837 Df PrivacyBrowser[2890:355c] (Foundation) SafariLoader: classNames -> nil (framework image not in the loaded image list)
+2026-10-29 08:19:50.837 Df PrivacyBrowser[2890:355c] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:50.837 Df PrivacyBrowser[2890:355c] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:50.838 Df PrivacyBrowser[2890:355c] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:50.838 Df PrivacyBrowser[2890:355c] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:50.845 Df PrivacyBrowser[2890:355c] (Foundation) SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:19:50.895 A  PrivacyBrowser[2890:355c] (libsystem_containermanager.dylib) container_create_or_lookup_for_current_user
+2026-10-29 08:19:50.895 A  PrivacyBrowser[2890:355c] (libsystem_containermanager.dylib) container_create_or_lookup_for_platform
+2026-10-29 08:19:50.895 Df PrivacyBrowser[2890:355c] [com.apple.containermanager:xpc] Requesting container lookup; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], class = 2, identifier = <private>, group_identifier = <private>, create = 0, temp = 0, euid = 501, uid = 501
+2026-10-29 08:19:50.895 A  PrivacyBrowser[2890:355c] (libsystem_containermanager.dylib) container_query_t
+2026-10-29 08:19:50.895 Df PrivacyBrowser[2890:355c] [com.apple.containermanager:query] Query; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], euid = 501, uid = 501, class = 2, identifier = [(null)](0), flags = 900000002
+2026-10-29 08:19:50.895 Df containermanagerd[342:16a4] [com.apple.containermanager:fs] Read [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30296, options = 0x2
+2026-10-29 08:19:50.895 Df containermanagerd[342:16a4] [com.apple.containermanager:lifecycle] Using client sandbox path [<~~~>]; metadata = <<~~~>(2);<501/20/~~/0/1001>;u5F67D825-5AD0-4059-8576-67B8051D7CC7;pdev.local.PrivacyBrowser;dp-1;uma(null)>
+2026-10-29 08:19:50.896 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=2890, sandboxed=1, platform=1 (1/1/0) [<~~~>], cs cached>, error=(null)
+2026-10-29 08:19:50.896 Df PrivacyBrowser[2890:355c] [com.apple.containermanager:unspecified] container_query_get_single_result: success
+2026-10-29 08:19:50.896 A  PrivacyBrowser[2890:355c] (libsystem_containermanager.dylib) container_copy_object
+2026-10-29 08:19:50.896 Df PrivacyBrowser[2890:355c] [com.apple.containermanager:unspecified] container_create_or_lookup_for_platform: success
+2026-10-29 08:19:50.896 A  PrivacyBrowser[2890:355c] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:19:50.907 A  PrivacyBrowser[2891:3560] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:19:50.907 Df secinitd[344:3520] PrivacyBrowser[2891]: root path for bundle "<private>" of main executable "<private>"
+2026-10-29 08:19:50.910 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2891, sandboxed=0, platform=1 (1/1/0) [(null)], cs cached>, error=(null)
+2026-10-29 08:19:50.910 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2891, sandboxed=0, platform=1 (1/1/0) [(null)], cached, cs cached>, error=(null)
+2026-10-29 08:19:50.911 Df secinitd[344:3520] PrivacyBrowser[2891]: AppSandbox request successful
+2026-10-29 08:19:50.914 A  PrivacyBrowser[2891:3560] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:19:50.914 Df PrivacyBrowser[2891:3560] [com.apple.xpc:connection] [0x6000034f0000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:19:50.914 Df PrivacyBrowser[2891:3561] [com.apple.xpc:connection] [0x6000034f00f0] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:19:50.918 Df PrivacyBrowser[2891:3560] (Foundation) SafariLoader: classNames -> nil (framework image not in the loaded image list)
+2026-10-29 08:19:50.919 Df PrivacyBrowser[2891:3560] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:50.919 Df PrivacyBrowser[2891:3560] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:50.919 Df PrivacyBrowser[2891:3560] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:50.919 Df PrivacyBrowser[2891:3560] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:50.927 Df PrivacyBrowser[2891:3560] (Foundation) SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:19:51.016 A  PrivacyBrowser[2891:3560] (libsystem_containermanager.dylib) container_create_or_lookup_for_current_user
+2026-10-29 08:19:51.016 A  PrivacyBrowser[2891:3560] (libsystem_containermanager.dylib) container_create_or_lookup_for_platform
+2026-10-29 08:19:51.016 Df PrivacyBrowser[2891:3560] [com.apple.containermanager:xpc] Requesting container lookup; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], class = 2, identifier = <private>, group_identifier = <private>, create = 0, temp = 0, euid = 501, uid = 501
+2026-10-29 08:19:51.016 A  PrivacyBrowser[2891:3560] (libsystem_containermanager.dylib) container_query_t
+2026-10-29 08:19:51.016 Df PrivacyBrowser[2891:3560] [com.apple.containermanager:query] Query; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], euid = 501, uid = 501, class = 2, identifier = [(null)](0), flags = 900000002
+2026-10-29 08:19:51.017 Df containermanagerd[342:16a4] [com.apple.containermanager:fs] Read [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30296, options = 0x2
+2026-10-29 08:19:51.017 Df containermanagerd[342:16a4] [com.apple.containermanager:lifecycle] Using client sandbox path [<~~~>]; metadata = <<~~~>(2);<501/20/~~/0/1001>;u5F67D825-5AD0-4059-8576-67B8051D7CC7;pdev.local.PrivacyBrowser;dp-1;uma(null)>
+2026-10-29 08:19:51.017 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=2891, sandboxed=1, platform=1 (1/1/0) [<~~~>], cs cached>, error=(null)
+2026-10-29 08:19:51.018 Df PrivacyBrowser[2891:3560] [com.apple.containermanager:unspecified] container_query_get_single_result: success
+2026-10-29 08:19:51.018 A  PrivacyBrowser[2891:3560] (libsystem_containermanager.dylib) container_copy_object
+2026-10-29 08:19:51.018 Df PrivacyBrowser[2891:3560] [com.apple.containermanager:unspecified] container_create_or_lookup_for_platform: success
+2026-10-29 08:19:51.018 A  PrivacyBrowser[2891:3560] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:19:51.029 A  PrivacyBrowser[2892:3568] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:19:51.030 Df secinitd[344:2bd0] PrivacyBrowser[2892]: root path for bundle "<private>" of main executable "<private>"
+2026-10-29 08:19:51.032 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2892, sandboxed=0, platform=1 (1/1/0) [(null)], cs cached>, error=(null)
+2026-10-29 08:19:51.033 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2892, sandboxed=0, platform=1 (1/1/0) [(null)], cached, cs cached>, error=(null)
+2026-10-29 08:19:51.033 Df secinitd[344:2bd0] PrivacyBrowser[2892]: AppSandbox request successful
+2026-10-29 08:19:51.036 A  PrivacyBrowser[2892:3568] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:19:51.037 Df PrivacyBrowser[2892:3568] [com.apple.xpc:connection] [0x6000023dc000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:19:51.037 Df PrivacyBrowser[2892:3569] [com.apple.xpc:connection] [0x6000023d8000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:19:51.040 Df PrivacyBrowser[2892:3568] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:51.040 Df PrivacyBrowser[2892:3568] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:51.040 Df PrivacyBrowser[2892:3568] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:51.040 Df PrivacyBrowser[2892:3568] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:51.048 Df PrivacyBrowser[2892:3568] (Foundation) SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:19:51.069 A  PrivacyBrowser[2892:3568] (libsystem_containermanager.dylib) container_create_or_lookup_for_current_user
+2026-10-29 08:19:51.069 A  PrivacyBrowser[2892:3568] (libsystem_containermanager.dylib) container_create_or_lookup_for_platform
+2026-10-29 08:19:51.069 Df PrivacyBrowser[2892:3568] [com.apple.containermanager:xpc] Requesting container lookup; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], class = 2, identifier = <private>, group_identifier = <private>, create = 0, temp = 0, euid = 501, uid = 501
+2026-10-29 08:19:51.069 A  PrivacyBrowser[2892:3568] (libsystem_containermanager.dylib) container_query_t
+2026-10-29 08:19:51.069 Df PrivacyBrowser[2892:3568] [com.apple.containermanager:query] Query; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], euid = 501, uid = 501, class = 2, identifier = [(null)](0), flags = 900000002
+2026-10-29 08:19:51.069 Df containermanagerd[342:16a4] [com.apple.containermanager:fs] Read [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30296, options = 0x2
+2026-10-29 08:19:51.070 Df containermanagerd[342:16a4] [com.apple.containermanager:lifecycle] Using client sandbox path [<~~~>]; metadata = <<~~~>(2);<501/20/~~/0/1001>;u5F67D825-5AD0-4059-8576-67B8051D7CC7;pdev.local.PrivacyBrowser;dp-1;uma(null)>
+2026-10-29 08:19:51.070 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=2892, sandboxed=1, platform=1 (1/1/0) [<~~~>], cs cached>, error=(null)
+2026-10-29 08:19:51.070 Df PrivacyBrowser[2892:3568] [com.apple.containermanager:unspecified] container_query_get_single_result: success
+2026-10-29 08:19:51.070 A  PrivacyBrowser[2892:3568] (libsystem_containermanager.dylib) container_copy_object
+2026-10-29 08:19:51.070 Df PrivacyBrowser[2892:3568] [com.apple.containermanager:unspecified] container_create_or_lookup_for_platform: success
+2026-10-29 08:19:51.070 A  PrivacyBrowser[2892:3568] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:19:51.081 A  PrivacyBrowser[2893:356e] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:19:51.082 Df secinitd[344:3520] PrivacyBrowser[2893]: root path for bundle "<private>" of main executable "<private>"
+2026-10-29 08:19:51.084 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2893, sandboxed=0, platform=1 (1/1/0) [(null)], cs cached>, error=(null)
+2026-10-29 08:19:51.085 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2893, sandboxed=0, platform=1 (1/1/0) [(null)], cached, cs cached>, error=(null)
+2026-10-29 08:19:51.085 Df secinitd[344:3520] PrivacyBrowser[2893]: AppSandbox request successful
+2026-10-29 08:19:51.088 A  PrivacyBrowser[2893:356e] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:19:51.088 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x6000031e4000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:19:51.088 Df PrivacyBrowser[2893:356f] [com.apple.xpc:connection] [0x6000031ec000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:19:51.091 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x6000031e40f0] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.launchservicesd
+2026-10-29 08:19:51.092 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x6000031e41e0] activating connection: mach=true listener=false peer=false name=com.apple.pasteboard.1
+2026-10-29 08:19:51.092 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x6000031ec0f0] activating connection: mach=true listener=false peer=false name=com.apple.distributed_notifications@Uv3
+2026-10-29 08:19:51.094 Df PrivacyBrowser[2893:356e] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) No windows open yet
+2026-10-29 08:19:51.094 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x6000031ec1e0] activating connection: mach=true listener=false peer=false name=com.apple.analyticsd
+2026-10-29 08:19:51.095 A  PrivacyBrowser[2893:356e] (TCC) TCCAccessRequest() IPC
+2026-10-29 08:19:51.095 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x6000031e8000] activating connection: mach=true listener=false peer=false name=com.apple.tccd.system
+2026-10-29 08:19:51.095 Df PrivacyBrowser[2893:3570] [com.apple.CoreAnalytics:client] Received configuration update from daemon (initial)
+2026-10-29 08:19:51.096 Df tccd[147:2d70] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=2893.1, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, requesting={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2893, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, },
+2026-10-29 08:19:51.097 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x6000031e8000] invalidated after the last release of the connection object
+2026-10-29 08:19:51.097 Df PrivacyBrowser[2893:356e] [com.apple.SkyLight:default] server port 0x0000390b, session port 0x0000390b
+2026-10-29 08:19:51.098 Df tccd[147:2d70] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=151.81, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2893, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer}, },
+2026-10-29 08:19:51.098 Df tccd[147:2d70] [com.apple.TCC:access] requestor: TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer is checking access for accessor TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2893, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+2026-10-29 08:19:51.100 Df PrivacyBrowser[2893:356e] [com.apple.SkyLight:default] New connection 0x3c3bb main
+2026-10-29 08:19:51.102 Df PrivacyBrowser[2893:356e] [com.apple.processmanager:front-35286506] CHECKIN: pid=2893
+2026-10-29 08:19:51.106 Df launchservicesd[122:2d92] [com.apple.launchservices:cas] CHECKIN:0x0-0x44044 2893 dev.local.PrivacyBrowser
+2026-10-29 08:19:51.108 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationReady:] | App: PrivacyBrowser, ready, updating active tracking timer
+2026-10-29 08:19:51.108 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:Standard] -[ApplicationManager checkInAppContext:eventData:] | ApplicationManager: Checked in app : PrivacyBrowser
+2026-10-29 08:19:51.108 Df distnoted[307:354b] [com.apple.distnoted:diagnostic] register name: com.apple.sharedfilelist.change object: com.apple.LSSharedFileList.ApplicationRecentDocuments/dev.local.privacybrowser token: 4f00000047 pid: 326
+2026-10-29 08:19:51.119 Df PrivacyBrowser[2893:356e] [com.apple.processmanager:front-35286506] CHECKEDIN: pid=2893 asn=0x0-0x44044 foreground=1
+2026-10-29 08:19:51.122 Df runningboardd[150:2778] [com.apple.runningboard:process] Resolved pid 2893 to [anon<PrivacyBrowser>(501):2893]
+2026-10-29 08:19:51.122 Df runningboardd[150:2778] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] is not RunningBoard jetsam managed.
+2026-10-29 08:19:51.122 Df runningboardd[150:2778] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] This process will not be managed.
+2026-10-29 08:19:51.122 Df runningboardd[150:2778] [com.apple.runningboard:ttl] Now tracking process: [anon<PrivacyBrowser>(501):2893]
+2026-10-29 08:19:51.125 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x150607940] activating connection: mach=true listener=false peer=false name=com.apple.lsd.modifydb
+2026-10-29 08:19:51.125 Df runningboardd[150:2778] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):2893] from originator [osservice<com.apple.coreservices.launchservicesd>:122] with description <RBSAssertionDescriptor| "foregroundApp:2893" ID:150-122-481 target:2893 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:19:51.125 Df runningboardd[150:2778] [com.apple.runningboard:ttl] Assertion 150-122-481 (target:[anon<PrivacyBrowser>(501):2893]) will be created as active
+2026-10-29 08:19:51.125 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] Ignoring jetsam update because this process is not memory-managed
+2026-10-29 08:19:51.125 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] Ignoring suspend because this process is not lifecycle managed
+2026-10-29 08:19:51.125 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] Result 45 setting darwin role to UserInteractiveNonFocal: Operation not supported, falling back to setting priority
+2026-10-29 08:19:51.125 Df runningboardd[150:3577] [com.apple.runningboard:ttl] [anon<PrivacyBrowser>(501):2893] Set darwin priority to: PRIO_DEFAULT
+2026-10-29 08:19:51.125 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] Ignoring GPU update because this process is not GPU managed
+2026-10-29 08:19:51.125 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] Ignoring memory limit update because this process is not memory-managed
+2026-10-29 08:19:51.132 Df lsd[156:3579] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:19:51.133 Df lsd[156:3579] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:19:51.133 Df lsd[329:2b94] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:19:51.134 Df lsd[329:2b94] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:19:51.134 Df lsd[329:2b94] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:4:2:1:_LSServerRegisterItemInfo result = 0
+2026-10-29 08:19:51.161 Df lsd[156:3579] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:4:2:1:_LSServerRegisterItemInfo result = 0
+2026-10-29 08:19:51.164 Df lsd[156:3579] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:19:51.164 Df lsd[156:3579] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:19:51.165 Df lsd[156:3579] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:4:2:1:_LSServerRegisterItemInfo result = 0
+2026-10-29 08:19:51.169 Df lsd[156:3579] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:19:51.169 Df lsd[156:3579] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:19:51.170 Df lsd[156:3579] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:4:2:1:_LSServerRegisterItemInfo result = 0
+2026-10-29 08:19:51.176 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x150706600] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:19:51.176 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x150706600] Channel could not return listener port.
+2026-10-29 08:19:51.176 Df runningboardd[150:2e00] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):2893] from originator [osservice<com.apple.coreservices.launchservicesd>:122] with description <RBSAssertionDescriptor| "foregroundApp:2893" ID:150-122-482 target:2893 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:19:51.176 Df runningboardd[150:2e00] [com.apple.runningboard:ttl] Assertion 150-122-482 (target:[anon<PrivacyBrowser>(501):2893]) will be created as active
+2026-10-29 08:19:51.177 Df PrivacyBrowser[2893:356f] [com.apple.xpc:connection] [0x151804f90] activating connection: mach=false listener=false peer=true name=com.apple.xpc.anonymous.0x150706600.peer[122].0x151804f90
+2026-10-29 08:19:51.177 Df runningboardd[150:3577] [com.apple.runningboard:ttl] Invalidating assertion 150-122-481 (target:[anon<PrivacyBrowser>(501):2893]) from originator [osservice<com.apple.coreservices.launchservicesd>:122]
+2026-10-29 08:19:51.178 Df PrivacyBrowser[2893:356e] [com.apple.processmanager:front-35286506] FRONTLOGGING: version 1
+2026-10-29 08:19:51.178 Df PrivacyBrowser[2893:356e] [com.apple.processmanager:front-35286506] Registered, pid=2893 ASN=0x0,0x44044
+2026-10-29 08:19:51.181 Df PrivacyBrowser[2893:356f] [com.apple.xpc:connection] [0x150706750] activating connection: mach=true listener=false peer=false name=com.apple.lsd.mapdb
+2026-10-29 08:19:51.183 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x150706600] Channel could not return listener port.
+2026-10-29 08:19:51.184 Df PrivacyBrowser[2893:356e] [com.apple.processmanager:front-35286506] BringForward: pid=2893 asn=0x0-0x44044 bringForward=0 foreground=1 uiElement=0 launchedByLS=0 modifiersCount=0 allDisabled=0
+2026-10-29 08:19:51.184 Df PrivacyBrowser[2893:356e] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:19:51.185 Df PrivacyBrowser[2893:356e] (libMobileGestalt.dylib) No persisted cache on this platform.
+2026-10-29 08:19:51.186 Df kernel[0:356e] IOUC AppleNVMeEANUC failed MACF in process pid 2893, PrivacyBrowser
+2026-10-29 08:19:51.186 Df PrivacyBrowser[2893:356e] (libMobileGestalt.dylib) IOServiceOpen failed for class 'AppleNVMeEAN'
+2026-10-29 08:19:51.186 Df PrivacyBrowser[2893:356e] (libMobileGestalt.dylib) Could not open EAN service and connect
+2026-10-29 08:19:51.186 Df PrivacyBrowser[2893:356e] (libMobileGestalt.dylib) Failed to copy 'aptk' from EAN
+2026-10-29 08:19:51.186 Df PrivacyBrowser[2893:356e] (libMobileGestalt.dylib) Failed to copy APTicket properties. Falling back to default policy.
+2026-10-29 08:19:51.186 Df PrivacyBrowser[2893:356e] (libMobileGestalt.dylib) Creating default MGSysConfigPolicy
+2026-10-29 08:19:51.186 Df PrivacyBrowser[2893:356e] (libMobileGestalt.dylib) CFDictionaryRef copySyscfgDictionary(void) enumeration of <private> failed.
+2026-10-29 08:19:51.186 Df PrivacyBrowser[2893:356e] (libMobileGestalt.dylib) Failed to find key <private>
+2026-10-29 08:19:51.187 Df lsd[329:2b94] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:19:51.187 Df lsd[329:2b94] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:19:51.188 Df PrivacyBrowser[2893:356e] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:19:51.188 Df PrivacyBrowser[2893:356e] [com.apple.AppKit:Appearance] Post-registration system appearance: (HLTB: 1)
+2026-10-29 08:19:51.197 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x150706600] Channel could not return listener port.
+2026-10-29 08:19:51.200 Df distnoted[307:354b] [com.apple.distnoted:diagnostic] register name: com.apple.xctest.FakeForceTouchDevice object: dev.local.PrivacyBrowser token: 1e00000021 pid: 2893
+2026-10-29 08:19:51.202 Df nehelper[178:3346] [com.apple.networkextension:] Received an apps installed notification with bundle IDs (
+    "dev.local.PrivacyBrowser"
+)
+2026-10-29 08:19:51.202 Df dmd[336:7f8] Received xpc stream event (distributed notification matching) with name: com.apple.LaunchServices.applicationRegistered user info: {
+    CFBundleDisplayName = PrivacyBrowser;
+    bundleIDs =     (
+        "dev.local.PrivacyBrowser"
+    );
+    isPlaceholder = 0;
+}
+2026-10-29 08:19:51.203 Df nehelper[178:3346] [com.apple.networkextension:] Received an apps installed notification with bundle IDs (
+    "dev.local.PrivacyBrowser"
+)
+2026-10-29 08:19:51.203 Df nehelper[178:3346] [com.apple.networkextension:] Received an apps installed notification with bundle IDs (
+    "dev.local.PrivacyBrowser"
+)
+2026-10-29 08:19:51.204 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x150706600] Channel could not return listener port.
+2026-10-29 08:19:51.209 Df PrivacyBrowser[2893:356e] [com.apple.dt.xctest:Default] Registering for test daemon availability notify post.
+2026-10-29 08:19:51.209 Df PrivacyBrowser[2893:356e] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:51.210 Df PrivacyBrowser[2893:356e] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:51.210 Df PrivacyBrowser[2893:356e] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:51.222 E  kernel[0:359a] [com.apple.sandbox.reporting:violation] Sandbox: swcd(560) deny(1) system-fsctl (_IO "h" 47)
+2026-10-29 08:19:51.237 A  PrivacyBrowser[2893:356e] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:19:51.238 Df PrivacyBrowser[2893:356e] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.gms.availability.notification
+2026-10-29 08:19:51.238 Df PrivacyBrowser[2893:356e] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.os-eligibility-domain.change.greymatter
+2026-10-29 08:19:51.238 Df PrivacyBrowser[2893:356e] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.language.changed
+2026-10-29 08:19:51.238 Df PrivacyBrowser[2893:356e] [com.apple.WritingTools:Default] isAvailable value changed: featureEnabled = true, isMDMAllowed = true, gmAvailable (current) = false
+2026-10-29 08:19:51.241 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x151805a30] activating connection: mach=true listener=false peer=false name=com.apple.appkit.restoration_storage
+2026-10-29 08:19:51.242 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x6000031e44b0] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.appleevents
+2026-10-29 08:19:51.243 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x150706600] Channel could not return listener port.
+2026-10-29 08:19:51.243 Df PrivacyBrowser[2893:356e] [com.apple.processmanager:front-35286506] SignalReady: pid=2893 asn=0x0-0x44044
+2026-10-29 08:19:51.244 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationReady:] | App: PrivacyBrowser, ready, updating active tracking timer
+2026-10-29 08:19:51.244 Df PrivacyBrowser[2893:356e] [com.apple.processmanager:front-35286506] SIGNAL: pid=2893 asn=0x0x-0x44044
+2026-10-29 08:19:51.249 A  PrivacyBrowser[2893:356e] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:19:51.249 A  PrivacyBrowser[2893:356e] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:19:51.251 A  PrivacyBrowser[2893:356e] (libsystem_containermanager.dylib) container_create_or_lookup_for_current_user
+2026-10-29 08:19:51.251 A  PrivacyBrowser[2893:356e] (libsystem_containermanager.dylib) container_create_or_lookup_for_platform
+2026-10-29 08:19:51.251 Df PrivacyBrowser[2893:356e] [com.apple.containermanager:xpc] Requesting container lookup; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], class = 2, identifier = <private>, group_identifier = <private>, create = 0, temp = 0, euid = 501, uid = 501
+2026-10-29 08:19:51.251 A  PrivacyBrowser[2893:356e] (libsystem_containermanager.dylib) container_query_t
+2026-10-29 08:19:51.251 Df PrivacyBrowser[2893:356e] [com.apple.containermanager:query] Query; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], euid = 501, uid = 501, class = 2, identifier = [(null)](0), flags = 900000002
+2026-10-29 08:19:51.252 Df containermanagerd[342:16a4] [com.apple.containermanager:fs] Read [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30296, options = 0x2
+2026-10-29 08:19:51.253 Df containermanagerd[342:16a4] [com.apple.containermanager:lifecycle] Using client sandbox path [<~~~>]; metadata = <<~~~>(2);<501/20/~~/0/1001>;u5F67D825-5AD0-4059-8576-67B8051D7CC7;pdev.local.PrivacyBrowser;dp-1;uma(null)>
+2026-10-29 08:19:51.253 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=2893, sandboxed=1, platform=1 (1/1/0) [<~~~>], cs cached>, error=(null)
+2026-10-29 08:19:51.253 Df PrivacyBrowser[2893:356e] [com.apple.containermanager:unspecified] container_query_get_single_result: success
+2026-10-29 08:19:51.253 A  PrivacyBrowser[2893:356e] (libsystem_containermanager.dylib) container_copy_object
+2026-10-29 08:19:51.253 Df PrivacyBrowser[2893:356e] [com.apple.containermanager:unspecified] container_create_or_lookup_for_platform: success
+2026-10-29 08:19:51.253 A  PrivacyBrowser[2893:356e] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:19:51.255 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x6000031ec5a0] activating connection: mach=false listener=false peer=false name=com.apple.hiservices-xpcservice
+2026-10-29 08:19:51.266 Df PrivacyBrowser[2893:356e] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:19:51.266 Df PrivacyBrowser[2893:356e] [com.apple.AppKit:StateRestoration] -[NSApplication _reopenWindowsAsNecessaryIncludingRestorableState:withFullFidelity:completionHandler:] shouldRestoreState=1 hasPersistentStateToRestore=0 shouldStillRestoreStateAfterPrompting=0
+2026-10-29 08:19:51.266 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x6000031e42d0] activating connection: mach=true listener=false peer=false name=com.apple.window_proxies
+2026-10-29 08:19:51.267 Df PrivacyBrowser[2893:356e] [com.apple.xpc:connection] [0x6000031e42d0] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:51.268 Df tccd[147:3553] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=151.82, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2893, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer}, },
+2026-10-29 08:19:51.268 Df tccd[147:3553] [com.apple.TCC:access] requestor: TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer is checking access for accessor TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2893, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+2026-10-29 08:19:51.269 Df PrivacyBrowser[2893:356e] [com.apple.AppKit:AutomaticTermination] void _NSEnableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:19:51.272 Df PrivacyBrowser[2893:3570] [com.apple.xpc:connection] [0x151809560] activating connection: mach=true listener=false peer=false name=com.apple.windowmanager.server
+2026-10-29 08:19:51.273 Df WindowManager[323:2de1] [com.apple.windowmanagement:xpcconnection] Connection activated | (2893) PrivacyBrowser
+2026-10-29 08:19:51.274 Df PrivacyBrowser[2893:356e] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:51.276 Df PrivacyBrowser[2893:356e] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:51.276 Df PrivacyBrowser[2893:356e] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:51.277 Df PrivacyBrowser[2893:356e] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:51.283 Df PrivacyBrowser[2893:356e] (Foundation) SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:19:51.285 Df PrivacyBrowser[2893:356e] [com.apple.CoreAnalytics:client] Entering exit handler.
+2026-10-29 08:19:51.285 Df PrivacyBrowser[2893:356e] [com.apple.CoreAnalytics:client] Queueing exit procedure onto XPC queue. Any further messages sent will be discarded. activeSendTransactions=0
+2026-10-29 08:19:51.285 Df PrivacyBrowser[2893:356f] [com.apple.CoreAnalytics:client] Cancelling XPC connection. Any further reply handler invocations will not retry messages
+2026-10-29 08:19:51.285 Df PrivacyBrowser[2893:356f] [com.apple.xpc:connection] [0x6000031ec1e0] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:51.285 Df PrivacyBrowser[2893:356e] [com.apple.CoreAnalytics:client] Exiting exit handler.
+2026-10-29 08:19:51.285 Df PrivacyBrowser[2893:356f] [com.apple.CoreAnalytics:client] XPC connection invalidated (daemon unloaded/disabled)
+2026-10-29 08:19:51.285 Df launchd[1:26a0] [gui/501 [100003]:] service inactive: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.2893
+2026-10-29 08:19:51.285 Df launchd[1:26a0] [gui/501 [100003]:] removing inactive unmanaged service: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.2893
+2026-10-29 08:19:51.285 Df WindowManager[323:2de1] [com.apple.windowmanagement:xpcconnection] Connection invalidated | (2893) PrivacyBrowser
+2026-10-29 08:19:51.286 Df runningboardd[150:3588] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] termination reported by proc_exit
+2026-10-29 08:19:51.287 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationQuit:] | for app:PrivacyBrowser, _appTrackingState = 2
+2026-10-29 08:19:51.287 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationQuit:] | App: PrivacyBrowser, quit, updating active tracking timer
+2026-10-29 08:19:51.288 Df runningboardd[150:3588] [com.apple.runningboard:ttl] Invalidating assertion 150-122-482 (target:[anon<PrivacyBrowser>(501):2893]) from originator [osservice<com.apple.coreservices.launchservicesd>:122]
+2026-10-29 08:19:51.298 A  PrivacyBrowser[2895:35ad] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:19:51.299 Df secinitd[344:3520] PrivacyBrowser[2895]: root path for bundle "<private>" of main executable "<private>"
+2026-10-29 08:19:51.302 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2895, sandboxed=0, platform=1 (1/1/0) [(null)], cs cached>, error=(null)
+2026-10-29 08:19:51.302 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2895, sandboxed=0, platform=1 (1/1/0) [(null)], cached, cs cached>, error=(null)
+2026-10-29 08:19:51.303 Df secinitd[344:3520] PrivacyBrowser[2895]: AppSandbox request successful
+2026-10-29 08:19:51.307 A  PrivacyBrowser[2895:35ad] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:19:51.307 Df PrivacyBrowser[2895:35ad] [com.apple.xpc:connection] [0x600001c44000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:19:51.307 Df PrivacyBrowser[2895:35ae] [com.apple.xpc:connection] [0x600001c40000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:19:51.310 Df PrivacyBrowser[2895:35ad] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:51.310 Df PrivacyBrowser[2895:35ad] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:51.310 Df PrivacyBrowser[2895:35ad] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:51.310 Df PrivacyBrowser[2895:35ad] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:51.319 Df PrivacyBrowser[2895:35ad] (Foundation) SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:19:51.322 A  PrivacyBrowser[2895:35ad] (TCC) TCCAccessRequest() IPC
+2026-10-29 08:19:51.322 Df PrivacyBrowser[2895:35ad] [com.apple.xpc:connection] [0x600001c48000] activating connection: mach=true listener=false peer=false name=com.apple.tccd
+2026-10-29 08:19:51.323 Df tccd[349:2d57] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=2895.1, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, requesting={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2895, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, },
+2026-10-29 08:19:51.325 Df PrivacyBrowser[2895:35ad] [com.apple.xpc:connection] [0x600001c48000] invalidated after the last release of the connection object
+2026-10-29 08:19:51.328 Df PrivacyBrowser[2895:35ad] [com.apple.xpc:connection] [0x600001c48000] activating connection: mach=true listener=false peer=false name=com.apple.distributed_notifications@Uv3
+2026-10-29 08:19:51.330 E  kernel[0:26a3] [com.apple.sandbox.reporting:violation] 3 duplicate reports for Sandbox: PrivacyBrowser(2895) deny(1) file-read-data /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences
+2026-10-29 08:19:51.331 E  cfprefsd[316:26a3] [com.apple.defaults:cfprefsd] rejecting read of { com.apple.Safari, runner, kCFPreferencesAnyHost, /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist, managed: 0 } from process 2895 (PrivacyBrowser) because accessing preferences outside an application's container requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.332 F  PrivacyBrowser[2895:35ae] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x600000d50d80> (Domain: com.apple.Safari, User: kCFPreferencesCurrentUser, ByHost: No, Container: /Users/runner/Library/Containers/com.apple.Safari/Data, Contents Need Refresh: No): accessing preferences outside an application's container requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.332 A  PrivacyBrowser[2895:35ae] (libsystem_trace.dylib) Activity for state dumps
+2026-10-29 08:19:51.333 Df PrivacyBrowser[2895:35ad] [com.apple.xpc:connection] [0x14ae066c0] activating connection: mach=true listener=false peer=false name=com.apple.lsd.mapdb
+2026-10-29 08:19:51.338 A  PrivacyBrowser[2895:35ad] (libsystem_containermanager.dylib) container_create_or_lookup_for_current_user
+2026-10-29 08:19:51.338 A  PrivacyBrowser[2895:35ad] (libsystem_containermanager.dylib) container_create_or_lookup_for_platform
+2026-10-29 08:19:51.338 Df PrivacyBrowser[2895:35ad] [com.apple.containermanager:xpc] Requesting container lookup; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], class = 2, identifier = <private>, group_identifier = <private>, create = 0, temp = 0, euid = 501, uid = 501
+2026-10-29 08:19:51.338 A  PrivacyBrowser[2895:35ad] (libsystem_containermanager.dylib) container_query_t
+2026-10-29 08:19:51.338 Df PrivacyBrowser[2895:35ad] [com.apple.containermanager:query] Query; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], euid = 501, uid = 501, class = 2, identifier = [(null)](0), flags = 900000002
+2026-10-29 08:19:51.339 Df containermanagerd[342:16a4] [com.apple.containermanager:fs] Read [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30296, options = 0x2
+2026-10-29 08:19:51.340 Df containermanagerd[342:16a4] [com.apple.containermanager:lifecycle] Using client sandbox path [<~~~>]; metadata = <<~~~>(2);<501/20/~~/0/1001>;u5F67D825-5AD0-4059-8576-67B8051D7CC7;pdev.local.PrivacyBrowser;dp-1;uma(null)>
+2026-10-29 08:19:51.340 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=2895, sandboxed=1, platform=1 (1/1/0) [<~~~>], cs cached>, error=(null)
+2026-10-29 08:19:51.340 Df PrivacyBrowser[2895:35ad] [com.apple.containermanager:unspecified] container_query_get_single_result: success
+2026-10-29 08:19:51.340 A  PrivacyBrowser[2895:35ad] (libsystem_containermanager.dylib) container_copy_object
+2026-10-29 08:19:51.341 Df PrivacyBrowser[2895:35ad] [com.apple.containermanager:unspecified] container_create_or_lookup_for_platform: success
+2026-10-29 08:19:51.341 A  PrivacyBrowser[2895:35ad] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:19:51.342 Df PrivacyBrowser[2895:35ad] (WebCore) 0x14c004468 - ResourceMonitorThrottler::Initialized with count: 5, duration: 86400, maxHosts: 100
+2026-10-29 08:19:51.342 Df PrivacyBrowser[2895:35ad] (WebKit) 0x14c004288 - WebsiteDataStore::WebsiteDataStore sessionID=2
+2026-10-29 08:19:51.343 Df PrivacyBrowser[2895:35ad] (WebKit) 0x10d000900 - [PID=0] WebProcessCache::updateCapacity: Cache is disabled because process swap on navigation is disabled
+2026-10-29 08:19:51.347 Df PrivacyBrowser[2895:35ae] [com.apple.xpc:connection] [0x600001c480f0] activating connection: mach=true listener=false peer=false name=com.apple.metadata.mds
+2026-10-29 08:19:51.353 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] Ignoring jetsam update because this process is not memory-managed
+2026-10-29 08:19:51.353 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] Ignoring suspend because this process is not lifecycle managed
+2026-10-29 08:19:51.353 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] Ignoring role changes because this process is not role managed
+2026-10-29 08:19:51.353 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] Ignoring GPU update because this process is not GPU managed
+2026-10-29 08:19:51.353 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2893] Ignoring memory limit update because this process is not memory-managed
+2026-10-29 08:19:51.359 Df tccd[349:2d57] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=109.49, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2895, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.mds, pid=109, auid=0, euid=0, binary_path=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds}, },
+2026-10-29 08:19:51.360 A  PrivacyBrowser[2895:35ad] (CoreFoundation) Updating Key-Value Observers Of Preferences
+2026-10-29 08:19:51.362 Df tccd[349:2d57] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=109.50, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2895, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.mds, pid=109, auid=0, euid=0, binary_path=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds}, },
+2026-10-29 08:19:51.364 Df PrivacyBrowser[2895:35b1] [com.apple.xpc:connection] [0x600001c481e0] activating connection: mach=true listener=false peer=false name=com.apple.webprivacyd
+2026-10-29 08:19:51.366 Df PrivacyBrowser[2895:35ad] [com.apple.WebKit:BackForwardCache] WebBackForwardCache::clear
+2026-10-29 08:19:51.366 Df PrivacyBrowser[2895:35ad] [com.apple.WebKit:ResourceLoading] 0x14c005718 - ResourceMonitorThrottler::Initialized with count: 5, duration: 86400, maxHosts: 100
+2026-10-29 08:19:51.366 Df PrivacyBrowser[2895:35ad] [com.apple.WebKit:Storage] 0x14c005538 - WebsiteDataStore::WebsiteDataStore sessionID=9223372036854775810
+2026-10-29 08:19:51.367 Df tccd[349:358e] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=109.51, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2895, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.mds, pid=109, auid=0, euid=0, binary_path=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds}, },
+2026-10-29 08:19:51.367 Df PrivacyBrowser[2895:35ad] (Foundation) SafariHooks: bound +[WKWebsiteDataStore _safari_dataStoreForProfileWithIdentifier:createIfNecessary:cacheNewDataStoreInMemory:]
+2026-10-29 08:19:51.367 Df PrivacyBrowser[2895:35ad] (Foundation) SafariHooks: bound -[WKWebViewConfiguration websiteDataStore]
+2026-10-29 08:19:51.378 A  PrivacyBrowser[2896:35c1] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:19:51.379 Df secinitd[344:3520] PrivacyBrowser[2896]: root path for bundle "<private>" of main executable "<private>"
+2026-10-29 08:19:51.383 E  mds[109:1f4c] [com.apple.spotlightindex:General] si_oid64psid_check_sandbox:595: failed to sandbox check 1 elements 3
+2026-10-29 08:19:51.383 Df containermanagerd[342:16a4] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2896, sandboxed=0, platform=1 (1/1/0) [(null)], cs cached>, error=(null)
+2026-10-29 08:19:51.384 Df containermanagerd[342:353d] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2896, sandboxed=0, platform=1 (1/1/0) [(null)], cached, cs cached>, error=(null)
+2026-10-29 08:19:51.385 Df secinitd[344:3520] PrivacyBrowser[2896]: AppSandbox request successful
+2026-10-29 08:19:51.389 A  PrivacyBrowser[2896:35c1] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:19:51.390 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x600000110000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:19:51.390 Df PrivacyBrowser[2896:35c2] [com.apple.xpc:connection] [0x600000114000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:19:51.393 Df PrivacyBrowser[2896:35c1] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:51.393 Df runningboardd[150:3588] [com.apple.runningboard:process] Removing process: [anon<PrivacyBrowser>(501):2893]
+2026-10-29 08:19:51.393 Df runningboardd[150:3588] [com.apple.runningboard:general] removeJobWithInstance called for identity without existing job [anon<PrivacyBrowser>(501):2893]
+2026-10-29 08:19:51.393 Df runningboardd[150:3588] [com.apple.runningboard:process] Removing assertions for terminated process: [anon<PrivacyBrowser>(501):2893]
+2026-10-29 08:19:51.393 Df PrivacyBrowser[2896:35c1] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:51.393 Df PrivacyBrowser[2896:35c1] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:51.393 Df PrivacyBrowser[2896:35c1] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:51.405 Df PrivacyBrowser[2896:35c1] (Foundation) SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:19:51.406 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x6000001100f0] activating connection: mach=true listener=false peer=false name=com.apple.distributed_notifications@Uv3
+2026-10-29 08:19:51.406 Df PrivacyBrowser[2896:35c1] (Foundation) SafariWindow: +[BrowserDocumentController sharedDocumentController]: sharedDocumentController -> BrowserDocumentController
+2026-10-29 08:19:51.407 Df PrivacyBrowser[2896:35c1] (Foundation) SafariWindow: +sharedDocumentController is now BrowserDocumentController
+2026-10-29 08:19:51.408 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x6000001101e0] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.launchservicesd
+2026-10-29 08:19:51.408 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x6000001102d0] activating connection: mach=true listener=false peer=false name=com.apple.pasteboard.1
+2026-10-29 08:19:51.412 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.iBooksX.BooksThumbnail : <none>
+2026-10-29 08:19:51.414 Df PrivacyBrowser[2896:35c1] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) No windows open yet
+2026-10-29 08:19:51.414 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.CalendarExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:51.414 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x6000001140f0] activating connection: mach=true listener=false peer=false name=com.apple.analyticsd
+2026-10-29 08:19:51.414 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.WebExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:51.414 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.TextExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:51.414 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.FontExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:51.415 A  PrivacyBrowser[2896:35c1] (TCC) TCCAccessRequest() IPC
+2026-10-29 08:19:51.415 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.OfficeExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:51.415 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x6000001141e0] activating connection: mach=true listener=false peer=false name=com.apple.tccd.system
+2026-10-29 08:19:51.415 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.ImageExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:51.415 Df PrivacyBrowser[2896:35c3] [com.apple.CoreAnalytics:client] Received configuration update from daemon (initial)
+2026-10-29 08:19:51.415 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.ClippingsExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:51.415 Df tccd[147:3552] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=2896.1, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, requesting={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2896, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, },
+2026-10-29 08:19:51.415 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.ContactExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:51.415 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.PackageExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:51.416 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.quicklook.thumbnail.AudiovisualExtension : quicklook-thumbnail-secure
+2026-10-29 08:19:51.416 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x6000001141e0] invalidated after the last release of the connection object
+2026-10-29 08:19:51.416 Df PrivacyBrowser[2896:35c1] [com.apple.SkyLight:default] server port 0x00003307, session port 0x00003307
+2026-10-29 08:19:51.416 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.HydraQLThumbnailExtension : <none>
+2026-10-29 08:19:51.417 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.WatchFaceAlert.ThumbnailExtension : <none>
+2026-10-29 08:19:51.417 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.SceneKitQLThumbnailExtension : <none>
+2026-10-29 08:19:51.417 Df tccd[147:2d70] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=151.83, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2896, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer}, },
+2026-10-29 08:19:51.417 Df tccd[147:2d70] [com.apple.TCC:access] requestor: TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer is checking access for accessor TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2896, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+2026-10-29 08:19:51.417 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.shortcuts.ThumbnailExtension : <none>
+2026-10-29 08:19:51.417 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.CoreHapticsTools.QLThumbnailExtension : <none>
+2026-10-29 08:19:51.417 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.OFDThumbnail : <none>
+2026-10-29 08:19:51.417 E  com.apple.quicklook.ThumbnailsAgent[338:357e] [com.apple.extensionkit:discovery] Private sandbox for com.apple.RAQLThumbnailExtension : <none>
+2026-10-29 08:19:51.419 Df PrivacyBrowser[2896:35c1] [com.apple.SkyLight:default] New connection 0x2df77 main
+2026-10-29 08:19:51.421 Df PrivacyBrowser[2896:35c1] [com.apple.processmanager:front-35286506] CHECKIN: pid=2896
+2026-10-29 08:19:51.424 Df launchservicesd[122:2d71] [com.apple.launchservices:cas] CHECKIN:0x0-0x45045 2896 dev.local.PrivacyBrowser
+2026-10-29 08:19:51.427 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationReady:] | App: PrivacyBrowser, ready, updating active tracking timer
+2026-10-29 08:19:51.427 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:Standard] -[ApplicationManager checkInAppContext:eventData:] | ApplicationManager: Checked in app : PrivacyBrowser
+2026-10-29 08:19:51.428 Df PrivacyBrowser[2896:35c1] [com.apple.processmanager:front-35286506] CHECKEDIN: pid=2896 asn=0x0-0x45045 foreground=1
+2026-10-29 08:19:51.428 Df runningboardd[150:2e00] [com.apple.runningboard:process] Resolved pid 2896 to [anon<PrivacyBrowser>(501):2896]
+2026-10-29 08:19:51.428 Df runningboardd[150:2e00] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] is not RunningBoard jetsam managed.
+2026-10-29 08:19:51.428 Df runningboardd[150:2e00] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] This process will not be managed.
+2026-10-29 08:19:51.428 Df runningboardd[150:2e00] [com.apple.runningboard:ttl] Now tracking process: [anon<PrivacyBrowser>(501):2896]
+2026-10-29 08:19:51.429 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x11d007fb0] activating connection: mach=true listener=false peer=false name=com.apple.lsd.modifydb
+2026-10-29 08:19:51.430 Df runningboardd[150:2e00] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):2896] from originator [osservice<com.apple.coreservices.launchservicesd>:122] with description <RBSAssertionDescriptor| "foregroundApp:2896" ID:150-122-483 target:2896 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:19:51.430 Df runningboardd[150:2e00] [com.apple.runningboard:ttl] Assertion 150-122-483 (target:[anon<PrivacyBrowser>(501):2896]) will be created as active
+2026-10-29 08:19:51.430 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x11d005f70] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:19:51.430 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x11d005f70] Channel could not return listener port.
+2026-10-29 08:19:51.431 Df runningboardd[150:3588] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):2896] from originator [osservice<com.apple.coreservices.launchservicesd>:122] with description <RBSAssertionDescriptor| "foregroundApp:2896" ID:150-122-484 target:2896 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:19:51.431 Df runningboardd[150:3588] [com.apple.runningboard:ttl] Assertion 150-122-484 (target:[anon<PrivacyBrowser>(501):2896]) will be created as active
+2026-10-29 08:19:51.431 Df PrivacyBrowser[2896:35c2] [com.apple.xpc:connection] [0x11d00c380] activating connection: mach=false listener=false peer=true name=com.apple.xpc.anonymous.0x11d005f70.peer[122].0x11d00c380
+2026-10-29 08:19:51.431 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] Ignoring jetsam update because this process is not memory-managed
+2026-10-29 08:19:51.431 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] Ignoring suspend because this process is not lifecycle managed
+2026-10-29 08:19:51.431 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] Result 45 setting darwin role to UserInteractiveNonFocal: Operation not supported, falling back to setting priority
+2026-10-29 08:19:51.431 Df runningboardd[150:3577] [com.apple.runningboard:ttl] [anon<PrivacyBrowser>(501):2896] Set darwin priority to: PRIO_DEFAULT
+2026-10-29 08:19:51.431 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] Ignoring GPU update because this process is not GPU managed
+2026-10-29 08:19:51.431 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] Ignoring memory limit update because this process is not memory-managed
+2026-10-29 08:19:51.433 Df runningboardd[150:3577] [com.apple.runningboard:ttl] Invalidating assertion 150-122-483 (target:[anon<PrivacyBrowser>(501):2896]) from originator [osservice<com.apple.coreservices.launchservicesd>:122]
+2026-10-29 08:19:51.434 Df PrivacyBrowser[2896:35c1] [com.apple.processmanager:front-35286506] FRONTLOGGING: version 1
+2026-10-29 08:19:51.434 Df PrivacyBrowser[2896:35c1] [com.apple.processmanager:front-35286506] Registered, pid=2896 ASN=0x0,0x45045
+2026-10-29 08:19:51.436 Df PrivacyBrowser[2896:35c2] [com.apple.xpc:connection] [0x11c607110] activating connection: mach=true listener=false peer=false name=com.apple.lsd.mapdb
+2026-10-29 08:19:51.437 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x11d005f70] Channel could not return listener port.
+2026-10-29 08:19:51.438 Df lsd[329:337c] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:19:51.438 Df lsd[329:337c] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:19:51.438 Df PrivacyBrowser[2896:35c1] [com.apple.processmanager:front-35286506] BringForward: pid=2896 asn=0x0-0x45045 bringForward=0 foreground=1 uiElement=0 launchedByLS=0 modifiersCount=0 allDisabled=0
+2026-10-29 08:19:51.439 Df PrivacyBrowser[2896:35c1] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:19:51.440 Df PrivacyBrowser[2896:35c1] (libMobileGestalt.dylib) No persisted cache on this platform.
+2026-10-29 08:19:51.441 Df kernel[0:35c1] IOUC AppleNVMeEANUC failed MACF in process pid 2896, PrivacyBrowser
+2026-10-29 08:19:51.441 Df PrivacyBrowser[2896:35c1] (libMobileGestalt.dylib) IOServiceOpen failed for class 'AppleNVMeEAN'
+2026-10-29 08:19:51.441 Df PrivacyBrowser[2896:35c1] (libMobileGestalt.dylib) Could not open EAN service and connect
+2026-10-29 08:19:51.441 Df PrivacyBrowser[2896:35c1] (libMobileGestalt.dylib) Failed to copy 'aptk' from EAN
+2026-10-29 08:19:51.441 Df PrivacyBrowser[2896:35c1] (libMobileGestalt.dylib) Failed to copy APTicket properties. Falling back to default policy.
+2026-10-29 08:19:51.441 Df PrivacyBrowser[2896:35c1] (libMobileGestalt.dylib) Creating default MGSysConfigPolicy
+2026-10-29 08:19:51.441 Df PrivacyBrowser[2896:35c1] (libMobileGestalt.dylib) CFDictionaryRef copySyscfgDictionary(void) enumeration of <private> failed.
+2026-10-29 08:19:51.441 Df PrivacyBrowser[2896:35c1] (libMobileGestalt.dylib) Failed to find key <private>
+2026-10-29 08:19:51.442 Df PrivacyBrowser[2896:35c1] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:19:51.443 Df PrivacyBrowser[2896:35c1] [com.apple.AppKit:Appearance] Post-registration system appearance: (HLTB: 1)
+2026-10-29 08:19:51.446 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x11d005f70] Channel could not return listener port.
+2026-10-29 08:19:51.447 Df distnoted[307:2518] [com.apple.distnoted:diagnostic] register name: com.apple.xctest.FakeForceTouchDevice object: dev.local.PrivacyBrowser token: 1f00000020 pid: 2896
+2026-10-29 08:19:51.450 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x11d005f70] Channel could not return listener port.
+2026-10-29 08:19:51.454 Df PrivacyBrowser[2896:35c1] [com.apple.dt.xctest:Default] Registering for test daemon availability notify post.
+2026-10-29 08:19:51.454 Df PrivacyBrowser[2896:35c1] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:51.454 Df PrivacyBrowser[2896:35c1] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:51.455 Df PrivacyBrowser[2896:35c1] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:51.458 A  PrivacyBrowser[2896:35c1] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:19:51.459 Df PrivacyBrowser[2896:35c1] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.gms.availability.notification
+2026-10-29 08:19:51.459 Df PrivacyBrowser[2896:35c1] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.os-eligibility-domain.change.greymatter
+2026-10-29 08:19:51.459 Df PrivacyBrowser[2896:35c1] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.language.changed
+2026-10-29 08:19:51.459 Df PrivacyBrowser[2896:35c1] [com.apple.WritingTools:Default] isAvailable value changed: featureEnabled = true, isMDMAllowed = true, gmAvailable (current) = false
+2026-10-29 08:19:51.464 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x11c705640] activating connection: mach=true listener=false peer=false name=com.apple.appkit.restoration_storage
+2026-10-29 08:19:51.465 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x6000001142d0] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.appleevents
+2026-10-29 08:19:51.465 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x11d005f70] Channel could not return listener port.
+2026-10-29 08:19:51.465 Df PrivacyBrowser[2896:35c1] [com.apple.processmanager:front-35286506] SignalReady: pid=2896 asn=0x0-0x45045
+2026-10-29 08:19:51.466 Df PrivacyBrowser[2896:35c1] [com.apple.processmanager:front-35286506] SIGNAL: pid=2896 asn=0x0x-0x45045
+2026-10-29 08:19:51.466 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationReady:] | App: PrivacyBrowser, ready, updating active tracking timer
+2026-10-29 08:19:51.468 A  PrivacyBrowser[2896:35c1] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:19:51.468 A  PrivacyBrowser[2896:35c1] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:19:51.469 A  PrivacyBrowser[2896:35c1] (libsystem_containermanager.dylib) container_create_or_lookup_for_current_user
+2026-10-29 08:19:51.469 A  PrivacyBrowser[2896:35c1] (libsystem_containermanager.dylib) container_create_or_lookup_for_platform
+2026-10-29 08:19:51.469 Df PrivacyBrowser[2896:35c1] [com.apple.containermanager:xpc] Requesting container lookup; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], class = 2, identifier = <private>, group_identifier = <private>, create = 0, temp = 0, euid = 501, uid = 501
+2026-10-29 08:19:51.469 A  PrivacyBrowser[2896:35c1] (libsystem_containermanager.dylib) container_query_t
+2026-10-29 08:19:51.469 Df PrivacyBrowser[2896:35c1] [com.apple.containermanager:query] Query; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], euid = 501, uid = 501, class = 2, identifier = [(null)](0), flags = 900000002
+2026-10-29 08:19:51.470 Df containermanagerd[342:353d] [com.apple.containermanager:fs] Read [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30296, options = 0x2
+2026-10-29 08:19:51.470 Df containermanagerd[342:353d] [com.apple.containermanager:lifecycle] Using client sandbox path [<~~~>]; metadata = <<~~~>(2);<501/20/~~/0/1001>;u5F67D825-5AD0-4059-8576-67B8051D7CC7;pdev.local.PrivacyBrowser;dp-1;uma(null)>
+2026-10-29 08:19:51.470 Df containermanagerd[342:353d] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=2896, sandboxed=1, platform=1 (1/1/0) [<~~~>], cs cached>, error=(null)
+2026-10-29 08:19:51.471 Df PrivacyBrowser[2896:35c1] [com.apple.containermanager:unspecified] container_query_get_single_result: success
+2026-10-29 08:19:51.471 A  PrivacyBrowser[2896:35c1] (libsystem_containermanager.dylib) container_copy_object
+2026-10-29 08:19:51.471 Df PrivacyBrowser[2896:35c1] [com.apple.containermanager:unspecified] container_create_or_lookup_for_platform: success
+2026-10-29 08:19:51.471 A  PrivacyBrowser[2896:35c1] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:19:51.474 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x600000118000] activating connection: mach=false listener=false peer=false name=com.apple.hiservices-xpcservice
+2026-10-29 08:19:51.491 Df PrivacyBrowser[2896:35c1] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:19:51.491 Df PrivacyBrowser[2896:35c1] [com.apple.AppKit:StateRestoration] -[NSApplication _reopenWindowsAsNecessaryIncludingRestorableState:withFullFidelity:completionHandler:] shouldRestoreState=1 hasPersistentStateToRestore=0 shouldStillRestoreStateAfterPrompting=0
+2026-10-29 08:19:51.491 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x6000001143c0] activating connection: mach=true listener=false peer=false name=com.apple.window_proxies
+2026-10-29 08:19:51.492 Df PrivacyBrowser[2896:35c1] [com.apple.xpc:connection] [0x6000001143c0] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:51.494 Df tccd[147:2d70] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=151.84, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2896, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer}, },
+2026-10-29 08:19:51.494 Df tccd[147:2d70] [com.apple.TCC:access] requestor: TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer is checking access for accessor TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2896, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+2026-10-29 08:19:51.494 Df PrivacyBrowser[2896:35c1] [com.apple.AppKit:AutomaticTermination] void _NSEnableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:19:51.496 Df PrivacyBrowser[2896:35c3] [com.apple.xpc:connection] [0x11d00d1c0] activating connection: mach=true listener=false peer=false name=com.apple.windowmanager.server
+2026-10-29 08:19:51.497 Df PrivacyBrowser[2896:35c1] [com.apple.CoreAnalytics:client] Entering exit handler.
+2026-10-29 08:19:51.497 Df PrivacyBrowser[2896:35c1] [com.apple.CoreAnalytics:client] Queueing exit procedure onto XPC queue. Any further messages sent will be discarded. activeSendTransactions=0
+2026-10-29 08:19:51.497 Df PrivacyBrowser[2896:35c2] [com.apple.CoreAnalytics:client] Cancelling XPC connection. Any further reply handler invocations will not retry messages
+2026-10-29 08:19:51.497 Df PrivacyBrowser[2896:35c2] [com.apple.xpc:connection] [0x6000001140f0] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:51.497 Df PrivacyBrowser[2896:35c1] [com.apple.CoreAnalytics:client] Exiting exit handler.
+2026-10-29 08:19:51.498 Df WindowManager[323:2de1] [com.apple.windowmanagement:xpcconnection] Connection activated | (2896) PrivacyBrowser
+2026-10-29 08:19:51.498 Df launchd[1:2698] [gui/501 [100003]:] service inactive: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.2896
+2026-10-29 08:19:51.498 Df launchd[1:2698] [gui/501 [100003]:] removing inactive unmanaged service: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.2896
+2026-10-29 08:19:51.498 Df WindowManager[323:2de1] [com.apple.windowmanagement:xpcconnection] Connection invalidated | (2896) PrivacyBrowser
+2026-10-29 08:19:51.499 Df runningboardd[150:3578] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] termination reported by proc_exit
+2026-10-29 08:19:51.499 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationQuit:] | for app:PrivacyBrowser, _appTrackingState = 2
+2026-10-29 08:19:51.499 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationQuit:] | App: PrivacyBrowser, quit, updating active tracking timer
+2026-10-29 08:19:51.500 Df runningboardd[150:3577] [com.apple.runningboard:ttl] Invalidating assertion 150-122-484 (target:[anon<PrivacyBrowser>(501):2896]) from originator [osservice<com.apple.coreservices.launchservicesd>:122]
+2026-10-29 08:19:51.511 A  PrivacyBrowser[2897:35ca] (libsystem_secinit.dylib) AppSandbox
+2026-10-29 08:19:51.512 Df secinitd[344:3520] PrivacyBrowser[2897]: root path for bundle "<private>" of main executable "<private>"
+2026-10-29 08:19:51.516 Df containermanagerd[342:353d] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2897, sandboxed=0, platform=1 (1/1/0) [(null)], cs cached>, error=(null)
+2026-10-29 08:19:51.516 Df containermanagerd[342:353d] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>(com.apple.secinitd)/(null), u=<501/20/~~/2/1001>, uid=501, pid=2897, sandboxed=0, platform=1 (1/1/0) [(null)], cached, cs cached>, error=(null)
+2026-10-29 08:19:51.517 Df secinitd[344:3520] PrivacyBrowser[2897]: AppSandbox request successful
+2026-10-29 08:19:51.521 A  PrivacyBrowser[2897:35ca] (libsystem_info.dylib) Retrieve User by ID
+2026-10-29 08:19:51.522 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x600000818000] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-29 08:19:51.522 Df PrivacyBrowser[2897:35cb] [com.apple.xpc:connection] [0x6000008180f0] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-29 08:19:51.525 Df PrivacyBrowser[2897:35ca] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:51.526 Df PrivacyBrowser[2897:35ca] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari' (no such file))
+2026-10-29 08:19:51.526 Df PrivacyBrowser[2897:35ca] (Foundation) SafariLoader: /System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:51.526 Df PrivacyBrowser[2897:35ca] (Foundation) SafariLoader: /System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari -> nil (on disk: false, dlerror: dlopen(/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari, 0x0006): tried: '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file), '/System/Cryptexes/App/System/Library/PrivateFrameworks/Safari.framework/Safari' (no such file))
+2026-10-29 08:19:51.539 Df PrivacyBrowser[2897:35ca] (Foundation) SafariLoader: opened /System/Library/PrivateFrameworks/Safari.framework/Versions/A/Safari (not on disk: resolved from the shared cache)
+2026-10-29 08:19:51.539 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x600000810000] activating connection: mach=true listener=false peer=false name=com.apple.distributed_notifications@Uv3
+2026-10-29 08:19:51.539 Df PrivacyBrowser[2897:35ca] (Foundation) SafariWindow: +[BrowserDocumentController sharedDocumentController]: sharedDocumentController -> BrowserDocumentController
+2026-10-29 08:19:51.539 Df PrivacyBrowser[2897:35ca] (Foundation) SafariWindow: +sharedDocumentController is now BrowserDocumentController
+2026-10-29 08:19:51.540 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x6000008100f0] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.launchservicesd
+2026-10-29 08:19:51.540 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x6000008101e0] activating connection: mach=true listener=false peer=false name=com.apple.pasteboard.1
+2026-10-29 08:19:51.544 Df PrivacyBrowser[2897:35ca] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) No windows open yet
+2026-10-29 08:19:51.544 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x6000008102d0] activating connection: mach=true listener=false peer=false name=com.apple.analyticsd
+2026-10-29 08:19:51.545 E  modelmanagerd[971:2d60] [com.apple.extensionkit:discovery] Private sandbox for com.apple.tgondeviceinferenceproviderservice : <none>
+2026-10-29 08:19:51.546 A  PrivacyBrowser[2897:35ca] (TCC) TCCAccessRequest() IPC
+2026-10-29 08:19:51.546 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x6000008103c0] activating connection: mach=true listener=false peer=false name=com.apple.tccd.system
+2026-10-29 08:19:51.546 E  modelmanagerd[971:2d60] [com.apple.extensionkit:discovery] Private sandbox for com.apple.VisualGeneration.inference : <none>
+2026-10-29 08:19:51.546 Df tccd[147:3552] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=2897.1, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, requesting={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2897, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, },
+2026-10-29 08:19:51.546 E  modelmanagerd[971:2d60] [com.apple.extensionkit:discovery] Private sandbox for com.apple.InferenceProviderService : <none>
+2026-10-29 08:19:51.547 E  modelmanagerd[971:2d60] [com.apple.extensionkit:discovery] Private sandbox for com.apple.BlackPowderInferenceExtension : <none>
+2026-10-29 08:19:51.547 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x6000008103c0] invalidated after the last release of the connection object
+2026-10-29 08:19:51.547 E  modelmanagerd[971:2d60] [com.apple.extensionkit:discovery] Private sandbox for com.apple.cloudml.inference.PrivateMLClientInferenceProviderService : <none>
+2026-10-29 08:19:51.548 Df PrivacyBrowser[2897:35ca] [com.apple.SkyLight:default] server port 0x00003107, session port 0x00003107
+2026-10-29 08:19:51.548 Df PrivacyBrowser[2897:35cb] [com.apple.CoreAnalytics:client] Received configuration update from daemon (initial)
+2026-10-29 08:19:51.549 Df tccd[147:2d70] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=151.85, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2897, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer}, },
+2026-10-29 08:19:51.549 Df tccd[147:2d70] [com.apple.TCC:access] requestor: TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer is checking access for accessor TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2897, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+2026-10-29 08:19:51.552 Df PrivacyBrowser[2897:35ca] [com.apple.SkyLight:default] New connection 0x2cf63 main
+2026-10-29 08:19:51.554 Df PrivacyBrowser[2897:35ca] [com.apple.processmanager:front-35286506] CHECKIN: pid=2897
+2026-10-29 08:19:51.557 Df launchservicesd[122:2b3e] [com.apple.launchservices:cas] CHECKIN:0x0-0x46046 2897 dev.local.PrivacyBrowser
+2026-10-29 08:19:51.558 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationReady:] | App: PrivacyBrowser, ready, updating active tracking timer
+2026-10-29 08:19:51.558 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:Standard] -[ApplicationManager checkInAppContext:eventData:] | ApplicationManager: Checked in app : PrivacyBrowser
+2026-10-29 08:19:51.558 Df runningboardd[150:3577] [com.apple.runningboard:process] Resolved pid 2897 to [anon<PrivacyBrowser>(501):2897]
+2026-10-29 08:19:51.558 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] is not RunningBoard jetsam managed.
+2026-10-29 08:19:51.558 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] This process will not be managed.
+2026-10-29 08:19:51.558 Df runningboardd[150:3577] [com.apple.runningboard:ttl] Now tracking process: [anon<PrivacyBrowser>(501):2897]
+2026-10-29 08:19:51.559 Df PrivacyBrowser[2897:35ca] [com.apple.processmanager:front-35286506] CHECKEDIN: pid=2897 asn=0x0-0x46046 foreground=1
+2026-10-29 08:19:51.560 Df runningboardd[150:2e00] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] Ignoring jetsam update because this process is not memory-managed
+2026-10-29 08:19:51.560 Df runningboardd[150:2e00] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] Ignoring suspend because this process is not lifecycle managed
+2026-10-29 08:19:51.560 Df runningboardd[150:2e00] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] Ignoring role changes because this process is not role managed
+2026-10-29 08:19:51.560 Df runningboardd[150:2e00] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] Ignoring GPU update because this process is not GPU managed
+2026-10-29 08:19:51.560 Df runningboardd[150:2e00] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2896] Ignoring memory limit update because this process is not memory-managed
+2026-10-29 08:19:51.560 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14d8084f0] activating connection: mach=true listener=false peer=false name=com.apple.lsd.modifydb
+2026-10-29 08:19:51.560 Df runningboardd[150:3577] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):2897] from originator [osservice<com.apple.coreservices.launchservicesd>:122] with description <RBSAssertionDescriptor| "foregroundApp:2897" ID:150-122-485 target:2897 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:19:51.560 Df runningboardd[150:3577] [com.apple.runningboard:ttl] Assertion 150-122-485 (target:[anon<PrivacyBrowser>(501):2897]) will be created as active
+2026-10-29 08:19:51.560 Df runningboardd[150:3578] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] Ignoring jetsam update because this process is not memory-managed
+2026-10-29 08:19:51.560 Df runningboardd[150:3578] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] Ignoring suspend because this process is not lifecycle managed
+2026-10-29 08:19:51.560 Df runningboardd[150:3578] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] Result 45 setting darwin role to UserInteractiveNonFocal: Operation not supported, falling back to setting priority
+2026-10-29 08:19:51.560 Df runningboardd[150:3578] [com.apple.runningboard:ttl] [anon<PrivacyBrowser>(501):2897] Set darwin priority to: PRIO_DEFAULT
+2026-10-29 08:19:51.560 Df runningboardd[150:3578] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] Ignoring GPU update because this process is not GPU managed
+2026-10-29 08:19:51.560 Df runningboardd[150:3578] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] Ignoring memory limit update because this process is not memory-managed
+2026-10-29 08:19:51.561 Df runningboardd[150:3578] [com.apple.runningboard:ttl] Acquiring assertion targeting [anon<PrivacyBrowser>(501):2897] from originator [osservice<com.apple.coreservices.launchservicesd>:122] with description <RBSAssertionDescriptor| "foregroundApp:2897" ID:150-122-486 target:2897 attributes:[
+	<RBSDomainAttribute| domain:"com.apple.launchservicesd" name:"RoleUserInteractiveNonFocal" sourceEnvironment:"(null)">
+	]>
+2026-10-29 08:19:51.561 Df runningboardd[150:3578] [com.apple.runningboard:ttl] Assertion 150-122-486 (target:[anon<PrivacyBrowser>(501):2897]) will be created as active
+2026-10-29 08:19:51.561 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c7080a0] activating connection: mach=false listener=true peer=false name=(anonymous)
+2026-10-29 08:19:51.561 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c7080a0] Channel could not return listener port.
+2026-10-29 08:19:51.561 Df runningboardd[150:3577] [com.apple.runningboard:ttl] Invalidating assertion 150-122-485 (target:[anon<PrivacyBrowser>(501):2897]) from originator [osservice<com.apple.coreservices.launchservicesd>:122]
+2026-10-29 08:19:51.561 Df PrivacyBrowser[2897:35cc] [com.apple.xpc:connection] [0x14c709670] activating connection: mach=false listener=false peer=true name=com.apple.xpc.anonymous.0x14c7080a0.peer[122].0x14c709670
+2026-10-29 08:19:51.563 Df PrivacyBrowser[2897:35ca] [com.apple.processmanager:front-35286506] FRONTLOGGING: version 1
+2026-10-29 08:19:51.563 Df PrivacyBrowser[2897:35ca] [com.apple.processmanager:front-35286506] Registered, pid=2897 ASN=0x0,0x46046
+2026-10-29 08:19:51.564 Df PrivacyBrowser[2897:35cc] [com.apple.xpc:connection] [0x14d809020] activating connection: mach=true listener=false peer=false name=com.apple.lsd.mapdb
+2026-10-29 08:19:51.564 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c7080a0] Channel could not return listener port.
+2026-10-29 08:19:51.565 Df PrivacyBrowser[2897:35ca] [com.apple.processmanager:front-35286506] BringForward: pid=2897 asn=0x0-0x46046 bringForward=0 foreground=1 uiElement=0 launchedByLS=0 modifiersCount=0 allDisabled=0
+2026-10-29 08:19:51.565 Df PrivacyBrowser[2897:35ca] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:19:51.566 Df PrivacyBrowser[2897:35ca] (libMobileGestalt.dylib) No persisted cache on this platform.
+2026-10-29 08:19:51.567 E  kernel[0:35ca] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(2897) deny(1) iokit-open-user-client AppleNVMeEANUC
+2026-10-29 08:19:51.567 Df kernel[0:35ca] IOUC AppleNVMeEANUC failed MACF in process pid 2897, PrivacyBrowser
+2026-10-29 08:19:51.567 Df PrivacyBrowser[2897:35ca] (libMobileGestalt.dylib) IOServiceOpen failed for class 'AppleNVMeEAN'
+2026-10-29 08:19:51.567 Df PrivacyBrowser[2897:35ca] (libMobileGestalt.dylib) Could not open EAN service and connect
+2026-10-29 08:19:51.567 Df PrivacyBrowser[2897:35ca] (libMobileGestalt.dylib) Failed to copy 'aptk' from EAN
+2026-10-29 08:19:51.567 Df PrivacyBrowser[2897:35ca] (libMobileGestalt.dylib) Failed to copy APTicket properties. Falling back to default policy.
+2026-10-29 08:19:51.567 Df PrivacyBrowser[2897:35ca] (libMobileGestalt.dylib) Creating default MGSysConfigPolicy
+2026-10-29 08:19:51.567 Df PrivacyBrowser[2897:35ca] (libMobileGestalt.dylib) CFDictionaryRef copySyscfgDictionary(void) enumeration of <private> failed.
+2026-10-29 08:19:51.567 Df PrivacyBrowser[2897:35ca] (libMobileGestalt.dylib) Failed to find key <private>
+2026-10-29 08:19:51.568 Df PrivacyBrowser[2897:35ca] [com.apple.AppKit:Appearance] Current system appearance, (HLTB: 1), (SLS: 0)
+2026-10-29 08:19:51.568 Df PrivacyBrowser[2897:35ca] [com.apple.AppKit:Appearance] Post-registration system appearance: (HLTB: 1)
+2026-10-29 08:19:51.569 Df lsd[329:358a] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:1:1:Building bundle record for app
+2026-10-29 08:19:51.570 Df lsd[329:358a] [com.apple.appinstallation:TransactionLog] dev.local.PrivacyBrowser/Unknown Persona:5:5:2:1:Built bundle record for app
+2026-10-29 08:19:51.575 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c7080a0] Channel could not return listener port.
+2026-10-29 08:19:51.576 Df distnoted[307:2518] [com.apple.distnoted:diagnostic] register name: com.apple.xctest.FakeForceTouchDevice object: dev.local.PrivacyBrowser token: 1f00000020 pid: 2897
+2026-10-29 08:19:51.576 E  kernel[0:312] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(2897) deny(1) hid-control
+2026-10-29 08:19:51.580 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c7080a0] Channel could not return listener port.
+2026-10-29 08:19:51.585 Df PrivacyBrowser[2897:35ca] [com.apple.dt.xctest:Default] Registering for test daemon availability notify post.
+2026-10-29 08:19:51.585 Df PrivacyBrowser[2897:35ca] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:51.585 Df PrivacyBrowser[2897:35ca] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:51.585 Df PrivacyBrowser[2897:35ca] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-10-29 08:19:51.587 A  PrivacyBrowser[2897:35ca] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:19:51.588 Df PrivacyBrowser[2897:35ca] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.gms.availability.notification
+2026-10-29 08:19:51.588 Df PrivacyBrowser[2897:35ca] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.os-eligibility-domain.change.greymatter
+2026-10-29 08:19:51.588 Df PrivacyBrowser[2897:35ca] [com.apple.GenerativeModels:availability] registering darwin observer for name: com.apple.language.changed
+2026-10-29 08:19:51.588 Df PrivacyBrowser[2897:35ca] [com.apple.WritingTools:Default] isAvailable value changed: featureEnabled = true, isMDMAllowed = true, gmAvailable (current) = false
+2026-10-29 08:19:51.591 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c70c740] activating connection: mach=true listener=false peer=false name=com.apple.appkit.restoration_storage
+2026-10-29 08:19:51.591 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x6000008103c0] activating connection: mach=true listener=false peer=false name=com.apple.coreservices.appleevents
+2026-10-29 08:19:51.592 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c7080a0] Channel could not return listener port.
+2026-10-29 08:19:51.593 Df PrivacyBrowser[2897:35ca] [com.apple.processmanager:front-35286506] SignalReady: pid=2897 asn=0x0-0x46046
+2026-10-29 08:19:51.593 Df PrivacyBrowser[2897:35ca] [com.apple.processmanager:front-35286506] SIGNAL: pid=2897 asn=0x0x-0x46046
+2026-10-29 08:19:51.593 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationReady:] | App: PrivacyBrowser, ready, updating active tracking timer
+2026-10-29 08:19:51.598 A  PrivacyBrowser[2897:35ca] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:19:51.599 A  PrivacyBrowser[2897:35ca] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-29 08:19:51.601 A  PrivacyBrowser[2897:35ca] (libsystem_containermanager.dylib) container_create_or_lookup_for_current_user
+2026-10-29 08:19:51.601 A  PrivacyBrowser[2897:35ca] (libsystem_containermanager.dylib) container_create_or_lookup_for_platform
+2026-10-29 08:19:51.601 Df PrivacyBrowser[2897:35ca] [com.apple.containermanager:xpc] Requesting container lookup; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], class = 2, identifier = <private>, group_identifier = <private>, create = 0, temp = 0, euid = 501, uid = 501
+2026-10-29 08:19:51.601 A  PrivacyBrowser[2897:35ca] (libsystem_containermanager.dylib) container_query_t
+2026-10-29 08:19:51.601 Df PrivacyBrowser[2897:35ca] [com.apple.containermanager:query] Query; personaid = -1, type = NOPERSONA, name = <unknown>, origin [pid = 0, personaid = 0], proximate [pid = 0, personaid = 0], euid = 501, uid = 501, class = 2, identifier = [(null)](0), flags = 900000002
+2026-10-29 08:19:51.602 Df containermanagerd[342:353d] [com.apple.containermanager:fs] Read [/Users/runner/Library/Containers/dev.local.PrivacyBrowser/.com.apple.containermanagerd.metadata.plist], length = 30296, options = 0x2
+2026-10-29 08:19:51.603 Df containermanagerd[342:353d] [com.apple.containermanager:lifecycle] Using client sandbox path [<~~~>]; metadata = <<~~~>(2);<501/20/~~/0/1001>;u5F67D825-5AD0-4059-8576-67B8051D7CC7;pdev.local.PrivacyBrowser;dp-1;uma(null)>
+2026-10-29 08:19:51.603 Df runningboardd[150:3577] [com.apple.runningboard:process] Removing process: [anon<PrivacyBrowser>(501):2896]
+2026-10-29 08:19:51.603 Df containermanagerd[342:353d] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=2897, sandboxed=1, platform=1 (1/1/0) [<~~~>], cs cached>, error=(null)
+2026-10-29 08:19:51.603 Df runningboardd[150:3577] [com.apple.runningboard:general] removeJobWithInstance called for identity without existing job [anon<PrivacyBrowser>(501):2896]
+2026-10-29 08:19:51.603 Df runningboardd[150:3577] [com.apple.runningboard:process] Removing assertions for terminated process: [anon<PrivacyBrowser>(501):2896]
+2026-10-29 08:19:51.603 Df PrivacyBrowser[2897:35ca] [com.apple.containermanager:unspecified] container_query_get_single_result: success
+2026-10-29 08:19:51.603 A  PrivacyBrowser[2897:35ca] (libsystem_containermanager.dylib) container_copy_object
+2026-10-29 08:19:51.603 Df PrivacyBrowser[2897:35ca] [com.apple.containermanager:unspecified] container_create_or_lookup_for_platform: success
+2026-10-29 08:19:51.603 A  PrivacyBrowser[2897:35ca] (libsystem_info.dylib) Membership API: translate identifier
+2026-10-29 08:19:51.607 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x6000008140f0] activating connection: mach=false listener=false peer=false name=com.apple.hiservices-xpcservice
+2026-10-29 08:19:51.623 Df PrivacyBrowser[2897:35ca] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:19:51.623 Df PrivacyBrowser[2897:35ca] [com.apple.AppKit:StateRestoration] -[NSApplication _reopenWindowsAsNecessaryIncludingRestorableState:withFullFidelity:completionHandler:] shouldRestoreState=1 hasPersistentStateToRestore=0 shouldStillRestoreStateAfterPrompting=0
+2026-10-29 08:19:51.623 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x6000008104b0] activating connection: mach=true listener=false peer=false name=com.apple.window_proxies
+2026-10-29 08:19:51.623 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x6000008104b0] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:51.625 Df tccd[147:3552] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: msgID=151.86, attribution={responsible={TCCDProcess: identifier=a.out, pid=962, auid=501, euid=501, responsible_path=/opt/hca/hosted-compute-agent, binary_path=/opt/hca/hosted-compute-agent}, accessing={TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2897, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser}, requesting={TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer}, },
+2026-10-29 08:19:51.625 Df tccd[147:3552] [com.apple.TCC:access] requestor: TCCDProcess: identifier=com.apple.WindowServer, pid=151, auid=88, euid=88, binary_path=/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer is checking access for accessor TCCDProcess: identifier=dev.local.PrivacyBrowser, pid=2897, auid=501, euid=501, binary_path=/Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+2026-10-29 08:19:51.627 Df PrivacyBrowser[2897:35ca] [com.apple.AppKit:AutomaticTermination] void _NSEnableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-10-29 08:19:51.629 Df PrivacyBrowser[2897:35ce] [com.apple.xpc:connection] [0x14c605030] activating connection: mach=true listener=false peer=false name=com.apple.windowmanager.server
+2026-10-29 08:19:51.630 Df WindowManager[323:35a6] [com.apple.windowmanagement:xpcconnection] Connection activated | (2897) PrivacyBrowser
+2026-10-29 08:19:51.642 A  PrivacyBrowser[2897:35ca] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:19:51.642 A  PrivacyBrowser[2897:35ca] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-29 08:19:51.644 Df distnoted[307:354b] [com.apple.distnoted:diagnostic] register name: com.apple.nsquiet_safe_quit_give_reason object: dev.local.PrivacyBrowser token: 4200000047 pid: 2897
+2026-10-29 08:19:51.650 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x600000b16d00] activating connection: mach=true listener=false peer=false name=com.apple.fonts
+2026-10-29 08:19:51.654 Df PrivacyBrowser[2897:35ca] [com.apple.AppKit:Appearance] NSApp cache appearance:
+-NSRequiresAquaSystemAppearance: 0
+-appearance: (null)
+-effectiveAppearance: <NSCompositeAppearance: 0x600000518240
+ (
+    "<NSAquaAppearance: 0x600000518750>",
+    "<NSSystemAppearance: 0x6000005185a0>"
+)>
+2026-10-29 08:19:51.689 E  kernel[0:35ca] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(2897) deny(1) file-read-data /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences
+2026-10-29 08:19:51.689 E  kernel[0:26a3] [com.apple.sandbox.reporting:violation] 3 duplicate reports for Sandbox: PrivacyBrowser(2897) deny(1) file-read-data /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences
+2026-10-29 08:19:51.689 E  kernel[0:26a3] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(2897) deny(1) file-read-data /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist
+2026-10-29 08:19:51.689 E  cfprefsd[316:26a3] [com.apple.defaults:cfprefsd] rejecting read of { com.apple.Safari, runner, kCFPreferencesAnyHost, /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist, managed: 0 } from process 2897 (PrivacyBrowser) because accessing preferences outside an application's container requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.690 F  PrivacyBrowser[2897:35cb] [com.apple.defaults:User Defaults] Couldn't read values in CFPrefsPlistSource<0x60000191e200> (Domain: com.apple.Safari, User: kCFPreferencesCurrentUser, ByHost: No, Container: /Users/runner/Library/Containers/com.apple.Safari/Data, Contents Need Refresh: No): accessing preferences outside an application's container requires user-preference-read or file-read-data sandbox access
+2026-10-29 08:19:51.690 A  PrivacyBrowser[2897:35cb] (libsystem_trace.dylib) Activity for state dumps
+2026-10-29 08:19:51.690 E  PrivacyBrowser[2897:35ca] [com.apple.parsec:CoreParsec] PARSession setup failed on host check
+2026-10-29 08:19:51.691 A  PrivacyBrowser[2897:35cb] (Accounts) accounts/accounts-with-types-sync
+2026-10-29 08:19:51.691 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c6170f0] activating connection: mach=true listener=false peer=false name=com.apple.ScreenTimeAgent.private
+2026-10-29 08:19:51.691 E  kernel[0:2698] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(2897) deny(1) mach-lookup com.apple.ScreenTimeAgent.private
+2026-10-29 08:19:51.691 Df launchd[1:2698] [gui/501 [100003]:] denied lookup: name = com.apple.ScreenTimeAgent.private, requestor = PrivacyBrowser[2897], error = 159: Sandbox restriction
+2026-10-29 08:19:51.692 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c6170f0] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-10-29 08:19:51.692 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c6170f0] invalidated after a failed init
+2026-10-29 08:19:51.692 Df PrivacyBrowser[2897:35cb] [com.apple.xpc:connection] [0x14c70ebd0] activating connection: mach=true listener=false peer=false name=com.apple.accountsd.accountmanager
+2026-10-29 08:19:51.695 E  accountsd[360:3363] [com.apple.accounts:entitlement] Unentitled access by client 'PrivacyBrowser' (selector: accountsWithAccountTypeIdentifiers:preloadedProperties:completion:)
+2026-10-29 08:19:51.695 E  PrivacyBrowser[2897:35cb] [com.apple.accounts:core] "Error returned from daemon: Error Domain=com.apple.accounts Code=7"
+2026-10-29 08:19:51.696 Df PrivacyBrowser[2897:35cb] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:51.696 Df PrivacyBrowser[2897:35cb] [com.apple.xpc:connection] [0x14d81d470] activating connection: mach=true listener=false peer=false name=com.apple.passd.in-app-payment
+2026-10-29 08:19:51.701 Df PrivacyBrowser[2897:35cb] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:51.701 Df PrivacyBrowser[2897:35ce] [com.apple.xpc:connection] [0x14d81d470] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:51.701 Df PrivacyBrowser[2897:35cb] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:51.701 Df PrivacyBrowser[2897:35cb] [com.apple.xpc:connection] [0x14d81d470] activating connection: mach=true listener=false peer=false name=com.apple.passd.payment-continuity
+2026-10-29 08:19:51.702 Df PrivacyBrowser[2897:35cb] [com.apple.passkit:Continuity] Failed to retrieve registered host device status
+2026-10-29 08:19:51.702 Df PrivacyBrowser[2897:35cb] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:51.702 Df PrivacyBrowser[2897:35cb] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:51.702 Df PrivacyBrowser[2897:35cb] [com.apple.xpc:connection] [0x14d8298f0] activating connection: mach=true listener=false peer=false name=com.apple.passd.in-app-payment
+2026-10-29 08:19:51.702 Df PrivacyBrowser[2897:35ce] [com.apple.xpc:connection] [0x14d81d470] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:51.704 Df PrivacyBrowser[2897:35cb] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:51.704 Df PrivacyBrowser[2897:35cc] [com.apple.xpc:connection] [0x14d8298f0] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:51.704 Df PrivacyBrowser[2897:35cb] [com.apple.passkit:General] PKNotifyCoalescer: registered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:51.704 Df PrivacyBrowser[2897:35cb] [com.apple.xpc:connection] [0x14c714340] activating connection: mach=true listener=false peer=false name=com.apple.passd.payment-continuity
+2026-10-29 08:19:51.704 Df PrivacyBrowser[2897:35cb] [com.apple.passkit:Continuity] Failed to retrieve registered host device status
+2026-10-29 08:19:51.704 Df PrivacyBrowser[2897:35cb] [com.apple.passkit:General] PKNotifyCoalescer: unregistered for notification com.apple.passd.listener.resumed.
+2026-10-29 08:19:51.705 Df PrivacyBrowser[2897:35cb] [com.apple.xpc:connection] [0x14c70ebd0] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:51.705 Df PrivacyBrowser[2897:35cb] [com.apple.accounts:core] "The connection to ACDAccountStore was invalidated."
+2026-10-29 08:19:51.705 Df PrivacyBrowser[2897:35ce] [com.apple.xpc:connection] [0x14c714340] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-29 08:19:51.730 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c6207d0] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:19:51.730 E  kernel[0:26a0] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(2897) deny(1) mach-lookup com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:19:51.730 Df launchd[1:26a0] [gui/501 [100003]:] denied lookup: name = com.apple.SafariBookmarksSyncAgent, requestor = PrivacyBrowser[2897], error = 159: Sandbox restriction
+2026-10-29 08:19:51.730 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c6207d0] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-10-29 08:19:51.730 Df PrivacyBrowser[2897:35ca] [com.apple.xpc:connection] [0x14c6207d0] invalidated after a failed init
+2026-10-29 08:19:51.730 E  PrivacyBrowser[2897:35ce] [com.apple.WebBookmarks:TabGroup] Connection to TabGroups sync agent was invalidated
+2026-10-29 08:19:51.731 Df PrivacyBrowser[2897:35ce] [com.apple.xpc:connection] [0x14c71b730] activating connection: mach=true listener=false peer=false name=com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:19:51.731 Df PrivacyBrowser[2897:35ce] [com.apple.xpc:connection] [0x14c71b730] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-10-29 08:19:51.731 Df PrivacyBrowser[2897:35ce] [com.apple.xpc:connection] [0x14c71b730] invalidated after a failed init
+2026-10-29 08:19:51.731 E  PrivacyBrowser[2897:35cb] [com.apple.WebBookmarks:TabGroup] Connection to TabGroups sync agent was invalidated
+2026-10-29 08:19:51.731 Df kernel[0:35ce] PrivacyBrowser[2897] Corpse allowed 1 of 5
+2026-10-29 08:19:51.731 Df WindowManager[323:2de1] [com.apple.windowmanagement:xpcconnection] Connection invalidated | (2897) PrivacyBrowser
+2026-10-29 08:19:51.731 Df launchd[1:2698] [gui/501 [100003]:] service inactive: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.2897
+2026-10-29 08:19:51.731 Df launchd[1:2698] [gui/501 [100003]:] removing inactive unmanaged service: com.apple.xpc.launchd.unmanaged.PrivacyBrowser.2897
+2026-10-29 08:19:51.732 Df runningboardd[150:3578] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] termination reported by proc_exit
+2026-10-29 08:19:51.733 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationQuit:] | for app:PrivacyBrowser, _appTrackingState = 2
+2026-10-29 08:19:51.733 Df loginwindow[149:2f3] [com.apple.loginwindow.logging:TAL] -[PersistentAppsSupport applicationQuit:] | App: PrivacyBrowser, quit, updating active tracking timer
+2026-10-29 08:19:51.733 Df runningboardd[150:2e00] [com.apple.runningboard:ttl] Invalidating assertion 150-122-486 (target:[anon<PrivacyBrowser>(501):2897]) from originator [osservice<com.apple.coreservices.launchservicesd>:122]
+2026-10-29 08:19:51.736 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] Ignoring jetsam update because this process is not memory-managed
+2026-10-29 08:19:51.736 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] Ignoring suspend because this process is not lifecycle managed
+2026-10-29 08:19:51.736 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] Ignoring role changes because this process is not role managed
+2026-10-29 08:19:51.736 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] Ignoring GPU update because this process is not GPU managed
+2026-10-29 08:19:51.736 Df runningboardd[150:3577] [com.apple.runningboard:process] [anon<PrivacyBrowser>(501):2897] Ignoring memory limit update because this process is not memory-managed
+2026-10-29 08:19:51.795 Df nehelper[178:3346] [com.apple.networkextension:] Removing UUIDs for (
+    "dev.local.PrivacyBrowser"
+)
+2026-10-29 08:19:51.836 Df runningboardd[150:3578] [com.apple.runningboard:process] Removing process: [anon<PrivacyBrowser>(501):2897]
+2026-10-29 08:19:51.836 Df runningboardd[150:3578] [com.apple.runningboard:general] removeJobWithInstance called for identity without existing job [anon<PrivacyBrowser>(501):2897]
+2026-10-29 08:19:51.836 Df runningboardd[150:3578] [com.apple.runningboard:process] Removing assertions for terminated process: [anon<PrivacyBrowser>(501):2897]
+2026-10-29 08:19:51.837 Df nehelper[178:3346] [com.apple.networkextension:] Handling an apps installed notification with bundle IDs (
+    "dev.local.PrivacyBrowser"
+)
+2026-10-29 08:19:51.841 E  kernel[0:2bfe] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: PrivacyBrowser(2897) deny(1) mach-lookup com.apple.SafariBookmarksSyncAgent
+2026-10-29 08:19:51.841 E  kernel[0:2bfe] [com.apple.sandbox.reporting:violation] Sandbox: nesessionmanager(128) deny(1) system-fsctl (_IO "h" 47)
+2026-10-29 08:19:51.846 Df nehelper[178:3596] [com.apple.networkextension:] com.apple.preferences.networkprivacy-AC77AE23-ED14-4616-85ED-C6ABA617C430: Populating the cache with 1 UUID(s) for dev.local.PrivacyBrowser
+2026-10-29 08:19:51.860 E  sandboxd[142:3123] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(2893) deny(1) hid-control
+Process:         PrivacyBrowser [2893]
+Path:            /Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+Load Address:    0x100250000
+Identifier:      dev.local.PrivacyBrowser
+Version:         1 (0.1.0)
+Code Type:       arm64 (Native)
+Parent Process:  Python [2818]
+Responsible:     /opt/hca/hosted-compute-agent
+User ID:         501
+
+Date/Time:       2026-10-29 08:19:51.346 GMT
+OS Version:      macOS 15.7.9 (24G830)
+Release Type:    User
+Report Version:  8
+
+MetaData: {"container":"\134/Users\134/runner\134/Library\134/Containers\134/dev.local.PrivacyBrowser\134/Data","hardware":"VMA2MACOS","parent-process-pid":2818,"translated":false,"action":"deny","binary-in-trust-cache":false,"process_path":["Users","runner","work","antifdete7329900","antifdete7329900","build","sandboxed","PrivacyBrowser.app","Contents","MacOS","PrivacyBrowser"],"checker":"WindowServer","apple-internal":false,"process":"PrivacyBrowser","responsible-process-sdk":720896,"sandbox_checker":"WindowServer","platform_binary":"no","policy-description":"Sandbox","signing-id":"dev.local.PrivacyBrowser","flags":5,"checker-pid":151,"profile-flags":0,"profile-in-collection":false,"summary":"deny(1) hid-control","uid":501,"responsible-process-signing-id":"a.out","platform-binary":false,"pid":2893,"operation":"hid-control","responsible-process-path":"\134/opt\134/hca\134/hosted-compute-agent","build":"macOS 15.7.9 (24G830)","platform-policy":false,"process-path":"\134/Users\134/runner\134/work\134/antifdete7329900\134/antifdete7329900\134/build\134/sandboxed\134/PrivacyBrowser.app\134/Contents\134/MacOS\134/PrivacyBrowser","parent-process-name":"Python","errno":1,"release-type":"User"}
+
+Thread 0 (id: 13678):
+0   libsystem_kernel.dylib        	0x0000000183ee9c34 mach_msg2_trap + 8
+1   libsystem_kernel.dylib        	0x0000000183ef2764 mach_msg_overwrite + 484
+2   libsystem_kernel.dylib        	0x0000000183ee9fa8 mach_msg + 24
+3   SkyLight                      	0x000000018a3161ac SLSSetSymbolicHotKeyWithOptions + 180
+4   AppKit                        	0x0000000187f020a8 -[NSApplication init] + 1688
+5   AppKit                        	0x0000000187f01844 +[NSApplication sharedApplication] + 128
+6   PrivacyBrowser                	0x000000010043a2e8 static SafariFrameworkProbe.start(arguments:) + 2992 (SafariFrameworkProbe.swift:83)
+7   PrivacyBrowser                	0x000000010031e888 closure #1 in  + 392 (main.swift:29)
+8   PrivacyBrowser                	0x000000010031eb84 specialized static MainActor.assumeIsolated<A>(_:file:line:) + 132 (/<compiler-generated>:0)
+9   PrivacyBrowser                	0x000000010031e6e8 PrivacyBrowser_main + 72 (/<compiler-generated>:0)
+10  dyld                          	0x0000000183b8ab98 start + 6076
+
+Thread 1 (id: 13679):
+0   libsystem_kernel.dylib        	0x0000000183eeb908 kevent_qos + 8
+1   libdispatch.dylib             	0x0000000183d964e8 _dispatch_kq_drain + 260
+2   libdispatch.dylib             	0x0000000183d95e0c _dispatch_event_loop_poke + 156
+3   libdispatch.dylib             	0x0000000183d81658 _dispatch_mgr_queue_push + 88
+4   libdispatch.dylib             	0x0000000183d73b2c _dispatch_call_block_and_release + 32
+5   libdispatch.dylib             	0x0000000183d8d85c _dispatch_client_callout + 16
+6   libdispatch.dylib             	0x0000000183d7c350 _dispatch_lane_serial_drain + 740
+7   libdispatch.dylib             	0x0000000183d7ce60 _dispatch_lane_invoke + 440
+8   libdispatch.dylib             	0x0000000183d87264 _dispatch_root_queue_drain_deferred_wlh + 292
+9   libdispatch.dylib             	0x0000000183d86ae8 _dispatch_workloop_worker_thread + 540
+10  libsystem_pthread.dylib       	0x0000000183f27e20 _pthread_wqthread + 292
+11  libsystem_pthread.dylib       	0x0000000183f26b74 start_wqthread + 8
+
+Thread 2 (id: 13680):
+0   libsystem_kernel.dylib        	0x0000000183eeb8b0 __workq_kernreturn + 8
+1   libsystem_pthread.dylib       	0x0000000183f26b74 start_wqthread + 8
+
+Thread 3 (id: 13707):
+0   libsystem_kernel.dylib        	0x0000000183eeb8b0 __workq_kernreturn + 8
+1   libsystem_pthread.dylib       	0x0000000183f26b74 start_wqthread + 8
+
+Binary Images:
+       0x100250000 -        0x100251a87  PrivacyBrowser <23b4cf75-c396-3fba-82aa-140f63bdeab7> build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+       0x183b84000 -        0x183b84fff  com.apple.darwin.ignition (1.0.0 - 56) <aa296324-126c-32dd-9026-5b744f8eb283> /usr/lib/dyld
+       0x183d72000 -        0x183d7311f  libdispatch.dylib <63a54ce1-2ab6-3673-82e4-d8489d811475> /usr/lib/system/libdispatch.dylib
+       0x183ee9000 -        0x183ee97bf  libsystem_kernel.dylib <4d7a9e23-5b73-3c87-80e2-3b5e13f74f58> /usr/lib/system/libsystem_kernel.dylib
+       0x183f25000 -        0x183f25907  libsystem_pthread.dylib <2886f4f3-500b-36c8-a20c-c457eb754e3d> /usr/lib/system/libsystem_pthread.dylib
+       0x187efc000 -        0x187eff8ef  com.apple.AppKit (6.9 - 2575.70.57) <934e3129-a982-329c-bace-27cbe73d6320> /System/Library/Frameworks/AppKit.framework/Versions/C/AppKit
+       0x189f64000 -        0x189f6669f  com.apple.SkyLight (1.600.0) <ecea98f9-3cbe-3aa4-bdd6-633e9901ac5c> /System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight
+2026-10-29 08:19:51.861 E  sandboxd[142:3123] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(2895) deny(1) file-read-data /Users/runner/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist
+Process:         PrivacyBrowser [2895]
+Path:            /Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+Load Address:    0
+Identifier:      dev.local.PrivacyBrowser
+Version:         1 (0.1.0)
+Code Type:       unknown (Native)
+Parent Process:  Python [2818]
+Responsible:     /opt/hca/hosted-compute-agent
+User ID:         501
+
+Date/Time:       2026-10-29 08:19:51.983 GMT
+OS Version:      macOS 15.7.9 (24G830)
+Release Type:    User
+Report Version:  8
+
+MetaData: {"primary-filter":"path","container":"\134/Users\134/runner\134/Library\134/Containers\134/dev.local.PrivacyBrowser\134/Data","hardware":"VMA2MACOS","parent-process-pid":2818,"translated":false,"action":"deny","binary-in-trust-cache":false,"vnode-type":"REGULAR-FILE","file-mode":384,"process_path":["Users","runner","work","antifdete7329900","antifdete7329900","build","sandboxed","PrivacyBrowser.app","Contents","MacOS","PrivacyBrowser"],"checker":"cfprefsd","apple-internal":false,"file-flags":0,"process":"PrivacyBrowser","normalized_target":["Users","runner","Library","Containers","com.apple.Safari","Data","Library","Preferences","com.apple.Safari.plist"],"appbundle-contains-path":false,"responsible-process-sdk":720896,"sandbox_checker":"cfprefsd","platform_binary":"no","primary-filter-value":"\134/Users\134/runner\134/Library\134/Containers\134/com.apple.Safari\134/Data\134/Library\134/Preferences\134/com.apple.Safari.plist","hardlinked":false,"policy-description":"Sandbox","signing-id":"dev.local.PrivacyBrowser","flags":5,"checker-pid":316,"profile-flags":0,"apfs-synthetic":false,"target":"\134/Users\134/runner\134/Library\134/Containers\134/com.apple.Safari\134/Data\134/Library\134/Preferences\134/com.apple.Safari.plist","profile-in-collection":false,"summary":"deny(1) file-read-data \134/Users\134/runner\134/Library\134/Containers\134/com.apple.Safari\134/Data\134/Library\134/Preferences\134/com.apple.Safari.plist","uid":501,"rdev":0,"responsible-process-signing-id":"a.out","platform-binary":false,"filesystem-name":"apfs","pid":2895,"operation":"file-read-data","responsible-process-path":"\134/opt\134/hca\134/hosted-compute-agent","build":"macOS 15.7.9 (24G830)","platform-policy":false,"process-path":"\134/Users\134/runner\134/work\134/antifdete7329900\134/antifdete7329900\134/build\134/sandboxed\134/PrivacyBrowser.app\134/Contents\134/MacOS\134/PrivacyBrowser","appbundle-contains-responsible-binary":false,"parent-process-name":"Python","path":"\134/Users\134/runner\134/Library\134/Containers\134/com.apple.Safari\134/Data\134/Library\134/Preferences\134/com.apple.Safari.plist","mount-flags":76582912,"errno":1,"release-type":"User"}
+
+Failed to symbolicate: NULL symbolicator
+2026-10-29 08:19:51.861 E  sandboxd[142:3123] [com.apple.sandbox.reporting:violation] Sandbox: PrivacyBrowser(2896) deny(1) hid-control
+Process:         PrivacyBrowser [2896]
+Path:            /Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+Load Address:    0
+Identifier:      dev.local.PrivacyBrowser
+Version:         1 (0.1.0)
+Code Type:       unknown (Native)
+Parent Process:  Python [2818]
+Responsible:     /opt/hca/hosted-compute-agent
+User ID:         501
+
+Date/Time:       2026-10-29 08:19:51.984 GMT
+OS Version:      macOS 15.7.9 (24G830)
+Release Type:    User
+Report Version:  8
+
+MetaData: {"container":"\134/Users\134/runner\134/Library\134/Containers\134/dev.local.PrivacyBrowser\134/Data","hardware":"VMA2MACOS","parent-process-pid":2818,"translated":false,"action":"deny","binary-in-trust-cache":false,"process_path":["Users","runner","work","antifdete7329900","antifdete7329900","build","sandboxed","PrivacyBrowser.app","Contents","MacOS","PrivacyBrowser"],"checker":"WindowServer","apple-internal":false,"process":"PrivacyBrowser","responsible-process-sdk":720896,"sandbox_checker":"WindowServer","platform_binary":"no","policy-description":"Sandbox","signing-id":"dev.local.PrivacyBrowser","flags":5,"checker-pid":151,"profile-flags":0,"profile-in-collection":false,"summary":"deny(1) hid-control","uid":501,"responsible-process-signing-id":"a.out","platform-binary":false,"pid":2896,"operation":"hid-control","responsible-process-path":"\134/opt\134/hca\134/hosted-compute-agent","build":"macOS 15.7.9 (24G830)","platform-policy":false,"process-path":"\134/Users\134/runner\134/work\134/antifdete7329900\134/antifdete7329900\134/build\134/sandboxed\134/PrivacyBrowser.app\134/Contents\134/MacOS\134/PrivacyBrowser","parent-process-name":"Python","errno":1,"release-type":"User"}
+
+Failed to symbolicate: NULL symbolicator
+2026-10-29 08:19:52.676 Df ReportCrash[506:2c2d] Formulating fatal 309 report for corpse[2897] PrivacyBrowser
+2026-10-29 08:19:52.678 Df ReportCrash[506:2c2d] loadStoreInfo [platform 1] dev.local.PrivacyBrowser from file:///Users/runner/work/antifdete7329900/antifdete7329900/build/sandboxed/PrivacyBrowser.app/
+2026-10-29 08:19:52.681 Df osanalyticshelper[521:336c] (OSAnalytics) creating type 309 as /Users/runner/Library/Logs/DiagnosticReports/.PrivacyBrowser-2026-10-29-081952.ips
+2026-10-29 08:19:52.684 Df osanalyticshelper[521:336c] (OSAnalytics) Saved type '309(<private>)' report (2 of max 25) at /Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-081952.ips
+2026-10-29 08:19:52.684 Df osanalyticshelper[521:336c] xpc log creation type 309 result success: /Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-081952.ips
+2026-10-29 08:19:52.684 Df ReportCrash[506:2c2d] (OSAnalytics) client log create type 309 result success: /Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-081952.ips
+2026-10-29 08:19:52.685 Df ReportCrash[506:2c2d] dev.local.PrivacyBrowser is not a MetricKit client
+2026-10-29 08:19:52.694 Df ReportCrash[506:2c2d] recordCrashEvent; isBeta 0, log: '/Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-081952.ips'
+2026-10-29 08:19:52.712 Df containermanagerd[342:353d] [com.apple.containermanager:xpc] [501] command=39, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=506, sandboxed=0, platform=1 (1/1/1) [(null)], cached>, error=(null)
+2026-10-29 08:19:56.326 E  kernel[0:2dde] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: nesessionmanager(128) deny(1) system-fsctl (_IO "h" 47)
+2026-10-29 08:19:56.326 E  kernel[0:2dde] [com.apple.sandbox.reporting:violation] Sandbox: mobileassetd(194) deny(1) file-read-data /Library/Preferences/com.apple.networkextension.uuidcache.plist
+2026-10-29 08:19:56.326 Df mobileassetd[194:2dde] [com.apple.networkextension:] UUID cache sandbox check failed
+2026-10-29 08:19:56.342 Df containermanagerd[342:353d] [com.apple.containermanager:sandbox] Issuing token to pid 2903 for identifier = [<private>](7), path = [<private>] (extension class: com.apple.sandbox.application-group)
+2026-10-29 08:19:56.342 Df containermanagerd[342:353d] [com.apple.containermanager:xpc] [501] command=38, client=<<~~~>/(null), u=<501/20/~~/2/1001>, uid=501, pid=2903, sandboxed=0, platform=1 (1/1/1) [(null)]>, error=(null)
+2026-10-29 08:19:56.343 Df swtransparencyd[2903:3607] [com.apple.containermanager:sandbox] Consumed sandbox extension; path = [<private>], handle = 0
+2026-10-29 08:19:59.829 Df log[3007:3703] [com.apple.log:] log run noninteractively, parent: 2818 (Python), args: 'log' 'show' '--style' 'compact' '--start' '2026-10-29 08:19:46' '--predicate' 'process == "PrivacyBrowser" OR eventMessage CONTAINS[c] "PrivacyBrowser" OR eventMessage CONTAINS[c] "AMFI" OR eventMess

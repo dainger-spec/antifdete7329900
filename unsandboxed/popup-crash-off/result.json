@@ -1,0 +1,8 @@
+{
+  "step": "popup:crash-off",
+  "pid": 2568,
+  "seconds": 0.9,
+  "exit": 0,
+  "crashes": [],
+  "outcome": "exited 0"
+}

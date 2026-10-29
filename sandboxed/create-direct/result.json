@@ -1,0 +1,62 @@
+{
+  "step": "create-direct",
+  "pid": 2897,
+  "seconds": 0.2,
+  "exit": -11,
+  "crashes": [
+    {
+      "path": "/Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-081952.ips",
+      "header": {
+        "app_name": "PrivacyBrowser",
+        "timestamp": "2026-10-29 08:19:52.00 +0000",
+        "app_version": "0.1.0",
+        "slice_uuid": "23b4cf75-c396-3fba-82aa-140f63bdeab7",
+        "build_version": "1",
+        "platform": 1,
+        "bundleID": "dev.local.PrivacyBrowser",
+        "share_with_app_devs": 0,
+        "is_first_party": 0,
+        "bug_type": "309",
+        "os_version": "macOS 15.7.9 (24G830)",
+        "roots_installed": 0,
+        "name": "PrivacyBrowser",
+        "incident_id": "DBDA47A4-2399-4F00-9D9B-E0DF98FD76CC"
+      },
+      "exception": {
+        "codes": "0x0000000000000001, 0x0000623ef793a7e0",
+        "rawCodes": [
+          1,
+          108022581143520
+        ],
+        "type": "EXC_BAD_ACCESS",
+        "signal": "SIGSEGV",
+        "subtype": "KERN_INVALID_ADDRESS at 0x0000623ef793a7e0"
+      },
+      "termination": {
+        "flags": 0,
+        "code": 11,
+        "namespace": "SIGNAL",
+        "indicator": "Segmentation fault: 11",
+        "byProc": "exc handler",
+        "byPid": 2897
+      },
+      "vmRegionInfo": "0x623ef793a7e0 is not in any region.  \n      REGION TYPE                    START - END         [ VSIZE] PRT/MAX SHRMOD  REGION DETAIL\n      UNUSED SPACE AT START\n--->  \n      UNUSED SPACE AT END",
+      "faultingThread": 3,
+      "triggered_frames": [
+        "libobjc.A.dylib + 31024",
+        "Foundation + 109156",
+        "Foundation + 136776",
+        "WebBookmarks + 69364",
+        "libdispatch.dylib + 6956",
+        "libdispatch.dylib + 112732",
+        "libdispatch.dylib + 41808",
+        "libdispatch.dylib + 44640",
+        "libdispatch.dylib + 86628",
+        "libdispatch.dylib + 84712",
+        "libsystem_pthread.dylib + 11808",
+        "libsystem_pthread.dylib + 7028"
+      ]
+    }
+  ],
+  "outcome": "killed by SIGSEGV"
+}

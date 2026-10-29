@@ -1,0 +1,59 @@
+{
+  "step": "create-direct",
+  "pid": 2326,
+  "seconds": 1.0,
+  "exit": -5,
+  "crashes": [
+    {
+      "path": "/Users/runner/Library/Logs/DiagnosticReports/PrivacyBrowser-2026-10-29-081943.ips",
+      "header": {
+        "app_name": "PrivacyBrowser",
+        "timestamp": "2026-10-29 08:19:43.00 +0000",
+        "app_version": "0.1.0",
+        "slice_uuid": "23b4cf75-c396-3fba-82aa-140f63bdeab7",
+        "build_version": "1",
+        "platform": 1,
+        "bundleID": "dev.local.PrivacyBrowser",
+        "share_with_app_devs": 0,
+        "is_first_party": 0,
+        "bug_type": "309",
+        "os_version": "macOS 15.7.9 (24G830)",
+        "roots_installed": 0,
+        "name": "PrivacyBrowser",
+        "incident_id": "8CBCF712-F46D-4FCF-84B9-BAFEDC30ECAA"
+      },
+      "exception": {
+        "codes": "0x0000000000000001, 0x0000000188209628",
+        "rawCodes": [
+          1,
+          6578804264
+        ],
+        "type": "EXC_BREAKPOINT",
+        "signal": "SIGTRAP"
+      },
+      "termination": {
+        "flags": 0,
+        "code": 5,
+        "namespace": "SIGNAL",
+        "indicator": "Trace/BPT trap: 5",
+        "byProc": "exc handler",
+        "byPid": 2326
+      },
+      "faultingThread": 0,
+      "triggered_frames": [
+        "AppKit + 3200552",
+        "AppKit + 3199976",
+        "AppKit + 187548",
+        "PrivacyBrowser + 2008412",
+        "PrivacyBrowser + 845960",
+        "PrivacyBrowser + 846724",
+        "PrivacyBrowser + 846724",
+        "PrivacyBrowser + 846724",
+        "PrivacyBrowser + 846724",
+        "PrivacyBrowser + 845544",
+        "dyld + 27544"
+      ]
+    }
+  ],
+  "outcome": "killed by SIGTRAP"
+}
