@@ -573,8 +573,26 @@ blockers, each named by its own crash:
    window alive. Worth noting as a kind: a hosted chrome can be killed by something that runs on a
    timer, so "the window opened" is not the end of the measurement.
 
-The working invocation, as a record of the minimum set:
+6. **A new tab.** The start page's onboarding section
+   (`-[StartPageOnboardingSectionProvider reloadData]`) traps the same way the tab clusters do, and
+   takes every new tab with it. Stubbed.
 
+**`CFFIXED_USER_HOME` is the one that matters.** Blockers 2 and the rest of the nil values are the
+same fact seen from different places: without a home of its own the process is refused Safari's
+preferences and databases, so colours, text metrics and the autofill store all come back empty — the
+address bar draws its text on top of itself and the search field does nothing. Give the process a
+directory of its own at launch (it is read once, at process start, so this means `execv`-ing into a
+process that has it, which is what `SafariChrome.relaunchWithProfileHomeIfNeeded` does) and those go
+away on their own; the nil-tolerance patch that stood in for them was then removed, and nothing
+needed it. Hosting Safari's chrome therefore *requires* the per-profile process, rather than merely
+benefiting from it (§9 item 1).
+
+What the hosted chrome does once all of that is in place, measured by hand: the window with Safari's
+toolbar, tab bar and address bar; our `WKWebView` rendering in its tab; the sidebar, built from
+`LibraryViewController.nib` out of Safari.app; the start page; a new tab; and search from the address
+bar with Google as the engine.
+
+The working invocation of the probe, as a record of what each piece answers:
 ```
 CFFIXED_USER_HOME=<profile dir> ./sprobe \
   --prepare \                      # +[WBSSearchEnginePreferenceObserver setUpSharedObserver…:nil]

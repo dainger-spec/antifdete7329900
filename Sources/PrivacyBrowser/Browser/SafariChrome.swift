@@ -88,7 +88,6 @@ enum SafariChrome {
     static func prepare() {
         guard isAvailable else { return }
         setUpSearchEnginePreferenceObserver()
-        tolerateNilAttributeValues()
         bridgeImageLookups()
         bridgeNibLookups()
         stubChromeFeatures()
@@ -145,25 +144,6 @@ enum SafariChrome {
         let setEngine = unsafeBitCast(method_getImplementation(method), to: SetEngine.self)
         for privateBrowsing in [false, true] {
             setEngine(controller, selector, name as NSString, privateBrowsing)
-        }
-    }
-
-    /// Colours Safari reads from its preferences arrive nil here (see the type comment), and
-    /// `-addAttribute:value:range:` with a nil value is turned into a crash by
-    /// `+[NSApplication _crashOnException:]` while the address bar lays itself out. Dropping nil
-    /// values covers every such site at once.
-    private static func tolerateNilAttributeValues() {
-        typealias AddAttribute = @convention(c) (AnyObject, Selector, NSString, AnyObject?, NSRange) -> Void
-        let selector = NSSelectorFromString("addAttribute:value:range:")
-        for className in ["NSConcreteMutableAttributedString", "NSMutableAttributedString"] {
-            guard let cls = NSClassFromString(className),
-                  let method = class_getInstanceMethod(cls, selector) else { continue }
-            let original = unsafeBitCast(method_getImplementation(method), to: AddAttribute.self)
-            let replacement: @convention(block) (AnyObject, NSString, AnyObject?, NSRange) -> Void = { object, name, value, range in
-                guard let value else { return }
-                original(object, selector, name, value, range)
-            }
-            method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
     }
 
