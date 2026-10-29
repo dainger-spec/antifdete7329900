@@ -420,7 +420,7 @@ enum SafariChrome {
         }
         let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
         var objects: [Any]?
-        guard NSNib(nibData: data, bundle: owner).instantiate(withOwner: NSApp, topLevelObjects: &objects) else {
+        guard NSNib(nibData: data, bundle: owner).instantiate(withOwner: NSApplication.shared, topLevelObjects: &objects) else {
             log.error("Safari's MainMenu.nib did not instantiate")
             return false
         }
@@ -430,7 +430,7 @@ enum SafariChrome {
             log.error("Safari's MainMenu.nib holds no menu")
             return false
         }
-        NSApp.mainMenu = menu
+        NSApplication.shared.mainMenu = menu
         log.info("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
         return true
     }
