@@ -241,8 +241,8 @@ public struct ProxyList: Codable, Equatable, Sendable {
 }
 
 extension ProxyList {
-    static func file(for vault: UnlockedVault) -> EncryptedDocumentFile<ProxyList> {
-        EncryptedDocumentFile(url: vault.root.appendingPathComponent("proxies.bin"), key: vault.proxyListKey,
+    static func file(for vault: UnlockedVault) throws -> EncryptedDocumentFile<ProxyList> {
+        EncryptedDocumentFile(url: vault.root.appendingPathComponent("proxies.bin"), key: try vault.proxyListKey,
                               aad: "proxy-list:v1:\(vault.vaultID.uuidString)")
     }
 

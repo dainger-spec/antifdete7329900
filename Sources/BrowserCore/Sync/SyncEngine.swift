@@ -66,10 +66,10 @@ public final class SyncEngine: @unchecked Sendable {
     private let resolveConflict: @Sendable (String) -> SyncConflictResolution
 
     public init(repository: ProfileRepository, transport: SyncTransport,
-                resolveConflict: @escaping @Sendable (String) -> SyncConflictResolution = { _ in .keepRemote }) {
+                resolveConflict: @escaping @Sendable (String) -> SyncConflictResolution = { _ in .keepRemote }) throws {
         self.repository = repository
         self.transport = transport
-        self.codec = SyncCodec(vault: repository.vault)
+        self.codec = try SyncCodec(vault: repository.vault)
         self.resolveConflict = resolveConflict
     }
 

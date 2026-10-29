@@ -305,7 +305,7 @@ final class ProfileManager: ObservableObject {
             profileID: id,
             executable: executable,
             vaultRoot: repository.root,
-            masterKeyMaterial: repository.vault.masterKeyMaterial,
+            grant: repository.grant(for: id),
             home: safariHomeVault.homeDirectory(for: id),
             languages: languages,
             locale: languages.first.map { $0.replacingOccurrences(of: "-", with: "_") },
@@ -331,6 +331,9 @@ final class ProfileManager: ObservableObject {
                 if let cookies { pending?.resume(returning: cookies) } else { pending?.resume(throwing: CookieImportError.busy) }
             case .networkReport(let report):
                 self.onNetworkReport?(id, report)
+            case .configurationSaved:
+                try? self.repository.bumpRevision(id)
+                self.onConfigurationChanged?(id)
             }
         }
         child.onExit = { [weak self] status in

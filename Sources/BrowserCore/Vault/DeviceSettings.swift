@@ -49,8 +49,8 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
 }
 
 extension DeviceSettings {
-    private static func file(for vault: UnlockedVault) -> EncryptedDocumentFile<DeviceSettings> {
-        EncryptedDocumentFile(url: vault.root.appendingPathComponent("settings.bin"), key: vault.settingsKey,
+    private static func file(for vault: UnlockedVault) throws -> EncryptedDocumentFile<DeviceSettings> {
+        EncryptedDocumentFile(url: vault.root.appendingPathComponent("settings.bin"), key: try vault.settingsKey,
                               aad: "device-settings:v1:\(vault.vaultID.uuidString)")
     }
 

@@ -484,7 +484,13 @@ places (`~/Library/Safari`, its container, cookies, caches, preferences); a call
 refused is listed, not failed on. The checks that each request reached the proxy are in the
 self-test (§0).
 
-**The process itself.** The master key reaches it only on its standard input. It quits — sealing
+**The process itself.** It is not given the vault's master key: only its own profile's key and
+that profile's entry in the index (`ProfileGrant`), on its standard input — never in `argv`, the
+environment or a file. A vault opened with that grant reads and writes the one profile's files and
+refuses the rest (`CoreError.notGranted`): the other profiles' keys and names, the proxy list,
+this Mac's settings and the sync keys stay with the manager, and the index is written only by the
+manager. So a compromise of the process that loads websites and Safari's frameworks reaches the
+profile it runs, not the vault (`ProfileGrantTests`). It quits — sealing
 its data — when the manager's channel closes (the manager quit or crashed), and holds a lock on its
 home while it runs, so that a manager started after a crash seals a home left in plaintext only
 once its process is gone. The self-test's environment variables are not passed to it.

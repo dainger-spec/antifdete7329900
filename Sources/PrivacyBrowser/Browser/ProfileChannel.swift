@@ -10,7 +10,8 @@ import os
 /// they ask, and the profile answers.
 ///
 /// Two one-way streams, one JSON object per line. Commands go down the child's standard input,
-/// which already carries the vault key as its first 32 bytes; events come back on the child's
+/// which starts with the profile's grant (`ProfileGrant`: its key and its entry in the index, and
+/// not the vault's master key); events come back on the child's
 /// standard output, each line prefixed, because Safari's own frameworks print there too and
 /// anything unprefixed is theirs.
 enum ProfileCommand: Codable {
@@ -51,6 +52,10 @@ enum ProfileEvent: Codable {
     case cookiesExported([ImportedCookie]?)
     /// The answer to `checkNetwork`.
     case networkReport(ProfileNetworkReport)
+    /// The profile's settings were saved in its process (a proxy location remembered, a site
+    /// never to save passwords for): the manager records the new revision in the index, which
+    /// only it writes (`ProfileRepository.onRevisionBump`), and shows the settings again.
+    case configurationSaved
 }
 
 /// One line of JSON per message, and a prefix on the way back so that Safari's own output on the

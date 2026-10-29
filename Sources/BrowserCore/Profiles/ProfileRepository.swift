@@ -72,15 +72,36 @@ struct ProfileIndex: Codable, Equatable {
 /// ```
 /// Profile names are only readable after unlock. Profile configurations are only
 /// decrypted when launched or edited.
+///
+/// On a vault opened for one profile (`ProfileGrant`, in that profile's own process) the
+/// repository holds that profile only: its index is the grant's one entry, the index on disk is
+/// neither read nor written (it is the manager's, and this process has no key for it), and
+/// anything about another profile or the whole vault is refused.
 public final class ProfileRepository: @unchecked Sendable {
     public let vault: UnlockedVault
     private let lock = NSLock()
     private var index: ProfileIndex
 
+    /// In a repository on a granted vault: the profile's settings were saved. The manager's index
+    /// counts that as a new revision of the profile (sync's merge of the index goes by it), and
+    /// only the manager writes the index — so it is told, through this, instead.
+    public var onRevisionBump: ((UUID) -> Void)?
+
     public init(vault: UnlockedVault) throws {
         self.vault = vault
         self.index = ProfileIndex()
-        self.index = try loadIndex()
+        if let grant = vault.grant {
+            index.entries = [ProfileIndexEntry(summary: grant.summary, wrappedKey: Data())]
+        } else {
+            self.index = try loadIndex()
+        }
+    }
+
+    /// What the profile's own process is given to run it: its summary and its key, not the
+    /// vault's master key (`ProfileGrant`). Only a repository on the whole vault grants.
+    public func grant(for id: UUID) throws -> ProfileGrant {
+        guard vault.grant == nil else { throw CoreError.notGranted("granting a profile") }
+        return ProfileGrant(summary: try summary(for: id), key: try profileKey(for: id))
     }
 
     // MARK: Paths
@@ -137,10 +158,17 @@ public final class ProfileRepository: @unchecked Sendable {
     }
 
     public func markLaunched(_ id: UUID) throws {
+        // In the profile's own process: the manager marked the launch when it started the process.
+        if vault.grant != nil { _ = try summary(for: id); return }
         try mutateSummary(id) { $0.lastLaunchedAt = Date() }
     }
 
     public func bumpRevision(_ id: UUID) throws {
+        if vault.grant != nil {
+            _ = try summary(for: id)
+            onRevisionBump?(id)
+            return
+        }
         try mutateSummary(id) { $0.revision += 1 }
     }
 
@@ -165,6 +193,8 @@ public final class ProfileRepository: @unchecked Sendable {
 
     /// Deletes profile directories that are not referenced by the index.
     public func removeOrphanedDirectories() {
+        // A granted vault's index is one profile: every other profile's directory would look orphaned.
+        guard vault.grant == nil else { return }
         let known = Set(list().map { $0.id.uuidString })
         let contents = (try? FileManager.default.contentsOfDirectory(atPath: profilesDirectory.path)) ?? []
         for name in contents where !known.contains(name) && UUID(uuidString: name) != nil {
@@ -177,6 +207,10 @@ public final class ProfileRepository: @unchecked Sendable {
     /// Unwraps the profile key. Call only when launching/editing the profile and drop the
     /// returned key when done.
     public func profileKey(for id: UUID) throws -> SymmetricKey {
+        if let grant = vault.grant {
+            guard grant.profileID == id else { throw CoreError.profileNotFound(id) }
+            return grant.key
+        }
         let wrapped = try lock.withLock { try entry(for: id).wrappedKey }
         let raw = try AEAD.open(wrapped, key: vault.profileKeyWrappingKey, aad: Self.keyAAD(id))
         guard raw.count == 32 else { throw CoreError.corruptData("profile key length") }

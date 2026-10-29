@@ -14,11 +14,14 @@ import os
 /// itself, natively, rather than through scripts patching what a page can see.
 ///
 /// WHAT IS WHERE. The manager process keeps the profile list, the vault and the master password.
-/// The child opens the same vault — it is handed the master key over its standard input, never in
-/// `argv` (which any process of this user can read) and never in the environment — then runs the
-/// whole launch itself, with its own `ProfileManager`: the proxy lookup, decrypting the WebKit
-/// data, the cookies, the window. Sealing happens where the data was decrypted, in the child, on
-/// its way out.
+/// The child opens the same vault for its one profile: it is handed that profile's key and entry
+/// in the index (`ProfileGrant`) over its standard input — not the vault's master key, so the
+/// process that loads websites cannot decrypt any other profile, the proxy list, the settings or
+/// the sync keys — never in `argv` (which any process of this user can read) and never in the
+/// environment. It then runs the whole launch itself, with its own `ProfileManager`: the proxy
+/// lookup, decrypting the WebKit data, the cookies, the window. Sealing happens where the data was
+/// decrypted, in the child, on its way out. The index is the manager's alone: what would change
+/// it in the child is sent to the manager (`ProfileEvent.configurationSaved`).
 ///
 /// WHAT THIS FIRST STEP DOES NOT DO. Features that reach into a running session from the manager
 /// process — the warm-up robot, importing cookies into a profile that is already running, the
@@ -69,7 +72,7 @@ final class ProfileProcess {
     static func start(profileID: UUID,
                       executable: URL,
                       vaultRoot: URL,
-                      masterKeyMaterial: Data,
+                      grant: ProfileGrant,
                       home: URL,
                       languages: [String],
                       locale: String?,
@@ -114,19 +117,17 @@ final class ProfileProcess {
         // prefixed lines are ours and the rest is passed on to the log as it was.
         let eventPipe = Pipe()
         process.standardOutput = eventPipe
+        var record = try grant.encoded()
+        defer { ProfileGrant.erase(&record) }
         try process.run()
 
-        // The master key, and nothing else, then end of file. Written after the fork so that it
-        // exists only in the two processes' memory and the pipe buffer.
-        var key = masterKeyMaterial
-        keyPipe.fileHandleForWriting.write(key)
-        key.withUnsafeMutableBytes { bytes in
-            guard let base = bytes.baseAddress else { return }
-            memset_s(base, bytes.count, 0, bytes.count)
-        }
+        // The profile's grant first: its key and its entry in the index, not the vault's master
+        // key (`ProfileGrant`). Written after the fork so that it exists only in the two
+        // processes' memory and the pipe buffer.
+        keyPipe.fileHandleForWriting.write(record)
 
         let child = ProfileProcess(profileID: profileID, process: process)
-        // The same pipe carries the commands after the key; it stays open until the child exits.
+        // The same pipe carries the commands after the grant; it stays open until the child exits.
         child.commands = keyPipe.fileHandleForWriting
         ProfileChannel.readLines(from: eventPipe.fileHandleForReading) { [weak child] line in
             guard let event = ProfileChannel.decode(ProfileEvent.self, from: line, prefix: ProfileChannel.eventPrefix) else {

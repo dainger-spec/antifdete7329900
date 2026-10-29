@@ -22,7 +22,7 @@ MainActor.assumeIsolated {
     } else if arguments.contains("--profile-session") {
         // One profile in its own process, started by the manager process (ProfileProcess.swift
         // says why, ProfileSessionHost.swift what it does). Its language, locale and time zone are
-        // already in argv and the environment; the vault's master key arrives on stdin.
+        // already in argv and the environment; the profile's key arrives on stdin (ProfileGrant).
         ProfileSessionHost.start(arguments: arguments)
     } else if arguments.contains("--check-safari-chrome") {
         // Which of the private classes and methods the hosted Safari chrome relies on this macOS

@@ -100,6 +100,12 @@ All HKDF derivations use the vault ID (or profile ID) as salt. Every ciphertext'
 names its purpose and owner, so moving a ciphertext into another file or profile makes
 decryption fail.
 
+A profile's own process (`ProfileProcess`) is never given the VMK: the manager hands it a
+`ProfileGrant` — that profile's key and its index entry — on its standard input, and the vault it
+opens with it derives none of the VMK's keys above (`CoreError.notGranted`). It reads and writes
+the profile's own files; the index stays the manager's (a settings change in the child is sent
+back as `ProfileEvent.configurationSaved` for the manager to record).
+
 Changing the master password re-wraps only the VMK. A new device unlocks with the same
 password because `vault.json` (salt, KDF parameters and wrapped VMK) is synced in
 plaintext.

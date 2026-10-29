@@ -5,12 +5,13 @@ import os
 
 /// The child process of one profile: `PrivacyBrowser --profile-session <uuid>`.
 ///
-/// Started by the manager process (`ProfileProcess`, which explains why), and given the vault's
-/// master key on its standard input — nothing else: the profile to run is in `argv`, the language,
-/// locale and time zone are in `argv` and the environment where the system reads them at process
-/// start, and the key is the one thing that must not be visible to other processes.
+/// Started by the manager process (`ProfileProcess`, which explains why), and given its profile's
+/// grant on its standard input — that profile's key and entry in the index, not the vault's master
+/// key (`ProfileGrant`): the profile to run is in `argv`, the language, locale and time zone are in
+/// `argv` and the environment where the system reads them at process start, and the key is the one
+/// thing that must not be visible to other processes.
 ///
-/// It then does what the manager used to do in-process: open the vault, launch that one profile
+/// It then does what the manager used to do in-process: open the vault for that one profile, launch it
 /// with its own `ProfileManager` (proxy lookup, decrypting the WebKit data, cookies, window), and
 /// on the way out seal it. Quit, ⌘Q and the `SIGTERM` the manager sends all end up in the same
 /// place, because sealing is the one thing that must not be skipped.
@@ -33,9 +34,18 @@ enum ProfileSessionHost {
             FileHandle.standardError.write(Data("--profile-session needs a profile id\n".utf8))
             exit(2)
         }
-        // Everything after the key on this stream is commands from the manager.
-        guard var key = readMasterKey() else {
-            FileHandle.standardError.write(Data("--profile-session expects the vault master key on stdin\n".utf8))
+        // Everything after the grant on this stream is commands from the manager. Read before
+        // anything else happens, so that a manager that died meanwhile cannot leave this process
+        // waiting with a window open.
+        let grant: ProfileGrant
+        do {
+            grant = try ProfileGrant.read { count in try? FileHandle.standardInput.read(upToCount: count) }
+        } catch {
+            FileHandle.standardError.write(Data("--profile-session expects its profile's grant on stdin\n".utf8))
+            exit(2)
+        }
+        guard grant.profileID == profileID else {
+            FileHandle.standardError.write(Data("--profile-session was granted another profile\n".utf8))
             exit(2)
         }
         // The profile's own settings first: what this process may send, and through which proxy,
@@ -44,17 +54,17 @@ enum ProfileSessionHost {
         let repository: ProfileRepository
         let stored: ProfileConfiguration
         do {
-            let vault = try MasterVault.open(in: AppEnvironment.vaultDirectory, masterKeyMaterial: key)
+            let vault = try MasterVault.open(in: AppEnvironment.vaultDirectory, grant: grant)
             repository = try ProfileRepository(vault: vault)
+            // The index is the manager's: a saved change of the profile's settings is its to count.
+            repository.onRevisionBump = { _ in
+                DispatchQueue.main.async { MainActor.assumeIsolated { ProfileSessionHost.send(.configurationSaved) } }
+            }
             stored = try repository.loadConfiguration(profileID)
             try ProfileNetworkGuard.engage(profileID: profileID, proxy: stored.proxy, safeBrowsing: stored.safeBrowsingEnabled)
         } catch {
             log.error("Could not open the vault or hold \(profileID.uuidString, privacy: .public) to its proxy: \(String(describing: error), privacy: .private)")
             exit(3)
-        }
-        key.withUnsafeMutableBytes { bytes in
-            guard let base = bytes.baseAddress else { return }
-            memset_s(base, bytes.count, 0, bytes.count)
         }
         // While this process runs, its home is in use: a manager started meanwhile (after a crash
         // of the one that started this) must not seal it from under it.
@@ -81,17 +91,6 @@ enum ProfileSessionHost {
         // than with wheel events, which need a key window; the robot reports which it used.)
         application.setActivationPolicy(ProcessInfo.processInfo.environment["PB_WARM_UP_ONLY"] == "1" ? .accessory : .regular)
         application.run()
-    }
-
-    /// The master key: 32 bytes and end of file. Read before anything else happens, so that a
-    /// manager that died meanwhile cannot leave this process waiting with a window open.
-    private static func readMasterKey() -> Data? {
-        var key = Data()
-        while key.count < 32 {
-            guard let chunk = try? FileHandle.standardInput.read(upToCount: 32 - key.count), !chunk.isEmpty else { break }
-            key.append(chunk)
-        }
-        return key.count == 32 ? key : nil
     }
 
     @MainActor
