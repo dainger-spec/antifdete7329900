@@ -98,6 +98,7 @@ enum SafariChrome {
         bridgeImageLookups()
         bridgeColorLookups()
         tolerateNilAttributeValues()
+        tolerateNilDictionaryKeys()
         bridgeNibLookups()
         stubChromeFeatures()
     }
@@ -224,6 +225,31 @@ enum SafariChrome {
         let setEngine = unsafeBitCast(method_getImplementation(method), to: SetEngine.self)
         for privateBrowsing in [false, true] {
             setEngine(controller, selector, name as NSString, privateBrowsing)
+        }
+    }
+
+    /// Something Safari's chrome schedules on the main queue stores into a dictionary with a nil
+    /// key, moments after the window is up, and throws. The stack cannot name it: the block's body
+    /// is a tail call into `-setObject:forKeyedSubscript:`, so the block itself never appears in a
+    /// backtrace, and nothing but the dispatch frames is left. Rather than guess, the insert is
+    /// made to drop a nil key — nothing can be stored under one anyway — and to say so in the log,
+    /// so it stays visible instead of silently papered over.
+    private static func tolerateNilDictionaryKeys() {
+        typealias SetObject = @convention(c) (AnyObject, Selector, AnyObject?, AnyObject?) -> Void
+        let selector = NSSelectorFromString("setObject:forKeyedSubscript:")
+        for className in ["__NSDictionaryM", "NSMutableDictionary"] {
+            guard let cls = NSClassFromString(className),
+                  let method = class_getInstanceMethod(cls, selector) else { continue }
+            let original = unsafeBitCast(method_getImplementation(method), to: SetObject.self)
+            let replacement: @convention(block) (AnyObject, AnyObject?, AnyObject?) -> Void = { dictionary, object, key in
+                guard key != nil else {
+                    Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
+                        .notice("Dropped a dictionary write with no key (object \(object == nil ? "nil" : String(describing: type(of: object!)), privacy: .public))")
+                    return
+                }
+                original(dictionary, selector, object, key)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
     }
 
