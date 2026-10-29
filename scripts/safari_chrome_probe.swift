@@ -46,6 +46,32 @@ func installCrashReporter() {
 }
 installCrashReporter()
 
+/// An exception thrown during AppKit layout never reaches an uncaught-exception handler:
+/// +[NSApplication _crashOnException:] traps the process where it stands. The objc runtime's
+/// exception preprocessor runs at the throw itself, which is the only place left to read the
+/// reason from.
+func installExceptionPreprocessor() {
+    typealias Preprocessor = @convention(c) (AnyObject) -> AnyObject
+    typealias Install = @convention(c) (Preprocessor) -> Preprocessor
+    guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "objc_setExceptionPreprocessor") else {
+        print("objc_setExceptionPreprocessor not found; exception reasons will not be printed")
+        return
+    }
+    let install = unsafeBitCast(symbol, to: Install.self)
+    _ = install({ thrown in
+        var text = "\n== exception thrown ==\n"
+        if let exception = thrown as? NSException {
+            text += "\(exception.name.rawValue): \(exception.reason ?? "-")\n"
+            for frame in exception.callStackSymbols.prefix(25) { text += "   " + frame + "\n" }
+        } else {
+            text += "\(thrown)\n"
+        }
+        text.withUTF8 { buffer in _ = write(2, buffer.baseAddress, buffer.count) }
+        return thrown
+    })
+}
+installExceptionPreprocessor()
+
 let arguments = Array(CommandLine.arguments.dropFirst())
 func flag(_ name: String) -> Bool { arguments.contains(name) }
 func value(after name: String) -> String? {
