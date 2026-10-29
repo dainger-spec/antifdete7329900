@@ -281,6 +281,38 @@ if flag("--tolerate-nil-attributes") {
     if patched == 0 { print("no attributed-string class to patch") }
 }
 
+if flag("--bridge-images") {
+    // Safari's chrome asks for its icons by name from the *main* bundle, and in a foreign process
+    // that is the probe's own executable — CoreUI says so above the crash ("unable to find a
+    // bundle 'NSBundle </tmp> (loaded)' with identifier '(null)'"). So every icon comes back nil
+    // and the first array built from one throws. Fall back to the private frameworks' own
+    // bundles, which carry Safari's asset catalogs.
+    print("\n== bridge images ==")
+    let bundles = ["/System/Library/PrivateFrameworks/Safari.framework",
+                   "/System/Volumes/Preboot/Cryptexes/OS/System/Library/PrivateFrameworks/Safari.framework",
+                   "/System/Library/PrivateFrameworks/SafariShared.framework",
+                   "/System/Library/PrivateFrameworks/SafariFoundation.framework",
+                   "/System/Library/PrivateFrameworks/PasswordManagerUI.framework"].compactMap(Bundle.init(path:))
+    print("fallback bundles: \(bundles.count)")
+    typealias ImageNamed = @convention(c) (AnyObject, Selector, NSString) -> NSImage?
+    let selector = NSSelectorFromString("imageNamed:")
+    if let method = class_getClassMethod(NSImage.self, selector) {
+        let original = unsafeBitCast(method_getImplementation(method), to: ImageNamed.self)
+        let replacement: @convention(block) (AnyObject, NSString) -> NSImage? = { cls, name in
+            if let image = original(cls, selector, name) { return image }
+            for bundle in bundles {
+                if let image = bundle.image(forResource: name as String) { return image }
+            }
+            // A chrome icon Safari draws from SF Symbols, when its catalogs have no such name.
+            return NSImage(systemSymbolName: name as String, accessibilityDescription: nil)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        print("patched +[NSImage imageNamed:]")
+    } else {
+        print("+[NSImage imageNamed:] not found")
+    }
+}
+
 if flag("--patch-unified-field") {
     // -[UnifiedField _notSecureAnnotation] builds an attributed string for the address bar's
     // "Not Secure" badge and passes a nil attribute value when Safari's own environment is not
