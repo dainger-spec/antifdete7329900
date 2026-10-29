@@ -141,13 +141,19 @@ final class PasswordAutoFillHandler: NSObject, WKScriptMessageHandlerWithReply {
     private func autoFill(for webView: WKWebView, of session: BrowserSession) -> TabPasswordAutoFill? {
         if let tab = session.tab(for: webView) { return tab.passwords }
         if let known = hosted.object(forKey: webView) { return known }
-        let autoFill = TabPasswordAutoFill(host: HostedPageAutoFillHost(webView: webView),
-                                           vault: session.passwordVault, settings: session.passwordSettings)
+        // The AutoFill controller holds its host weakly — a tab owns both and outlives them — so
+        // here, where the host exists only for this web view, it is held alongside. Without that
+        // it is released the moment it is made, every message finds no host, and nothing is ever
+        // offered to save.
+        let host = HostedPageAutoFillHost(webView: webView)
+        let autoFill = TabPasswordAutoFill(host: host, vault: session.passwordVault, settings: session.passwordSettings)
         hosted.setObject(autoFill, forKey: webView)
+        hostedHosts.setObject(host, forKey: webView)
         return autoFill
     }
 
     private let hosted = NSMapTable<WKWebView, TabPasswordAutoFill>.weakToStrongObjects()
+    private let hostedHosts = NSMapTable<WKWebView, HostedPageAutoFillHost>.weakToStrongObjects()
 }
 
 /// The user's answer to "Save password?" / "Update password?".
