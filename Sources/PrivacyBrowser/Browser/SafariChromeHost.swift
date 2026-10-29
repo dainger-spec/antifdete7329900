@@ -20,6 +20,8 @@ enum SafariChromeHost {
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "SafariChromeHost")
     private static var isPrepared = false
     static var isTurnedOff: Bool { ProcessInfo.processInfo.environment["PB_SAFARI_CHROME"] == "0" }
+    /// This process hosts Safari's chrome: its windows are Safari's own.
+    static var isHosting: Bool { isPrepared }
 
     /// Loads Safari's frameworks and makes this process the kind of process its chrome expects.
     /// Must run before anything touches `NSApplication.shared`. False when the chrome is not

@@ -31,6 +31,9 @@ final class ProfileManager: ObservableObject {
     /// A warm-up run of a profile moved on: another page visited, or it finished. The per-profile
     /// process reports it to the manager over the channel (`ProfileChannel`).
     var onWarmUpProgress: ((UUID) -> Void)?
+    /// A profile's own process reported that it is up, and whether its window is Safari's chrome
+    /// (the self-test checks that the chrome's own web views load through the profile's proxy).
+    var onProfileRunning: ((UUID, Bool) -> Void)?
     /// This manager is the one inside a profile's own process (`ProfileSessionHost`), where the
     /// process *is* the profile: ending a warm-up there means quitting, which the host does, so
     /// this manager does not stop the profile itself.
@@ -289,7 +292,8 @@ final class ProfileManager: ObservableObject {
             switch event {
             case .error(let message):
                 self.onError?(message)
-            case .running:
+            case .running(let hostsSafariChrome):
+                self.onProfileRunning?(id, hostsSafariChrome)
                 self.objectWillChange.send()
             case .warmUp(let status):
                 self.reportedWarmUp[id] = status

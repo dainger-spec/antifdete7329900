@@ -147,7 +147,7 @@ enum ProfileSessionHost {
                         try await manager.launch(self.profileID, openingWindow: !self.isForWarmUpOnly)
                         self.showedWindow = !self.isForWarmUpOnly
                         self.isReady = true
-                        ProfileSessionHost.send(.running)
+                        ProfileSessionHost.send(.running(hostsSafariChrome: SafariChromeHost.isHosting))
                         // Whatever the manager asked for while the profile was still starting.
                         let waiting = self.pendingCommands
                         self.pendingCommands = []

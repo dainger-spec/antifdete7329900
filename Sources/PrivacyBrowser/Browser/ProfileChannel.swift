@@ -30,8 +30,9 @@ enum ProfileCommand: Codable {
 enum ProfileEvent: Codable {
     /// Something the user should see, shown by the manager in its own window.
     case error(String)
-    /// The profile is up and its first window is on screen.
-    case running
+    /// The profile is up and its first window is on screen; `hostsSafariChrome` says whether that
+    /// window is Safari's own chrome (the self-test checks the chrome's web views use the proxy).
+    case running(hostsSafariChrome: Bool)
     /// Where the warm-up of this profile has got to; sent as the run goes on, and once more when
     /// it ends. Everything the warm-up screen and the profile list show comes from here.
     case warmUp(WarmUpStatus)

@@ -136,6 +136,7 @@ final class SelfTest {
             try await cookieImport(repository)
             try await profileSync(repository)
             try await warmUp(repository)
+            try await safariChromeThroughTheProxy(repository)
             try await lockDuringLaunch(repository)
             try await quitFromFocusedPage(repository)
             try await forcedSealAtQuit(repository)
@@ -537,6 +538,75 @@ final class SelfTest {
             return nil
         }
         return try await js(webView, script) as? String
+    }
+
+
+    // MARK: Safari's chrome, in a profile's own process, through that profile's proxy
+
+    /// The check this product cannot do without: a profile whose window is Safari's own chrome
+    /// loads its pages through the profile's proxy.
+    ///
+    /// Every other proxy check here runs in a window of ours, where the web view is built from our
+    /// own configuration and carries the profile's data store — which is what carries the proxy. In
+    /// Safari's chrome the web views are Safari's to build, and one built by a path we do not reach
+    /// would load as this Mac. So this runs the real thing: a profile in a process of its own
+    /// (`ProfileProcess`), its window Safari's, its start page on a host that does not resolve
+    /// (".invalid"), which can therefore only be reached through the proxy at all. The proxy then
+    /// says which paths it has served, and that answer is read from a profile of our own.
+    private func safariChromeThroughTheProxy(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("Safari-chrome proxy check skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        // A process per profile, and Safari's frameworks inside it, is a feature of the
+        // unsandboxed build (it needs library validation off); the sandboxed one cannot do it.
+        guard !AppEnvironment.isSandboxed else {
+            info("Safari-chrome proxy check skipped (the sandboxed build runs no process per profile)")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let run = String(UUID().uuidString.prefix(8)).lowercased()
+        let path = "/pb-chrome-\(run)"
+        let profile = try repository.create(name: "Safari chrome", configuration: ProfileConfiguration(
+            startURL: URL(string: "http://proxied.selftest.invalid\(path)"), proxy: proxy, matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+
+        // The per-profile process is off by default; this one check is what it is for.
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        do {
+            try await manager.launch(profile.id)
+        } catch {
+            unsetenv("PB_PROFILE_PROCESS")
+            check("Safari chrome: the profile's own process started", false, String(describing: error))
+            return
+        }
+        unsetenv("PB_PROFILE_PROCESS")
+        let started = await waitUntil(timeout: 90) { hostsChrome != nil }
+        check("Safari chrome: the profile's own process started and reported its window",
+              started, "no 'running' came back (the process may have died; see its own log)")
+        if hostsChrome == false {
+            info("the window was ours, not Safari's chrome: this Mac would not load its frameworks")
+        }
+
+        // What the proxy has served, asked through the same proxy from a window of ours. Polled,
+        // because the chrome's first page load is on its own schedule.
+        let served = URL(string: "http://proxied.selftest.invalid/pb-served.json")!
+        var answer = ""
+        for _ in 0..<12 {
+            answer = (try await loadThroughProxy(repository, proxy, url: served)) ?? ""
+            if answer.contains(path) { break }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+        check("Safari chrome: a profile in its own process loads its pages through its own proxy",
+              answer.contains(path), "the proxy served: \(answer.isEmpty ? "nothing" : answer)")
+
+        try? await manager.stop(profile.id)
+        await manager.shutDown()
+        check("Safari chrome: nothing went wrong while it ran", messages.isEmpty, messages.joined(separator: " | "))
     }
 
     // MARK: Tabs, history, bookmarks
