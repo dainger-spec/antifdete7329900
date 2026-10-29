@@ -149,11 +149,11 @@ if let className = value(after: "--try-init") {
         print("no such class after loading the frameworks")
         exit(1)
     }
-    guard let type = cls as? NSObject.Type else {
+    guard let objectType = cls as? NSObject.Type else {
         print("not an NSObject subclass; cannot be created this way")
         exit(1)
     }
-    let object = type.init()
+    let object = objectType.init()
     print("init ok: \(object)")
     if flag("--load-view"), let controller = object as? NSViewController {
         // Where the nib is actually read, and where a controller that wants Safari's own
