@@ -101,6 +101,7 @@ enum SafariChrome {
         tolerateNilDictionaryKeys()
         tolerateMissingSafariDirectories()
         tolerateNilDirectoryEnumeration()
+        tolerateNilDirectoryListing()
         bridgeNibLookups()
         stubChromeFeatures()
     }
@@ -294,6 +295,25 @@ enum SafariChrome {
                 return nil
             }
             return original(manager, selector, url, keys, options, handler)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
+    /// The sibling of the enumerator: listing a directory outright. Safari reaches this one a few
+    /// seconds later, with a nil URL again. An empty listing is what a directory that has no path
+    /// contains.
+    private static func tolerateNilDirectoryListing() {
+        typealias ContentsOfDirectory = @convention(c) (AnyObject, Selector, AnyObject?, AnyObject?, UInt, UnsafeMutableRawPointer?) -> AnyObject?
+        let selector = NSSelectorFromString("contentsOfDirectoryAtURL:includingPropertiesForKeys:options:error:")
+        guard let method = class_getInstanceMethod(FileManager.self, selector) else { return }
+        let original = unsafeBitCast(method_getImplementation(method), to: ContentsOfDirectory.self)
+        let replacement: @convention(block) (AnyObject, AnyObject?, AnyObject?, UInt, UnsafeMutableRawPointer?) -> AnyObject? = { manager, url, keys, options, error in
+            guard let url else {
+                Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
+                    .notice("Safari asked for the contents of a directory it has no path for")
+                return [] as NSArray
+            }
+            return original(manager, selector, url, keys, options, error)
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
