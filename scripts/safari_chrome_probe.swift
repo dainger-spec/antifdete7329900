@@ -254,6 +254,23 @@ if flag("--prepare") {
     }
 }
 
+if flag("--patch-unified-field") {
+    // -[UnifiedField _notSecureAnnotation] builds an attributed string for the address bar's
+    // "Not Secure" badge and passes a nil attribute value when Safari's own environment is not
+    // there, which AppKit's layout turns into a crash. Replacing that one method is the same
+    // move the competitor makes with its SafariZoomFix.dylib: patch the few methods of Safari's
+    // chrome that assume they are inside Safari.
+    print("\n== patch ==")
+    if let cls = NSClassFromString("UnifiedField"),
+       let method = class_getInstanceMethod(cls, NSSelectorFromString("_notSecureAnnotation")) {
+        let replacement: @convention(block) (AnyObject) -> AnyObject = { _ in NSAttributedString(string: "") }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        print("patched -[UnifiedField _notSecureAnnotation]")
+    } else {
+        print("UnifiedField or its _notSecureAnnotation not found")
+    }
+}
+
 if let className = value(after: "--try-init") {
     print("\n== \(className) ==")
     guard let cls = NSClassFromString(className) else {
