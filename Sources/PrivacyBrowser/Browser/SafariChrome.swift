@@ -195,6 +195,17 @@ enum SafariChrome {
             setDefaultSearchEngine("Google", on: shared)
         }
         setDefaultSearchEngine("Google", on: controller)
+        // Safari's chrome reaches its providers through +[WBSSearchProvidersController shared],
+        // which the base class creates bare: it never loads the provider list, so the suggestions
+        // fetcher is handed a provider with no suggestions template and throws on the nil. Our
+        // instance is Safari's own subclass with the list loaded (measured: six providers, Google
+        // with both a search and a suggestions template), so that is what `shared` returns here.
+        searchProviders = controller
+        if let base = NSClassFromString("WBSSearchProvidersController"),
+           let method = class_getClassMethod(base, NSSelectorFromString("shared")) {
+            let replacement: @convention(block) (AnyObject) -> AnyObject? = { _ in searchProviders }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
         log.info("Search providers: \(String(describing: controller.value(forKey: "defaultSearchEngineName")), privacy: .public)")
         return controller
     }
@@ -342,6 +353,9 @@ enum SafariChrome {
 
     private static var nibURLs: [String: URL?] = [:]
 
+    /// Safari's providers, kept for the lifetime of the process because `+shared` hands them out.
+    private static var searchProviders: NSObject?
+
     /// Features of Safari's chrome that need services only Safari has, and take the process down
     /// when they do not find them. None of them is wanted here.
     ///
@@ -373,12 +387,6 @@ enum SafariChrome {
         // state worth restoring anyway (the profile decides what opens), and the windows are
         // marked not restorable as well, in openWindow.
         replaceWithConstant("BrowserDocument", "fileType") { "public.html" as NSString }
-        // Search suggestions: typing in the address bar asks the provider for its suggestions URL
-        // template, which the providers built here do not carry, and the fetcher throws on the nil.
-        // Stubbed rather than supplied on purpose — suggestions send every keystroke to the search
-        // engine, which is the last thing a profile of this browser should do.
-        replaceWithConstant("WebSearchSuggestionsFetcherController",
-                            "addSuggestionsURLTemplate:forDefaultSearchProvider:") { nil }
     }
 
     /// Replaces one object-returning method with a constant. On arm64 a block that only returns a
