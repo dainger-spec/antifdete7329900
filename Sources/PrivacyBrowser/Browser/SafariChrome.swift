@@ -101,8 +101,9 @@ enum SafariChrome {
         stubChromeFeatures()
     }
 
-    /// `-windowDidLoad` sends new-window telemetry that asserts this observer exists. It takes a
-    /// nil search provider context.
+    /// `-windowDidLoad` sends new-window telemetry that asserts this observer exists. It accepts a
+    /// nil search provider context, but then nothing holds a search engine and the address bar
+    /// cannot turn a query into a URL, so build the context first.
     private static func setUpSearchEnginePreferenceObserver() {
         guard let observer: AnyObject = NSClassFromString("WBSSearchEnginePreferenceObserver") else { return }
         let selector = NSSelectorFromString("setUpSharedObserverWithSearchProviderContext:")
@@ -110,7 +111,41 @@ enum SafariChrome {
             log.notice("WBSSearchEnginePreferenceObserver has no setUpSharedObserverWithSearchProviderContext:")
             return
         }
-        _ = observer.perform(selector, with: nil)
+        _ = observer.perform(selector, with: searchProviderContext())
+    }
+
+    /// Safari's search providers. In Safari this object comes up with the app; here it has to be
+    /// built, and its default engine set, because the `com.apple.Safari` preferences it would read
+    /// are another app's container (see the type comment). `SearchProvidersController` is Safari's
+    /// subclass of `WBSSearchProvidersController`, and the observer above takes it as its context.
+    private static func searchProviderContext() -> NSObject? {
+        guard let cls = NSClassFromString("SearchProvidersController") as? NSObject.Type else {
+            log.notice("No SearchProvidersController: the address bar will not search")
+            return nil
+        }
+        let controller = cls.init()
+        for selectorName in ["_loadAllProviders", "reloadProviders"] {
+            let selector = NSSelectorFromString(selectorName)
+            if controller.responds(to: selector) {
+                _ = controller.perform(selector)
+                break
+            }
+        }
+        setDefaultSearchEngine("Google", on: controller)
+        log.info("Search providers: \(String(describing: controller.value(forKey: "defaultSearchEngineName")), privacy: .public)")
+        return controller
+    }
+
+    /// `-setDefaultSearchEngine:forPrivateBrowsing:` takes a `BOOL`, which `perform` cannot pass,
+    /// so it is called through its implementation with the right signature.
+    private static func setDefaultSearchEngine(_ name: String, on controller: NSObject) {
+        typealias SetEngine = @convention(c) (AnyObject, Selector, NSString, Bool) -> Void
+        let selector = NSSelectorFromString("setDefaultSearchEngine:forPrivateBrowsing:")
+        guard let method = class_getInstanceMethod(type(of: controller), selector) else { return }
+        let setEngine = unsafeBitCast(method_getImplementation(method), to: SetEngine.self)
+        for privateBrowsing in [false, true] {
+            setEngine(controller, selector, name as NSString, privateBrowsing)
+        }
     }
 
     /// Colours Safari reads from its preferences arrive nil here (see the type comment), and
@@ -176,6 +211,26 @@ enum SafariChrome {
             }
             method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
+
+        // -[NSViewController loadView] does not go through -nibBundle for every controller:
+        // Safari's LibraryViewController still looked for its nib in our bundle. Intercept the call
+        // that actually loads it and name Safari's bundle there too.
+        typealias NibWithName = @convention(c) (AnyObject, Selector, NSString, Bundle?) -> AnyObject?
+        let loader = NSSelectorFromString("_nibWithName:bundle:")
+        guard let method = class_getInstanceMethod(NSViewController.self, loader) else { return }
+        let original = unsafeBitCast(method_getImplementation(method), to: NibWithName.self)
+        let replacement: @convention(block) (AnyObject, NSString, Bundle?) -> AnyObject? = { object, name, bundle in
+            guard let imagePointer = object_getClass(object).flatMap({ class_getImageName($0) }) else {
+                return original(object, loader, name, bundle)
+            }
+            let image = String(cString: imagePointer)
+            guard image.contains("Safari") || image.contains("PasswordManagerUI") else {
+                return original(object, loader, name, bundle)
+            }
+            let own = bundles.first { $0.executableURL?.resolvingSymlinksInPath().path == image } ?? fallback
+            return original(object, loader, name, own)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
 
     /// Features of Safari's chrome that need services only Safari has, and take the process down
