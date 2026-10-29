@@ -148,11 +148,26 @@ enum SafariFrameworkProbe {
         say("configuration factories: \(factories.isEmpty ? "none" : factories.joined(separator: ", "))")
         let name = "contentWebViewConfigurationForBrowsingMode:profileIdentifier:automationSessionIdentifier:"
         guard classSide.contains(name) else { return say("\(name) -> not declared") }
-        say("calling +[WebKitPreferencesManager \(name)] with the ordinary browsing mode and no profile …")
-        let call = ObjCRuntime.callReturningObject(cls, name, integer: 0, first: nil, second: nil)
+        // A profile identifier is required: with nil the framework's own store factory raises
+        // from -[_WKWebsiteDataStoreConfiguration initWithIdentifier:] before anything else runs.
+        let identifier = UUID().uuidString
+        say("calling +[WebKitPreferencesManager \(name)] for profile \(identifier) …")
+        let call = ObjCRuntime.callReturningObject(cls, name, integer: 0, first: identifier as NSString, second: nil)
         say("  \(call.reason)")
         if let configuration = call.value as? WKWebViewConfiguration {
             say("  websiteDataStore: \(SafariHooks.describe(configuration.websiteDataStore))")
+        }
+        // And again with the profile's own store bound, to see whether the factory is the key.
+        WebDataStoreVault.ensureWebKitInitialized()
+        let ours = WKWebsiteDataStore.nonPersistent()
+        SafariHooks.forgetObservations()
+        let bound = SafariHooks.bindDataStore(ours) {
+            ObjCRuntime.callReturningObject(cls, name, integer: 0, first: UUID().uuidString as NSString, second: nil)
+        }
+        say("with the profile's store bound: \(bound.reason)")
+        SafariHooks.observations.forEach { say("  \($0)") }
+        if let configuration = bound.value as? WKWebViewConfiguration {
+            say("  websiteDataStore is the bound one: \(configuration.websiteDataStore === ours)")
         }
     }
 

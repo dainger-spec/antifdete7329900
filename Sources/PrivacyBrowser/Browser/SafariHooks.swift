@@ -7,13 +7,14 @@ import WebKit
 ///
 /// **Binding the profile's data store.** `-[WKWebView configuration]` hands back a *copy*, so
 /// assigning `websiteDataStore` on it after the view exists changes nothing the page will ever
-/// see: WebKit read the store when the page was created and never looks again. The store has to
-/// be in place before that, and the window's web views are built by the framework, out of
-/// configurations we never touch. What every one of them does go through is
-/// `-[WKWebViewConfiguration websiteDataStore]` — the getter WebKit itself calls while building
-/// a page, and the getter that otherwise hands out the *default* store. Overriding it for the
-/// span of one window's creation puts the profile's store in front of WebKit at the one moment
-/// it is read, and keeps the default store from being instantiated at all.
+/// see: WebKit read the store when the page was created and never looks again. Nor is there a
+/// configuration of ours to put it in — the framework builds its own, and does not take a store
+/// as input. It *makes* one, from the profile identifier, in
+/// `+[WKWebsiteDataStore(SafariSharedExtras) _safari_dataStoreForProfileWithIdentifier:
+/// createIfNecessary:cacheNewDataStoreInMemory:]`, which ends in
+/// `-[_WKWebsiteDataStoreConfiguration initWithIdentifier:]`. That factory is the binding point,
+/// and `-[WKWebViewConfiguration websiteDataStore]` is kept as a second line for anything that
+/// reads a store without going through it.
 ///
 /// A plain getter is also the safe thing to replace. An `init`-family method returns +1 while a
 /// block returns +0, and a swizzle across that line miscounts the window controller's web view.
@@ -30,9 +31,16 @@ enum SafariHooks {
     /// How often the getter was consulted while a store was bound, and what it handed back.
     private(set) static var observations: [String] = []
     private static var originalDataStoreGetter: IMP?
+    private static var originalProfileStoreFactory: IMP?
     private static var keyWindowForced: Set<String> = []
 
     private static let dataStoreSelector = NSSelectorFromString("websiteDataStore")
+    /// The framework's own per-profile store factory. Everything it builds for a profile window
+    /// comes from here: it does not read a store out of the configuration it is handed, it makes
+    /// one from the profile identifier and puts it in. Found in the backtrace of
+    /// `+[WebKitPreferencesManager contentWebViewConfigurationForBrowsingMode:…]`.
+    private static let profileStoreSelector =
+        NSSelectorFromString("_safari_dataStoreForProfileWithIdentifier:createIfNecessary:cacheNewDataStoreInMemory:")
 
     // MARK: Data store binding
 
@@ -42,10 +50,42 @@ enum SafariHooks {
     @MainActor
     @discardableResult
     static func bindDataStore<T>(_ store: WKWebsiteDataStore?, during body: () -> T) -> T {
-        guard store != nil, installDataStoreHook() else { return body() }
+        guard store != nil else { return body() }
+        // Both, because they answer different questions: the factory is where the framework's
+        // own store comes from, and the getter catches anything that reads a configuration's
+        // store without going through it.
+        let factory = installProfileStoreHook()
+        let getter = installDataStoreHook()
+        guard factory || getter else { return body() }
         pendingDataStore = store
         defer { pendingDataStore = nil }
         return body()
+    }
+
+    /// Replaces the framework's per-profile store factory for the span of a binding, so the
+    /// store it puts into its own configurations is the profile's. A class method, so the
+    /// override goes on the metaclass.
+    @discardableResult
+    private static func installProfileStoreHook() -> Bool {
+        if originalProfileStoreFactory != nil { return true }
+        guard let meta: AnyClass = object_getClass(WKWebsiteDataStore.self),
+              let method = class_getInstanceMethod(meta, profileStoreSelector) else {
+            NSLog("SafariHooks: +[WKWebsiteDataStore \(NSStringFromSelector(profileStoreSelector))] -> nil; " +
+                  "this WebKit has no per-profile store factory to bind")
+            return false
+        }
+        let block: @convention(block) (AnyObject, NSString?, ObjCBool, ObjCBool) -> WKWebsiteDataStore? = { receiver, identifier, create, cache in
+            if let store = pendingDataStore {
+                observations.append("per-profile store factory asked for \(identifier ?? "nil") -> handed it \(describe(store))")
+                return store
+            }
+            typealias Original = @convention(c) (AnyObject, Selector, NSString?, ObjCBool, ObjCBool) -> WKWebsiteDataStore?
+            guard let original = originalProfileStoreFactory else { return nil }
+            return unsafeBitCast(original, to: Original.self)(receiver, profileStoreSelector, identifier, create, cache)
+        }
+        originalProfileStoreFactory = method_setImplementation(method, imp_implementationWithBlock(block))
+        NSLog("SafariHooks: bound +[WKWebsiteDataStore \(NSStringFromSelector(profileStoreSelector))]")
+        return true
     }
 
     /// Clears the record before a window is built, so a report covers that window only.
