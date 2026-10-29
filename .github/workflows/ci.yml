@@ -30,6 +30,10 @@ jobs:
         with:
           bun-version: 1.2.23
       - run: TZ=America/New_York bun scripts/test-shims.mjs
+      # ru and en hold the same keys with the same format specifiers, every L("key") exists, and no
+      # text a user reads is written into the code (scripts/check_localization.py).
+      - name: Localization is complete in both languages
+        run: python3 scripts/check_localization.py
 
   macos:
     name: macOS build, core tests, WebKit self-test
@@ -65,10 +69,6 @@ jobs:
           name: ui-snapshots
           path: build/ui-snapshots
           if-no-files-found: ignore
-      - name: Safari's private classes and methods the hosted chrome relies on
-        # SafariChrome.expectedPieces: a macOS whose Safari renamed or removed one fails here, by name,
-        # instead of a profile's window quietly degrading on a user's Mac.
-        run: build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --check-safari-chrome
       - name: Self-test against real WebKit (sandboxed and unsandboxed)
         run: |
           set -o pipefail
@@ -101,6 +101,12 @@ jobs:
             --selftest-log build/egress/selftest-unsandboxed.txt --tcpdump-errors build/egress/tcpdump.err || status=1
           echo "::endgroup::"
           exit $status
+      - name: Safari's private classes and methods the hosted chrome relies on
+        # SafariChrome.expectedPieces: a macOS whose Safari renamed or removed one fails here, by name,
+        # instead of a profile's window quietly degrading on a user's Mac. After the self-test, so
+        # that a missing piece never hides what the self-test would have measured.
+        if: always()
+        run: build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --check-safari-chrome
       - name: Compare the fingerprint surface with this Mac's real Safari (safaridriver)
         run: |
           sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"

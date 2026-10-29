@@ -72,7 +72,10 @@ enum SafariChrome {
         }
         isAvailable = true
         for missing in missingPieces() {
-            log.error("This Safari does not have \(missing, privacy: .public)")
+            log.error("This macOS does not have \(missing, privacy: .public)")
+        }
+        for absent in absentStubs() {
+            log.notice("Not in this Safari (nothing to stub): \(absent, privacy: .public)")
         }
         return true
     }
@@ -103,11 +106,21 @@ enum SafariChrome {
     /// A class, or a method of one, that something here relies on.
     struct Piece {
         enum Kind { case type, classMethod, instanceMethod }
+        enum Role {
+            /// Without it the chrome cannot be hosted at all: the profile opens our own window.
+            case structural
+            /// What holds a profile's process to its proxy (`ProfileNetworkGuard`): WebKit's and
+            /// Foundation's own methods, patched by name.
+            case network
+            /// A method stubbed because it crashed a hosted chrome on one Safari build (§9.1 of
+            /// docs/SAFARI_PROCESS.md). Builds differ: a Safari without the method has nothing
+            /// to stub, which is no fault — reported, never failed on.
+            case stub
+        }
         let className: String
         let selector: String?
         let kind: Kind
-        /// Without it the chrome cannot be hosted at all: the profile opens our own window.
-        let isStructural: Bool
+        let role: Role
 
         var name: String {
             guard let selector else { return className }
@@ -126,54 +139,70 @@ enum SafariChrome {
         }
     }
 
-    /// Everything this file and `SafariChromeHost` reach for by name, in one list, so that a
-    /// macOS update that renames or removes any of it is caught — by `--check-safari-chrome` in
-    /// CI, and in front of the user by the profile's process — instead of degrading in silence.
-    /// Structural pieces decide whether the chrome is hosted at all. The rest are the measured
-    /// crashes of §9.1 (docs/SAFARI_PROCESS.md): a stub whose method is gone may be a crash that
-    /// moved somewhere else, so it is reported, but the chrome is still tried.
+    /// Everything this file, `SafariChromeHost` and `ProfileNetworkGuard` reach for by name, in one
+    /// list, so that a macOS update that renames or removes any of it is caught — by
+    /// `--check-safari-chrome` in CI, and in front of the user by the profile's process — instead
+    /// of degrading in silence. A missing structural piece means our own window; a missing network
+    /// piece means a lock of the guard that is not there; stubs only say what this build has.
     static let expectedPieces: [Piece] = [
-        Piece(className: "BrowserApplication", selector: "sharedApplication", kind: .classMethod, isStructural: true),
-        Piece(className: "BrowserWindowController", selector: "openEmptyBrowserWindowController", kind: .classMethod, isStructural: true),
-        Piece(className: "BrowserWindowController", selector: "allBrowserTabViewItemsFromAllWindows", kind: .classMethod, isStructural: true),
-        Piece(className: "BrowserTabViewItem", selector: "loadURL:", kind: .instanceMethod, isStructural: true),
-        Piece(className: "WBSSearchEnginePreferenceObserver", selector: "setUpSharedObserverWithSearchProviderContext:", kind: .classMethod, isStructural: true),
-        Piece(className: "SearchProvidersController", selector: "setDefaultSearchEngine:forPrivateBrowsing:", kind: .instanceMethod, isStructural: false),
-        Piece(className: "WBSSearchProvidersController", selector: "shared", kind: .classMethod, isStructural: false),
-        Piece(className: "WebKitPreferencesManager", selector: nil, kind: .type, isStructural: false),
-        Piece(className: "NSViewController", selector: "_nibWithName:bundle:", kind: .instanceMethod, isStructural: true),
-        Piece(className: "BrowserWindowController", selector: "_setUpClusterManagerIfNeeded", kind: .instanceMethod, isStructural: false),
-        Piece(className: "BrowserNavigationDelegate", selector: "donatePageTextMetadata:allowingDonationWithoutReaderText:", kind: .instanceMethod, isStructural: false),
-        Piece(className: "WKWebViewConfiguration", selector: "_setShouldRelaxThirdPartyCookieBlocking:", kind: .instanceMethod, isStructural: false),
-        Piece(className: "WBSWebExtensionSQLiteStoreMigrator", selector: "_migrateExtensionSQLiteStoresForDefaultProfile", kind: .instanceMethod, isStructural: false),
-        Piece(className: "StartPageOnboardingSectionProvider", selector: "reloadData", kind: .instanceMethod, isStructural: false),
-        Piece(className: "UnifiedField", selector: "_assistantButtonIconForContentOption:withSparkle:", kind: .instanceMethod, isStructural: false),
-        Piece(className: "BrowserDocument", selector: "fileType", kind: .instanceMethod, isStructural: false),
-        Piece(className: "NSFileManager", selector: "safari_topLevelDirectoriesAtURL:", kind: .instanceMethod, isStructural: false),
+        Piece(className: "BrowserApplication", selector: "sharedApplication", kind: .classMethod, role: .structural),
+        Piece(className: "BrowserWindowController", selector: "openEmptyBrowserWindowController", kind: .classMethod, role: .structural),
+        Piece(className: "BrowserWindowController", selector: "allBrowserTabViewItemsFromAllWindows", kind: .classMethod, role: .structural),
+        Piece(className: "BrowserTabViewItem", selector: "loadURL:", kind: .instanceMethod, role: .structural),
+        Piece(className: "WBSSearchEnginePreferenceObserver", selector: "setUpSharedObserverWithSearchProviderContext:", kind: .classMethod, role: .structural),
+        Piece(className: "NSViewController", selector: "_nibWithName:bundle:", kind: .instanceMethod, role: .structural),
+        Piece(className: "WKWebView", selector: "initWithFrame:configuration:", kind: .instanceMethod, role: .network),
+        Piece(className: "WKWebsiteDataStore", selector: "defaultDataStore", kind: .classMethod, role: .network),
+        Piece(className: "WKWebsiteDataStore", selector: "nonPersistentDataStore", kind: .classMethod, role: .network),
+        Piece(className: "WKWebsiteDataStore", selector: "dataStoreForIdentifier:", kind: .classMethod, role: .network),
+        Piece(className: "WKPreferences", selector: "_setPeerConnectionEnabled:", kind: .instanceMethod, role: .network),
+        Piece(className: "WKPreferences", selector: "setFraudulentWebsiteWarningEnabled:", kind: .instanceMethod, role: .network),
+        Piece(className: "NSURLSessionConfiguration", selector: "defaultSessionConfiguration", kind: .classMethod, role: .network),
+        Piece(className: "NSURLSessionConfiguration", selector: "ephemeralSessionConfiguration", kind: .classMethod, role: .network),
+        Piece(className: "NSURLSession", selector: "sharedSession", kind: .classMethod, role: .network),
+        Piece(className: "SearchProvidersController", selector: "setDefaultSearchEngine:forPrivateBrowsing:", kind: .instanceMethod, role: .stub),
+        Piece(className: "WBSSearchProvidersController", selector: "shared", kind: .classMethod, role: .stub),
+        Piece(className: "WebKitPreferencesManager", selector: nil, kind: .type, role: .stub),
+        Piece(className: "BrowserWindowController", selector: "_setUpClusterManagerIfNeeded", kind: .instanceMethod, role: .stub),
+        Piece(className: "BrowserNavigationDelegate", selector: "donatePageTextMetadata:allowingDonationWithoutReaderText:", kind: .instanceMethod, role: .stub),
+        Piece(className: "WKWebViewConfiguration", selector: "_setShouldRelaxThirdPartyCookieBlocking:", kind: .instanceMethod, role: .stub),
+        Piece(className: "WBSWebExtensionSQLiteStoreMigrator", selector: "_migrateExtensionSQLiteStoresForDefaultProfile", kind: .instanceMethod, role: .stub),
+        Piece(className: "StartPageOnboardingSectionProvider", selector: "reloadData", kind: .instanceMethod, role: .stub),
+        Piece(className: "UnifiedField", selector: "_assistantButtonIconForContentOption:withSparkle:", kind: .instanceMethod, role: .stub),
+        Piece(className: "BrowserDocument", selector: "fileType", kind: .instanceMethod, role: .stub),
+        Piece(className: "NSFileManager", selector: "safari_topLevelDirectoriesAtURL:", kind: .instanceMethod, role: .stub),
     ]
 
-    /// The expected pieces this macOS does not have, by name; one entry more when none of the
-    /// configuration factories is there. Meaningful once `load()` has run.
+    /// The structural and network pieces this macOS does not have, by name. Meaningful once
+    /// `load()` has run (before, Safari's classes are not there to look at).
     static func missingPieces() -> [String] {
         guard isAvailable else { return [] }
-        var missing = expectedPieces.filter { !$0.isPresent }.map(\.name)
-        if let factories = NSClassFromString("WebKitPreferencesManager"),
-           !configurationFactories.contains(where: { class_getClassMethod(factories, NSSelectorFromString($0)) != nil }) {
-            missing.append("+[WebKitPreferencesManager contentWebViewConfigurationFor…] (none of \(configurationFactories.count))")
-        }
-        return missing
+        return expectedPieces.filter { $0.role != .stub && !$0.isPresent }.map(\.name)
     }
 
     /// The structural pieces that are missing: with any of them, the chrome is not hosted.
     static func missingStructuralPieces() -> [String] {
         guard isAvailable else { return [] }
-        return expectedPieces.filter { $0.isStructural && !$0.isPresent }.map(\.name)
+        return expectedPieces.filter { $0.role == .structural && !$0.isPresent }.map(\.name)
+    }
+
+    /// What this Safari has of the stubbed methods and of the configuration factories: for the log
+    /// and `--check-safari-chrome`, never a failure.
+    static func absentStubs() -> [String] {
+        guard isAvailable else { return [] }
+        var absent = expectedPieces.filter { $0.role == .stub && !$0.isPresent }.map(\.name)
+        if let factories = NSClassFromString("WebKitPreferencesManager"),
+           !configurationFactories.contains(where: { class_getClassMethod(factories, NSSelectorFromString($0)) != nil }) {
+            absent.append("+[WebKitPreferencesManager contentWebViewConfigurationFor…] (none of \(configurationFactories.count): the initializer alone gives web views the profile's data)")
+        }
+        return absent
     }
 
     /// `PrivacyBrowser --check-safari-chrome`: loads Safari's frameworks and says which of the
-    /// pieces this build relies on this macOS has. Exit code 0 when all of them are there, 1 when
-    /// any is missing, 2 when the frameworks do not load (a sandboxed build, or a macOS without
-    /// them). Touches nothing else: no window, no application object, no preferences.
+    /// pieces this build relies on this macOS has. Exit code 0 when every structural and network
+    /// piece is there, 1 when any is missing, 2 when the frameworks do not load (a sandboxed build,
+    /// or a macOS without them). Absent stubs are listed only. Touches nothing else: no window, no
+    /// application object, no preferences.
     static func checkPieces() -> Int32 {
         guard load() else {
             print("SAFARI-CHROME frameworks did not load")
@@ -181,7 +210,8 @@ enum SafariChrome {
         }
         let missing = missingPieces()
         for piece in expectedPieces {
-            print("\(piece.isPresent ? "PRESENT" : "MISSING") \(piece.isStructural ? "structural" : "stub      ") \(piece.name)")
+            let state = piece.isPresent ? "PRESENT" : piece.role == .stub ? "absent " : "MISSING"
+            print("\(state) \(String(describing: piece.role).padding(toLength: 10, withPad: " ", startingAt: 0)) \(piece.name)")
         }
         if let factories = NSClassFromString("WebKitPreferencesManager") {
             for name in configurationFactories {
