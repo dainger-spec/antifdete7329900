@@ -89,6 +89,8 @@ enum SafariChrome {
         guard isAvailable else { return }
         setUpSearchEnginePreferenceObserver()
         bridgeImageLookups()
+        bridgeColorLookups()
+        tolerateNilAttributeValues()
         bridgeNibLookups()
         stubChromeFeatures()
     }
@@ -144,6 +146,44 @@ enum SafariChrome {
         let setEngine = unsafeBitCast(method_getImplementation(method), to: SetEngine.self)
         for privateBrowsing in [false, true] {
             setEngine(controller, selector, name as NSString, privateBrowsing)
+        }
+    }
+
+    /// Safari's chrome takes its colours out of an asset catalog by name, the same way it takes
+    /// its icons, and asks the *main* bundle for them — so the address bar's "Not Secure" colour
+    /// comes back nil here. Look in Safari's own bundles.
+    private static func bridgeColorLookups() {
+        typealias ColorNamed = @convention(c) (AnyObject, Selector, NSString) -> NSColor?
+        let selector = NSSelectorFromString("colorNamed:")
+        guard let method = class_getClassMethod(NSColor.self, selector) else { return }
+        let bundles = chromeBundles
+        let original = unsafeBitCast(method_getImplementation(method), to: ColorNamed.self)
+        let replacement: @convention(block) (AnyObject, NSString) -> NSColor? = { cls, name in
+            if let color = original(cls, selector, name) { return color }
+            for bundle in bundles {
+                if let color = NSColor(named: name as String, bundle: bundle) { return color }
+            }
+            return nil
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
+    /// `-[UnifiedField _notSecureAnnotation]` still passes a nil value even with a home of its own
+    /// and the colour bridge above, and AppKit turns that into a crash while the address bar lays
+    /// itself out — which is every window and every new tab. Dropping nil values is the right
+    /// answer here: an attribute nobody provided is an attribute the text does not need.
+    private static func tolerateNilAttributeValues() {
+        typealias AddAttribute = @convention(c) (AnyObject, Selector, NSString, AnyObject?, NSRange) -> Void
+        let selector = NSSelectorFromString("addAttribute:value:range:")
+        for className in ["NSConcreteMutableAttributedString", "NSMutableAttributedString"] {
+            guard let cls = NSClassFromString(className),
+                  let method = class_getInstanceMethod(cls, selector) else { continue }
+            let original = unsafeBitCast(method_getImplementation(method), to: AddAttribute.self)
+            let replacement: @convention(block) (AnyObject, NSString, AnyObject?, NSRange) -> Void = { object, name, value, range in
+                guard let value else { return }
+                original(object, selector, name, value, range)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
     }
 
