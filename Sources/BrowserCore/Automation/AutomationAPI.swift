@@ -64,7 +64,8 @@ public enum AutomationHTTP {
 
         public static func json<T: Encodable>(_ status: Int, _ value: T) -> Response {
             let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+            // An address reads as one (`http://…`, not `http:\/\/…`): scripts compare it as text.
+            encoder.outputFormatting = [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
             encoder.dateEncodingStrategy = .iso8601
             let body = (try? encoder.encode(value)) ?? Data("{}".utf8)
             return Response(status: status, body: body + Data("\n".utf8))

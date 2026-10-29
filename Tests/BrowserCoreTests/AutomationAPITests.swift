@@ -156,6 +156,7 @@ final class AutomationAPITests: XCTestCase {
         let body = String(decoding: AutomationHTTP.Response.json(200, [entry]).body, as: UTF8.self)
         XCTAssertFalse(body.contains("s3cret-pass") || body.contains("user-name"), body)
         XCTAssertTrue(body.contains("\"running\" : true"), body)
+        XCTAssertTrue(body.contains("\"socks5://gw.example:1080\""), "the address as written, slashes unescaped: \(body)")
     }
 
     func testDeviceSettingsFromBeforeTheAPIStillRead() throws {
