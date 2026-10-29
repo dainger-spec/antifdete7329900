@@ -378,6 +378,13 @@
 "sync.title" = "Sync";
 "sync.to" = "Sync to";
 "tab.newTab" = "New Tab";
+"toolbar.back" = "Back";
+"toolbar.forward" = "Forward";
+"toolbar.reload" = "Reload";
+"toolbar.bookmark" = "Bookmark this page";
+"toolbar.bookmarks" = "Bookmarks";
+"toolbar.history" = "History";
+"tab.close" = "Close Tab";
 "toolbar.address.placeholder" = "Search or enter address";
 "toolbar.fillPassword" = "Fill saved password";
 "toolbar.savePassword" = "Save password from this page";

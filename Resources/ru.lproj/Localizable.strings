@@ -378,6 +378,13 @@
 "sync.title" = "Синхронизация";
 "sync.to" = "Куда синхронизировать";
 "tab.newTab" = "Новая вкладка";
+"toolbar.back" = "Назад";
+"toolbar.forward" = "Вперёд";
+"toolbar.reload" = "Обновить";
+"toolbar.bookmark" = "Добавить страницу в закладки";
+"toolbar.bookmarks" = "Закладки";
+"toolbar.history" = "История";
+"tab.close" = "Закрыть вкладку";
 "toolbar.address.placeholder" = "Поиск или адрес сайта";
 "toolbar.fillPassword" = "Подставить сохранённый пароль";
 "toolbar.savePassword" = "Сохранить пароль с этой страницы";
