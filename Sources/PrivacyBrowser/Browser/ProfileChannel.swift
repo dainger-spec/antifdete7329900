@@ -18,6 +18,8 @@ enum ProfileCommand: Codable {
     case stop
     /// Bring the profile's windows forward.
     case activate
+    /// Another window of the same profile.
+    case openWindow
     case showLibrary(section: String)
     case showPasswords
     case importCookies([ImportedCookie])

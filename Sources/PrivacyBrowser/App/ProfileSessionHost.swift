@@ -136,6 +136,14 @@ enum ProfileSessionHost {
             case .activate:
                 NSApp.activate(ignoringOtherApps: true)
                 manager?.session(for: profileID)?.bringToFront()
+            case .openWindow:
+                NSApp.activate(ignoringOtherApps: true)
+                guard let session = manager?.session(for: profileID) else { return }
+                // In Safari's chrome a window is Safari's to open, and it comes up with the
+                // profile's data like every other (SafariChromeHost).
+                if !SafariChromeHost.open(session: session, url: nil) {
+                    session.openWindow(url: nil)
+                }
             case .showLibrary(let section):
                 guard let section = LibraryView.Section(rawValue: section) else { return }
                 manager?.showLibrary(profileID, section: section)

@@ -402,10 +402,20 @@ final class ProfileManager: ObservableObject {
 
     /// Opens another window in an already running profile.
     func openNewWindow(_ id: UUID) {
+        if let child = children[id] {
+            child.send(.openWindow)
+            child.bringToFront()
+            return
+        }
         sessions[id]?.openWindow(url: nil)
     }
 
     func showLibrary(_ id: UUID, section: LibraryView.Section) {
+        if let child = children[id] {
+            child.send(.showLibrary(section: section.rawValue))
+            child.bringToFront()
+            return
+        }
         sessions[id]?.showLibrary(section)
     }
 
