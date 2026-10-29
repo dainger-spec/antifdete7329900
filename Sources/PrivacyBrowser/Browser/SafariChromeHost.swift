@@ -35,8 +35,17 @@ enum SafariChromeHost {
         SafariChrome.prepare()
         SafariChrome.installMainMenu()
         giveSafarisWebViewsTheProfilesData()
-        everyWebViewGetsTheProfilesData()
-        theDefaultStoreIsTheProfiles()
+        // The two nets under the factories above. `PB_CHROME_NETS=0` leaves them out, which is how
+        // one finds out whether they are load-bearing on a given macOS: with them out, a profile
+        // whose pages still load through its proxy is a macOS where Safari's own factories are
+        // enough, and one whose pages load as this Mac is a macOS where they are not. Nothing but
+        // a diagnostic — a build run this way can leak, which is the point of measuring it.
+        if ProcessInfo.processInfo.environment["PB_CHROME_NETS"] == "0" {
+            log.error("PB_CHROME_NETS=0: only Safari's own configuration factories are patched; this run may load pages outside the profile's proxy")
+        } else {
+            everyWebViewGetsTheProfilesData()
+            theDefaultStoreIsTheProfiles()
+        }
         isPrepared = true
         return true
     }
@@ -60,7 +69,7 @@ enum SafariChromeHost {
         // process down. Nothing here touches the arguments: they are passed through as the bits
         // they arrived as, and only the configuration that comes back is read.
         typealias Factory = @convention(c) (AnyObject, Selector, Int, OpaquePointer?, OpaquePointer?) -> Unmanaged<AnyObject>?
-        var patched = 0
+        var patched: [String] = []
         for selectorName in ["contentWebViewConfigurationForBrowsingMode:profileIdentifier:automationSessionIdentifier:",
                              "contentWebViewConfigurationForBrowsingMode:profileIdentifier:jitEnabled:",
                              "readerWebViewConfigurationForBrowsingMode:profileIdentifier:relatedWebView:"] {
@@ -75,12 +84,15 @@ enum SafariChromeHost {
                 return result
             }
             method_setImplementation(method, imp_implementationWithBlock(replacement))
-            patched += 1
+            patched.append(String(selectorName.prefix(while: { $0 != ":" })))
         }
-        if patched == 0 {
-            log.notice("None of WebKitPreferencesManager's configuration factories is in this Safari")
+        if patched.isEmpty {
+            // Which is what a macOS that renamed them looks like: the web views are then given the
+            // profile's data by the nets below instead, and this line says to go and find the new
+            // names (see docs/SAFARI_PROCESS.md).
+            log.error("None of WebKitPreferencesManager's configuration factories is in this Safari: its own names have changed")
         } else {
-            log.notice("Safari's web views will be built with the profile's data (\(patched, privacy: .public) factories)")
+            log.notice("Safari's configuration factories patched: \(patched.joined(separator: ", "), privacy: .public)")
         }
     }
 
