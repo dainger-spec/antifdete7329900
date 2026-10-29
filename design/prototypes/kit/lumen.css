@@ -1,0 +1,351 @@
+/* Lumen in CSS, for the design prototypes only (nothing here ships).
+ *
+ * Two token sets:
+ *   .v-current  — Theme.swift as it is today (values copied 1:1, names kept);
+ *   .v-proposed — the proposal: the same names where nothing changes, the changed and new tokens
+ *                 marked "PROPOSED" (design/README.md lists them with their Swift names).
+ *
+ * Fonts: the system font only. On a Mac -apple-system / BlinkMacSystemFont is SF Pro, the font the app
+ * uses; elsewhere (the PNG renders made on Linux) Inter stands in. Nothing is loaded from a network.
+ */
+
+:root, .v-current {
+  /* Surfaces — each one tone lighter than the one below it */
+  --backdrop: #0B0C0F;
+  --sidebar: #121419;
+  --surface: #161920;
+  --toolbar: #1A1D24;
+  --card: #1B1F27;
+  --raised: #1E222A;
+  --raisedInset: #252A33;
+  --field: #0F1115;
+  /* Lines */
+  --hairline: rgba(255, 255, 255, 0.08);
+  --divider: rgba(255, 255, 255, 0.06);
+  --fieldBorder: rgba(255, 255, 255, 0.10);
+  --strongBorder: rgba(255, 255, 255, 0.14);
+  /* Text — contrast on surface: 15.1 / 7.4 / 4.7 : 1 (Theme.swift says 14.6 / 7.5 / 4.6) */
+  --textPrimary: #ECEEF2;
+  --textSecondary: #A2A9B6;
+  --textTertiary: #7C8494;
+  --textDisabled: #555D6C;
+  /* Accent and states */
+  --accent: #6F8FEA;
+  --accentFill: #5E84EB;
+  --accentFillStrong: #5E84EB;
+  --accentTint: rgba(111, 143, 234, 0.14);
+  --accentTintStrong: rgba(111, 143, 234, 0.24);
+  --running: #4CC38A;
+  --warning: #D9A441;
+  --danger: #E5635C;
+  --rowHover: rgba(255, 255, 255, 0.04);
+  --rowSelected: rgba(94, 132, 235, 0.14);
+  --controlFill: rgba(255, 255, 255, 0.06);
+  --controlHover: rgba(255, 255, 255, 0.09);
+  --primaryFill: #E6E8ED;
+  --primaryHover: #F2F3F6;
+  --primaryText: #121419;
+  --markTile: #16181D;
+  --markGlyph: #F4F5F7;
+  /* Metrics */
+  --cornerRadius: 10px;
+  --controlRadius: 6px;
+  --controlHeight: 28px;
+  --fieldHeight: 32px;
+  /* Motion (Theme.hoverAnimation / appearAnimation) */
+  --hoverDur: 160ms;
+  --hoverIn: 160ms;
+  --hoverOut: 160ms;
+  --hoverEase: cubic-bezier(0, 0, 0.58, 1);         /* SwiftUI .easeOut */
+  --appearDur: 220ms;
+  --appearEase: cubic-bezier(0.2, 0.8, 0.2, 1);     /* timingCurve(0.2, 0.8, 0.2, 1) */
+  --focusDur: 160ms;                                /* LumenField animates its focus ring */
+  --pressScale: 1;
+  /* Type: 20 / 15 / 13 / 13 / 12 / 11 */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --fontDisplay: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter Display", "Inter", system-ui, sans-serif;
+  --fontMono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --tTitle: 600 20px/25px var(--fontDisplay);
+  --tSheet: 600 15px/20px var(--font);
+  --tSection: 600 13px/17px var(--font);
+  --tBody: 400 13px/17px var(--font);
+  --tLabel: 500 13px/17px var(--font);
+  --tSecondary: 400 12px/16px var(--font);
+  --tCaption: 400 11px/14px var(--font);
+  --tColumn: 500 11px/14px var(--font);
+  --tNumeral: 600 19px/24px var(--font);
+  --focusRing: 0 0 0 0 transparent;
+  --focusWidth: 1px;
+}
+
+.v-proposed {
+  /* PROPOSED colour changes: tertiary text holds 4.5:1 on every surface it is drawn on (sheets and
+     their inset panels too); danger holds 4.5:1 on raisedInset; a darker accent fill for white text. */
+  --textTertiary: #8A93A3;          /* was #7C8494: 3.83–4.68 → 4.65–6.32 */
+  --danger: #EC6F68;                /* was #E5635C: 4.30 on raisedInset → 4.83 */
+  --accentFillStrong: #4469D6;      /* NEW: white text 4.96:1 (accentFill gives 3.51) */
+  --selectionBar: #5E84EB;          /* NEW: the selected row's leading bar, 5.0:1 on surface */
+  --fieldBorderIncreased: rgba(255, 255, 255, 0.36); /* NEW: with Increase Contrast: 3.29:1 on raised */
+  /* PROPOSED metrics: one control height (fields were 32, buttons 28) */
+  --fieldHeight: 28px;
+  /* PROPOSED motion: hover appears at once and fades out briefly; focus and selection instant */
+  --hoverIn: 0ms;
+  --hoverOut: 120ms;
+  --focusDur: 0ms;
+  /* PROPOSED type: 22 / 17 / 13 / 11 — the four sizes of macOS's own text styles (title1, title2,
+     body, subheadline); weight, not size, separates body, label and section. */
+  --tTitle: 600 22px/28px var(--fontDisplay);
+  --tSheet: 600 17px/22px var(--font);
+  --tSection: 600 13px/18px var(--font);
+  --tBody: 400 13px/18px var(--font);
+  --tLabel: 500 13px/18px var(--font);
+  --tSecondary: 400 13px/18px var(--font);   /* the 12 pt role goes: secondary text is body in textSecondary */
+  --tCaption: 400 11px/14px var(--font);
+  --tColumn: 500 11px/14px var(--font);
+  --tNumeral: 600 22px/28px var(--fontDisplay);
+  --focusWidth: 2px;
+}
+
+@media (prefers-contrast: more) {
+  .v-proposed { --fieldBorder: var(--fieldBorderIncreased); --hairline: rgba(255, 255, 255, 0.24); }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--backdrop);
+  color: var(--textPrimary);
+  font: var(--tBody);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button { font: inherit; color: inherit; }
+.num, .tabular { font-variant-numeric: tabular-nums; }
+.icon { flex: none; display: block; }
+.new-string { outline: 1.5px dashed #F2C13D; outline-offset: 1px; border-radius: 2px; }
+
+/* MARK: Window frame */
+
+.window {
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  background: var(--surface);
+  font: var(--tBody);
+}
+.traffic { position: absolute; top: 14px; left: 14px; display: flex; gap: 8px; z-index: 5; }
+.traffic i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.25); }
+.traffic i:nth-child(1) { background: #FF5F57; }
+.traffic i:nth-child(2) { background: #FEBC2E; }
+.traffic i:nth-child(3) { background: #28C840; }
+
+/* MARK: Text roles */
+
+.t-title { font: var(--tTitle); letter-spacing: -0.2px; }
+.t-sheet { font: var(--tSheet); }
+.t-section { font: var(--tSection); }
+.t-body { font: var(--tBody); }
+.t-label { font: var(--tLabel); }
+.t-secondary { font: var(--tSecondary); color: var(--textSecondary); }
+.t-caption { font: var(--tCaption); }
+.t-column { font: var(--tColumn); }
+.c-primary { color: var(--textPrimary); }
+.c-secondary { color: var(--textSecondary); }
+.c-tertiary { color: var(--textTertiary); }
+.c-accent { color: var(--accent); }
+.c-running { color: var(--running); }
+.c-warning { color: var(--warning); }
+.c-danger { color: var(--danger); }
+
+/* MARK: Buttons (LumenButtonStyle) */
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--controlHeight); padding: 0 12px; flex: none;
+  border-radius: var(--controlRadius); border: 1px solid transparent;
+  font: var(--tLabel); white-space: nowrap; cursor: default; user-select: none;
+  background: var(--controlFill); color: var(--textPrimary);
+  transition: background-color var(--hoverOut) var(--hoverEase), color var(--hoverOut) var(--hoverEase);
+}
+.btn:hover { transition-duration: var(--hoverIn); }
+.btn:active { opacity: 0.85; }
+.btn[disabled] { opacity: 0.45; pointer-events: none; }
+.btn.primary { background: var(--primaryFill); color: var(--primaryText); }
+.btn.primary:hover { background: var(--primaryHover); }
+.btn.secondary { background: var(--controlFill); border-color: var(--fieldBorder); }
+.btn.secondary:hover { background: var(--controlHover); }
+.btn.ghost { background: transparent; color: var(--textSecondary); }
+.btn.ghost:hover { background: var(--controlFill); color: var(--textPrimary); }
+.btn.destructive { background: transparent; color: var(--danger); }
+.btn.destructive:hover { background: var(--controlFill); }
+.btn.large { height: 36px; }
+.btn.small { height: 24px; padding: 0 8px; }
+.btn.full { width: 100%; }
+.btn .icon { width: 13px; height: 13px; }
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 28px; height: 28px; border: 0; padding: 0; border-radius: var(--controlRadius);
+  background: transparent; color: var(--textSecondary); cursor: default;
+  transition: background-color var(--hoverOut) var(--hoverEase), color var(--hoverOut) var(--hoverEase);
+}
+.icon-btn:hover { background: var(--controlFill); color: var(--textPrimary); transition-duration: var(--hoverIn); }
+.icon-btn:active { opacity: 0.85; }
+.icon-btn[disabled] { opacity: 0.35; pointer-events: none; }
+.icon-btn .icon { width: 14px; height: 14px; }
+
+/* Keyboard focus: PROPOSED — a 2 pt accent ring outside every control, shown at once (no fade).
+   The current app draws one only on its text fields (1 pt accent border + a 3 pt halo at 30 %). */
+.v-proposed :focus { outline: none; }
+.v-proposed :focus-visible,
+.v-proposed .focus-ring {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 1px;
+}
+.v-current :focus { outline: none; }
+
+/* MARK: Fields (lumenField) */
+
+.field {
+  display: flex; align-items: center; gap: 6px;
+  height: var(--fieldHeight); padding: 0 10px;
+  background: var(--field); border: 1px solid var(--fieldBorder); border-radius: var(--controlRadius);
+  color: var(--textPrimary); font: var(--tBody);
+  transition: border-color var(--focusDur) var(--hoverEase), box-shadow var(--focusDur) var(--hoverEase);
+}
+.field input {
+  flex: 1; min-width: 0; border: 0; outline: none !important; background: transparent; color: inherit; font: inherit; padding: 0;
+}
+.field input::placeholder { color: var(--textTertiary); opacity: 1; }
+.field .icon { color: var(--textTertiary); width: 12px; height: 12px; }
+.field .clear { border: 0; background: none; color: var(--textTertiary); padding: 6px; margin: -6px -6px -6px 0; display: flex; }
+.v-current .field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(111, 143, 234, 0.30); }
+.v-proposed .field:focus-within { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 1px; }
+.field.error { border-color: var(--danger); }
+.field.mono { font-family: var(--fontMono); font-size: 12px; }
+.field.large { height: 36px; }
+.field.multiline { height: auto; min-height: 56px; align-items: flex-start; padding-top: 6px; padding-bottom: 6px; }
+
+/* MARK: Native-control stand-ins (segmented, switch, pop-up, checkbox). The app uses AppKit's own
+   controls here; these only approximate their size and states. */
+
+.seg {
+  display: inline-flex; padding: 2px; gap: 2px; height: var(--controlHeight);
+  background: var(--controlFill); border-radius: 7px; border: 1px solid var(--hairline);
+}
+.seg button {
+  border: 0; background: transparent; color: var(--textPrimary); font: var(--tBody); padding: 0 12px;
+  border-radius: 5px; white-space: nowrap; height: 100%; line-height: 1;
+}
+.seg button.on { background: rgba(255, 255, 255, 0.16); font-weight: 500; }
+.seg.full { display: flex; width: 100%; }
+.seg.full button { flex: 1; }
+
+.switch {
+  position: relative; flex: none; width: 32px; height: 19px; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.16); border: 0; padding: 0;
+  transition: background-color 120ms var(--hoverEase);
+}
+.switch::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%;
+  background: #F4F5F7; box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.35);
+  transition: transform 160ms var(--hoverEase);
+}
+.switch.on { background: var(--accentFill); }
+.switch.on::after { transform: translateX(13px); }
+.switch[disabled] { opacity: 0.45; }
+
+.popup {
+  display: inline-flex; align-items: center; gap: 6px; height: var(--controlHeight); padding: 0 6px 0 10px;
+  background: var(--controlFill); border: 1px solid var(--fieldBorder); border-radius: var(--controlRadius);
+  font: var(--tBody); color: var(--textPrimary); white-space: nowrap;
+}
+.popup .icon { width: 12px; height: 12px; color: var(--textSecondary); }
+.popup[disabled] { opacity: 0.45; }
+
+.checkbox {
+  flex: none; width: 16px; height: 16px; border-radius: 4px; padding: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.34); background: transparent;
+  display: inline-flex; align-items: center; justify-content: center; color: #fff;
+}
+.checkbox .icon { width: 12px; height: 12px; opacity: 0; }
+.checkbox.on { background: var(--accentFillStrong); border-color: var(--accentFillStrong); }
+.checkbox.on .icon { opacity: 1; }
+.checkbox.mixed { background: var(--accentFillStrong); border-color: var(--accentFillStrong); }
+.checkbox.mixed::after { content: ''; width: 8px; height: 2px; border-radius: 1px; background: #fff; }
+
+/* MARK: Small parts */
+
+.avatar {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 600; letter-spacing: 0; user-select: none;
+}
+.flag { flex: none; display: block; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 4px 0 8px;
+  border-radius: var(--controlRadius); background: var(--controlFill); border: 1px solid var(--hairline);
+  font: var(--tBody); color: var(--textPrimary); white-space: nowrap;
+}
+.chip .x { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: 4px; color: var(--textSecondary); }
+.chip .x .icon { width: 10px; height: 10px; }
+.kbd { font: var(--tCaption); color: var(--textTertiary); font-variant-numeric: tabular-nums; }
+.divider-h { height: 1px; background: var(--divider); flex: none; }
+.hairline-v { width: 1px; background: var(--hairline); flex: none; }
+
+/* Status glyphs: shape and colour both carry the state (PROPOSED) */
+.status { display: inline-flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
+.status .glyph { flex: none; width: 12px; height: 12px; display: inline-flex; align-items: center; justify-content: center; }
+.status .label { overflow: hidden; text-overflow: ellipsis; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--running); }
+.ring { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--textTertiary); }
+.spinner { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid rgba(111, 143, 234, 0.25); border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; border-right-color: var(--accent); }
+}
+.reduce-motion .spinner { animation: none; border-right-color: var(--accent); }
+.progress-ring { width: 12px; height: 12px; }
+
+.bar { position: relative; height: 2px; border-radius: 1px; background: rgba(255, 255, 255, 0.10); overflow: hidden; }
+.bar > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 1px; background: var(--accentFill); transition: width 200ms linear; }
+
+/* MARK: Cards, groups, sheets */
+
+.card { background: var(--card); border: 1px solid var(--hairline); border-radius: var(--cornerRadius); }
+.sheet { background: var(--raised); color: var(--textPrimary); display: flex; flex-direction: column; overflow: hidden; }
+.sheet-header { padding: 20px 24px 16px; }
+.sheet-footer { flex: none; height: 56px; border-top: 1px solid var(--divider); display: flex; align-items: center; gap: 8px; padding: 0 24px; }
+.sheet-footer .spacer { flex: 1; }
+
+.group { background: var(--raisedInset); border: 1px solid var(--hairline); border-radius: var(--cornerRadius); }
+.group > .row-f + .row-f { border-top: 1px solid var(--divider); }
+.group-title { font: var(--tSection); color: var(--textPrimary); margin: 0 0 8px 2px; }
+.row-f { display: flex; align-items: center; gap: 16px; min-height: 44px; padding: 8px 12px; }
+.row-f .text { flex: 1; min-width: 0; }
+.row-f .title { font: var(--tLabel); }
+.row-f .hint { font: var(--tCaption); color: var(--textSecondary); margin-top: 2px; }
+.row-f .hint.warning { color: var(--warning); display: flex; gap: 5px; align-items: flex-start; }
+.row-f.stack { flex-direction: column; align-items: stretch; gap: 6px; }
+.row-f .control { flex: none; display: flex; align-items: center; gap: 8px; }
+.field-label { font: var(--tColumn); color: var(--textSecondary); margin-bottom: 6px; display: block; }
+.field-error { display: flex; gap: 5px; align-items: center; font: var(--tCaption); color: var(--danger); margin-top: 6px; }
+.field-error .icon { width: 11px; height: 11px; }
+.more-link { font: var(--tCaption); color: var(--accent); background: none; border: 0; padding: 0; cursor: default; display: inline-flex; align-items: center; gap: 3px; }
+
+.banner {
+  display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 12px; border-radius: 8px;
+  background: rgba(217, 164, 65, 0.10); border: 1px solid rgba(217, 164, 65, 0.28);
+}
+.banner .icon { color: var(--warning); }
+.banner .msg { flex: 1; min-width: 0; font: var(--tBody); color: var(--textPrimary); }
+
+/* An empty, loading or error state: one layout for all (PROPOSED LumenStateView) */
+.state { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px; }
+.state .art { margin-bottom: 16px; color: var(--textTertiary); }
+.state .title { font: var(--tSheet); color: var(--textPrimary); margin-bottom: 6px; }
+.state .msg { font: var(--tBody); color: var(--textSecondary); max-width: 360px; margin-bottom: 20px; }
+.state .actions { display: flex; gap: 8px; }
+
+.scroll { overflow: auto; scrollbar-width: none; }
+.scroll::-webkit-scrollbar { display: none; }
+.prop { font-variant-numeric: proportional-nums; }
