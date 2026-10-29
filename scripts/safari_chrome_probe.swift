@@ -456,6 +456,37 @@ if flag("--open-window") {
         }
     }
 
+    // Replacing the tab's content controller means implementing the protocol Safari's own one
+    // implements (-currentBrowserViewController and whatever follows). --embed-web instead keeps
+    // Safari's controller and puts our web view inside its view, which needs no protocol at all,
+    // and reports the controller's class so the real type is known for later.
+    if flag("--embed-web") {
+        print("\n-- embed")
+        let items = (windowClass.perform(NSSelectorFromString("allBrowserTabViewItemsFromAllWindows"))?
+            .takeUnretainedValue()) as? [AnyObject] ?? []
+        print("tabs in all windows: \(items.count)")
+        if let tab = items.first as? NSObject,
+           let content = tab.perform(NSSelectorFromString("tabContentViewController"))?.takeUnretainedValue() {
+            print("tab content controller: \(String(describing: type(of: content)))")
+            if let controller = content as? NSViewController {
+                let host = controller.view
+                print("its view: \(String(describing: type(of: host))) \(host.frame)")
+                let webView = WKWebView(frame: host.bounds)
+                webView.autoresizingMask = [.width, .height]
+                host.addSubview(webView)
+                webView.load(URLRequest(url: URL(string: "https://example.com")!))
+                print("our WKWebView is in Safari's tab")
+            }
+            let setURLString = NSSelectorFromString("setURLString:")
+            if tab.responds(to: setURLString) {
+                _ = tab.perform(setURLString, with: "https://example.com" as NSString)
+                print("set the address bar text")
+            }
+        } else {
+            print("no tab content controller to embed into")
+        }
+    }
+
     print("showing for 20 s…")
     RunLoop.main.run(until: Date().addingTimeInterval(20))
     print("still alive after 20 s")
