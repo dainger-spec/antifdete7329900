@@ -399,6 +399,7 @@ enum SafariFrameworkProbe {
         guard let window else {
             say("RESULT no window")
             say("activation policy afterwards: \(NSApp.activationPolicy().rawValue) (0 = regular, 1 = accessory)")
+            await fallbackCheck(store: store, target: target)
             return
         }
         say("RESULT window \(NSStringFromClass(type(of: window))) visible=\(window.isVisible) frame=\(NSStringFromRect(window.frame))")
@@ -426,12 +427,33 @@ enum SafariFrameworkProbe {
         say("layout and display after the load: " +
             (late.map { "raised \($0.name.rawValue): \($0.reason ?? "no reason")" } ?? "nothing raised") +
             "; visible=\(window.isVisible)")
-        await snapshot(window, webView: webView)
+        await snapshot(window, webView: webView, prefix: "")
+    }
+
+    /// What the app opens when the framework path gives up: an ordinary window with a web view on
+    /// the profile's store. Run after a caught exception, it shows whether the process can carry
+    /// on — the AppKit frames between the raise and the catch were skipped, not unwound.
+    private static func fallbackCheck(store: WKWebsiteDataStore, target: URL) async {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = store
+        let frame = NSRect(x: 200, y: 200, width: 900, height: 600)
+        let webView = WKWebView(frame: NSRect(origin: .zero, size: frame.size), configuration: configuration)
+        let window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = webView
+        window.makeKeyAndOrderFront(nil)
+        webView.load(URLRequest(url: target))
+        for _ in 0..<40 where webView.isLoading || webView.url == nil {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        say("FALLBACK in-process window: visible=\(window.isVisible) url=\(webView.url?.absoluteString ?? "nil") " +
+            "title=\(webView.title ?? "nil")")
+        await snapshot(window, webView: webView, prefix: "fallback-")
     }
 
     /// The window as drawn, for the report: its views rendered into a bitmap, which needs no
     /// screen recording permission, and the page as WebKit renders it.
-    private static func snapshot(_ window: NSWindow, webView: WKWebView) async {
+    private static func snapshot(_ window: NSWindow, webView: WKWebView, prefix: String) async {
         var windowPNG: Data?
         let raised = PBCatchException {
             guard let root = window.contentView?.superview ?? window.contentView,
@@ -440,13 +462,13 @@ enum SafariFrameworkProbe {
             windowPNG = rep.representation(using: .png, properties: [:])
         }
         if let raised { say("drawing the window raised \(raised.name.rawValue): \(raised.reason ?? "no reason")") }
-        if let windowPNG { write(windowPNG, to: "window.png") } else { say("window drawing: nothing to write") }
+        if let windowPNG { write(windowPNG, to: "\(prefix)window.png") } else { say("window drawing: nothing to write") }
         let page: NSImage? = await withCheckedContinuation { continuation in
             webView.takeSnapshot(with: nil) { image, _ in continuation.resume(returning: image) }
         }
         if let tiff = page?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
            let png = rep.representation(using: .png, properties: [:]) {
-            write(png, to: "page.png")
+            write(png, to: "\(prefix)page.png")
         } else {
             say("page snapshot: none")
         }

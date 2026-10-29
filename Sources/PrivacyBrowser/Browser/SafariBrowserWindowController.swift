@@ -127,6 +127,13 @@ final class SafariBrowserWindowController: NSObject {
             note("no popup variant gave a usable window; going on with the ordinary window")
         }
 
+        // Guarded as the popup's calls are. A raise inside a binding would skip the binding's
+        // end and leave the profile's store handed to every configuration made afterwards, and
+        // one out of -window would unwind past the fallback to the in-process window.
+        raised = []
+        let previousObserver = startObservingRaises()
+        defer { stopObservingRaises(previousObserver) }
+
         // Everything that can create a web view runs inside the binding.
         //
         // Direct creation first, and the application controller only as the fallback — the
@@ -137,12 +144,18 @@ final class SafariBrowserWindowController: NSObject {
         // controller directly never touches that branch and gets as far as laying out the
         // window. See docs/SAFARI_FRAMEWORK_PATH.md.
         SafariHooks.forgetObservations()
-        let controller = SafariHooks.bindDataStore(dataStore) { () -> NSObject? in
-            if let direct = createDirectly() { return direct }
-            note("direct creation produced no controller; trying the application controller")
-            return createViaApplicationController()
+        var created: NSObject?
+        SafariHooks.bindDataStore(dataStore) {
+            guarded("creating the window controller") {
+                if let direct = self.createDirectly() {
+                    created = direct
+                } else {
+                    self.note("direct creation produced no controller; trying the application controller")
+                    created = self.createViaApplicationController()
+                }
+            }
         }
-        guard let controller else {
+        guard let controller = created else {
             note("no window controller from any path")
             return fail()
         }
@@ -150,15 +163,19 @@ final class SafariBrowserWindowController: NSObject {
         note("window controller: \(NSStringFromClass(type(of: controller)))")
 
         // The window is a lazy nib load on NSWindowController; asking for it is what forces it.
-        guard let window = loadWindow(of: controller) else { return fail() }
+        var loaded: NSWindow?
+        guard guarded("-window", { loaded = self.loadWindow(of: controller) }), let window = loaded else { return fail() }
         self.window = window
         note("window: \(NSStringFromClass(type(of: window))), frame \(NSStringFromRect(window.frame))")
 
-        SafariHooks.bindDataStore(dataStore) {
-            finishContentSetup(of: controller)
-            showWindow(controller)
-            openFirstTab(of: controller, url: startURL)
+        let setUp = SafariHooks.bindDataStore(dataStore) {
+            guarded("setting up the window's content") {
+                self.finishContentSetup(of: controller)
+                self.showWindow(controller)
+                self.openFirstTab(of: controller, url: startURL)
+            }
         }
+        guard setUp else { return fail() }
 
         guard let contentView = window.contentView else {
             note("window.contentView -> nil; the window loaded but holds nothing")
@@ -292,18 +309,12 @@ final class SafariBrowserWindowController: NSObject {
         note("NSApplicationCrashOnExceptions: \(Self.crashOnExceptionsSetting())")
         raised = []
         tabWebView = nil
-        // Every exception raised while this runs is recorded the moment it is raised, with the
-        // stack it came from — the ones AppKit catches itself during layout included, which no
-        // caller ever sees — and any one of them ends the attempt. One the framework raised and
-        // caught on its own would end it too; none is expected here, and a false failure costs
-        // only the in-process window instead of this one.
-        let previousObserver = PBObserveRaisedExceptions { [weak self] exception, stack in
-            MainActor.assumeIsolated { () -> Void in
-                guard let self else { return }
-                self.noteRaised(exception, stack: stack)
-            }
-        }
-        defer { _ = PBObserveRaisedExceptions(previousObserver) }
+        // Any exception raised while this runs ends the attempt, the ones AppKit catches itself
+        // during layout included, which no caller ever sees. One the framework raised and caught
+        // on its own would end it too; none is expected here, and a false failure costs only the
+        // in-process window instead of this one.
+        let previousObserver = startObservingRaises()
+        defer { stopObservingRaises(previousObserver) }
         SafariHooks.forgetObservations()
 
         // Everything that can build a web view runs inside the binding, and each call into the
@@ -440,6 +451,9 @@ final class SafariBrowserWindowController: NSObject {
             window = loaded
         }
         if let window { describeWindow(window) }
+        if let controller = frameworkController { describeFields(of: controller) }
+        note("the profile's store was handed out \(SafariHooks.observations.count) times during the attempt")
+        SafariHooks.observations.prefix(8).forEach { note("  \($0)") }
         if let controller = frameworkController {
             guarded("closing the popup controller") { _ = ObjCRuntime.send(controller, "close") }
         }
@@ -462,6 +476,21 @@ final class SafariBrowserWindowController: NSObject {
         if !raised.contains(line) { raised.append(line) }
         note("\(what) raised \(line); caught, so the attempt ends and the process does not")
         return false
+    }
+
+    /// Records every exception raised from here on, the moment it is raised and with the stack it
+    /// came from. Returns the observer it replaced, for `stopObservingRaises`.
+    private func startObservingRaises() -> PBRaisedExceptionObserver? {
+        PBObserveRaisedExceptions { [weak self] exception, stack in
+            MainActor.assumeIsolated { () -> Void in
+                guard let self else { return }
+                self.noteRaised(exception, stack: stack)
+            }
+        }
+    }
+
+    private func stopObservingRaises(_ previous: PBRaisedExceptionObserver?) {
+        _ = PBObserveRaisedExceptions(previous)
     }
 
     /// An exception as it is raised, with the stack it came from — printed at once, because the
@@ -515,6 +544,28 @@ final class SafariBrowserWindowController: NSObject {
         note("toolbar: \(window.toolbar.map { "\(NSStringFromClass(type(of: $0))), visible \($0.isVisible)" } ?? "none"); " +
              "title bar accessories: " +
              window.titlebarAccessoryViewControllers.map { NSStringFromClass(type(of: $0)) }.joined(separator: ", ").ifEmpty("none"))
+    }
+
+    /// The two address fields the controller can hold — the toolbar's and the popup's own — and
+    /// where each is, in the window's view tree or not yet.
+    private func describeFields(of controller: NSObject) {
+        var toolbarField: NSObject?
+        guarded("-unifiedField") { toolbarField = ObjCRuntime.callReturningObject(controller, "unifiedField").value }
+        note("-unifiedField -> \(describeView(toolbarField))")
+        note("_popupWindowUnifiedField -> \(describeView(objectIvar(controller, "_popupWindowUnifiedField")))")
+    }
+
+    private func describeView(_ object: NSObject?) -> String {
+        guard let object else { return "nil" }
+        guard let view = object as? NSView else { return NSStringFromClass(type(of: object)) }
+        return "\(NSStringFromClass(type(of: view))), superview \(view.superview.map { NSStringFromClass(type(of: $0)) } ?? "nil"), " +
+            "in a window \(view.window != nil), hidden \(view.isHidden), frame \(NSStringFromRect(view.frame))"
+    }
+
+    /// An object-typed instance variable, read without calling anything on the object.
+    private func objectIvar(_ object: NSObject, _ name: String) -> NSObject? {
+        guard let ivar = class_getInstanceVariable(type(of: object), name) else { return nil }
+        return object_getIvar(object, ivar) as? NSObject
     }
 
     /// The views of the framework's address-field class in the window, subclasses included — the

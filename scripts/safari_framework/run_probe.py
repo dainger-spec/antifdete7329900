@@ -39,6 +39,7 @@ STEPS = [
     "popup-mode",       # initWithBrowsingMode:0 isPopupWindow:YES
     "popup-hidden",     # +hiddenEmptyBrowserWindowControllerWithBrowsingMode:profileIdentifier:isPopupWindow:
     "popup:crash-off",  # popup again, with NSApplicationCrashOnExceptions set to NO rather than unset
+    "window:chrome",    # the whole path as -safari-chrome runs it: the popups, then the ordinary window
 ]
 
 # Run as the app runs them, without NSApplicationCrashOnExceptions: whether an exception raised
@@ -50,6 +51,9 @@ AS_THE_APP_RUNS = {"popup", "popup-nofield", "popup-mode", "popup-hidden"}
 VARIANT_ARGUMENTS = {
     # Set, not merely absent: whether AppKit tells the two apart is what it measures.
     "crash-off": ["-NSApplicationCrashOnExceptions", "NO"],
+    # As the app runs with the launch argument. Last, because the defaults system would read
+    # whatever followed it as its value.
+    "chrome": ["-NSApplicationCrashOnExceptions", "NO", "-safari-chrome"],
 }
 
 CRASH_DIRS = [
