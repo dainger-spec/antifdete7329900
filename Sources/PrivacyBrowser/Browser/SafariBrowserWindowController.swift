@@ -15,10 +15,11 @@ import WebKit
 /// names move between releases and the point of this path is to find out what this macOS
 /// actually offers.
 ///
-/// With `-safari-chrome` a popup window is tried before that sequence (`PopupVariant`): the
-/// framework lays a popup out without the toolbar's address bar, which is where the ordinary
-/// window dies. Every call it makes into the framework is guarded, so an exception raised there
-/// ends the attempt and not the process.
+/// With `-safari-chrome` a popup window is tried before that sequence (`PopupVariant`), in case
+/// one is laid out without the toolbar's address bar, which is where the ordinary window dies.
+/// Measured, it is not: a popup loads the same window with the same toolbar and raises at the
+/// same point. Every call into the framework is guarded, on both routes, so an exception it
+/// raises ends the attempt rather than the process wherever AppKit lets the exception reach us.
 ///
 /// The profile's `WKWebsiteDataStore` is bound through `SafariHooks.bindDataStore`, which wraps
 /// creation rather than following it: the framework makes its own store from a profile
@@ -27,10 +28,11 @@ import WebKit
 /// Every failure returns nil with the trace intact and leaves the process a regular app, so the
 /// caller can fall back to the in-process web view path with nothing to undo. On macOS 15 and 26
 /// the path does not reach a usable window: it gets as far as the window's address bar laying
-/// itself out and dies there on a nil attribute. That failure is a raised `NSException`, which
-/// Swift cannot catch, so it takes the process with it — which is why nothing here runs unless
-/// the framework path was asked for on the command line. docs/SAFARI_FRAMEWORK_PATH.md has the
-/// measurements.
+/// itself out and fails there on a nil attribute, a raised `NSException`. On macOS 15 that
+/// exception comes out of `-window`, is caught, and the profile falls back; on macOS 26 AppKit
+/// ends the process inside its layout pass, before anything can catch it — which is why nothing
+/// here runs unless the framework path was asked for on the command line.
+/// docs/SAFARI_FRAMEWORK_PATH.md has the measurements.
 @MainActor
 final class SafariBrowserWindowController: NSObject {
     let profileID: UUID
@@ -50,13 +52,14 @@ final class SafariBrowserWindowController: NSObject {
     private(set) var boundDataStore: WKWebsiteDataStore?
     /// The popup tab's own web view, for when it is not (yet) in the window's view tree.
     private var tabWebView: WKWebView?
-    /// Exceptions raised during the current popup attempt, as "name: reason". Any one ends it.
+    /// Exceptions raised during the current attempt, as "name: reason". Any one ends a popup's.
     private var raised: [String] = []
 
-    /// Ways of getting a window controller laid out without the toolbar's address bar, the view
-    /// that raises in layout in the ordinary window (docs/SAFARI_FRAMEWORK_PATH.md, §1). A window
-    /// a page opens is a popup to the framework, and a popup carries its own, smaller address
-    /// field instead — or none. The raw value is the probe step that runs it on its own.
+    /// Ways of asking for a window controller without the toolbar's address bar, the view that
+    /// raises in layout in the ordinary window (docs/SAFARI_FRAMEWORK_PATH.md, §1): a window a page
+    /// opens is a popup to the framework, with an address field of its own. None gets one — a
+    /// popup loads the same toolbar, its own field is a subclass with the same layout, and every
+    /// variant fails (§9). The raw value is the probe step that runs it on its own.
     enum PopupVariant: String, CaseIterable {
         /// `[[BrowserWindowController alloc] initAsPopupWindow:YES]`.
         case initAsPopup = "popup"
@@ -70,8 +73,11 @@ final class SafariBrowserWindowController: NSObject {
         case hiddenEmptyPopup = "popup-hidden"
     }
 
-    /// The order `-safari-chrome` tries them in before the ordinary window.
-    static let popupOrder: [PopupVariant] = PopupVariant.allCases
+    /// What `-safari-chrome` tries before the ordinary window: the popup initialiser alone. The
+    /// rest are for the probe, one per process. In the app each would only build another window
+    /// that fails the same way, and the empty-window factory gets as far as a half-made tab that
+    /// the next window then picks up and aborts on (§9).
+    static let popupOrder: [PopupVariant] = [.initAsPopup]
 
     /// `-safari-chrome` on the command line: every profile opened in this run takes the framework
     /// path, whatever its own `useSafariChrome` says. Nothing stored changes, so the next run
@@ -118,8 +124,8 @@ final class SafariBrowserWindowController: NSObject {
     func open(dataStore: WKWebsiteDataStore?, startURL: URL?) -> NSWindow? {
         guard frameworkReady() else { return fail() }
 
-        // -safari-chrome: a popup first. It has no toolbar address bar to lay out, and that is
-        // where the window below dies (docs/SAFARI_FRAMEWORK_PATH.md, §1 and §9).
+        // -safari-chrome: a popup first, in case it is laid out without the toolbar address bar
+        // the window below dies on. Measured, it is not (docs/SAFARI_FRAMEWORK_PATH.md, §9).
         if Self.enabledByLaunchArgument {
             for variant in Self.popupOrder {
                 if let window = attemptPopup(variant, dataStore: dataStore, startURL: startURL) { return window }
@@ -220,8 +226,8 @@ final class SafariBrowserWindowController: NSObject {
     /// Undoes the activation-policy change and drops everything held, then reports nil.
     private func fail() -> NSWindow? {
         SafariHooks.undoShell()
-        if let controller = frameworkController { ObjCRuntime.send(controller, "close") }
-        window?.orderOut(nil)
+        adoptLoadedWindow()
+        retireFrameworkWindow()
         frameworkController = nil
         window = nil
         webView = nil
@@ -443,21 +449,12 @@ final class SafariBrowserWindowController: NSObject {
     /// variant — or the ordinary window, or the in-process one — starts from nothing.
     private func abandonPopup(_ variant: PopupVariant, because reason: String) -> NSWindow? {
         note("popup path, \(variant.rawValue): giving up — \(reason)")
-        // When -window itself raised, the nib had loaded and the window exists; only the
-        // controller has it, and asking again returns it without loading anything.
-        if window == nil, let controller = frameworkController, flag(controller, "isWindowLoaded") == "true" {
-            var loaded: NSWindow?
-            guarded("-window, already loaded") { loaded = ObjCRuntime.callReturningObject(controller, "window").value as? NSWindow }
-            window = loaded
-        }
+        adoptLoadedWindow()
         if let window { describeWindow(window) }
         if let controller = frameworkController { describeFields(of: controller) }
         note("the profile's store was handed out \(SafariHooks.observations.count) times during the attempt")
         SafariHooks.observations.prefix(8).forEach { note("  \($0)") }
-        if let controller = frameworkController {
-            guarded("closing the popup controller") { _ = ObjCRuntime.send(controller, "close") }
-        }
-        if let window { guarded("ordering the popup window out") { window.orderOut(nil) } }
+        retireFrameworkWindow()
         SafariHooks.undoShell()
         frameworkController = nil
         window = nil
@@ -465,6 +462,26 @@ final class SafariBrowserWindowController: NSObject {
         tabWebView = nil
         boundDataStore = nil
         return nil
+    }
+
+    /// When -window itself raised, the nib had loaded and the window exists; only the controller
+    /// has it, and asking again returns it without loading anything.
+    private func adoptLoadedWindow() {
+        guard window == nil, let controller = frameworkController, flag(controller, "isWindowLoaded") == "true" else { return }
+        var loaded: NSWindow?
+        guarded("-window, already loaded") { loaded = ObjCRuntime.callReturningObject(controller, "window").value as? NSWindow }
+        window = loaded
+    }
+
+    /// Takes a window that failed half-built out of AppKit's way. Closing it is not enough: its
+    /// layout was cut short, so the next display cycle lays it out again, toolbar and all, and
+    /// the address field raises there — outside any guard, where AppKit ends the process.
+    /// Measured on macOS 15. Without its toolbar the field is in no window, and nothing lays it
+    /// out again.
+    private func retireFrameworkWindow() {
+        if let window { guarded("detaching the toolbar") { window.toolbar = nil } }
+        if let controller = frameworkController { guarded("closing the controller") { _ = ObjCRuntime.send(controller, "close") } }
+        if let window { guarded("ordering the window out") { window.orderOut(nil) } }
     }
 
     /// Runs one call into the framework, catching an Objective-C exception it raises — which
