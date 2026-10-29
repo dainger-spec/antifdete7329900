@@ -160,7 +160,7 @@ enum SafariFrameworkProbe {
             say("  \(instance.count) instance methods, \(classSide.count) class methods, \(ivars.count) ivars, \(properties.count) properties")
             for interesting in ["init", "window", "profile", "webview", "datastore", "configuration", "shared", "new", "tab"] {
                 let hits = (instance + classSide).filter { $0.range(of: interesting, options: .caseInsensitive) != nil }
-                if !hits.isEmpty { say("  *\(interesting)*: \(hits.prefix(14).map { $0.split(separator: " ").first.map { String($0) } ?? "" }.joined(separator: ", "))") }
+                if !hits.isEmpty { say("  *\(interesting)*: \(hits.prefix(14).map { $0.split(separator: " ").first.map(String.init) ?? "" }.joined(separator: ", "))") }
             }
             let storeIvars = ivars.filter { $0.range(of: "store", options: .caseInsensitive) != nil || $0.range(of: "profile", options: .caseInsensitive) != nil }
             say("  ivars naming a store or a profile: \(storeIvars.isEmpty ? "none" : storeIvars.joined(separator: " | "))")
@@ -247,9 +247,7 @@ enum SafariFrameworkProbe {
         }
         say("after loading: url=\(webView.url?.absoluteString ?? "nil") title=\(webView.title ?? "nil")")
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
-        let records: [WKWebsiteDataRecord] = await withCheckedContinuation { continuation in
-            store.fetchDataRecords(ofTypes: types) { continuation.resume(returning: $0) }
-        }
+        let records = await store.dataRecords(ofTypes: types)
         let names = records.map(\.displayName).sorted()
         say("records in the PROFILE's store after the load: \(names.isEmpty ? "none" : names.joined(separator: ", "))")
         say("the profile's store holds the loaded origin: \(names.contains { target.host?.hasSuffix($0) == true })")

@@ -179,12 +179,9 @@ enum ObjCRuntime {
     ///
     /// A `_new…` method hands back +1 and this never releases it: one over-retained object per
     /// window beats a double free in a path whose whole job is to survive the unknown.
-    static func callReturningObject(_ receiver: Any, _ name: String) -> (value: NSObject?, reason: String) {
+    static func callReturningObject(_ receiver: AnyObject, _ name: String) -> (value: NSObject?, reason: String) {
         let selector = NSSelectorFromString(name)
-        // `receiver` may be a class object, whose Swift type is a metatype; `as AnyObject` is
-        // what turns that back into the Objective-C class object the runtime wants.
-        let target = receiver as AnyObject
-        guard let cls: AnyClass = object_getClass(target) else { return (nil, "\(name) -> receiver has no class") }
+        guard let cls: AnyClass = object_getClass(receiver) else { return (nil, "\(name) -> receiver has no class") }
         guard let method = class_getInstanceMethod(cls, selector) else { return (nil, "\(name) -> not implemented") }
         let returnTypePointer = method_copyReturnType(method)
         let returnType = String(cString: returnTypePointer)
@@ -201,10 +198,10 @@ enum ObjCRuntime {
         let returned: UnsafeRawPointer?
         if colons == 0 {
             typealias Call = @convention(c) (AnyObject, Selector) -> UnsafeRawPointer?
-            returned = unsafeBitCast(imp, to: Call.self)(target, selector)
+            returned = unsafeBitCast(imp, to: Call.self)(receiver, selector)
         } else {
             typealias Call = @convention(c) (AnyObject, Selector, AnyObject?) -> UnsafeRawPointer?
-            returned = unsafeBitCast(imp, to: Call.self)(target, selector, nil)
+            returned = unsafeBitCast(imp, to: Call.self)(receiver, selector, nil)
         }
         guard let returned else { return (nil, "\(name) -> nil") }
         guard let value = Unmanaged<AnyObject>.fromOpaque(returned).takeUnretainedValue() as? NSObject else {
