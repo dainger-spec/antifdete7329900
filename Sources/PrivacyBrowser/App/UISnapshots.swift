@@ -104,6 +104,15 @@ enum UISnapshots {
             problems += await Shot(name: "sheet-cookie-import", size: CGSize(width: 680, height: 560), titled: false) {
                 CookieImportView(profile: northwind).environmentObject(model)
             }.capture(into: folder)
+            problems += await Shot(name: "sheet-cookie-export", size: CGSize(width: 480, height: 400), titled: false) {
+                CookieExportView(profile: northwind).environmentObject(model)
+            }.capture(into: folder)
+            problems += await Shot(name: "sheet-profile-export", size: CGSize(width: 480, height: 420), titled: false) {
+                ProfileExportView(profile: northwind).environmentObject(model)
+            }.capture(into: folder)
+            problems += await Shot(name: "sheet-profile-import", size: CGSize(width: 480, height: 300), titled: false) {
+                ProfileImportView().environmentObject(model)
+            }.capture(into: folder)
         } else {
             print("FAIL could not make a sample profile summary")
             problems += 1
