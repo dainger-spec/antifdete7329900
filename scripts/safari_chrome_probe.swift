@@ -293,12 +293,19 @@ if flag("--search-dump") {
         var count: UInt32 = 0
         if let methods = class_copyMethodList(type(of: provider), &count) {
             let names = (0..<Int(count)).map { String(cString: sel_getName(method_getName(methods[$0]))) }.sorted()
-            print("its selectors with 'uggestion' or 'emplate':")
-            for name in names where name.contains("uggestion") || name.contains("emplate") { print("   -\(name)") }
+            print("all of its selectors:")
+            for name in names { print("   -\(name)") }
             free(methods)
         }
-        for key in ["suggestionsURLTemplate", "searchURLTemplate", "name", "identifier"] {
-            print("\(key): \(String(describing: try? provider.value(forKey: key)))")
+        // Only what it answers to: KVC on a key it does not have throws, and that exception
+        // cannot be caught from Swift.
+        for key in ["suggestionsURLTemplate", "searchURLTemplate", "shortName", "name", "identifier",
+                    "providerIdentifier", "suggestionsURLString", "supportsSuggestions"] {
+            guard provider.responds(to: NSSelectorFromString(key)) else {
+                print("\(key): (no such selector)")
+                continue
+            }
+            print("\(key): \(String(describing: provider.value(forKey: key)))")
         }
     } else {
         print("no defaultSearchProvider")
