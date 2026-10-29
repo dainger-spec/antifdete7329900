@@ -606,14 +606,15 @@ final class SelfTest {
 
         // What the proxy answered for this run, and what the page reported, asked through the same
         // proxy from a window of ours. Polled: the chrome's page loads are on their own schedule.
-        struct Entry { let target: String; let path: String }
+        struct Entry { let target: String; let path: String; let cookie: String }
         func leakLog() async -> (targets: [Entry], reports: [[String: Any]]) {
             let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
             let text = try? await loadThroughProxy(repository, proxy, url: url)
             guard let data = text?.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], []) }
             let targets = (object["targets"] as? [[String: Any]] ?? []).map {
-                Entry(target: ($0["target"] as? String ?? "").lowercased(), path: $0["path"] as? String ?? "")
+                Entry(target: ($0["target"] as? String ?? "").lowercased(), path: $0["path"] as? String ?? "",
+                      cookie: $0["cookie"] as? String ?? "")
             }
             return (targets, object["reports"] as? [[String: Any]] ?? [])
         }
@@ -703,6 +704,13 @@ final class SelfTest {
               probes.count == 3 && probes.allSatisfy { $0.target == "probe-\(run).\(domain):80" },
               probes.map { "\($0.target) \($0.path)" }.joined(separator: " | "))
 
+        // Cookies imported while the profile runs in its own process go into its store at once,
+        // and its next request carries them (the second window's start page, below).
+        let imported = ImportedCookie(name: "pbimported", value: run, domain: "start-\(run).\(domain)", hostOnly: true)
+        let importOutcome = try? await manager.importCookies([imported], into: profile.id)
+        check("Safari chrome: cookies imported into the running profile go into its own process's store",
+              importOutcome == .applied(stored: 1, refused: []), String(describing: importOutcome))
+
         // Another window, as ⌘N opens one: Safari builds a new web view for it, and its start page
         // goes through the proxy as well.
         let before = log.targets.filter { $0.path.hasPrefix(startPath) }.count
@@ -716,6 +724,9 @@ final class SelfTest {
         }
         check("Safari chrome: a second window of the profile loads through its proxy", after > before,
               "start page requests: \(before) before, \(after) after")
+        check("Safari chrome: the second window's request carries the cookie imported meanwhile",
+              log.targets.contains { $0.path.hasPrefix(startPath) && $0.cookie.contains("pbimported=\(run)") },
+              log.targets.filter { $0.path.hasPrefix(startPath) }.map(\.cookie).joined(separator: " | "))
 
         // Long enough for what Safari's chrome does on a timer (the page-text donation runs about
         // five seconds after a load) to happen while the capture is still looking.

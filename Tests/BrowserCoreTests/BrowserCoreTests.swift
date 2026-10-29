@@ -171,6 +171,26 @@ final class ProfileRepositoryTests: XCTestCase {
         try reopened.remove(id: reopened.allEntries()[0].id)
         XCTAssertEqual(try repo.passwordVault(for: profile.id).allEntries().count, 1)
     }
+
+    /// The manager's password window and the profile's own process hold the same file open at
+    /// once: a login one of them saves is neither lost to nor hidden from the other.
+    func testPasswordVaultOpenTwiceKeepsBothProcessesChanges() throws {
+        let profile = try repo.create(name: "Two processes", configuration: ProfileConfiguration())
+        let manager = try repo.passwordVault(for: profile.id)
+        let profileProcess = try repo.passwordVault(for: profile.id)
+        try manager.upsert(PasswordEntry(origin: "https://a.example", username: "u", password: "1"))
+        // The other copy sees it without being reopened…
+        XCTAssertEqual(profileProcess.allEntries().map(\.origin), ["https://a.example"])
+        // …and a change it makes is made on top of it, not on what it read when it was opened.
+        try profileProcess.upsert(PasswordEntry(origin: "https://b.example", username: "u", password: "2"))
+        XCTAssertEqual(manager.allEntries().map(\.origin), ["https://a.example", "https://b.example"])
+        let first = try XCTUnwrap(manager.allEntries().first)
+        try profileProcess.markUsed(id: first.id)
+        try manager.remove(id: try XCTUnwrap(manager.allEntries().last).id)
+        XCTAssertEqual(profileProcess.allEntries().map(\.origin), ["https://a.example"])
+        XCTAssertNotNil(profileProcess.allEntries().first?.lastUsedAt)
+        XCTAssertEqual(try repo.passwordVault(for: profile.id).allEntries().count, 1)
+    }
 }
 
 final class ArchiveTests: XCTestCase {

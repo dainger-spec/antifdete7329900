@@ -217,14 +217,7 @@ enum ProfileSessionHost {
                 Task { @MainActor [weak self] in
                     guard let self, let manager = self.manager else { return }
                     let outcome = try? await manager.importCookies(cookies, into: self.profileID)
-                    switch outcome {
-                    case .applied(let stored, let refused):
-                        ProfileSessionHost.send(.cookiesImported(accepted: stored, refused: refused.count))
-                    case .queued(let queued):
-                        ProfileSessionHost.send(.cookiesImported(accepted: queued, refused: 0))
-                    case nil:
-                        ProfileSessionHost.send(.error(L("cookies.error.busy")))
-                    }
+                    ProfileSessionHost.send(.cookiesImported(outcome))
                 }
             case .stopWarmUp:
                 manager?.stopWarmUp(profileID)

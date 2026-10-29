@@ -246,7 +246,8 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         if plain_path != "/pb-served.json":
             SERVED.append(plain_path)
         if not plain_path.startswith("/pb-leak/log.json"):
-            TARGETS.append({"via": via.split()[0] if via else "", "target": target, "path": path})
+            TARGETS.append({"via": via.split()[0] if via else "", "target": target, "path": path,
+                            "cookie": header(request, "Cookie")})
         served = list(SERVED)
     if plain_path == "/pb-geo.json":
         params = {key: values[0] for key, values in parse_qs(query).items()}

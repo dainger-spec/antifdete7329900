@@ -73,6 +73,8 @@ final class ProfileManager: ObservableObject {
     private var lookupsInFlight: Set<UUID> = []
     /// The session warm-up robot of each profile that used one since unlock.
     private var warmUpRobots: [UUID: WarmUpRobot] = [:]
+    /// A cookie import sent to a profile's own process, waiting for its answer.
+    private var pendingCookieImports: [UUID: CheckedContinuation<CookieImportOutcome, Error>] = [:]
     /// Where the warm-up of each profile running in its own process has got to, as that process
     /// last reported it. The one the manager keeps for a profile it runs itself comes from the
     /// robot instead (`warmUpStatus(of:)`).
@@ -302,14 +304,16 @@ final class ProfileManager: ObservableObject {
                 self.reportedWarmUp[id] = status
                 self.onWarmUpProgress?(id)
                 self.objectWillChange.send()
-            case .cookiesImported(let accepted, let refused):
-                self.log.notice("Profile \(id.uuidString, privacy: .public) imported \(accepted, privacy: .public) cookies, \(refused, privacy: .public) refused")
+            case .cookiesImported(let outcome):
+                let pending = self.pendingCookieImports.removeValue(forKey: id)
+                if let outcome { pending?.resume(returning: outcome) } else { pending?.resume(throwing: CookieImportError.busy) }
             case .networkReport(let report):
                 self.onNetworkReport?(id, report)
             }
         }
         child.onExit = { [weak self] status in
             guard let self, self.children[id] === child else { return }
+            self.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.children[id] = nil
             self.runningProfileIDs.remove(id)
             // A warm-up cannot outlive the process it ran in; what it collected is still shown.
@@ -666,7 +670,7 @@ final class ProfileManager: ObservableObject {
 
     // MARK: Cookie import
 
-    enum CookieImportOutcome: Equatable {
+    enum CookieImportOutcome: Equatable, Codable {
         /// Into the running profile's store now; `refused`: those WebKit did not keep.
         case applied(stored: Int, refused: [ImportedCookie])
         /// The profile is stopped (its website data is sealed): queued, encrypted, for its next
@@ -682,6 +686,19 @@ final class ProfileManager: ObservableObject {
     /// Imports `cookies` into a profile: at once when it runs, else at its next launch, before
     /// its first page loads.
     func importCookies(_ cookies: [ImportedCookie], into id: UUID) async throws -> CookieImportOutcome {
+        // A profile in its own process imports into its own store, and says how it went.
+        if let child = children[id] {
+            guard pendingCookieImports[id] == nil else { throw CookieImportError.busy }
+            return try await withCheckedThrowingContinuation { continuation in
+                pendingCookieImports[id] = continuation
+                child.send(.importCookies(cookies))
+                // A process that does not answer (it is sealing on its way out) is not waited on.
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 30_000_000_000)
+                    self?.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
+                }
+            }
+        }
         if let store = sessions[id]?.dataStore {
             let result = await CookieStoreImport.apply(cookies, to: store.httpCookieStore)
             log.notice("Imported \(result.stored) cookies into a running profile, \(result.refused.count) refused")

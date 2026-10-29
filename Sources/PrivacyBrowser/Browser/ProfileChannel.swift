@@ -39,7 +39,9 @@ enum ProfileEvent: Codable {
     /// Where the warm-up of this profile has got to; sent as the run goes on, and once more when
     /// it ends. Everything the warm-up screen and the profile list show comes from here.
     case warmUp(WarmUpStatus)
-    case cookiesImported(accepted: Int, refused: Int)
+    /// The answer to `importCookies`: what the profile's store did with them, or nil when the
+    /// profile could not take them (it was starting or stopping).
+    case cookiesImported(ProfileManager.CookieImportOutcome?)
     /// The answer to `checkNetwork`.
     case networkReport(ProfileNetworkReport)
 }
