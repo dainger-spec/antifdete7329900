@@ -267,6 +267,45 @@ final class HostedWebViewController: NSViewController {
 }
 var hostedContent: NSViewController?
 
+// --search-dump: what Safari's search providers look like in this process. The address bar's
+// suggestions need a provider carrying a suggestions URL template, and the competitor's
+// suggestions work, so the list must be loadable properly rather than stubbed away.
+if flag("--search-dump") {
+    print("\n== search providers ==")
+    guard let cls = NSClassFromString("SearchProvidersController") as? NSObject.Type else {
+        print("no SearchProvidersController")
+        exit(1)
+    }
+    let controller = cls.init()
+    for selectorName in ["_loadAllProviders", "reloadProviders"] where controller.responds(to: NSSelectorFromString(selectorName)) {
+        print("calling -\(selectorName)…")
+        _ = controller.perform(NSSelectorFromString(selectorName))
+    }
+    for key in ["defaultSearchEngineName", "privateSearchEngineName", "countryCode", "systemLanguage", "deviceType"] {
+        print("\(key): \(String(describing: controller.value(forKey: key)))")
+    }
+    let list = controller.perform(NSSelectorFromString("providerList"))?.takeUnretainedValue() as? [AnyObject] ?? []
+    print("providerList: \(list.count) providers")
+    for provider in list.prefix(4) { print("   \(provider)") }
+    if let provider = controller.perform(NSSelectorFromString("defaultSearchProvider"))?.takeUnretainedValue() as? NSObject {
+        print("\ndefaultSearchProvider: \(String(describing: type(of: provider)))")
+        print(provider)
+        var count: UInt32 = 0
+        if let methods = class_copyMethodList(type(of: provider), &count) {
+            let names = (0..<Int(count)).map { String(cString: sel_getName(method_getName(methods[$0]))) }.sorted()
+            print("its selectors with 'uggestion' or 'emplate':")
+            for name in names where name.contains("uggestion") || name.contains("emplate") { print("   -\(name)") }
+            free(methods)
+        }
+        for key in ["suggestionsURLTemplate", "searchURLTemplate", "name", "identifier"] {
+            print("\(key): \(String(describing: try? provider.value(forKey: key)))")
+        }
+    } else {
+        print("no defaultSearchProvider")
+    }
+    exit(0)
+}
+
 if flag("--prepare") {
     // Safari's BrowserWindowController aborts in -windowDidLoad unless the shared search engine
     // observer exists: "ASSERTION FAILURE: sharedSearchEngineObserver in
