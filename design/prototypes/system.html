@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ru" class="v-proposed">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lumen system — prototype</title>
+<link rel="stylesheet" href="kit/lumen.css">
+<style>
+  .window { flex-direction: column; background: var(--surface); padding: 28px 32px; gap: 18px; overflow: hidden; }
+  .sec-title { font: 600 15px/20px var(--font); color: var(--textPrimary); }
+  .sec-sub { font: var(--tCaption); color: var(--textSecondary); margin-top: 2px; }
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .panel { background: var(--card); border: 1px solid var(--hairline); border-radius: 10px; padding: 16px 18px; }
+  .panel h3 { margin: 0 0 12px; font: 600 12px/16px var(--font); color: var(--textSecondary); letter-spacing: 0.02em; display: flex; justify-content: space-between; }
+  .panel h3 .tag { font-weight: 500; color: var(--textTertiary); }
+  .type-row { display: grid; grid-template-columns: 118px 1fr; align-items: baseline; gap: 12px; padding: 7px 0; border-top: 1px solid var(--divider); }
+  .type-row:first-of-type { border-top: 0; }
+  .type-row .spec { font: 400 11px/14px var(--fontMono); color: var(--textTertiary); }
+  .type-row .spec b { color: var(--textSecondary); font-weight: 500; }
+  .type-row .sample { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .type-row .role { font: 400 11px/14px var(--font); color: var(--textTertiary); margin-top: 2px; }
+  .ratio { display: flex; gap: 6px; align-items: center; margin-top: 12px; font: 400 11px/14px var(--fontMono); color: var(--textTertiary); flex-wrap: wrap; }
+  .ratio span { padding: 2px 6px; border-radius: 4px; background: var(--controlFill); color: var(--textSecondary); }
+  .ratio span.bad { color: var(--warning); }
+  .ctx { margin-top: 14px; padding: 14px; border-radius: 8px; background: var(--raised); border: 1px solid var(--hairline); }
+  /* the old scale, applied inside .old */
+  .old { --tTitle: 600 20px/25px var(--fontDisplay); --tSheet: 600 15px/20px var(--font); --tSection: 600 13px/17px var(--font); --tBody: 400 13px/17px var(--font); --tLabel: 500 13px/17px var(--font); --tSecondary: 400 12px/16px var(--font); --tCaption: 400 11px/14px var(--font); --tColumn: 500 11px/14px var(--font); --textTertiary: #7C8494; }
+  .num-table { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .num-col { font: var(--tBody); }
+  .num-col div { padding: 3px 0; border-top: 1px solid var(--divider); display: flex; gap: 8px; }
+  .num-col .v { text-align: left; width: 140px; }
+  .prop { font-variant-numeric: proportional-nums; }
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .space-bar { display: flex; align-items: center; gap: 10px; font: var(--tCaption); color: var(--textSecondary); padding: 3px 0; }
+  .space-bar i { display: block; height: 10px; background: var(--accentFill); border-radius: 2px; }
+  .space-bar code { width: 28px; font: 400 11px/14px var(--fontMono); color: var(--textPrimary); text-align: right; }
+  .sheets-cmp { display: flex; flex-direction: column; gap: 6px; }
+  .sheet-bar { display: flex; align-items: center; gap: 10px; font: var(--tCaption); color: var(--textSecondary); }
+  .sheet-bar i { display: block; height: 14px; border-radius: 3px; background: rgba(255,255,255,.14); }
+  .sheet-bar.new i { background: var(--accentFill); }
+  .sheet-bar code { width: 34px; text-align: right; font: 400 11px/14px var(--fontMono); color: var(--textPrimary); }
+  .ctrl-cmp { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+  .ctrl-cmp .lbl { font: 400 10px/12px var(--fontMono); color: var(--textTertiary); margin-top: 4px; text-align: center; }
+  table.cr { border-collapse: collapse; width: 100%; font: var(--tCaption); }
+  table.cr th { text-align: left; font: var(--tColumn); color: var(--textTertiary); padding: 4px 6px; border-bottom: 1px solid var(--divider); }
+  table.cr td { padding: 3px 6px; border-bottom: 1px solid var(--divider); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  table.cr td.fail { color: var(--danger); font-weight: 600; }
+  table.cr td.pass { color: var(--textSecondary); }
+  table.cr td.better { color: var(--running); font-weight: 600; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+  .states { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .mini { height: 230px; border-radius: 10px; border: 1px solid var(--hairline); background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
+  .mini .cap { font: var(--tColumn); color: var(--textTertiary); padding: 8px 10px; border-bottom: 1px solid var(--divider); }
+  .mini .state { padding: 16px; flex: 1; }
+  .mini .state .msg { margin-bottom: 14px; }
+  .a11y { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .focus-demo { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .hit { position: relative; display: inline-flex; }
+  .hit::after { content: ''; position: absolute; inset: 0; outline: 1px dashed rgba(242, 193, 61, 0.9); }
+  .hit.small::after { outline-color: rgba(229, 99, 92, 0.95); }
+  .hit-pair { display: flex; gap: 22px; align-items: center; }
+  .hit-pair .lbl { font: var(--tCaption); color: var(--textSecondary); margin-top: 6px; }
+  .cb-sim { display: flex; gap: 14px; }
+  .cb-sim > div { flex: 1; }
+  .cb-sim .status { display: flex; padding: 4px 0; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- Colour-vision simulations (Machado et al. 2009, severity 1.0) to check that statuses survive without hue -->
+  <filter id="deuter"><feColorMatrix type="matrix" values="0.367 0.861 -0.228 0 0  0.280 0.673 0.047 0 0  -0.012 0.043 0.969 0 0  0 0 0 1 0"/></filter>
+  <filter id="protan"><feColorMatrix type="matrix" values="0.152 1.053 -0.205 0 0  0.115 0.786 0.099 0 0  -0.004 -0.048 1.052 0 0  0 0 0 1 0"/></filter>
+  <filter id="gray"><feColorMatrix type="saturate" values="0"/></filter>
+</svg>
+<script src="kit/wordmark.js"></script>
+<script src="kit/geometry.js"></script>
+<script src="kit/strings.js"></script>
+<script src="kit/icons.js"></script>
+<script src="kit/lumen.js"></script>
+<script src="kit/contrast-data.js"></script>
+<script>
+(function () {
+  'use strict';
+  const { L, H, icon, params } = Lumen;
+  const en = Lumen.lang === 'en';
+  const T = (ruText, enText) => (en ? enText : ruText);
+  const E = Lumen.escapeHTML;
+
+  const SECTIONS = {
+    type: { title: T('Шрифт', 'Type'), w: 1180, h: 800 },
+    numerals: { title: T('Цифры', 'Numerals'), w: 1180, h: 420 },
+    metrics: { title: T('Отступы и размеры', 'Metrics'), w: 1180, h: 600 },
+    contrast: { title: T('Контраст', 'Contrast'), w: 1180, h: 820 },
+    states: { title: T('Состояния', 'States'), w: 1180, h: 360 },
+    a11y: { title: T('Доступность', 'Accessibility'), w: 1180, h: 520 },
+  };
+  const id = SECTIONS[params.get('state')] ? params.get('state') : 'type';
+  const sec = SECTIONS[id];
+  const win = Lumen.shell({ title: T('Система Lumen — шкалы, токены, состояния', 'Lumen system'), width: Number(params.get('w')) || sec.w, height: Number(params.get('h')) || sec.h,
+    scenarios: Object.entries(SECTIONS).map(([k, s]) => ({ id: k, title: s.title })) });
+
+  // MARK: Type
+
+  function typeSection() {
+    const cur = [
+      ['lumenTitle', '20 / semibold', 't-title', L('profiles.title')],
+      ['lumenSheetTitle', '15 / semibold', 't-sheet', L('sync.title')],
+      ['lumenSection', '13 / semibold', 't-section', L('editor.section.history')],
+      ['lumenLabel', '13 / medium', 't-label', L('editor.proxy.use.title')],
+      ['lumenBody', '13 / regular', 't-body', L('editor.proxy.detail')],
+      ['lumenSecondary', '12 / regular', 't-secondary', L('profiles.sync.synced', T('4 минуты назад', '4 minutes ago'))],
+      ['lumenCaption', '11 / regular', 't-caption c-tertiary', L('profiles.footnote.sealed')],
+      ['lumenColumn', '11 / medium', 't-column c-tertiary', L('profiles.column.exit')],
+    ];
+    const prop = [
+      ['lumenTitle', '22/28 semibold', 't-title', L('profiles.title'), T('окно, экран запуска', 'window, launch screen')],
+      ['lumenHeading', '17/22 semibold', 't-sheet', L('sync.title'), T('лист, пустое состояние', 'sheet, empty state')],
+      ['lumenSection', '13/18 semibold', 't-section', L('editor.section.history'), T('группа в форме', 'form group')],
+      ['lumenLabel', '13/18 medium', 't-label', L('editor.proxy.use.title'), T('название настройки, имя в строке', 'setting, row name')],
+      ['lumenBody', '13/18 regular', 't-body', L('editor.proxy.detail'), T('текст, ячейки, поля', 'text, cells, fields')],
+      ['lumenCaption', '11/14 regular', 't-caption c-secondary', L('editor.proxy.warnIPChange.hint'), T('пояснение, мета, сноска', 'hint, meta, footnote')],
+      ['lumenColumn', '11/14 medium', 't-column c-tertiary', L('profiles.column.exit'), T('заголовки колонок, подписи полей', 'column headers, field labels')],
+      ['lumenNumeral', '22/28 semibold tnum', 't-title num', '213', T('счётчики прогрева', 'warm-up counters')],
+    ];
+    const rows = (list, withRole) => list.map(([token, spec, cls, sample, role]) =>
+      `<div class="type-row"><div class="spec"><b>${token.replace('lumen', '')}</b><br>${spec}</div><div style="min-width:0"><div class="sample ${cls}">${E(sample)}</div>${withRole && role ? `<div class="role">${E(role)}</div>` : ''}</div></div>`).join('');
+    const ctx = (old) => `<div class="ctx ${old ? 'old' : ''}">
+        <div class="t-sheet">${E(L('sync.title'))}</div>
+        <div class="${old ? 't-secondary' : 't-body c-secondary'}" style="margin:3px 0 12px">${E(L('sync.to.hint'))}</div>
+        <div class="t-section" style="margin-bottom:6px">${E(L('editor.section.history'))}</div>
+        <div class="t-label">${E(L('editor.history.record'))}</div>
+        <div class="${old ? 't-secondary c-tertiary' : 't-caption c-secondary'}">${E(L(old ? 'editor.history.footer' : 'editor.history.record.hint'))}</div></div>`;
+    return `<div><div class="sec-title">${T('Шкала: пять кеглей на 9 pt (20 / 15 / 13 / 12 / 11) → четыре кегля системных стилей macOS', 'Scale: five sizes within 9 pt (20 / 15 / 13 / 12 / 11) → the four sizes of macOS’s text styles')}</div>
+      <div class="sec-sub">${T('Справа — те же роли; иерархию внутри 13 pt держит начертание (regular / medium / semibold), а не ещё один кегль. 12 pt уходит: вторичный текст = 13 в textSecondary, мета = 11.', 'Same roles on the right; within 13 pt, weight carries the hierarchy, not another size. 12 pt goes: secondary text is 13 in textSecondary, meta is 11.')}</div></div>
+      <div class="cols2">
+        <div class="panel old"><h3>${T('Сейчас', 'Now')} <span class="tag">20 / 15 / 13 / 13 / 12 / 11</span></h3>${rows(cur)}
+          <div class="ratio">${T('шаги', 'steps')}: <span>20→15 ×1.33</span><span class="bad">15→13 ×1.15</span><span class="bad">13→12 ×1.08</span><span class="bad">12→11 ×1.09</span></div>${ctx(true)}</div>
+        <div class="panel"><h3>${T('Предлагаю', 'Proposed')} <span class="tag">22 / 17 / 13 / 11 · title1, title2, body, subheadline</span></h3>${rows(prop, true)}
+          <div class="ratio">${T('шаги', 'steps')}: <span>22→17 ×1.29</span><span>17→13 ×1.31</span><span>13→11 ×1.18</span></div>${ctx(false)}</div>
+      </div>`;
+  }
+
+  // MARK: Numerals
+
+  function numeralsSection() {
+    const values = [['cookies', '111'], ['cookies', '888'], [T('страница', 'page'), '1/11'], [T('страница', 'page'), '8/12'], ['IP', '10.1.1.1'], ['IP', '185.199.108.153'], [T('порт', 'port'), '1111'], [T('порт', 'port'), '8080']];
+    const col = (cls, title) => `<div class="num-col ${cls}"><div class="t-column c-tertiary" style="border:0">${title}</div>${values.map(([k, v]) => `<div><span class="c-tertiary" style="width:70px">${E(k)}</span><span class="v">${E(v)}</span></div>`).join('')}</div>`;
+    // Four frames of one counter; the dashed line marks where the tail starts in the first frame.
+    const jitter = (cls) => `<div style="position:relative;padding-top:2px">` + ['111', '118', '181', '188'].map((v) => `<div class="${cls}" style="font:var(--tBody);padding:3px 0;white-space:nowrap"><span class="c-accent" style="font-weight:600">${v}</span> <span class="c-secondary">${E(L('warmup.counter.cookies'))}</span></div>`).join('') +
+      `<i class="guide" style="position:absolute;top:0;bottom:0;width:0;border-left:1px dashed rgba(242,193,61,.8)"></i></div>`;
+    return `<div><div class="sec-title">${T('Цифры, которые меняются на месте, — табличные', 'Numbers that change in place are tabular')}</div>
+      <div class="sec-sub">${T('SF Pro по умолчанию пропорциональный: «1» уже «8». Счётчик прогрева, «4/12», IP и порт прыгают по ширине при каждом обновлении. В SwiftUI — .monospacedDigit() (местами уже стоит: счётчики, «Запускался»); предлагаю правило: везде, где число обновляется, и во всех колонках с числами.', 'SF Pro digits are proportional by default: “1” is narrower than “8”. The warm-up counter, “4/12”, IPs and ports change width on every update. In SwiftUI: .monospacedDigit() (already on the counters and Last used); proposed rule: everywhere a number updates, and every numeric column.')}</div></div>
+      <div class="cols2">
+        <div class="panel"><h3>${T('В колонке', 'In a column')} <span class="tag">${T('слева пропорциональные, справа табличные', 'proportional left, tabular right')}</span></h3>
+          <div class="num-table">${col('prop', T('пропорциональные', 'proportional'))}${col('num', T('табличные', 'tabular'))}</div></div>
+        <div class="panel"><h3>${T('При обновлении', 'While it updates')} <span class="tag">${T('четыре кадра одного счётчика', 'four frames of one counter')}</span></h3>
+          <div class="cols2" style="gap:16px"><div><div class="t-column c-tertiary">${T('пропорциональные: хвост строки дёргается', 'proportional: the tail jumps')}</div>${jitter('prop')}</div>
+          <div><div class="t-column c-tertiary">${T('табличные: стоит на месте', 'tabular: it stays put')}</div>${jitter('num')}</div></div>
+          <div class="t-caption c-secondary" style="margin-top:10px" id="live-note"></div></div>
+      </div>`;
+  }
+
+  // MARK: Metrics
+
+  function metricsSection() {
+    const spaces = [[4, T('иконка ↔ подпись в чипе', 'icon ↔ label in a chip')], [8, T('между контролами в ряду', 'controls in a row')], [12, T('ячейки таблицы, поля в паре', 'table cells, paired fields')], [16, T('поля окна, строки формы', 'window margins, form rows')], [24, T('поля листа', 'sheet margins')], [32, T('между разделами страницы', 'between page sections')], [48, T('пустые состояния', 'empty states')]];
+    const sheetsNow = [[420, L('changepw.title')], [480, T('Перенос профиля', 'Profile transfer')], [540, L('sync.title')], [560, L('tunnel.title')], [600, T('Редактор профиля', 'Profile editor')], [680, T('Импорт cookies', 'Import cookies')], [780, T('Пароли', 'Passwords')], [880, T('Прогрев', 'Warm-up')]];
+    const sheetsNew = [[440, 'S — ' + T('подтверждения, пароль', 'confirmations, password')], [600, 'M — ' + T('формы: редактор, импорт, настройки', 'forms: editor, import, settings')], [860, 'L — ' + T('два столбца: пароли, прогрев', 'two panes: passwords, warm-up')]];
+    const bar = (w, label, isNew) => `<div class="sheet-bar ${isNew ? 'new' : ''}"><code>${w}</code><i style="width:${w / 2.2}px"></i><span>${E(label)}</span></div>`;
+    return `<div><div class="sec-title">${T('Сетка 4 pt без исключений, одна высота контрола, три ширины листов', 'A strict 4 pt grid, one control height, three sheet widths')}</div>
+      <div class="sec-sub">${T('Сейчас в коде встречаются 6, 10, 14, 20, 22 и поля 32 pt рядом с кнопками 28 pt. Предлагаю: шаги 4/8/12/16/24/32/48 (6 — только между иконкой и подписью), всё интерактивное — 28 pt (24 — компактные кнопки в строках, 36 — экран запуска).', 'The code has 6, 10, 14, 20, 22 and 32 pt fields next to 28 pt buttons. Proposed: 4/8/12/16/24/32/48 (6 only between an icon and its label), every control 28 pt (24 compact in rows, 36 on the launch screen).')}</div></div>
+      <div class="metrics">
+        <div class="panel"><h3>${T('Отступы', 'Spacing')}</h3>${spaces.map(([v, t]) => `<div class="space-bar"><code>${v}</code><i style="width:${v * 3}px"></i><span>${E(t)}</span></div>`).join('')}
+          <h3 style="margin-top:16px">${T('Высоты', 'Heights')}</h3>
+          <div class="ctrl-cmp">
+            <div><span class="field" style="width:150px;height:32px;opacity:.8"><input value="proxy.example.com"></span><div class="lbl">${T('поле сейчас', 'field now')} 32</div></div>
+            <div><span class="btn secondary">${E(L('sync.folder.choose'))}</span><div class="lbl">${T('кнопка', 'button')} 28</div></div>
+            <div style="width:12px"></div>
+            <div><span class="field" style="width:150px"><input value="proxy.example.com"></span><div class="lbl">${T('поле предлагаю', 'field proposed')} 28</div></div>
+            <div><span class="btn secondary">${E(L('sync.folder.choose'))}</span><div class="lbl">28</div></div>
+            <div><span class="btn secondary small">${E(L('profiles.row.launch'))}</span><div class="lbl">24</div></div>
+            <div><span class="btn primary large">${E(L('unlock.action.unlock'))}</span><div class="lbl">36</div></div>
+          </div>
+          <div class="t-caption c-secondary" style="margin-top:12px">${T('Строки: список 36 (было 48), боковая панель 28, строка формы ≥ 44, заголовок окна 52, низ листа 56 (было 60).', 'Rows: list 36 (was 48), sidebar 28, form row ≥ 44, window header 52, sheet footer 56 (was 60).')}</div>
+        </div>
+        <div class="panel"><h3>${T('Ширины листов', 'Sheet widths')} <span class="tag">${T('масштаб 1 : 2.2', 'scale 1 : 2.2')}</span></h3>
+          <div class="t-column c-tertiary" style="margin-bottom:6px">${T('сейчас — восемь разных', 'now — eight different')}</div>
+          <div class="sheets-cmp">${sheetsNow.map(([w, l]) => bar(w, l)).join('')}</div>
+          <div class="t-column c-tertiary" style="margin:14px 0 6px">${T('предлагаю — три', 'proposed — three')}</div>
+          <div class="sheets-cmp">${sheetsNew.map(([w, l]) => bar(w, l, true)).join('')}</div>
+          <h3 style="margin-top:16px">${T('Скругления', 'Radii')}</h3>
+          <div class="ctrl-cmp"><div><span class="btn secondary">6</span><div class="lbl">${T('контролы, строки', 'controls, rows')}</div></div>
+            <div><span style="display:inline-block;width:64px;height:28px;border-radius:10px;background:var(--raisedInset);border:1px solid var(--hairline)"></span><div class="lbl">10 ${T('группы, карточки', 'groups, cards')}</div></div>
+            <div><span class="chip" style="border-radius:12px">${T('капсула', 'capsule')}</span><div class="lbl">${T('плашки', 'pills')}</div></div>
+            <div><span class="chip">7 → 6</span><div class="lbl">${T('чипы прогрева', 'warm-up chips')}</div></div></div>
+        </div>
+      </div>`;
+  }
+
+  // MARK: Contrast
+
+  function contrastSection() {
+    const C = Lumen.contrast;
+    const surfaces = ['backdrop', 'sidebar', 'surface', 'toolbar', 'card', 'raised', 'raisedInset', 'field'];
+    const hex = { backdrop: '#0B0C0F', sidebar: '#121419', surface: '#161920', toolbar: '#1A1D24', card: '#1B1F27', raised: '#1E222A', raisedInset: '#252A33', field: '#0F1115',
+      textPrimary: '#ECEEF2', textSecondary: '#A2A9B6', textTertiary: '#7C8494', textDisabled: '#555D6C', accent: '#6F8FEA', running: '#4CC38A', warning: '#D9A441', danger: '#E5635C' };
+    const proposedHex = { textTertiary: '#8A93A3', danger: '#EC6F68' };
+    const fgs = ['textPrimary', 'textSecondary', 'textTertiary', 'accent', 'running', 'warning', 'danger'];
+    const find = (set, fg, bg) => (C[set].text.find((r) => r.fg === fg && r.bg === bg) || {}).ratio;
+    let rows = '';
+    for (const fg of fgs) {
+      const changed = proposedHex[fg];
+      rows += `<tr><td><span class="sw" style="background:${hex[fg]}"></span>${fg}${changed ? ` → <span class="sw" style="background:${changed}"></span>${changed}` : ''}</td>`;
+      for (const bg of surfaces) {
+        const now = find('current', fg, bg), next = find('proposed', fg, bg);
+        if (now === undefined) { rows += '<td class="pass">—</td>'; continue; }
+        const cls = now < 4.5 ? 'fail' : 'pass';
+        rows += changed && next !== now ? `<td class="${cls}">${now.toFixed(2)} → <span style="color:${next >= 4.5 ? 'var(--running)' : 'var(--danger)'};font-weight:600">${next.toFixed(2)}</span></td>` : `<td class="${cls}">${now.toFixed(2)}</td>`;
+      }
+      rows += '</tr>';
+    }
+    const special = C.changes.map((r) => {
+      const need = r.kind === 'text' ? 4.5 : 3;
+      const now = r.now <= 1 ? T('нет', 'none') : r.now.toFixed(2);
+      return `<tr><td>${E(en ? r.en : r.ru)}</td><td>${r.kind === 'text' ? T('текст', 'text') : T('не текст', 'non-text')} · ${need}:1</td><td class="${r.now < need ? 'fail' : 'pass'}">${now}</td><td style="color:var(--textSecondary)">${E(r.instead.includes(' / ') ? r.instead.split(' / ')[en ? 1 : 0] : r.instead)}</td><td class="${r.next >= need ? 'better' : 'fail'}">${r.next.toFixed(2)}</td></tr>`;
+    }).join('');
+    return `<div><div class="sec-title">${T('Контраст каждой пары — числом (WCAG 2.x; текст ≥ 4.5:1, контролы и состояния ≥ 3:1)', 'Contrast of every pair as a number (WCAG 2.x; text ≥ 4.5:1, controls and states ≥ 3:1)')}</div>
+      <div class="sec-sub">${T('Theme.swift мерит текст на surface. Но листы — raised, панели в них — raisedInset, и там textTertiary падает до 4.24 и 3.83: подсказки редактора (EditorNote) сейчас ниже AA. Предлагаю textTertiary #8A93A3 и danger #EC6F68 — остальные токены не трогаю. Пересчёт: design/tools/contrast.py.', 'Theme.swift measures text on surface. Sheets are raised and their panels raisedInset, where textTertiary drops to 4.24 and 3.83: the editor’s notes (EditorNote) are below AA today. Proposed: textTertiary #8A93A3 and danger #EC6F68, nothing else. Recompute with design/tools/contrast.py.')}</div></div>
+      <div class="panel" style="padding:12px 14px"><table class="cr"><tr><th>${T('цвет текста', 'text colour')}</th>${surfaces.map((s) => `<th><span class="sw" style="background:${hex[s]}"></span>${s}</th>`).join('')}</tr>${rows}</table></div>
+      <div class="panel" style="padding:12px 14px"><table class="cr"><tr><th>${T('что на экране', 'what is drawn')}</th><th>${T('порог', 'threshold')}</th><th>${T('сейчас', 'now')}</th><th>${T('предлагаю вместо', 'proposed instead')}</th><th></th></tr>${special}</table>
+        <div class="t-caption c-secondary" style="margin-top:8px">${T('Края полей 1.36:1 — как у системных полей macOS; строгие 3:1 по умолчанию сделали бы форму тяжёлой, поэтому предлагаю их только при «Увеличить контраст» (Environment colorSchemeContrast == .increased). textDisabled (2.4–3.0) — для неактивного, WCAG его не нормирует.', 'Field edges are 1.36:1, like macOS’s own fields; a strict 3:1 by default would make forms heavy, so it is proposed only with Increase Contrast (Environment colorSchemeContrast == .increased). textDisabled (2.4–3.0) is for inactive controls, which WCAG exempts.')}</div></div></div>`;
+  }
+
+  // MARK: States
+
+  function statesSection() {
+    const mini = (cap, body) => `<div class="mini"><div class="cap">${cap}</div>${body}</div>`;
+    return `<div><div class="sec-title">${T('Одно пустое / загрузка / ошибка на всё приложение (LumenStateView)', 'One empty / loading / error state for the whole app (LumenStateView)')}</div>
+      <div class="sec-sub">${T('Сейчас: EmptyProfilesView, NoMatchesView, LumenEmptyHint и Text(...).foregroundStyle(.secondary) в списках — четыре разных вида. Предлагаю один компонент: знак/символ, заголовок 17, строка 13, действие; ошибки, которые не мешают работать, — баннером над содержимым, а не алертом.', 'Today: EmptyProfilesView, NoMatchesView, LumenEmptyHint and bare secondary Text in lists — four looks. Proposed: one component — glyph, 17 pt title, a 13 pt line, an action; errors that do not block work go in a banner above the content, not an alert.')}</div></div>
+      <div class="states">
+        ${mini(T('пусто', 'empty'), `<div class="state"><div class="art">${Lumen.geometry.glyphSVG(36, 'rgba(138,147,163,0.55)')}</div><div class="title">${H('profiles.empty.title')}</div><div class="msg">${H('profiles.empty.subtitle')}</div><div class="actions"><button class="btn primary">${icon('plus', 12)}${H('profiles.action.new')}</button></div></div>`)}
+        ${mini(T('загрузка', 'loading'), `<div class="state"><div class="art"><div class="bar" style="width:140px"><i style="width:42px;left:49px"></i></div></div><div class="title" style="font:var(--tLabel)">${H('unlock.working')}</div><div class="msg" style="font:var(--tCaption)">${T('Неопределённая линия — только пока ждём; под Reduce Motion стоит.', 'Indeterminate line only while waiting; still under Reduce Motion.')}</div></div>`)}
+        ${mini(T('ошибка без блокировки', 'non-blocking error'), `<div style="padding:12px"><div class="banner">${icon('exclamationTriangleFill', 14)}<span class="msg" style="font:var(--tCaption)">${H('profiles.banner.didNotStart', 'Banking')}</span><button class="btn secondary small">${H('profiles.banner.fix')}</button></div>
+          <div class="t-caption c-secondary" style="margin-top:12px">${T('Ошибка, после которой надо решать сейчас (удалить, сбросить хранилище), остаётся диалогом.', 'Errors that need a decision now (delete, reset the vault) stay dialogs.')}</div></div>`)}
+      </div>`;
+  }
+
+  // MARK: Accessibility
+
+  function a11ySection() {
+    return `<div><div class="sec-title">${T('Фокус видно везде, мишень ≥ 24 × 24, статус — не только цветом', 'Focus visible everywhere, targets ≥ 24 × 24, status not by colour alone')}</div></div>
+      <div class="a11y">
+        <div class="panel"><h3>${T('Фокус с клавиатуры: кольцо 2 pt accent (5.16:1 на raised), появляется сразу', 'Keyboard focus: a 2 pt accent ring (5.16:1 on raised), at once')}</h3>
+          <div class="focus-demo">
+            <button class="btn primary focus-ring">${H('common.save')}</button>
+            <button class="btn secondary focus-ring">${H('common.cancel')}</button>
+            <button class="icon-btn focus-ring" aria-label="more">${icon('ellipsis', 14)}</button>
+            <span class="field focus-ring" style="width:150px"><input value="1080"></span>
+            <button class="switch on focus-ring" aria-label="switch"></button>
+            <button class="checkbox on focus-ring">${icon('check', 12)}</button>
+          </div>
+          <div class="t-caption c-secondary" style="margin-top:10px">${T('Сейчас кольцо есть только у полей (LumenField: рамка 1 pt + ореол 30 %, 1.62:1, с анимацией 160 мс). У кнопок LumenButtonStyle, строк, пунктов боковой панели и чипов его нет — с Tab не видно, где ты.', 'Today only fields have one (LumenField: 1 pt border + 30 % halo, 1.62:1, animated 160 ms). LumenButtonStyle buttons, rows, sidebar items and chips have none — with Tab you cannot see where you are.')}</div>
+        </div>
+        <div class="panel"><h3>${T('Мишени: пунктир — область нажатия', 'Targets: dashed = hit area')}</h3>
+          <div class="hit-pair">
+            <div style="text-align:center"><span class="field" style="width:150px"><input value="zzz"><span class="hit small" style="color:var(--textTertiary)">${icon('xmarkCircleFill', 12)}</span></span><div class="lbl">${T('очистка поиска сейчас: 12 × 12', 'search clear now: 12 × 12')}</div></div>
+            <div style="text-align:center"><span class="field" style="width:150px"><input value="zzz"><span class="hit" style="color:var(--textTertiary);padding:6px;margin:-6px -6px -6px 0">${icon('xmarkCircleFill', 12)}</span></span><div class="lbl">${T('предлагаю: 24 × 24', 'proposed: 24 × 24')}</div></div>
+            <div style="text-align:center"><span class="hit small" style="color:var(--textSecondary)">${icon('doc', 16)}</span><div class="lbl">${T('копировать в паролях: 16', 'copy in Passwords: 16')}</div></div>
+            <div style="text-align:center"><span class="hit icon-btn" style="width:24px;height:24px">${icon('doc', 14)}</span><div class="lbl">24 × 24</div></div>
+          </div>
+          <h3 style="margin-top:16px">${T('Статусы без цвета: как видит дейтеранопия и в оттенках серого', 'Statuses without colour: deuteranopia and greyscale')}</h3>
+          <div class="cb-sim">${['', 'deuter', 'gray'].map((f) => `<div style="${f ? `filter:url(#${f})` : ''}"><div class="t-column c-tertiary">${f === 'deuter' ? T('дейтеранопия', 'deuteranopia') : f === 'gray' ? T('серый', 'greyscale') : T('как есть', 'as is')}</div>
+            ${Lumen.statusHTML('running', H('profiles.row.running'))}${Lumen.statusHTML('warmup', H('profiles.row.warmUpShort', 4, 12), { fraction: 4 / 12 })}${Lumen.statusHTML('starting', H('profiles.row.starting'))}${Lumen.statusHTML('sealing', H('profiles.row.encrypting'))}${Lumen.statusHTML('failed', `<span style="color:var(--warning)">${H('profiles.status.failed')}</span>`)}${Lumen.statusHTML('stopped', '<span class="c-tertiary">—</span>')}</div>`).join('')}</div>
+        </div>
+      </div>`;
+  }
+
+  const builders = { type: typeSection, numerals: numeralsSection, metrics: metricsSection, contrast: contrastSection, states: statesSection, a11y: a11ySection };
+  win.innerHTML = builders[id]();
+  for (const guide of win.querySelectorAll('.guide')) {
+    const first = guide.parentElement.querySelector('.c-secondary');
+    guide.style.left = (first.getBoundingClientRect().left - guide.parentElement.getBoundingClientRect().left - 1) + 'px';
+  }
+
+  // Live: the counter ticks in the interactive page, so the jump is visible, not described.
+  if (id === 'numerals' && !Lumen.frameless) {
+    const note = document.getElementById('live-note');
+    let v = 111;
+    note.innerHTML = `${T('Вживую', 'Live')}: <span class="prop c-accent" style="font-weight:600" id="p">111</span> <span>· ${T('пропорциональные', 'proportional')}</span> &nbsp; <span class="num c-accent" style="font-weight:600" id="t">111</span> <span>· ${T('табличные', 'tabular')}</span>`;
+    setInterval(() => { v += 7; if (v > 199) v = 111; document.getElementById('p').textContent = v; document.getElementById('t').textContent = v; }, 450);
+  }
+  window.__ready = true;
+})();
+</script>
+</body>
+</html>

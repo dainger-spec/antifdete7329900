@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ru" class="v-proposed">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Motion — now vs proposed</title>
+<link rel="stylesheet" href="kit/lumen.css">
+<style>
+  body { background: #0B0C0F; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 20px 24px 40px; }
+  .scene { margin-bottom: 30px; }
+  .scene h2 { font: 600 15px/20px var(--font); margin: 0 0 4px; }
+  .scene .how { font: var(--tCaption); color: var(--textSecondary); margin-bottom: 12px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .pane { border-radius: 12px; border: 1px solid var(--hairline); background: var(--surface); overflow: hidden; position: relative; }
+  .pane-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--divider); font: var(--tColumn); color: var(--textSecondary); }
+  .pane-head b { color: var(--textPrimary); font-weight: 600; }
+  .pane-head .t { margin-left: auto; color: var(--textTertiary); font-family: var(--fontMono); font-size: 10.5px; }
+  .only .pair { grid-template-columns: 1fr; }
+  .only .page { padding: 0; }
+  .only .scene > h2, .only .scene > .how { display: none; }
+
+  /* Every timing below comes from the pane's motion set (--m-*), filled in from MOTION in the script. */
+  .list-scene { display: flex; height: 368px; }
+  .mini-side { width: 150px; flex: none; background: var(--sidebar); border-right: 1px solid var(--hairline); padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
+  .mini-side button { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--textPrimary); font: var(--tBody); text-align: left;
+    transition: background-color var(--m-hover-out) var(--hoverEase); }
+  .mini-side button:hover { background: var(--rowHover); transition-duration: var(--m-hover-in); }
+  .mini-side button.on { background: rgba(255, 255, 255, 0.08); font-weight: 500; transition: var(--m-select-transition); }
+  .mini-side .icon { width: 14px; height: 14px; color: var(--textSecondary); }
+  .mini-side button.on .icon { color: var(--accent); }
+  .mini-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .mini-head { display: flex; gap: 8px; padding: 10px 12px; align-items: center; }
+  .mini-head .field { flex: 1; transition: border-color var(--m-focus) var(--hoverEase), outline-color var(--m-focus) var(--hoverEase), box-shadow var(--m-focus) var(--hoverEase); }
+  .m-current .mini-head .field:focus-within { outline: none; box-shadow: 0 0 0 3px rgba(111, 143, 234, 0.30); }
+  .m-proposed .mini-head .field:focus-within { box-shadow: none; outline: 2px solid var(--accent); outline-offset: 1px; }
+  .mini-list { flex: 1; overflow: hidden; padding: 0 8px 8px; position: relative; }
+  .ghead { height: 24px; display: flex; align-items: flex-end; padding: 0 8px 4px; font: var(--tColumn); color: var(--textSecondary); font-weight: 600; }
+  .ghead .n { color: var(--textTertiary); font-weight: 500; margin-left: 5px; font-variant-numeric: tabular-nums; }
+  .mrow { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 8px; border-radius: 6px; position: relative;
+    transition: background-color var(--m-hover-out) var(--hoverEase); }
+  .mrow:hover { background: var(--rowHover); transition-duration: var(--m-hover-in); }
+  .mrow .name { flex: 1; font: var(--tLabel); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mrow .st { width: 132px; flex: none; }
+  .mrow .st .status { transition: opacity var(--m-status) linear; }
+  .mrow .icon-btn { width: 26px; height: 26px; }
+  .mrow.flip { transition: transform var(--m-regroup) var(--appearEase), background-color var(--m-hover-out) var(--hoverEase); }
+  .mrow.pending::before { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 1px; background: var(--accent); opacity: .7; }
+  .fade-in { animation: fadeIn var(--m-filter) var(--appearEase) both; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .sheet-scene { height: 250px; display: flex; flex-direction: column; background: var(--raised); }
+  .sheet-scene .seg { margin: 12px 14px; width: calc(100% - 28px); }
+  .tabs-body { position: relative; flex: 1; margin: 0 14px 14px; }
+  .tab-pane { position: absolute; inset: 0; transition: opacity var(--m-tab) var(--appearEase); }
+  .tab-pane .group { padding: 4px 0; }
+
+  .launch-scene { height: 300px; background: var(--backdrop); display: flex; align-items: center; justify-content: center; position: relative; }
+  .launch-card { display: flex; flex-direction: column; align-items: center; text-align: center; width: 300px; }
+  .launch-card .t-title { margin: 16px 0 6px; }
+  .launch-card .t-body { color: var(--textSecondary); margin-bottom: 16px; }
+  .launch-card .field, .launch-card .btn { width: 240px; }
+  .replay { position: absolute; right: 10px; bottom: 10px; }
+
+  .progress-scene { padding: 14px 16px; height: 120px; display: flex; flex-direction: column; gap: 12px; }
+  .progress-scene .bar > i { transition: width var(--m-progress) var(--m-progress-ease); }
+  .counter { font: var(--tNumeral); color: var(--accent); }
+
+  table.spec { width: 100%; border-collapse: collapse; font: var(--tCaption); }
+  table.spec th { text-align: left; font: var(--tColumn); color: var(--textTertiary); padding: 6px 8px; border-bottom: 1px solid var(--divider); }
+  table.spec td { padding: 6px 8px; border-bottom: 1px solid var(--divider); vertical-align: top; color: var(--textSecondary); }
+  table.spec td:first-child { color: var(--textPrimary); font-weight: 500; }
+  table.spec td.now { color: var(--textTertiary); }
+  table.spec td.bad { color: var(--warning); }
+  .rm-switch { display: inline-flex; align-items: center; gap: 8px; font: var(--tCaption); color: var(--textSecondary); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="kit/wordmark.js"></script>
+<script src="kit/geometry.js"></script>
+<script src="kit/strings.js"></script>
+<script src="kit/icons.js"></script>
+<script src="kit/lumen.js"></script>
+<script>
+(function () {
+  'use strict';
+  const { L, H, icon, params } = Lumen;
+  const en = Lumen.lang === 'en';
+  const T = (ruText, enText) => (en ? enText : ruText);
+  const E = Lumen.escapeHTML;
+
+  // MARK: The two motion sets. "now" is Theme.swift and the views' .animation / withAnimation calls;
+  // "proposed" is design/README.md §5. Durations in ms, curves as in SwiftUI.
+  const EASE_OUT = 'cubic-bezier(0, 0, 0.58, 1)';          // Animation.easeOut
+  const APPEAR = 'cubic-bezier(0.2, 0.8, 0.2, 1)';         // Theme.appearAnimation's timingCurve
+  const MOTION = {
+    current: {
+      label: T('Сейчас', 'Now'), hoverIn: 160, hoverOut: 160, focus: 160, select: 220, filter: 220, status: 160, regroup: 220,
+      regroupWhen: 'now', tab: 220, entrance: { delay: 60, dur: 420, rise: 10 }, progress: 160, progressEase: EASE_OUT,
+      reduceMotion: { list: false, entrance: true }, // the list and the editor's tabs do not check accessibilityReduceMotion
+    },
+    proposed: {
+      label: T('Предлагаю', 'Proposed'), hoverIn: 0, hoverOut: 120, focus: 0, select: 0, filter: 0, status: 120, regroup: 220,
+      regroupWhen: 'pointer-leaves', tab: 0, entrance: { delay: 0, dur: 240, rise: 6 }, progress: 200, progressEase: 'linear',
+      reduceMotion: { list: true, entrance: true },
+    },
+  };
+  const reduce = Lumen.reduceMotion;
+  const only = params.get('only');            // 'current' | 'proposed': one pane (for recordings)
+  const sceneOnly = params.get('scene');      // 'list' | 'sheet' | 'launch' | 'progress' | 'spec'
+  if (only) document.body.classList.add('only');
+
+  function vars(m) {
+    const rm = reduce;
+    const listMoves = rm && m.reduceMotion.list ? 0 : m.regroup;
+    return [
+      `--m-hover-in:${m.hoverIn}ms`, `--m-hover-out:${m.hoverOut}ms`, `--m-focus:${m.focus}ms`, `--m-status:${m.status}ms`,
+      `--m-regroup:${listMoves}ms`, `--m-filter:${rm && m.reduceMotion.list ? 0 : m.filter}ms`, `--m-tab:${rm && m.reduceMotion.list ? 0 : m.tab}ms`,
+      `--m-progress:${rm && m === MOTION.proposed ? 0 : m.progress}ms`, `--m-progress-ease:${m.progressEase}`,
+      `--m-select-transition:${m.select ? `background-color ${m.select}ms ${APPEAR}` : 'none'}`,
+    ].join(';');
+  }
+
+  // MARK: Scene: the list
+
+  const ROWS = [
+    { id: 1, name: 'Personal', running: true, proxy: false },
+    { id: 2, name: 'Northwind', running: true, proxy: true },
+    { id: 3, name: 'Research', running: false, proxy: true },
+    { id: 4, name: 'Shopping', running: false, proxy: false },
+    { id: 5, name: 'Banking', running: false, proxy: true },
+    { id: 6, name: 'Travel', running: false, proxy: true },
+    { id: 7, name: 'Retail DE 01', running: false, proxy: true },
+  ];
+
+  function listScene(mode) {
+    const m = MOTION[mode];
+    const root = document.createElement('div');
+    root.className = 'list-scene';
+    const state = { rows: ROWS.map((r) => ({ ...r, activity: r.running ? 'running' : 'stopped', group: r.running ? 'run' : 'ready' })), filter: 'all', inside: false };
+    const active = (r) => r.activity !== 'stopped';
+    const statusHTML = (r) => r.activity === 'running' ? Lumen.statusHTML('running', H('profiles.row.running'))
+      : r.activity === 'starting' ? Lumen.statusHTML('starting', H('profiles.row.starting'))
+      : r.activity === 'sealing' ? Lumen.statusHTML('sealing', H('profiles.row.encrypting')) : Lumen.statusHTML('stopped', '');
+    function rowsHTML() {
+      const visible = state.rows.filter((r) => state.filter === 'all' || (state.filter === 'run' ? active(r) : r.proxy));
+      const run = visible.filter((r) => r.group === 'run'), ready = visible.filter((r) => r.group !== 'run');
+      const row = (r) => `<div class="mrow ${r.group === 'run' && !active(r) || r.group !== 'run' && active(r) ? 'pending' : ''}" data-id="${r.id}">
+          ${Lumen.avatarHTML(r.name, r.id, 18)}<span class="name">${E(r.name)}</span><span class="st">${statusHTML(r)}</span>
+          ${r.activity === 'running' ? `<button class="icon-btn" data-stop="${r.id}" aria-label="${E(L('profiles.row.stop'))}">${icon('stopFill', 12)}</button>` : r.activity === 'stopped' ? `<button class="icon-btn" data-launch="${r.id}" aria-label="${E(L('profiles.row.launch'))}">${icon('playFill', 12)}</button>` : '<span style="width:26px"></span>'}</div>`;
+      return (run.length ? `<div class="ghead">${H('profiles.group.running')}<span class="n">· ${run.length}</span></div>${run.map(row).join('')}` : '') +
+        (ready.length ? `<div class="ghead">${H('profiles.group.ready')}<span class="n">· ${ready.length}</span></div>${ready.map(row).join('')}` : '');
+    }
+    root.innerHTML = `<div class="mini-side">
+        ${[['all', 'person2', 'profiles.filter.all'], ['run', 'playCircle', 'profiles.filter.running'], ['proxied', 'network', 'profiles.filter.proxied']].map(([id, sym, key]) =>
+          `<button data-filter="${id}" class="${id === 'all' ? 'on' : ''}">${icon(sym, 14)}${H(key)}</button>`).join('')}
+      </div>
+      <div class="mini-main"><div class="mini-head"><label class="field">${icon('magnifyingglass', 12)}<input placeholder="${E(L('profiles.search.prompt'))}"></label></div>
+        <div class="mini-list" data-list>${rowsHTML()}</div></div>`;
+    const list = root.querySelector('[data-list]');
+
+    function rerender({ animate = true, filterChange = false } = {}) {
+      const before = new Map([...list.querySelectorAll('[data-id]')].map((el) => [el.dataset.id, el.getBoundingClientRect().top]));
+      list.innerHTML = rowsHTML();
+      const moveMs = parseFloat(getComputedStyle(root.parentElement).getPropertyValue('--m-regroup')) || 0;
+      const filterMs = parseFloat(getComputedStyle(root.parentElement).getPropertyValue('--m-filter')) || 0;
+      for (const el of list.querySelectorAll('[data-id]')) {
+        const old = before.get(el.dataset.id);
+        if (old === undefined) { if (filterChange && filterMs) el.classList.add('fade-in'); continue; }
+        const dy = old - el.getBoundingClientRect().top;
+        const ms = filterChange ? filterMs : moveMs;
+        if (!dy || !animate || !ms) continue;
+        el.style.transition = 'none';
+        el.style.transform = `translateY(${dy}px)`;
+        el.getBoundingClientRect();
+        el.style.transition = `transform ${ms}ms ${APPEAR}, background-color var(--m-hover-out) var(--hoverEase)`;
+        el.style.transform = '';
+      }
+      if (filterChange && filterMs) for (const h of list.querySelectorAll('.ghead')) h.classList.add('fade-in');
+    }
+    function settle() {
+      let moved = false;
+      for (const r of state.rows) { const g = active(r) ? 'run' : 'ready'; if (r.group !== g) { r.group = g; moved = true; } }
+      if (moved) rerender();
+    }
+    function setActivity(id, activity) {
+      const r = state.rows.find((x) => x.id === id);
+      r.activity = activity;
+      if (m.regroupWhen === 'now' || !state.inside) { for (const x of state.rows) x.group = active(x) ? 'run' : 'ready'; }
+      rerender();
+    }
+    root.addEventListener('click', (e) => {
+      const f = e.target.closest('[data-filter]');
+      if (f) {
+        for (const b of root.querySelectorAll('[data-filter]')) b.classList.toggle('on', b === f);
+        state.filter = f.dataset.filter;
+        rerender({ filterChange: true });
+        return;
+      }
+      const l = e.target.closest('[data-launch]');
+      if (l) { const id = +l.dataset.launch; setActivity(id, 'starting'); setTimeout(() => setActivity(id, 'running'), 1400); return; }
+      const s = e.target.closest('[data-stop]');
+      if (s) { const id = +s.dataset.stop; setActivity(id, 'sealing'); setTimeout(() => setActivity(id, 'stopped'), 1400); }
+    });
+    list.addEventListener('pointerenter', () => { state.inside = true; });
+    list.addEventListener('pointerleave', () => { state.inside = false; if (m.regroupWhen !== 'now') settle(); });
+    return root;
+  }
+
+  // MARK: Scene: a sheet's tabs
+
+  function sheetScene(mode) {
+    const root = document.createElement('div');
+    root.className = 'sheet-scene';
+    const tabs = [['general', 'editor.section.general'], ['network', 'editor.section.network'], ['data', 'editor.tab.data']];
+    const body = {
+      general: `<div class="group"><div class="row-f"><div class="text"><div class="title">${H('editor.ephemeral.title')}</div><div class="hint">${H('editor.ephemeral.detail')}</div></div><div class="control"><button class="switch"></button></div></div></div>`,
+      network: `<div class="group"><div class="row-f"><div class="text"><div class="title">${H('editor.proxy.use.title')}</div><div class="hint">${H('editor.proxy.detail')}</div></div><div class="control"><button class="switch on"></button></div></div>
+        <div class="row-f"><div class="text"><div class="title">${H('editor.proxy.warnIPChange')}</div><div class="hint">${H('editor.proxy.warnIPChange.hint')}</div></div><div class="control"><button class="switch on"></button></div></div></div>`,
+      data: `<div class="group"><div class="row-f"><div class="text"><div class="title">${H('editor.history.record')}</div><div class="hint">${H('editor.history.record.hint')}</div></div><div class="control"><button class="switch on"></button></div></div>
+        <div class="row-f"><div class="text"><div class="title">${H('editor.passwords.autoFill')}</div><div class="hint">${H('editor.passwords.autoFill.hint')}</div></div><div class="control"><button class="switch on"></button></div></div></div>`,
+    };
+    root.innerHTML = `<div class="seg full">${tabs.map(([id, key], i) => `<button data-tab="${id}" class="${i === 1 ? 'on' : ''}">${H(key)}</button>`).join('')}</div>
+      <div class="tabs-body">${tabs.map(([id], i) => `<div class="tab-pane" data-pane="${id}" style="opacity:${i === 1 ? 1 : 0}">${body[id]}</div>`).join('')}</div>`;
+    root.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-tab]');
+      if (!t) return;
+      for (const b of root.querySelectorAll('[data-tab]')) b.classList.toggle('on', b === t);
+      // SwiftUI's .transition(.opacity) with .id(tab): the old pane fades out while the new one fades in.
+      for (const p of root.querySelectorAll('[data-pane]')) p.style.opacity = p.dataset.pane === t.dataset.tab ? 1 : 0;
+    });
+    return root;
+  }
+
+  // MARK: Scene: the launch screen's entrance
+
+  function launchScene(mode) {
+    const m = MOTION[mode];
+    const root = document.createElement('div');
+    root.className = 'launch-scene';
+    root.innerHTML = `<div class="launch-card" data-card>${Lumen.geometry.markSVG(48)}<div class="t-title">${H('unlock.title')}</div><div class="t-body">${H('unlock.subtitle')}</div>
+      <label class="field large"><input type="password" placeholder="${E(L('setup.field.password'))}"></label><button class="btn primary large" style="margin-top:10px">${H('unlock.action.unlock')}</button></div>
+      <button class="btn ghost small replay" data-replay>↻ ${T('Повторить', 'Replay')}</button>`;
+    const card = root.querySelector('[data-card]');
+    function play() {
+      const e = m.entrance;
+      card.style.transition = 'none';
+      if (reduce && m.reduceMotion.entrance) {
+        // now: appears without animation; proposed: a 150 ms fade, no movement
+        card.style.opacity = mode === 'proposed' ? 0 : 1; card.style.transform = 'none';
+        card.getBoundingClientRect();
+        if (mode === 'proposed') { card.style.transition = 'opacity 150ms linear'; card.style.opacity = 1; }
+        return;
+      }
+      card.style.opacity = 0; card.style.transform = `translateY(${e.rise}px)`;
+      card.getBoundingClientRect();
+      card.style.transition = `opacity ${e.dur}ms ${APPEAR} ${e.delay}ms, transform ${e.dur}ms ${APPEAR} ${e.delay}ms`;
+      card.style.opacity = 1; card.style.transform = 'none';
+    }
+    root.querySelector('[data-replay]').addEventListener('click', play);
+    root.play = play;
+    return root;
+  }
+
+  // MARK: Scene: progress that updates in place
+
+  function progressScene(mode) {
+    const root = document.createElement('div');
+    root.className = 'progress-scene';
+    root.innerHTML = `<div style="display:flex;align-items:baseline;gap:10px"><span class="counter ${mode === 'proposed' ? 'num' : 'prop'}" data-c>84</span><span class="t-caption c-secondary">${H('warmup.counter.cookies')}</span>
+      <span class="t-body c-secondary ${mode === 'proposed' ? 'num' : ''}" data-p style="margin-left:auto">${H('warmup.progress.page', 4, 12)}</span></div><div class="bar"><i data-b style="width:33%"></i></div>`;
+    let page = 4, cookies = 84;
+    root.tick = () => {
+      page = page >= 12 ? 1 : page + 1; cookies = page === 1 ? 7 : cookies + 7 + (page * 5) % 13;
+      root.querySelector('[data-c]').textContent = cookies;
+      root.querySelector('[data-p]').textContent = L('warmup.progress.page', page, 12);
+      root.querySelector('[data-b]').style.width = `${(page / 12) * 100}%`;
+    };
+    return root;
+  }
+
+  // MARK: The spec
+
+  function specTable() {
+    const r = (what, now, next, rm, bad = false) => `<tr><td>${what}</td><td class="now ${bad ? 'bad' : ''}">${now}</td><td>${next}</td><td>${rm}</td></tr>`;
+    return `<table class="spec"><tr><th>${T('Что', 'What')}</th><th>${T('Сейчас (Theme.swift, вьюхи)', 'Now (Theme.swift, the views)')}</th><th>${T('Предлагаю', 'Proposed')}</th><th>Reduce Motion</th></tr>
+      ${r(T('Наведение: тон фона', 'Hover: background tone'), T('160 мс easeOut туда и обратно', '160 ms easeOut both ways'), T('появление 0 мс, угасание 120 мс easeOut', 'in 0 ms, out 120 ms easeOut'), T('так же — это тон, не движение', 'same — a tone, not motion'))}
+      ${r(T('Нажатие', 'Press'), T('сразу 85 %', 'at once, 85 %'), T('без изменений', 'unchanged'), '—')}
+      ${r(T('Выделение строки, пункта, чипа', 'Selecting a row, item, chip'), T('пункт боковой панели — 220 мс (withAnimation при смене фильтра)', 'sidebar item — 220 ms (withAnimation on filter change)'), T('сразу, 0 мс', 'at once, 0 ms'), '—', true)}
+      ${r(T('Кольцо фокуса', 'Focus ring'), T('только у полей, 160 мс', 'fields only, 160 ms'), T('у всех контролов, сразу', 'every control, at once'), '—', true)}
+      ${r(T('Результаты фильтра и поиска', 'Filter and search results'), T('220 мс, строки едут и проявляются; Reduce Motion не проверяется', '220 ms, rows slide and fade; Reduce Motion not checked'), T('сразу', 'at once'), T('сразу', 'at once'), true)}
+      ${r(T('Статус строки (точка, подпись)', 'Row status (dot, label)'), T('160 мс easeOut', '160 ms easeOut'), T('120 мс, смена глифа и подписи', '120 ms crossfade of glyph and label'), T('120 мс, без движения', '120 ms, no movement'))}
+      ${r(T('Строка уезжает в «Запущены» / «Готовы»', 'Row moving to Running / Ready'), T('сразу, 220 мс, прямо из-под курсора; Reduce Motion не проверяется', 'at once, 220 ms, from under the pointer; Reduce Motion not checked'), T('когда курсор ушёл со списка, 220 мс', 'once the pointer leaves the list, 220 ms'), T('без анимации, когда курсор ушёл', 'no animation, once the pointer leaves'), true)}
+      ${r(T('Прогресс (полоска, кольцо)', 'Progress (bar, ring)'), T('160 мс easeOut', '160 ms easeOut'), T('200 мс linear — значение растёт ровно', '200 ms linear — the value grows evenly'), T('сразу к значению', 'jumps to the value'))}
+      ${r(T('Счётчики, IP, «4/12»', 'Counters, IP, “4/12”'), T('сразу; цифры частично пропорциональные', 'at once; digits partly proportional'), T('сразу, табличные цифры везде', 'at once, tabular digits everywhere'), '—')}
+      ${r(T('Вкладки листа', 'Sheet tabs'), T('220 мс: старая и новая видны одновременно', '220 ms: old and new visible at once'), T('сразу', 'at once'), T('сразу', 'at once'), true)}
+      ${r(T('Экран запуска: появление', 'Launch screen: entrance'), T('задержка 60 + 420 мс, подъём 10 pt', '60 delay + 420 ms, rise 10 pt'), T('240 мс, подъём 6 pt, без задержки', '240 ms, rise 6 pt, no delay'), T('150 мс проявление, без подъёма', '150 ms fade, no rise'), true)}
+      ${r(T('Хранилище открывается', 'Vault opening'), T('линия 1.4 с по кругу, пока ждём', 'a 1.4 s line loop while waiting'), T('так же; ничего не крутится в покое', 'same; nothing loops at rest'), T('сегмент стоит', 'the segment stands still'))}
+      ${r(T('Баннер ошибки', 'Error banner'), '—', T('180 мс проявление + 6 pt сверху; уход 120 мс', '180 ms fade + 6 pt from above; out 120 ms'), T('только проявление', 'fade only'))}
+      ${r(T('Листы, меню, поповеры, подсказки', 'Sheets, menus, popovers, tooltips'), T('системные', 'the system’s'), T('системные — не переопределять', 'the system’s — do not override'), T('система сама', 'the system handles it'))}
+      ${r(T('Никогда', 'Never'), '', T('выделение, фокус, текст и числа, сортировка и фильтр, раскладка при ресайзе, прокрутка; никаких пульсаций в покое', 'selection, focus, text and numbers, sorting and filtering, layout on resize, scrolling; nothing pulses at rest'), '')}
+    </table>`;
+  }
+
+  // MARK: Page
+
+  const root = document.getElementById('app');
+  const page = document.createElement('div');
+  page.className = 'page';
+  const timingTag = (mode, scene) => {
+    const m = MOTION[mode];
+    return { list: `hover ${m.hoverIn}/${m.hoverOut} · filter ${m.filter} · move ${m.regroup}${m.regroupWhen === 'now' ? '' : ' ↦ leave'}`, sheet: `tab ${m.tab} ms`, launch: `${m.entrance.delay}+${m.entrance.dur} ms · ${m.entrance.rise} pt`, progress: `${m.progress} ms ${m.progressEase === 'linear' ? 'linear' : 'easeOut'}` }[scene];
+  };
+  const SCENES = [
+    ['list', T('Список: наведение, запуск, фильтр', 'List: hover, launch, filter'), T('Проведите курсором по строкам. Нажмите ▶ у профиля из «Готовы к запуску». Переключите фильтр слева. Нажмите в поле поиска.', 'Sweep the pointer over the rows. Press ▶ on a Ready profile. Switch the filter on the left. Click into the search field.'), listScene],
+    ['sheet', T('Вкладки листа', 'Sheet tabs'), T('Переключайте вкладки: слева старая и новая видны вместе 220 мс.', 'Switch tabs: on the left, old and new show together for 220 ms.'), sheetScene],
+    ['launch', T('Экран запуска', 'Launch screen'), T('«Повторить» проигрывает появление.', '“Replay” plays the entrance.'), launchScene],
+    ['progress', T('Прогресс и счётчики', 'Progress and counters'), T('Обновление раз в 0.7 с, как приходит статус прогрева.', 'Updates every 0.7 s, as warm-up status arrives.'), progressScene],
+  ];
+  const ticking = [];
+  const players = [];
+  for (const [id, title, how, build] of SCENES) {
+    if (sceneOnly && sceneOnly !== id) continue;
+    const sec = document.createElement('section');
+    sec.className = 'scene';
+    sec.innerHTML = `<h2>${title}</h2><div class="how">${how}</div><div class="pair"></div>`;
+    const pair = sec.querySelector('.pair');
+    for (const mode of ['current', 'proposed']) {
+      if (only && only !== mode) continue;
+      const pane = document.createElement('div');
+      pane.className = `pane m-${mode}`;
+      pane.setAttribute('style', vars(MOTION[mode]));
+      pane.innerHTML = `<div class="pane-head"><b>${MOTION[mode].label}</b><span class="t">${timingTag(mode, id)}${reduce ? ' · Reduce Motion' : ''}</span></div>`;
+      const scene = build(mode);
+      pane.appendChild(scene);
+      pair.appendChild(pane);
+      if (scene.tick) ticking.push(scene);
+      if (scene.play) players.push(scene);
+    }
+    page.appendChild(sec);
+  }
+  if (!sceneOnly || sceneOnly === 'spec') {
+    const sec = document.createElement('section');
+    sec.className = 'scene';
+    sec.innerHTML = `<h2>${T('Спек движения', 'Motion spec')}</h2><div class="how">${T('Ничего дольше 250 мс на обычное действие; ничего не движется в покое; всё уважает Reduce Motion (в SwiftUI — @Environment(\\.accessibilityReduceMotion), сам он анимации не отключает).', 'Nothing longer than 250 ms for an ordinary action; nothing moves at rest; everything honours Reduce Motion (in SwiftUI via @Environment(\\.accessibilityReduceMotion) — it does not disable animations by itself).')}</div>${specTable()}`;
+    page.appendChild(sec);
+  }
+  if (!only) {
+    const bar = document.createElement('div');
+    bar.className = 'viewer-bar';
+    const p = new URLSearchParams(location.search);
+    const link = (k, v) => { const q = new URLSearchParams(p); if (v === null) q.delete(k); else q.set(k, v); return '?' + q; };
+    bar.innerHTML = `<strong>${T('Движение — сейчас и предлагаю', 'Motion — now and proposed')}</strong>
+      <span class="viewer-group"><a href="${link('lang', 'ru')}" class="${en ? '' : 'on'}">RU</a><a href="${link('lang', 'en')}" class="${en ? 'on' : ''}">EN</a></span>
+      <span class="viewer-group"><a href="${link('rm', reduce ? null : '1')}" class="${reduce ? 'on' : ''}">Reduce Motion</a></span>
+      <span class="viewer-note">${T('Длительности и кривые — настоящие (те же числа, что в Theme.swift и в спеке).', 'Real durations and curves (the same numbers as Theme.swift and the spec).')}</span>`;
+    root.appendChild(bar);
+  }
+  root.appendChild(page);
+  setInterval(() => ticking.forEach((s) => s.tick()), 700);
+  setTimeout(() => players.forEach((s) => s.play()), 300);
+  window.__motion = { players, ticking };
+  window.__ready = true;
+})();
+</script>
+</body>
+</html>
