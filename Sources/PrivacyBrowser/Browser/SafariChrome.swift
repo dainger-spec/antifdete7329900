@@ -377,6 +377,11 @@ enum SafariChrome {
             // Doing nothing is also the behaviour we want: this is the switch that relaxes
             // third-party cookie blocking, and no profile here should have it relaxed.
             ("WKWebViewConfiguration", "_setShouldRelaxThirdPartyCookieBlocking:"),
+            // Safari's web extensions, which the menu brings up on launch. Its store migrator
+            // enumerates a directory it works out from Safari's own container, which is nil here.
+            // Not stubbed only to stop the crash: extensions installed in Safari have no business
+            // in a profile of this browser, and they would be shared by every profile.
+            ("WBSWebExtensionSQLiteStoreMigrator", "_migrateExtensionSQLiteStoresForDefaultProfile"),
             // The start page's onboarding section: Swift code that traps when it cannot reach
             // Safari's own services, and it takes every new tab down with it.
             ("StartPageOnboardingSectionProvider", "reloadData"),
