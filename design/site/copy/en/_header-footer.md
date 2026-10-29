@@ -10,6 +10,8 @@ Pricing
 
 Docs
 
+RU
+
 Sign in
 
 Try it free

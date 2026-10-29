@@ -67,7 +67,9 @@ export async function build({ only } = {}) {
       }
       const render = (await import(pathToFileURL(tplPath(page.template)).href + `?t=${Date.now()}`)).default;
       const c = await loadCopy(lang, page.copy);
-      const ctx = { lang, c: common, slug: page.slug, other: `${page.slug}.html`, state: page.state, page, copy: (name) => loadCopy(lang, name) };
+      // The header's subtitle (phones): the page's own name, or on the home page its first scene's.
+      const sub = typeof c.title === 'string' ? c.title : (c.intro && c.intro.section) || '';
+      const ctx = { lang, c: common, slug: page.slug, other: `${page.slug}.html`, state: page.state, page, sub, copy: (name) => loadCopy(lang, name) };
       const out = await render(c, ctx);
       const html = document(ctx, {
         title: out.title === undefined ? (c.title ?? null) : out.title,

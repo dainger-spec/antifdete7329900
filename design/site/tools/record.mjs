@@ -50,45 +50,86 @@ async function clickAt(page, locator) {
 }
 
 const SCENES = {
-  'hero-1440': { w: 1440, h: 900, async run(page, base) {
-    // The mark comes up from the seam (once), then a pointer moves over it: a soft light, nothing else moves.
-    await page.goto(`${base}/ru/index.html?rec=1`);
-    await pause(page, 2600);
-    await page.mouse.move(1300, 760, { steps: 1 });
-    await page.mouse.move(1000, 420, { steps: 40 });
-    await pause(page, 300);
-    await page.mouse.move(820, 560, { steps: 40 });
-    await pause(page, 300);
-    await page.mouse.move(1180, 300, { steps: 40 });
-    await pause(page, 700);
-    await page.mouse.move(700, 860, { steps: 30 });
-    await pause(page, 900);
-  } },
-  'hero-390': { w: 390, h: 844, mobile: true, async run(page, base) {
-    await page.goto(`${base}/ru/index.html?rec=1`);
-    await pause(page, 600);
-    const y = await page.evaluate(() => document.querySelector('[data-art]').getBoundingClientRect().top + scrollY - 160);
-    await smoothScroll(page, y, 700);
-    await pause(page, 2600);
-  } },
-  'hero-reduced-1440': { w: 1440, h: 900, reduced: true, async run(page, base) {
-    // Reduce Motion: the mark is simply there, finished; the pointer brings no light.
-    await page.goto(`${base}/ru/index.html?rec=1`);
-    await pause(page, 1200);
-    await page.mouse.move(1000, 420, { steps: 30 });
-    await pause(page, 1200);
-  } },
-  'tiles-1440': { w: 1440, h: 900, async run(page, base) {
+  'home-1440': { w: 1440, h: 900, async run(page, base) {
+    // The presentation, top to bottom: each scene plays with the scroll.
     await page.goto(`${base}/ru/index.html?rec=1`);
     await pause(page, 1800);
-    const y = await page.evaluate(() => document.querySelector('.bento-sec').getBoundingClientRect().top + scrollY - 40);
-    await smoothScroll(page, y, 900);
-    await pause(page, 3600);
-    await smoothScroll(page, y + 470, 700);
-    await pause(page, 3200);
-    await page.mouse.move(700, 120, { steps: 20 });
-    await page.mouse.move(1100, 300, { steps: 20 });
-    await pause(page, 2200);
+    const H = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
+    const stops = await page.evaluate(() => Array.from(document.querySelectorAll('[data-scene], .morex, .final')).map((el) => el.getBoundingClientRect().top + scrollY));
+    let y = 0;
+    for (const s of stops.slice(1).concat([H])) {
+      const to = Math.min(H, s), d = to - y;
+      if (d <= 0) continue;
+      await smoothScroll(page, to, Math.max(1600, Math.min(5200, d * 1.6)));
+      await pause(page, 700);
+      y = to;
+    }
+    await pause(page, 1200);
+  } },
+  'home-390': { w: 390, h: 844, mobile: true, async run(page, base) {
+    await page.goto(`${base}/ru/index.html?rec=1`);
+    await pause(page, 1600);
+    const H = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
+    const stops = await page.evaluate(() => Array.from(document.querySelectorAll('[data-scene], .morex, .final')).map((el) => el.getBoundingClientRect().top + scrollY));
+    let y = 0;
+    for (const s of stops.slice(1).concat([H])) {
+      const to = Math.min(H, s), d = to - y;
+      if (d <= 0) continue;
+      await smoothScroll(page, to, Math.max(1500, Math.min(4800, d * 1.5)));
+      await pause(page, 600);
+      y = to;
+    }
+    await pause(page, 1000);
+  } },
+  'home-1440': { w: 1440, h: 900, async run(page, base) {
+    // The presentation, top to bottom: each scene plays with the scroll.
+    await page.goto(`${base}/ru/index.html?rec=1`);
+    await pause(page, 1800);
+    const H = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
+    const stops = await page.evaluate(() => Array.from(document.querySelectorAll('[data-scene], .morex, .final')).map((el) => el.getBoundingClientRect().top + scrollY + Math.max(0, el.offsetHeight - innerHeight)));
+    let y = 0;
+    for (const s of stops.concat([H])) {
+      const to = Math.min(H, s), d = to - y;
+      if (d <= 20) continue;
+      await smoothScroll(page, to, Math.max(1400, Math.min(5600, d * 1.9)));
+      await pause(page, 500);
+      y = to;
+    }
+    await pause(page, 1200);
+  } },
+  'home-390': { w: 390, h: 844, mobile: true, async run(page, base) {
+    await page.goto(`${base}/ru/index.html?rec=1`);
+    await pause(page, 1600);
+    const H = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
+    const stops = await page.evaluate(() => Array.from(document.querySelectorAll('[data-scene], .morex, .final')).map((el) => el.getBoundingClientRect().top + scrollY + Math.max(0, el.offsetHeight - innerHeight)));
+    let y = 0;
+    for (const s of stops.concat([H])) {
+      const to = Math.min(H, s), d = to - y;
+      if (d <= 20) continue;
+      await smoothScroll(page, to, Math.max(1400, Math.min(5200, d * 1.8)));
+      await pause(page, 450);
+      y = to;
+    }
+    await pause(page, 1000);
+  } },
+  'hero-1440': { w: 1440, h: 900, async run(page, base) {
+    // The opening alone: the words rise, then the scroll opens the Mac and brings the half out of its screen.
+    await page.goto(`${base}/ru/index.html?rec=1`);
+    await pause(page, 2000);
+    const end = await page.evaluate(() => { const el = document.querySelector('[data-scene="intro"]'); return el.offsetHeight - innerHeight; });
+    await smoothScroll(page, end, 7000);
+    await pause(page, 600);
+    await page.mouse.move(380, 700, { steps: 1 });
+    await page.mouse.move(470, 430, { steps: 40 });
+    await page.mouse.move(560, 380, { steps: 30 });
+    await pause(page, 1400);
+  } },
+  'hero-reduced-1440': { w: 1440, h: 900, reduced: true, async run(page, base) {
+    // Reduce Motion: no scenes; every section shows its finished picture and the page simply scrolls.
+    await page.goto(`${base}/ru/index.html?rec=1`);
+    await pause(page, 1200);
+    await smoothScroll(page, 1400, 2400);
+    await pause(page, 1000);
   } },
   'reveal-1440': { w: 1440, h: 900, async run(page, base) {
     await page.goto(`${base}/ru/features.html?rec=1`);

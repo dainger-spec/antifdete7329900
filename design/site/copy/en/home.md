@@ -10,7 +10,7 @@ Search description: Lumen is a multi-account browser for Mac. Every account gets
 
 A multi-account browser for Mac
 
-# Every account gets its own Safari
+# Every account gets its own Safari.
 
 Its own cookies, IP, language and time zone for every profile. No signing in and out, and no leaks.
 
@@ -20,6 +20,10 @@ Its own cookies, IP, language and time zone for every profile. No signing in and
 
 ⟦q3: 7 days free⟧ No card needed macOS 14 or later
 
+Ads
+
+en-US · America/New_York
+
 Store
 
 de-DE · Europe/Berlin
@@ -28,43 +32,145 @@ Ads
 
 en-US · America/New_York
 
-The Lumen mark drawn in code: two halves, two profiles with data of their own, and the seam between them
+A MacBook whose display shows half of the Lumen mark drawn in code; the other half has come out of the screen towards us. Two halves, two profiles, each with its own language and time zone
 
-## Why Lumen
+One Mac, many Safaris. And they never mix.
 
-### It is real Safari
+Scroll
 
-The engine, the network handshake and the headers are those of Safari on your Mac.
+Lumen opens every account in a Safari of its own. Its own cookies, passwords and history. Its own proxy, language and time zone. Sites see an ordinary Safari — and you see every account at once.
 
-WebKit engine
+## One Mac, many Safaris. Each from a country of its own.
 
-as in Safari
+shop.example
 
-TLS handshake
+Store
 
-as in Safari
+Ads
 
-HTTP/2
+QA
 
-as in Safari
+shop
 
-Header order
+Neu
 
-as in Safari
+Damen
 
-Canvas and WebGL
+Herren
 
-as in Safari
+Kollektion
 
-Fonts
+### Neue Kollektion
 
-as in Safari
+Leicht, warm, für jeden Tag.
 
-448 signals compared with Safari on every build
+Jetzt entdecken
 
-### A proxy that never leaks
+Jacken
 
-Proxy down, and the profile does not go online directly. Your IP stays hidden.
+Schuhe
+
+Taschen
+
+shop
+
+Neu
+
+Damen
+
+Herren
+
+Kollektion
+
+### Neue Kollektion
+
+Leicht, warm, für jeden Tag.
+
+Jetzt entdecken
+
+Jacken
+
+Schuhe
+
+Taschen
+
+shop
+
+New
+
+Women
+
+Men
+
+Collection
+
+### The new collection
+
+Light, warm, for every day.
+
+Shop now
+
+Jackets
+
+Shoes
+
+Bags
+
+shop
+
+新着
+
+レディース
+
+メンズ
+
+コレクション
+
+### 新しいコレクション
+
+軽くて暖かい、毎日のために。
+
+今すぐ見る
+
+ジャケット
+
+シューズ
+
+バッグ
+
+The page is drawn by the real WebKit.Exactly as in Safari.
+
+The site sees: Germany · `de-DE`The site sees: USA · `en-US` The site sees: Japan · `ja-JP`
+
+## A profile is apart at every level.
+
+Window, process, data, network and key — every profile has its own.
+
+1. **A Safari window**Its own tabs, history and bookmarks
+2. **A process of its own**Its own WebKit, folder and temporary files
+3. **Its own data**Cookies and passwords other profiles cannot see
+4. **Its own network**Only through its proxy; direct is closed
+5. **Its own key**Everything on disk under AES-256-GCM
+
+A Safari window
+
+WebKit
+
+~/profile
+
+A process of its own
+
+Its own data
+
+Its own network
+
+AES-256-GCM
+
+Its own key
+
+## The proxy is down. No connection.
+
+A profile with a proxy goes online only through it. Your IP stays hidden.
 
 Ads
 
@@ -74,79 +180,75 @@ down
 
 Site
 
-Direct — closed
-
-IP hidden
-
-### Accounts never mix
-
-Its own cookies, passwords and history for every profile. And its own process.
-
-Store
-
-cookies · passwords · history
-
-cookies · passwords · history
-
-Ads
-
-### Warm-up runs itself
-
-A profile browses its country’s sites in a hidden window and collects cookies.
-
-84
-
-cookies
-
-Page 4 of 12
-
-google.se
-
-aftonbladet.se
-
-svt.se
-
-dn.se
-
-expressen.se
-
-blocket.se
-
-### Not even we can read it
-
-Everything on disk is encrypted with a key from your master password.
-
-Passwords
-
-••••••••••••
-
-Cookies
-
-••••••••••••
-
-History
-
-••••••••••••
-
-Bookmarks
-
-••••••••••••
-
-AES-256-GCM
+## Strength in numbers.
 
 448
 
-signals compared with Safari
+signals compared with real Safari on every build
 
-31/31
+31 / 31
 
-headers as in Safari
+headers, the same set and order as Safari’s
+
+15 / 15
+
+TLS and HTTP/2 values match
 
 0
 
 packets around the proxy
 
+26
+
+countries with ready-made warm-up site lists
+
+`AES-256-GCM`
+
+encryption of everything a profile keeps on disk
+
 How we verify
+
+## And everything you expect from Safari.
+
+shop.example
+
+••••••••••
+
+Save password
+
+### Passwords
+
+AutoFill as in Safari: save, update, fill.
+
+Orders
+
+Seller dashboard
+
+Support
+
+### History and bookmarks
+
+Every profile has its own.
+
+cookies.txt
+
+### Cookie import
+
+JSON and cookies.txt from extensions, Puppeteer, Playwright and Selenium.
+
+### Sync
+
+Your profiles on all your Macs. Only ciphertext goes to the server.
+
+### Profile export
+
+A whole profile in one file under a password.
+
+### Ephemeral profiles
+
+Close it, and nothing is left.
+
+All features
 
 ## Try Lumen free
 

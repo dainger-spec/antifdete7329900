@@ -12,27 +12,37 @@ export function lockup(markSize = 24, wordHeight = 12.4, gap = 10) {
 
 export function header(ctx) {
   const { lang, c, slug, other } = ctx;
+  const ru = lang === 'ru';
   const nav = c.nav.map(([href, label]) =>
     `<a href="${href}.html"${navCurrent(slug, href) ? ' aria-current="page"' : ''}>${esc(label)}</a>`).join('');
   const langSwitch = `<span class="lang" role="group" aria-label="${esc(c.a11y.language)}">` +
-    `<a href="../ru/${other}" hreflang="ru" lang="ru"${lang === 'ru' ? ' aria-current="true"' : ''}>RU</a>` +
-    `<a href="../en/${other}" hreflang="en" lang="en"${lang === 'en' ? ' aria-current="true"' : ''}>EN</a></span>`;
+    `<a href="../ru/${other}" hreflang="ru" lang="ru"${ru ? ' aria-current="true"' : ''}>RU</a>` +
+    `<a href="../en/${other}" hreflang="en" lang="en"${!ru ? ' aria-current="true"' : ''}>EN</a></span>`;
+  // The other language, one tap away (the footer and the phone menu carry the full switch).
+  const otherLang = ru
+    ? `<a class="hlang" href="../en/${other}" hreflang="en" lang="en" title="English" aria-label="English">${icon('globe', 15)}<span>EN</span></a>`
+    : `<a class="hlang" href="../ru/${other}" hreflang="ru" lang="ru" title="Русский" aria-label="Русский">${icon('globe', 15)}<span>RU</span></a>`;
+  const account = slug.startsWith('login') || slug.startsWith('account') || slug === 'signup';
   const menuLinks = c.nav.map(([href, label]) =>
-    `<a href="${href}.html"${navCurrent(slug, href) ? ' aria-current="page"' : ''}>${esc(label)}</a>`).join('') +
-    `<a href="login.html"${slug.startsWith('login') || slug.startsWith('account') || slug === 'signup' ? ' aria-current="page"' : ''}>${esc(c.header.login)}</a>`;
+    `<a href="${href}.html"${navCurrent(slug, href) ? ' aria-current="page"' : ''}>${esc(label)}${icon('chevronRight', 16)}</a>`).join('');
+  // The logo on the left, the sections in a capsule of glass in the middle, the actions on the right. The bar
+  // itself is clear at the top of a page and turns to glass once the page scrolls under it (site.js).
   return `<header class="site-header">
-  <div class="container glass bar">
-    <a class="brand" href="index.html" aria-label="${esc(productName())} — ${esc(c.a11y.home)}">${lockup()}</a>
-    <nav class="nav" aria-label="${esc(c.a11y.mainNav)}">${nav}</nav>
+  <div class="container hbar">
+    <a class="brand" href="index.html" aria-label="${esc(productName())} — ${esc(c.a11y.home)}">${lockup()}<span class="hsub" data-hsub>${inline(ctx.sub || '', lang)}</span></a>
+    <nav class="nav glass" aria-label="${esc(c.a11y.mainNav)}">${nav}</nav>
     <div class="header-end">
-      ${langSwitch}
-      <a class="btn ghost sm login" href="login.html">${esc(c.header.login)}</a>
+      ${otherLang}
+      <a class="hlogin" href="login.html"${account ? ' aria-current="page"' : ''}>${esc(c.header.login)}</a>
       <a class="btn primary sm" href="download.html"><span class="long">${esc(c.header.download)}</span><span class="short">${esc(c.header.downloadShort)}</span></a>
       <details class="menu">
-        <summary aria-label="${esc(c.a11y.menu)}">${icon('menu', 20, 'open')}${icon('xmark', 18, 'close')}</summary>
+        <summary aria-label="${esc(c.a11y.menu)}">${icon('chevronDown', 18, 'open')}${icon('xmark', 16, 'close')}</summary>
         <div class="menu-panel">
           <nav aria-label="${esc(c.a11y.mainNav)}">${menuLinks}</nav>
-          <div class="menu-foot">${langSwitch.replace('class="lang"', 'class="lang" style="display:inline-flex"')}<a class="btn primary" href="download.html">${icon('download', 16)}${esc(c.header.downloadLong)}</a></div>
+          <div class="menu-foot">
+            <a class="btn primary lg block" href="download.html">${icon('download', 16)}${esc(c.header.downloadLong)}</a>
+            <div class="menu-row"><a class="btn secondary" href="login.html">${esc(c.header.login)}</a>${langSwitch.replace('class="lang"', 'class="lang seg"')}</div>
+          </div>
         </div>
       </details>
     </div>
