@@ -227,6 +227,9 @@ final class ProfileManager: ObservableObject {
             Task { @MainActor in await self?.stopReportingErrors(id) }
         }
         sessions[id] = session
+        // Before any web view of this process exists: in a profile's own process every web view is
+        // built with this session's data store, which is what carries its proxy (SafariChromeHost).
+        SafariChromeHost.register(session: session)
         keys[id] = key
         launchTokens[id] = token
         runningProfileIDs.insert(id)
