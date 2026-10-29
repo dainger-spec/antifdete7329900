@@ -45,6 +45,10 @@ enum SafariChromeHost {
     /// tab: the chrome navigates, opens tabs, keeps history and shows its start page exactly as
     /// Safari does, and the pages it loads do so with the profile's cookies, storage and proxy.
     private static func giveSafarisWebViewsTheProfilesData() {
+        guard let cls = NSClassFromString("WebKitPreferencesManager") else {
+            log.notice("No WebKitPreferencesManager: Safari's chrome would load pages with its own data")
+            return
+        }
         // Opaque arguments and an unmanaged return on purpose. These three factories do not share
         // one signature — one of them takes a BOOL where the others take an object — and letting
         // Swift treat that BOOL as an object would have ARC retain the value 1 and take the
