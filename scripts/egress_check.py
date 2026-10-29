@@ -23,8 +23,10 @@ so. It fails on:
   `PrivacyBrowser` process (the profile's own, `INFO egress-pid`, or the self-test's), or made on
   its behalf by another process, to anything but loopback.
 
-Packets of other processes are listed (a Safari service that this machine runs anyway is not the
-profile's), never failed on. A capture that could not be made (no pktap, no sudo) makes the
+During the check, packets of Safari's own services and of the daemons a profile's process could ask
+to fetch for it (search suggestions, Safe Browsing, Safari Suggestions, background URL sessions,
+CloudKit, Web Push) fail too: nothing here runs the real Safari, so they can only be the profile's.
+Packets of other processes are listed, never failed on. A capture that could not be made (no pktap, no sudo) makes the
 result inconclusive: a warning, exit code 0.
 """
 import argparse
@@ -32,6 +34,12 @@ import ipaddress
 import re
 import sys
 
+# Services that fetch for whoever asks: in the check's window, theirs can only be the profile's.
+# Process names in the capture are cut to 16 characters ("com.apple.Safari" is any of Safari's
+# XPC services). Measured: the hosted chrome woke passd and translationd, and one of Safari's
+# services sent QUIC to Apple, while the profile ran.
+SERVICES = ("SearchHelper", "SafeBrowsing", "parsecd", "nsurlsessiond", "cloudd", "webpushd", "Safari",
+            "passd", "translationd")
 DOCUMENTATION = [ipaddress.ip_network(n) for n in
                  ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")]
 # "1730000000.123456 (proc PrivacyBrowser:4242, eproc ..., svc BE, out) IP 10.0.0.5.51000 > 192.0.2.10.8080: ..."
@@ -125,6 +133,8 @@ def main() -> int:
         elif in_window(packet) and (ours(packet["proc"]) or ours(packet["eproc"])):
             if packet["dst"] is None or not packet["dst"].is_loopback:
                 failures.append(("a PrivacyBrowser process (or one acting for it) reached past the proxy", line))
+        elif in_window(packet) and packet["proc"] and any(name in packet["proc"][0] for name in SERVICES):
+            failures.append((f"{packet['proc'][0]} fetched for someone while the profile ran", line))
         elif in_window(packet) and packet["proc"]:
             others.setdefault(packet["proc"][0], []).append(line)
 

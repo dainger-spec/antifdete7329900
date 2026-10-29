@@ -66,14 +66,17 @@ enum ProfileChannel {
         return try? JSONDecoder().decode(type, from: Data(json.utf8))
     }
 
-    /// Calls `onLine` for each complete line that arrives on `handle`, on the main actor. Reading
-    /// happens on Foundation's own queue; partial lines are kept until the rest arrives.
-    static func readLines(from handle: FileHandle, onLine: @escaping @MainActor (String) -> Void) {
+    /// Calls `onLine` for each complete line that arrives on `handle`, on the main actor, and
+    /// `onEnd` once when the other side has closed it. Reading happens on Foundation's own queue;
+    /// partial lines are kept until the rest arrives.
+    static func readLines(from handle: FileHandle, onEnd: (@MainActor () -> Void)? = nil,
+                          onLine: @escaping @MainActor (String) -> Void) {
         let buffer = LineBuffer()
         handle.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty else {
                 handle.readabilityHandler = nil
+                if let onEnd { DispatchQueue.main.async { MainActor.assumeIsolated { onEnd() } } }
                 return
             }
             for line in buffer.take(data) {

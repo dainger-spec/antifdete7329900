@@ -57,6 +57,8 @@ struct ProfileIndex: Codable, Equatable {
 /// profiles/<uuid>/history.bin      AEAD(historyKey, HistoryDocument JSON)
 /// profiles/<uuid>/bookmarks.bin    AEAD(bookmarksKey, BookmarkDocument JSON)
 /// profiles/<uuid>/webdata.pbsa     encrypted archive of the WebKit data store (app layer)
+/// profiles/<uuid>/safarihome.pbsa  encrypted archive of Safari's own state in a profile hosting its
+///                                  chrome (app layer, `SafariHomeVault`)
 /// profiles/<uuid>/cookies-import.bin AEAD(cookieImportKey, [ImportedCookie] JSON): imported while
 ///                                  the profile was stopped, applied at its next launch (not synced)
 /// profiles/<uuid>/cookies.bin      AEAD(cookiesKey, CookieJarDocument JSON): the persistent cookies,
@@ -91,6 +93,9 @@ public final class ProfileRepository: @unchecked Sendable {
 
     func configURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("config.bin") }
     public func webDataArchiveURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("webdata.pbsa") }
+    /// Safari's own state of the profile, for a profile whose window is Safari's chrome (the
+    /// app's `SafariHomeVault` seals and restores it).
+    public func safariHomeArchiveURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("safarihome.pbsa") }
 
     // MARK: Queries
 

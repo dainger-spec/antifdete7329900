@@ -47,7 +47,7 @@ enum ProfileSessionHost {
             let vault = try MasterVault.open(in: AppEnvironment.vaultDirectory, masterKeyMaterial: key)
             repository = try ProfileRepository(vault: vault)
             stored = try repository.loadConfiguration(profileID)
-            try ProfileNetworkGuard.engage(profileID: profileID, proxy: stored.proxy)
+            try ProfileNetworkGuard.engage(profileID: profileID, proxy: stored.proxy, safeBrowsing: stored.safeBrowsingEnabled)
         } catch {
             log.error("Could not open the vault or hold \(profileID.uuidString, privacy: .public) to its proxy: \(String(describing: error), privacy: .public)")
             exit(3)
@@ -55,6 +55,11 @@ enum ProfileSessionHost {
         key.withUnsafeMutableBytes { bytes in
             guard let base = bytes.baseAddress else { return }
             memset_s(base, bytes.count, 0, bytes.count)
+        }
+        // While this process runs, its home is in use: a manager started meanwhile (after a crash
+        // of the one that started this) must not seal it from under it.
+        if let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] {
+            SafariHomeVault.holdWhileRunning(home: URL(fileURLWithPath: home, isDirectory: true))
         }
         // A web view that turns out not to be on the profile's data loads nothing (the guard's
         // second lock); the user is told why the page did not open.
@@ -124,7 +129,12 @@ enum ProfileSessionHost {
             source.resume()
             terminationSource = source
 
-            ProfileChannel.readLines(from: FileHandle.standardInput) { [weak self] line in
+            ProfileChannel.readLines(from: FileHandle.standardInput, onEnd: {
+                // The manager is gone (it quit or crashed): nothing can ask this process to seal the
+                // profile's data any more, so it does now, the way quitting does.
+                ProfileSessionHost.log.notice("The manager closed the channel: quitting, which seals the profile")
+                NSApp.terminate(nil)
+            }) { [weak self] line in
                 guard let command = ProfileChannel.decode(ProfileCommand.self, from: line) else { return }
                 self?.handle(command)
             }

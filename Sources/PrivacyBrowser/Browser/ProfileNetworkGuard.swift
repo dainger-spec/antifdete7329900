@@ -66,7 +66,7 @@ enum ProfileNetworkGuard {
 
     /// Holds this process to `proxy` (or, with none, to no proxy but still to the profile's store).
     /// Throws when the proxy cannot be applied: the process must then not run at all.
-    static func engage(profileID: UUID, proxy: ProxySettings?) throws {
+    static func engage(profileID: UUID, proxy: ProxySettings?, safeBrowsing: Bool = false) throws {
         guard proxies == nil else { return }
         let proxies = try ProxyConfigurationFactory.make(proxy)
         self.proxies = proxies
@@ -80,6 +80,9 @@ enum ProfileNetworkGuard {
         missingHooks += everyStoreStartsClosed(except: profileID)
         missingHooks += everyWebViewGetsTheProfilesData()
         missingHooks += pinPrivacyPreferences()
+        missingHooks += noPagePicksAnotherStore()
+        missingHooks += noServiceOutsideTheProxy(safeBrowsing: safeBrowsing)
+        missingHooks += nothingIsHandedOff()
         log.notice("This process is held to its profile's proxy: \(proxies.count, privacy: .public) proxies, \(missingHooks.count, privacy: .public) hooks missing")
         for hook in missingHooks {
             log.error("Not in this macOS: \(hook, privacy: .public)")
@@ -128,6 +131,11 @@ enum ProfileNetworkGuard {
         guard let session else {
             log.error("\(origin, privacy: .public) before the profile was ready: it gets a store that loads nothing")
             configuration.websiteDataStore = closedStore
+            // And nothing that leaves a store's proxy anyway (the setters are pinned: with no
+            // profile yet, they answer off).
+            configuration.preferences.isFraudulentWebsiteWarningEnabled = false
+            WebKitPreferences.setBool(configuration.preferences, "_setPeerConnectionEnabled:", false)
+            for key in BrowserSession.featuresOffWithAProxy { WebKitFeatures.set(configuration.preferences, key, false) }
             return
         }
         session.applyProfile(to: configuration)
@@ -166,7 +174,131 @@ enum ProfileNetworkGuard {
             return result
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
+
+        // The initializer every initializer goes through, -initWithCoder: (a web view in a nib)
+        // included: the same, once more, where nothing else reaches. Private, so only noted when
+        // absent; giving a configuration the profile twice changes nothing.
+        let initialize = NSSelectorFromString("_initializeWithConfiguration:")
+        if let method = class_getInstanceMethod(WKWebView.self, initialize) {
+            typealias Initialize = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+            let original = unsafeBitCast(method_getImplementation(method), to: Initialize.self)
+            let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { receiver, configuration in
+                if let configuration = configuration as? WKWebViewConfiguration {
+                    give(configuration, builtBy: "A web view being initialized")
+                }
+                original(receiver, initialize, configuration)
+                if let webView = receiver as? WKWebView { inspect(webView) }
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
         return []
+    }
+
+    /// A page's navigation can carry a data store of its own (`WKWebpagePreferences`, set by the
+    /// browser's navigation delegate — Safari's, here): in this process it is always the profile's,
+    /// or the closed one before the profile is ready.
+    private static func noPagePicksAnotherStore() -> [String] {
+        let selector = NSSelectorFromString("_setWebsiteDataStore:")
+        guard let method = class_getInstanceMethod(WKWebpagePreferences.self, selector) else { return [] }
+        typealias Setter = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+        let original = unsafeBitCast(method_getImplementation(method), to: Setter.self)
+        let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { preferences, store in
+            let profiles: WKWebsiteDataStore = session?.dataStore ?? closedStore
+            if let store, store !== profiles {
+                log.error("A navigation asked for another data store: it gets the profile's")
+            }
+            original(preferences, selector, store == nil ? nil : profiles)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        return []
+    }
+
+    /// The XPC services of Safari's and of the system that would make requests for a profile from
+    /// another process — as this Mac, outside every lock in this one — are not reached from here:
+    /// a connection to one of them is made to a name that does not exist, so it fails at once and
+    /// its error handler runs, as for any service that is unavailable. Every service this process
+    /// does connect to is noted for the report, so that a new one is seen.
+    ///
+    ///   * SearchHelper: Safari's search suggestions and the OpenSearch descriptions pages name.
+    ///   * SafeBrowsing: the lookups, unless the profile asks for them.
+    ///   * parsecd: Safari Suggestions. cloudd and the sync agents: iCloud Tabs, bookmarks, tab
+    ///     groups. webpushd: Web Push, registered with this Mac's own push token.
+    ///   * passd (Apple Pay), translationd (Safari's page translation, which sends the page's text)
+    ///     and Safari's password breach check: measured in CI, the hosted chrome woke the first
+    ///     two on its own and both went to Apple's servers as this Mac while the profile ran.
+    ///
+    /// Connections are made from any thread, so this runs on whichever it is called from.
+    nonisolated private static func noServiceOutsideTheProxy(safeBrowsing: Bool) -> [String] {
+        var denied = ["Safari.SearchHelper", "parsec", "cloudd", "SyncAgent", "CloudTabs", "webpushd",
+                      "passd", "translationd", "PasswordBreach"]
+        if !safeBrowsing { denied.append("SafeBrowsing") }
+        let deny = denied
+        var missing: [String] = []
+        let reroute: @Sendable (String) -> String = { name in
+            let refused = deny.contains { name.localizedCaseInsensitiveContains($0) }
+            servicesSeen.insert(refused ? "\(name) (refused)" : name)
+            return refused ? "\(name).refused-in-a-profile" : name
+        }
+        let service = NSSelectorFromString("initWithServiceName:")
+        if let method = class_getInstanceMethod(NSXPCConnection.self, service) {
+            typealias Initializer = @convention(c) (AnyObject, Selector, NSString?) -> Unmanaged<AnyObject>?
+            let original = unsafeBitCast(method_getImplementation(method), to: Initializer.self)
+            let replacement: @convention(block) (AnyObject, NSString?) -> Unmanaged<AnyObject>? = { receiver, name in
+                original(receiver, service, name.map { reroute($0 as String) as NSString })
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        } else {
+            missing.append("-[NSXPCConnection initWithServiceName:]")
+        }
+        let machService = NSSelectorFromString("initWithMachServiceName:options:")
+        if let method = class_getInstanceMethod(NSXPCConnection.self, machService) {
+            typealias Initializer = @convention(c) (AnyObject, Selector, NSString?, UInt) -> Unmanaged<AnyObject>?
+            let original = unsafeBitCast(method_getImplementation(method), to: Initializer.self)
+            let replacement: @convention(block) (AnyObject, NSString?, UInt) -> Unmanaged<AnyObject>? = { receiver, name, options in
+                original(receiver, machService, name.map { reroute($0 as String) as NSString }, options)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        } else {
+            missing.append("-[NSXPCConnection initWithMachServiceName:options:]")
+        }
+        return missing
+    }
+
+    /// XPC services this process has connected to (refused ones marked), for the report.
+    nonisolated private static let servicesSeen = LockedSet()
+
+    /// A set any thread may add to.
+    final class LockedSet: @unchecked Sendable {
+        private let lock = NSLock()
+        private var names: Set<String> = []
+        func insert(_ name: String) { lock.withLock { _ = names.insert(name) } }
+        var sorted: [String] { lock.withLock { names.sorted() } }
+    }
+
+    /// Safari publishes the page in front as a Handoff activity, which the system advertises to the
+    /// owner's other devices on their Apple ID — the profile's addresses, outside its proxy and
+    /// tied to the owner. In a profile's process no activity becomes current, and none is eligible
+    /// for Handoff, Spotlight or public indexing.
+    nonisolated private static func nothingIsHandedOff() -> [String] {
+        var missing: [String] = []
+        let becomeCurrent = NSSelectorFromString("becomeCurrent")
+        if let method = class_getInstanceMethod(NSUserActivity.self, becomeCurrent) {
+            let replacement: @convention(block) (AnyObject) -> Void = { _ in }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        } else {
+            missing.append("-[NSUserActivity becomeCurrent]")
+        }
+        typealias BoolSetter = @convention(c) (AnyObject, Selector, Bool) -> Void
+        for name in ["setEligibleForHandoff:", "setEligibleForSearch:", "setEligibleForPublicIndexing:"] {
+            let selector = NSSelectorFromString(name)
+            guard let method = class_getInstanceMethod(NSUserActivity.self, selector) else { continue }
+            let original = unsafeBitCast(method_getImplementation(method), to: BoolSetter.self)
+            let replacement: @convention(block) (AnyObject, Bool) -> Void = { activity, _ in
+                original(activity, selector, false)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+        return missing
     }
 
     /// What a finished web view actually holds. Not on the profile's store, or on it without the
@@ -220,10 +352,13 @@ enum ProfileNetworkGuard {
         pin("setFraudulentWebsiteWarningEnabled:", required: true) { _ in
             session?.configuration.safeBrowsingEnabled ?? false
         }
+        pin("_setSafeBrowsingEnabled:", required: false) { _ in
+            session?.configuration.safeBrowsingEnabled ?? false
+        }
         pin("_setShouldAllowUserInstalledFonts:", required: false) { _ in false }
 
         // The feature switches, by key: only the ones that leave the proxy, only with a proxy.
-        let pinnedOff: Set<String> = ["WebTransportEnabled", "PrivateClickMeasurementEnabled"]
+        let pinnedOff = BrowserSession.featuresOffWithAProxy
         for name in ["_setEnabled:forFeature:", "_setEnabled:forExperimentalFeature:", "_setEnabled:forInternalDebugFeature:"] {
             let selector = NSSelectorFromString(name)
             guard let method = class_getInstanceMethod(preferencesClass, selector) else { continue }
@@ -363,8 +498,9 @@ enum ProfileNetworkGuard {
             method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
 
-        let background = NSSelectorFromString("backgroundSessionConfigurationWithIdentifier:")
-        if let method = class_getClassMethod(URLSessionConfiguration.self, background) {
+        for name in ["backgroundSessionConfigurationWithIdentifier:", "backgroundSessionConfiguration:"] {
+            let background = NSSelectorFromString(name)
+            guard let method = class_getClassMethod(URLSessionConfiguration.self, background) else { continue }
             let replacement: @convention(block) (AnyObject, AnyObject?) -> URLSessionConfiguration = { _, identifier in
                 Logger(subsystem: "PrivacyBrowser", category: "ProfileNetworkGuard")
                     .notice("A background URL session was asked for (\(String(describing: identifier), privacy: .public)); it runs in this process, through the profile's proxy")
@@ -419,6 +555,7 @@ enum ProfileNetworkGuard {
                 && !NWParameters.PrivacyContext.default.proxyConfigurations.isEmpty)
         report.missing = missingHooks + SafariChrome.missingPieces()
         report.features = WebKitFeatures.applied
+        report.services = servicesSeen.sorted
         report.safariPreferences = SafariChrome.servicePreferences()
         if let probe {
             report.probes["shared"] = await fetch(probe, with: URLSession.shared)
@@ -475,6 +612,8 @@ struct ProfileNetworkReport: Codable, Equatable {
     var features: [String: Bool] = [:]
     /// Safari's own services as its preferences in this profile have them.
     var safariPreferences: [String: String] = [:]
+    /// XPC services the process connected to; the ones refused (`noServiceOutsideTheProxy`) say so.
+    var services: [String] = []
 
     /// Nothing in the process is outside the profile's data or proxy, as far as it can tell.
     var isClean: Bool {

@@ -502,3 +502,33 @@
 /* Network guard of a profile's own process */
 "network.webViewOffProfile" = "A page of this profile was about to open outside its data and proxy, and was stopped: better a page that does not open than one opened from this Mac's own address. Please report this with the log (subsystem PrivacyBrowser).";
 "safari.chrome.missingPieces" = "This macOS's Safari no longer has parts the Safari window of a profile relies on (%@). The profile still loads only through its proxy, but some of Safari's window may misbehave; an update of PrivacyBrowser is needed.";
+
+/* Profile export and import; crash recovery */
+"profiles.row.export" = "Export Profile…";
+"profiles.menu.import" = "Import Profile…";
+"transfer.export.title" = "Export “%@”";
+"transfer.export.explanation" = "The whole profile — settings and proxy, passwords, history, bookmarks, cookies and website data — in one file encrypted with a password of its own: for another Mac, a backup, or to hand over.";
+"transfer.export.running" = "The profile is running: it will be stopped first, so that its data is saved whole.";
+"transfer.export.action" = "Export…";
+"transfer.export.actionStop" = "Stop and Export…";
+"transfer.export.done" = "Saved: %@";
+"transfer.password" = "File password";
+"transfer.password.repeat" = "Repeat password";
+"transfer.password.note" = "At least 8 characters. The file cannot be opened without it, and it cannot be recovered.";
+"transfer.import.title" = "Import Profile";
+"transfer.import.explanation" = "Choose a .pbprofile file and enter its password. The profile is added as a new one, with data of its own, apart from the profiles already here.";
+"transfer.import.choose" = "Choose File…";
+"transfer.import.open" = "Open";
+"transfer.import.name" = "Profile name";
+"transfer.import.contents" = "Passwords: %1$d · History: %2$d · Bookmarks: %3$d";
+"transfer.import.websiteData" = "Cookies and website data: included";
+"transfer.import.noWebsiteData" = "Cookies and website data: none";
+"transfer.import.proxy" = "Proxy: %@";
+"transfer.import.direct" = "No proxy";
+"transfer.import.exportedAt" = "Exported %@";
+"transfer.import.action" = "Import";
+"transfer.import.done" = "Profile “%@” added.";
+"transfer.error.password" = "Wrong password, or the file is damaged.";
+"transfer.error.notExport" = "This is not a PrivacyBrowser profile file.";
+"recovery.homeNotSealed" = "Could not encrypt Safari's state of profile “%1$@” again: %2$@";
+"recovery.webDataNotSealed" = "Could not encrypt the data of profile “%1$@” again: %2$@";

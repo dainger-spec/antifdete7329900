@@ -34,6 +34,8 @@ struct ProfileListView: View {
     @State private var passwordsFor: ProfileSummary?
     @State private var importingCookiesFor: ProfileSummary?
     @State private var warmingUp: ProfileSummary?
+    @State private var exporting: ProfileSummary?
+    @State private var importingProfile = false
     @State private var pendingDelete: ProfileSummary?
     @State private var changingPassword = false
     @State private var showingSync = false
@@ -48,6 +50,8 @@ struct ProfileListView: View {
             .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
             .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
             .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
+            .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }
+            .sheet(isPresented: $importingProfile) { ProfileImportView() }
             // "Passwords…" in a browser window's AutoFill list.
             .onReceive(model.$passwordsRequest.compactMap { $0 }) { profile in
                 passwordsFor = profile
@@ -106,6 +110,8 @@ struct ProfileListView: View {
             passwords: { id in passwordsFor = summary(id) },
             importCookies: { id in importingCookiesFor = summary(id) },
             warmUp: { id in warmingUp = summary(id) },
+            exportProfile: { id in exporting = summary(id) },
+            importProfile: { importingProfile = true },
             delete: { id in pendingDelete = summary(id) },
             lock: { Task { await model.lock() } },
             openSync: { showingSync = true },
@@ -204,6 +210,8 @@ struct ProfileActions {
     var passwords: (UUID) -> Void = { _ in }
     var importCookies: (UUID) -> Void = { _ in }
     var warmUp: (UUID) -> Void = { _ in }
+    var exportProfile: (UUID) -> Void = { _ in }
+    var importProfile: () -> Void = {}
     var delete: (UUID) -> Void = { _ in }
     var lock: () -> Void = {}
     var openSync: () -> Void = {}
@@ -274,6 +282,8 @@ struct ProfilesScreen: View {
             LumenSearchField(text: $search, prompt: L("profiles.search"))
                 .frame(width: 200)
             Menu {
+                Button(L("profiles.menu.import"), action: actions.importProfile)
+                Divider()
                 Button(L("profiles.menu.sync"), action: actions.openSync)
                 Button(L("profiles.menu.syncNow")) { actions.syncNow?() }
                     .disabled(actions.syncNow == nil)
@@ -688,6 +698,8 @@ private struct ProfileMenuItems: View {
         Button(L("profiles.row.passwords")) { actions.passwords(row.id) }
         Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
         Button(L("profiles.row.warmUp")) { actions.warmUp(row.id) }
+        Divider()
+        Button(L("profiles.row.export")) { actions.exportProfile(row.id) }
         Divider()
         Button(L("profiles.row.delete"), role: .destructive) { actions.delete(row.id) }
     }

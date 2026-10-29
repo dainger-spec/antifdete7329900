@@ -502,3 +502,33 @@
 /* Network guard of a profile's own process */
 "network.webViewOffProfile" = "Страница этого профиля чуть не открылась вне его данных и прокси — загрузка остановлена: лучше не открыть страницу, чем открыть её с реального адреса этого Mac. Сообщите об этом и приложите лог (subsystem PrivacyBrowser).";
 "safari.chrome.missingPieces" = "В Safari этой версии macOS нет частей, на которые опирается окно Safari профиля (%@). Профиль по-прежнему ходит только через свой прокси, но часть окна Safari может работать неправильно; нужно обновление PrivacyBrowser.";
+
+/* Profile export and import; crash recovery */
+"profiles.row.export" = "Экспортировать профиль…";
+"profiles.menu.import" = "Импортировать профиль…";
+"transfer.export.title" = "Экспорт профиля «%@»";
+"transfer.export.explanation" = "Профиль целиком — настройки и прокси, пароли, история, закладки, cookies и данные сайтов — в один файл, зашифрованный отдельным паролем: для другого Mac, резервной копии или передачи.";
+"transfer.export.running" = "Профиль запущен: перед экспортом он будет остановлен, чтобы его данные сохранились целиком.";
+"transfer.export.action" = "Экспортировать…";
+"transfer.export.actionStop" = "Остановить и экспортировать…";
+"transfer.export.done" = "Сохранено: %@";
+"transfer.password" = "Пароль файла";
+"transfer.password.repeat" = "Повторите пароль";
+"transfer.password.note" = "Не меньше 8 символов. Без этого пароля файл не открыть, и восстановить его нельзя.";
+"transfer.import.title" = "Импорт профиля";
+"transfer.import.explanation" = "Выберите файл .pbprofile и введите его пароль. Профиль появится в списке как новый, со своими данными, отдельно от уже существующих.";
+"transfer.import.choose" = "Выбрать файл…";
+"transfer.import.open" = "Открыть";
+"transfer.import.name" = "Имя профиля";
+"transfer.import.contents" = "Пароли: %1$d · История: %2$d · Закладки: %3$d";
+"transfer.import.websiteData" = "Cookies и данные сайтов: есть";
+"transfer.import.noWebsiteData" = "Cookies и данные сайтов: нет";
+"transfer.import.proxy" = "Прокси: %@";
+"transfer.import.direct" = "Без прокси";
+"transfer.import.exportedAt" = "Экспортирован %@";
+"transfer.import.action" = "Импортировать";
+"transfer.import.done" = "Профиль «%@» добавлен.";
+"transfer.error.password" = "Неверный пароль, или файл повреждён.";
+"transfer.error.notExport" = "Это не файл профиля PrivacyBrowser.";
+"recovery.homeNotSealed" = "Не удалось заново зашифровать состояние Safari профиля «%1$@»: %2$@";
+"recovery.webDataNotSealed" = "Не удалось заново зашифровать данные профиля «%1$@»: %2$@";

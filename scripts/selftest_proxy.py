@@ -45,7 +45,8 @@ User-Agent headers and the time it came.
 
 `/pb-leak?run=<id>` is the leak page for a profile hosted in Safari's chrome (SelfTest's
 `safariChromeThroughTheProxy`, scripts/egress_check.py): served for any host, it makes every kind of
-request a page can make — fetches to IPv4 and IPv6 literals in the documentation ranges (TEST-NET
+request a page can make — and that Safari makes for a page (its icons, its OpenSearch
+description) — fetches to IPv4 and IPv6 literals in the documentation ranges (TEST-NET
 192.0.2.0/24, 2001:db8::/32, which nothing answers and nothing routes), to host names carrying the
 run id, a WebSocket, a worker's fetch, an image, a frame, a font, a video, a `<link rel=dns-prefetch>`
 and `rel=preconnect`, an `<a ping>`, a beacon, WebRTC and WebTransport where the page has them —
@@ -138,6 +139,9 @@ def leak_page(run: str) -> bytes:
     page = r"""<!doctype html><html><head><title>PB leak page RUN</title>
 <link rel="dns-prefetch" href="//prefetch-RUN.leak.example.com">
 <link rel="preconnect" href="http://preconnect-RUN.leak.example.com">
+<link rel="search" type="application/opensearchdescription+xml" title="PB" href="http://osd-RUN.leak.example.com/pb-leak/osd.xml?run=RUN">
+<link rel="apple-touch-icon" href="http://touchicon-RUN.leak.example.com/pb-leak/touch.png?run=RUN">
+<link rel="icon" href="http://icon-RUN.leak.example.com/pb-leak/icon.png?run=RUN">
 <style>@font-face{font-family:pbleak;src:url(http://font-RUN.leak.example.com/pb-leak/font.woff?run=RUN)} body{font-family:pbleak,serif}</style>
 </head><body>
 <p>PB-LEAK-PAGE RUN</p>
@@ -281,7 +285,7 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
             # This run's requests, and every request for an address in the documentation ranges
             # (only the leak page asks for those; a TLS request's path is its encrypted bytes).
             entries = [entry for entry in TARGETS if run and (run in entry["path"].lower() or run in entry["target"].lower()
-                                                              or entry["target"].startswith(("192.0.2.", "[2001:db8:")))]
+                                                              or entry["target"].startswith(("192.0.2.", "[2001:db8:", "2001:db8:")))]
             body = json.dumps({"targets": entries, "reports": LEAK_REPORTS.get(run, [])}).encode()
         content_type = "application/json"
     elif plain_path == "/pb-cookies":

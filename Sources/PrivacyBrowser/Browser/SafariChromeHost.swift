@@ -35,14 +35,14 @@ enum SafariChromeHost {
     static func prepareForChildProcess(configuration: ProfileConfiguration) -> Bool {
         guard !isPrepared else { return true }
         guard !isTurnedOff else { return false }
+        // Before the frameworks load: some of what they read, they read as they load.
+        SafariChrome.configureSafarisOwnServices(for: configuration)
         guard SafariChrome.load() else { return false }
         let structural = SafariChrome.missingStructuralPieces()
         guard structural.isEmpty else {
             log.error("This Safari lacks what its chrome needs here (\(structural.joined(separator: ", "), privacy: .public)): our own window instead")
             return false
         }
-        // Before anything of Safari's reads them: the profile's own com.apple.Safari domain.
-        SafariChrome.configureSafarisOwnServices(for: configuration)
         guard SafariChrome.installApplication() else {
             log.error("NSApp is not Safari's application object: Safari's chrome is not hosted here")
             return false

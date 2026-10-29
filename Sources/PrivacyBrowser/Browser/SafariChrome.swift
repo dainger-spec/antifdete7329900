@@ -262,6 +262,12 @@ enum SafariChrome {
     ///   * Privacy-preserving ad measurement: its reports are sent later, outside the page's
     ///     session; off for a profile with a proxy (the web views have it off as well,
     ///     `BrowserSession.applyPrivacyPreferences`).
+    ///   * Quick Website Search: Safari fetches the OpenSearch description a page names, from a
+    ///     service of its own, as this Mac. Off.
+    ///   * Preloading the top hit: a page loaded for what is being typed, before it is chosen.
+    ///     Through the profile's proxy like any page, but a request the user did not make. Off.
+    ///   * Asking websites' permission for notifications, and Safari's extensions: Web Push is
+    ///     registered with this Mac's own push token, extensions are the real Safari's. Off.
     static func servicePreferenceValues(for configuration: ProfileConfiguration) -> [(String, Bool)] {
         [
             ("AutoFillPasswords", false),
@@ -272,16 +278,26 @@ enum SafariChrome {
             ("SuppressSearchSuggestions", true),
             ("WarnAboutFraudulentWebsites", configuration.safeBrowsingEnabled),
             ("WebKitPreferences.privateClickMeasurementEnabled", configuration.proxy == nil),
+            ("WebsiteSpecificSearchEnabled", false),
+            ("PreloadTopHit", false),
+            ("CanPromptForPushNotifications", false),
+            ("ExtensionsEnabled", false),
         ]
     }
 
-    /// Writes `servicePreferenceValues` into the profile's `com.apple.Safari` domain. Called before
-    /// anything of Safari's reads it.
+    /// Writes `servicePreferenceValues` into the profile's `com.apple.Safari` domain, and puts the
+    /// same values in the argument domain of this process — which every domain's lookups see
+    /// before what is stored or registered, and which is never written anywhere — in case some
+    /// part of Safari reads them from a domain other than the one written. Called before Safari's
+    /// frameworks load.
     static func configureSafarisOwnServices(for configuration: ProfileConfiguration) {
         let domain = "com.apple.Safari" as CFString
+        var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         for (key, value) in servicePreferenceValues(for: configuration) {
             CFPreferencesSetAppValue(key as CFString, value ? kCFBooleanTrue : kCFBooleanFalse, domain)
+            arguments[key] = value
         }
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         CFPreferencesAppSynchronize(domain)
         servicePreferenceKeys = servicePreferenceValues(for: configuration).map(\.0)
         log.notice("Safari's own services are set for this profile (\(servicePreferenceKeys.count, privacy: .public) keys)")
@@ -734,12 +750,25 @@ enum SafariChrome {
             log.error("Safari's MainMenu.nib holds no menu")
             return false
         }
+        removePrivateWindowItems(from: menu)
         NSApplication.shared.mainMenu = menu
         log.notice("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
         return true
     }
 
     private static var menuObjects: [Any]?
+
+    /// "New Private Window" goes: a private window of Safari's would be built, like every web view
+    /// here, on the profile's own store — a window that says private and keeps everything. A
+    /// profile that should keep nothing is an ephemeral profile.
+    private static func removePrivateWindowItems(from menu: NSMenu) {
+        for item in menu.items {
+            if let submenu = item.submenu { removePrivateWindowItems(from: submenu) }
+            if let action = item.action, NSStringFromSelector(action).localizedCaseInsensitiveContains("private") {
+                menu.removeItem(item)
+            }
+        }
+    }
 
     // MARK: Opening a window
 

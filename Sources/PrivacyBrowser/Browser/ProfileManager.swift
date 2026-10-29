@@ -228,6 +228,12 @@ final class ProfileManager: ObservableObject {
         // Synced cookies, and cookies imported while the profile was stopped: into its store
         // before the first page loads.
         await prepareCookies(of: id, summary: summary, syncs: stored.syncsCookies, session: session)
+        // Attribution reports a page set up before Private Click Measurement was off for proxied
+        // profiles would still be sent by WebKit, later, outside the page's session: removed.
+        if configuration.proxy != nil, let store = session.dataStore {
+            await store.removeData(ofTypes: ["_WKWebsiteDataTypePrivateClickMeasurements", "_WKWebsiteDataTypeAdClickAttributions"],
+                                   modifiedSince: .distantPast)
+        }
         session.onAllWindowsClosed = { [weak self] in
             // Return to the Profiles window right away; sealing then runs in the background and
             // flips the row to "Encrypting…" via busyProfileIDs.
@@ -808,9 +814,35 @@ final class ProfileManager: ObservableObject {
 
     // MARK: Crash recovery
 
-    /// Seals WebKit data left unencrypted by a crash or forced quit. Run after unlock.
+    /// A stopped profile's data, all of it sealed: WebKit data a crash left in plaintext is
+    /// archived again, and so is Safari's home of a profile whose own process did not get to
+    /// seal it. Nothing happens to a running profile, whose data is in use.
+    func sealLeftovers(of id: UUID) async throws {
+        guard !isRunning(id), !busyProfileIDs.contains(id) else { return }
+        let key = try repository.profileKey(for: id)
+        if !WebDataStoreVault.discoverDirectories(for: id).isEmpty {
+            try await webDataVault.seal(profileID: id, key: key, activeStore: false)
+        }
+        try safariHomeVault.seal(profileID: id, key: key)
+    }
+
+    /// Seals WebKit data left unencrypted by a crash or forced quit, and Safari's home of a
+    /// profile whose process ended without the manager sealing it (the manager itself crashed, or
+    /// was killed, while the profile ran). Run after unlock.
     func recoverUnsealedProfiles() async {
-        for summary in repository.list() where sessions[summary.id] == nil {
+        for summary in repository.list() where sessions[summary.id] == nil && children[summary.id] == nil {
+            guard !isShuttingDown else { break }
+            if FileManager.default.fileExists(atPath: safariHomeVault.homeDirectory(for: summary.id).path),
+               !safariHomeVault.isInUse(profileID: summary.id) {
+                log.notice("Re-sealing Safari's unencrypted home of \(summary.id.uuidString, privacy: .public)")
+                do {
+                    try safariHomeVault.seal(profileID: summary.id, key: repository.profileKey(for: summary.id))
+                } catch {
+                    onError?(String(format: L("recovery.homeNotSealed"), summary.name, error.localizedDescription))
+                }
+            }
+        }
+        for summary in repository.list() where sessions[summary.id] == nil && children[summary.id] == nil {
             guard !isShuttingDown else { break }
             guard !WebDataStoreVault.discoverDirectories(for: summary.id).isEmpty else { continue }
             log.notice("Re-sealing unencrypted WebKit data of \(summary.id.uuidString, privacy: .public)")
@@ -821,7 +853,7 @@ final class ProfileManager: ObservableObject {
                 try await webDataVault.seal(profileID: summary.id, key: repository.profileKey(for: summary.id),
                                             activeStore: false)
             } catch {
-                onError?("Could not re-encrypt data of profile “\(summary.name)”: \(error.localizedDescription)")
+                onError?(String(format: L("recovery.webDataNotSealed"), summary.name, error.localizedDescription))
             }
             busyProfileIDs.remove(summary.id)
         }

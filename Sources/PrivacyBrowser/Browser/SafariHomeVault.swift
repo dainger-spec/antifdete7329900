@@ -30,10 +30,10 @@ final class SafariHomeVault {
     }
 
     private func archiveURL(for profileID: UUID) -> URL {
-        repository.directory(for: profileID).appendingPathComponent("safarihome.pbsa")
+        repository.safariHomeArchiveURL(for: profileID)
     }
 
-    private static let label = "safari-home"
+    private static let label = ProfileTransfer.safariHomeLabel
 
     /// Restores the directory from its archive, ready for the child process to be started.
     /// Anything already there is left alone: it is plaintext from a run that did not get to seal
@@ -67,9 +67,40 @@ final class SafariHomeVault {
         log.notice("Sealed Safari's home for \(profileID.uuidString, privacy: .public): \(stats.files, privacy: .public) files, \(stats.bytes, privacy: .public) bytes")
     }
 
+    /// The lock a profile's process holds on its home for as long as it runs (`holdWhileRunning`).
+    nonisolated static func lockURL(forHome home: URL) -> URL {
+        home.deletingLastPathComponent().appendingPathComponent("home.lock")
+    }
+
+    /// A profile's process is running on this home — possibly one left behind by a manager that
+    /// crashed: its files are in use and must not be sealed from under it.
+    func isInUse(profileID: UUID) -> Bool {
+        let descriptor = open(Self.lockURL(forHome: homeDirectory(for: profileID)).path, O_RDWR)
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+        if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {
+            flock(descriptor, LOCK_UN)
+            return false
+        }
+        return errno == EWOULDBLOCK
+    }
+
+    /// Called by a profile's own process at start: holds the home's lock until the process exits
+    /// (the kernel lets go of it then, however the process ended).
+    nonisolated static func holdWhileRunning(home: URL) {
+        let descriptor = open(lockURL(forHome: home).path, O_RDWR | O_CREAT, 0o600)
+        guard descriptor >= 0 else { return }
+        if flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            Logger(subsystem: "PrivacyBrowser", category: "SafariHomeVault")
+                .error("Another process holds this profile's home")
+        }
+        // Deliberately never closed: the descriptor is the lock.
+    }
+
     /// With the profile itself.
     func delete(profileID: UUID) {
         try? FileManager.default.removeItem(at: homeDirectory(for: profileID))
         try? FileManager.default.removeItem(at: archiveURL(for: profileID))
+        try? FileManager.default.removeItem(at: Self.lockURL(forHome: homeDirectory(for: profileID)))
     }
 }

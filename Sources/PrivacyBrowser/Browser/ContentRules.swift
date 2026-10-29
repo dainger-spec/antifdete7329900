@@ -15,6 +15,8 @@ import WebKit
 enum ContentRules {
     /// Blocks every ping-type load; nil until `prepare()` compiled it (or when compiling failed).
     private(set) static var dnsPrefetchBlocker: WKContentRuleList?
+    /// `prepare()` ran and WebKit refused the list: a profile with a proxy then does not start.
+    private(set) static var failedToCompile = false
     private static var preparation: Task<Void, Never>?
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "ContentRules")
 
@@ -38,7 +40,8 @@ enum ContentRules {
                                                 encodedContentRuleList: dnsPrefetchBlockerJSON)
                     log.info("Compiled the ping-load blocker")
                 } catch {
-                    log.error("Could not compile the ping-load blocker; dns-prefetch may resolve outside proxies: \(String(describing: error), privacy: .public)")
+                    failedToCompile = true
+                    log.error("Could not compile the ping-load blocker; profiles with a proxy will not start: \(String(describing: error), privacy: .public)")
                 }
             }
         }

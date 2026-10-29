@@ -256,6 +256,42 @@ final class AppModel: ObservableObject {
         refresh()
     }
 
+    // MARK: Profile export and import (ProfileTransfer)
+
+    /// Writes the profile to `url`, encrypted with `password`. A running profile is stopped first,
+    /// and anything a crash left unsealed is sealed: the export must hold the profile whole.
+    func exportProfile(_ id: UUID, to url: URL, password: String) async throws -> ProfileTransfer.Manifest {
+        guard let manager, let repository else { throw CoreError.vaultNotFound }
+        if manager.isRunning(id) { try await manager.stop(id) }
+        try await manager.sealLeftovers(of: id)
+        return try await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            return try ProfileTransfer.export(id, from: repository, to: url, password: password)
+        }.value
+    }
+
+    /// What a profile export holds, opened with its password (nothing is imported).
+    func readProfileExport(_ url: URL, password: String) async throws -> ProfileTransfer.Manifest {
+        try await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            return try ProfileTransfer.manifest(of: url, password: password)
+        }.value
+    }
+
+    /// Imports a profile export as a new profile named `name`.
+    func importProfile(from url: URL, password: String, name: String?) async throws -> ProfileSummary {
+        guard let repository else { throw CoreError.vaultNotFound }
+        let summary = try await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            return try ProfileTransfer.importProfile(from: url, password: password, into: repository, name: name)
+        }.value
+        refresh()
+        return summary
+    }
+
     func deleteProfile(_ id: UUID) async {
         await perform { try await self.manager?.delete(id) }
         refresh()

@@ -51,6 +51,11 @@ final class BrowserSession {
     init(profileID: UUID, profileName: String, configuration: ProfileConfiguration,
          passwordVault: PasswordVault, passwordSettings: ProfilePasswordSettings, library: ProfileLibrary) throws {
         let proxies = try ProxyConfigurationFactory.make(configuration.proxy)
+        // Without the ping-load blocker a page's dns-prefetch would be resolved by this Mac: a
+        // profile with a proxy does not start (fail-closed), as with a proxy that cannot be applied.
+        if configuration.proxy != nil, ContentRules.failedToCompile {
+            throw CoreError.invalidConfiguration("the ping-load blocker did not compile")
+        }
         self.profileID = profileID
         self.profileName = profileName
         self.configuration = configuration
@@ -80,7 +85,7 @@ final class BrowserSession {
                 userContentController.add(blocker)
             } else {
                 Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
-                    .error("No ping-load blocker: dns-prefetch of this profile may resolve outside its proxy")
+                    .error("No ping-load blocker yet: dns-prefetch of this profile may resolve outside its proxy")
             }
         }
         passwordHandler.session = self
@@ -154,10 +159,8 @@ final class BrowserSession {
     ///   * Safe Browsing lookups are made by a system service, outside the proxy: per profile,
     ///     off by default. Safari's own configuration has it on.
     ///   * With a proxy, the features whose traffic does not go through the data store's proxy
-    ///     at all: WebTransport (QUIC, which an HTTP or SOCKS5 proxy cannot carry) and
-    ///     Private Click Measurement (attribution reports sent later, outside the page's session).
-    ///     A Safari user can have both off as well; Safari's own switch for the second is in its
-    ///     Advanced settings.
+    ///     at all (`featuresOffWithAProxy`). A Safari user can have them off as well (Private Click
+    ///     Measurement in Safari's Advanced settings, the rest as Lockdown Mode does).
     ///   * As Safari: pages see the system's fonts only, not the ones the user installed.
     func applyPrivacyPreferences(to preferences: WKPreferences) {
         preferences.isFraudulentWebsiteWarningEnabled = configuration.safeBrowsingEnabled
@@ -175,10 +178,22 @@ final class BrowserSession {
             WebKitPreferences.setBool(preferences, "_setEnumeratingAllNetworkInterfacesEnabled:", true)
         }
         if configuration.proxy != nil {
-            WebKitFeatures.set(preferences, "WebTransportEnabled", false)
-            WebKitFeatures.set(preferences, "PrivateClickMeasurementEnabled", false)
+            for key in Self.featuresOffWithAProxy { WebKitFeatures.set(preferences, key, false) }
         }
     }
+
+    /// The WebKit features whose traffic does not go through the data store's proxy, and are off
+    /// in every web view of a profile with a proxy (`ProfileNetworkGuard` pins them there):
+    ///   * WebTransport: QUIC, which an HTTP or SOCKS5 proxy cannot carry.
+    ///   * Private Click Measurement: attribution reports sent later, outside the page's session.
+    ///   * Web Authentication and Digital Credentials: passkeys are the user's own iCloud Keychain,
+    ///     the same in every profile and in Safari, and their checks are made by system services.
+    ///   * Web archives loaded on a store of their own: WebKit moves such a page to a fresh
+    ///     ephemeral store — one without the profile's proxy — for whatever the archive lacks.
+    nonisolated static let featuresOffWithAProxy: Set<String> = [
+        "WebTransportEnabled", "PrivateClickMeasurementEnabled", "WebAuthenticationEnabled",
+        "DigitalCredentialsEnabled", "LoadWebArchiveWithEphemeralStorageEnabled",
+    ]
 
     /// Content controllers this profile has already been applied to, held weakly.
     private let appliedControllers = WeakSet()

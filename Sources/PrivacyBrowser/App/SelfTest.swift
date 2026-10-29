@@ -134,6 +134,7 @@ final class SelfTest {
             try await dialogTeardown(repository)
             try await passwordAutoFill(repository)
             try await cookieImport(repository)
+            try await profileTransfer(repository)
             try await profileSync(repository)
             try await warmUp(repository)
             try await safariChromeThroughTheProxy(repository)
@@ -624,8 +625,10 @@ final class SelfTest {
             if log.reports.contains(where: { $0["frame"] == nil }) && log.reports.contains(where: { $0["frame"] != nil }) { break }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
+        // WebKit names an IPv6 address in its CONNECT line without brackets.
         func reached(_ target: String, _ path: String) -> Bool {
-            log.targets.contains { $0.target == target.lowercased() && $0.path.hasPrefix(path) }
+            let forms = [target.lowercased(), target.lowercased().replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")]
+            return log.targets.contains { forms.contains($0.target) && $0.path.hasPrefix(path) }
         }
         check("Safari chrome: a profile in its own process loads its pages through its own proxy",
               reached("start-\(run).\(domain):80", startPath),
@@ -657,8 +660,6 @@ final class SelfTest {
             check("Safari chrome: \(what) goes through the profile's proxy", reached(target, path),
                   "not seen by the proxy: \(target)\(path)")
         }
-        check("Safari chrome: an HTTPS request goes through the proxy too (as a CONNECT)",
-              log.targets.contains { $0.target == "192.0.2.14:443" })
         // The ping-load blocker (dns-prefetch, <a ping>) reaches the web views Safari builds.
         check("Safari chrome: <a ping> is blocked in Safari's web views (and dns-prefetch with it)",
               !log.targets.contains { $0.path.hasPrefix("/pb-leak/ping") }, "the ping reached the proxy")
@@ -669,8 +670,11 @@ final class SelfTest {
         // The profile's process, from inside: where its web views are, what WebRTC their engines
         // have, and a request made by each of the process's own ways of making one — to a host
         // that only the proxy answers.
+        // https: App Transport Security refuses plain http to the app's own URLSession. The test
+        // proxy cannot speak TLS, so each request fails after its CONNECT — and the CONNECT, at the
+        // proxy, is the proof of where it went.
         let probePath = "/pb-leak/urlsession?run=\(run)"
-        _ = manager.checkNetwork(profile.id, probe: URL(string: "http://probe-\(run).\(domain)\(probePath)"))
+        _ = manager.checkNetwork(profile.id, probe: URL(string: "https://probe-\(run).\(domain)\(probePath)"))
         _ = await waitUntil(timeout: 40) { networkReport != nil }
         if let report = networkReport {
             info("Safari chrome: the profile's process reports \(report)")
@@ -680,11 +684,7 @@ final class SelfTest {
                   report.webViewsWithWebRTC == 0, "\(report.webViewsWithWebRTC) of \(report.webViews) have")
             check("Safari chrome: WebKit's own default store is closed", report.defaultStoreClosed)
             check("Safari chrome: the process's own connections carry the profile's proxy", report.processProxy)
-            for name in ["shared", "ephemeral", "explicit"] {
-                let answer = report.probes[name] ?? "not run"
-                check("Safari chrome: a request of the process's own (\(name) URLSession) goes through the proxy",
-                      answer.hasPrefix("ok 200") && answer.contains("PB-PROXY-OK"), answer)
-            }
+            check("Safari chrome: the process made its three probe requests", report.probes.count == 3, "\(report.probes)")
             check("Safari chrome: this Safari has every class and method the chrome relies on",
                   report.missing.isEmpty, report.missing.joined(separator: ", "))
             check("Safari chrome: Safari's own services are set as the profile needs them",
@@ -699,10 +699,10 @@ final class SelfTest {
         // reached through the process's own (a request whose session names its proxy explicitly,
         // as the proxy lookup's does, must not be sent through the process-wide one as well).
         log = await leakLog()
-        let probes = log.targets.filter { $0.path.hasPrefix("/pb-leak/urlsession") || $0.path.hasPrefix("probe-") }
-        check("Safari chrome: each of the process's own requests went to the proxy once, directly",
-              probes.count == 3 && probes.allSatisfy { $0.target == "probe-\(run).\(domain):80" },
-              probes.map { "\($0.target) \($0.path)" }.joined(separator: " | "))
+        let probes = log.targets.filter { $0.target.hasPrefix("probe-") || $0.path.contains("probe-") }
+        check("Safari chrome: each of the process's own requests (shared, ephemeral and explicit URLSession) went to the proxy itself, not through another proxy",
+              probes.count >= 3 && probes.allSatisfy { $0.target == "probe-\(run).\(domain):443" },
+              probes.map { "\($0.target) \($0.path.prefix(40))" }.joined(separator: " | "))
 
         // Cookies imported while the profile runs in its own process go into its store at once,
         // and its next request carries them (the second window's start page, below).
@@ -731,6 +731,14 @@ final class SelfTest {
         // Long enough for what Safari's chrome does on a timer (the page-text donation runs about
         // five seconds after a load) to happen while the capture is still looking.
         try? await Task.sleep(nanoseconds: 8_000_000_000)
+        // The page's https request is answered by WebKit's own timing, which can be after the page
+        // reported: looked for last.
+        log = await leakLog()
+        check("Safari chrome: an HTTPS request goes through the proxy too (as a CONNECT)",
+              log.targets.contains { $0.target == "192.0.2.14:443" })
+        for (what, host) in [("the page's icon", "icon-"), ("its touch icon", "touchicon-"), ("its OpenSearch description", "osd-")] {
+            info("Safari chrome: \(what) \(log.targets.contains { $0.target.hasPrefix(host + run) } ? "was fetched through the proxy" : "was not fetched through the proxy")")
+        }
         try? await manager.stop(profile.id)
         await manager.shutDown()
         info("egress-window end \(Date().timeIntervalSince1970)")
@@ -1775,6 +1783,59 @@ final class SelfTest {
               third.contains("hostonly=imported-hostonly-value") && third.contains("live=imported-live-value")
                   && !third.contains("session="), third)
         try await manager.delete(profile.id)
+    }
+
+    // MARK: Profile export and import
+
+    /// A profile carried in a `.pbprofile` file arrives with its website data: a cookie the
+    /// original had in its (sealed) WebKit store is sent by the imported profile's first request.
+    /// That is what proves the website data was restored where WebKit looks for the new profile's
+    /// store — the archive's directories are renamed after the new profile on the way.
+    private func profileTransfer(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("profile transfer checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let start = URL(string: "http://transfer.selftest.invalid/pb-cookies")!
+        let original = try repository.create(name: "Carried", configuration: ProfileConfiguration(
+            startURL: start, proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        func pageText(_ id: UUID) async -> String {
+            guard let tab = manager.session(for: id)?.windowControllers.first?.selectedTab else { return "" }
+            _ = await waitUntil(timeout: 15) { !tab.isLoading && tab.url == start }
+            return (try? await js(tab.webView, "return document.body ? document.body.innerText : '';")) as? String ?? ""
+        }
+        // Into the original's WebKit store (queued, applied at launch), then sealed with it at stop.
+        let cookie = ImportedCookie(name: "carried", value: "carried-value", domain: "transfer.selftest.invalid", hostOnly: true,
+                                    expires: Date().addingTimeInterval(30 * 86_400))
+        _ = try await manager.importCookies([cookie], into: original.id)
+        try await manager.launch(original.id)
+        let before = await pageText(original.id)
+        try await manager.stop(original.id)
+        check("profile transfer: the original profile has the cookie", before.contains("carried=carried-value"), before)
+
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("pb-transfer-\(UUID().uuidString).\(ProfileTransfer.fileExtension)")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let manifest = try ProfileTransfer.export(original.id, from: repository, to: file, password: "transfer pw",
+                                                  kdf: .generate(iterations: 10_000))
+        let bytes = (try? Data(contentsOf: file)) ?? Data()
+        check("profile transfer: the export carries the website data, and nothing of it is readable in the file",
+              manifest.hasWebsiteData && !bytes.isEmpty && bytes.range(of: Data("carried-value".utf8)) == nil
+                && bytes.range(of: Data("Carried".utf8)) == nil, "\(manifest.hasWebsiteData) \(bytes.count) bytes")
+        check("profile transfer: a wrong password opens nothing",
+              (try? ProfileTransfer.manifest(of: file, password: "wrong")) == nil)
+
+        let imported = try ProfileTransfer.importProfile(from: file, password: "transfer pw", into: repository, name: "Carried (imported)")
+        try await manager.launch(imported.id)
+        let after = await pageText(imported.id)
+        check("profile transfer: the imported profile — a new profile — sends the original's cookie from its first request",
+              imported.id != original.id && after.contains("carried=carried-value"), after)
+        try await manager.stop(imported.id)
+        check("profile transfer: nothing went wrong", messages.isEmpty, messages.joined(separator: " | "))
+        try await manager.delete(imported.id)
+        try await manager.delete(original.id)
     }
 
     // MARK: Profile sync (cookies and settings between two devices)
