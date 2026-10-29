@@ -197,6 +197,12 @@ enum SafariChrome {
         }
         let original = unsafeBitCast(method_getImplementation(method), to: NibWithName.self)
         let replacement: @convention(block) (AnyObject, NSString, Bundle?) -> AnyObject? = { object, name, bundle in
+            // Only Safari's own controllers; ours and AppKit's keep their normal lookup, and are
+            // not worth a line in the log each.
+            guard let imagePointer = object_getClass(object).flatMap({ class_getImageName($0) }),
+                  String(cString: imagePointer).contains("Safari") else {
+                return original(object, loader, name, bundle)
+            }
             // Build the nib from the file itself rather than hand another bundle to AppKit: bundle
             // resolution is what went wrong here twice, and a framework in the Safari cryptex does
             // not answer -pathForResource:ofType: for these nibs at all.
