@@ -26,6 +26,7 @@
 import AppKit
 import Foundation
 import ObjectiveC.runtime
+import WebKit
 
 // Line-buffered: a class that aborts inside Safari's own code must still leave the marker of
 // what was being tried on the terminal.
@@ -231,6 +232,70 @@ if let root = resourceRoots.first(where: { FileManager.default.fileExists(atPath
 }
 
 // MARK: Instantiate one class
+
+/// Our own content, to be put inside a tab of Safari's window.
+final class HostedWebViewController: NSViewController {
+    let webView = WKWebView()
+    override func loadView() {
+        view = webView
+        webView.load(URLRequest(url: URL(string: "https://example.com")!))
+    }
+}
+var hostedContent: NSViewController?
+
+// --open-window uses Safari's own factory instead of creating the controller by hand, which is how
+// Safari opens a window itself. With --inject-web it then hands one of that window's tabs a view
+// controller of ours holding a WKWebView (-[BrowserTabViewItem setTabContentViewController:]) and
+// sets the address bar's text, which is the seam a hosted chrome would be built on.
+if flag("--open-window") {
+    print("\n== open window ==")
+    let application = NSApplication.shared
+    application.setActivationPolicy(.regular)
+    guard let windowClass: AnyObject = NSClassFromString("BrowserWindowController") else {
+        print("BrowserWindowController not found")
+        exit(1)
+    }
+    print("calling +openEmptyBrowserWindowController…")
+    let opened = windowClass.perform(NSSelectorFromString("openEmptyBrowserWindowController"))?.takeUnretainedValue()
+    print("opened: \(String(describing: opened))")
+    if let controller = opened as? NSWindowController, let window = controller.window {
+        print("window: \(window.frame) title=\(window.title)")
+        print("contentViewController: \(String(describing: window.contentViewController))")
+        controller.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        application.activate(ignoringOtherApps: true)
+    }
+
+    if flag("--inject-web") {
+        print("\n-- inject")
+        let items = (windowClass.perform(NSSelectorFromString("allBrowserTabViewItemsFromAllWindows"))?
+            .takeUnretainedValue()) as? [AnyObject] ?? []
+        print("tabs in all windows: \(items.count)")
+        if let tab = items.first as? NSObject {
+            print("tab: \(tab)")
+            let hosted = HostedWebViewController()
+            hostedContent = hosted
+            let setContent = NSSelectorFromString("setTabContentViewController:")
+            print("responds to setTabContentViewController: \(tab.responds(to: setContent))")
+            if tab.responds(to: setContent) {
+                _ = tab.perform(setContent, with: hosted)
+                print("handed the tab our view controller")
+            }
+            let setURLString = NSSelectorFromString("setURLString:")
+            if tab.responds(to: setURLString) {
+                _ = tab.perform(setURLString, with: "https://example.com" as NSString)
+                print("set the address bar text")
+            }
+        } else {
+            print("the window reported no tab to inject into")
+        }
+    }
+
+    print("showing for 20 s…")
+    RunLoop.main.run(until: Date().addingTimeInterval(20))
+    print("still alive after 20 s")
+    exit(0)
+}
 
 if flag("--prepare") {
     // Safari's BrowserWindowController aborts in -windowDidLoad unless the shared search engine
