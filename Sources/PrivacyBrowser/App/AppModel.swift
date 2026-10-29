@@ -179,6 +179,7 @@ final class AppModel: ObservableObject {
         warmUps.begin()
         proxyList = ProxyListModel(vault: vault) { [weak self] message in self?.showError(message) }
         deviceSettings = (try? DeviceSettings.load(from: vault)) ?? DeviceSettings()
+        restartAutomation()
         phase = .unlocked
         refresh()
         Task { await manager.recoverUnsealedProfiles() }
@@ -211,6 +212,10 @@ final class AppModel: ObservableObject {
     var hasActivity: Bool { lockTask != nil || (manager?.hasActivity ?? false) }
 
     private func performLock() async {
+        // First: no script may start a profile while they are being stopped and sealed.
+        automationServer?.stop()
+        automationServer = nil
+        automationState = .stopped
         // Before the profiles stop: nothing waiting in the warm-up queue may launch one again.
         warmUps?.shutDown()
         warmUps = nil
@@ -502,6 +507,65 @@ final class AppModel: ObservableObject {
         }
         try? updateDeviceSettings { $0.lastSync = status }
         refresh()
+    }
+
+    // MARK: Automation API (optional)
+
+    /// Whether the local automation API listens, and where (`AutomationServer`).
+    @Published private(set) var automationState: AutomationServer.State = .stopped
+    private var automationServer: AutomationServer?
+
+    /// The API's settings: off, with a token of its own, until set (`ensureAutomationSettings`).
+    var automationSettings: AutomationSettings? { deviceSettings.automation }
+
+    /// Makes and saves the API's settings (off, a new token) the first time they are shown, so
+    /// that the token shown is the one kept.
+    func ensureAutomationSettings() {
+        guard deviceSettings.automation == nil else { return }
+        try? updateDeviceSettings { $0.automation = AutomationSettings() }
+    }
+
+    func setAutomation(enabled: Bool, port: Int) {
+        var settings = deviceSettings.automation ?? AutomationSettings()
+        settings.isEnabled = enabled
+        settings.port = port
+        saveAutomation(settings)
+    }
+
+    /// A new token: scripts holding the old one are refused from now on.
+    func renewAutomationToken() {
+        var settings = deviceSettings.automation ?? AutomationSettings()
+        settings.token = AutomationSettings.newToken()
+        saveAutomation(settings)
+    }
+
+    private func saveAutomation(_ settings: AutomationSettings) {
+        do {
+            try updateDeviceSettings { $0.automation = settings }
+        } catch {
+            showError(String(format: L("automation.error.save"), error.localizedDescription))
+            return
+        }
+        restartAutomation()
+    }
+
+    /// Listens with the saved settings when the API is on (and the vault unlocked), else not.
+    private func restartAutomation() {
+        automationServer?.stop()
+        automationServer = nil
+        guard let settings = deviceSettings.automation, settings.isEnabled, let manager, let repository else {
+            automationState = .stopped
+            return
+        }
+        let handler = AutomationHandler(manager: manager, repository: repository)
+        handler.waitForSync = { [weak self] in
+            while self?.isSyncing == true { try? await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        handler.onChange = { [weak self] in self?.refresh() }
+        let server = AutomationServer(settings: settings, handler: handler)
+        server.onStateChange = { [weak self] state in self?.automationState = state }
+        automationServer = server
+        server.start()
     }
 
     private func updateDeviceSettings(_ change: (inout DeviceSettings) -> Void) throws {

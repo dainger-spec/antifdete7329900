@@ -149,6 +149,7 @@ final class SelfTest {
             try await passwordAutoFill(repository)
             try await cookieImport(repository)
             try await profileTransfer(repository)
+            try await automationAPI(repository)
             try await profileSync(repository)
             try await warmUp(repository)
             try await warmUpQueue(repository)
@@ -701,6 +702,115 @@ final class SelfTest {
                 && proxied.page["worker"] as? String == "undefined" && proxied.page["shared"] as? String == "undefined"
                 && proxied.serviceWorker["webTransport"] as? String == "undefined",
               "page \(proxied.page), service worker \(proxied.serviceWorker.isEmpty ? "no report" : "\(proxied.serviceWorker)")")
+    // MARK: The local automation API
+
+    /// A script on this Mac drives a profile through the API (`AutomationServer`) as the app's own
+    /// buttons do — list, start out of sight, cookies in and out, stop — and nothing else gets in:
+    /// no token, a wrong one, a web page's request, a name pointed at 127.0.0.1. What it answers
+    /// never holds a proxy's credentials. Requests go over a plain socket, so that their headers
+    /// are exactly the ones written here.
+    private func automationAPI(_ repository: ProfileRepository) async throws {
+        let manager = ProfileManager(repository: repository)
+        manager.onError = { _ in }
+        let token = AutomationSettings.newToken()
+        let handler = AutomationHandler(manager: manager, repository: repository)
+        let server = AutomationServer(settings: AutomationSettings(isEnabled: true, port: 0, token: token), handler: handler)
+        server.start()
+        defer { server.stop() }
+        guard AutomationServer.isAvailable else {
+            check("automation: the sandboxed build does not listen, and says why",
+                  server.state == .failed(L("automation.error.sandboxed")), "\(server.state)")
+            return
+        }
+        _ = await waitUntil(timeout: 10) { if case .listening = server.state { return true } else { return false } }
+        guard case .listening(let port) = server.state else {
+            check("automation: the API listens on the loopback address", false, "\(server.state)")
+            return
+        }
+        let run = String(UUID().uuidString.prefix(8)).lowercased()
+        let secret = "api-secret-\(run)"
+        let profile = try repository.create(name: "API \(run)", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9, username: "api-user-\(run)", password: secret),
+            ephemeral: true))
+        defer { try? repository.delete(profile.id) }
+
+        func call(_ method: String, _ path: String, token given: String? = nil, host: String? = nil,
+                  extra: [String: String] = [:], body: String = "") async -> (status: Int, body: String) {
+            var head = "\(method) \(path) HTTP/1.1\r\nHost: \(host ?? "127.0.0.1:\(port)")\r\n"
+            head += "Authorization: Bearer \(given ?? token)\r\n"
+            for (name, value) in extra { head += "\(name): \(value)\r\n" }
+            head += "Content-Length: \(body.utf8.count)\r\n\r\n"
+            let request = Data((head + body).utf8)
+            let answer = await Task.detached { Self.rawHTTP(port: port, request) }.value
+            guard let answer, let text = String(data: answer, encoding: .utf8),
+                  let statusText = text.split(separator: " ", maxSplits: 2).dropFirst().first, let status = Int(statusText) else {
+                return (0, "")
+            }
+            return (status, text.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n"))
+        }
+        let base = "/v1/profiles/\(profile.id.uuidString)"
+        check("automation: a request without the token is refused", await call("GET", "/v1/profiles", token: "").status == 401)
+        check("automation: a request with a wrong token is refused", await call("GET", "/v1/profiles", token: token + "x").status == 401)
+        check("automation: a web page's request is refused, with the token too",
+              await call("GET", "/v1/profiles", extra: ["Origin": "https://attacker.example"]).status == 403)
+        check("automation: a name pointed at 127.0.0.1 is refused (DNS rebinding)",
+              await call("GET", "/v1/profiles", host: "attacker.example:\(port)").status == 403)
+
+        let list = await call("GET", "/v1/profiles")
+        check("automation: the profiles are listed, with their proxy but not its credentials",
+              list.status == 200 && list.body.contains(profile.id.uuidString) && list.body.contains("http://127.0.0.1:9")
+                && !list.body.contains(secret) && !list.body.contains("api-user-\(run)"),
+              "\(list.status) \(list.body.prefix(300))")
+        check("automation: an unknown profile is not found", await call("GET", "/v1/profiles/nobody-\(run)").status == 404)
+
+        let started = await call("POST", base + "/start", body: "{\"window\": false}")
+        check("automation: a profile starts out of sight", started.status == 200 && manager.isRunning(profile.id),
+              "\(started.status) \(started.body.prefix(200))")
+        let expiry = Int(Date().addingTimeInterval(3600).timeIntervalSince1970)
+        let cookieFile = "api-\(run).test\tFALSE\t/\tFALSE\t\(expiry)\tpbapi\t\(run)\n"
+        let imported = await call("POST", base + "/cookies", body: cookieFile)
+        check("automation: cookies go into the running profile", imported.status == 200 && imported.body.contains("\"applied\" : 1"),
+              "\(imported.status) \(imported.body.prefix(200))")
+        let exported = await call("GET", base + "/cookies?format=netscape")
+        check("automation: the profile's cookies come back out", exported.status == 200 && exported.body.contains("\tpbapi\t\(run)"),
+              "\(exported.status) \(exported.body.prefix(300))")
+        check("automation: only an http or https address is opened",
+              await call("POST", base + "/open", body: "{\"url\": \"file:///etc/passwd\"}").status == 400)
+        let stopped = await call("POST", base + "/stop")
+        check("automation: the profile stops", stopped.status == 200 && !manager.isRunning(profile.id), "\(stopped.status)")
+
+        server.stop()
+        let afterStop = await Task.detached { Self.rawHTTP(port: port, Data("GET / HTTP/1.1\r\n\r\n".utf8)) }.value
+        check("automation: nothing answers once the API is off", afterStop == nil || afterStop?.isEmpty == true)
+    }
+
+    /// One request on a plain socket to 127.0.0.1:`port`, and everything that comes back until the
+    /// other side closes; nil when no connection could be made.
+    nonisolated private static func rawHTTP(port: Int, _ request: Data) -> Data? {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return nil }
+        defer { close(descriptor) }
+        var timeout = timeval(tv_sec: 60, tv_usec: 0)
+        setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(port).bigEndian)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        guard connected == 0 else { return nil }
+        let sent = request.withUnsafeBytes { send(descriptor, $0.baseAddress, $0.count, 0) }
+        guard sent == request.count else { return nil }
+        var response = Data()
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let count = recv(descriptor, &buffer, buffer.count, 0)
+            if count <= 0 { break }
+            response.append(contentsOf: buffer[0..<count])
+        }
+        return response
     }
 
     // MARK: Safari's chrome, in a profile's own process, through that profile's proxy

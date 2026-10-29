@@ -1,7 +1,7 @@
 import Foundation
 
 /// Settings that belong to this device and vault, not to a profile, and are never synced:
-/// where to sync to and the outcome of the last sync. Stored as `settings.bin`,
+/// where to sync to, the outcome of the last sync, and the local automation API's. Stored as `settings.bin`,
 /// AES-GCM with `HKDF(VMK, "device-settings")` — the sync token and folder location are
 /// therefore only readable after unlock.
 public struct DeviceSettings: Codable, Equatable, Sendable {
@@ -41,10 +41,13 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
 
     public var syncTarget: SyncTarget?
     public var lastSync: SyncStatus?
+    /// The local automation API (`AutomationHTTP`): nil until it is first set up.
+    public var automation: AutomationSettings?
 
-    public init(syncTarget: SyncTarget? = nil, lastSync: SyncStatus? = nil) {
+    public init(syncTarget: SyncTarget? = nil, lastSync: SyncStatus? = nil, automation: AutomationSettings? = nil) {
         self.syncTarget = syncTarget
         self.lastSync = lastSync
+        self.automation = automation
     }
 }
 

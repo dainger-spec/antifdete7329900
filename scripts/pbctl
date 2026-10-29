@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""pbctl — the PrivacyBrowser automation API from the command line (docs/AUTOMATION_API.md).
+
+    pbctl list
+    pbctl show <profile>
+    pbctl start <profile> [--hidden]
+    pbctl stop <profile>
+    pbctl open <profile> <url>
+    pbctl cookies <profile> [--format playwright|netscape|extension]
+    pbctl import-cookies <profile> <file>
+
+<profile> is a profile's id or its exact name. The token comes from PB_API_TOKEN (Automation API…
+→ Copy in the app), the port from PB_API_PORT (default 50777). Nothing is installed: Python 3 only.
+"""
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+def call(method, path, body=None, raw=False):
+    token = os.environ.get("PB_API_TOKEN", "")
+    if not token:
+        sys.exit("pbctl: set PB_API_TOKEN to the token shown in the app (Automation API… → Copy)")
+    port = int(os.environ.get("PB_API_PORT", "50777"))
+    data = body if isinstance(body, (bytes, type(None))) else json.dumps(body).encode()
+    request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, method=method,
+                                     headers={"Authorization": f"Bearer {token}"})
+    # Straight to 127.0.0.1, never through a proxy set in the environment.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(request, timeout=180) as response:
+            payload = response.read()
+    except urllib.error.HTTPError as error:
+        payload = error.read()
+        try:
+            message = json.loads(payload).get("message", "")
+        except ValueError:
+            message = payload.decode(errors="replace")
+        sys.exit(f"pbctl: {error.code}: {message}")
+    except urllib.error.URLError as error:
+        sys.exit(f"pbctl: the API does not answer on 127.0.0.1:{port} ({error.reason}); is it on and the vault unlocked?")
+    return payload if raw else json.loads(payload)
+
+
+def profile_path(reference, suffix=""):
+    return "/v1/profiles/" + urllib.parse.quote(reference, safe="") + suffix
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="pbctl", description=__doc__.split("\n\n")[0])
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("list", help="every profile")
+    for name, help_text in (("show", "one profile"), ("stop", "stop a profile (its data is sealed)")):
+        commands.add_parser(name, help=help_text).add_argument("profile")
+    start = commands.add_parser("start", help="start a profile")
+    start.add_argument("profile")
+    start.add_argument("--hidden", action="store_true", help="without a window, as a warm-up does")
+    open_ = commands.add_parser("open", help="a new window of a running profile on a URL")
+    open_.add_argument("profile")
+    open_.add_argument("url")
+    cookies = commands.add_parser("cookies", help="a profile's cookies, to stdout")
+    cookies.add_argument("profile")
+    cookies.add_argument("--format", choices=("playwright", "netscape", "extension"), default="playwright")
+    imports = commands.add_parser("import-cookies", help="import a cookie file into a profile")
+    imports.add_argument("profile")
+    imports.add_argument("file")
+    args = parser.parse_args()
+
+    if args.command == "list":
+        for profile in call("GET", "/v1/profiles"):
+            state = "running" if profile["running"] else ("busy" if profile["busy"] else "stopped")
+            print(f'{profile["id"]}  {state:8}  {profile.get("proxy") or "direct":32}  {profile["name"]}')
+    elif args.command == "show":
+        print(json.dumps(call("GET", profile_path(args.profile)), indent=2, ensure_ascii=False))
+    elif args.command == "start":
+        print(json.dumps(call("POST", profile_path(args.profile, "/start"), {"window": not args.hidden}), indent=2, ensure_ascii=False))
+    elif args.command == "stop":
+        print(json.dumps(call("POST", profile_path(args.profile, "/stop"), {}), indent=2, ensure_ascii=False))
+    elif args.command == "open":
+        print(json.dumps(call("POST", profile_path(args.profile, "/open"), {"url": args.url}), indent=2, ensure_ascii=False))
+    elif args.command == "cookies":
+        sys.stdout.buffer.write(call("GET", profile_path(args.profile, f"/cookies?format={args.format}"), raw=True))
+    elif args.command == "import-cookies":
+        with open(args.file, "rb") as handle:
+            print(json.dumps(call("POST", profile_path(args.profile, "/cookies"), handle.read()), indent=2))
+
+
+if __name__ == "__main__":
+    main()

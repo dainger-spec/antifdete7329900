@@ -44,6 +44,7 @@ struct ProfileListView: View {
     @State private var changingPassword = false
     @State private var showingSync = false
     @State private var showingTunnel = false
+    @State private var showingAutomation = false
     @State private var filter: ProfileFilter = .all
     @State private var search = ""
     @State private var showingProxies = false
@@ -70,6 +71,7 @@ struct ProfileListView: View {
             .sheet(isPresented: $changingPassword) { ChangePasswordView() }
             .sheet(isPresented: $showingSync) { SyncSettingsView() }
             .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
+            .sheet(isPresented: $showingAutomation) { AutomationSettingsView() }
             .confirmationDialog(String(format: L("profiles.delete.title"), pendingDelete?.name ?? ""),
                                 isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                                 presenting: pendingDelete) { profile in
@@ -154,6 +156,7 @@ struct ProfileListView: View {
             openSync: { showingSync = true },
             syncNow: model.syncTarget == nil ? nil : { Task { await model.syncNow() } },
             openTunnel: { showingTunnel = true },
+            openAutomation: { showingAutomation = true },
             changePassword: { changingPassword = true },
             warmUpQueue: { queuePreselection = []; warmingUpSeveral = true },
             openProxies: { showingProxies = true },
@@ -265,6 +268,8 @@ struct ProfileActions {
     /// Nil while no sync target is set.
     var syncNow: (() -> Void)?
     var openTunnel: () -> Void = {}
+    /// The local automation API's settings (`AutomationSettingsView`).
+    var openAutomation: () -> Void = {}
     var changePassword: () -> Void = {}
     /// Several profiles warmed up one after the other (`WarmUpQueueView`).
     var warmUpQueue: () -> Void = {}
@@ -373,6 +378,7 @@ struct ProfilesScreen: View {
                     .disabled(actions.syncNow == nil)
                 Divider()
                 Button(L("profiles.menu.tunnel"), action: actions.openTunnel)
+                Button(L("profiles.menu.automation"), action: actions.openAutomation)
                 Divider()
                 Button(L("profiles.menu.changePassword"), action: actions.changePassword)
             } label: {

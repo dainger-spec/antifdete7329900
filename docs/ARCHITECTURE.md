@@ -28,6 +28,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │        │                                                                                   │
 │  AppModel ── lock state, vault, DeviceSettings (sync target), errors                       │
 │        ├── ProxyListModel ── proxies.bin, checks (ProxyChecker → ProxyGeoLookup)           │
+│        ├── AutomationServer ── 127.0.0.1 API, off by default → AutomationHandler → manager │
 │        │                                                                                   │
 │  ProfileManager ── launch / stop / delete / crash recovery                                 │
 │        ├── TunnelManager ── packet tunnel: activation, VPN configuration, per-profile routes│
@@ -45,6 +46,8 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │  MasterVault / UnlockedVault ── Argon2id, key hierarchy; DeviceSettings (settings.bin)     │
 │  ProfileRepository ── encrypted index + per-profile config, store factories                │
 │  ProxyList / ProxyListImport ── proxy list, pasted-list reader, round-robin assignment     │
+│  ProfileGrant ── a profile's process opens the vault for its one profile                   │
+│  AutomationHTTP / AutomationGate / AutomationRoute ── the local API's wire, gate, routes   │
 │  PasswordVault / HistoryStore / BookmarkStore ── per-profile encrypted documents           │
 │  EncryptedChunkStream / EncryptedDirectoryArchive / WebKitDataLayout ── WebKit data seal   │
 │  SyncCodec / SyncEngine ── encrypted sync client with per-record merges                    │
@@ -364,7 +367,7 @@ configs read as the default generation).
 
 | Layer | How | Where it runs |
 |---|---|---|
-| Core (crypto, vault, profiles, archive, layout, history, bookmarks, passwords, cookie import and export, sync incl. cookies and settings conflicts, warm-up plans and link rules, warm-up queue, schedule and per-site report, HTTP transport, UA presets, proxy location, proxy list: pasted-list reader, storage, rotation and assignment, profile export and import, a profile's process granted its one profile, the proxied profiles' rule list) | XCTest, 182 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| Core (crypto, vault, profiles, archive, layout, history, bookmarks, passwords, cookie import and export, sync incl. cookies and settings conflicts, warm-up plans and link rules, warm-up queue, schedule and per-site report, HTTP transport, UA presets, proxy location, proxy list: pasted-list reader, storage, rotation and assignment, profile export and import, a profile's process granted its one profile, the proxied profiles' rule list, the automation API's reader, gate and routes) | XCTest, 191 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
 | Tunnel protocols (STUN/TURN against RFC 5769 vectors, IPv4/IPv6 UDP packets, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy, several profiles through one router) | XCTest, 32 tests | Linux and macOS, every push |
 | Packet-tunnel extension | builds against the macOS SDK and is laid out as a system extension, plists linted, provider class checked (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner. Its router runs on a raw utun interface opened as root (`--utun-relay`, `UTunDevice`) against real WebKit, inside the leak check | macOS 26 runner, every push |
 | JS shims (logic, CreepJS-style shape checks) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages) | Linux, every push |
