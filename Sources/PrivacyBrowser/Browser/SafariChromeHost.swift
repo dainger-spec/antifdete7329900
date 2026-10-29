@@ -59,8 +59,31 @@ enum SafariChromeHost {
                 original(tab, selector, url)
                 return
             }
-            log.notice("\(url.absoluteString, privacy: .public) into the profile's web view")
+            log.notice("\(url.absoluteString, privacy: .public) into the profile's web view (tab)")
             webView.load(URLRequest(url: url))
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        routeBrowserViewControllerLoads()
+    }
+
+    /// The address bar does not go through the tab: it ends up in
+    /// `-[BrowserViewController _loadURLRequest:tabLabel:lifetime:…]`, the one method every
+    /// navigation of Safari's chrome passes through — typing an address, a bookmark, a link, the
+    /// menu. The request is taken from it and loaded in the profile's web view instead of Safari's.
+    ///
+    /// The method takes ten arguments and this replacement reads only the first; on arm64 the rest
+    /// stay untouched in their registers, which is sound because nothing is passed on.
+    private static func routeBrowserViewControllerLoads() {
+        let selector = NSSelectorFromString("_loadURLRequest:tabLabel:lifetime:allowJavaScript:waitInQueue:clearFallbackURLs:inNewProcess:skipSyncableTabUpdates:canAttemptUpgradingRequestURLToHTTPS:searchNavigationUUID:")
+        guard let cls = NSClassFromString("BrowserViewController"),
+              let method = class_getInstanceMethod(cls, selector) else {
+            log.notice("No -[BrowserViewController _loadURLRequest:…]: the address bar will drive Safari's own web view")
+            return
+        }
+        let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { _, request in
+            guard let request = request as? URLRequest, let url = request.url, let webView = hostedWebViews.last else { return }
+            log.notice("\(url.absoluteString, privacy: .public) into the profile's web view")
+            webView.load(request)
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
@@ -70,19 +93,29 @@ enum SafariChromeHost {
     /// ours is put back on top and resized to fit.
     private static func keepOurWebViewsOnTop() {
         typealias InstallView = @convention(c) (AnyObject, Selector) -> Void
-        let selector = NSSelectorFromString("_installCurrentViewControllerView")
-        guard let cls = NSClassFromString("TabContentViewController"),
-              let method = class_getInstanceMethod(cls, selector) else { return }
-        let original = unsafeBitCast(method_getImplementation(method), to: InstallView.self)
-        let replacement: @convention(block) (AnyObject) -> Void = { controller in
-            original(controller, selector)
-            guard let view = (controller as? NSViewController)?.viewIfLoaded else { return }
-            for webView in hostedWebViews where webView.superview === view {
-                webView.frame = view.bounds
-                view.addSubview(webView, positioned: .above, relativeTo: nil)
+        guard let cls = NSClassFromString("TabContentViewController") else { return }
+        for selectorName in ["_installCurrentViewControllerView", "viewDidLayout"] {
+            let selector = NSSelectorFromString(selectorName)
+            guard let method = class_getInstanceMethod(cls, selector) else { continue }
+            let original = unsafeBitCast(method_getImplementation(method), to: InstallView.self)
+            let replacement: @convention(block) (AnyObject) -> Void = { controller in
+                original(controller, selector)
+                raiseOurWebView(in: (controller as? NSViewController)?.viewIfLoaded)
             }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
-        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
+    /// Safari installs its start page, or its own web view, into the same view ours sits in, and
+    /// ours ends up underneath — which is what a blank window was. Put back on top, at full size.
+    private static func raiseOurWebView(in view: NSView?) {
+        guard let view else { return }
+        for webView in hostedWebViews where webView.superview === view {
+            guard view.subviews.last !== webView || webView.frame != view.bounds else { continue }
+            webView.frame = view.bounds
+            view.addSubview(webView, positioned: .above, relativeTo: nil)
+            log.notice("The profile's web view is back on top of Safari's content")
+        }
     }
 
     /// The profile's web view in that tab. One profile has one window for now, so the tab the web
