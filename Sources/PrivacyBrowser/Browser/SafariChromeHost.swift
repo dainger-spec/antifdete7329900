@@ -34,6 +34,7 @@ enum SafariChromeHost {
         SafariChrome.installMainMenu()
         giveSafarisWebViewsTheProfilesData()
         everyWebViewGetsTheProfilesData()
+        theDefaultStoreIsTheProfiles()
         isPrepared = true
         return true
     }
@@ -111,6 +112,25 @@ enum SafariChromeHost {
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
         log.notice("Every web view of this process will be built with the profile's data")
+    }
+
+    /// `+[WKWebsiteDataStore defaultDataStore]` answers with the profile's store in this process.
+    ///
+    /// The other half of the same problem: where Safari's chrome does not take the store from the
+    /// configuration we handed it but asks WebKit for "the default one", that default is a store
+    /// of Safari's with no proxy. Here it is the profile's, so there is no such thing in this
+    /// process as a store that goes straight out.
+    private static func theDefaultStoreIsTheProfiles() {
+        let selector = NSSelectorFromString("defaultDataStore")
+        guard let method = class_getClassMethod(WKWebsiteDataStore.self, selector) else {
+            log.error("WKWebsiteDataStore's default store is not where it was: Safari's chrome could load outside the profile's proxy")
+            return
+        }
+        let replacement: @convention(block) (AnyObject) -> WKWebsiteDataStore = { _ in
+            session?.dataStore ?? closedStore
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        log.notice("The default website data store of this process is the profile's")
     }
 
     /// Gives `configuration` the profile's data store and scripts. With no profile yet — nothing

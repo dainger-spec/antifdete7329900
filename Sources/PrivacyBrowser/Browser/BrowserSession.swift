@@ -67,6 +67,11 @@ final class BrowserSession {
         // Applies to all network loads of this data store. Empty only when no proxy is configured.
         store.proxyConfigurations = proxies
         self.dataStore = store
+        // Said plainly in the log, because this one line tells apart the two ways a profile can
+        // end up loading pages as this Mac: a store built without its proxy (this says 0), and a
+        // store built with it that something later replaced (SafariChromeHost reports that).
+        Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
+            .notice("Profile \(profileName, privacy: .public): has a proxy=\(configuration.proxy != nil, privacy: .public) store proxies=\(store.proxyConfigurations.count, privacy: .public)")
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
         self.userContentController = BehaviorSets.makeUserContentController(for: configuration)
         if configuration.proxy != nil {
