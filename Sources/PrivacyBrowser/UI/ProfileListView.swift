@@ -34,6 +34,7 @@ struct ProfileListView: View {
     @State private var passwordsFor: ProfileSummary?
     @State private var importingCookiesFor: ProfileSummary?
     @State private var warmingUp: ProfileSummary?
+    @State private var warmingUpSeveral = false
     @State private var exporting: ProfileSummary?
     @State private var importingProfile = false
     @State private var pendingDelete: ProfileSummary?
@@ -50,6 +51,7 @@ struct ProfileListView: View {
             .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
             .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
             .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
+            .sheet(isPresented: $warmingUpSeveral) { WarmUpQueueView() }
             .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }
             .sheet(isPresented: $importingProfile) { ProfileImportView() }
             // "Passwords…" in a browser window's AutoFill list.
@@ -84,7 +86,8 @@ struct ProfileListView: View {
                 ephemeral: details?.ephemeral ?? false,
                 appearsAs: ProfileRowItem.appearsAs(details?.deviceGeneration ?? DeviceGenerations.resolved(id: nil)),
                 lastUsed: profile.lastLaunchedAt,
-                warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil })
+                warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
+                warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false)
         }
     }
 
@@ -117,7 +120,8 @@ struct ProfileListView: View {
             openSync: { showingSync = true },
             syncNow: model.syncTarget == nil ? nil : { Task { await model.syncNow() } },
             openTunnel: { showingTunnel = true },
-            changePassword: { changingPassword = true })
+            changePassword: { changingPassword = true },
+            warmUpSeveral: { warmingUpSeveral = true })
     }
 }
 
@@ -136,6 +140,8 @@ struct ProfileRowItem: Identifiable {
     var lastUsed: Date?
     /// The warm-up of this profile while one runs, as the profile's process last reported it.
     var warmUp: WarmUpStatus?
+    /// Waiting in the warm-up queue for its turn (`WarmUpCoordinator`).
+    var warmUpQueued = false
 
     var isRunning: Bool { activity == .running }
     var isBusy: Bool { activity == .starting || activity == .sealing }
@@ -219,6 +225,8 @@ struct ProfileActions {
     var syncNow: (() -> Void)?
     var openTunnel: () -> Void = {}
     var changePassword: () -> Void = {}
+    /// Several profiles warmed up one after the other (`WarmUpQueueView`).
+    var warmUpSeveral: () -> Void = {}
 }
 
 // MARK: - The screen
@@ -282,6 +290,9 @@ struct ProfilesScreen: View {
             LumenSearchField(text: $search, prompt: L("profiles.search"))
                 .frame(width: 200)
             Menu {
+                Button(L("profiles.menu.warmUpSeveral"), action: actions.warmUpSeveral)
+                    .disabled(rows.isEmpty)
+                Divider()
                 Button(L("profiles.menu.import"), action: actions.importProfile)
                 Divider()
                 Button(L("profiles.menu.sync"), action: actions.openSync)
@@ -629,11 +640,17 @@ private struct ProfileRow: View {
         case .running:
             if let warmUp = row.warmUp {
                 WarmUpLine(status: warmUp)
+            } else if row.warmUpQueued {
+                secondaryLine(L("profiles.row.warmUpQueued"))
             } else {
                 secondaryLine(L("profiles.row.running"))
             }
         case .stopped:
-            if row.ephemeral { secondaryLine(L("profiles.row.ephemeral")) }
+            if row.warmUpQueued {
+                secondaryLine(L("profiles.row.warmUpQueued"))
+            } else if row.ephemeral {
+                secondaryLine(L("profiles.row.ephemeral"))
+            }
         }
     }
 

@@ -91,7 +91,8 @@ final class WarmUpRobot: ObservableObject {
         }
         return WarmUpStatus(phase: phase, visited: visited, total: pageCount, failed: failed,
                             cookies: cookiesCollected, secondsRemaining: secondsRemaining,
-                            currentHost: isRunning ? visits.last?.url.host : nil)
+                            currentHost: isRunning ? visits.last?.url.host : nil,
+                            sites: isRunning ? nil : cookieSites)
     }
 
     /// Roughly how much of the run is left: from what its pages have actually taken so far, and
@@ -118,10 +119,17 @@ final class WarmUpRobot: ObservableObject {
     private weak var tab: BrowserTab?
     /// The window this run browses in, off every screen (`BrowserSession.openOffscreenWindow`).
     private var offscreenWindow: BrowserWindowController?
-    private var cookiesBefore: Int?
-    /// Cookies the profile has gained since this run began: counted before the first page and
-    /// again after each one, which is what "collected" means on the warm-up screen.
+    /// The profile's cookies when the run began (`WarmUpCookieCount.Cookie`: one per name, domain
+    /// and path); nil until the store has answered.
+    private var cookiesBefore: Set<WarmUpCookieCount.Cookie>?
+    /// Cookies the profile has gained since this run began: the store is read before the first
+    /// page and again after each one, and a cookie counts when it was not there at the start —
+    /// which is what "collected" means on the warm-up screen.
     @Published private(set) var cookiesCollected = 0
+    /// Once the run is over: the profile's cookies per site and how many of them the run added —
+    /// the report the warm-up screen shows (`WarmUpStatus.sites`). Taken from the same reads of
+    /// the store, in the process the profile runs in, so it crosses to the manager in the status.
+    private(set) var cookieSites: [WarmUpCookieSite]?
     /// When the run began, and what one of its pages was expected to cost: together they say how
     /// much of the run is left.
     private var startedAt: Date?
@@ -152,6 +160,7 @@ final class WarmUpRobot: ObservableObject {
         offscreenWindow = controller
         cookiesBefore = nil
         cookiesCollected = 0
+        cookieSites = nil
         startedAt = Date()
         plannedSecondsPerPage = plan.secondsPerPage
         countCookiesSoFar() // the run's starting point: `cookiesBefore` is nil until it answers
@@ -196,22 +205,27 @@ final class WarmUpRobot: ObservableObject {
 
     /// Counts the profile's cookies and reports how many the run has added so far. Called after
     /// each page, so the screen can show the count growing rather than only a total at the end.
+    /// The count a stop asks for (`release()`) comes back once the run is over: it brings the
+    /// report of a run that was stopped part-way.
     private func countCookiesSoFar() {
-        countCookies { [weak self] count in
+        countCookies { [weak self] cookies in
             guard let self else { return }
             guard let before = self.cookiesBefore else {
                 // The first count has not come back yet: take this one as the run's starting point.
-                self.cookiesBefore = count
+                self.cookiesBefore = Set(cookies)
                 return
             }
-            let collected = max(0, count - before)
-            guard collected != self.cookiesCollected else { return }
+            let collected = WarmUpCookieCount.added(before: before, after: cookies)
+            let sites = self.isRunning ? nil : WarmUpCookieCount.sites(before: before, after: cookies)
+            guard collected != self.cookiesCollected || (sites != nil && sites != self.cookieSites) else { return }
             self.cookiesCollected = collected
+            if let sites { self.cookieSites = sites }
             self.onProgress?()
         }
     }
 
-    /// The same, waited for: used once, at the end of a run.
+    /// The same, waited for: used once, at the end of a run, so that the run is reported as over
+    /// with its whole count and its report, not before the last page's cookies are in.
     private func countCookiesAndWait() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             guard let store = session?.dataStore else {
@@ -221,7 +235,9 @@ final class WarmUpRobot: ObservableObject {
             store.httpCookieStore.getAllCookies { cookies in
                 MainActor.assumeIsolated {
                     if let before = self.cookiesBefore {
-                        self.cookiesCollected = max(0, cookies.count - before)
+                        let after = cookies.map { Self.identity($0) }
+                        self.cookiesCollected = WarmUpCookieCount.added(before: before, after: after)
+                        self.cookieSites = WarmUpCookieCount.sites(before: before, after: after)
                     }
                     continuation.resume()
                 }
@@ -229,12 +245,17 @@ final class WarmUpRobot: ObservableObject {
         }
     }
 
-    /// How many cookies the profile holds right now.
-    private func countCookies(_ answer: @escaping @MainActor (Int) -> Void) {
+    /// The cookies the profile holds right now, as `WarmUpCookieCount` tells them apart.
+    private func countCookies(_ answer: @escaping @MainActor ([WarmUpCookieCount.Cookie]) -> Void) {
         guard let store = session?.dataStore else { return }
         store.httpCookieStore.getAllCookies { cookies in
-            MainActor.assumeIsolated { answer(cookies.count) }
+            MainActor.assumeIsolated { answer(cookies.map { Self.identity($0) }) }
         }
+    }
+
+    /// A cookie of the store, by what tells it apart from the others (name, domain, path).
+    nonisolated private static func identity(_ cookie: HTTPCookie) -> WarmUpCookieCount.Cookie {
+        WarmUpCookieCount.Cookie(name: cookie.name, domain: cookie.domain, path: cookie.path)
     }
 
     /// Changes visit `index` of run `run`; nothing once that run has ended (its last awaits can
@@ -287,7 +308,8 @@ final class WarmUpRobot: ObservableObject {
         task = nil
         release()
         setState(.finished)
-        log.notice("Warm-up finished: \(self.cookiesCollected, privacy: .public) cookies collected")
+        let sitesAdded = cookieSites?.filter { $0.added > 0 }.count ?? 0
+        log.notice("Warm-up finished: \(self.cookiesCollected, privacy: .public) cookies collected on \(sitesAdded, privacy: .public) sites")
     }
 
     private func isFailure(_ outcome: WarmUpVisit.Outcome) -> Bool {

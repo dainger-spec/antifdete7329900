@@ -44,6 +44,7 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Cookie import | a Netscape file with CRLF, comments, an HttpOnly line and damaged bytes: the five readable cookies are read, the four other lines reported (field count, public suffix, expired, damaged text); into a stopped profile they are queued encrypted (no cookie value in the file) and put into its store at launch before the start page is requested: the request carries the host-only, domain, HttpOnly and session cookies, not the Secure one or another path's over http; the store holds each with the file's attributes; a cut-off JSON export's complete entry goes into the running profile at once and the next request carries it; after a stop (sealed) and a launch the persistent imported cookies are back and the session cookie is not |
 | Profile sync (two devices) | a second vault bootstrapped from a sync folder with the master password stands in for another Mac: a cookie imported into the stopped profile on A joins the synced cookies at its launch, a page's persistent cookie at its stop (its session cookie not); the folder holds no cookie name, value or domain; on B the start page's first request already carries both; B's change of one and deletion of the other reach A's store before its first page; settings changed on both, B's later: B's on both Macs, A's kept as `config.bin.conflict` |
 | Session warm-up robot | through the app's launch path behind the self-test proxy, with short waits: a plan of three pages, a `javascript:` line (skipped) and a page the proxy closes unanswered (reported, the robot goes on) is visited in order in a new tab of the profile, each page taken as visited only once it has come (never before the proxy was asked for it), and an address that only jumps within the page shown at once (also when the page then rewrites the fragment); the requests carry the profile's User-Agent and the cookies the pages before set; at the proxy, each page's followed link comes at least the plan's time after the page, and the next page at least half that after the followed one; each page is scrolled (the pages see trusted scroll events); from each page only the plain same-site link is followed, with the page as Referer — never the sign-out, other-site, file or new-window links next to it; while the robot scrolls and clicks, each page's own world sees no `window.webkit` and no robot global; history and the pages' cookies are kept; Stop during a page ends the run before its next page is requested; closing its tab and a page's alert stop it; stopping the profile stops it first (while its store is still there), and the profile's data then seals as usual. Whether wheel and mouse events reached the page or the script fallback was used is reported |
+| Warm-up queue and report | two stopped profiles queued with one plan through `WarmUpCoordinator` behind the self-test proxy: they run one after the other and never both at once, each without a window of its own, and each is stopped and sealed before the next starts; the report of each run counts the profile's cookies per site (registrable domain) — two sites with one new cookie each for the first, and for the second, which already held a cookie of the site it visits, two cookies there of which one is new; a run from the queue counts as the profile's last run for its schedule, stored encrypted |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
@@ -264,6 +265,7 @@ storage and network (§1, §4).
 | Saved passwords | encrypted (`passwords.bin`) | decrypted on demand | in memory |
 | Imported cookies for a stopped profile | encrypted (`cookies-import.bin`) until its next launch puts them into the website data | — | in WebKit's cookie store (as the profile's other cookies) |
 | Warm-up plan (addresses, search, times) | encrypted (`warmup.bin`, this Mac only, not synced) | decrypted when the sheet opens | — |
+| Warm-up schedule (every N hours, last run) | encrypted (`warmup-schedule.bin`, this Mac only, not synced, not in a profile export) | decrypted at unlock (the timer needs it) | — |
 | Synced cookies (persistent cookies, with cookie sync on) | encrypted (`cookies.bin`; its local baseline `cookies-baseline.bin`) | encrypted | encrypted; written at launch and stop |
 | History | encrypted (`history.bin`); ephemeral profiles: never written | encrypted | in memory, saved encrypted (debounced, ≤ 3 s) |
 | Bookmarks | encrypted (`bookmarks.bin`) | encrypted | in memory, saved encrypted on every change |
@@ -683,12 +685,50 @@ not held up); Lock and Quit (they stop every profile); a page that shows a dialo
 stops it and leaves the dialog to the user. The run goes on when the sheet is closed; the
 profile list shows its progress.
 
+**What a run left.** When a run is over the sheet lists the profile's cookies per site — the
+registrable domain by the Public Suffix List, so `www.example.co.uk` and `.example.co.uk` are one
+site and `alice.github.io` and `bob.github.io` are two — with how many of them the run added. The
+robot reads the profile's own cookie store (`WKHTTPCookieStore`) when the run starts and when it
+ends, where the profile runs: in a profile's own process the list comes back to the manager in the
+run's status, like the page counts. A cookie counts as added when no cookie of the same name,
+domain and path was there at the start; one a page set again with a new value is not new, and a
+cookie that expired during the run is simply no longer listed. A run stopped part-way gets its
+list a moment after it stops. At most 100 sites are listed, those the run added to first.
+
+**Several profiles.** **More → Warm Up Several Profiles…** warms the ticked profiles one after the
+other with one plan (a list composed for the proxy's country is put together for each profile's
+own country). A stopped profile is started without a window, warmed up, then stopped and sealed
+again — and only then does the next one start, so at most one profile is ever decrypted for the
+queue. A profile the user already has open is warmed up where it runs and stays open. The sheet
+says which profile is on ("profile 2 of 5") and what each run came to; the rest of the queue can
+be cancelled, or the run going on stopped as well. A run started from a profile's own warm-up
+sheet runs on its own, and the queue waits for it rather than run beside it.
+
+**Repeating.** "Repeat on a schedule" in a profile's warm-up sheet runs the plan the sheet shows
+every 1–168 hours, while the app is unlocked — never while it is locked, since nothing can be
+decrypted then. A timer looks once a minute and puts the runs that are due into the same queue, so
+scheduled runs take turns too and are started without a window like any queued run. A profile that
+is running when its run comes up is taken to be in use — its windows are the user's — and is left
+alone; the run is tried again ten minutes later. The first run comes one interval after repeating
+is turned on (Start is there for a run now); after that, one interval after the profile's last run,
+whoever started it. A run that could not start (the launch failed, the plan has no page) counts
+as one, so a profile whose proxy is down is not relaunched every minute. A Mac that slept through
+several intervals runs the profile once when it wakes, not once per interval missed. The schedule
+and its last run (`warmup-schedule.bin`) stay on this Mac: they are not synced, and a profile
+export does not carry them, since another Mac should not start a profile in the background
+because this one was told to. The plan a scheduled run uses is the profile's saved one; a
+ready-made or composed choice is cut and shuffled anew for each run, for the country the proxy
+exits in at that time.
+
 **Limits.** No browsing intelligence: the order is the list's, the links are chosen at random
 among the allowed ones in view, the timing is random within fixed ranges. Rhythm and paths are
 still a robot's, and sites that profile behaviour (or ask for a CAPTCHA) can tell; a CAPTCHA or a
 consent banner is neither answered nor clicked away. It does not sign in, fill forms, play media
-or open new windows. Only one run per profile at a time; the plan (`warmup.bin`) stays on this
-Mac.
+or open new windows. Only one run per profile at a time, and the queue runs one profile at a
+time; the plan (`warmup.bin`) and the schedule (`warmup-schedule.bin`) stay on this Mac. A
+schedule only runs while the app is open and unlocked: it is a timer in the app, not a system
+job. The ready-made lists (general, by interest, and 26 countries) are part of the app; nothing is
+fetched to build one.
 
 ## 9. App Sandbox
 

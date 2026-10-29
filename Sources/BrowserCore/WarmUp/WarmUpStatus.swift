@@ -23,16 +23,22 @@ public struct WarmUpStatus: Codable, Equatable, Sendable {
     public var total: Int
     /// Of `visited`, those that did not load.
     public var failed: Int
-    /// Cookies the profile has gained since this run began — what a warm-up is for.
+    /// Cookies the profile has gained since this run began — what a warm-up is for. Counted by
+    /// identity (`WarmUpCookieCount.added`): a cookie set again with a new value is not a new one.
     public var cookies: Int
     /// Roughly how much of the run is left, from what the pages so far actually took. Nil when
     /// the run is over, or before the first page is done.
     public var secondsRemaining: TimeInterval?
     /// The page being visited now, as a host name, for the screen to name.
     public var currentHost: String?
+    /// Once the run is over: the profile's cookies per site and how many of them the run added
+    /// (`WarmUpCookieCount.sites`), counted in the profile's own cookie store where the robot ran.
+    /// Nil while it runs — the list would cross the channel with every page for nothing — and
+    /// until the last count has come back (a run stopped mid-page gets it a moment later).
+    public var sites: [WarmUpCookieSite]?
 
     public init(phase: Phase, visited: Int, total: Int, failed: Int = 0, cookies: Int = 0,
-                secondsRemaining: TimeInterval? = nil, currentHost: String? = nil) {
+                secondsRemaining: TimeInterval? = nil, currentHost: String? = nil, sites: [WarmUpCookieSite]? = nil) {
         self.phase = phase
         self.visited = visited
         self.total = total
@@ -40,6 +46,7 @@ public struct WarmUpStatus: Codable, Equatable, Sendable {
         self.cookies = cookies
         self.secondsRemaining = secondsRemaining
         self.currentHost = currentHost
+        self.sites = sites
     }
 
     public var isRunning: Bool { phase == .running }

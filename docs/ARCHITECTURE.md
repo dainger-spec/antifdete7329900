@@ -88,6 +88,7 @@ profile key (random 256-bit per profile, stored only wrapped)
    ├─ HKDF "cookies"           → cookies.bin                   (AAD "cookies:v1:<uuid>")
    ├─ HKDF "cookie-baseline"   → cookies-baseline.bin          (AAD "cookie-baseline:v1:<uuid>")
    ├─ HKDF "warm-up"           → warmup.bin                    (AAD "warm-up:v1:<uuid>")
+   ├─ HKDF "warm-up-schedule"  → warmup-schedule.bin           (AAD "warm-up-schedule:v1:<uuid>")
    └─ HKDF "webdata-archive", salt = random per archive → webdata.pbsa chunk key
 ```
 
@@ -117,6 +118,7 @@ Application Support/PrivacyBrowser/      (0700)
     cookies.bin                   AES-GCM(cookies key, CookieJarDocument JSON)        [persistent cookies, synced; with cookie sync on]
     cookies-baseline.bin          AES-GCM(cookie-baseline key, CookieBaseline JSON)   [this Mac only: the store at the last record or apply]
     warmup.bin                    AES-GCM(warm-up key, WarmUpPlan JSON)               [this Mac only: the last warm-up plan]
+    warmup-schedule.bin           AES-GCM(warm-up-schedule key, WarmUpSchedule JSON)  [this Mac only, not exported: every N hours, last run]
     config.bin.conflict, passwords.bin.conflict   the other device's version after a sync conflict (encrypted as the file)
     history.bin                   AES-GCM(history key, HistoryDocument JSON)          [not for ephemeral profiles]
     bookmarks.bin                 AES-GCM(bookmarks key, BookmarkDocument JSON)
@@ -228,21 +230,50 @@ the next launch or unlock instead of being taken for newer data.
 ## Session warm-up
 
 ```
-WarmUpView (sheet) ── AppModel.startWarmUp: save plan (warmup.bin), launch the profile if stopped
+WarmUpView (sheet) ── AppModel.startWarmUp: save plan (warmup.bin), launch the profile
+        │              without a window if stopped (launch(openingWindow: false))
+        │
+WarmUpQueueView ── WarmUpCoordinator (one per unlock; AppModel.warmUps)
+  "Warm Up Several…"   queue: WarmUpQueue (BrowserCore) — one entry runs at a time:
+                         wait for any other run → AppModel.startWarmUp → follow warmUpStatus
+                         until it is over → wait for a profile started for it to stop and seal
+                       schedule: WarmUpScheduler (BrowserCore) over warmup-schedule.bin;
+                         a 60 s timer puts due runs into the same queue, postpones a running
+                         profile (in use) by 10 min; any run that ends records lastRunAt
+                         (manager.onWarmUpProgress)
         │
         ▼
-ProfileManager.warmUpRobot(for:) ── one WarmUpRobot per profile; stop(id) stops it first
-        │  start(plan, in: session): a new selected tab in the front window
+ProfileManager.warmUpRobot(for:) ── one WarmUpRobot per profile; stop(id) stops it first;
+        │  a profile with no visible window is stopped (sealed) when its run ends
+        │  start(plan, in: session): a window of its own, transparent, at the lowest level
+        │  (in a profile's own process: ProfileCommand.startWarmUp → the child's robot,
+        │   ProfileEvent.warmUp(WarmUpStatus) back; the child quits when a warm-up-only run ends)
         ▼
 WarmUpRobot (main actor, one Task per run; tab and session held weakly)
+   cookies at the start: WKHTTPCookieStore → Set<WarmUpCookieCount.Cookie> (name, domain, path)
    for each WarmUpPlan page (BrowserCore: pages(), WarmUpTiming, WarmUpLinkPolicy):
      wait until its tab is shown → tab.load(url) → wait for that navigation (committed, ended,
        or a jump within the page asked for) with nothing loading; failedNavigations
      → stay WarmUpTiming.dwell: wheel gestures (native NSEvent from CGEvent, else scrollBy)
      → follow one allowed link (mouse events once a trusted move reached it, else click())
-     → pause
+     → count the cookies added so far → pause
+   at the end: cookies again → WarmUpStatus.sites (WarmUpCookieCount.sites: per registrable
+     domain, cookies and how many were added), then the run is reported over
    reads pages only in WKContentWorld "PrivacyBrowser.WarmUp" (callAsyncJavaScript)
 ```
+
+The per-site report is computed where the robot runs, from the profile's own cookie store, and
+travels in `WarmUpStatus` — the value a profile in its own process already sends over the channel
+— so the sheet shows it the same way for both. It is left out while the run goes on (it would
+cross the channel with every page) and capped at 100 sites, those the run added to first. "Added"
+is by identity (name, domain, path), not by count: a cookie a page sets again is not new.
+
+The queue and the schedule's arithmetic (what is due, in which order, when next; a run put off;
+a clock set back; a Mac that slept through several intervals runs once) live in BrowserCore and
+are unit-tested; the coordinator only launches and waits. A scheduled run never starts in a
+profile that is running — its windows are the user's — and is tried again 10 minutes later; a
+scheduled run that started (or could not: launch failed, no page) counts as an attempt, so a
+profile whose proxy is down is not relaunched every minute.
 
 The robot never replaces the tab's delegates (they authenticate the proxy, record history and
 handle downloads); it watches the tab instead, and sets the tab's `refusesDownloads` for the run
@@ -289,7 +320,7 @@ configs read as the default generation).
 
 | Layer | How | Where it runs |
 |---|---|---|
-| Core (crypto, vault, profiles, archive, layout, history, bookmarks, passwords, cookie import, sync incl. cookies and settings conflicts, warm-up plans and link rules, HTTP transport, UA presets, proxy location) | XCTest, 120 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| Core (crypto, vault, profiles, archive, layout, history, bookmarks, passwords, cookie import, sync incl. cookies and settings conflicts, warm-up plans and link rules, warm-up queue, schedule and per-site report, HTTP transport, UA presets, proxy location) | XCTest, 151 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
 | Tunnel protocols (STUN/TURN against RFC 5769 vectors, IPv4/IPv6 UDP packets, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy, several profiles through one router) | XCTest, 32 tests | Linux and macOS, every push |
 | Packet-tunnel extension | builds against the macOS SDK and is laid out as a system extension, plists linted, provider class checked (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner. Its router runs on a raw utun interface opened as root (`--utun-relay`, `UTunDevice`) against real WebKit, inside the leak check | macOS 26 runner, every push |
 | JS shims (logic, CreepJS-style shape checks) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages) | Linux, every push |
