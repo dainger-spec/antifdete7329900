@@ -479,10 +479,14 @@ reload: the page must fail, not show your own IP.
 
 ## 4a. A profile in its own process, and Safari's chrome
 
-In the build without the App Sandbox a profile can run in a process of its own
-(`PB_PROFILE_PROCESS`, `ProfileProcess`), and there its window is Safari's own chrome
-(docs/SAFARI_PROCESS.md §9). That process holds Safari's frameworks next to the profile, and
-Safari builds the web views; so the profile's proxy is held for the **whole process**, not only for
+In the build without the App Sandbox every profile runs in a process of its own (`ProfileProcess`),
+and there its window is Safari's own chrome (docs/SAFARI_PROCESS.md §9) — except an iPhone or iPad
+profile, which gets our own window presenting its device, and a profile whose WebRTC goes through
+the packet tunnel, which stays in the manager process. The emergency switch back to every profile
+in the manager process, in our own windows: `PB_PROFILE_PROCESS=0`, or
+`defaults write <bundle id> PBProfileProcess -bool NO`. The sandboxed build keeps every profile in
+the one process (it cannot load Safari's frameworks). A profile's process holds Safari's frameworks
+next to the profile, and Safari builds the web views; so the profile's proxy is held for the **whole process**, not only for
 the web views it knows about (`ProfileNetworkGuard`), and it is decided before Safari's frameworks
 load (the child opens the vault and reads the profile first).
 
@@ -574,8 +578,8 @@ loads are not among them. WebKit's C preference setters (`WKPreferencesSetPeerCo
 cannot be pinned; the report reads every web view's engine instead. With WebRTC through the packet
 tunnel, profile processes each keep their own view of the tunnel, and one can stop it under
 another (code reading, not measured: the tunnel has not yet run on a Mac, docs/TUNNEL.md); until
-the manager owns the tunnel alone, a profile whose WebRTC goes through the tunnel should not run in
-a process of its own. A site whose certificate holds only with a fetch fails in a proxied profile
+the manager owns the tunnel alone, a profile whose WebRTC goes through the tunnel runs in the manager
+process, in our own window. A site whose certificate holds only with a fetch fails in a proxied profile
 rather than being completed, and Safari's automatic upgrade of an `http://` address to HTTPS does
 not fall back to http after such a refusal (it is a cancelled check, not a failed one). In Safari's
 chrome, Safari's own context menu keeps Look Up, Translate and

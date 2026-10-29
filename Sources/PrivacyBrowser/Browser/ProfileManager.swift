@@ -150,8 +150,11 @@ final class ProfileManager: ObservableObject {
         // A proxy that does not work leaves the profile with no page loaded: said in words, by the
         // same probe the Proxies sheet's check runs, while the profile starts.
         if let proxy = stored.proxy, !runsInProfileProcess { diagnoseProxy(of: id, proxy, startURL: stored.startURL) }
-        // A profile's own process runs its profile itself: it never starts another process.
-        if ProfileProcess.isEnabled, !runsInProfileProcess {
+        // A profile's own process runs its profile itself: it never starts another process. A
+        // profile whose WebRTC goes through the packet tunnel stays here: the tunnel's routes are
+        // this process's, and a process of its own would keep a view of the tunnel of its own,
+        // which can stop the tunnel under another profile (docs/ISOLATION_AND_LIMITATIONS.md §4a).
+        if ProfileProcess.isEnabled, !runsInProfileProcess, !relaysWebRTCThroughTunnel(stored) {
             var stored = stored
             // Its languages and time zone are fixed when the process starts. With no location
             // remembered for the proxy yet — a first launch, or a new proxy — they are looked up
@@ -784,6 +787,10 @@ final class ProfileManager: ObservableObject {
         // Starting or being encrypted: its store is about to exist or to go.
         guard !busyProfileIDs.contains(id), !isShuttingDown else { throw CookieImportError.busy }
         return .queued(try repository.queueImportedCookies(cookies, for: id))
+    }
+
+    private func relaysWebRTCThroughTunnel(_ configuration: ProfileConfiguration) -> Bool {
+        configuration.webRTCPolicy != .disabled && configuration.proxy?.kind == .socks5 && tunnel.canCarryWebRTC
     }
 
     /// Every cookie of a profile, session cookies included, for an export (`CookieExport`). A

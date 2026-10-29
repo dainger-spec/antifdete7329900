@@ -23,17 +23,21 @@ import os
 /// decrypted, in the child, on its way out. The index is the manager's alone: what would change
 /// it in the child is sent to the manager (`ProfileEvent.configurationSaved`).
 ///
-/// WHAT THIS FIRST STEP DOES NOT DO. Features that reach into a running session from the manager
-/// process — the warm-up robot, importing cookies into a profile that is already running, the
-/// library window — have no way across the process boundary yet, so they are unavailable for a
-/// profile started this way. That is why this is off unless asked for (`isEnabled`), and why the
-/// in-process path stays exactly as it was.
+/// WHAT CROSSES. Everything the manager does to a running profile goes over `ProfileChannel`: its
+/// windows, its library, its warm-up, cookies imported into it, the check of where its traffic
+/// goes. Files both processes open (the password vault) are shared under a lock. The in-process
+/// path stays as it was, for the sandboxed build and as the emergency switch (`isEnabled`).
 @MainActor
 final class ProfileProcess {
-    /// `PB_PROFILE_PROCESS=1`, or `defaults write <bundle id> PBProfileProcess -bool YES`.
+    /// On by default in a build without the App Sandbox — the build that can host Safari's chrome,
+    /// which needs a process of its own. `PB_PROFILE_PROCESS=0`, or `defaults write <bundle id>
+    /// PBProfileProcess -bool NO`, is the emergency switch back to every profile in this one
+    /// process (in our own windows); `=1` / `YES` asks for it in a sandboxed build, where it runs
+    /// without Safari's chrome.
     static var isEnabled: Bool {
         if let value = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"] { return value == "1" }
-        return UserDefaults.standard.bool(forKey: "PBProfileProcess")
+        if let stored = UserDefaults.standard.object(forKey: "PBProfileProcess") as? Bool { return stored }
+        return !AppEnvironment.isSandboxed
     }
 
     let profileID: UUID
