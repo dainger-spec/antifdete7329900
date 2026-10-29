@@ -713,7 +713,7 @@ final class SelfTest {
 
         // What the proxy answered for this run, and what the page reported, asked through the same
         // proxy from a window of ours. Polled: the chrome's page loads are on their own schedule.
-        struct Entry { let via: String; let target: String; let path: String; let cookie: String; let userAgent: String }
+        struct Entry { let via: String; let target: String; let path: String; let cookie: String; let userAgent: String; let language: String }
         func leakLog() async -> (targets: [Entry], reports: [[String: Any]], canary: [String]) {
             let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
             let text = try? await loadThroughProxy(repository, proxy, url: url)
@@ -722,7 +722,7 @@ final class SelfTest {
             let targets = (object["targets"] as? [[String: Any]] ?? []).map {
                 Entry(via: $0["via"] as? String ?? "", target: ($0["target"] as? String ?? "").lowercased(),
                       path: $0["path"] as? String ?? "", cookie: $0["cookie"] as? String ?? "",
-                      userAgent: $0["userAgent"] as? String ?? "")
+                      userAgent: $0["userAgent"] as? String ?? "", language: $0["language"] as? String ?? "")
             }
             let canary = (object["canary"] as? [[String: Any]] ?? []).map { "\($0["listener"] ?? "?") \($0["request"] ?? "")" }
             return (targets, object["reports"] as? [[String: Any]] ?? [], canary)
@@ -960,6 +960,12 @@ final class SelfTest {
             again.matchProxyLocation = true
             again.timeZoneIdentifier = nil
             try repository.saveConfiguration(again, for: profile.id)
+            // The manager looks the new proxy up before the process starts (nothing is remembered
+            // for it): the self-test proxy's answer is Germany, so the process starts in German.
+            let services = ProxyGeoLookup.services
+            ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json")!,
+                                             timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+            defer { ProxyGeoLookup.services = services }
             hostsChrome = nil
             networkReport = nil
             let before = (await leakLog()).targets.filter { $0.path.hasPrefix(startPath) }.count
@@ -979,6 +985,9 @@ final class SelfTest {
             check("Safari chrome, second launch on the restored home through SOCKS5: Safari's window again, its start page through the proxy, by name",
                   restarted && hostsChrome == true && arrived.dropFirst(before).contains { $0.via == "via=socks5" },
                   "chrome \(String(describing: hostsChrome)), start page requests \(arrived.map(\.via))")
+            check("Safari chrome, a new proxy's first launch: the page is asked for in the proxy's country's language",
+                  arrived.dropFirst(before).contains { $0.language.hasPrefix("de") },
+                  arrived.dropFirst(before).map(\.language).joined(separator: " | "))
             _ = manager.checkNetwork(profile.id, probe: URL(string: "https://probe-\(run).\(domain)/pb-leak/second?run=\(run)"))
             _ = await waitUntil(timeout: 40) { networkReport != nil }
             check("Safari chrome, second launch: every web view on the profile's store, none with WebRTC, the kernel's closures in place",

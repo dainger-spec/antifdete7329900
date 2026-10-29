@@ -146,6 +146,18 @@ final class ProfileManager: ObservableObject {
         let stored = try repository.loadConfiguration(id, key: key)
         // A profile's own process runs its profile itself: it never starts another process.
         if ProfileProcess.isEnabled, !runsInProfileProcess {
+            var stored = stored
+            // Its languages and time zone are fixed when the process starts. With no location
+            // remembered for the proxy yet — a first launch, or a new proxy — they are looked up
+            // here first, as briefly as a launch in this process waits, rather than the process
+            // starting with this Mac's own languages and learning the proxy's only for next time.
+            if stored.needsProxyLocation, stored.rememberedProxyLocation == nil, (try? stored.proxy?.validate()) != nil {
+                let lookup = Task { await self.lookUpProxyLocation(stored) }
+                if let result = await Self.value(of: lookup, within: Self.firstLookupWait), result.location != nil {
+                    proxyLookupFinished(result, for: id, name: summary.name, stored: stored)
+                    stored = (try? repository.loadConfiguration(id, key: key)) ?? stored
+                }
+            }
             try startInOwnProcess(id, summary: summary, stored: stored, forWarmUpOnly: !openingWindow)
             return
         }
