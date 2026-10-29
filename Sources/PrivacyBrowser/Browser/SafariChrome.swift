@@ -197,9 +197,14 @@ enum SafariChrome {
         }
         let original = unsafeBitCast(method_getImplementation(method), to: NibWithName.self)
         let replacement: @convention(block) (AnyObject, NSString, Bundle?) -> AnyObject? = { object, name, bundle in
-            if bundle?.bundlePath.hasPrefix("/System/") != true, let own = chromeBundle(holdingNib: name as String) {
-                return original(object, loader, name, own)
+            // Build the nib from the file itself rather than hand another bundle to AppKit: bundle
+            // resolution is what went wrong here twice, and a framework in the Safari cryptex does
+            // not answer -pathForResource:ofType: for these nibs at all.
+            if let url = nibURL(named: name as String) {
+                log.info("\(name, privacy: .public).nib from \(url.path, privacy: .public)")
+                return NSNib(contentsOf: url)
             }
+            log.notice("No Safari framework holds \(name, privacy: .public).nib; letting AppKit try \(bundle?.bundlePath ?? "the main bundle", privacy: .public)")
             return original(object, loader, name, bundle)
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
@@ -214,18 +219,21 @@ enum SafariChrome {
         return roots.flatMap { root in frameworks.compactMap { Bundle(path: "\(root)/\($0).framework") } }
     }()
 
-    /// The bundle that holds `name.nib`, or nil when none of Safari's does.
-    private static func chromeBundle(holdingNib name: String) -> Bundle? {
-        if let known = nibBundles[name] { return known }
-        guard let found = chromeBundles.first(where: { $0.path(forResource: name, ofType: "nib") != nil }) else {
-            log.notice("No Safari bundle holds \(name, privacy: .public).nib")
-            return nil
-        }
-        nibBundles[name] = found
+    /// The file `name.nib` inside one of Safari's frameworks. Looked for on disk, under every
+    /// layout those frameworks use, because that is the one thing that does not depend on how a
+    /// cryptex-backed bundle answers resource lookups. Answers are cached, hits and misses alike.
+    private static func nibURL(named name: String) -> URL? {
+        if let known = nibURLs[name] { return known }
+        let subdirectories = ["Resources", "Resources/Base.lproj", "Resources/en.lproj",
+                              "Versions/A/Resources", "Versions/A/Resources/Base.lproj", "Versions/A/Resources/en.lproj"]
+        let found = chromeBundles.lazy.flatMap { bundle in
+            subdirectories.lazy.map { bundle.bundleURL.appendingPathComponent($0).appendingPathComponent("\(name).nib") }
+        }.first { FileManager.default.fileExists(atPath: $0.path) }
+        nibURLs[name] = found
         return found
     }
 
-    private static var nibBundles: [String: Bundle] = [:]
+    private static var nibURLs: [String: URL?] = [:]
 
     /// Features of Safari's chrome that need services only Safari has, and take the process down
     /// when they do not find them. None of them is wanted here.
