@@ -106,6 +106,20 @@ enum SafariChrome {
         stubChromeFeatures()
     }
 
+    /// Safari's own AutoFill offers to save passwords into the user's iCloud Keychain — shared by
+    /// every profile and by the real Safari, which is the opposite of what a profile is for, and
+    /// next to this project's own password vault it would be a second manager in one window.
+    /// Turned off in the profile's `com.apple.Safari` domain, which is the profile's own file
+    /// because the process has its own home (`CFFIXED_USER_HOME`).
+    private static func turnOffSafarisOwnAutoFill() {
+        let domain = "com.apple.Safari" as CFString
+        for key in ["AutoFillPasswords", "AutoFillCreditCardData", "AutoFillMiscellaneousForms",
+                    "AutoFillFromAddressBook"] {
+            CFPreferencesSetAppValue(key as CFString, kCFBooleanFalse, domain)
+        }
+        CFPreferencesAppSynchronize(domain)
+    }
+
     /// Every failure of a hosted chrome so far has been an Objective-C exception or a trap inside
     /// Safari's code, and AppKit turns the ones thrown during layout into a crash that prints
     /// nothing. The objc runtime's exception preprocessor runs at the throw itself, which is the
