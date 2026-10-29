@@ -39,6 +39,9 @@ final class AppModel: ObservableObject {
     let root: URL
 
     init() {
+        // Before the vault is looked for: a vault a sandboxed build of this app left in its
+        // container is this build's to use (an unsandboxed build hosts Safari's chrome).
+        AppEnvironment.adoptSandboxedDataIfNeeded()
         root = AppEnvironment.vaultDirectory
         phase = MasterVault.exists(in: root) ? .locked : .setup
     }
