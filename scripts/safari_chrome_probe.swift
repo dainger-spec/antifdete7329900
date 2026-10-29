@@ -22,6 +22,24 @@ import ObjectiveC.runtime
 // what was being tried on the terminal.
 setvbuf(stdout, nil, _IOLBF, 0)
 
+// Safari's frameworks assert and abort when a singleton they expect has not been set up. Each
+// such abort names the next thing to prepare, so the probe prints its own backtrace instead of
+// leaving it to a crash report.
+func installCrashReporter() {
+    let handler: @convention(c) (Int32) -> Void = { signalNumber in
+        var frames = [UnsafeMutableRawPointer?](repeating: nil, count: 64)
+        let count = backtrace(&frames, 64)
+        var banner = "\n== aborted on signal \(signalNumber) ==\n"
+        banner.withUTF8 { buffer in _ = write(2, buffer.baseAddress, buffer.count) }
+        backtrace_symbols_fd(&frames, count, 2)
+        _exit(1)
+    }
+    for signalNumber in [SIGABRT, SIGTRAP, SIGSEGV, SIGILL, SIGBUS] {
+        signal(signalNumber, handler)
+    }
+}
+installCrashReporter()
+
 let arguments = Array(CommandLine.arguments.dropFirst())
 func flag(_ name: String) -> Bool { arguments.contains(name) }
 func value(after name: String) -> String? {
