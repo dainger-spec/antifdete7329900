@@ -702,6 +702,8 @@ final class SelfTest {
                 && proxied.page["worker"] as? String == "undefined" && proxied.page["shared"] as? String == "undefined"
                 && proxied.serviceWorker["webTransport"] as? String == "undefined",
               "page \(proxied.page), service worker \(proxied.serviceWorker.isEmpty ? "no report" : "\(proxied.serviceWorker)")")
+    }
+
     // MARK: The local automation API
 
     /// A script on this Mac drives a profile through the API (`AutomationServer`) as the app's own
