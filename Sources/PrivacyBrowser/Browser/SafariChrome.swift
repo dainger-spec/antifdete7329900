@@ -99,6 +99,7 @@ enum SafariChrome {
         bridgeColorLookups()
         tolerateNilAttributeValues()
         tolerateNilDictionaryKeys()
+        tolerateMissingSafariDirectories()
         bridgeNibLookups()
         stubChromeFeatures()
     }
@@ -251,6 +252,30 @@ enum SafariChrome {
             }
             method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
+    }
+
+    /// Safari walks directories it works out from its own container, and in this process several
+    /// of those come out nil — `-[NSFileManager safari_topLevelDirectoriesAtURL:]` then hands the
+    /// nil to `-enumeratorAtURL:…`, which throws. Patching the walk rather than each of its
+    /// callers: a directory that does not exist holds nothing, which is the right answer for every
+    /// one of them.
+    private static func tolerateMissingSafariDirectories() {
+        typealias TopLevelDirectories = @convention(c) (AnyObject, Selector, AnyObject?) -> AnyObject?
+        let selector = NSSelectorFromString("safari_topLevelDirectoriesAtURL:")
+        guard let method = class_getInstanceMethod(FileManager.self, selector) else {
+            log.notice("No -[NSFileManager safari_topLevelDirectoriesAtURL:] in this Safari")
+            return
+        }
+        let original = unsafeBitCast(method_getImplementation(method), to: TopLevelDirectories.self)
+        let replacement: @convention(block) (AnyObject, AnyObject?) -> AnyObject? = { manager, url in
+            guard let url else {
+                Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
+                    .notice("Safari asked for the contents of a directory it has no path for")
+                return [] as NSArray
+            }
+            return original(manager, selector, url)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
 
     /// Safari's chrome takes its colours out of an asset catalog by name, the same way it takes
