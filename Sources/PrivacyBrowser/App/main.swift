@@ -36,6 +36,12 @@ MainActor.assumeIsolated {
     } else {
         // Russian by default (English fallback); must be set before AppKit builds its menus.
         Localization.applyProcessLanguage()
+        if SafariBrowserWindowController.enabledByLaunchArgument {
+            // -safari-chrome: the framework's document controller has to be the process's shared
+            // one, and AppKit hands that to whichever is created first — which it does itself
+            // while finishing launching. So this cannot wait until a profile window is opened.
+            SafariBrowserWindowController.prepareProcess()
+        }
         PrivacyBrowserApp.main()
     }
 }

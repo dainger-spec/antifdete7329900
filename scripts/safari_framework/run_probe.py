@@ -26,6 +26,7 @@ STEPS = [
     "appcontroller",    # the application controller's methods and ivars
     "windowcontroller", # the window controller's methods, ivars, properties
     "documentcontroller", # the document controller the window path goes through
+    "documentcontroller-create", # what happens when AppKit made one of its own first
     "shared",           # obtaining the application controller instance
     "create-direct",    # allocating the window controller directly
     "create",           # the application-controller window path

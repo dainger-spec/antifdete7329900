@@ -156,44 +156,64 @@ final class SafariBrowserWindowController: NSObject {
 
     // MARK: The document controller
 
-    /// AppKit gives `+sharedDocumentController` to the *first* `NSDocumentController` created in
-    /// the process, so creating the framework's subclass here is what makes the shared one the
-    /// kind the rest of the framework expects. Without this, the window path dies on
-    /// `-[NSDocumentController frontmostBrowserDocument]: unrecognized selector` — measured on
-    /// macOS 15 and 26, see docs/SAFARI_FRAMEWORK_PATH.md.
+    /// Opens the framework and makes its `NSDocumentController` subclass the process's shared
+    /// one. **This has to run before the application finishes launching**, and is the reason the
+    /// `-safari-chrome` launch argument exists rather than only the per-profile setting.
     ///
-    /// Nothing in this app may read `NSDocumentController.shared` before this runs: that read is
-    /// itself what creates a plain one, and AppKit never replaces it afterwards.
+    /// AppKit gives `+sharedDocumentController` to the first `NSDocumentController` created in
+    /// the process and never replaces it. It creates one itself while finishing launching —
+    /// state restoration asks for it — so by the time a profile window is opened it is too late:
+    /// `-[BrowserDocumentController init]` gets AppKit's existing plain instance back out of
+    /// `[super init]` and then sends it `_commonInit`, which a plain `NSDocumentController` does
+    /// not have. The process dies on that unrecognized selector. Measured on macOS 15 and 26,
+    /// sandboxed and not; see docs/SAFARI_FRAMEWORK_PATH.md.
     ///
-    /// This is the one step of the path that cannot be undone. If a later step fails and the
-    /// caller falls back to the in-process window, the framework's document controller stays the
-    /// process's shared one for the rest of the run. That is why it happens only when the
-    /// framework path was asked for, never on the way to the ordinary window.
-    private func installDocumentController() -> Bool {
-        if let existing = Self.documentController {
-            note("document controller: already installed (\(NSStringFromClass(type(of: existing))))")
-            return true
+    /// Irreversible: once the framework's document controller is the shared one it stays so for
+    /// the rest of the run, even if the window path then fails and the app falls back to its own
+    /// windows. That is why nothing calls this unless the framework path was explicitly asked
+    /// for on the command line.
+    @discardableResult
+    static func prepareProcess() -> Bool {
+        guard documentController == nil else { return true }
+        guard SafariLoader.load() else {
+            NSLog("SafariWindow: prepareProcess -> framework not loaded")
+            return false
         }
-        for className in Self.documentControllerClasses {
+        for className in documentControllerClasses {
             guard let cls = NSClassFromString(className) as? NSObject.Type else {
-                note("class \(className) -> nil")
+                NSLog("SafariWindow: class \(className) -> nil")
                 continue
             }
-            let instance = cls.init()
+            // The framework's own accessor first: it is what the framework calls on itself, and
+            // it is what decides how the instance is set up.
+            let viaAccessor = ObjCRuntime.callReturningObject(cls, "sharedDocumentController")
+            NSLog("SafariWindow: +[\(className) sharedDocumentController]: \(viaAccessor.reason)")
+            let instance = viaAccessor.value ?? cls.init()
             let shared = NSDocumentController.shared
             guard shared === instance else {
-                note("created \(className), but +sharedDocumentController is " +
-                     "\(NSStringFromClass(type(of: shared))) — something made a document controller first, " +
-                     "and AppKit never replaces it")
+                NSLog("SafariWindow: made \(className), but +sharedDocumentController is " +
+                      "\(NSStringFromClass(type(of: shared))) — a document controller already existed, " +
+                      "and AppKit never replaces it")
                 return false
             }
-            Self.documentController = instance
-            note("document controller: +sharedDocumentController is now \(className)")
+            documentController = instance
+            NSLog("SafariWindow: +sharedDocumentController is now \(NSStringFromClass(type(of: instance)))")
             return true
         }
-        note("no document controller class found; framework classes named *DocumentController*: " +
-             SafariLoader.classNames(containing: "DocumentController").prefix(12).joined(separator: ", ").ifEmpty("none"))
+        NSLog("SafariWindow: no document controller class; framework classes named *DocumentController*: " +
+              SafariLoader.classNames(containing: "DocumentController").prefix(12).joined(separator: ", ").ifEmpty("none"))
         return false
+    }
+
+    private func installDocumentController() -> Bool {
+        guard let installed = Self.documentController else {
+            note("document controller -> nil: prepareProcess() did not run, or ran too late. " +
+                 "The framework's subclass can only become the shared one before the application " +
+                 "finishes launching, which is what -safari-chrome is for.")
+            return false
+        }
+        note("document controller: \(NSStringFromClass(type(of: installed)))")
+        return true
     }
 
     // MARK: The application-controller path

@@ -20,6 +20,7 @@ import WebKit
 ///   `appcontroller`    the application controller's methods and ivars
 ///   `windowcontroller` the window controller's methods, ivars, properties, superclasses
 ///   `documentcontroller` the document controller and the document it makes
+///   `documentcontroller-create` what happens when AppKit already made one
 ///   `shared`           obtaining the application controller instance
 ///   `create`           the application-controller window path
 ///   `create-bootstrap` the same, after the launch callbacks
@@ -51,7 +52,14 @@ enum SafariFrameworkProbe {
         say("sandboxed: \(ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil)")
 
         // The steps that build a window need a running application; the rest must not wait for one.
-        if ["shared", "create", "create-bootstrap", "create-direct", "window"].contains(step) {
+        if ["shared", "create", "create-bootstrap", "create-direct", "window", "documentcontroller-create"].contains(step) {
+            // Before NSApplication exists, let alone finishes launching: AppKit makes its own
+            // document controller on the way up, and the framework's subclass can only be the
+            // shared one if it got there first.
+            if step != "documentcontroller-create" {
+                say("prepareProcess: \(SafariBrowserWindowController.prepareProcess())")
+                say("shared document controller is now \(NSStringFromClass(type(of: NSDocumentController.shared)))")
+            }
             let app = NSApplication.shared
             app.setActivationPolicy(.regular)
             DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
@@ -81,6 +89,7 @@ enum SafariFrameworkProbe {
                                                fallback: "BrowserWindowController")
         case "documentcontroller": dumpClassStep(candidates: ["BrowserDocumentController", "BrowserDocument"],
                                                  fallback: "BrowserDocumentController")
+        case "documentcontroller-create": documentControllerCreateStep()
         case "shared": sharedStep()
         case "create": createStep(bootstrap: false)
         case "create-bootstrap": createStep(bootstrap: true)
@@ -182,6 +191,25 @@ enum SafariFrameworkProbe {
             report += "\n-- properties --\n" + properties.joined(separator: "\n") + "\n\n"
         }
         write(report, to: "framework-\(fallback).txt")
+    }
+
+    /// Which way of getting the framework's document controller works, and whether AppKit then
+    /// agrees it is the shared one. Runs under a running application on purpose: it is the one
+    /// step that measures what happens when AppKit got there first.
+    private static func documentControllerCreateStep() {
+        guard SafariLoader.load() else { return say("framework not loaded") }
+        guard let cls = NSClassFromString("BrowserDocumentController") as? NSObject.Type else {
+            return say("BrowserDocumentController -> nil")
+        }
+        say("chain: \(ObjCRuntime.chain(of: cls).joined(separator: " <- "))")
+        let declared = Set(ObjCRuntime.declaredSelectors(of: cls))
+        say("declares -init: \(declared.contains("init")), -_commonInit: \(declared.contains("_commonInit"))")
+        let classSide = object_getClass(cls).map { Set(ObjCRuntime.declaredSelectors(of: $0)) } ?? []
+        say("declares +sharedDocumentController: \(classSide.contains("sharedDocumentController"))")
+        say("a document controller exists before we ask: this step is about to find out")
+        let viaAccessor = ObjCRuntime.callReturningObject(cls, "sharedDocumentController")
+        say("+[BrowserDocumentController sharedDocumentController]: \(viaAccessor.reason)")
+        say("NSDocumentController.shared is \(NSStringFromClass(type(of: NSDocumentController.shared)))")
     }
 
     private static func sharedStep() {
