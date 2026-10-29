@@ -62,11 +62,22 @@ final class AutomationServer {
             state = .failed(error.localizedDescription)
             return
         }
-        listener.stateUpdateHandler = { [weak self] update in
-            MainActor.assumeIsolated { self?.listenerChanged(update) }
+        // Only the current listener is heard: `stop()` cancels one, and cancelling is asynchronous —
+        // a connection it took meanwhile is closed unanswered, and its late states change nothing.
+        listener.stateUpdateHandler = { [weak self, weak listener] update in
+            MainActor.assumeIsolated {
+                guard let self, let listener, self.listener === listener else { return }
+                self.listenerChanged(update)
+            }
         }
-        listener.newConnectionHandler = { [weak self] connection in
-            MainActor.assumeIsolated { self?.accept(connection) }
+        listener.newConnectionHandler = { [weak self, weak listener] connection in
+            MainActor.assumeIsolated {
+                guard let self, let listener, self.listener === listener else {
+                    connection.cancel()
+                    return
+                }
+                self.accept(connection)
+            }
         }
         self.listener = listener
         listener.start(queue: .main)

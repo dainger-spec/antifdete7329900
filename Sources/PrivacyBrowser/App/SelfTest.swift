@@ -783,7 +783,8 @@ final class SelfTest {
 
         server.stop()
         let afterStop = await Task.detached { Self.rawHTTP(port: port, Data("GET / HTTP/1.1\r\n\r\n".utf8)) }.value
-        check("automation: nothing answers once the API is off", afterStop == nil || afterStop?.isEmpty == true)
+        check("automation: nothing answers once the API is off", afterStop == nil || afterStop?.isEmpty == true,
+              afterStop.map { String(decoding: $0.prefix(120), as: UTF8.self) } ?? "no connection")
     }
 
     /// One request on a plain socket to 127.0.0.1:`port`, and everything that comes back until the
