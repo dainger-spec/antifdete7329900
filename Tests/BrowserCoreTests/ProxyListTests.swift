@@ -102,6 +102,8 @@ final class ProxyListImportTests: XCTestCase {
     }
 
     func testTheSameProxyTwiceIsReadOnce() {
+        // The same host (in any case), port and user name: the same proxy, whatever the scheme or
+        // the password; another user name is another proxy.
         let report = read("""
             1.2.3.4:1080
             socks5://1.2.3.4:1080
@@ -109,9 +111,11 @@ final class ProxyListImportTests: XCTestCase {
             u:p@proxy.example:80
             proxy.example:80:other:p
             http://1.2.3.4:1080
+            proxy.example:80:u:another-password
             """)
-        XCTAssertEqual(report.proxies.map(\.line), [1, 3, 5, 6])
-        XCTAssertEqual(report.problems.map(\.reason), [.duplicate(ofLine: 1), .duplicate(ofLine: 3)])
+        XCTAssertEqual(report.proxies.map(\.line), [1, 3, 5])
+        XCTAssertEqual(report.problems.map(\.reason), [.duplicate(ofLine: 1), .duplicate(ofLine: 3), .duplicate(ofLine: 1),
+                                                       .duplicate(ofLine: 3)])
         // A repeat is not a failure: the proxy was read.
         XCTAssertEqual(report.failures, [])
     }
@@ -157,8 +161,9 @@ final class ProxyListTests: XCTestCase {
         XCTAssertEqual(first.added.count, 2)
         XCTAssertEqual(list.entries.map(\.label), [String(repeating: "x", count: 64), ""])
         XCTAssertEqual(list.entries.map(\.displayName), [String(repeating: "x", count: 64), "5.6.7.8:1080"])
-        let second = list.add(lines("socks5://1.2.3.4:1080\n5.6.7.8:1080:u:other\n[::1]:9050"))
-        XCTAssertEqual(second.alreadyListed, 1)
+        // The same host, port and user with another password is the proxy already listed.
+        let second = list.add(lines("socks5://1.2.3.4:1080\n5.6.7.8:1080:u:other\n5.6.7.8:1080:v:p\n[::1]:9050"))
+        XCTAssertEqual(second.alreadyListed, 2)
         XCTAssertEqual(second.added.count, 2)
         XCTAssertEqual(list.entries.map(\.address), ["1.2.3.4:1080", "5.6.7.8:1080", "5.6.7.8:1080", "[::1]:9050"])
         // A proxy that does not validate is never listed, however it got here.

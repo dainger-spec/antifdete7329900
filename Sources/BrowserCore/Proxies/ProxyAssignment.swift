@@ -1,5 +1,15 @@
 import Foundation
 
+extension ProxySettings {
+    /// This proxy with `other`'s connection — type, host, port, login, TLS — and its own bypass
+    /// list, which is the profile's choice, not the proxy's.
+    public func withConnection(of other: ProxySettings) -> ProxySettings {
+        var proxy = other
+        proxy.excludedDomains = excludedDomains
+        return proxy
+    }
+}
+
 extension ProfileConfiguration {
     /// This configuration with `proxy` as its proxy, saved as the editor saves a change of the
     /// proxy alone (`savingEdit(over:)`): what the browser keeps for itself stays as stored, and
@@ -44,16 +54,22 @@ public struct ProxyAssignmentOutcome: Equatable, Sendable {
 extension ProfileRepository {
     /// Gives each profile its proxy from the list (`ProxyList.rotation(of:over:)` for several in
     /// turn): read, changed as the editor would change it (`ProfileConfiguration.assigning`), and
-    /// saved — or left alone when it already has that proxy. One profile that fails does not stop
-    /// the others.
+    /// saved — or left alone when it already has that proxy. The profile keeps its own bypass list.
+    /// An entry whose type no check has found yet is given to nobody (the profile would connect
+    /// with a guess). One profile that fails does not stop the others.
     @discardableResult
     public func assign(_ assignments: [ProxyAssignment], at time: Date = Date()) -> ProxyAssignmentOutcome {
         var outcome = ProxyAssignmentOutcome()
         for assignment in assignments {
             let id = assignment.profileID
+            guard let proxy = assignment.entry.usableProxy else {
+                outcome.failed[id] = "the proxy's type is not known yet: check it first"
+                continue
+            }
             do {
                 let stored = try loadConfiguration(id)
-                let assigned = stored.assigning(assignment.entry.proxy, check: assignment.entry.lastCheck, at: time)
+                let given = stored.proxy.map { $0.withConnection(of: proxy) } ?? proxy
+                let assigned = stored.assigning(given, check: assignment.entry.lastCheck, at: time)
                 guard assigned != stored else {
                     outcome.unchanged.append(id)
                     continue
@@ -65,5 +81,37 @@ extension ProfileRepository {
             }
         }
         return outcome
+    }
+
+    /// The profiles that use the list's entry as it was (`previous`: the same host, port and user
+    /// name, `ProxyList.identity(of:)`) take its connection as it is now — after an edit, or a
+    /// check that found its type — each keeping its own bypass list, saved as an edit of the proxy
+    /// alone. Profiles with another proxy, or none, are not touched.
+    @discardableResult
+    public func follow(_ entry: ProxyListEntry, previous: ProxySettings, at time: Date = Date()) -> ProxyAssignmentOutcome {
+        var outcome = ProxyAssignmentOutcome()
+        guard let proxy = entry.usableProxy else { return outcome }
+        let identity = ProxyList.identity(of: previous)
+        for summary in list() {
+            do {
+                let stored = try loadConfiguration(summary.id)
+                guard let current = stored.proxy, ProxyList.identity(of: current) == identity else { continue }
+                let followed = stored.assigning(current.withConnection(of: proxy), check: entry.lastCheck, at: time)
+                guard followed != stored else {
+                    outcome.unchanged.append(summary.id)
+                    continue
+                }
+                try saveConfiguration(followed, for: summary.id)
+                outcome.changed.append(summary.id)
+            } catch {
+                outcome.failed[summary.id] = (error as? CoreError)?.description ?? error.localizedDescription
+            }
+        }
+        return outcome
+    }
+
+    /// The proxies of every profile that has one, for the list to take in (`ProxyList.takeIn`).
+    public func profileProxies() -> [ProxySettings] {
+        list().compactMap { (try? loadConfiguration($0.id))?.proxy }
     }
 }

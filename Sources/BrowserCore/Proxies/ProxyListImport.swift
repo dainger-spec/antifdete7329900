@@ -10,11 +10,14 @@ import Foundation
 ///     [2001:db8::1]:1080
 ///
 /// Each line is taken apart as the editor's Host field takes a pasted proxy apart
-/// (`ProxyHostField`), so a line the list accepts is one the editor would accept too. A line
-/// without a scheme gets the kind chosen for the import (`defaultKind`); `https://` means TLS to the
-/// proxy. Text after ` #` is the proxy's label; blank lines and lines starting with `#` or `//` are
-/// skipped. Every other line that is not a usable proxy is reported with its line number and why,
-/// as the cookie import reports its file — never silently dropped.
+/// (`ProxyHostField`), so a line the list accepts is one the editor would accept too. A line with a
+/// scheme is that type; `https://` means TLS to the proxy. A line without one gets the type chosen
+/// for the import (`defaultKind`) — or, chosen "find out", none yet: the first check finds it by
+/// asking the proxy both ways (`ProxyProbe`, `kindGiven` false). Text after ` #` is the proxy's
+/// label; blank lines and lines starting with `#` or `//` are skipped. Every other line that is not
+/// a usable proxy is reported with its line number and why, as the cookie import reports its file —
+/// never silently dropped. The same proxy twice (the same host, port and user name,
+/// `ProxyList.identity(of:)`) is read once: the first time.
 public enum ProxyListImport {
     /// At most this many proxies are read from one paste (the list's own limit).
     public static let maximumProxies = ProxyList.maximumEntries
@@ -26,11 +29,16 @@ public enum ProxyListImport {
         public var proxy: ProxySettings
         /// From ` # label` after the address; empty without one.
         public var label: String
+        /// The type is the line's own (its scheme) or the one chosen for the import. False: the line
+        /// had no scheme and the import was asked to find out, so `proxy.kind` is only a placeholder
+        /// until the first check (`ProxyListEntry.kindKnown`).
+        public var kindGiven: Bool
 
-        public init(line: Int, proxy: ProxySettings, label: String = "") {
+        public init(line: Int, proxy: ProxySettings, label: String = "", kindGiven: Bool = true) {
             self.line = line
             self.proxy = proxy
             self.label = label
+            self.kindGiven = kindGiven
         }
     }
 
@@ -77,7 +85,8 @@ public enum ProxyListImport {
         }
     }
 
-    public static func read(_ text: String, defaultKind: ProxySettings.Kind = .socks5) -> Report {
+    /// `defaultKind`: the type of a line without a scheme; nil to find it by checking.
+    public static func read(_ text: String, defaultKind: ProxySettings.Kind? = nil) -> Report {
         var report = Report(proxies: [], problems: [], linesRead: 0)
         var firstLine: [String: Int] = [:]
         // Character.isNewline: \n, \r\n (one Character), \r and the Unicode line separators.
@@ -96,28 +105,29 @@ public enum ProxyListImport {
             switch proxy(in: address, defaultKind: defaultKind) {
             case .failure(let failure):
                 report.problems.append(Problem(line: number, text: shown, reason: failure.reason))
-            case .success(let proxy):
+            case .success(let (proxy, kindGiven)):
                 let identity = ProxyList.identity(of: proxy)
                 if let first = firstLine[identity] {
                     report.problems.append(Problem(line: number, text: shown, reason: .duplicate(ofLine: first)))
                     continue
                 }
                 firstLine[identity] = number
-                report.proxies.append(Line(line: number, proxy: proxy, label: ProxyList.cleanLabel(label)))
+                report.proxies.append(Line(line: number, proxy: proxy, label: ProxyList.cleanLabel(label), kindGiven: kindGiven))
             }
         }
         return report
     }
 
-    /// One address (without its label) as the proxy it names.
-    static func proxy(in address: String, defaultKind: ProxySettings.Kind) -> Result<ProxySettings, ReasonError> {
+    /// One address (without its label) as the proxy it names, and whether its type is known.
+    static func proxy(in address: String, defaultKind: ProxySettings.Kind?) -> Result<(ProxySettings, kindGiven: Bool), ReasonError> {
         let field: ProxyHostField
         switch ProxyHostField.read(address) {
         case .success(let read): field = read
         case .failure(let failure): return .failure(ReasonError(reason: .unreadable(failure.problem)))
         }
         guard let port = field.port else { return .failure(ReasonError(reason: .missingPort)) }
-        let kind = field.kind ?? defaultKind
+        // A placeholder while the type is unknown: SOCKS5, the type most proxy lists hand out.
+        let kind = field.kind ?? defaultKind ?? .socks5
         let proxy = ProxySettings(kind: kind, host: field.host, port: port,
                                   username: field.username, password: field.username == nil ? nil : (field.password ?? ""),
                                   tlsToProxy: kind == .httpConnect && field.tlsToProxy == true)
@@ -125,7 +135,7 @@ public enum ProxyListImport {
         guard (try? proxy.validate()) != nil else {
             return .failure(ReasonError(reason: .unreadable(.invalidHost(field.host))))
         }
-        return .success(proxy)
+        return .success((proxy, field.kind != nil || defaultKind != nil))
     }
 
     /// `Result` wants an `Error`.
