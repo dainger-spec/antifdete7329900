@@ -107,7 +107,10 @@ final class WarmUpRobot: ObservableObject {
         let pages = plan.pages().pages
         guard !pages.isEmpty else { return false }
         let controller = session.openOffscreenWindow()
-        guard let tab = controller.tabs.first else { return false }
+        guard let tab = controller.tabs.first else {
+            log.error("Warm-up could not open its own window")
+            return false
+        }
         offscreenWindow = controller
         countCookies { [weak self] count in self?.cookiesBefore = count }
         tab.refusesDownloads = true
@@ -120,7 +123,7 @@ final class WarmUpRobot: ObservableObject {
         scrollInput = nil
         clickInput = nil
         setState(.running)
-        log.notice("Warm-up of \(pages.count) pages started")
+        log.notice("Warm-up of \(pages.count) pages started, out of sight")
         task = Task { [weak self] in
             await self?.perform(plan.normalized, pages, run: current)
         }

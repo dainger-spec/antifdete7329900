@@ -198,10 +198,17 @@ final class BrowserSession {
         let controller = BrowserWindowController(session: self)
         windows.append(controller)
         if let window = controller.window {
-            window.setFrameOrigin(NSPoint(x: -30000, y: -30000))
+            // Not moved off screen: AppKit pulls an ordinary window back onto a screen when it is
+            // ordered front, which is why the warm-up was visible. Fully transparent instead, at
+            // the lowest window level, taking no clicks and in no window list — WebKit still
+            // treats it as on screen, which is what keeps rendering and timers running and
+            // `document.visibilityState` at "visible", exactly as for a page someone is reading.
+            window.alphaValue = 0
+            window.ignoresMouseEvents = true
+            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.minimumWindow)))
             window.isExcludedFromWindowsMenu = true
-            window.collectionBehavior.insert(.stationary)
-            window.orderFront(nil)
+            window.collectionBehavior.insert([.transient, .ignoresCycle, .fullScreenNone])
+            window.orderBack(nil)
         }
         controller.addTab(url: URL(string: "about:blank"))
         return controller
