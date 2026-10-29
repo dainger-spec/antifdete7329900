@@ -593,7 +593,12 @@ final class ProfileManager: ObservableObject {
     func startWarmUp(_ id: UUID, plan: WarmUpPlan) -> Bool {
         guard !isShuttingDown else { return false }
         if let child = children[id] {
-            warmUpProgress[id] = (0, plan.pages().pages.count)
+            // The same refusal the in-process robot gives, before anything is sent: a plan with no
+            // page is not a run, and the screen should say so rather than show a warm-up that
+            // never starts.
+            let pages = plan.pages().pages.count
+            guard pages > 0 else { return false }
+            warmUpProgress[id] = (0, pages)
             warmUpCookies[id] = nil
             child.send(.startWarmUp(plan))
             objectWillChange.send()

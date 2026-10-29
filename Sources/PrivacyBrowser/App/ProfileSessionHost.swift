@@ -175,7 +175,10 @@ enum ProfileSessionHost {
                     }
                 }
             case .startWarmUp(let plan):
-                _ = manager?.startWarmUp(profileID, plan: plan)
+                if manager?.startWarmUp(profileID, plan: plan) != true {
+                    ProfileSessionHost.log.error("Warm-up of \(self.profileID.uuidString, privacy: .public) did not start")
+                    ProfileSessionHost.send(.warmUpFinished(completed: false))
+                }
             }
         }
 
