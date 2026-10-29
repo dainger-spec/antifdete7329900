@@ -93,7 +93,8 @@ final class ProxyListModel: ObservableObject {
         } catch {
             return error.localizedDescription
         }
-        guard save(updated) else { return L("proxies.error.unreadable") }
+        // Not saved: the alert says why (`save`); the sheet stays open with the change in it.
+        guard save(updated) else { return L("proxies.edit.notSaved") }
         if let entry = list.entry(id), entry.proxy != previous { onEntryChanged?(entry, previous) }
         return nil
     }

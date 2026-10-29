@@ -1879,6 +1879,24 @@ final class SelfTest {
                   && full.diagnosis?.kinds.first == .httpConnect && full.latencyMilliseconds != nil
                   && full.latencyMilliseconds == full.diagnosis?.medianLatency,
               String(describing: full))
+        // And through each other listener that works: the exit the service saw came back through it.
+        var throughEach: [(String, ProxySettings)] = []
+        if let socksPort = port("PB_SELFTEST_SOCKS_PROXY_PORT") {
+            throughEach.append(("SOCKS5 listed as HTTP", ProxySettings(kind: .httpConnect, host: loopback, port: socksPort)))
+        }
+        if let socksAuthPort = port("PB_SELFTEST_SOCKS_AUTH_PROXY_PORT") {
+            throughEach.append(("SOCKS5 with its login", ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort,
+                                                                       username: "pb-user2", password: "pb-pass2")))
+        }
+        if let http6Port = port("PB_SELFTEST_HTTP6_PROXY_PORT") {
+            throughEach.append(("HTTP CONNECT on ::1", ProxySettings(kind: .httpConnect, host: "::1", port: http6Port)))
+        }
+        for (name, proxy) in throughEach {
+            let result = await ProxyChecker.check(proxy)
+            check("proxy checker: through \(name), end to end — the exit IP, country and city the service saw",
+                  result.isAlive && result.exitIP == "203.0.113.21" && result.countryCode == "DE" && result.city == "Berlin",
+                  String(describing: result))
+        }
         if let silentPort {
             let silent = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: silentPort))
             check("proxy checker: the silent proxy fails as silent, and nothing came back from anywhere",

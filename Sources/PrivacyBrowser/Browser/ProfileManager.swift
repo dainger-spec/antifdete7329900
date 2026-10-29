@@ -378,18 +378,24 @@ final class ProfileManager: ObservableObject {
     /// when it does not work (`onProxyProblem`) — unless the profile was stopped meanwhile. The
     /// tunnel it asks for goes to the profile's own start page, which the profile is about to ask
     /// the same proxy for (no start page: the first geolocation service), and only one: no latency
-    /// is measured here. The probe talks to the proxy alone.
+    /// is measured here. The probe talks to the proxy alone. Without a start page, a proxy that
+    /// works and only cannot reach that service is not reported: the pages the user opens may well
+    /// load through it.
     private func diagnoseProxy(of id: UUID, _ proxy: ProxySettings, startURL: URL?) {
         guard onProxyProblem != nil, (try? proxy.validate()) != nil else { return }
         var configured = ProxyChecker.probe(latencySamples: 1)
+        var targetsStartPage = false
         if let url = startURL, ["http", "https"].contains(url.scheme?.lowercased() ?? ""), let host = url.host, !host.isEmpty {
             configured.targetHost = host
             configured.targetPort = url.port ?? (url.scheme?.lowercased() == "http" ? 80 : 443)
+            targetsStartPage = true
         }
         let probe = configured
+        let reportsNoUpstream = targetsStartPage
         Task { @MainActor [weak self] in
             let diagnosis = await probe.run(proxy)
-            guard let self, !diagnosis.isWorking, self.isRunning(id) || self.busyProfileIDs.contains(id) else { return }
+            guard let self, !diagnosis.isWorking, diagnosis.verdict != .noUpstream || reportsNoUpstream,
+                  self.isRunning(id) || self.busyProfileIDs.contains(id) else { return }
             self.log.notice("The proxy of \(id.uuidString, privacy: .public) does not work: \(diagnosis.verdict.rawValue, privacy: .public)")
             self.onProxyProblem?(id, proxy, diagnosis)
         }

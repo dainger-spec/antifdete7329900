@@ -375,6 +375,7 @@
 "proxies.edit.host" = "Хост";
 "proxies.edit.loginHalf" = "Укажите и логин, и пароль — или ни то ни другое.";
 "proxies.edit.name" = "Название";
+"proxies.edit.notSaved" = "Изменение не сохранено.";
 "proxies.edit.password" = "Пароль";
 "proxies.edit.port" = "Порт";
 "proxies.edit.portInvalid" = "Порт — число от 1 до 65535.";

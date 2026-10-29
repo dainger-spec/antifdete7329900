@@ -375,6 +375,7 @@
 "proxies.edit.host" = "Host";
 "proxies.edit.loginHalf" = "Enter both the user name and the password, or neither.";
 "proxies.edit.name" = "Name";
+"proxies.edit.notSaved" = "The change was not saved.";
 "proxies.edit.password" = "Password";
 "proxies.edit.port" = "Port";
 "proxies.edit.portInvalid" = "The port is a number from 1 to 65535.";
