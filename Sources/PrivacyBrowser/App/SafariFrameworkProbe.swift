@@ -68,7 +68,7 @@ enum SafariFrameworkProbe {
         say("step \(step)")
         say("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         say("sandboxed: \(ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil)")
-        say("NSApplicationCrashOnExceptions: \(UserDefaults.standard.bool(forKey: "NSApplicationCrashOnExceptions"))")
+        say("NSApplicationCrashOnExceptions at start: \(SafariBrowserWindowController.crashOnExceptionsSetting())")
 
         // The steps that build a window need a running application; the rest must not wait for one.
         if popup != nil || ["shared", "create", "create-bootstrap", "create-direct", "window", "documentcontroller-create"].contains(step) {
@@ -78,6 +78,7 @@ enum SafariFrameworkProbe {
             if step != "documentcontroller-create" {
                 say("prepareProcess: \(SafariBrowserWindowController.prepareProcess())")
                 say("shared document controller is now \(NSStringFromClass(type(of: NSDocumentController.shared)))")
+                say("NSApplicationCrashOnExceptions with the framework loaded: \(SafariBrowserWindowController.crashOnExceptionsSetting())")
             }
             let app = NSApplication.shared
             app.setActivationPolicy(.regular)
@@ -86,6 +87,7 @@ enum SafariFrameworkProbe {
                 exit(3)
             }
             Task { @MainActor in
+                say("NSApplicationCrashOnExceptions with the application running: \(SafariBrowserWindowController.crashOnExceptionsSetting())")
                 if let popup {
                     await popupStep(popup)
                 } else if step == "window" {

@@ -38,12 +38,19 @@ STEPS = [
     "popup-nofield",    # the same, with the popup's address field turned off before it loads
     "popup-mode",       # initWithBrowsingMode:0 isPopupWindow:YES
     "popup-hidden",     # +hiddenEmptyBrowserWindowControllerWithBrowsingMode:profileIdentifier:isPopupWindow:
+    "popup:crash-off",  # popup again, with NSApplicationCrashOnExceptions set to NO rather than unset
 ]
 
 # Run as the app runs them, without NSApplicationCrashOnExceptions: whether an exception raised
 # inside the framework can be caught is what these measure, and that setting would end the
 # process first. They record each exception as it is raised, so a hang still says why.
 AS_THE_APP_RUNS = {"popup", "popup-nofield", "popup-mode", "popup-hidden"}
+
+# "<step>:<variant>" runs a step again under other launch arguments, into its own folder.
+VARIANT_ARGUMENTS = {
+    # Set, not merely absent: whether AppKit tells the two apart is what it measures.
+    "crash-off": ["-NSApplicationCrashOnExceptions", "NO"],
+}
 
 CRASH_DIRS = [
     os.path.expanduser("~/Library/Logs/DiagnosticReports"),
@@ -109,8 +116,9 @@ def system_log(since, process):
         return "log show failed: %s" % error
 
 
-def run_step(binary, step, out_dir, timeout):
-    step_dir = os.path.join(out_dir, step)
+def run_step(binary, spec, out_dir, timeout):
+    step, _, variant = spec.partition(":")
+    step_dir = os.path.join(out_dir, spec.replace(":", "-"))
     os.makedirs(step_dir, exist_ok=True)
     before = crash_snapshot()
     # `log show --start` wants local time, and wants to be a little earlier than the step.
@@ -118,7 +126,9 @@ def run_step(binary, step, out_dir, timeout):
     # -NSApplicationCrashOnExceptions on the command line as well as in code: AppKit otherwise
     # swallows an exception raised under its run loop, and the step hangs with nothing to read.
     command = [binary, "--safari-probe", step, "--out", step_dir]
-    if step not in AS_THE_APP_RUNS:
+    if variant:
+        command += VARIANT_ARGUMENTS[variant]
+    elif step not in AS_THE_APP_RUNS:
         command += ["-NSApplicationCrashOnExceptions", "YES"]
     start = time.time()
     try:
@@ -129,7 +139,7 @@ def run_step(binary, step, out_dir, timeout):
         status = None
     elapsed = time.time() - start
 
-    result = {"step": step, "seconds": round(elapsed, 1), "exit": status, "output": output}
+    result = {"step": spec, "seconds": round(elapsed, 1), "exit": status, "output": output}
     if status is None:
         result["outcome"] = "timed out after %d s" % timeout
     elif status < 0:
@@ -150,7 +160,7 @@ def run_step(binary, step, out_dir, timeout):
                 continue
             shutil.copy(path, os.path.join(step_dir, os.path.basename(path)))
             result["crashes"].append(read_crash(path))
-    if status is None or status != 0 or step in AS_THE_APP_RUNS:
+    if status is None or status != 0 or step in AS_THE_APP_RUNS or variant:
         result["log"] = system_log(since, "PrivacyBrowser")
 
     with open(os.path.join(step_dir, "output.txt"), "w") as handle:
@@ -217,6 +227,8 @@ def main():
     for name, command in (("macos", ["sw_vers", "-productVersion"]),
                           ("build", ["sw_vers", "-buildVersion"]),
                           ("sip", ["csrutil", "status"]),
+                          ("sdk", ["xcrun", "--show-sdk-version"]),
+                          ("xcode", ["xcodebuild", "-version"]),
                           ("arch", ["uname", "-m"])):
         try:
             facts[name] = subprocess.run(command, capture_output=True, text=True, timeout=30).stdout.strip()
@@ -233,6 +245,7 @@ def main():
     lines = ["# Framework window probe", ""]
     lines.append("macOS %s (%s), %s, SIP: %s" % (facts["macos"], facts["build"], facts["arch"],
                                                  facts["sip"].replace("\n", " ")))
+    lines.append("built with SDK %s, %s" % (facts["sdk"], facts["xcode"].replace("\n", " ")))
     lines.append("app: %s" % arguments.app)
     lines.append("")
     lines.append("| step | outcome | seconds | why |")

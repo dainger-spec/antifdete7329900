@@ -288,6 +288,8 @@ final class SafariBrowserWindowController: NSObject {
     /// process a regular app again — when any step returns nil or anything raises.
     private func attemptPopup(_ variant: PopupVariant, dataStore: WKWebsiteDataStore?, startURL: URL?) -> NSWindow? {
         note("popup path, \(variant.rawValue)")
+        // Whether an exception AppKit catches during layout ends the process rests on this.
+        note("NSApplicationCrashOnExceptions: \(Self.crashOnExceptionsSetting())")
         raised = []
         tabWebView = nil
         // Every exception raised while this runs is recorded the moment it is raised, with the
@@ -430,6 +432,13 @@ final class SafariBrowserWindowController: NSObject {
     /// variant — or the ordinary window, or the in-process one — starts from nothing.
     private func abandonPopup(_ variant: PopupVariant, because reason: String) -> NSWindow? {
         note("popup path, \(variant.rawValue): giving up — \(reason)")
+        // When -window itself raised, the nib had loaded and the window exists; only the
+        // controller has it, and asking again returns it without loading anything.
+        if window == nil, let controller = frameworkController, flag(controller, "isWindowLoaded") == "true" {
+            var loaded: NSWindow?
+            guarded("-window, already loaded") { loaded = ObjCRuntime.callReturningObject(controller, "window").value as? NSWindow }
+            window = loaded
+        }
         if let window { describeWindow(window) }
         if let controller = frameworkController {
             guarded("closing the popup controller") { _ = ObjCRuntime.send(controller, "close") }
@@ -473,6 +482,16 @@ final class SafariBrowserWindowController: NSObject {
         }
     }
 
+    /// What `NSApplicationCrashOnExceptions` reads as, and which domains set it.
+    static func crashOnExceptionsSetting() -> String {
+        let key = "NSApplicationCrashOnExceptions"
+        let defaults = UserDefaults.standard
+        func value(_ domain: [String: Any]?) -> String { domain?[key].map { "\($0)" } ?? "unset" }
+        return "reads \(defaults.bool(forKey: key)); arguments \(value(defaults.volatileDomain(forName: UserDefaults.argumentDomain))), " +
+            "app \(value(Bundle.main.bundleIdentifier.flatMap { defaults.persistentDomain(forName: $0) })), " +
+            "registered \(value(defaults.volatileDomain(forName: UserDefaults.registrationDomain)))"
+    }
+
     /// A `BOOL` the framework reports, as text: "true", "false", or why there is no answer.
     private func flag(_ object: NSObject, _ name: String) -> String {
         var answer: Bool?
@@ -492,22 +511,33 @@ final class SafariBrowserWindowController: NSObject {
         if let root = window.contentView?.superview ?? window.contentView {
             note("view tree: \(describeTree(root, limit: 6))")
         }
-        note(unifiedFieldCensus(window))
-        note("toolbar: \(window.toolbar.map { "\(NSStringFromClass(type(of: $0))), visible \($0.isVisible)" } ?? "none")")
+        unifiedFieldCensus(window).forEach(note)
+        note("toolbar: \(window.toolbar.map { "\(NSStringFromClass(type(of: $0))), visible \($0.isVisible)" } ?? "none"); " +
+             "title bar accessories: " +
+             window.titlebarAccessoryViewControllers.map { NSStringFromClass(type(of: $0)) }.joined(separator: ", ").ifEmpty("none"))
     }
 
-    /// The views of the framework's address-field class in the window, subclasses included: the
-    /// popup's own field may be one, and then it lays out the same way.
-    private func unifiedFieldCensus(_ window: NSWindow) -> String {
-        guard let fieldClass = NSClassFromString("UnifiedField") else { return "class UnifiedField -> nil" }
-        guard let root = window.contentView?.superview ?? window.contentView else { return "UnifiedField views: the window has no views" }
+    /// The views of the framework's address-field class in the window, subclasses included — the
+    /// popup's own field is one, and lays out the same way — each with where it sits.
+    private func unifiedFieldCensus(_ window: NSWindow) -> [String] {
+        guard let fieldClass = NSClassFromString("UnifiedField") else { return ["class UnifiedField -> nil"] }
+        guard let root = window.contentView?.superview ?? window.contentView else { return ["UnifiedField views: the window has no views"] }
         var found: [String] = []
         func visit(_ view: NSView) {
-            if view.isKind(of: fieldClass) { found.append(NSStringFromClass(type(of: view))) }
+            if view.isKind(of: fieldClass) {
+                var ancestors: [String] = []
+                var next = view.superview
+                while let ancestor = next, ancestors.count < 6 {
+                    ancestors.append(NSStringFromClass(type(of: ancestor)))
+                    next = ancestor.superview
+                }
+                found.append("  \(NSStringFromClass(type(of: view))), hidden \(view.isHiddenOrHasHiddenAncestor), " +
+                             "in \(ancestors.joined(separator: " < "))")
+            }
             view.subviews.forEach(visit)
         }
         visit(root)
-        return "UnifiedField views in the window: \(found.count)" + (found.isEmpty ? "" : " (\(found.joined(separator: ", ")))")
+        return ["UnifiedField views in the window: \(found.count)"] + found
     }
 
     // MARK: The application-controller path
