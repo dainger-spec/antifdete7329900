@@ -123,6 +123,8 @@ final class BrowserSession {
         }
         PasswordAutoFill.install(in: controller, handler: passwordHandler,
                                  testHooks: CommandLine.arguments.contains("--self-test"))
+        Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
+            .notice("Profile scripts and AutoFill installed into a content controller of Safari's chrome")
     }
 
     /// Content controllers this profile has already been applied to, held weakly.

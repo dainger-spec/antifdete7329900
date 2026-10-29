@@ -123,6 +123,10 @@ final class PasswordAutoFillHandler: NSObject, WKScriptMessageHandlerWithReply {
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping (Any?, String?) -> Void) {
+        // Whether the script reaches us at all is the first thing to know when AutoFill is silent
+        // in a window that is not ours (Safari's chrome).
+        Logger(subsystem: "PrivacyBrowser", category: "PasswordAutoFill")
+            .notice("AutoFill message: \((message.body as? [String: Any])?["type"] as? String ?? "?", privacy: .public)")
         guard message.world == PasswordAutoFill.world, let body = message.body as? [String: Any],
               let webView = message.webView, let session,
               let autoFill = autoFill(for: webView, of: session) else {
