@@ -1894,6 +1894,12 @@ final class SelfTest {
             throughEach.append(("SOCKS5 with its login", ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort,
                                                                        username: "pb-user2", password: "pb-pass2")))
         }
+        // The HTTP listener with a login answers CONNECT only: the lookup through it is tunnelled
+        // too (measured in CI run 392, where this was an info line and came back alive).
+        if let authPort = port("PB_SELFTEST_HTTP_AUTH_PROXY_PORT") {
+            throughEach.append(("HTTP CONNECT with its login", ProxySettings(kind: .httpConnect, host: loopback, port: authPort,
+                                                                             username: "pb-user", password: "pb-pass")))
+        }
         if let http6Port = port("PB_SELFTEST_HTTP6_PROXY_PORT") {
             throughEach.append(("HTTP CONNECT on ::1", ProxySettings(kind: .httpConnect, host: "::1", port: http6Port)))
         }
@@ -1939,9 +1945,6 @@ final class SelfTest {
             check("proxy checker: a proxy that wants credentials it was not given is dead for that reason",
                   noCredentials.failure == .needsCredentials && noCredentials.diagnosis?.verdict == .credentialsNeeded,
                   String(describing: noCredentials))
-            let withCredentials = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: loopback, port: authPort,
-                                                                         username: "pb-user", password: "pb-pass"))
-            info("proxy checker: the HTTP proxy that wants credentials, given them: \(withCredentials)")
         }
 
         // The list's model: an import, a check of all of it two at a time, the results kept with
