@@ -73,6 +73,33 @@ def crash_snapshot():
     return found
 
 
+def crash_pid(path):
+    """The process a crash report is about. Reports are written late, sometimes after the next
+    step has begun, so they are matched to steps by this rather than by when they appeared."""
+    try:
+        with open(path, "r", errors="replace") as handle:
+            body = handle.read().split("\n", 1)[1]
+        return json.loads(body).get("pid")
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def attach_crashes(result, candidates):
+    """Copies the reports among `candidates` that are about this step's process into its folder."""
+    for path in sorted(candidates):
+        if "PrivacyBrowser" not in os.path.basename(path) or crash_pid(path) != result["pid"]:
+            continue
+        if any(crash["path"] == path for crash in result["crashes"]):
+            continue
+        shutil.copy(path, os.path.join(result["dir"], os.path.basename(path)))
+        result["crashes"].append(read_crash(path))
+
+
+def write_result(result):
+    with open(os.path.join(result["dir"], "result.json"), "w") as handle:
+        json.dump({key: value for key, value in result.items() if key not in ("output", "log", "dir")}, handle, indent=2)
+
+
 def read_crash(path):
     """The interesting fields of an .ips report: a JSON header line, then a JSON body."""
     try:
@@ -135,15 +162,19 @@ def run_step(binary, spec, out_dir, timeout):
     elif step not in AS_THE_APP_RUNS:
         command += ["-NSApplicationCrashOnExceptions", "YES"]
     start = time.time()
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace")
     try:
-        done = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
-        output, status = done.stdout + done.stderr, done.returncode
-    except subprocess.TimeoutExpired as expired:
-        output = (expired.stdout or b"").decode(errors="replace") + (expired.stderr or b"").decode(errors="replace")
+        stdout, stderr = process.communicate(timeout=timeout)
+        status = process.returncode
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate()
         status = None
+    output = (stdout or "") + (stderr or "")
     elapsed = time.time() - start
 
-    result = {"step": spec, "seconds": round(elapsed, 1), "exit": status, "output": output}
+    result = {"step": spec, "pid": process.pid, "seconds": round(elapsed, 1), "exit": status,
+              "output": output, "dir": step_dir, "crashes": []}
     if status is None:
         result["outcome"] = "timed out after %d s" % timeout
     elif status < 0:
@@ -157,13 +188,7 @@ def run_step(binary, spec, out_dir, timeout):
     # even when they exit cleanly: it is where AppKit says what it did with an exception it caught.
     if status is None or status != 0:
         time.sleep(8)
-        new = crash_snapshot() - before
-        result["crashes"] = []
-        for path in sorted(new):
-            if "PrivacyBrowser" not in os.path.basename(path):
-                continue
-            shutil.copy(path, os.path.join(step_dir, os.path.basename(path)))
-            result["crashes"].append(read_crash(path))
+        attach_crashes(result, crash_snapshot() - before)
     if status is None or status != 0 or step in AS_THE_APP_RUNS or variant:
         result["log"] = system_log(since, "PrivacyBrowser")
 
@@ -172,8 +197,7 @@ def run_step(binary, spec, out_dir, timeout):
     if result.get("log"):
         with open(os.path.join(step_dir, "system-log.txt"), "w") as handle:
             handle.write(result["log"])
-    with open(os.path.join(step_dir, "result.json"), "w") as handle:
-        json.dump({key: value for key, value in result.items() if key not in ("output", "log")}, handle, indent=2)
+    write_result(result)
     return result
 
 
@@ -244,7 +268,16 @@ def main():
     except (OSError, subprocess.SubprocessError) as error:
         facts["signature"] = "unavailable: %s" % error
 
+    before_run = crash_snapshot()
     results = [run_step(binary, step, arguments.out, arguments.timeout) for step in arguments.steps]
+    # Reports still being written when their own step stopped waiting for them.
+    unreported = [result for result in results if result["exit"] != 0 and not result["crashes"]]
+    if unreported:
+        time.sleep(10)
+        new = crash_snapshot() - before_run
+        for result in unreported:
+            attach_crashes(result, new)
+            write_result(result)
 
     lines = ["# Framework window probe", ""]
     lines.append("macOS %s (%s), %s, SIP: %s" % (facts["macos"], facts["build"], facts["arch"],

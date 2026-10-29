@@ -75,8 +75,8 @@ final class SafariBrowserWindowController: NSObject {
 
     /// What `-safari-chrome` tries before the ordinary window: the popup initialiser alone. The
     /// rest are for the probe, one per process. In the app each would only build another window
-    /// that fails the same way, and the empty-window factory gets as far as a half-made tab that
-    /// the next window then picks up and aborts on (§9).
+    /// that fails the same way, and the empty-window factory gets as far as a half-made tab —
+    /// the likely reason the ordinary window aborted when it was tried after all four (§9).
     static let popupOrder: [PopupVariant] = [.initAsPopup]
 
     /// `-safari-chrome` on the command line: every profile opened in this run takes the framework
