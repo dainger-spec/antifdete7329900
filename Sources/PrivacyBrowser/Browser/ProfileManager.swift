@@ -324,14 +324,22 @@ final class ProfileManager: ObservableObject {
             self.runningProfileIDs.remove(id)
             // A warm-up cannot outlive the process it ran in; what it collected is still shown.
             if self.reportedWarmUp[id]?.isRunning == true { self.reportedWarmUp[id]?.phase = .stopped }
-            // Nothing holds those files now.
+            // Nothing holds those files now. Sealed whatever way the process ended: one that crashed
+            // left its WebKit data in plaintext in this home too, and it goes into the same archive
+            // (the next launch takes it from there, as any crash residue).
+            var sealed = true
             do {
                 try self.safariHomeVault.seal(profileID: id, key: key)
             } catch {
+                sealed = false
                 self.log.error("Could not seal Safari's home for \(id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+                self.onError?(String(format: L("profile.homeNotSealed"), summary.name, error.localizedDescription))
             }
+            // A stop asked for from here takes this handler away first, so this is a process that
+            // ended on its own: said, not only logged.
             if status != 0 {
                 self.log.error("Profile \(id.uuidString, privacy: .public) exited with status \(status, privacy: .public)")
+                self.onError?(String(format: L(sealed ? "profile.crashed" : "profile.crashedUnsealed"), summary.name))
             }
             self.onReturnToProfiles?()
         }
@@ -465,6 +473,16 @@ final class ProfileManager: ObservableObject {
             return
         }
         sessions[id]?.openWindow(url: nil)
+    }
+
+    /// Another window of a running profile, on `url`.
+    func openWindow(_ id: UUID, url: URL) {
+        if let child = children[id] {
+            child.send(.openURL(url))
+            child.bringToFront()
+            return
+        }
+        sessions[id]?.openWindow(url: url)
     }
 
     func showLibrary(_ id: UUID, section: LibraryView.Section) {

@@ -25,9 +25,21 @@ so. It fails on:
 
 During the check, packets of Safari's own services and of the daemons a profile's process could ask
 to fetch for it (search suggestions, Safe Browsing, Safari Suggestions, background URL sessions,
-CloudKit, Web Push) fail too: nothing here runs the real Safari, so they can only be the profile's.
-Packets of other processes are listed, never failed on. A capture that could not be made (no pktap, no sudo) makes the
-result inconclusive: a warning, exit code 0.
+CloudKit, Web Push) fail too, whether they are the packet's process or the one it was sent for
+(`eproc`: a DNS query mDNSResponder makes for Safari's service is that service's): nothing here
+runs the real Safari, so they can only be the profile's. Packets of other processes are listed,
+never failed on. Any DNS question for a name under leak.example.com fails, whenever it is asked —
+those names are the leak pages', and through the proxy they are never resolved here — except the
+controls'.
+
+A control (`INFO egress-control <name>`) is something the self-test makes this Mac do on purpose,
+outside any proxy, so that the capture must show it: the TLS check's `pbaiacontrol`, a certificate
+whose intermediate the system's trust service fetches, from a profile without a proxy. Seen, the
+capture is known to see such fetches, and their absence for the profiles with a proxy means
+something; not seen, that part is inconclusive, and said so.
+
+A capture that could not be made (no pktap, no sudo) makes the result inconclusive: a warning,
+exit code 0.
 """
 import argparse
 import ipaddress
@@ -40,6 +52,9 @@ import sys
 # services sent QUIC to Apple, while the profile ran.
 SERVICES = ("SearchHelper", "SafeBrowsing", "parsecd", "nsurlsessiond", "cloudd", "webpushd", "Safari",
             "passd", "translationd")
+LEAK_DOMAIN = "leak.example.com"
+# "... 12345+ A? fetch-abc.leak.example.com. (46)", "... 0 AAAA (QM)? lan-abc.local. (30)"
+QUESTION = re.compile(r"\b(?:A|AAAA|HTTPS|SVCB|ANY|CNAME|TXT|PTR)(?: \(Q[MU]\))?\? (\S+?)\.? ")
 DOCUMENTATION = [ipaddress.ip_network(n) for n in
                  ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")]
 # "1730000000.123456 (proc PrivacyBrowser:4242, eproc ..., svc BE, out) IP 10.0.0.5.51000 > 192.0.2.10.8080: ..."
@@ -86,6 +101,7 @@ def main() -> int:
 
     log = open(args.selftest_log, encoding="utf-8", errors="replace").read()
     tokens = re.findall(r"INFO egress-token (\w+)", log)
+    controls = re.findall(r"INFO egress-control (\w+)", log)
     begins = [float(t) for t in re.findall(r"INFO egress-window begin ([\d.]+)", log)]
     ends = [float(t) for t in re.findall(r"INFO egress-window end ([\d.]+)", log)]
     pids = {int(p) for p in re.findall(r"INFO egress-pid (\d+)", log)}
@@ -122,21 +138,43 @@ def main() -> int:
     def ours(owner):
         return owner is not None and (owner[1] in pids or owner[0].startswith("PrivacyBrowser"))
 
-    failures, others = [], {}
+    def service(owner):
+        return owner is not None and any(name in owner[0] for name in SERVICES)
+
+    failures, others, seen_controls = [], {}, {}
     for packet in packets:
         line = packet["line"]
+        lowered = line.lower()
+        question = QUESTION.search(line)
+        name = question.group(1).lower() if question else ""
+        control = next((c for c in controls if c in lowered), None)
+        if control:
+            owners = [f"{kind} {owner[0]}" for kind, owner in (("proc", packet["proc"]), ("eproc", packet["eproc"])) if owner]
+            seen_controls.setdefault(control, []).append(", ".join(owners) or "no process")
+            continue
         if any(packet["dst"] is not None and packet["dst"].version == net.version and packet["dst"] in net
                for net in DOCUMENTATION):
             failures.append(("to a documentation address (only the leak page asks for those)", line))
-        elif any(token in line.lower() for token in tokens):
-            failures.append(("carries the run id (a name resolved on this Mac, not by the proxy)", line))
+        elif any(token in lowered for token in tokens):
+            failures.append(("carries a run id or a canary (a name resolved, or a fetch made, on this Mac rather than through the proxy)", line))
+        elif name.endswith(LEAK_DOMAIN):
+            failures.append(("a DNS question for a leak page's name (resolved on this Mac, not by the proxy)", line))
         elif in_window(packet) and (ours(packet["proc"]) or ours(packet["eproc"])):
             if packet["dst"] is None or not packet["dst"].is_loopback:
                 failures.append(("a PrivacyBrowser process (or one acting for it) reached past the proxy", line))
-        elif in_window(packet) and packet["proc"] and any(name in packet["proc"][0] for name in SERVICES):
-            failures.append((f"{packet['proc'][0]} fetched for someone while the profile ran", line))
+        elif in_window(packet) and (service(packet["proc"]) or service(packet["eproc"])):
+            who = packet["proc"][0] if service(packet["proc"]) else f"{packet['eproc'][0]} (through {packet['proc'][0] if packet['proc'] else '?'})"
+            failures.append((f"{who} fetched for someone while the profile ran", line))
         elif in_window(packet) and packet["proc"]:
             others.setdefault(packet["proc"][0], []).append(line)
+
+    for control in controls:
+        if control in seen_controls:
+            print(f"egress check: control {control} seen {len(seen_controls[control])} times "
+                  f"({sorted(set(seen_controls[control]))[:4]}): the capture sees such fetches")
+        else:
+            print(f"::warning::egress check: control {control} was never seen — this macOS did not fetch it, or the "
+                  f"capture cannot see it; the matching check for the profiles with a proxy is inconclusive")
 
     if others:
         print("other processes during the check (listed, not failed on):")

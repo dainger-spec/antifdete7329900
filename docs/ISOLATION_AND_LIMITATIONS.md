@@ -9,7 +9,8 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 183/183 checks in both builds):
+(macOS 26: every check passed in both builds; CI prints the count, 188 at commit 854c87e, more
+since):
 
 | Claim | Self-test result |
 |---|---|
@@ -34,6 +35,9 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the packet tunnel cannot carry it (§5) |
 | Packet tunnel | a build without the network extension reports it (the tunnel sheet says what a signed build needs), and proxied profiles keep WebRTC off. The tunnel's TURN server and SOCKS5 relay are measured by the leak check instead ([TUNNEL.md](TUNNEL.md)) |
 | Proxy: dns-prefetch leak | an `<a ping>` (the load type WebKit gives dns-prefetch) reaches neither the proxy nor the network; a fetch to the same origin does |
+| Safari's chrome, in a profile's own process | through the app's launch path, a proxied profile whose window is Safari's chrome loads the self-test proxy's leak page: its page load, a fetch to an IPv4 and an IPv6 literal, to a host name, an https request, a WebSocket, a worker's fetch, an image and a frame of another site all reach the proxy; `<a ping>` does not; fetches to `127.0.0.1`, `localhost`, `::1` and a `.local` name go to the proxy like any other, and nothing reaches loopback directly; an HTTPS image whose certificate needs a fetch reaches the proxy and its certificate is refused; `RTCPeerConnection` exists in neither the page, a frame of another site nor an about:blank frame, `WebTransport` in neither; on loopback (a secure context) the leak page's secure half, loaded through the proxy, has neither in the page and no `WebTransport` in a dedicated, a shared or a service worker; the profile's process reports every web view on its store with its proxy, none with WebRTC or with a feature that leaves the proxy, no setter that turns them on again, WebKit's default store closed, UDP and the real Safari's places closed to it by the kernel, its certificate checks made without fetching, and its own three probe requests at the proxy as one CONNECT each; a cookie imported while it runs is sent by the next window's first request; a second window loads through the proxy too. Around it, the egress capture and the file-system trace (§4a) |
+| Certificates with a proxy | the self-test proxy answers every TLS handshake in its tunnels with a certificate whose chain is complete only for a client that fetches the intermediate from the address the certificate names (`pbaiacanary.leak.example.com`): in a proxied profile's tab the certificate is checked without a fetch and refused at the handshake, through the proxy; the same kind of certificate (`pbaiacontrol`) loaded without a proxy is the control, which the system does fetch and the capture must see (§4a) |
+| Profile export and import | a profile whose sealed WebKit store holds a cookie is exported to a `.pbprofile` file (in which neither the cookie nor the profile's name is readable; a wrong password opens nothing), imported as a new profile, and the new profile's first request carries the cookie |
 | Proxy: 407 without credentials | the launch is refused ("needs credentials") and the data is sealed again; nothing opens, directly or otherwise |
 | Proxy: `Accept-Language` | the header the proxy sees is the language the app decided at its first launch (`de-DE,de;q=0.9` in the self-test) |
 | Time zone from the proxy | a profile with a proxy and *Time zone of the proxy's location* runs in the time zone the lookup through the proxy returned, cached per profile |
@@ -49,11 +53,13 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 
 Run it yourself: `build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test`. For the
 proxy checks, start the self-test proxy as CI does,
-`python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085`,
+`python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 --tls-control 18086 --canary 18087`,
 and set `PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081
 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
-PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085`. Without a variable
-its checks (407, IPv6, several SOCKS5 profiles at once) are skipped and the count is lower. The
+PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
+PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087`. Without a variable its checks
+(407, IPv6, several SOCKS5 profiles at once, the certificate control, the loopback canary) are
+skipped and the count is lower. The
 self-test uses a temporary vault and removes everything it creates.
 
 ## 1. Storage isolation between profiles
@@ -341,8 +347,9 @@ tunnel ([TUNNEL.md](TUNNEL.md)), below.
 | Path | Status | Mitigation |
 |---|---|---|
 | WebRTC (STUN, TURN over UDP or TCP, media) | Never proxied by WebKit: it opens these sockets itself, without the data store's proxy. STUN reveals the real public IP to the page (seen by the CI leak check); a TURN server sees it too | With a SOCKS5 proxy and the packet tunnel on: through the proxy's UDP ASSOCIATE, via a per-profile TURN relay ([TUNNEL.md](TUNNEL.md)). Otherwise WebRTC is **off** in a proxied profile, whatever its setting (§5) |
-| DNS prefetch | `<link rel="dns-prefetch">` (also as a `Link:` header) makes the network process resolve the host through the system resolver — WebKit skips it only for a *system-wide* proxy, not for a data store's `proxyConfigurations` | A content rule list blocking `ping`-type loads is added to every proxied profile (`ContentRules`): WebKit runs dns-prefetch through it as a ping. It also blocks `<a ping>` click trackers; beacons are fetches and unaffected. Verified by the self-test with an `<a ping>` |
-| Safe Browsing lookups | Made outside the data store's network session | Off by default (`safeBrowsingEnabled`) |
+| DNS prefetch | `<link rel="dns-prefetch">` (also as a `Link:` header) makes the network process resolve the host through the system resolver — WebKit skips it only for a *system-wide* proxy, not for a data store's `proxyConfigurations` | A content rule list blocking `ping`-type loads is added to every proxied profile (`ContentRules`), Safari's chrome included: WebKit 7621 and later runs dns-prefetch through it as a ping. Before 7621 dns-prefetch is a preference instead, which proxied profiles have off (and pinned off in Safari's chrome, which turns it on). It also blocks `<a ping>` click trackers; beacons are another load type and go through the proxy. A proxied profile does not start without the list (compiled into the default rule-list store, or, failing that, a temporary one). In Safari's chrome the list stays through "Reload Without Content Blockers" and a site's content-blocker switch (§4a). Verified by the self-test with an `<a ping>`, and in Safari's chrome by the egress capture (no DNS question for the leak page's prefetch, header, link or late-prefetch names) |
+| WebTransport, Private Click Measurement, Web Authentication | QUIC an HTTP or SOCKS5 proxy cannot carry; attribution reports sent later outside the page's session; passkeys from the owner's iCloud Keychain, checked by system services | Off in every web view of a proxied profile (pinned in Safari's chrome); attribution reports already stored are removed at launch |
+| Safe Browsing lookups | Made by a system service, outside the data store's network session | Off by default (`safeBrowsingEnabled`); in Safari's chrome both its setters are pinned to the profile's choice and the service is not reached unless asked for (§4a) |
 | `mailto:`, `tel:`, custom schemes | Would hand the URL to another app, outside the profile | Blocked by the navigation policy |
 | Camera and microphone streams | Local capture; their WebRTC transport goes through the proxy only via the packet tunnel (SOCKS5), otherwise WebRTC is off with a proxy | Asks the user every time |
 | Sync traffic | Goes from the app process through the system network, not the profile proxy | Folder transport makes no network requests; HTTP sync is HTTPS and carries only encrypted blobs |
@@ -398,6 +405,66 @@ or replaced, neither stores an IP nor warns.
 **Verify the proxy by hand:** set a SOCKS5 proxy, for example `ssh -D 1080 host`, open
 `https://ifconfig.me`, and confirm it shows the proxy's IP. Then stop the proxy and
 reload: the page must fail, not show your own IP.
+
+## 4a. A profile in its own process, and Safari's chrome
+
+In the build without the App Sandbox a profile can run in a process of its own
+(`PB_PROFILE_PROCESS`, `ProfileProcess`), and there its window is Safari's own chrome
+(docs/SAFARI_PROCESS.md §9). That process holds Safari's frameworks next to the profile, and
+Safari builds the web views; so the profile's proxy is held for the **whole process**, not only for
+the web views it knows about (`ProfileNetworkGuard`), and it is decided before Safari's frameworks
+load (the child opens the vault and reads the profile first).
+
+| Lock | What it does | Verified by |
+|---|---|---|
+| 1. Every web view on the profile's store | Safari's configuration factories are patched, and so are the initializers every web view goes through (`initWithFrame:configuration:`, `_initializeWithConfiguration:`): each gets the profile's data store, its privacy preferences and scripts; a navigation's `WKWebpagePreferences` cannot name another store | The self-test's network report: every web view on the profile's store with its proxy. Measured on macOS 26: Safari's factories **missed** the chrome's web view, which only the initializer gave the profile's store — the leak of the hosted chrome came from exactly there |
+| 2. Every other store closed | Any other data store the process makes — WebKit's own default store included — points at a proxy that does not exist (127.0.0.1:1, no failover): a web view that ends up on one loads nothing instead of loading as this Mac | The report: default store closed |
+| 3. The process's own connections | The default Network.framework privacy context and every URLSession configuration carry the profile's proxy; a background session runs in-process | The report's three probe requests (shared, ephemeral, explicit session), each seen at the proxy as one CONNECT to its host |
+| Pinned preferences | Safari re-applies its own settings to live web views, so the setters themselves keep to the profile: WebRTC (off unless the profile's routing allows it — through its own setter and through the feature switches, which reach every boolean preference), Safe Browsing (both setters), installed fonts, ICE candidate filtering on; with a proxy also dns-prefetch, WebTransport, Private Click Measurement, Web Authentication, Digital Credentials and web archives on an ephemeral store | The leak page in Safari's chrome: no `RTCPeerConnection` in the page, a frame of another site or an about:blank frame; no `WebTransport`. The report tries every setter on preferences of no web view and lists any that turns one of them on again (none), and reads every web view's engine |
+| Workers | WebKit gives every shared and service worker of a process the preferences of the first web view the process built, copied once: the first web view of every process is one of ours on the closed store with WebRTC and the features above off, and a profile's service workers get the profile's own preferences (`_setServiceWorkerOverridePreferences:`) | The secure half of the leak page: no `WebTransport` in a dedicated, a shared or a service worker |
+| The profile's content stays | A navigation's own content controller gets the profile's scripts first; a controller Safari empties of scripts or rule lists gets the profile's back; with a proxy, "Reload Without Content Blockers" and a site's "content blockers off" keep the ping-load blocker on (it stops a page's dns-prefetch, `ContentRules`) | — |
+| Certificates | With a proxy, a site's certificate is checked without this Mac fetching anything for it (`ServerTrust`): the system's trust service would otherwise download a missing intermediate, or ask a revocation server, from the address the certificate names — as this Mac, outside the proxy, and a page can serve such a certificate at will. Answered so in our tabs and downloads, for the profile's data store (service workers), for every delegate Safari's chrome gives its web views and downloads, for the process's URL sessions without a delegate, and for the proxy lookup. A chain that cannot be completed from what the server sent is refused | The canary certificate (§0): refused at the handshake, and no query for its name in the capture, while the control's is there. The report counts the evaluations |
+| Kernel | A sandbox profile, applied before Safari's frameworks load, that allows everything else: with a proxy no UDP at all (QUIC goes around any proxy, and Network.framework ignores a privacy context's proxies for it); and no read or write in the real Safari's places (`~/Library/Safari`, Safari's containers, caches, website data, cookies, preferences, group containers). Safari's frameworks find their folders from the account's real home, not the profile's: their path getters are redirected to the profile's home (`SafariPaths`), and whatever they find another way is refused | The report: UDP and the real Safari's places closed; a UDP datagram and a QUIC connection to documentation addresses never sent (the capture). Measured on macOS 26 before this: the hosted chrome wrote its history index, icons, top sites, per-site settings and content-blocker statistics in the real `~/Library/Safari` |
+| Services in other processes | A connection to an XPC service that would fetch for the profile from another process — as this Mac — or keep its browsing in the user's own stores goes to a name that does not exist: Safari's SearchHelper (search suggestions, OpenSearch descriptions a page names), Safe Browsing (unless asked for), parsecd (Safari Suggestions), cloudd and the sync agents, webpushd, passd (Apple Pay), translationd (page translation), the password breach check, Screen Time (web usage, synced through iCloud), Siri Suggestions, the personalization store, shortcuts and link context, input analytics, Safari's notification agent, and the shared web credentials daemon (which fetches a site's associated-domains file). Every service the process connects to is listed in its report | The egress capture below. Measured on macOS 26 before this: the hosted chrome woke passd and translationd, and one of Safari's services sent QUIC to Apple, all as this Mac |
+| Handoff | No `NSUserActivity` becomes current or is eligible for Handoff or indexing: Safari advertised the page in front to the owner's devices on their Apple ID | — |
+| Safari's own services | In the profile's `com.apple.Safari` domain, before Safari's frameworks load (and in the process's argument domain): Safari's AutoFill (iCloud Keychain), Safari Suggestions, search suggestions, Quick Website Search, top-hit preloading, notification prompts and extensions off; Safe Browsing as the profile says. "New Private Window" is not in the hosted menu (its window would keep everything in the profile) | The report: the keys read back |
+
+**Measured from outside, on every push.** Around the unsandboxed self-test CI captures every
+packet that leaves the runner, with the process it belongs to (`tcpdump` on `pktap`), while the
+self-test runs a proxied profile in Safari's chrome on a leak page that makes every kind of request
+a page can make — IPv4 and IPv6 documentation-range literals, host names carrying the run's id, a
+WebSocket, a worker, an image, a frame, a font, a video, dns-prefetch, preconnect, `<a ping>`, a
+beacon, an icon, a touch icon, an OpenSearch description, WebRTC and WebTransport where they
+exist, a link whose name a browser may prefetch (with `X-DNS-Prefetch-Control: on`), a dns-prefetch
+added after load, an HTTPS request to a host name, an HTTPS image whose certificate needs a fetch,
+fetches to loopback and to a `.local` name; and its secure half on loopback, with workers.
+`scripts/egress_check.py` fails on any packet to a documentation address, any packet carrying the
+run id or the canary certificate's names, any DNS question for a leak page's name, any non-loopback
+packet of the app's processes (or made on their behalf), and any packet of the services above —
+as the packet's process or the one it was sent for — during the check. A control the self-test
+makes on purpose (a certificate fetch from a profile without a proxy) must be seen, or that part
+is reported inconclusive. In the same window `fs_usage` records every file the app's, WebKit's and
+cfprefsd's processes write, and `scripts/disk_check.py` fails on a write into the real Safari's
+places (`~/Library/Safari`, its container, cookies, caches, preferences); a call the sandbox
+refused is listed, not failed on. The checks that each request reached the proxy are in the
+self-test (§0).
+
+**The process itself.** The master key reaches it only on its standard input. It quits — sealing
+its data — when the manager's channel closes (the manager quit or crashed), and holds a lock on its
+home while it runs, so that a manager started after a crash seals a home left in plaintext only
+once its process is gone. The self-test's environment variables are not passed to it.
+
+**Not covered:** traffic of system daemons that run for every app and are not started on the
+profile's behalf (the capture lists them: `webprivacyd`, `mobileassetd`, the system's time
+synchronisation), and anything Safari reaches through C-level XPC (`xpc_connection_create`)
+rather than `NSXPCConnection` — the capture would show it. URL sessions Safari makes with a
+delegate of its own answer their certificate questions Safari's way (the system's); the pages'
+loads are not among them. WebKit's C preference setters (`WKPreferencesSetPeerConnectionEnabled`)
+cannot be pinned; the report reads every web view's engine instead. With WebRTC through the packet
+tunnel, profile processes each keep their own view of the tunnel, and one can stop it under
+another (code reading, not measured: the tunnel has not yet run on a Mac, docs/TUNNEL.md); until
+the manager owns the tunnel alone, a profile whose WebRTC goes through the tunnel should not run in
+a process of its own.
 
 ## 5. WebRTC
 

@@ -20,6 +20,8 @@ enum ProfileCommand: Codable {
     case activate
     /// Another window of the same profile.
     case openWindow
+    /// Another window of the same profile, on `url`.
+    case openURL(URL)
     case showLibrary(section: String)
     case showPasswords
     case importCookies([ImportedCookie])

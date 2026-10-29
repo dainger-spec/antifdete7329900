@@ -670,10 +670,29 @@ others take an object. Typing that argument as `AnyObject?` in the replacement h
 value `1`, and no profile would start at all. The arguments are passed through as opaque pointers and
 the return is `Unmanaged`; only the configuration that comes back is touched.
 
-What is not across the boundary yet: script message handlers have no enumerable API, so AutoFill in
-the hosted chrome is unwired; and Safari's own state (its history, its tab snapshots) lands in the
-profile's `home` directory in Safari's formats, outside the encrypted archive this project keeps the
-WebKit data in.
+**The factories are not enough (measured).** On the CI runner's macOS 26 the hosted chrome's web
+view reached `-[WKWebView initWithFrame:configuration:]` with a configuration *not* built by the
+patched factories: only the patch on the initializer gave it the profile's store. A patch on the
+factories alone is therefore a chrome that loads as this Mac — the most likely cause of the leak
+the owner saw. The whole set of measures that hold a profile's process to its proxy since then —
+every web view at its initializers, every other store closed, the process's own connections
+through the proxy, preferences pinned against Safari re-applying its own, Safari's and the system's
+services that would fetch from another process refused, Handoff off — is `ProfileNetworkGuard`,
+described in ISOLATION_AND_LIMITATIONS.md §4a together with the capture that checks it on every
+push. The process's network report counts the web views only the initializer caught
+(`webViewsCaughtByNet`), so the same measurement can be read on any Mac without taking the net away.
+
+AutoFill is installed into Safari's content controller with its handlers when the profile is
+applied to it (`BrowserSession.applyProfile`), and Safari's own state in the profile's home is
+sealed between runs like everything else (`SafariHomeVault`).
+
+**Which private pieces this needs.** `SafariChrome.expectedPieces` lists every class and method
+reached for by name. `PrivacyBrowser --check-safari-chrome` prints which this macOS has (CI runs it);
+a missing structural piece means the profile opens our own window, a missing network piece is a lock
+of the guard that is not there, and both are shown to the user; a stubbed method a Safari build
+does not have is only listed (on macOS 26, `+[WBSSearchProvidersController shared]` and
+`-[BrowserWindowController _setUpClusterManagerIfNeeded]` are not there — they are in the Safari of
+macOS 27.0.1, where they crashed a hosted chrome).
 
 ## Sources
 

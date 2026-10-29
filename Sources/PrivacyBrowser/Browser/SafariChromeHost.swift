@@ -38,6 +38,10 @@ enum SafariChromeHost {
         // Before the frameworks load: some of what they read, they read as they load.
         SafariChrome.configureSafarisOwnServices(for: configuration)
         guard SafariChrome.load() else { return false }
+        // Before any of Safari's code runs: its own folders are the profile's (SafariPaths).
+        if let realHome = SafariPaths.realHome, let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] {
+            SafariPaths.redirectGetters(from: realHome, to: home)
+        }
         let structural = SafariChrome.missingStructuralPieces()
         guard structural.isEmpty else {
             log.error("This Safari lacks what its chrome needs here (\(structural.joined(separator: ", "), privacy: .public)): our own window instead")

@@ -8,9 +8,11 @@ import WebKit
 /// the prefetch when a proxy is set system-wide (`DNSResolveQueue::isUsingProxy` reads
 /// `CFNetworkCopySystemProxySettings`), not for a data store's `proxyConfigurations`. With
 /// SOCKS5 the proxy resolves every other name, so this would be the one DNS query a page can
-/// make the Mac send itself. WebKit runs the prefetch through the content rule lists as a
-/// `ping`-type load, so a rule blocking `ping` stops it. The same rule stops `<a ping>` and
-/// `navigator.sendBeacon` (click and unload trackers, which content blockers block too).
+/// make the Mac send itself. WebKit 7621 and later runs the prefetch through the content rule
+/// lists as a `ping`-type load, so a rule blocking `ping` stops it there; before 7621 the prefetch
+/// is a preference instead, which `BrowserSession.applyPrivacyPreferences` turns off. The same rule
+/// stops `<a ping>` (a click tracker, which content blockers block too); a beacon is another type
+/// of load and goes through the proxy like any other.
 @MainActor
 enum ContentRules {
     /// Blocks every ping-type load; nil until `prepare()` compiled it (or when compiling failed).
@@ -34,14 +36,27 @@ enum ContentRules {
                 // The store completes on WebKit's main run loop, which exists only once WebKit is
                 // initialized (see WebDataStoreVault.ensureWebKitInitialized).
                 WebDataStoreVault.ensureWebKitInitialized()
-                do {
-                    dnsPrefetchBlocker = try await WKContentRuleListStore.default()
-                        .compileContentRuleList(forIdentifier: dnsPrefetchBlockerIdentifier,
-                                                encodedContentRuleList: dnsPrefetchBlockerJSON)
-                    log.info("Compiled the ping-load blocker")
-                } catch {
+                // The default store (its compiled lists are cached on disk), then, if that one
+                // cannot be written, a store of this run's own in the temporary folder.
+                let stores: [() -> WKContentRuleListStore?] = [
+                    { WKContentRuleListStore.default() },
+                    { WKContentRuleListStore(url: FileManager.default.temporaryDirectory
+                        .appendingPathComponent("pb-rules-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)) },
+                ]
+                for store in stores {
+                    guard let store = store() else { continue }
+                    do {
+                        dnsPrefetchBlocker = try await store.compileContentRuleList(
+                            forIdentifier: dnsPrefetchBlockerIdentifier, encodedContentRuleList: dnsPrefetchBlockerJSON)
+                        log.info("Compiled the ping-load blocker")
+                        break
+                    } catch {
+                        log.error("Could not compile the ping-load blocker in a store: \(String(describing: error), privacy: .public)")
+                    }
+                }
+                if dnsPrefetchBlocker == nil {
                     failedToCompile = true
-                    log.error("Could not compile the ping-load blocker; profiles with a proxy will not start: \(String(describing: error), privacy: .public)")
+                    log.error("No ping-load blocker: profiles with a proxy will not start")
                 }
             }
         }

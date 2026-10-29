@@ -216,6 +216,10 @@ enum ProfileSessionHost {
                 NSApp.activate(ignoringOtherApps: true)
                 guard let session = manager?.session(for: profileID) else { return }
                 openWindow(of: session)
+            case .openURL(let url):
+                NSApp.activate(ignoringOtherApps: true)
+                guard let session = manager?.session(for: profileID) else { return }
+                openWindow(of: session, url: url)
             case .showLibrary(let section):
                 guard let section = LibraryView.Section(rawValue: section) else { return }
                 manager?.showLibrary(profileID, section: section)
@@ -260,12 +264,12 @@ enum ProfileSessionHost {
         /// A window of the profile. In Safari's chrome a window is Safari's to open, and it comes
         /// up with the profile's data like every other (`SafariChromeHost`). From here on this
         /// process has a window of its own, so a warm-up ending no longer quits it.
-        private func openWindow(of session: BrowserSession) {
+        private func openWindow(of session: BrowserSession, url: URL? = nil) {
             guard !isQuitting else { return } // this process is sealing its data and going
             showedWindow = true
             if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
-            if !SafariChromeHost.open(session: session, url: nil) {
-                session.openWindow(url: nil)
+            if !SafariChromeHost.open(session: session, url: url) {
+                session.openWindow(url: url)
             }
         }
 

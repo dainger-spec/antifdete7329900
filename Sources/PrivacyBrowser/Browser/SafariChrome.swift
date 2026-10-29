@@ -278,6 +278,9 @@ enum SafariChrome {
             ("SuppressSearchSuggestions", true),
             ("WarnAboutFraudulentWebsites", configuration.safeBrowsingEnabled),
             ("WebKitPreferences.privateClickMeasurementEnabled", configuration.proxy == nil),
+            // A page's dns-prefetch is resolved by this Mac, outside the proxy (`ContentRules`).
+            ("WebKitDNSPrefetchingEnabled", configuration.proxy == nil),
+            ("WebKitPreferences.dnsPrefetchingEnabled", configuration.proxy == nil),
             ("WebsiteSpecificSearchEnabled", false),
             ("PreloadTopHit", false),
             ("CanPromptForPushNotifications", false),

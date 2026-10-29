@@ -56,10 +56,15 @@ enum PasswordAutoFill {
         return .world(name: worldName)
     }
 
-    /// Adds the script (every frame, before page scripts) and the handler to a profile's controller.
-    static func install(in controller: WKUserContentController, handler: WKScriptMessageHandlerWithReply, testHooks: Bool) {
-        controller.addUserScript(WKUserScript(source: PasswordAutoFillScript.source(handlerName: handlerName, testHooks: testHooks),
-                                              injectionTime: .atDocumentStart, forMainFrameOnly: false, in: world))
+    /// The script: every frame, before page scripts, in AutoFill's own world.
+    static func script(testHooks: Bool) -> WKUserScript {
+        WKUserScript(source: PasswordAutoFillScript.source(handlerName: handlerName, testHooks: testHooks),
+                     injectionTime: .atDocumentStart, forMainFrameOnly: false, in: world)
+    }
+
+    /// Adds `script` (made by `script(testHooks:)`) and the handler to a profile's controller.
+    static func install(in controller: WKUserContentController, handler: WKScriptMessageHandlerWithReply, script: WKUserScript) {
+        controller.addUserScript(script)
         controller.addScriptMessageHandler(handler, contentWorld: world, name: handlerName)
     }
 

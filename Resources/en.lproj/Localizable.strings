@@ -532,3 +532,6 @@
 "transfer.error.notExport" = "This is not a PrivacyBrowser profile file.";
 "recovery.homeNotSealed" = "Could not encrypt Safari's state of profile “%1$@” again: %2$@";
 "recovery.webDataNotSealed" = "Could not encrypt the data of profile “%1$@” again: %2$@";
+"profile.homeNotSealed" = "Could not encrypt Safari's state of profile “%1$@”: %2$@. It is encrypted again at the next unlock.";
+"profile.crashed" = "Profile “%@” ended unexpectedly. Its data is encrypted; its next launch carries on from where it stopped.";
+"profile.crashedUnsealed" = "Profile “%@” ended unexpectedly, and its data is not encrypted yet: that happens at the next unlock.";

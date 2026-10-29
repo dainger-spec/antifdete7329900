@@ -21,8 +21,11 @@ fails on any path in the real Safari's places:
     ~/Library/Preferences/com.apple.Safari*.plist, ~/Library/HTTPStorages/com.apple.Safari
 
 Every other path written outside the self-test's temporary vault is listed by directory, so that
-what the app leaves behind is visible run after run. A trace that could not be made is a warning
-(exit 0); a write to the real Safari's places is exit 1.
+what the app leaves behind is visible run after run. A call that failed (fs_usage shows its errno,
+`[  1]` for a sandbox's refusal) wrote nothing: those are listed as refused, never failed on. A
+trace of cfprefsd (`sudo fs_usage -w -f filesys cfprefsd`) counts as well, for the preferences a
+profile's process sets through it. A trace that could not be made is a warning (exit 0); a write
+to the real Safari's places is exit 1.
 """
 import argparse
 import os
@@ -35,6 +38,8 @@ WRITES = {"mkdir", "rename", "renameat", "renamex_np", "unlink", "unlinkat", "rm
           "removexattr", "link", "symlink", "clonefile", "clonefileat", "copyfile", "exchangedata", "utimes", "futimes"}
 OPENS = {"open", "openat", "open_nocancel", "openat_nocancel", "open_extended", "creat"}
 TIME = re.compile(r"^(\d\d):(\d\d):(\d\d)\.(\d+)")
+# "15:42:15.747185  unlink  [  2]  /Users/..." — the call failed with that errno.
+FAILED = re.compile(r"^\S+\s+\S+\s+\[\s*(\d+)\]")
 PATH = re.compile(r"(/(?:[^\s]|\\ )+)")
 
 
@@ -88,7 +93,7 @@ def main():
                         end_tm.tm_hour * 3600 + end_tm.tm_min * 60 + end_tm.tm_sec + (end % 1)))
 
     roots = forbidden_roots(args.home)
-    failures, elsewhere, lines_read = [], Counter(), 0
+    failures, refused, elsewhere, lines_read = [], [], Counter(), 0
     for trace in args.trace:
         try:
             lines = open(trace, encoding="utf-8", errors="replace").read().splitlines()
@@ -115,7 +120,7 @@ def main():
                 if path.startswith("/dev/") or any(path.startswith(v) or path.startswith("/private" + v) for v in vaults):
                     continue
                 if is_forbidden(path, roots):
-                    failures.append(line)
+                    (refused if FAILED.match(line) else failures).append(line)
                 elif path.startswith(args.home) or path.startswith("/private/var/folders") or path.startswith("/var/folders"):
                     parts = path.split("/")
                     elsewhere["/".join(parts[:7])] += 1
@@ -126,6 +131,10 @@ def main():
         print("written outside the self-test's vault during the check (listed, not failed on):")
         for directory, count in elsewhere.most_common(40):
             print(f"  {count:6d}  {directory}")
+    if refused:
+        print(f"disk check: {len(refused)} calls into the real Safari's places were refused (they wrote nothing):")
+        for line in refused[:20]:
+            print("REFUSED " + line[:300])
     if failures:
         print(f"::error::disk check: {len(failures)} writes into the real Safari's places while a profile ran")
         for line in failures[:60]:

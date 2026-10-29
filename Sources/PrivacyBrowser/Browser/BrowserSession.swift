@@ -53,8 +53,10 @@ final class BrowserSession {
         let proxies = try ProxyConfigurationFactory.make(configuration.proxy)
         // Without the ping-load blocker a page's dns-prefetch would be resolved by this Mac: a
         // profile with a proxy does not start (fail-closed), as with a proxy that cannot be applied.
-        if configuration.proxy != nil, ContentRules.failedToCompile {
-            throw CoreError.invalidConfiguration("the ping-load blocker did not compile")
+        // (`ContentRules.prepare` comes first wherever a profile is launched.)
+        if configuration.proxy != nil, ContentRules.dnsPrefetchBlocker == nil {
+            throw CoreError.invalidConfiguration(ContentRules.failedToCompile
+                ? "the ping-load blocker did not compile" : "the ping-load blocker is not ready")
         }
         self.profileID = profileID
         self.profileName = profileName
@@ -66,6 +68,9 @@ final class BrowserSession {
         // `.nonPersistent()` needs WebKit initialized but does not initialize it, and an ephemeral
         // profile can be the first WebKit use after unlock (see `ensureWebKitInitialized`).
         WebDataStoreVault.ensureWebKitInitialized()
+        // Before the first web view of any profile: the one every worker of the process copies
+        // its preferences from.
+        ProfileNetworkGuard.ensureWorkerTemplate()
         let store: WKWebsiteDataStore = configuration.ephemeral
             ? .nonPersistent()
             : WebDataStoreVault.makeStore(for: profileID)
@@ -79,19 +84,42 @@ final class BrowserSession {
             .notice("Profile \(profileName, privacy: .public): has a proxy=\(configuration.proxy != nil, privacy: .public) store proxies=\(store.proxyConfigurations.count, privacy: .public)")
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
         self.userContentController = BehaviorSets.makeUserContentController(for: configuration)
-        if configuration.proxy != nil {
+        if configuration.proxy != nil, let blocker = ContentRules.dnsPrefetchBlocker {
             // Loads WebKit would otherwise make outside the proxy (see ContentRules).
-            if let blocker = ContentRules.dnsPrefetchBlocker {
-                userContentController.add(blocker)
-            } else {
-                Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
-                    .error("No ping-load blocker yet: dns-prefetch of this profile may resolve outside its proxy")
-            }
+            userContentController.add(blocker)
         }
+        self.profileScripts = userContentController.userScripts
+        self.autoFillScript = PasswordAutoFill.script(testHooks: CommandLine.arguments.contains("--self-test"))
+        self.storeChallenges = StoreChallenges(policy: ProfileChallengePolicy(
+            hasProxy: configuration.proxy != nil,
+            proxyCredential: configuration.proxy.flatMap { proxy in
+                proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
+            }))
         passwordHandler.session = self
-        PasswordAutoFill.install(in: userContentController, handler: passwordHandler,
-                                 testHooks: CommandLine.arguments.contains("--self-test"))
+        PasswordAutoFill.install(in: userContentController, handler: passwordHandler, script: autoFillScript)
+        if configuration.proxy != nil {
+            // The challenges of loads no page is behind (a service worker's) come to the store's
+            // own delegate; without one they get the system's default handling (`ServerTrust`).
+            let setDelegate = NSSelectorFromString("_setDelegate:")
+            if store.responds(to: setDelegate) { store.perform(setDelegate, with: storeChallenges) }
+        }
+        // A service worker of this profile has the profile's preferences, not those of whichever
+        // web view the process built first (`ProfileNetworkGuard.ensureWorkerTemplate`).
+        let workerPreferences = WKPreferences()
+        applyPrivacyPreferences(to: workerPreferences)
+        let override = NSSelectorFromString("_setServiceWorkerOverridePreferences:")
+        Self.workerPreferencesApplied = store.responds(to: override)
+        if store.responds(to: override) { store.perform(override, with: workerPreferences) }
     }
+
+    /// The scripts every page of this profile gets (the privacy scripts of its device generation),
+    /// and AutoFill's: kept, so that what Safari's chrome takes out of a controller can be put back.
+    private let profileScripts: [WKUserScript]
+    private let autoFillScript: WKUserScript
+    /// The data store's delegate (`StoreChallenges`); the store holds it weakly.
+    private let storeChallenges: StoreChallenges
+    /// Whether this WebKit let a profile's service workers have the profile's preferences.
+    private(set) static var workerPreferencesApplied: Bool?
 
     var windowCount: Int { windows.count }
 
@@ -101,6 +129,7 @@ final class BrowserSession {
     var tabContext: BrowserTabContext {
         BrowserTabContext(profileName: profileName, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version),
                           passwordVault: passwordVault, passwordSettings: passwordSettings, library: library,
+                          hasProxy: configuration.proxy != nil,
                           proxyCredential: configuration.proxy.flatMap { proxy in
                               proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
                           })
@@ -126,26 +155,52 @@ final class BrowserSession {
     func applyProfile(to webConfiguration: WKWebViewConfiguration) {
         webConfiguration.websiteDataStore = dataStore ?? ProfileNetworkGuard.closedStore
         applyPrivacyPreferences(to: webConfiguration.preferences)
-        let controller = webConfiguration.userContentController
+        applyContent(to: webConfiguration.userContentController)
+    }
+
+    /// The profile's scripts, its ping-load blocker and its AutoFill, into a content controller
+    /// something else made (a configuration's, or one a navigation brings: `ProfileNetworkGuard`).
+    func applyContent(to controller: WKUserContentController) {
         // Our own controller already has all of it (`makeWebViewConfiguration`); a second copy of
         // the privacy scripts would patch what they patched once already, which a page can see.
         guard controller !== userContentController else { return }
         // Safari reuses a configuration's controller across the web views of a tab; everything
         // below would otherwise be injected again on each of them.
         guard appliedControllers.add(controller) else { return }
-        // Built fresh rather than copied from our own controller: ours also carries AutoFill, and
-        // that is installed below with its handlers rather than as a lone script.
-        for script in BehaviorSets.makeUserContentController(for: configuration).userScripts {
+        // AutoFill's script is installed below, with its handlers.
+        for script in profileScripts {
             controller.addUserScript(script)
         }
         if configuration.proxy != nil, let blocker = ContentRules.dnsPrefetchBlocker {
             controller.add(blocker)
         }
-        PasswordAutoFill.install(in: controller, handler: passwordHandler,
-                                 testHooks: CommandLine.arguments.contains("--self-test"))
+        PasswordAutoFill.install(in: controller, handler: passwordHandler, script: autoFillScript)
         Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
             .notice("Profile scripts and AutoFill installed into a content controller of Safari's chrome")
     }
+
+    /// Puts back into `controller` — one the profile was applied to, which something has just
+    /// emptied of scripts or rule lists — whatever of the profile's is no longer there. The
+    /// message handlers stay where they are through such a wipe, so only scripts and the blocker
+    /// come back. (Our own controller is emptied only when the session closes, and stays so.)
+    func restoreContent(in controller: WKUserContentController) {
+        guard controller !== userContentController, appliedControllers.contains(controller) else { return }
+        let present = Set(controller.userScripts.map(\.source))
+        var restored = 0
+        for script in profileScripts + [autoFillScript] where !present.contains(script.source) {
+            controller.addUserScript(script)
+            restored += 1
+        }
+        if configuration.proxy != nil, let blocker = ContentRules.dnsPrefetchBlocker {
+            controller.add(blocker)
+        }
+        Self.contentRestorations += 1
+        Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
+            .notice("A content controller of Safari's chrome was emptied: \(restored, privacy: .public) of the profile's scripts and its rule lists put back")
+    }
+
+    /// How many times `restoreContent` ran in this process (the self-test).
+    private(set) static var contentRestorations = 0
 
     /// The preferences that decide what a page of this profile can reach outside its proxy, or
     /// what this Mac's own services are asked on its behalf. One place, for our own web views and
@@ -179,6 +234,9 @@ final class BrowserSession {
         }
         if configuration.proxy != nil {
             for key in Self.featuresOffWithAProxy { WebKitFeatures.set(preferences, key, false) }
+            // A page's dns-prefetch is resolved by this Mac, outside the proxy: before WebKit 7621
+            // through this switch, which the content rules do not reach (`ContentRules`).
+            WebKitPreferences.setBool(preferences, "_setDNSPrefetchingEnabled:", false)
         }
     }
 
@@ -202,6 +260,7 @@ final class BrowserSession {
     /// not applied to a second time by mistake and is not kept in memory either.
     private final class WeakSet {
         private let table = NSHashTable<AnyObject>.weakObjects()
+        func contains(_ object: AnyObject) -> Bool { table.contains(object) }
         /// True when `object` was not in the set and has been added.
         func add(_ object: AnyObject) -> Bool {
             guard !table.contains(object) else { return false }
@@ -353,6 +412,13 @@ final class BrowserSession {
     }
 }
 
+/// The WebKit this app runs on, by its build (`CFBundleVersion` of WebKit.framework, as
+/// "21622.1.22.118.4"): what WebKit does outside a proxy differs between versions, and the
+/// self-test and the network report say which one they saw.
+enum WebKitBuild {
+    static let version: String = Bundle(identifier: "com.apple.WebKit")?.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+}
+
 /// WebKit preferences with no public API (`WKPreferencesPrivate.h`). Each is applied
 /// only when this WebKit implements the selector, so a WebKit without it is left as it is.
 enum WebKitPreferences {
@@ -381,6 +447,16 @@ enum WebKitPreferences {
 enum WebKitFeatures {
     /// Key → whether this WebKit has that feature, for every key `set` was asked about.
     private(set) static var applied: [String: Bool] = [:]
+
+    /// Sets `key` through the one setter named, when this WebKit has both (the network report
+    /// tries each way in turn: `ProfileNetworkGuard.pinBypasses`).
+    static func set(_ preferences: WKPreferences, _ key: String, _ enabled: Bool, through setter: String) -> Bool {
+        let selector = NSSelectorFromString(setter)
+        guard let feature = features[key], let method = class_getInstanceMethod(WKPreferences.self, selector) else { return false }
+        typealias Setter = @convention(c) (NSObject, Selector, Bool, AnyObject) -> Void
+        unsafeBitCast(method_getImplementation(method), to: Setter.self)(preferences, selector, enabled, feature)
+        return true
+    }
 
     @discardableResult
     static func set(_ preferences: WKPreferences, _ key: String, _ enabled: Bool) -> Bool {

@@ -101,7 +101,13 @@ private final class ProxyChallengeObserver: NSObject, URLSessionTaskDelegate, @u
     func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         let space = challenge.protectionSpace
-        guard space.isProxy(), space.authenticationMethod != NSURLAuthenticationMethodServerTrust else {
+        // The lookup always goes through the profile's proxy: the service's certificate is checked
+        // without this Mac fetching anything for it, as a page's is (`ServerTrust`).
+        if space.authenticationMethod == NSURLAuthenticationMethodServerTrust {
+            ServerTrust.answerWithoutFetching(challenge, completionHandler)
+            return
+        }
+        guard space.isProxy() else {
             completionHandler(.performDefaultHandling, nil)
             return
         }

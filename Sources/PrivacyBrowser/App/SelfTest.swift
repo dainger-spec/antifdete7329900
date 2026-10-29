@@ -125,12 +125,16 @@ final class SelfTest {
         do {
             let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
             try await firstWebKitUse(repository) // must run before anything else touches WebKit
+            // A profile with a proxy does not start without the ping-load blocker (ContentRules).
+            await ContentRules.prepare()
+            info("WebKit \(WebKitBuild.version)")
             try await storageIsolationAndShims(repository)
             try await deviceGenerations(repository)
             try await fingerprintSurface(repository)
             try await recoverySealing(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
+            try await certificatesWithoutFetching(repository)
             try await proxyLocationAtLaunch(repository)
             try await socksProfilesSideBySide(repository)
             try await proxyLookupAndExitIP(repository)
@@ -547,6 +551,57 @@ final class SelfTest {
     }
 
 
+    // MARK: Certificates, checked without this Mac fetching for them
+
+    /// The certificate of a site whose server sent its chain incomplete is completed by the
+    /// system's trust service, which downloads the missing certificate from the address the
+    /// certificate names — as this Mac, outside every proxy (`ServerTrust`). The self-test proxy
+    /// answers every TLS handshake in its tunnels with such a certificate, naming
+    /// `pbaiacanary.leak.example.com`: a DNS query for that name anywhere in the capture is a
+    /// fetch made for a profile with a proxy (scripts/egress_check.py). Its control is the same
+    /// kind of certificate, naming `pbaiacontrol`, loaded in a profile without a proxy, where the
+    /// system's default handling does fetch: the capture has to see that one.
+    private func certificatesWithoutFetching(_ repository: ProfileRepository) async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("certificate checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        info("egress-token pbaiacanary")
+        info("egress-token pbocspcanary")
+        func load(_ url: URL, in configuration: ProfileConfiguration) async throws {
+            let profile = try repository.create(name: "Certificates", configuration: configuration)
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            defer { session.shutDown() }
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            defer { tab.tearDown() }
+            tab.webView.load(URLRequest(url: url))
+            _ = await waitUntil(timeout: 20) { !tab.isLoading }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
+        if let controlPort = environment["PB_SELFTEST_TLS_CONTROL_PORT"].flatMap(Int.init) {
+            try await load(URL(string: "https://localhost:\(controlPort)/pb-aia-control")!, in: ProfileConfiguration(ephemeral: true))
+            info("egress-control pbaiacontrol")
+        }
+
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let before = ServerTrust.tally.counts
+        try await load(URL(string: "https://aia-\(run).leak.example.com/pb-leak/aia?run=\(run)")!,
+                       in: ProfileConfiguration(proxy: proxy, ephemeral: true))
+        let after = ServerTrust.tally.counts
+        let log = try await loadThroughProxy(repository, proxy, url: URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!) ?? ""
+        guard log.contains("(tls handshake)") else {
+            check("certificates: the self-test proxy answers HTTPS with its certificate", false,
+                  "no TLS handshake in its log (no openssl on this Mac?): \(log.prefix(300))")
+            return
+        }
+        check("certificates: with a proxy, a certificate whose chain needs a fetch is checked without one, and refused",
+              after.refused > before.refused, "evaluations \(before) → \(after)")
+        check("certificates: the browser refused it at the handshake, through the proxy",
+              log.contains("tls refused by the client"), String(log.prefix(400)))
+    }
+
     // MARK: Safari's chrome, in a profile's own process, through that profile's proxy
 
     /// The check this product cannot do without: a profile whose window is Safari's own chrome
@@ -576,6 +631,9 @@ final class SelfTest {
             return
         }
         let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        // The port the leak page asks for on loopback, where the proxy's canary listener notes any
+        // connection that comes straight to it (1 when the proxy runs without one).
+        let canaryPort = ProcessInfo.processInfo.environment["PB_SELFTEST_CANARY_PORT"].flatMap(Int.init) ?? 1
         let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
         // An ordinary name rather than ".invalid": the system resolver would really ask the network
         // about it (and the capture would see the run id), where ".invalid" may be answered on the Mac.
@@ -612,22 +670,25 @@ final class SelfTest {
 
         // What the proxy answered for this run, and what the page reported, asked through the same
         // proxy from a window of ours. Polled: the chrome's page loads are on their own schedule.
-        struct Entry { let target: String; let path: String; let cookie: String }
-        func leakLog() async -> (targets: [Entry], reports: [[String: Any]]) {
+        struct Entry { let via: String; let target: String; let path: String; let cookie: String }
+        func leakLog() async -> (targets: [Entry], reports: [[String: Any]], canary: [String]) {
             let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
             let text = try? await loadThroughProxy(repository, proxy, url: url)
             guard let data = text?.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], []) }
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], [], []) }
             let targets = (object["targets"] as? [[String: Any]] ?? []).map {
-                Entry(target: ($0["target"] as? String ?? "").lowercased(), path: $0["path"] as? String ?? "",
-                      cookie: $0["cookie"] as? String ?? "")
+                Entry(via: $0["via"] as? String ?? "", target: ($0["target"] as? String ?? "").lowercased(),
+                      path: $0["path"] as? String ?? "", cookie: $0["cookie"] as? String ?? "")
             }
-            return (targets, object["reports"] as? [[String: Any]] ?? [])
+            let canary = (object["canary"] as? [[String: Any]] ?? []).map { "\($0["listener"] ?? "?") \($0["request"] ?? "")" }
+            return (targets, object["reports"] as? [[String: Any]] ?? [], canary)
         }
-        var log = (targets: [Entry](), reports: [[String: Any]]())
+        // The leak page's own report, not its frame's or its secure half's.
+        func isPage(_ report: [String: Any]) -> Bool { report["frame"] == nil && report["secure"] == nil && report["sw"] == nil }
+        var log = (targets: [Entry](), reports: [[String: Any]](), canary: [String]())
         for _ in 0..<25 {
             log = await leakLog()
-            if log.reports.contains(where: { $0["frame"] == nil }) && log.reports.contains(where: { $0["frame"] != nil }) { break }
+            if log.reports.contains(where: isPage) && log.reports.contains(where: { $0["frame"] != nil }) { break }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
         // WebKit names an IPv6 address in its CONNECT line without brackets.
@@ -638,7 +699,7 @@ final class SelfTest {
         check("Safari chrome: a profile in its own process loads its pages through its own proxy",
               reached("start-\(run).\(domain):80", startPath),
               "the proxy answered: \(log.targets.map { "\($0.target)\($0.path.prefix(40))" }.joined(separator: " "))")
-        let page = log.reports.first { $0["frame"] == nil } ?? [:]
+        let page = log.reports.first(where: isPage) ?? [:]
         let frame = log.reports.first { $0["frame"] != nil } ?? [:]
         check("Safari chrome: the leak page ran and reported", !page.isEmpty, "no report from the page")
         info("Safari chrome: the leak page reported \(page)")
@@ -661,6 +722,11 @@ final class SelfTest {
             ("a worker's fetch", "192.0.2.15:8080", "/pb-leak/worker"),
             ("an image", "img-\(run).\(domain):80", "/pb-leak/img.png"),
             ("a frame of another site", "frame-\(run).\(domain):80", "/pb-leak/frame"),
+            // Loopback and the local network are not exceptions to the proxy.
+            ("a fetch to 127.0.0.1", "127.0.0.1:\(canaryPort)", "/pb-leak/lo4"),
+            ("a fetch to localhost", "localhost:\(canaryPort)", "/pb-leak/lohost"),
+            ("a fetch to ::1", "[::1]:\(canaryPort)", "/pb-leak/lo6"),
+            ("a fetch to a .local name", "lan-\(run).local:80", "/pb-leak/lan"),
         ] {
             check("Safari chrome: \(what) goes through the profile's proxy", reached(target, path),
                   "not seen by the proxy: \(target)\(path)")
@@ -696,6 +762,25 @@ final class SelfTest {
                   report.safariPreferences["UniversalSearchEnabled"] == "0"
                     && report.safariPreferences["AutoFillPasswords"] == "0",
                   "\(report.safariPreferences)")
+            info("Safari chrome: WebKit \(report.webKitVersion)")
+            // The preference decides dns-prefetch only before WebKit 7621; from then on the
+            // content rules do (checked above with <a ping>), so this is a check only there.
+            info("Safari chrome: web views whose dns-prefetch preference is on: \(report.webViewsWithDNSPrefetch) of \(report.webViews)")
+            check("Safari chrome: no web view of the process has a feature on that leaves the proxy (WebTransport, PCM, WebAuthn…)",
+                  report.webViewsWithFeatureOn.values.allSatisfy { $0 == 0 }, "\(report.webViewsWithFeatureOn)")
+            check("Safari chrome: nothing the profile has off can be turned on again by another setter",
+                  report.pinBypasses.isEmpty, report.pinBypasses.joined(separator: ", "))
+            check("Safari chrome: the profile's service workers have the profile's preferences",
+                  report.workerPreferences != false, "this WebKit has no service-worker preferences of a store's own")
+            check("Safari chrome: the real Safari's places are closed to the profile's process",
+                  report.safariPlacesClosed, "no sandbox over ~/Library/Safari and the rest")
+            info("Safari chrome: \(report.safariPathsRedirected.count) path getters of Safari's frameworks answer with the profile's home: \(report.safariPathsRedirected.prefix(80).joined(separator: " "))")
+            check("Safari chrome: UDP is closed to the profile's process (QUIC cannot go around the proxy)",
+                  report.udpClosed && !report.udp.values.contains { $0 == "sent" || $0.hasPrefix("ready") },
+                  "closed=\(report.udpClosed) \(report.udp)")
+            check("Safari chrome: certificates are checked without fetching, and the leak page's were refused",
+                  report.trustEvaluated > 0 && report.trustRefused > 0,
+                  "evaluated \(report.trustEvaluated), refused \(report.trustRefused)")
         } else {
             check("Safari chrome: the profile's process reported where its traffic goes", false, "no report in 40 s")
         }
@@ -733,6 +818,36 @@ final class SelfTest {
               log.targets.contains { $0.path.hasPrefix(startPath) && $0.cookie.contains("pbimported=\(run)") },
               log.targets.filter { $0.path.hasPrefix(startPath) }.map(\.cookie).joined(separator: " | "))
 
+        // The secure-context half of the leak page, on loopback (a secure context): WebTransport
+        // and WebRTC exist only in secure contexts, so only there does their absence — in the
+        // page, a dedicated, a shared and a service worker — mean something.
+        let securePath = "/pb-leak/secure?run=\(run)"
+        manager.openWindow(profile.id, url: URL(string: "http://127.0.0.1:\(httpPort)\(securePath)")!)
+        var secure: [String: Any] = [:]
+        var worker: [String: Any] = [:]
+        for _ in 0..<15 {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            log = await leakLog()
+            secure = log.reports.first { $0["secure"] != nil } ?? [:]
+            worker = log.reports.first { $0["sw"] != nil } ?? [:]
+            if !secure.isEmpty && !worker.isEmpty { break }
+        }
+        check("Safari chrome: a page on loopback goes through the proxy too",
+              log.targets.contains { $0.via != "via=forward" && $0.target == "127.0.0.1:\(httpPort)" && $0.path.hasPrefix(securePath) },
+              log.targets.filter { $0.path.hasPrefix(securePath) }.map { "\($0.via) \($0.target)" }.joined(separator: " | "))
+        info("Safari chrome: the secure page reported \(secure), its service worker \(worker)")
+        if secure["secure"] as? Bool == true {
+            check("Safari chrome: WebTransport and WebRTC are absent in a secure context (page, worker, shared worker)",
+                  secure["webTransport"] as? String == "undefined" && secure["rtc"] as? String == "undefined"
+                    && secure["worker"] as? String != "function" && secure["shared"] as? String != "function",
+                  "\(secure)")
+            if !worker.isEmpty {
+                check("Safari chrome: WebTransport is absent in a service worker", worker["webTransport"] as? String == "undefined", "\(worker)")
+            }
+        } else {
+            check("Safari chrome: the secure half of the leak page ran in a secure context", false, "\(secure)")
+        }
+
         // Long enough for what Safari's chrome does on a timer (the page-text donation runs about
         // five seconds after a load) to happen while the capture is still looking.
         try? await Task.sleep(nanoseconds: 8_000_000_000)
@@ -752,6 +867,11 @@ final class SelfTest {
         log = await leakLog()
         check("Safari chrome: an HTTPS request goes through the proxy too (as a CONNECT)",
               log.targets.contains { $0.target == "192.0.2.14:443" })
+        check("Safari chrome: an HTTPS image whose certificate needs a fetch reached the proxy, and its certificate was refused",
+              log.targets.contains { $0.target == "aia-\(run).\(domain):443" && $0.path.hasPrefix("(tls refused") },
+              log.targets.filter { $0.target.hasPrefix("aia-") }.map(\.path).joined(separator: " | "))
+        check("Safari chrome: nothing reached loopback directly (the canary listener took no connection)",
+              log.canary.isEmpty, log.canary.joined(separator: " | "))
         for (what, host) in [("the page's icon", "icon-"), ("its touch icon", "touchicon-"), ("its OpenSearch description", "osd-")] {
             info("Safari chrome: \(what) \(log.targets.contains { $0.target.hasPrefix(host + run) } ? "was fetched through the proxy" : "was not fetched through the proxy")")
         }

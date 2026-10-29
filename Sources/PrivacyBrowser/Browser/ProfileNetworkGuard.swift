@@ -2,6 +2,7 @@ import BrowserCore
 import Foundation
 import Network
 import os
+import Security
 import WebKit
 
 /// What a profile's own process may send, and through which proxy — decided before anything in
@@ -61,6 +62,15 @@ enum ProfileNetworkGuard {
     private static var realDefaultStore: WKWebsiteDataStore?
     /// Hooks that could not be installed because what they patch is not in this macOS.
     private static var missingHooks: [String] = []
+    /// How this process answers its loads' challenges (`everyChallengeIsTheProfiles`).
+    private static var challengePolicy: ProfileChallengePolicy?
+    /// The web view every worker of the process takes its preferences from (`ensureWorkerTemplate`).
+    private static var workerTemplate: WKWebView?
+    /// Set while that web view is being built: it is the one web view of the process that is
+    /// meant to be on the closed store, and the initializer's net leaves it as it is.
+    private static var makingTemplate = false
+    /// The navigation delegate of web views that have none (`inspect`); a web view holds it weakly.
+    private static var defaultNavigationDelegate: WebViewChallenges?
 
     // MARK: Engaging
 
@@ -71,16 +81,23 @@ enum ProfileNetworkGuard {
         let proxies = try ProxyConfigurationFactory.make(proxy)
         self.proxies = proxies
         self.profileID = profileID
+        let policy = ProfileChallengePolicy(
+            hasProxy: !proxies.isEmpty,
+            proxyCredential: proxy?.username.map { URLCredential(user: $0, password: proxy?.password ?? "", persistence: .forSession) })
+        challengePolicy = policy
         if !proxies.isEmpty {
             // Lock 3. The default privacy context is what every Network.framework connection and
             // URLSession task of this process uses unless it brings its own (macOS 14).
             NWParameters.PrivacyContext.default.proxyConfigurations = proxies
-            missingHooks += proxyEverySessionConfiguration(proxies)
+            missingHooks += proxyEverySessionConfiguration(proxies, delegate: StoreChallenges(policy: policy))
         }
+        missingHooks += closeTheProcess(udp: !proxies.isEmpty)
         missingHooks += everyStoreStartsClosed(except: profileID)
         missingHooks += everyWebViewGetsTheProfilesData()
         missingHooks += pinPrivacyPreferences()
         missingHooks += noPagePicksAnotherStore()
+        missingHooks += theProfilesContentStays()
+        missingHooks += everyChallengeIsTheProfiles(policy)
         missingHooks += noServiceOutsideTheProxy(safeBrowsing: safeBrowsing)
         missingHooks += nothingIsHandedOff()
         log.notice("This process is held to its profile's proxy: \(proxies.count, privacy: .public) proxies, \(missingHooks.count, privacy: .public) hooks missing")
@@ -114,6 +131,30 @@ enum ProfileNetworkGuard {
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
         log.notice("The default website data store of this process is closed, and asking for it gives the profile's")
+        ensureWorkerTemplate()
+    }
+
+    /// The first web view of this process, built before any profile's: never shown, never
+    /// loading, on the closed store, with WebRTC and every feature that leaves a proxy off.
+    ///
+    /// WebKit gives every shared worker and service worker of a process — whichever profile's page
+    /// started it — the preferences of the first web view that process ever built
+    /// (`WebProcessPool::m_remoteWorkerPreferences`, copied once and never updated). Were that
+    /// web view a profile's without a proxy, a page of a profile with one could start a shared
+    /// worker with WebTransport in it, which no proxy carries. So the first one is this. A
+    /// profile's service workers get the profile's own preferences besides
+    /// (`BrowserSession`, `_setServiceWorkerOverridePreferences:`). Idempotent; in the manager
+    /// process it is built at start-up, in a profile's process when its default store is closed.
+    static func ensureWorkerTemplate() {
+        guard workerTemplate == nil else { return }
+        WebDataStoreVault.ensureWebKitInitialized()
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = closedStore
+        WebKitPreferences.setBool(configuration.preferences, "_setPeerConnectionEnabled:", false)
+        for key in BrowserSession.featuresOffWithAProxy { WebKitFeatures.set(configuration.preferences, key, false) }
+        makingTemplate = true
+        workerTemplate = WKWebView(frame: .zero, configuration: configuration)
+        makingTemplate = false
     }
 
     /// The profile whose data every web view of this process is built with.
@@ -156,6 +197,7 @@ enum ProfileNetworkGuard {
         typealias Initializer = @convention(c) (AnyObject, Selector, CGRect, AnyObject?) -> Unmanaged<AnyObject>?
         let original = unsafeBitCast(method_getImplementation(method), to: Initializer.self)
         let replacement: @convention(block) (AnyObject, CGRect, AnyObject?) -> Unmanaged<AnyObject>? = { receiver, frame, configuration in
+            if makingTemplate { return original(receiver, selector, frame, configuration) }
             if let configuration = configuration as? WKWebViewConfiguration {
                 // A web view whose configuration reaches its initializer without the profile's
                 // store is one that Safari's configuration factories did not cover: without this
@@ -183,6 +225,7 @@ enum ProfileNetworkGuard {
             typealias Initialize = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
             let original = unsafeBitCast(method_getImplementation(method), to: Initialize.self)
             let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { receiver, configuration in
+                if makingTemplate { return original(receiver, initialize, configuration) }
                 if let configuration = configuration as? WKWebViewConfiguration {
                     give(configuration, builtBy: "A web view being initialized")
                 }
@@ -213,6 +256,199 @@ enum ProfileNetworkGuard {
         return []
     }
 
+    /// The profile's scripts and its ping-load blocker stay in every page of the process, whatever
+    /// Safari's chrome does to the content controllers they were put in.
+    ///
+    ///   * A navigation can carry a content controller of its own (`WKWebpagePreferences`, as it
+    ///     can carry a data store): it gets the profile's content first.
+    ///   * Safari empties a controller's scripts or rule lists when it reloads its own: the
+    ///     profile's are put back right after (`BrowserSession.restoreContent`).
+    ///   * With a proxy, "Reload Without Content Blockers" and a site's "content blockers off"
+    ///     switch everything off but the ping-load blocker, which is what keeps a page's
+    ///     dns-prefetch from being resolved by this Mac (`ContentRules`): the blocker is the
+    ///     exception every such switch keeps on, and the reload without blockers is a reload.
+    private static func theProfilesContentStays() -> [String] {
+        typealias ObjectSetter = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+        typealias Action = @convention(c) (AnyObject, Selector) -> Void
+        let pagePreferences: AnyClass = WKWebpagePreferences.self
+
+        let pageController = NSSelectorFromString("_setUserContentController:")
+        if let method = class_getInstanceMethod(pagePreferences, pageController) {
+            let original = unsafeBitCast(method_getImplementation(method), to: ObjectSetter.self)
+            let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { preferences, controller in
+                if let controller = controller as? WKUserContentController {
+                    session?.applyContent(to: controller)
+                }
+                original(preferences, pageController, controller)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+
+        // After each, what the profile put in that controller is put back.
+        let controllerClass: AnyClass = WKUserContentController.self
+        for name in ["removeAllUserScripts", "removeAllContentRuleLists", "_removeAllUserContentFilters"] {
+            let selector = NSSelectorFromString(name)
+            guard let method = class_getInstanceMethod(controllerClass, selector) else { continue }
+            let original = unsafeBitCast(method_getImplementation(method), to: Action.self)
+            let replacement: @convention(block) (AnyObject) -> Void = { controller in
+                original(controller, selector)
+                if let controller = controller as? WKUserContentController { session?.restoreContent(in: controller) }
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+        for name in ["_removeAllUserScriptsAssociatedWithContentWorld:", "removeContentRuleList:", "_removeUserContentFilter:",
+                     "_removeAllContentRuleListsAssociatedWithContentWorld:"] {
+            let selector = NSSelectorFromString(name)
+            guard let method = class_getInstanceMethod(controllerClass, selector) else { continue }
+            let original = unsafeBitCast(method_getImplementation(method), to: ObjectSetter.self)
+            let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { controller, argument in
+                original(controller, selector, argument)
+                if let controller = controller as? WKUserContentController { session?.restoreContent(in: controller) }
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+
+        guard !(proxies ?? []).isEmpty else { return [] }
+        let blocker: Set<String> = [ContentRules.dnsPrefetchBlockerIdentifier]
+        let lists = NSSelectorFromString("_setContentRuleListsEnabled:exceptions:")
+        typealias ListsSetter = @convention(c) (AnyObject, Selector, Bool, NSSet?) -> Void
+        let listsMethod = class_getInstanceMethod(pagePreferences, lists)
+        let listsOriginal = listsMethod.map { unsafeBitCast(method_getImplementation($0), to: ListsSetter.self) }
+        if let method = listsMethod, let original = listsOriginal {
+            // The exceptions are the lists that do the opposite of `enabled`: with everything
+            // off, the blocker is one of them; with everything on, it is never one.
+            let replacement: @convention(block) (AnyObject, Bool, NSSet?) -> Void = { preferences, enabled, exceptions in
+                var kept = Set((exceptions as? Set<String>) ?? [])
+                if enabled { kept.subtract(blocker) } else { kept.formUnion(blocker) }
+                original(preferences, lists, enabled, kept as NSSet)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+        let blockers = NSSelectorFromString("_setContentBlockersEnabled:")
+        if let method = class_getInstanceMethod(pagePreferences, blockers) {
+            typealias BoolSetter = @convention(c) (AnyObject, Selector, Bool) -> Void
+            let original = unsafeBitCast(method_getImplementation(method), to: BoolSetter.self)
+            let replacement: @convention(block) (AnyObject, Bool) -> Void = { preferences, enabled in
+                if enabled {
+                    original(preferences, blockers, true)
+                } else if let listsOriginal {
+                    log.notice("Content blockers off for a page: every list but the ping-load blocker")
+                    listsOriginal(preferences, lists, false, blocker as NSSet)
+                } else {
+                    log.notice("Content blockers off for a page refused: this WebKit cannot keep the ping-load blocker on alone")
+                    original(preferences, blockers, true)
+                }
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+        let reloadWithout = NSSelectorFromString("_reloadWithoutContentBlockers")
+        if let method = class_getInstanceMethod(WKWebView.self, reloadWithout) {
+            let replacement: @convention(block) (AnyObject) -> WKNavigation? = { webView in
+                log.notice("Reload without content blockers: reloaded with the ping-load blocker")
+                return (webView as? WKWebView)?.reload()
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+        return []
+    }
+
+    // MARK: Challenges
+
+    /// The challenges of the profile's loads are answered by the profile, whoever's delegate gets
+    /// them (`ProfileChallengePolicy`): the proxy's own request for credentials with the profile's
+    /// credentials, and, with a proxy, every server-trust question without this Mac fetching
+    /// anything for it (`ServerTrust`) — never with the system's default handling.
+    ///
+    /// WebKit asks a web view's navigation delegate, a download's delegate and, for a load no page
+    /// is behind, its data store's delegate; and it decides whether to ask a delegate at all when
+    /// the delegate is set, by whether it answers that question. So the delegates are covered as
+    /// they are set: their class answers the profile's part before its own code runs, and a class
+    /// with no answer of its own gets one that leaves the rest to the system's default, as before.
+    /// A web view with no navigation delegate at all gets one that does only this
+    /// (`inspect`). And a web view's certificate, read back for the address bar's padlock and the
+    /// certificate sheet, never fetches either.
+    private static func everyChallengeIsTheProfiles(_ policy: ProfileChallengePolicy) -> [String] {
+        var missing: [String] = []
+        typealias ObjectSetter = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+        for (owner, setter, question, takesSubject) in [
+            (WKWebView.self as AnyClass, "setNavigationDelegate:", "webView:didReceiveAuthenticationChallenge:completionHandler:", true),
+            (WKDownload.self as AnyClass, "setDelegate:", "download:didReceiveAuthenticationChallenge:completionHandler:", true),
+            (WKWebsiteDataStore.self as AnyClass, "_setDelegate:", "didReceiveAuthenticationChallenge:completionHandler:", false),
+        ] {
+            let selector = NSSelectorFromString(setter)
+            guard let method = class_getInstanceMethod(owner, selector) else {
+                missing.append("-[\(NSStringFromClass(owner)) \(setter)]")
+                continue
+            }
+            let original = unsafeBitCast(method_getImplementation(method), to: ObjectSetter.self)
+            let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { receiver, delegate in
+                if let delegate { answerChallenges(of: delegate, question, takesSubject: takesSubject, policy) }
+                original(receiver, selector, delegate)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+        if policy.hasProxy {
+            let serverTrust = NSSelectorFromString("serverTrust")
+            if let method = class_getInstanceMethod(WKWebView.self, serverTrust) {
+                typealias Getter = @convention(c) (AnyObject, Selector) -> Unmanaged<SecTrust>?
+                let original = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+                let replacement: @convention(block) (AnyObject) -> Unmanaged<SecTrust>? = { webView in
+                    let trust = original(webView, serverTrust)
+                    if let trust { SecTrustSetNetworkFetchAllowed(trust.takeUnretainedValue(), false) }
+                    return trust
+                }
+                method_setImplementation(method, imp_implementationWithBlock(replacement))
+            }
+        }
+        return missing
+    }
+
+    /// Classes (by name) whose answer to a challenge question already goes through the profile.
+    nonisolated private static let coveredClasses = LockedSet()
+
+    /// Makes `delegate`'s class answer `question` — `<subject>:didReceiveAuthenticationChallenge:
+    /// completionHandler:`, or without the subject — the profile's way first (`policy`).
+    private static func answerChallenges(of delegate: AnyObject, _ question: String, takesSubject: Bool,
+                                         _ policy: ProfileChallengePolicy) {
+        guard !(delegate is AnswersProfileChallenges), let delegateClass = object_getClass(delegate) else { return }
+        guard coveredClasses.insertIfNew("\(NSStringFromClass(delegateClass)) \(question)") else { return }
+        typealias Completion = @convention(block) (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        let selector = NSSelectorFromString(question)
+        let existing = class_getInstanceMethod(delegateClass, selector)
+        let implementation: IMP
+        if takesSubject {
+            typealias Question = @convention(c) (AnyObject, Selector, AnyObject?, URLAuthenticationChallenge, Completion) -> Void
+            let original = existing.map { unsafeBitCast(method_getImplementation($0), to: Question.self) }
+            let replacement: @convention(block) (AnyObject, AnyObject?, URLAuthenticationChallenge, @escaping Completion) -> Void = { receiver, subject, challenge, completion in
+                if policy.answer(challenge, { completion($0, $1) }) { return }
+                if let original {
+                    original(receiver, selector, subject, challenge, completion)
+                } else {
+                    completion(.performDefaultHandling, nil)
+                }
+            }
+            implementation = imp_implementationWithBlock(replacement)
+        } else {
+            typealias Question = @convention(c) (AnyObject, Selector, URLAuthenticationChallenge, Completion) -> Void
+            let original = existing.map { unsafeBitCast(method_getImplementation($0), to: Question.self) }
+            let replacement: @convention(block) (AnyObject, URLAuthenticationChallenge, @escaping Completion) -> Void = { receiver, challenge, completion in
+                if policy.answer(challenge, { completion($0, $1) }) { return }
+                if let original {
+                    original(receiver, selector, challenge, completion)
+                } else {
+                    completion(.performDefaultHandling, nil)
+                }
+            }
+            implementation = imp_implementationWithBlock(replacement)
+        }
+        // On the delegate's own class: replaces its method, or adds one in front of an inherited
+        // one (which the replacement then calls), or adds the only one.
+        let types = existing.flatMap { method_getTypeEncoding($0) }.map { String(cString: $0) }
+            ?? (takesSubject ? "v@:@@@?" : "v@:@@?")
+        class_replaceMethod(delegateClass, selector, implementation, types)
+        log.notice("Challenges of \(NSStringFromClass(delegateClass), privacy: .public) go through the profile first")
+    }
+
     /// The XPC services of Safari's and of the system that would make requests for a profile from
     /// another process — as this Mac, outside every lock in this one — are not reached from here:
     /// a connection to one of them is made to a name that does not exist, so it fails at once and
@@ -230,7 +466,14 @@ enum ProfileNetworkGuard {
     /// Connections are made from any thread, so this runs on whichever it is called from.
     nonisolated private static func noServiceOutsideTheProxy(safeBrowsing: Bool) -> [String] {
         var denied = ["Safari.SearchHelper", "parsec", "cloudd", "SyncAgent", "CloudTabs", "webpushd",
-                      "passd", "translationd", "PasswordBreach"]
+                      "passd", "translationd", "PasswordBreach",
+                      // Seen in CI connected from the hosted chrome: Screen Time's web usage (which
+                      // syncs through iCloud), Siri Suggestions' and the personalization store's
+                      // learning, shortcuts and link context, input analytics, Safari's own
+                      // notifications, and the shared web credentials daemon, which fetches a site's
+                      // associated-domains file as this Mac.
+                      "ScreenTime", "suggestd", "PersonalizationPortrait", "synapse", "linkd", "inputanalyticsd",
+                      "SafariNotificationAgent", "SharedWebCredentials"]
         if !safeBrowsing { denied.append("SafeBrowsing") }
         let deny = denied
         var missing: [String] = []
@@ -272,6 +515,8 @@ enum ProfileNetworkGuard {
         private let lock = NSLock()
         private var names: Set<String> = []
         func insert(_ name: String) { lock.withLock { _ = names.insert(name) } }
+        /// True when `name` was not in the set and now is.
+        func insertIfNew(_ name: String) -> Bool { lock.withLock { names.insert(name).inserted } }
         var sorted: [String] { lock.withLock { names.sorted() } }
     }
 
@@ -305,6 +550,12 @@ enum ProfileNetworkGuard {
     /// proxy the profile has, is a web view that would have loaded as this Mac without lock 2.
     private static func inspect(_ webView: WKWebView) {
         webViews.add(webView)
+        // A web view nobody gives a navigation delegate would have its challenges answered the
+        // system's default way: until someone does, it has one that answers only those.
+        if webView.navigationDelegate == nil, let challengePolicy {
+            if defaultNavigationDelegate == nil { defaultNavigationDelegate = WebViewChallenges(policy: challengePolicy) }
+            webView.navigationDelegate = defaultNavigationDelegate
+        }
         let store = webView.configuration.websiteDataStore
         let onProfile = session.map { $0.dataStore === store } ?? false
         let wanted = !(proxies ?? []).isEmpty
@@ -356,9 +607,16 @@ enum ProfileNetworkGuard {
             session?.configuration.safeBrowsingEnabled ?? false
         }
         pin("_setShouldAllowUserInstalledFonts:", required: false) { _ in false }
+        // A page's dns-prefetch is resolved by this Mac, outside the proxy (`ContentRules`); in
+        // WebKit before 7621 it never consults the content rules, and Safari turns it on.
+        pin("_setDNSPrefetchingEnabled:", required: false) { asked in asked && (proxies ?? []).isEmpty }
+        // ICE candidate filtering (no host addresses to a page that was not granted the camera)
+        // is on, as in Safari; gathering on every interface only for the tunnel's hardware checks.
+        pin("_setICECandidateFilteringEnabled:", required: false) { _ in true }
+        pin("_setEnumeratingAllNetworkInterfacesEnabled:", required: false) { asked in asked && allInterfacesAllowed }
 
-        // The feature switches, by key: only the ones that leave the proxy, only with a proxy.
-        let pinnedOff = BrowserSession.featuresOffWithAProxy
+        // The feature switches, by key. Every boolean preference is a feature too, WebRTC's
+        // included, so the same switch reaches it by another way: the same answers there.
         for name in ["_setEnabled:forFeature:", "_setEnabled:forExperimentalFeature:", "_setEnabled:forInternalDebugFeature:"] {
             let selector = NSSelectorFromString(name)
             guard let method = class_getInstanceMethod(preferencesClass, selector) else { continue }
@@ -368,14 +626,116 @@ enum ProfileNetworkGuard {
                 let key = (feature as? NSObject).flatMap { object -> String? in
                     object.responds(to: NSSelectorFromString("key")) ? object.value(forKey: "key") as? String : nil
                 }
-                let proxied = !(proxies ?? []).isEmpty
-                let value = asked && !(proxied && key.map(pinnedOff.contains) == true)
-                original(preferences, selector, value, feature)
+                original(preferences, selector, pinnedFeature(key, asked: asked), feature)
             }
             method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
         return missing
     }
+
+    /// The feature `key` as the profile allows it, when something asks for `asked`.
+    private static func pinnedFeature(_ key: String?, asked: Bool) -> Bool {
+        let proxied = !(proxies ?? []).isEmpty
+        switch key {
+        case "PeerConnectionEnabled"?:
+            return asked && (session.map { $0.configuration.effectiveWebRTCPolicy != .disabled } ?? false)
+        case "ICECandidateFilteringEnabled"?:
+            return true
+        case "EnumeratingAllNetworkInterfacesEnabled"?:
+            return asked && allInterfacesAllowed
+        case "DNSPrefetchingEnabled"?:
+            return asked && !proxied
+        case let key? where proxied && BrowserSession.featuresOffWithAProxy.contains(key):
+            return false
+        default:
+            return asked
+        }
+    }
+
+    /// WebRTC may gather on every interface: the profile's WebRTC goes through the tunnel, and the
+    /// hardware checks asked for it (`BrowserSession.applyPrivacyPreferences`).
+    private static var allInterfacesAllowed: Bool {
+        guard let session, case .relay = session.configuration.webRTCRouting else { return false }
+        return UserDefaults.standard.bool(forKey: "PBTunnelAllInterfaces")
+    }
+
+    /// Each way of turning on what the profile has off, tried on preferences of no web view: the
+    /// ways that get through the pins (`pinPrivacyPreferences`), for the report. Empty is right.
+    private static func pinBypasses() -> [String] {
+        guard let session else { return [] }
+        var bypasses: [String] = []
+        let proxied = !(proxies ?? []).isEmpty
+        var off: [(key: String, getter: String?, setter: String?)] = []
+        if session.configuration.effectiveWebRTCPolicy == .disabled {
+            off.append(("PeerConnectionEnabled", "_peerConnectionEnabled", "_setPeerConnectionEnabled:"))
+        }
+        if proxied {
+            off.append(("DNSPrefetchingEnabled", "_dnsPrefetchingEnabled", "_setDNSPrefetchingEnabled:"))
+            for key in BrowserSession.featuresOffWithAProxy.sorted() {
+                off.append((key: key, getter: nil, setter: nil))
+            }
+        }
+        for (key, getter, setter) in off {
+            let scratch = WKPreferences()
+            WebKitFeatures.set(scratch, key, false)
+            if let setter { WebKitPreferences.setBool(scratch, setter, false) }
+            func isOn() -> Bool {
+                if let getter, let value = WebKitPreferences.bool(scratch, getter) { return value }
+                return WebKitFeatures.isEnabled(scratch, key) == true
+            }
+            if let setter, WebKitPreferences.setBool(scratch, setter, true), isOn() {
+                bypasses.append("\(setter) → \(key)")
+            }
+            for route in ["_setEnabled:forFeature:", "_setEnabled:forExperimentalFeature:", "_setEnabled:forInternalDebugFeature:"] {
+                if WebKitFeatures.set(scratch, key, true, through: route), isOn() {
+                    bypasses.append("\(route) → \(key)")
+                }
+            }
+        }
+        return bypasses
+    }
+
+    /// What the kernel refuses this process, for the life of the process, through a sandbox
+    /// profile that allows everything else:
+    ///
+    ///   * With a proxy, every UDP datagram it would send — QUIC above all, which goes around any
+    ///     proxy: Network.framework ignores a privacy context's proxies for QUIC (reported on macOS
+    ///     27.0.1, FB24760235), and no HTTP or SOCKS5 proxy here carries UDP anyway. Names are still
+    ///     resolved, by mDNSResponder over a local socket; WebKit's own processes are not this one,
+    ///     and their UDP (WebRTC, WebTransport) is off with a proxy.
+    ///   * Any read or write in the real Safari's places (`SafariPaths`): Safari's frameworks find
+    ///     them from the account's real home, not from the profile's, and a profile must neither
+    ///     leave its browsing there nor read the user's own into itself.
+    nonisolated private static func closeTheProcess(udp: Bool) -> [String] {
+        var rules: [String] = []
+        if udp { rules.append("(deny network-outbound (remote udp \"*:*\"))") }
+        if let realHome = SafariPaths.realHome, let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"],
+           realHome != home {
+            rules.append("(deny file-read* file-write* \(SafariPaths.sandboxFilter(realHome: realHome)))")
+        }
+        guard !rules.isEmpty else { return [] }
+        typealias SandboxInit = @convention(c) (UnsafePointer<CChar>, UInt64, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) -> Int32
+        guard let symbol = dlsym(dlopen(nil, RTLD_NOW), "sandbox_init") else {
+            return ["sandbox_init (UDP and the real Safari's places stay open)"]
+        }
+        let sandboxInit = unsafeBitCast(symbol, to: SandboxInit.self)
+        let profile = "(version 1)(allow default)" + rules.joined()
+        var error: UnsafeMutablePointer<CChar>?
+        guard sandboxInit(profile, 0, &error) == 0 else {
+            let reason = error.map { String(cString: $0) } ?? "unknown"
+            Logger(subsystem: "PrivacyBrowser", category: "ProfileNetworkGuard")
+                .error("The process could not be closed: \(reason, privacy: .public) (\(profile, privacy: .public))")
+            return ["sandbox: not applied (\(reason))"]
+        }
+        if udp { closures.insert("udp") }
+        if rules.count > (udp ? 1 : 0) { closures.insert("safari-places") }
+        Logger(subsystem: "PrivacyBrowser", category: "ProfileNetworkGuard")
+            .notice("The kernel closes to this process: \(closures.sorted.joined(separator: ", "), privacy: .public)")
+        return []
+    }
+
+    /// What the kernel closed to this process (`closeTheProcess`): "udp", "safari-places".
+    nonisolated private static let closures = LockedSet()
 
     // MARK: Lock 2: every other store closed
 
@@ -478,7 +838,12 @@ enum ProfileNetworkGuard {
     /// was given proxies of its own (the proxy lookup's, which are the same ones); the shared
     /// session is one made from such a configuration; and a background session — which would run
     /// in a system daemon, outside this process and every lock in it — is made an ordinary one.
-    nonisolated private static func proxyEverySessionConfiguration(_ proxies: [ProxyConfiguration]) -> [String] {
+    ///
+    /// And a session made without a delegate gets `delegate`, which answers the profile's part of
+    /// its challenges (`ProfileChallengePolicy`) — a server's certificate checked without this Mac
+    /// fetching for it — where with no delegate the system's default handling would.
+    nonisolated private static func proxyEverySessionConfiguration(_ proxies: [ProxyConfiguration],
+                                                                   delegate: StoreChallenges) -> [String] {
         var missing: [String] = []
         typealias Factory = @convention(c) (AnyObject, Selector) -> Unmanaged<URLSessionConfiguration>?
         for name in ["defaultSessionConfiguration", "ephemeralSessionConfiguration"] {
@@ -511,11 +876,30 @@ enum ProfileNetworkGuard {
             method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
 
+        typealias Maker = @convention(c) (AnyObject, Selector, AnyObject?, AnyObject?, AnyObject?) -> Unmanaged<AnyObject>?
+        let withDelegate = NSSelectorFromString("sessionWithConfiguration:delegate:delegateQueue:")
+        if let method = class_getClassMethod(URLSession.self, withDelegate) {
+            let original = unsafeBitCast(method_getImplementation(method), to: Maker.self)
+            let replacement: @convention(block) (AnyObject, AnyObject?, AnyObject?, AnyObject?) -> Unmanaged<AnyObject>? = { cls, configuration, given, queue in
+                original(cls, withDelegate, configuration, given ?? delegate, queue)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+            let plain = NSSelectorFromString("sessionWithConfiguration:")
+            if let method = class_getClassMethod(URLSession.self, plain) {
+                let replacement: @convention(block) (AnyObject, AnyObject?) -> Unmanaged<AnyObject>? = { cls, configuration in
+                    original(cls, withDelegate, configuration, delegate, nil)
+                }
+                method_setImplementation(method, imp_implementationWithBlock(replacement))
+            }
+        } else {
+            missing.append("+[NSURLSession sessionWithConfiguration:delegate:delegateQueue:]")
+        }
+
         let shared = NSSelectorFromString("sharedSession")
         if let method = class_getClassMethod(URLSession.self, shared) {
             let configuration = URLSessionConfiguration.default
             configuration.proxyConfigurations = proxies
-            let session = URLSession(configuration: configuration)
+            let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
             let replacement: @convention(block) (AnyObject) -> URLSession = { _ in session }
             method_setImplementation(method, imp_implementationWithBlock(replacement))
         } else {
@@ -547,7 +931,24 @@ enum ProfileNetworkGuard {
             if !webRTCWanted, WebKitPreferences.bool(configuration.preferences, "_peerConnectionEnabled") == true {
                 report.webViewsWithWebRTC += 1
             }
+            if report.hasProxy {
+                if WebKitPreferences.bool(configuration.preferences, "_dnsPrefetchingEnabled") == true {
+                    report.webViewsWithDNSPrefetch += 1
+                }
+                for key in BrowserSession.featuresOffWithAProxy where WebKitFeatures.isEnabled(configuration.preferences, key) == true {
+                    report.webViewsWithFeatureOn[key, default: 0] += 1
+                }
+            }
         }
+        report.pinBypasses = pinBypasses()
+        let trust = ServerTrust.tally.counts
+        report.trustEvaluated = trust.evaluated
+        report.trustRefused = trust.refused
+        report.udpClosed = closures.sorted.contains("udp")
+        report.safariPlacesClosed = closures.sorted.contains("safari-places")
+        report.safariPathsRedirected = SafariPaths.redirected
+        report.workerPreferences = BrowserSession.workerPreferencesApplied
+        report.webKitVersion = WebKitBuild.version
         report.webViewsCaughtByNet = webViewsCaughtByNet
         report.defaultStoreClosed = realDefaultStore.map { !$0.proxyConfigurations.isEmpty } ?? false
         report.processProxy = !report.hasProxy
@@ -571,7 +972,56 @@ enum ProfileNetworkGuard {
                 explicit.invalidateAndCancel()
             }
         }
+        if report.hasProxy {
+            // UDP and QUIC to addresses nothing answers: refused by the kernel here, and a packet
+            // to either in a capture is one that left (scripts/egress_check.py).
+            report.udp["udp"] = await datagram(to: "192.0.2.16", using: .udp)
+            report.udp["quic"] = await datagram(to: "192.0.2.17", using: NWParameters(quic: NWProtocolQUIC.Options(alpn: ["h3"])))
+        }
         return report
+    }
+
+    /// What became of a connection to `host`:443 made with `parameters` and given one datagram:
+    /// "refused …" when it could not be made or the datagram could not be sent, "sent" or
+    /// "ready" when it was (for UDP and QUIC, that is a packet on its way), "waiting" otherwise.
+    private static func datagram(to host: String, using parameters: NWParameters) async -> String {
+        let connection = NWConnection(host: NWEndpoint.Host(host), port: 443, using: parameters)
+        let queue = DispatchQueue(label: "PrivacyBrowser.udp-probe")
+        let outcome = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            let once = Once(continuation)
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    connection.send(content: Data("pb".utf8), completion: .contentProcessed { error in
+                        once.finish(error.map { "refused \($0)" } ?? "sent")
+                    })
+                case let .failed(error):
+                    once.finish("refused \(error)")
+                case let .waiting(error):
+                    once.finish("refused (waiting) \(error)")
+                default:
+                    break
+                }
+            }
+            connection.start(queue: queue)
+            queue.asyncAfter(deadline: .now() + 4) { once.finish("no answer in 4 s") }
+        }
+        connection.cancel()
+        return outcome
+    }
+
+    /// Resumes a continuation the first time only.
+    private final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<String, Never>?
+        init(_ continuation: CheckedContinuation<String, Never>) { self.continuation = continuation }
+        func finish(_ value: String) {
+            let pending = lock.withLock { () -> CheckedContinuation<String, Never>? in
+                defer { continuation = nil }
+                return continuation
+            }
+            pending?.resume(returning: value)
+        }
     }
 
     private static func fetch(_ url: URL, with session: URLSession) async -> String {
@@ -614,10 +1064,36 @@ struct ProfileNetworkReport: Codable, Equatable {
     var safariPreferences: [String: String] = [:]
     /// XPC services the process connected to; the ones refused (`noServiceOutsideTheProxy`) say so.
     var services: [String] = []
+    /// With a proxy: web views whose dns-prefetch preference is on (which decides dns-prefetch
+    /// before WebKit 7621; from then on the content rules do, `ContentRules`).
+    var webViewsWithDNSPrefetch = 0
+    /// With a proxy: by feature key (`BrowserSession.featuresOffWithAProxy`), web views that have
+    /// it on in their engine.
+    var webViewsWithFeatureOn: [String: Int] = [:]
+    /// Ways of turning on what the profile has off that get through the pins. Empty is right.
+    var pinBypasses: [String] = []
+    /// Server-trust questions answered without this Mac fetching (`ServerTrust`), and of those
+    /// the ones refused.
+    var trustEvaluated = 0
+    var trustRefused = 0
+    /// With a proxy: the kernel refuses this process any UDP (`ProfileNetworkGuard.closeTheProcess`).
+    var udpClosed = false
+    /// The kernel refuses this process the real Safari's places (`SafariPaths`).
+    var safariPlacesClosed = false
+    /// The path getters of Safari's frameworks that answer with the profile's home (`SafariPaths`).
+    var safariPathsRedirected: [String] = []
+    /// With a proxy: what became of a UDP datagram and of a QUIC connection, by name.
+    var udp: [String: String] = [:]
+    /// The profile's service workers have the profile's preferences (nil: this WebKit cannot).
+    var workerPreferences: Bool?
+    /// WebKit's version (`CFBundleVersion`), for telling apart what differs between versions.
+    var webKitVersion = ""
 
     /// Nothing in the process is outside the profile's data or proxy, as far as it can tell.
     var isClean: Bool {
         webViewsOffProfile == 0 && webViewsWithWebRTC == 0 && processProxy
+            && webViewsWithFeatureOn.values.allSatisfy { $0 == 0 }
+            && pinBypasses.isEmpty && (!hasProxy || udpClosed)
             && probes.values.allSatisfy { $0.hasPrefix("ok ") }
     }
 }

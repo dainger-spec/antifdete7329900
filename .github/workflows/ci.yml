@@ -72,11 +72,14 @@ jobs:
       - name: Self-test against real WebKit (sandboxed and unsandboxed)
         run: |
           set -o pipefail
-          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 &
+          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
+            --tls-control 18086 --canary 18087 &
           PROXY_PID=$!
-          sleep 1
+          # The proxy makes its TLS certificates before it listens.
+          for attempt in $(seq 1 40); do nc -z 127.0.0.1 18081 && break; sleep 0.5; done
           export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
           export PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
+          export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087
           mkdir -p build/egress
           status=0
           for variant in sandboxed unsandboxed; do
@@ -92,6 +95,7 @@ jobs:
               # scripts/disk_check.py: nothing may be written where the real Safari keeps its data.
               sudo fs_usage -w -f filesys PrivacyBrowser > build/egress/fs-app.txt 2>&1 &
               sudo fs_usage -w -f filesys com.apple.WebKit > build/egress/fs-webkit.txt 2>&1 &
+              sudo fs_usage -w -f filesys cfprefsd > build/egress/fs-cfprefsd.txt 2>&1 &
               sleep 2
             fi
             build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test | tee "build/egress/selftest-$variant.txt" || status=1
@@ -106,7 +110,7 @@ jobs:
             --selftest-log build/egress/selftest-unsandboxed.txt --tcpdump-errors build/egress/tcpdump.err || status=1
           echo "::endgroup::"
           echo "::group::files written while a profile ran in Safari's chrome"
-          python3 scripts/disk_check.py --trace build/egress/fs-app.txt --trace build/egress/fs-webkit.txt \
+          python3 scripts/disk_check.py --trace build/egress/fs-app.txt --trace build/egress/fs-webkit.txt --trace build/egress/fs-cfprefsd.txt \
             --selftest-log build/egress/selftest-unsandboxed.txt || status=1
           echo "::endgroup::"
           exit $status
