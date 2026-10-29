@@ -2,7 +2,8 @@ import AppKit
 
 // Entry point. `--self-test` runs headless end-to-end checks against the real WebKit, and the
 // `--selftest-*-vault` pair checks App Sandbox container migration (see SelfTest.swift);
-// otherwise the SwiftUI app starts.
+// otherwise the SwiftUI app starts. `-safari-chrome` is not handled here: it is read where a
+// profile's window is opened (BrowserSession.openProfileWindow).
 // Top-level code runs on the main thread; Swift 5 mode does not infer main-actor isolation for it.
 MainActor.assumeIsolated {
     let arguments = CommandLine.arguments
@@ -22,6 +23,10 @@ MainActor.assumeIsolated {
     } else if arguments.contains("--render-ui-snapshots") {
         // The app's screens with sample data, as PNG files for design review (UISnapshots.swift).
         UISnapshots.start(arguments: arguments)
+    } else if arguments.contains("--safari-probe") {
+        // One step of the system browser framework window path, in its own process
+        // (SafariFrameworkProbe.swift; scripts/safari_framework/run_probe.py drives it).
+        SafariFrameworkProbe.start(arguments: arguments)
     } else if arguments.contains("--capture-sites") {
         // The app's own start-up, as far as web content can tell: its UI language is set, and the
         // first profile (no proxy) decides the language websites see.

@@ -1,0 +1,45 @@
+name: Framework window probe
+
+# Does the system browser framework produce a usable window inside this app's process, and can a
+# profile's WKWebsiteDataStore be bound to the web view it creates? See
+# docs/SAFARI_FRAMEWORK_PATH.md. Report-only: the results are the artifacts and the job summary;
+# a step fails only when the driver itself breaks.
+on:
+  push:
+    paths:
+      - "Sources/PrivacyBrowser/Browser/Safari*.swift"
+      - "Sources/PrivacyBrowser/App/SafariFrameworkProbe.swift"
+      - "scripts/safari_framework/**"
+      - ".github/workflows/safari-framework.yml"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - name: Build the app, sandboxed and not
+        # Both: the App Sandbox is the first thing that can stop a private framework from
+        # opening, and the difference between the two says whether that is what happened.
+        run: |
+          APP_DIR=build/sandboxed scripts/build-app.sh
+          SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Probe (unsandboxed)
+        timeout-minutes: 15
+        run: python3 scripts/safari_framework/run_probe.py --app build/unsandboxed/PrivacyBrowser.app --out build/safari-framework/unsandboxed
+      - name: Probe (sandboxed)
+        timeout-minutes: 15
+        run: python3 scripts/safari_framework/run_probe.py --app build/sandboxed/PrivacyBrowser.app --out build/safari-framework/sandboxed
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: safari-framework-${{ matrix.os }}
+          path: build/safari-framework
+          if-no-files-found: ignore

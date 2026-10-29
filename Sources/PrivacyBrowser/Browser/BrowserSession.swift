@@ -43,8 +43,13 @@ final class BrowserSession {
     /// Receives the AutoFill script's messages (registered in its own content world only).
     private let passwordHandler = PasswordAutoFillHandler()
     private var windows: [BrowserWindowController] = []
+    /// Windows opened through the system browser framework instead of the in-process web view
+    /// (`useSafariChrome`). Held here because nothing else keeps the framework's controller alive.
+    private var frameworkWindows: [SafariBrowserWindowController] = []
+    private var frameworkWindowObservers: [NSObjectProtocol] = []
     private var libraryWindow: LibraryWindowController?
     private var isClosing = false
+    private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
 
     /// Throws when the profile's proxy cannot be applied — before any data store exists, so a
     /// profile with a broken proxy never starts on a direct connection (fail-closed).
@@ -74,8 +79,7 @@ final class BrowserSession {
             if let blocker = ContentRules.dnsPrefetchBlocker {
                 userContentController.add(blocker)
             } else {
-                Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
-                    .error("No ping-load blocker: dns-prefetch of this profile may resolve outside its proxy")
+                log.error("No ping-load blocker: dns-prefetch of this profile may resolve outside its proxy")
             }
         }
         passwordHandler.session = self
@@ -84,6 +88,9 @@ final class BrowserSession {
     }
 
     var windowCount: Int { windows.count }
+
+    /// Windows of this profile that the system browser framework owns (self-test hook).
+    var frameworkWindowCount: Int { frameworkWindows.count }
 
     /// The profile's browser windows (self-test hook).
     var windowControllers: [BrowserWindowController] { windows }
@@ -131,25 +138,54 @@ final class BrowserSession {
 
     // MARK: Windows
 
-    /// Opens a browser window. When `useSafariChrome` is true (opt-in, default false) the
-    /// Safari.framework BrowserWindowController is attempted first; on failure the existing
-    /// custom controller is used. See docs/SAFARI_FRAMEWORK_PATH.md.
+    /// Opens the profile's window: through the system browser framework when this profile (or
+    /// the `-safari-chrome` launch argument) asks for it and the framework path works, otherwise
+    /// through the in-process web view. Returns the in-process controller, or nil when a
+    /// framework window took over — which has no `BrowserWindowController` behind it.
+    /// See docs/SAFARI_FRAMEWORK_PATH.md.
     @discardableResult
-    func openWindow(url: URL?, useSafariChrome: Bool = false) -> BrowserWindowController {
-        if useSafariChrome {
-            let safari = SafariBrowserWindowController(profileID: profileID)
-            if let window = safari.open(dataStore: dataStore) {
-                window.makeKeyAndOrderFront(nil)
-                NSLog("BrowserSession: Safari chrome opened for profile \(profileID)")
-                // Safari controller is not tracked in `windows` yet; fall through to custom
-                // controller so existing close/shutdown paths remain intact.
-            }
+    func openProfileWindow(url: URL?, useSafariChrome: Bool) -> BrowserWindowController? {
+        if useSafariChrome || SafariBrowserWindowController.enabledByLaunchArgument, openFrameworkWindow(url: url) {
+            return nil
         }
+        return openWindow(url: url)
+    }
+
+    /// The in-process web view path: the app's own window controller. Always available.
+    @discardableResult
+    func openWindow(url: URL?) -> BrowserWindowController {
         let controller = BrowserWindowController(session: self)
         windows.append(controller)
         controller.showWindow(nil)
         controller.addTab(url: url)
         return controller
+    }
+
+    /// True when the framework produced a usable window. On false nothing is retained and the
+    /// process is still a regular app, so the caller can open an in-process window instead.
+    private func openFrameworkWindow(url: URL?) -> Bool {
+        let controller = SafariBrowserWindowController(profileID: profileID)
+        guard let window = controller.open(dataStore: dataStore, startURL: url) else {
+            log.notice("Framework window path did not produce a window; using the in-process one")
+            return false
+        }
+        frameworkWindows.append(controller)
+        // The framework's own controller is the window's delegate; this watches it from outside
+        // rather than taking that over.
+        let observer = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification,
+                                                              object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.frameworkWindowDidClose(controller) }
+        }
+        frameworkWindowObservers.append(observer)
+        window.makeKeyAndOrderFront(nil)
+        return true
+    }
+
+    private func frameworkWindowDidClose(_ controller: SafariBrowserWindowController) {
+        frameworkWindows.removeAll { $0 === controller }
+        if windows.isEmpty && frameworkWindows.isEmpty && !isClosing {
+            onAllWindowsClosed?()
+        }
     }
 
     /// Opens `url` in a new tab of this profile's frontmost window (or a new window).
@@ -178,7 +214,7 @@ final class BrowserSession {
 
     func windowDidClose(_ controller: BrowserWindowController) {
         windows.removeAll { $0 === controller }
-        if windows.isEmpty && !isClosing {
+        if windows.isEmpty && frameworkWindows.isEmpty && !isClosing {
             onAllWindowsClosed?()
         }
     }
@@ -215,6 +251,11 @@ final class BrowserSession {
         // `tearDown()` nils each window's delegate, so `close()` here never calls back into us.
         let toClose = windows
         windows.removeAll()
+        frameworkWindowObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        frameworkWindowObservers.removeAll()
+        let frameworkToClose = frameworkWindows
+        frameworkWindows.removeAll()
+        frameworkToClose.forEach { $0.close() }
         libraryWin?.window?.delegate = nil
         libraryWin?.close()
         for controller in toClose {
