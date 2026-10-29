@@ -150,13 +150,30 @@ final class WebDataStoreVault {
                 try url.setResourceValues(values)
                 // Read back from a URL of its own (no cached value): set, or only said to be.
                 let readBack = try URL(fileURLWithPath: root.path).resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
-                if readBack != true { exclusionFailures.append("\(root.lastPathComponent): set without error, reads back \(String(describing: readBack))") }
+                if readBack != true {
+                    // Measured in the sandboxed build (CI run 384): set without an error, read back
+                    // false. The same mark written as the attribute it is, and what that does.
+                    exclusionFailures.append("\(root.lastPathComponent): set without error, reads back \(String(describing: readBack)); \(markExcludedDirectly(root))")
+                }
             } catch {
                 exclusionFailures.append("\(root.lastPathComponent): \(error.logKind) \(error.localizedDescription)")
                 Logger(subsystem: "PrivacyBrowser", category: "WebDataStoreVault")
                     .error("Could not keep \(root.path, privacy: .private) out of backups: \(error.logKind, privacy: .public)")
             }
         }
+    }
+
+    /// Time Machine's exclusion mark written directly (the extended attribute the resource value
+    /// stands for), and what came of it.
+    private static func markExcludedDirectly(_ root: URL) -> String {
+        guard let value = try? PropertyListSerialization.data(fromPropertyList: "com.apple.backupd", format: .binary, options: 0) else {
+            return "no attribute value"
+        }
+        let name = "com.apple.metadata:com_apple_backup_excludeItem"
+        let result = value.withUnsafeBytes { setxattr(root.path, name, $0.baseAddress, $0.count, 0, 0) }
+        if result != 0 { return "setxattr: \(String(cString: strerror(errno)))" }
+        let readBack = try? URL(fileURLWithPath: root.path).resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
+        return "setxattr: done, reads back \(String(describing: readBack))"
     }
 
     /// The roots `excludeRootsFromCopies` could not mark, and why (the self-test shows them).

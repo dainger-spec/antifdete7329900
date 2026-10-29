@@ -147,8 +147,9 @@ One line each; back to them once the list above is closed.
 - `.webarchive` opened in the chrome gets a store without the proxy — refuted: `LoadWebArchiveWithEphemeralStorageEnabled` is off with a proxy.
 - Attribution (PCM) reports stored before the proxy — removed at launch; no check.
 - The warm-up report counted a run's first page's cookies as the profile's own (its starting point was read before the session was set) — fixed with its check (the self-test's per-site report); not a leak.
+- The egress capture counted the self-test's own control profile (no proxy) dialing WebTransport to a documentation address in run 384 (timestamps and source ports fall in that step, before the proxied profile's) — the control now only measures, it does not connect.
 - A private window of Safari's chrome writes the profile's persistent store — disk.
-- Plaintext in backups and Spotlight while running — disk; checked (`home.noindex`, excluded from backups); the sandboxed build's WebKit folders fail it (measured in CI 382, reason recorded from the next run).
+- Plaintext in backups and Spotlight while running — disk; checked (`home.noindex`, excluded from backups) in the build without the sandbox; in the sandboxed build the mark does not stay on the container's folders (measured, CI 383–384; writing the attribute directly is measured next) — a documented limitation.
 - AppKit saved state, `/var/folders`, recent documents, crash reports — disk.
 - An ephemeral profile in its own process keeps Safari's state; unlock recovery of a busy home — disk.
 - Credentials from Safari's sheets to the keychain — clamped to the session; disk.

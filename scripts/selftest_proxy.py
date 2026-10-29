@@ -314,8 +314,11 @@ def leak_page(run: str) -> bytes:
     return page.replace("RUN", run).replace("CANARY", str(CANARY_PORT)).encode()
 
 
-def leak_secure_page(run: str) -> bytes:
-    """The leak page's secure-context half (see the module docstring)."""
+def leak_secure_page(run: str, connect: bool = True) -> bytes:
+    """The leak page's secure-context half (see the module docstring). `connect=0` in the query
+    (a profile without a proxy, the self-test's control) only says what exists: it tries no
+    WebTransport connection, which would go to the documentation address directly — as it should
+    without a proxy — and the capture would rightly count it."""
     page = r"""<!doctype html><html><head><title>PB secure leak page RUN</title></head><body>secure RUN<script>
 (async () => {
   const run = 'RUN';
@@ -345,10 +348,10 @@ def leak_secure_page(run: str) -> bytes:
     });
   } catch (e) { result.workerTZ = 'error ' + e; }
   try {
-    await navigator.serviceWorker.register('/pb-leak/sw.js?run=RUN');
+    await navigator.serviceWorker.register('/pb-leak/sw.js?run=RUN&connect=' + (CONNECT ? '1' : '0'));
     result.sw = 'registered';
   } catch (e) { result.sw = 'error ' + e; }
-  if ([result.webTransport, result.worker, result.shared].includes('function')) {
+  if (CONNECT && [result.webTransport, result.worker, result.shared].includes('function')) {
     try {
       const transport = new WebTransport('https://192.0.2.13:4433/pb-leak/wt?run=RUN');
       result.webTransportConnect = await Promise.race([transport.ready.then(() => 'ready', () => 'rejected'), timeout(3500, 'timeout')]);
@@ -357,15 +360,15 @@ def leak_secure_page(run: str) -> bytes:
   await fetch('/pb-leak/report?run=RUN&data=' + encodeURIComponent(JSON.stringify(result)), { cache: 'no-store' });
 })();
 </script></body></html>"""
-    return page.replace("RUN", run).encode()
+    return page.replace("RUN", run).replace("CONNECT", "true" if connect else "false").encode()
 
 
-def leak_service_worker(run: str) -> bytes:
+def leak_service_worker(run: str, connect: bool = True) -> bytes:
     """The service worker of the secure page: what a service worker can reach."""
     script = r"""self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const report = { sw: true, webTransport: typeof WebTransport, tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
-    if (typeof WebTransport === 'function') {
+    if (CONNECT && typeof WebTransport === 'function') {
       try {
         const transport = new WebTransport('https://192.0.2.13:4433/pb-leak/swwt?run=RUN');
         report.webTransportConnect = await Promise.race([transport.ready.then(() => 'ready', () => 'rejected'),
@@ -376,7 +379,7 @@ def leak_service_worker(run: str) -> bytes:
   })());
 });
 """
-    return script.replace("RUN", run).encode()
+    return script.replace("RUN", run).replace("CONNECT", "true" if connect else "false").encode()
 
 
 def leak_frame(run: str) -> bytes:
@@ -445,9 +448,9 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         extra_headers = (f"Link: <//header-{run}.leak.example.com>; rel=dns-prefetch\r\n"
                          "X-DNS-Prefetch-Control: on\r\n")
     elif plain_path == "/pb-leak/secure":
-        body, content_type = leak_secure_page(safe_run(query)), "text/html; charset=utf-8"
+        body, content_type = leak_secure_page(safe_run(query), parse_qs(query).get("connect", ["1"])[0] != "0"), "text/html; charset=utf-8"
     elif plain_path == "/pb-leak/sw.js":
-        body, content_type = leak_service_worker(safe_run(query)), "text/javascript"
+        body, content_type = leak_service_worker(safe_run(query), parse_qs(query).get("connect", ["1"])[0] != "0"), "text/javascript"
     elif plain_path == "/pb-leak/tzworker.js":
         body, content_type = b"postMessage(Intl.DateTimeFormat().resolvedOptions().timeZone)", "text/javascript"
     elif plain_path == "/pb-leak/frame":
