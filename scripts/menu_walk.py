@@ -11,6 +11,12 @@ lines, and adds the crash report of every item that ended the process (scripts/c
 Writes `menu-walk.json` and `menu-walk.md` (a table: item, keys, what it did, what it wrote,
 which services started) into --out.
 
+While it walks, `fs_usage` traces the file-system calls of the app's processes, WebKit's and
+cfprefsd (as the self-test's disk check does, scripts/disk_check.py; with sudo, when there is no
+other kernel trace): a write in the real Safari's places by one of them is a write by the profile.
+FSEvents, which the walk reads per item, does not say who wrote, and macOS's own daemons write in
+those places on their own schedule (Safari's bookmarks sync agent, its cache-delete extension).
+
 Each item is reduced to what is compared: its behaviour (disabled, a crash or a hang, an
 exception, our "unavailable" notice, a panel, an alert, a modal window, a window or sheet by class,
 a request to open something outside, quitting, our Settings asked for, a change in the window, or
@@ -18,7 +24,8 @@ nothing seen), where it wrote (the profile's home, the real Safari's places, els
 XPC services it started. With --record, the record for this Safari is compared item by item:
 every item whose reduction changed, every item gone and every new one is listed; with --check a
 difference fails (exit 1). Without a record, or with --write-record, the reduction is written
-for the record. A walk that did not get to the end fails with --check too.
+for the record. A walk that did not get to the end fails with --check too, and so does a write in
+the real Safari's places that the trace puts on the profile.
 """
 import argparse
 import glob
@@ -154,6 +161,45 @@ def keyed(items):
     return named
 
 
+def start_trace(out):
+    """fs_usage of the app's, WebKit's and cfprefsd's file-system calls, into out/fs.txt; None
+    without sudo."""
+    if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode != 0:
+        return None
+    trace = subprocess.Popen(["sudo", "-n", "fs_usage", "-w", "-f", "filesys", "PrivacyBrowser", "com.apple.WebKit", "cfprefsd"],
+                             stdout=open(os.path.join(out, "fs.txt"), "w"), stderr=subprocess.STDOUT)
+    time.sleep(2)
+    return trace
+
+
+def traced_writes(out):
+    """The writes in the real Safari's places in out/fs.txt, as "process: path", and what the
+    trace was (lines read, or why it is none)."""
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import disk_check
+    try:
+        lines = open(os.path.join(out, "fs.txt"), encoding="utf-8", errors="replace").read().splitlines()
+    except OSError:
+        return [], "no trace (no sudo)"
+    if len(lines) < 10 and any("ktrace" in line or "Resource busy" in line for line in lines):
+        return [], "no trace: " + " ".join(lines)[:200]
+    roots = disk_check.forbidden_roots(os.path.expanduser("~"))
+    found = []
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 3:
+            continue
+        call = fields[1].split("[")[0]
+        writes = call in disk_check.WRITES or (call in disk_check.OPENS and re.search(r"\([^)]*[WC][^)]*\)", line))
+        if not writes or disk_check.FAILED.match(line):
+            continue
+        for path in disk_check.PATH.findall(line):
+            path = path.replace("\\ ", " ")
+            if disk_check.is_forbidden(path, roots):
+                found.append(f"{fields[-1].rsplit('.', 1)[0]}: {path}")
+    return sorted(set(found)), f"{len(lines)} lines traced"
+
+
 def crash_reports(since, out):
     """The crash reports of this app's processes written since `since`, summarized, by pid."""
     found = {}
@@ -210,6 +256,7 @@ def main():
     environment = dict(os.environ, PRIVACYBROWSER_LANG="en", PB_MENU_WALK_IGNORE=args.ignore)
     if proxied:
         environment["PB_SELFTEST_HTTP_PROXY_PORT"] = str(PROXY_PORT)
+    trace = start_trace(out)
     started = time.time()
     with open(os.path.join(out, "walk.txt"), "w") as log:
         try:
@@ -220,6 +267,12 @@ def main():
             output, status = (expired.stdout or b"").decode(errors="replace") if isinstance(expired.stdout, bytes) else (expired.stdout or ""), -1
         log.write(output)
     proxy.kill()
+    if trace:
+        subprocess.run(["sudo", "-n", "pkill", "-INT", "-f", "fs_usage -w"], capture_output=True)
+        time.sleep(2)
+    by_profile, traced = traced_writes(out)
+    print(f"MENU-WALK file trace: {traced}; writes in the real Safari's places by the app's, WebKit's or cfprefsd's "
+          f"processes: {len(by_profile)}", flush=True)
 
     items = []
     for line in output.splitlines():
@@ -259,8 +312,11 @@ def main():
     written = walk_writes(items)
     for name, paths in written.items():
         if paths:
-            notice("error" if name == "REAL SAFARI" and args.check else "warning", args.title,
-                   f"during the walk, written in {name}: {len(paths)} path(s): " + " · ".join(paths[:8]))
+            notice("warning", args.title, f"during the walk, written in {name} (by any process): {len(paths)} path(s): "
+                   + " · ".join(paths[:8]))
+    if by_profile:
+        notice("error" if args.check else "warning", args.title,
+               f"the profile wrote in the real Safari's places (fs_usage): " + " · ".join(by_profile[:8]))
 
     current = {name: reduce(item) for name, item in keyed(items).items()}
     if args.write_record or not args.record or not os.path.exists(args.record or ""):
@@ -268,7 +324,7 @@ def main():
         with open(target, "w") as handle:
             json.dump(current, handle, indent=1, ensure_ascii=False, sort_keys=True)
         print(f"MENU-WALK record written: {target}", flush=True)
-    failed = args.check and (not finished or bool(written["REAL SAFARI"]))
+    failed = args.check and (not finished or bool(by_profile))
     if args.record and os.path.exists(args.record):
         with open(args.record) as handle:
             recorded = json.load(handle)
