@@ -2,7 +2,66 @@
 
 Sync is optional, off by default, and works on demand (**More → Sync…** in the app). This
 document describes the client: wire format, objects and merge rules. The HTTP contract
-for a server is in [SYNC_SERVER_API.md](SYNC_SERVER_API.md).
+for a server is in [SYNC_SERVER_API.md](SYNC_SERVER_API.md). A server and an account page are
+built to the decisions below.
+
+## Accepted decisions for a server (October 2026)
+
+Accepted by the project's owner before any server exists, so that a server and its account page
+are built to them rather than around them. Where the client already does what a decision says,
+that is said; the rest is not built yet.
+
+1. **Sync traffic goes directly, never through a profile's proxy.** Sync is the app's own
+   connection, from the profile manager (today `HTTPSyncTransport` over the app's `URLSession`;
+   no profile's proxy is on that path). Through a profile's proxy it would spend traffic the user
+   pays for — a profile's state is hundreds of kilobytes per change, and residential proxies are
+   sold by the gigabyte — make sync slow and unreliable, and fail wherever a proxy blocks the sync
+   domain, as the owner's proxy blocked ipinfo.io. The protection is not in the route but in the
+   server having nothing to link (decision 3).
+
+2. **One connection per app, not per profile.** The app syncs the objects of every profile in one
+   batched run. The server learns "this account has changes", never "profile N is open now, from
+   here". A connection per profile on a timer — the competitor's: every profile calls its server
+   every five seconds, so the server knows which profile a person has open this second, and from
+   which address — is ruled out on purpose.
+   The lock that keeps one profile from running on two Macs at once is needed (cookies otherwise
+   diverge: *Limitations*), and it is a **lease**, not a live signal: taken during a sync, as one
+   more encrypted object written with compare-and-swap, the device and the expiry inside its
+   ciphertext; released by a later sync, and otherwise ending when it expires. It is never renewed
+   on a timer and never opens a connection of its own — coarser than a live lock, and silent.
+
+3. **The server stores ciphertext only; the key never leaves the user's devices.** As built:
+   every object but `vault-header` is encrypted end to end (*Envelope*), object IDs are opaque
+   HMACs, and the server knows no profile's name, tags, notes or proxy address. A server or an
+   account page does not step back from this for convenience. A list of profiles in the account
+   page, a search across profiles, a preview, a count by kind: each needs the server to understand
+   the content, and with the first of them the promise ends. Anything the account page cannot do
+   without reading content is brought to the owner as a question, never decided in code.
+
+4. **Off by default.** As built: sync stays off until the user sets a target. Sending cookies to
+   someone else's server is a deliberate act, never a default: most users have one Mac and gain
+   nothing from sync, so on by default would be risk for no benefit. Turning it on first shows an
+   honest screen (not built yet):
+   - what leaves the Mac: the profile list, each profile's settings with its proxy and its
+     credentials, passwords, bookmarks, history, and persistent cookies (for the profiles whose
+     **Sync cookies with other devices** switch is on) — all of it encrypted on the Mac;
+   - what the server sees: the account, the vault ID and its header (the KDF's salt and
+     parameters and the wrapped key, nothing secret), how many objects there are, their sizes and
+     revisions, when they change, and the address the Mac connects from — its own, not a
+     profile's proxy;
+   - what it never sees: profile names, sites and URLs, cookies, passwords, proxies, anything
+     inside.
+
+5. **Metadata kept by the server is decided explicitly, with the server.** What it keeps in its
+   logs — addresses, times, sizes — is decided before it runs and written here as "this, for this
+   long; nothing else", never "whatever the stack keeps". Open.
+
+**Why this is written now.** The comparison it is for: the competitor's server knows the person,
+their real address, which profile is open this second, and receives the profile's data (the
+owner's measurement on a live Mac; not repeated in this repository). This project's server will
+know that an account exists, that it has changes, the address they come from and their size —
+and does not and cannot know what is inside. That difference can be said on the website, and a
+buyer can check it the same way the competitor was checked.
 
 ## What is ready for a server vs. local-only
 
@@ -206,7 +265,7 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
   and from there the cookies are in `cookies.bin` and sync with the rest.
 - Cookies reach another device at its next **launch** of the profile, after a sync. A profile
   running on two Macs at once diverges until each stops; then the newer change of each cookie
-  wins. A change counts from the stop that recorded it (or a launch, for imports), not from
+  wins. The accepted remedy is a lease taken during a sync (decision 2), not built yet. A change counts from the stop that recorded it (or a launch, for imports), not from
   the moment the page set it: of two devices that changed the same cookie in overlapping
   runs, the one that stopped later wins.
 - Only cookies sync. A site that keeps its sign-in in localStorage or IndexedDB (rather than

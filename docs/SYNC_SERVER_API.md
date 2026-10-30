@@ -10,6 +10,13 @@ except `vault-header`, which holds only the KDF salt, the KDF parameters and the
 vault key (see [SYNC_FORMAT.md](SYNC_FORMAT.md)). The server needs no crypto and never sees
 plaintext.
 
+A server and its account page are built to the decisions accepted in
+[SYNC_FORMAT.md](SYNC_FORMAT.md#accepted-decisions-for-a-server-october-2026): sync goes directly,
+not through a profile's proxy; one batched connection per app, never one per profile on a timer,
+and a lease taken during a sync instead of a live lock; ciphertext only, with nothing on the
+account page that needs to read content; off by default, behind an honest screen; and the logs the
+server keeps decided explicitly before it runs.
+
 ## Conventions
 
 - Base URL: configured by the user, e.g. `https://sync.example.com/api`. All paths below
