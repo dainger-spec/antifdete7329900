@@ -24,7 +24,8 @@ import WebKit
 /// on from the next item.
 ///
 /// Not chosen: the system's Services (they hand the selection to other applications, and
-/// `HandOffs` keeps them away from pages), and items that are views rather than commands.
+/// `HandOffs` keeps them away from pages), and items that are views rather than commands. Not
+/// listed: AppKit's window tiling in the Window menu (`isWindowTiling`).
 @MainActor
 enum SafariMenuWalk {
     /// One item of the menu bar, where it is and how to choose it.
@@ -148,7 +149,7 @@ enum SafariMenuWalk {
         func add(_ menu: NSMenu, _ path: [String]) {
             menu.delegate?.menuNeedsUpdate?(menu)
             menu.update()
-            for item in menu.items where !item.isSeparatorItem {
+            for item in menu.items where !item.isSeparatorItem && !isWindowTiling(item) {
                 let here = path + [item.title.isEmpty ? "(untitled)" : item.title]
                 if let submenu = item.submenu {
                     if submenu === NSApp.servicesMenu {
@@ -169,6 +170,18 @@ enum SafariMenuWalk {
             add(submenu, [top.title.isEmpty ? submenu.title : top.title])
         }
         return list
+    }
+
+    /// AppKit's own window tiling in the Window menu (Fill, Center, Move & Resize, Zoom All, Full
+    /// Screen Tile, Remove Window from Set): the system's, in every application, and there or not
+    /// by the window's state (runs 456 and 457 on macOS 26: 174 items, then 147). Not walked.
+    private static func isWindowTiling(_ item: NSMenuItem) -> Bool {
+        if let submenu = item.submenu {
+            let actions = submenu.items.compactMap { $0.action.map(NSStringFromSelector) }
+            return !actions.isEmpty && actions.allSatisfy { $0.hasPrefix("_zoom") }
+        }
+        guard let action = item.action.map(NSStringFromSelector) else { return item.title == "Full Screen Tile" }
+        return action.hasPrefix("_zoom") || action == "zoomAll:" || action == "_removeWindowFromStageManagerSet:"
     }
 
     // MARK: One item
