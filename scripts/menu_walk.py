@@ -87,13 +87,19 @@ def behaviour(item):
     return sorted(words) or ["nothing seen"]
 
 
-# Written by macOS itself for any application, not by the profile: Biome's record of which menu
-# items an application's user chose (App.MenuItem), and the like. Shown, not counted as the item's.
-SYSTEM_RECORDS = ("~/Library/Biome/",)
+# The account's home outside the profile, by what a write there would mean. Everything else in
+# it is written all the time by the system's own daemons (Spotlight, Duet, IdentityServices…),
+# whatever runs: listed in the JSON, not counted as the item's.
+BUNDLE_ID = "dev.local.PrivacyBrowser"
+PLACES = (("this app's files in the account's home", lambda path: BUNDLE_ID in path),
+          ("the user's folders", lambda path: path.startswith(("~/Downloads", "~/Desktop", "~/Documents", "~/Pictures", "~/Movies", "~/Music"))),
+          ("the keychain", lambda path: path.startswith("~/Library/Keychains")),
+          ("recent items", lambda path: "com.apple.sharedfilelist" in path or "RecentDocuments" in path))
 
 
 def outside(item):
-    return [path for path in item.get("outside", []) if not path.startswith(SYSTEM_RECORDS)]
+    """The writes outside the profile that count: the places in PLACES."""
+    return [path for path in item.get("outside", []) if any(test(path) for _, test in PLACES)]
 
 
 def writes(item):
@@ -102,13 +108,29 @@ def writes(item):
         places.append("profile's home")
     if item.get("realSafari"):
         places.append("REAL SAFARI")
-    if outside(item):
-        places.append("outside")
+    for name, test in PLACES:
+        if any(test(path) for path in item.get("outside", [])):
+            places.append(name)
     return places
 
 
 def reduce(item):
-    return {"behaviour": behaviour(item), "writes": writes(item), "xpc": sorted(set(item.get("xpc", [])))}
+    """What the record keeps of an item: what it did and the services it started. Where it wrote
+    is in the table but not in the record: a file is written a moment after the item that caused
+    it, often during the next one, and the system's daemons write in the home all the time, so
+    which item a write belongs to is a guess. What is checked of writes is the walk's as a whole
+    (`walk_writes`): nothing in the real Safari's places, ever."""
+    return {"behaviour": behaviour(item), "xpc": sorted(set(item.get("xpc", [])))}
+
+
+def walk_writes(items):
+    """Every write of the walk in the places that count, by place."""
+    found = {"REAL SAFARI": set()}
+    for item in items:
+        found["REAL SAFARI"].update(item.get("realSafari", []))
+        for name, test in PLACES:
+            found.setdefault(name, set()).update(path for path in item.get("outside", []) if test(path))
+    return {name: sorted(paths) for name, paths in found.items()}
 
 
 def key(item):
@@ -172,6 +194,13 @@ def main():
     args = parser.parse_args()
     out = os.path.abspath(args.out)
     os.makedirs(out, exist_ok=True)
+    global BUNDLE_ID
+    try:
+        import plistlib
+        with open(os.path.join(args.app, "Contents", "Info.plist"), "rb") as handle:
+            BUNDLE_ID = plistlib.load(handle).get("CFBundleIdentifier", BUNDLE_ID)
+    except (OSError, ValueError):
+        pass
 
     proxy = subprocess.Popen([sys.executable, os.path.join(ROOT, "scripts", "selftest_proxy.py"),
                               "--http", str(PROXY_PORT), "--socks", str(PROXY_PORT + 1)],
@@ -221,11 +250,16 @@ def main():
     for item in items:
         reduced = reduce(item)
         flagged = [word for word in reduced["behaviour"] if word in ("crash", "hang") or word.startswith("exception")]
-        if flagged or "REAL SAFARI" in reduced["writes"] or "outside" in reduced["writes"]:
-            detail = "; ".join(reduced["behaviour"]) + (f" — wrote {', '.join(reduced['writes'])}" if reduced["writes"] else "")
-            extra = (item.get("exceptions") or [])[:1] + (item.get("realSafari") or [])[:3] + outside(item)[:3] \
-                + (item.get("crashReport") or [])[:6]
+        places = writes(item)
+        if flagged or "REAL SAFARI" in places:
+            detail = "; ".join(reduced["behaviour"]) + (f" — wrote meanwhile: {', '.join(places)}" if places else "")
+            extra = (item.get("exceptions") or [])[:1] + (item.get("realSafari") or [])[:3] + (item.get("crashReport") or [])[:6]
             notice("warning", args.title, f"{key(item)}: {detail}. " + " · ".join(extra))
+    written = walk_writes(items)
+    for name, paths in written.items():
+        if paths:
+            notice("error" if name == "REAL SAFARI" and args.check else "warning", args.title,
+                   f"during the walk, written in {name}: {len(paths)} path(s): " + " · ".join(paths[:8]))
 
     current = {name: reduce(item) for name, item in keyed(items).items()}
     if args.write_record or not args.record or not os.path.exists(args.record or ""):
@@ -233,7 +267,7 @@ def main():
         with open(target, "w") as handle:
             json.dump(current, handle, indent=1, ensure_ascii=False, sort_keys=True)
         print(f"MENU-WALK record written: {target}", flush=True)
-    failed = args.check and not finished
+    failed = args.check and (not finished or bool(written["REAL SAFARI"]))
     if args.record and os.path.exists(args.record):
         with open(args.record) as handle:
             recorded = json.load(handle)
