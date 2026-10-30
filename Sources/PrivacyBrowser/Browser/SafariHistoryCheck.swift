@@ -13,8 +13,13 @@ import os
 /// storeAndPreWarmProxy:]`). This makes the service and the connection in a process like a
 /// profile's (a home of its own, held to a closed proxy, Safari's chrome prepared), hands the
 /// connection to the holder, makes Safari's shared history and asks it to load — then prints what
-/// came back, where the service's database is, and what is in the home's `Library/Safari`. A
-/// measurement: the History menu is decided from it.
+/// came back, where the service's database is, and what is in the home's `Library/Safari`.
+///
+/// With `--in-process-fallback` it makes nothing itself: Safari's own connection to its History
+/// service is set up with its in-process fallback (`-[WBSHistoryConnectionProxy
+/// _setupConnectionWithInProcessFallback:]`) turned on, and whether the service lets this process
+/// use its database is printed as the service answers it. Either way, a measurement: the History
+/// menu is decided from it.
 @MainActor
 enum SafariHistoryCheck {
     static func run(arguments: [String]) -> Never {
@@ -28,8 +33,14 @@ enum SafariHistoryCheck {
         ExceptionLog.onCaughtInRunLoop = { exception, _ in
             print("HISTORY-CHECK threw \(exception.name.rawValue): \(LogRedaction.exceptionReason(exception.reason ?? ""))")
         }
+        let fallback = arguments.contains("--in-process-fallback")
+        print("HISTORY-CHECK variant: \(fallback ? "Safari's own in-process fallback, turned on" : "a service and a connection made here")")
+        watchFallback(turnOn: fallback)
+        if fallback { watchEntitlement() }
         let steps = HistorySteps()
-        steps.perform(#selector(HistorySteps.makeService), with: nil, afterDelay: 0.3)
+        if !fallback {
+            steps.perform(#selector(HistorySteps.makeService), with: nil, afterDelay: 0.3)
+        }
         steps.perform(#selector(HistorySteps.loadHistory), with: nil, afterDelay: 1.5)
         steps.perform(#selector(HistorySteps.report), with: nil, afterDelay: 9)
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
@@ -46,6 +57,44 @@ enum SafariHistoryCheck {
     /// The in-process connection, kept for the run.
     fileprivate static var connection: AnyObject?
     fileprivate static var history: AnyObject?
+
+    /// `-[WBSHistoryConnectionProxy _setupConnectionWithInProcessFallback:]`, printed as Safari
+    /// calls it, and with the fallback turned on when `turnOn`.
+    private static func watchFallback(turnOn: Bool) {
+        typealias Setup = @convention(c) (AnyObject, Selector, Bool) -> Void
+        let selector = NSSelectorFromString("_setupConnectionWithInProcessFallback:")
+        guard let proxyClass = NSClassFromString("WBSHistoryConnectionProxy"),
+              let method = class_getInstanceMethod(proxyClass, selector) else {
+            print("HISTORY-CHECK not in this Safari: -[WBSHistoryConnectionProxy _setupConnectionWithInProcessFallback:]")
+            return
+        }
+        let original = unsafeBitCast(method_getImplementation(method), to: Setup.self)
+        let replacement: @convention(block) (AnyObject, Bool) -> Void = { proxy, fallback in
+            print("HISTORY-CHECK Safari sets up its history connection with the in-process fallback \(fallback ? "on" : "off")"
+                  + (turnOn && !fallback ? "; turned on here" : ""))
+            original(proxy, selector, fallback || turnOn)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
+    /// `-[WBSHistoryService _connectionIsEntitledToUseUserDatabase:]`, printed with the service's
+    /// own answer, which is kept.
+    private static func watchEntitlement() {
+        typealias Entitled = @convention(c) (AnyObject, Selector, AnyObject?) -> Bool
+        let selector = NSSelectorFromString("_connectionIsEntitledToUseUserDatabase:")
+        guard let serviceClass = NSClassFromString("WBSHistoryService"),
+              let method = class_getInstanceMethod(serviceClass, selector) else {
+            print("HISTORY-CHECK not in this Safari: -[WBSHistoryService _connectionIsEntitledToUseUserDatabase:]")
+            return
+        }
+        let original = unsafeBitCast(method_getImplementation(method), to: Entitled.self)
+        let replacement: @convention(block) (AnyObject, AnyObject?) -> Bool = { service, connection in
+            let answer = original(service, selector, connection)
+            print("HISTORY-CHECK the History service lets this process use its database: \(answer)")
+            return answer
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
 }
 
 /// The check's steps, each from a timer of AppKit's run loop (an exception there is lived through).
