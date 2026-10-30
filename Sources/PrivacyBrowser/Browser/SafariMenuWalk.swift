@@ -120,6 +120,17 @@ enum SafariMenuWalk {
         let realPlist = realHome + "/Library/Preferences/" + domain + ".plist"
         let realHas = (NSDictionary(contentsOfFile: realPlist)?["PBWalkProbeStandard"]) != nil
         let homeHas = (NSDictionary(contentsOfFile: homePlist)?["PBWalkProbeStandard"]) != nil
+        // What Safari's lookups of its own service settings answer here, by the three ways it
+        // could ask: Core Foundation for its domain, a suite of its domain, the standard defaults.
+        let safariSuite = UserDefaults(suiteName: "com.apple.Safari")
+        var answers: [String] = []
+        for key in ["AutoFillPasswords", "UniversalSearchEnabled", "WebKitDNSPrefetchingEnabled", "WarnAboutFraudulentWebsites"] {
+            let core = CFPreferencesCopyAppValue(key as CFString, "com.apple.Safari" as CFString).map { "\($0)" } ?? "unset"
+            let suiteValue = safariSuite?.object(forKey: key).map { "\($0)" } ?? "unset"
+            let standardValue = UserDefaults.standard.object(forKey: key).map { "\($0)" } ?? "unset"
+            answers.append("\(key): CF \(core), suite \(suiteValue), standard \(standardValue)")
+        }
+        emit(["event": "info", "text": "Safari's service settings as read here: " + answers.joined(separator: "; ")])
         emit(["event": "info", "text": "preferences: a suite named by a path in the profile's home "
               + "(synchronize \(synchronized), read back \(suite?.string(forKey: "PBWalkProbe") ?? "nothing")) is written to "
               + (found.isEmpty ? "no file found" : found.map { $0.hasPrefix(home) ? "the profile's home" : $0 }.joined(separator: ", "))

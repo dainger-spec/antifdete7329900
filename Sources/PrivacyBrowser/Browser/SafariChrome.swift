@@ -374,20 +374,21 @@ enum SafariChrome {
         ]
     }
 
-    /// Writes `servicePreferenceValues` into the profile's `com.apple.Safari` domain, and puts the
-    /// same values in the argument domain of this process — which every domain's lookups see
-    /// before what is stored or registered, and which is never written anywhere — in case some
-    /// part of Safari reads them from a domain other than the one written. Called before Safari's
-    /// frameworks load.
+    /// Puts `servicePreferenceValues` in the argument domain of this process, which every
+    /// domain's lookups see before what is stored or registered, and which is never written
+    /// anywhere. Called before Safari's frameworks load.
+    ///
+    /// They used to be written into the `com.apple.Safari` domain as well, as the profile's own:
+    /// `CFFIXED_USER_HOME` does not move a preferences domain, and the menu walk (run 457) found
+    /// them in the account's real ~/Library/Preferences/com.apple.Safari.plist, shared by every
+    /// profile and outside the vault (measurement branch: whether the argument domain alone
+    /// answers Safari's lookups).
     static func configureSafarisOwnServices(for configuration: ProfileConfiguration) {
-        let domain = "com.apple.Safari" as CFString
         var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         for (key, value) in servicePreferenceValues(for: configuration) {
-            CFPreferencesSetAppValue(key as CFString, value ? kCFBooleanTrue : kCFBooleanFalse, domain)
             arguments[key] = value
         }
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
-        CFPreferencesAppSynchronize(domain)
         servicePreferenceKeys = servicePreferenceValues(for: configuration).map(\.0)
         log.notice("Safari's own services are set for this profile (\(servicePreferenceKeys.count, privacy: .public) keys)")
     }
