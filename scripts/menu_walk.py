@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""Every item of Safari's menu bar chosen in a profile's own process, what each did, and whether
+that is still what it did when the record was made.
+
+    python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/menu-walk \\
+        --title "Menu walk" [--record docs/menu-walk/safari-26.json] [--check] [--write-record FILE]
+
+Runs `PrivacyBrowser --menu-walk` (SafariMenuWalkCheck.swift, SafariMenuWalk.swift) with the
+self-test proxy started for it (the profile's start page loads through it), reads its `MENUWALK`
+lines, and adds the crash report of every item that ended the process (scripts/crash_summary.py).
+Writes `menu-walk.json` and `menu-walk.md` (a table: item, keys, what it did, what it wrote,
+which services started) into --out.
+
+Each item is reduced to what is compared: its behaviour (disabled, a crash or a hang, an
+exception, our "unavailable" notice, a panel, an alert, a modal window, a window or sheet by class,
+a request to open something outside, quitting, our Settings asked for, a change in the window, or
+nothing seen), where it wrote (the profile's home, the real Safari's places, elsewhere) and the
+XPC services it started. With --record, the record for this Safari is compared item by item:
+every item whose reduction changed, every item gone and every new one is listed; with --check a
+difference fails (exit 1). Without a record, or with --write-record, the reduction is written
+for the record. A walk that did not get to the end fails with --check too.
+"""
+import argparse
+import glob
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BINARY = "Contents/MacOS/PrivacyBrowser"
+PROXY_PORT = 18190
+
+
+def notice(kind, title, text):
+    print(f"::{kind} title={title}::{text[:1500]}", flush=True)
+
+
+def wait_for_port(port, seconds=20):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        with socket.socket() as probe:
+            probe.settimeout(0.5)
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def behaviour(item):
+    """What an item did, as a sorted list of words that change only when the behaviour does."""
+    if item.get("skipped"):
+        return ["not chosen: " + ("services" if "Services" in item["skipped"] else "a view")]
+    if "exit" in item:
+        return ["hang" if item.get("hang") else "crash"]
+    if not item.get("enabled"):
+        return ["disabled"]
+    words = set()
+    for effect in item.get("effects", []):
+        for pattern, word in ((r"^an open panel", "open panel"), (r"^a save panel", "save panel"),
+                              (r"^an alert", "alert"), (r"^printing", "print"), (r"^page setup", "page setup"),
+                              (r"modal", "modal window"), (r"^asks the system to open the file", "opens a file outside"),
+                              (r"^asks the system to open", "opens a URL outside"), (r"^asks .* to open", "opens a URL outside"),
+                              (r"^asks the system to start", "starts an application"), (r"^asks the Finder", "Finder"),
+                              (r"^shares", "shares"), (r"^the sharing menu", "sharing menu"), (r"Help", "Help"),
+                              (r"character viewer", "character viewer"), (r"^asks to quit", "quit"),
+                              (r"^asks to hide the other", "hides other apps"), (r"^our notice", "our unavailable notice"),
+                              (r"Settings", "our Settings")):
+            if re.search(pattern, effect):
+                words.add(word)
+                break
+        else:
+            match = re.match(r"^(a window|a sheet): (\S+)", effect)
+            if match:
+                words.add(f"{match.group(1).split()[1]} {match.group(2)}")
+    for change in item.get("changes", []):
+        kind = change.split(":")[0] if ":" in change else change
+        words.add("changes " + kind.strip())
+    if item.get("exceptions"):
+        names = sorted({entry.split(":")[0] for entry in item["exceptions"]})
+        words.add("exception " + ", ".join(names))
+    return sorted(words) or ["nothing seen"]
+
+
+def writes(item):
+    places = []
+    if item.get("home"):
+        places.append("profile's home")
+    if item.get("realSafari"):
+        places.append("REAL SAFARI")
+    if item.get("outside"):
+        places.append("outside")
+    return places
+
+
+def reduce(item):
+    return {"behaviour": behaviour(item), "writes": writes(item), "xpc": sorted(set(item.get("xpc", [])))}
+
+
+def key(item):
+    return f"{item.get('path', '?')} | {item.get('action', '-')}"
+
+
+def crash_reports(since, out):
+    """The crash reports of this app's processes written since `since`, summarized, by pid."""
+    found = {}
+    for path in glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/PrivacyBrowser*.ips")):
+        if os.path.getmtime(path) < since:
+            continue
+        summary = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "crash_summary.py"), path],
+                                 capture_output=True, text=True).stdout
+        match = re.search(r"\(pid (\d+)\)", summary)
+        found[path] = (int(match.group(1)) if match else None, summary)
+        with open(os.path.join(out, os.path.basename(path) + ".txt"), "w") as handle:
+            handle.write(summary)
+    return found
+
+
+def table(items):
+    lines = ["| # | Item | Keys | What it did | Wrote | Services |", "|---|---|---|---|---|---|"]
+    for item in items:
+        reduced = reduce(item)
+        did = "; ".join(reduced["behaviour"])
+        details = [effect for effect in item.get("effects", [])] + item.get("exceptions", [])[:2]
+        if details:
+            did += "<br><sub>" + " · ".join(text.replace("|", "/")[:200] for text in details[:4]) + "</sub>"
+        wrote = ", ".join(reduced["writes"]) or "—"
+        lines.append(f"| {item.get('index', '?')} | {item.get('path', '?').replace('|', '/')} | {item.get('keys', '-')} "
+                     f"| {did} | {wrote} | {', '.join(reduced['xpc']) or '—'} |")
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--app", required=True)
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--title", default="Menu walk")
+    parser.add_argument("--record", help="the record of this Safari's menu walk to compare with")
+    parser.add_argument("--check", action="store_true", help="fail when the walk differs from the record")
+    parser.add_argument("--write-record", help="write this walk's reduction here")
+    parser.add_argument("--ignore", default="", help="prefixes of files written by others, colon-separated")
+    args = parser.parse_args()
+    out = os.path.abspath(args.out)
+    os.makedirs(out, exist_ok=True)
+
+    proxy = subprocess.Popen([sys.executable, os.path.join(ROOT, "scripts", "selftest_proxy.py"),
+                              "--http", str(PROXY_PORT), "--socks", str(PROXY_PORT + 1)],
+                             stdout=open(os.path.join(out, "proxy.txt"), "w"), stderr=subprocess.STDOUT)
+    proxied = wait_for_port(PROXY_PORT)
+    environment = dict(os.environ, PRIVACYBROWSER_LANG="en", PB_MENU_WALK_IGNORE=args.ignore)
+    if proxied:
+        environment["PB_SELFTEST_HTTP_PROXY_PORT"] = str(PROXY_PORT)
+    started = time.time()
+    with open(os.path.join(out, "walk.txt"), "w") as log:
+        try:
+            result = subprocess.run([os.path.join(args.app, BINARY), "--menu-walk"], env=environment,
+                                    stdout=subprocess.PIPE, stderr=log, text=True, timeout=2700)
+            output, status = result.stdout, result.returncode
+        except subprocess.TimeoutExpired as expired:
+            output, status = (expired.stdout or b"").decode(errors="replace") if isinstance(expired.stdout, bytes) else (expired.stdout or ""), -1
+        log.write(output)
+    proxy.kill()
+
+    items = []
+    for line in output.splitlines():
+        if line.startswith("MENUWALK "):
+            try:
+                items.append(json.loads(line[len("MENUWALK "):]))
+            except ValueError:
+                pass
+        elif line.startswith(("MENUWALK-INFO", "MENUWALK-ERROR")):
+            print(line, flush=True)
+    finished = "the walk got to the end" in output
+    reports = crash_reports(started, out)
+    for item in items:
+        if "exit" in item:
+            # The report of a process that ended while this item ran: written after its begin.
+            near = [summary for path, (pid, summary) in reports.items() if os.path.getmtime(path) >= item.get("begin", 0) - 1]
+            item["crashReport"] = near[0].splitlines()[:30] if near else ["no crash report found"]
+    with open(os.path.join(out, "menu-walk.json"), "w") as handle:
+        json.dump(items, handle, indent=1, ensure_ascii=False)
+    with open(os.path.join(out, "menu-walk.md"), "w") as handle:
+        handle.write(table(items))
+
+    counts = {}
+    for item in items:
+        for word in behaviour(item):
+            counts[word] = counts.get(word, 0) + 1
+    notice("notice", args.title, f"{len(items)} items walked (exit {status}, {'to the end' if finished else 'NOT to the end'}); "
+           + "; ".join(f"{word}: {count}" for word, count in sorted(counts.items(), key=lambda entry: -entry[1])[:25]))
+    for item in items:
+        reduced = reduce(item)
+        flagged = [word for word in reduced["behaviour"] if word in ("crash", "hang") or word.startswith("exception")]
+        if flagged or "REAL SAFARI" in reduced["writes"] or "outside" in reduced["writes"]:
+            detail = "; ".join(reduced["behaviour"]) + (f" — wrote {', '.join(reduced['writes'])}" if reduced["writes"] else "")
+            extra = (item.get("exceptions") or [])[:1] + (item.get("realSafari") or [])[:3] + (item.get("outside") or [])[:3] \
+                + (item.get("crashReport") or [])[:6]
+            notice("warning", args.title, f"{key(item)}: {detail}. " + " · ".join(extra))
+
+    current = {key(item): reduce(item) for item in items}
+    if args.write_record or not args.record or not os.path.exists(args.record or ""):
+        target = args.write_record or os.path.join(out, "record.json")
+        with open(target, "w") as handle:
+            json.dump(current, handle, indent=1, ensure_ascii=False, sort_keys=True)
+        print(f"MENU-WALK record written: {target}", flush=True)
+    failed = args.check and not finished
+    if args.record and os.path.exists(args.record):
+        with open(args.record) as handle:
+            recorded = json.load(handle)
+        differences = []
+        for name in sorted(set(recorded) | set(current)):
+            if name not in current:
+                differences.append(f"gone: {name}")
+            elif name not in recorded:
+                differences.append(f"new: {name} — {'; '.join(current[name]['behaviour'])}")
+            elif recorded[name] != current[name]:
+                was, now = recorded[name], current[name]
+                differences.append(f"changed: {name} — was {was}, now {now}")
+        for difference in differences[:60]:
+            notice("error" if args.check else "warning", args.title, difference)
+        print(f"MENU-WALK {len(differences)} difference(s) from the record {args.record}", flush=True)
+        if differences and args.check:
+            failed = True
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
