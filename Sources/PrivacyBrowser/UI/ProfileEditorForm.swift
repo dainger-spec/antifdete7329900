@@ -1,3 +1,4 @@
+import AppKit
 import BrowserCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -35,6 +36,16 @@ struct ProfileEditorForm: View {
             case .data: return "externaldrive"
             }
         }
+
+        /// The widest single word of the labels, in the index's font (medium, as the selected label
+        /// is): what a line of the index must hold.
+        static var widestWord: CGFloat {
+            let font = NSFont.systemFont(ofSize: 13, weight: .medium)
+            return allCases
+                .flatMap { L($0.titleKey).split(whereSeparator: \.isWhitespace) }
+                .map { ceil((String($0) as NSString).size(withAttributes: [.font: font]).width) }
+                .max() ?? 0
+        }
     }
 
     @Binding var draft: ProfileDraft
@@ -66,8 +77,14 @@ struct ProfileEditorForm: View {
     /// What sites see of the profile as it is saved (an existing profile; nil for a new one).
     var onWhatSitesSee: (() -> Void)?
 
-    static let size = CGSize(width: 760, height: 660)
-    static let indexWidth: CGFloat = 172
+    /// The index is at least as wide as its longest word, so that a label wraps between its words
+    /// and never inside one ("Конфиденциаль|ность"); the editor is wider by as much, so that the
+    /// form keeps its width.
+    static let indexWidth: CGFloat = max(172, Topic.widestWord + 2 + indexChrome)
+    static let size = CGSize(width: 760 + indexWidth - 172, height: 660)
+    /// Around a label in the index: the index's margins and the row's, the symbol, and the row's gaps
+    /// on either side of the label.
+    private static let indexChrome: CGFloat = 2 * 10 + 2 * 8 + 16 + 2 * 8
 
     var body: some View {
         VStack(spacing: 0) {
@@ -116,7 +133,8 @@ struct ProfileEditorForm: View {
                             .font(.system(size: 12))
                             .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
                             .frame(width: 16)
-                        // Two lines rather than cut ("Location and L…"): the index keeps its width.
+                        // Two lines rather than cut ("Location and L…"), between words: the index
+                        // is as wide as its longest word (`indexWidth`).
                         Text(L(part.titleKey))
                             .font(.system(size: 13, weight: selected ? .medium : .regular))
                             .foregroundStyle(Theme.textPrimary)

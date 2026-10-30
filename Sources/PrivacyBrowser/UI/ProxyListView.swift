@@ -42,6 +42,9 @@ struct ProxyListPanel: View {
     @State private var assigning: ProxyAssignView.Request?
     @State private var editing: ProxyListEntry?
     @State private var confirmingDelete = false
+    /// The selected proxy's report, measured: its pane is as tall as the report, up to half of what
+    /// the section has under its toolbar, and scrolls beyond that.
+    @State private var reportHeight: CGFloat = 210
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -322,8 +325,15 @@ struct ProxyListPanel: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
+            .background(GeometryReader { geometry in
+                Color.clear
+                    .onAppear { reportHeight = geometry.size.height }
+                    .onChange(of: geometry.size.height) { _, height in reportHeight = height }
+            })
         }
-        .frame(height: 210)
+        // The stack gives the pane, the less flexible of the two, up to half of the room first; the
+        // list takes the rest. A short report keeps its pane short.
+        .frame(minHeight: min(reportHeight, 150), maxHeight: reportHeight)
         .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Theme.raisedInset))
         .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
     }
@@ -354,8 +364,10 @@ struct ProxyListPanel: View {
 /// profiles' table drops its own optional columns.
 struct ProxyColumns {
     static let status: CGFloat = 18
-    static let kind: CGFloat = 70
-    static let exit: CGFloat = 176
+    // Wide enough for "Неизвестен" and for a country with its city ("Нидерланды, Amsterdam"); a
+    // longer place is cut and shown whole in its tooltip.
+    static let kind: CGFloat = 84
+    static let exit: CGFloat = 196
     static let ip: CGFloat = 118
     static let latency: CGFloat = 58
     static let checked: CGFloat = 92
@@ -486,6 +498,7 @@ struct ProxyExitLabel: View {
             } else if let check, let code = check.countryCode {
                 CountryFlag(code: code, size: 14)
                 Text(place(code, city: check.city)).foregroundStyle(Theme.textPrimary)
+                    .help(place(code, city: check.city))
             } else {
                 Text(state.shortText).foregroundStyle(Theme.textPrimary)
             }
