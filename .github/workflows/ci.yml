@@ -121,6 +121,16 @@ jobs:
           python3 scripts/fragment_check.py --app build/unsandboxed/PrivacyBrowser.app | tee build/egress27/fragment.txt
           grep '^FRAGMENT' build/egress27/fragment.txt | head -9 | cut -c1-600 | sed 's/^/::notice title=macOS 27 - fragment jump::/'
           exit 0
+      - name: What Safari 27's chrome brings into a profile's process (an inventory)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          set +e
+          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --safari-inventory > build/egress27/safari-inventory.txt 2> build/egress27/safari-inventory.err
+          echo "exit $?"
+          grep -E '^(INVENTORY|LS) ' build/egress27/safari-inventory.txt | head -10 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - Safari inventory::/'
+          exit 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -262,6 +272,22 @@ jobs:
         # that a missing piece never hides what the self-test would have measured.
         if: always()
         run: build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --check-safari-chrome
+      - name: What Safari's chrome brings into a profile's process (an inventory, never fails the build)
+        # SafariChromeInventory.swift: Safari's menu as a profile's window has it, LaunchServices'
+        # answers with a home of its own, the classes around AutoFill, history and export, and the
+        # methods that wait. In the artifact (fingerprint-surfaces), and the menu's File items here.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          set +e
+          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --safari-inventory > build/safari-inventory.txt 2> build/safari-inventory.err
+          echo "exit $?"
+          grep -E '^(INVENTORY|LS) ' build/safari-inventory.txt | head -10 | cut -c1-500 | sed 's/^/::notice title=Safari inventory::/'
+          grep -E '^MENU [^|]*(File|Файл|History|История|Bookmarks|Закладки) ' build/safari-inventory.txt | head -10 | cut -c1-400 \
+            | sed 's/^/::notice title=Safari inventory - menu::/'
+          echo "::group::the inventory"; cat build/safari-inventory.txt; echo "::endgroup::"
+          exit 0
       - name: Compare the fingerprint surface with this Mac's real Safari (safaridriver)
         run: |
           sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
@@ -400,6 +426,7 @@ jobs:
             build/payments
             build/payments-direct
             build/crashes
+            build/safari-inventory.txt
           if-no-files-found: ignore
       - name: App Sandbox container migration (unsandboxed data → sandboxed first launch)
         run: |
