@@ -253,6 +253,10 @@
 "launch.proxyIPChanged" = "Profile “%1$@”: its proxy now exits from %3$@ (at the previous launch: %2$@).";
 "launch.proxyNeedsCredentialsStopped" = "The proxy at “%@” now requires a user name and password. The profile was stopped, so no site opens directly. Add them in the profile settings.";
 "launch.proxyZoneChanged" = "Profile “%1$@”: its proxy now exits in the time zone %2$@. The profile uses it from its next launch; pages open now keep the current one.";
+"launch.proxyLocationUnknown.last" = "Profile “%1$@”: where its proxy exits to the internet could not be found — no geolocation service answered through it (they are often blocked). Its time zone and language are those of its last launch (%2$@).";
+"launch.proxyLocationUnknown.mac" = "Profile “%@”: where its proxy exits to the internet could not be found — no geolocation service answered through it (they are often blocked). Its time zone and language are this Mac's, not the proxy country's: a site comparing them with its address sees the mismatch. Set them in the editor, or check the proxy.";
+"profiles.exit.lookupFailed" = "At the last launch no geolocation service answered through the proxy: where it exits is not confirmed.";
+"editor.location.lookupFailed" = "At the last launch no geolocation service answered through the proxy — where it exits is not confirmed, and the time zone and language did not come from it.";
 "launch.webrtcOff.httpProxy" = "WebRTC is off in this profile: an HTTP proxy cannot carry UDP. WebRTC through a proxy needs SOCKS5.";
 "launch.webrtcOff.noTunnel" = "WebRTC is off in this profile: without the network extension its UDP would go around the proxy from the real IP. Turn the extension on under “WebRTC through proxies”.";
 "library.bookmarks.empty" = "No bookmarks. Use ☆ in the toolbar or ⌘D to bookmark a page.";

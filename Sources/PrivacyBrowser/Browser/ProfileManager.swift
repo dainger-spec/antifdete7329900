@@ -49,6 +49,12 @@ final class ProfileManager: ObservableObject {
     var onSealed: ((UUID, ProfileSealReport) -> Void)?
     /// A profile's process told how it sealed its data, just before it exited (the self-test).
     var onChildSealed: ((UUID, ProfileSealReport) -> Void)?
+    /// Profiles whose proxy's exit no geolocation service could tell at their last launch (they
+    /// are blocked often): said once when it happens, and shown in the profile's row and editor
+    /// until its next launch.
+    @Published private(set) var proxyLocationUnknown: Set<UUID> = []
+    /// In a profile's own process: its proxy's exit was not found (the manager says so).
+    var onProxyLocationUnknown: ((UUID) -> Void)?
     /// Pages of Safari's chrome closed by a quit, before the seal (`prepareForQuit`).
     private var pagesClosedForQuit = 0
     /// Settings → Proxies: a profile whose proxy does not work is not started at all — its proxy is
@@ -139,6 +145,7 @@ final class ProfileManager: ObservableObject {
 
     func launch(_ id: UUID, openingWindow: Bool = true) async throws {
         guard !isShuttingDown else { return }
+        if sessions[id] == nil, children[id] == nil { proxyLocationUnknown.remove(id) }
         if let session = sessions[id] {
             // A profile that is only being warmed up has no window yet: a launch now gives it one.
             if !session.hasVisibleWindow, openingWindow,
@@ -382,8 +389,11 @@ final class ProfileManager: ObservableObject {
                 // stop asked for from here has taken the child out of `children` and keeps the
                 // profile busy itself, until after the exit.
                 guard self.children[id] === child else { break }
+                self.runningProfileIDs.remove(id)
                 self.busyProfileIDs.insert(id)
                 self.objectWillChange.send()
+            case .proxyLocationUnknown:
+                self.noteProxyLocationUnknown(id, name: summary.name, last: stored.rememberedProxyLocation)
             case .sealed(let report):
                 self.log.notice("Profile \(id.uuidString, privacy: .public) sealed its data in \(Int(report.seconds), privacy: .public) s, attempts \(report.attempts, privacy: .public), forced \(report.forced, privacy: .public), pages closed \(report.pagesClosed, privacy: .public)")
                 self.onChildSealed?(id, report)
@@ -529,6 +539,20 @@ final class ProfileManager: ObservableObject {
         return result
     }
 
+    /// Says that no geolocation service answered through the profile's proxy, and in which time
+    /// zone and language the profile runs instead; marks the profile for its row and editor.
+    func noteProxyLocationUnknown(_ id: UUID, name: String, last: ProxyLocation?) {
+        guard !proxyLocationUnknown.contains(id) else { return }
+        proxyLocationUnknown.insert(id)
+        log.notice("No geolocation service answered through the proxy of \(id.uuidString, privacy: .public)")
+        if let last {
+            onError?(String(format: L("launch.proxyLocationUnknown.last"), name,
+                            last.countryCode.map(CountryNames.name(for:)) ?? last.timeZoneIdentifier))
+        } else {
+            onError?(String(format: L("launch.proxyLocationUnknown.mac"), name))
+        }
+    }
+
     /// Profiles already told, once per run, that websites see another language than their
     /// proxy's country suggests (WebKit's language list is fixed by the first profile launched).
     private var languageMismatchNoted: Set<UUID> = []
@@ -543,7 +567,17 @@ final class ProfileManager: ObservableObject {
     /// What a finished lookup tells: the exit IP compared with the previous launch's (when the
     /// profile asks for that), and the location to remember for the next launch.
     private func proxyLookupFinished(_ result: ProxyGeoLookup.Result, for id: UUID, name: String, stored: ProfileConfiguration) {
-        guard let found = result.location else { return }
+        guard let found = result.location else {
+            // No service answered through the proxy: not only a line in the log.
+            if stored.needsProxyLocation {
+                if runsInProfileProcess {
+                    onProxyLocationUnknown?(id)
+                } else {
+                    noteProxyLocationUnknown(id, name: name, last: stored.rememberedProxyLocation)
+                }
+            }
+            return
+        }
         // Not when, since the launch, the warning was turned off or the proxy removed or replaced
         // (a late answer): it is about a proxy the profile no longer asks about.
         let current = try? repository.loadConfiguration(id)

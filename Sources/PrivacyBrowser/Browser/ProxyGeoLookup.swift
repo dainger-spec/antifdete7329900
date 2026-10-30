@@ -25,8 +25,9 @@ enum ProxyGeoLookup {
         var organizationKeyPath: [String]? = nil
     }
 
-    /// HTTPS services that need no API key, tried in order until one answers. Replaced by the
-    /// self-test with an endpoint of its local proxy.
+    /// HTTPS services that need no API key, tried in order until one answers, each for at most
+    /// `perServiceTimeout`: a proxy that cuts one of them (they are blocked often) must leave time
+    /// for the others. Replaced by the self-test with endpoints of its local proxy.
     static var services: [Service] = [
         Service(url: URL(string: "https://ipinfo.io/json")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"],
                 cityKeyPath: ["city"], asnKeyPath: ["org"], organizationKeyPath: ["org"]),
@@ -34,7 +35,15 @@ enum ProxyGeoLookup {
                 cityKeyPath: ["city"], asnKeyPath: ["asn"], organizationKeyPath: ["organization_name"]),
         Service(url: URL(string: "https://ipwho.is/")!, timeZoneKeyPath: ["timezone", "id"], countryKeyPath: ["country_code"],
                 cityKeyPath: ["city"], asnKeyPath: ["connection", "asn"], organizationKeyPath: ["connection", "org"]),
+        Service(url: URL(string: "https://ipapi.co/json/")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country_code"],
+                cityKeyPath: ["city"], asnKeyPath: ["asn"], organizationKeyPath: ["org"]),
     ]
+
+    /// The longest one service is waited for. Before this, the first service had the whole
+    /// lookup's time: a proxy that held ipinfo.io's connection open used it all, and the services
+    /// after it were never asked (the owner's Mac, 2026-10-30: "ipinfo.io through the proxy failed"
+    /// at every launch, and no location).
+    static var perServiceTimeout: TimeInterval = 3.5
 
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "ProxyGeoLookup")
 
@@ -65,7 +74,7 @@ enum ProxyGeoLookup {
         var description: String { "\(address.contains(":") ? "[\(address)]" : address):\(port.map(String.init) ?? "?")" }
     }
 
-    static func lookUp(proxy: ProxySettings, userAgent: String, timeout: TimeInterval = 6) async -> Result {
+    static func lookUp(proxy: ProxySettings, userAgent: String, timeout: TimeInterval = 12) async -> Result {
         guard let proxies = try? ProxyConfigurationFactory.make(proxy), !proxies.isEmpty else { return Result() }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.proxyConfigurations = proxies
@@ -86,7 +95,7 @@ enum ProxyGeoLookup {
             let remaining = deadline.timeIntervalSinceNow
             guard remaining > 0.5 else { break }
             var request = URLRequest(url: service.url)
-            request.timeoutInterval = remaining
+            request.timeoutInterval = min(remaining, perServiceTimeout)
             let asked = Date()
             do {
                 let (data, response) = try await session.data(for: request)

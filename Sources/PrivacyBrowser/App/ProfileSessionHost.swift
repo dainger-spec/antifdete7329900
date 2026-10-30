@@ -168,6 +168,8 @@ enum ProfileSessionHost {
             SafariChromeHost.onLastWindowClosed = { NSApp.terminate(nil) }
             // How the data was sealed, told to the manager before this process exits.
             manager.onSealed = { _, report in ProfileSessionHost.send(.sealed(report)) }
+            // Where the proxy exits could not be found: the manager says so, where the user looks.
+            manager.onProxyLocationUnknown = { _ in ProfileSessionHost.send(.proxyLocationUnknown) }
             manager.onWarmUpProgress = { [weak self, weak manager] id in
                 guard let robot = manager?.warmUpRobot(for: id) else { return }
                 let status = robot.status

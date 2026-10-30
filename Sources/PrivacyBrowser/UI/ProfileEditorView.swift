@@ -281,6 +281,10 @@ struct ProfileDraft {
         return true
     }
 
+    /// At the profile's last launch no geolocation service answered through its proxy (the
+    /// manager knows; not saved): the location card says so.
+    var proxyLocationLookupFailed = false
+
     /// What the last lookup through the proxy found, while these fields still describe that proxy
     /// (`ProxyLocation.endpoint(of:)`): nil once host, port or credentials name another one.
     var knownProxyLocation: ProxyLocation? {
@@ -445,6 +449,7 @@ struct ProfileEditorView: View {
             do {
                 draft = ProfileDraft(name: summary.name, configuration: try model.configuration(for: summary.id),
                                      savedProxies: model.proxyList?.entries ?? [])
+                draft.proxyLocationLookupFailed = model.manager?.proxyLocationUnknown.contains(summary.id) ?? false
             } catch {
                 self.error = String(format: L("editor.error.decrypt"), error.localizedDescription)
             }

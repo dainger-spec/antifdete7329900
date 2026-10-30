@@ -294,6 +294,7 @@ enum UISnapshots {
         var silent = draft
         silent.proxyLine = ProxyLine(text: "198.51.100.40:8000")
         silent.lastProxyLocation = nil
+        silent.proxyLocationLookupFailed = true
         if let proxy = silent.proxyLine.checkable {
             silent.proxyLine.check = ProxyLine.Check(proxy: proxy, result: sampleFailed(ProxyDiagnosis(verdict: .silent,
                                                                                                          connectedAddress: "198.51.100.40")))
@@ -652,9 +653,10 @@ enum UISnapshots {
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-60)),
             ProfileRowItem(id: id(6), name: "Shopping", activity: .stopped, exit: .direct, ephemeral: true,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-3 * 86_400)),
+            // At its last launch no geolocation service answered through its proxy.
             ProfileRowItem(id: id(7), name: "Banking", activity: .stopped,
                            exit: .proxy(endpoint: "10.20.0.2:3128", countryCode: nil), ephemeral: false,
-                           appearsAs: mac, lastUsed: nil, tags: ["ads"]),
+                           appearsAs: mac, lastUsed: nil, exitUnconfirmed: true, tags: ["ads"]),
         ]
     }
 }

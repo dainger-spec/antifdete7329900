@@ -68,6 +68,9 @@ enum ProfileEvent: Codable {
     case sealing
     /// How the profile's WebKit data was sealed, just before the process exits.
     case sealed(ProfileSealReport)
+    /// No geolocation service answered through the profile's proxy: where it exits is not known,
+    /// and the profile runs in the last known location's time zone and language, or this Mac's.
+    case proxyLocationUnknown
 }
 
 /// How a profile's WebKit data was sealed as its process quit: whether WebKit let the store go

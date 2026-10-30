@@ -232,6 +232,7 @@ struct ProfileListView: View {
                 lastUsed: profile.lastLaunchedAt,
                 warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
                 warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false,
+                exitUnconfirmed: model.manager?.proxyLocationUnknown.contains(profile.id) ?? false,
                 tags: details?.tags ?? [], notes: details?.notes ?? "", avatar: details?.avatar)
         }
     }
@@ -311,6 +312,9 @@ struct ProfileRowItem: Identifiable {
     var warmUp: WarmUpStatus?
     /// Waiting in the warm-up queue for its turn (`WarmUpCoordinator`).
     var warmUpQueued = false
+    /// At its last launch no geolocation service answered through its proxy: where it exits is
+    /// not confirmed (`ProfileManager.proxyLocationUnknown`).
+    var exitUnconfirmed = false
     /// The person's own tags and notes for the profile, and how its glyph looks.
     var tags: [String] = []
     var notes = ""
@@ -865,7 +869,17 @@ private struct ProfileRow: View {
     var body: some View {
         HStack(spacing: ProfileColumns.gap) {
             nameCell.frame(maxWidth: .infinity, alignment: .leading)
-            ExitLabel(exit: row.exit).frame(width: ProfileColumns.exit, alignment: .leading)
+            HStack(spacing: 6) {
+                ExitLabel(exit: row.exit)
+                if row.exitUnconfirmed {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.warning)
+                        .help(L("profiles.exit.lookupFailed"))
+                        .accessibilityLabel(L("profiles.exit.lookupFailed"))
+                }
+            }
+            .frame(width: ProfileColumns.exit, alignment: .leading)
             if columns.showsAppearsAs {
                 Text(row.appearsAs)
                     .font(.lumenBody)

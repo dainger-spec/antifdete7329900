@@ -986,6 +986,18 @@ private struct ProxyLocationCard: View {
     @Binding var draft: ProfileDraft
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            card
+            if draft.proxyLocationLookupFailed {
+                Label(L("editor.location.lookupFailed"), systemImage: "exclamationmark.triangle.fill")
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var card: some View {
         HStack(alignment: .center, spacing: 12) {
             if let location = draft.knownProxyLocation, let code = location.countryCode {
                 CountryFlag(code: code, size: 16)

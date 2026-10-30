@@ -1796,6 +1796,24 @@ final class SelfTest {
         lookUp(at: "/no-location-here") // an HTML page, not a location
         let fallback = try await launchedTimeZone()
         check("proxy location: a failed lookup falls back to the remembered location", fallback == "Europe/Berlin", fallback ?? "nil")
+        check("proxy location: a lookup no service answered is said and marked for the profile's row and editor, not only logged",
+              manager.proxyLocationUnknown.contains(profile.id))
+
+        // A first service the proxy holds open (it answers only after 20 s) leaves time for the next
+        // one: each service is waited for at most `perServiceTimeout`. It used to have the whole
+        // lookup's time, and the services after it were never asked.
+        ProxyGeoLookup.services = [
+            .init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json?delay=20&tz=Asia/Tokyo")!,
+                  timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
+            .init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
+        ]
+        let held = Date()
+        let behindHeld = await ProxyGeoLookup.lookUp(proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort),
+                                                     userAgent: "PrivacyBrowser self-test")
+        let heldFor = Date().timeIntervalSince(held)
+        check("proxy location: a service the proxy holds open does not use up the lookup, the next one answers",
+              behindHeld.location?.timeZoneIdentifier == "Europe/Berlin" && heldFor < ProxyGeoLookup.perServiceTimeout + 4,
+              "\(behindHeld.location?.timeZoneIdentifier ?? "nil") after \(Int(heldFor)) s")
 
         var explicit = stored
         explicit.timeZoneIdentifier = "Asia/Tokyo"
@@ -1803,6 +1821,8 @@ final class SelfTest {
         lookUp(at: "/pb-geo.json")
         let tokyo = try await launchedTimeZone()
         check("proxy location: an explicit time zone wins", tokyo == "Asia/Tokyo", tokyo ?? "nil")
+        check("proxy location: the mark of a failed lookup goes with the next launch",
+              !manager.proxyLocationUnknown.contains(profile.id))
         try repository.delete(profile.id)
     }
 
