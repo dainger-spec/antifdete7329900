@@ -3730,12 +3730,11 @@ final class SelfTest {
 
     // MARK: Session cookies after a stop
 
-    /// Measured, not checked: does a stopped profile's session cookie come back at its next
-    /// launch — with no other profile running, and while another profile of this process keeps
-    /// running? In this app's windows every profile shares WebKit's one network process. CI run
-    /// 435 (macOS 27) saw session cookies come back after a stop in the cookie checks, in a run
-    /// whose diagnostics had made a web view of WebKit's default store in this process; run 434,
-    /// without it, did not.
+    /// A stopped profile's session cookie does not come back at its next launch — with no other
+    /// profile running, and while another profile of this process keeps running. In this app's
+    /// windows every profile shares WebKit's one network process, and while it runs it handed the
+    /// session cookies back (CI run 436, macOS 27: "still there" with another profile running,
+    /// "gone" without); a stop now deletes them (`ProfileManager.stop`).
     private func sessionCookieAfterStop(_ repository: ProfileRepository) async throws {
         let manager = ProfileManager(repository: repository)
         let cookies = CookieImporter.read(Data("session.selftest.invalid\tFALSE\t/\tFALSE\t0\tpbsession\tsession-value".utf8)).cookies
@@ -3752,9 +3751,11 @@ final class SelfTest {
             try await manager.launch(measured.id, openingWindow: false)
             let after = (try? await manager.exportCookies(of: measured.id)) ?? []
             let kept = after.contains { $0.name == "pbsession" }
-            let situation = withAnother ? "another profile running meanwhile" : "no other profile running"
-            info("session cookie after a stop and a launch, \(situation): \(kept ? "still there" : "gone") "
-                 + "(import \(imported); the store \(released ? "let go" : "still alive 10 s after the stop"))")
+            let situation = withAnother ? "while another profile keeps running" : "with no other profile running"
+            check("cookies: a stopped profile's session cookie does not come back at its next launch, \(situation)",
+                  imported == .applied(stored: 1, refused: []) && !kept,
+                  "import \(imported); the store \(released ? "let go" : "still alive 10 s after the stop"); "
+                      + "after the launch \(after.map(\.name))")
             try await manager.delete(measured.id)
             if let other { try await manager.delete(other.id) }
         }

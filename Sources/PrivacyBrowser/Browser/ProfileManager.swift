@@ -668,6 +668,12 @@ final class ProfileManager: ObservableObject {
         // Cookies set in the last moments (by a page, or imported) are written before the data is
         // sealed: CFNetwork would write them later, after the archive was made.
         if !ephemeral, let store = session.dataStore {
+            // A stop ends the profile's browsing session, as quitting Safari does: its session
+            // cookies go. WebKit's network process, which the profiles of this process share, hands
+            // them back at the profile's next launch while it keeps running for another profile
+            // (measured: CI run 436, macOS 27, `sessionCookieAfterStop`); with no other profile
+            // running they went with it.
+            await Self.deleteSessionCookies(in: store.httpCookieStore)
             await CookieStoreImport.flush(store.httpCookieStore)
             // What this run changed, for sync (the settings as they are now: sync may have been
             // turned off while it ran).
@@ -681,6 +687,13 @@ final class ProfileManager: ObservableObject {
         // data store reference was already dropped in shutDown().
         if !ephemeral, let key {
             try await webDataVault.seal(profileID: id, key: key)
+        }
+    }
+
+    /// Deletes the store's session cookies (those without an expiry date).
+    private static func deleteSessionCookies(in store: WKHTTPCookieStore) async {
+        for cookie in await store.allCookies() where cookie.isSessionOnly {
+            await store.deleteCookie(cookie)
         }
     }
 
