@@ -222,6 +222,22 @@ def plaintext_left(vault, profile_ids, roots):
     return left, unreadable
 
 
+def stop_capture(capture):
+    """tcpdump runs under sudo, which does not pass on a signal sent from our own process group:
+    the capture is stopped by name, as root, as the self-test's step does."""
+    if capture is None or capture.poll() is not None:
+        return
+    subprocess.run(["sudo", "pkill", "-INT", "-f", "tcpdump -i pktap"])
+    try:
+        capture.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        subprocess.run(["sudo", "pkill", "-KILL", "-f", "tcpdump -i pktap"])
+        try:
+            capture.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            print("INFO the capture did not stop", flush=True)
+
+
 def windows(log, name):
     begins = [float(t) for t in re.findall(rf"INFO {name} begin ([\d.]+)", log)]
     ends = [float(t) for t in re.findall(rf"INFO {name} end ([\d.]+)", log)]
@@ -365,8 +381,7 @@ def main():
                   f"exit {code}")
 
         # The capture: not one packet of the app while checks were off; the control seen.
-        subprocess.run(["sudo", "kill", "-INT", str(capture.pid)])
-        capture.wait(timeout=30)
+        stop_capture(capture)
         capture_file.close()
         packets = [egress_check.parse(line) for line in open(capture_path, encoding="utf-8", errors="replace")
                    if egress_check.TIME.search(line)]
@@ -405,8 +420,7 @@ def main():
         with open(os.path.join(out, "requests.json"), "w") as handle:
             json.dump(requests, handle, indent=1)
     finally:
-        if capture and capture.poll() is None:
-            subprocess.run(["sudo", "kill", "-INT", str(capture.pid)])
+        stop_capture(capture)
 
     print(f"UPDATE CHECK ({args.variant}) {'PASSED' if not failures else 'FAILED: ' + '; '.join(failures)}")
     return 0 if not failures else 1
