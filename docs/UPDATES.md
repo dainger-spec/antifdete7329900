@@ -70,12 +70,12 @@ What we take on, and how each case is met — refused openly rather than worked 
 
 | Edge case | Our answer |
 |---|---|
-| The app's location is not writable (a standard user, `/Applications` owned by an admin) | no install; the update screen says so and links the download page |
-| App Translocation, a read-only volume (run from a disk image) | detected; no install; "move the app to Applications first" |
+| The app's location is not writable (a standard user, `/Applications` owned by an admin) | no install; the update screen says so (told from the folder's owner, group and mode: the sandboxed process cannot ask the system for the user) |
+| App Translocation, a read-only volume (run from a disk image) | detected (the path; the volume's read-only flag); no install; "move the app to Applications first" — the read-only volume is not exercised by a test |
 | Another copy, or a stray process, running from the bundle | the installer waits for it, never kills it, and gives up after 10 minutes |
 | An interrupted replacement | `renamex_np(RENAME_SWAP)`: the old and the new bundle swap atomically; on any failure after the swap the installer swaps back |
 | The sandboxed build cannot write its own bundle | a small helper app embedded in the bundle, launched through LaunchServices (so outside the sandbox), does the replacement and checks everything itself |
-| Quarantine | the archive is fetched by our own URLSession (no quarantine flag); Gatekeeper still checks a notarized app at its first launch |
+| Quarantine | the archive is fetched by our own URLSession; whatever quarantine flag the new app carries, the helper takes it off once the zip's Ed25519 signature and the app's code signature check |
 | Delta updates | not supported: every update is a whole signed zip |
 
 ## 2. Finding, fetching and checking an update
@@ -89,20 +89,24 @@ newer than the last appcast accepted? (freshness)
 pick the newest item: newer build, this macOS
 GET the item's zip → staging folder
 length, SHA-256, Ed25519 of the zip
-ditto -x -k → staged bundle
-code signature (strict, nested), identifier,
-  Team ID policy, Info.plist versions == item's
 state: "downloaded, installs at quit"
 … quit: every profile sealed (§3) …
-launch helper (LaunchServices) ───────────────►  wait for the app to exit, and for every
-app exits normally                                process of the bundle to be gone
-                                                 verify the zip's Ed25519 again (keys from the
-                                                   installed app's signed Info.plist), extract it
-                                                   itself, code signature, versions
+request.json; launch helper (LaunchServices) ─►  the installed app's own signature, then its keys
+app exits normally                                and Team ID; wait for the app to exit, and for
+                                                   every process of the bundle to be gone
+                                                 the release again: newer, this macOS; the zip's
+                                                   length, SHA-256 and Ed25519
+                                                 ditto -x -k next to the app → one app: its code
+                                                   signature (strict, nested), identifier, Team ID,
+                                                   Info.plist versions == the item's
                                                  RENAME_SWAP installed ⇄ new; verify in place
                                                  launch the new app; swap back if it cannot start
                                                  write the outcome for the next launch to show
 ```
+
+The bundle itself — its code signature, identifier, Team ID and versions — is checked by the helper,
+once the app has quit and right before the swap: an archive that passed the app's checks is still
+only an archive until then, and the helper trusts nothing the app handed it but file names.
 
 **The appcast** is one static file: a JSON envelope `{"format": 1, "keyID": …, "payload": <base64
 of the appcast JSON>, "signature": <base64 Ed25519 of those payload bytes>}`. The signature is over

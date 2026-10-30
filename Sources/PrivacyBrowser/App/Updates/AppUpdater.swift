@@ -305,6 +305,7 @@ final class AppUpdater: ObservableObject, Updater {
     func installBlock() -> UpdateBlock? {
         let path = configuration.app.path
         if path.contains("/AppTranslocation/") { return .translocated }
+        if (try? configuration.app.resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly == true { return .notWritable }
         guard Self.userCanWrite(configuration.app.deletingLastPathComponent()) else { return .notWritable }
         return nil
     }
