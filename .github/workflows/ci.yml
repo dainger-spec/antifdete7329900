@@ -373,13 +373,15 @@ jobs:
       - name: The window's own properties a profile without a proxy lacks, by name (a measurement)
         # Without a proxy a profile in Safari's window has 1019 of Safari's 1044: WebRTC's 23 and
         # two more, which only a count named so far. The same page as the step above, the profile
-        # without a proxy.
+        # without a proxy, over HTTP on 127.0.0.1 (a secure context too): trusting the step above's
+        # throwaway authority a second time hung for 120 s in CI run 436, and names need no
+        # certificate.
         if: always()
         continue-on-error: true
         timeout-minutes: 10
         run: |
           set +e
-          python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --trust system --out build/payments-direct \
+          python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --http --out build/payments-direct \
             --proxy none --variants shipped-safari-window | tee build/payments-direct.txt
           grep "^PAYMENTS-NAMES" build/payments-direct.txt | head -5 | cut -c1-4000 \
             | sed 's/^/::notice title=Window names - Safari'"'"'s window without a proxy::/'

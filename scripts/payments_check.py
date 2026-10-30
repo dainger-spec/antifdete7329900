@@ -250,7 +250,9 @@ class Trust:
 
 
 class Pages:
-    """The page, its service worker, and the reports, on 127.0.0.1 over HTTPS."""
+    """The page, its service worker, and the reports, on 127.0.0.1 over HTTPS — or over HTTP with
+    no certificate (`leaf` None), for the window's own property names alone: 127.0.0.1 is a secure
+    context over HTTP too, so the same interfaces show, but Apple Pay answers no call there."""
 
     def __init__(self, leaf, key, push_key):
         self.reports = {}
@@ -307,13 +309,15 @@ class Pages:
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(leaf, key)
-        self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+        self.scheme = "https" if leaf else "http"
+        if leaf:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(leaf, key)
+            self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def url(self, side):
-        return f"https://127.0.0.1:{self.port}/pay?side={urllib.parse.quote(side)}"
+        return f"{self.scheme}://127.0.0.1:{self.port}/pay?side={urllib.parse.quote(side)}"
 
     def wait(self, side, timeout):
         deadline = time.time() + timeout
@@ -376,6 +380,9 @@ def main():
     parser.add_argument("--proxy", default="127.0.0.1:9", help="the profiles' HTTP proxy; 'none' for none")
     parser.add_argument("--variants", default=",".join(VARIANTS))
     parser.add_argument("--no-safari", action="store_true")
+    parser.add_argument("--http", action="store_true",
+                        help="serve the page over HTTP on 127.0.0.1, with no certificate and nothing trusted: for the "
+                             "window's own property names (Apple Pay answers no call there)")
     options = parser.parse_args()
 
     executable = os.path.join(options.app, "Contents", "MacOS", "PrivacyBrowser")
@@ -391,20 +398,20 @@ def main():
     work = tempfile.mkdtemp(prefix="pb-payments-")
     trust = None
     try:
-        made = make_certificates(work)
+        made = None if options.http else make_certificates(work)
         push_key = application_server_key(work)
-        if made is None or push_key is None:
+        if (made is None and not options.http) or push_key is None:
             log("PAYMENTS could not make the certificates or the push key")
             return 1
-        ca, leaf, key = made
-        if options.trust:
+        ca, leaf, key = made if made else (None, None, None)
+        if options.trust and not options.http:
             trust = Trust(ca, options.trust)
             signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
             if not trust.add():
                 log("PAYMENTS the authority could not be trusted: neither browser would load the page")
                 return 1
         pages = Pages(leaf, key, push_key)
-        log(f"PAYMENTS the page is served at https://127.0.0.1:{pages.port}/pay")
+        log(f"PAYMENTS the page is served at {pages.scheme}://127.0.0.1:{pages.port}/pay")
 
         safari = None
         if not options.no_safari:
