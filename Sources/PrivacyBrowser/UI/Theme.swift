@@ -307,21 +307,27 @@ private struct LumenField: ViewModifier {
                         .accessibilityHidden(true)
                 }
             }
+            .padding(.horizontal, 10)
             .overlay(alignment: .leading) {
-                // Opaque, over the text: a click goes through to the field, which then shows it all.
+                // Opaque, over the text and the field's margins inside its border: AppKit draws the
+                // text past the text field's own edge (views do not clip to their bounds since
+                // macOS 14), so a mask only the text's width let the real line's last glyph show
+                // beside it — a password's, where the password reaches the edge. A click goes
+                // through to the field, which then shows it all.
                 if let masked, !focused {
                     Text(verbatim: masked)
                         .font(.lumenBody)
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .padding(.horizontal, 9)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .background(Theme.field)
+                        .padding(.horizontal, 1)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
             }
-            .padding(.horizontal, 10)
             .padding(.vertical, height == nil ? 7 : 0)
             .frame(height: height)
             .frame(minHeight: height == nil ? 32 : nil)
