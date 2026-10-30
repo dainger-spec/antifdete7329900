@@ -149,20 +149,34 @@ when the app's executable declares a recent enough SDK (`linkedOnOrAfterSDKWithB
 Safari always (WTF's `computeSDKAlignedBehaviors` returns every one when the process is Safari);
 AppKit and the other frameworks follow the declared SDK too. Xcode 27's SwiftPM gives the linker the
 deployment target as the SDK (`-platform_version macos 14.0.0 14.0.0`; Xcode 26's gives its SDK,
-26.5), so a build made with Xcode 27 declared "sdk 14.0" — measured on the owner's build with Xcode
-27.1 — and on macOS 27 its pages lacked what Safari 27's have: by the window's own properties,
-`trustedTypes` and the five Trusted Types interfaces, and they had `MutationEvent`, which Safari 27
-no longer has (CI run 448, `scripts/sdk_check.sh`). Each executable now declares the SDK it is built
-with and macOS 26 as its oldest system: `scripts/build-app.sh` gives the linker both and refuses a
-build that declares another SDK; the self-test checks the declared SDK. With macOS 27's SDK
-declared, a page has what Safari 27's has, by those names.
+26.5), so a build made with Xcode 27 declares "sdk 14.0" — measured on the owner's build with Xcode
+27.1 — and on macOS 27 its pages lack what Safari 27's have: by the window's own properties,
+`trustedTypes` and the five Trusted Types interfaces, and they have `MutationEvent`, which Safari 27
+no longer has (CI run 448, `scripts/sdk_check.sh`); a copy declaring macOS 27's SDK has Safari's
+names.
 
-`+[WKProcessPool _setLinkedOnOrAfterEverything]` — WebKit's own switch for this, made for Safari:
-every behavior on, whatever the SDK — is **not** used. With it, on macOS 27, a profile with a proxy
-had the self-test's AIA canary (the address a certificate names for its missing intermediate)
-resolved by this Mac, outside the proxy; as built, and as a copy declaring macOS 27's SDK, it did not
-(CI runs 448 and 449, `scripts/aia_variants.py`: the certificate check alone under a packet capture,
-per variant). It stays a measurement switch (`--sdk-everything`, `--sdk-check --everything`).
+**The executables declare the SDK SwiftPM writes, not macOS 27's, and the app does not use
+`+[WKProcessPool _setLinkedOnOrAfterEverything]`** (WebKit's own switch for every behavior, made for
+Safari). With either, on macOS 27, a profile with a proxy had the self-test's AIA canary — the
+address a certificate names for its missing intermediate — resolved by this Mac, outside the proxy,
+caught by the egress capture: run 448 with the switch, run 450 with the executables declaring macOS
+27's SDK (build-app.sh gave the linker the real SDK); runs 447 and 449, declaring 14.0, were clean.
+The capture names this app, not WebKit's network process, as the one the fetch was made for; by
+WebKit's source the network process hands every server-trust question the app's identity
+(`SecTrustSetClientAuditToken`), and among what a newer SDK turns on is WebKit's network loader
+(`UseCFNetworkNetworkLoader`, macOS 15) — a reading of the source, not a measurement. Which SDK
+starts it is measured: the certificate check alone, once per SDK WebKit gates on, each with
+certificates of its own naming addresses no earlier variant used (`scripts/aia_variants.py`). Its
+first version reused one name for every variant and read clean where the full self-test leaked: in
+those variants not even the control was asked for (run 450), so they could not tell. Whether 26.5,
+what a build made with Xcode 26 declares, starts it on macOS 27 is among what it answers. On macOS
+26 the capture has not seen the system fetch for the control in any of the eight runs read (a
+profile without a proxy, where macOS 27 does fetch), so there the check cannot tell either. CI shows
+what follows the SDK on each runner: the app as built and a copy declaring another SDK, by the
+window's own properties and the screen, with the app's screens rendered from both (`--sdk-check`,
+`scripts/sdk_check.sh`); and which SDK SwiftPM writes, built four ways
+(`scripts/swiftpm_sdk_probe.sh`).
+
 `DigitalCredential` and `MediaSessionCoordinator` do not follow the SDK: WebKit turns them on only
 for a process with an entitlement Apple grants (`com.apple.developer.web-browser`,
 `com.apple.developer.group-session.urlactivity`). Nor, by CI's measure, does the screen's

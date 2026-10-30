@@ -108,13 +108,11 @@ products.append(.executable(name: "PacketTunnelExtension", targets: ["PacketTunn
 
 let package = Package(
     name: "PrivacyBrowser",
-    // macOS 26 and newer, as decided in October 2026. The two APIs this design cannot do without
-    // came in macOS 14 — WKWebsiteDataStore(forIdentifier:) and
-    // WKWebsiteDataStore.proxyConfigurations — but SwiftPM writes this version into each
-    // executable as both its minimum system and its SDK, and the frameworks that follow the SDK
-    // (WebKit, AppKit) then behave as for an app of that year; scripts/build-app.sh writes the SDK
-    // the app is really built with (docs/ISOLATION_AND_LIMITATIONS.md §2).
-    platforms: [.macOS("26.0")],
+    // macOS 14 is the minimum: WKWebsiteDataStore(forIdentifier:) and
+    // WKWebsiteDataStore.proxyConfigurations were introduced in macOS 14 (Sonoma).
+    // Without them neither persistent per-profile isolation nor per-profile
+    // proxies are available through public API.
+    platforms: [.macOS(.v14)],
     products: products,
     dependencies: packageDependencies,
     targets: targets

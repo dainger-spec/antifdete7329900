@@ -78,7 +78,10 @@ name, so a DNS query for it in the capture is the system's trust service fetchin
 this Mac (scripts/egress_check.py). `--tls-control <port>` serves the same kind of certificate,
 naming `pbaiacontrol`, directly on 127.0.0.1 without a proxy: the self-test loads it in a profile
 without one, and the query for that name is the proof that this macOS fetches and the capture sees
-it. Needs the `openssl` command; without it, no TLS (said at start-up).
+it. Needs the `openssl` command; without it, no TLS (said at start-up). `--aia-tag <tag>` adds
+<tag> to the four names (`pbaiacanary<tag>`, `pbocspcanary<tag>`, `pbaiacontrol<tag>`,
+`pbocspcontrol<tag>`): addresses no earlier run asked for, which no cache on this Mac can answer
+(scripts/aia_variants.py, one tag per variant).
 
 `--canary <port>` listens on 127.0.0.1 and ::1 and notes every connection it takes: the leak page
 asks for that port on loopback addresses, which a proxied profile must send to its proxy like
@@ -90,6 +93,7 @@ import functools
 import html
 import json
 import os
+import re
 import shutil
 import socket
 import ssl
@@ -152,17 +156,17 @@ authorityInfoAccess = caIssuers;URI:http://pbaiacontrol.leak.example.com/i.cer,O
 """
 
 
-def make_certificates() -> None:
+def make_certificates(tag: str = "") -> None:
     """A root, an intermediate it signs and, signed by the intermediate, the two leaf certificates
-    of the module docstring. Each leaf is served alone: the chain is complete only for a client
-    that fetches the intermediate from the address the leaf names."""
+    of the module docstring, their names with `tag` added. Each leaf is served alone: the chain is
+    complete only for a client that fetches the intermediate from the address the leaf names."""
     openssl = shutil.which("openssl")
     if not openssl:
         print("[selftest-proxy] no openssl: HTTPS through the proxies is not answered with TLS", flush=True)
         return
     folder = tempfile.mkdtemp(prefix="pb-selftest-tls-")
     with open(os.path.join(folder, "ext.cnf"), "w") as config:
-        config.write(CERT_CONFIG)
+        config.write(re.sub(r"//(pb(?:aia|ocsp)(?:canary|control))\.", lambda name: f"//{name.group(1)}{tag}.", CERT_CONFIG))
 
     def run(*arguments: str) -> None:
         subprocess.run([openssl, *arguments], check=True, capture_output=True, cwd=folder)
@@ -182,7 +186,7 @@ def make_certificates() -> None:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(os.path.join(folder, f"{name}.pem"), os.path.join(folder, f"{name}.key"))
             TLS[name] = context
-        print(f"[selftest-proxy] TLS certificates made in {folder}", flush=True)
+        print(f"[selftest-proxy] TLS certificates made in {folder}{f', names tagged {tag}' if tag else ''}", flush=True)
     except (subprocess.CalledProcessError, ssl.SSLError, OSError) as error:
         detail = getattr(error, "stderr", b"") or b""
         print(f"[selftest-proxy] could not make the TLS certificates: {error} {detail[-300:]!r}", flush=True)
@@ -808,6 +812,14 @@ def _safe(handler, conn) -> None:
         print(f"[selftest-proxy] {handler_name(handler)} error: {exc}", flush=True)
 
 
+def aia_tag(value: str) -> str:
+    """A tag for the certificates' names (`--aia-tag`): lowercase letters and digits, as a DNS label
+    takes them."""
+    if not re.fullmatch(r"[a-z0-9]{1,24}", value):
+        raise argparse.ArgumentTypeError("1 to 24 lowercase letters and digits")
+    return value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--http", type=int, default=18080)
@@ -819,8 +831,9 @@ def main() -> None:
     parser.add_argument("--tls-control", type=int, default=None)
     parser.add_argument("--canary", type=int, default=None)
     parser.add_argument("--silent", type=int, default=None)
+    parser.add_argument("--aia-tag", type=aia_tag, default="")
     args = parser.parse_args()
-    make_certificates()
+    make_certificates(args.aia_tag)
     if args.tls_control:
         threading.Thread(target=serve, args=(args.tls_control, handle_tls_control), daemon=True).start()
     if args.canary:

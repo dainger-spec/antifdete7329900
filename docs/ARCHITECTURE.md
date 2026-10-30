@@ -6,8 +6,7 @@ The browser is built on **WKWebView (system WebKit)**, not Chromium or Electron:
 
 - macOS 14 added the two APIs a multi-profile browser needs: persistent, separately
   identified data stores (`WKWebsiteDataStore(forIdentifier:)`) and per-store proxies
-  (`WKWebsiteDataStore.proxyConfigurations`). The app declares macOS 26 and newer, and each of
-  its executables the SDK it was built with (`scripts/build-app.sh`), as Xcode would write it.
+  (`WKWebsiteDataStore.proxyConfigurations`).
 - Electron is Chromium-based, so "Electron + WKWebView" isn't a real combination.
   Embedding Chromium (CEF) would give finer engine control, such as Chromium's
   `--force-webrtc-ip-handling-policy` flag, at the cost of shipping and patching a second

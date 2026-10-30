@@ -30,13 +30,9 @@ approximations limited by what WebKit exposes. The tables below say which parts 
 
 ## Requirements
 
-- macOS 26 or later. The design depends on two APIs added in macOS 14
-  (`WKWebsiteDataStore(forIdentifier:)` and `WKWebsiteDataStore.proxyConfigurations`); the app
-  declares macOS 26 and the SDK it is built with, so that WebKit and AppKit behave for it as for
-  this year's Safari (docs/ISOLATION_AND_LIMITATIONS.md §2).
-- Xcode 26 or later, or the matching Command Line Tools — the newest, for a release: a build
-  declares its Xcode's SDK, and features Apple ties to a newer SDK stay off until the app is
-  built with it.
+- macOS 14 Sonoma or later. The design depends on two APIs added in macOS 14:
+  `WKWebsiteDataStore(forIdentifier:)` and `WKWebsiteDataStore.proxyConfigurations`.
+- Xcode 15 or later, or the matching Command Line Tools (Swift 5.9+).
 
 ## Build and run
 

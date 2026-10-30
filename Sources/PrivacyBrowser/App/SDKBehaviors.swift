@@ -5,20 +5,20 @@ import WebKit
 /// WebKit's behaviors that follow the SDK an app was built with, and the SDK this executable declares.
 ///
 /// WebKit turns some of its features on for an app only when the app's executable declares a recent
-/// enough SDK (`linkedOnOrAfterSDKWithBehavior`: Trusted Types by default, `MutationEvent` off,
-/// `user-select` superseding `-webkit-user-select`, and more), and for Safari always: WTF's
-/// `computeSDKAlignedBehaviors` returns every behavior when the process is Safari. Xcode 27's SwiftPM
-/// wrote the deployment target into the executable as its SDK ("sdk 14.0" on the owner's build), so
-/// on macOS 27 a profile's page lacked `window.trustedTypes`, which Safari 27 has. The executables
-/// now declare the SDK they are built with (scripts/build-app.sh), which gives a page what Safari's
-/// has (docs/ISOLATION_AND_LIMITATIONS.md §2).
+/// enough SDK (`linkedOnOrAfterSDKWithBehavior`: the network loader Safari uses, Trusted Types by
+/// default, `MutationEvent` off, `user-select` superseding `-webkit-user-select`, and more), and for
+/// Safari always: WTF's `computeSDKAlignedBehaviors` returns every behavior when the process is Safari.
+/// Xcode 27's SwiftPM writes the deployment target into the executable as its SDK ("sdk 14.0" on the
+/// owner's build), Xcode 26's its SDK (26.5); on macOS 27 a page of a build declaring 14.0 lacks
+/// `window.trustedTypes`, which Safari 27 has.
 ///
-/// `+[WKProcessPool _setLinkedOnOrAfterEverything]`, WebKit's own switch for every behavior at once,
-/// made for Safari, is not used: with it, in CI runs 448 and 449 on macOS 27, a profile with a proxy
-/// had the self-test's AIA canary — the address a certificate names for its missing intermediate —
-/// resolved by this Mac, outside the proxy, and with the SDK declared it did not
-/// (scripts/aia_variants.py). Only `--sdk-everything` (CI's measurements) and `--sdk-check
-/// --everything` call it.
+/// The executables declare what SwiftPM writes, and `+[WKProcessPool _setLinkedOnOrAfterEverything]`
+/// (WebKit's own switch for every behavior at once, made for Safari) is not used: on macOS 27, with
+/// the switch or with macOS 27's SDK declared, a profile with a proxy had the self-test's AIA canary —
+/// the address a certificate names for its missing intermediate — resolved by this Mac, outside the
+/// proxy (CI run 448 with the switch, run 450 with the SDK; runs 447 and 449, declaring 14.0, were
+/// clean). From which SDK it starts, 26.5 among them, is measured (scripts/aia_variants.py). Only
+/// `--sdk-everything` (CI's measurements) and `--sdk-check --everything` call the switch.
 enum SDKBehaviors {
     /// Whether `matchSafari` turned every behavior on in this process (the self-test says so).
     private(set) static var matched = false

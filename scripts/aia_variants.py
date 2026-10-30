@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
-"""Which of WebKit's behaviors that follow an app's SDK makes this Mac resolve a certificate's AIA
-address outside a profile's proxy?
+"""From which SDK an app's executable declares does this Mac fetch a certificate's missing
+intermediate outside a profile's proxy?
 
-    python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app --sdk "26.5,$(xcrun --show-sdk-version)" \\
-        --out build/aia-variants --title "AIA variants"
+    python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app \\
+        --sdk "15.0,26.5,$(xcrun --show-sdk-version)" --out build/aia-variants --title "AIA variants"
 
-CI run 448 (macOS 27): with every one of those behaviors on (+[WKProcessPool
-_setLinkedOnOrAfterEverything], SDKBehaviors.swift), the self-test's certificate check had the AIA
-canary — `pbaiacanary.leak.example.com`, the address the self-test proxy's certificate names for its
-missing intermediate — resolved by this Mac, outside the profile's proxy. An executable that declares
-a newer SDK gets some of the same behaviors (WebKit's network loader among them), so that decides
-whether one can be used. This runs the self-test's "certificates" group alone (PB_SELFTEST_ONLY) under
-a packet capture with process names, three times, each in a window of its own:
+WebKit turns some of its behaviors on only for an app whose executable declares a recent enough SDK
+(WTF's computeSDKAlignedBehaviors), and every one with +[WKProcessPool _setLinkedOnOrAfterEverything]
+(SDKBehaviors.swift). On macOS 27, with the switch (CI run 448) and with the executables declaring
+macOS 27's SDK (run 450), the self-test's certificate check had this Mac resolve the AIA canary — the
+address the self-test proxy's certificate names for its missing intermediate — outside the profile's
+proxy; declaring 14.0 (runs 447 and 449) it did not. This runs the self-test's "certificates" group
+alone (PB_SELFTEST_ONLY) under a packet capture with process names, once per variant:
 
-  * the app as built: WebKit's behaviors as the SDK its executable declares gives them;
+  * the app as built (the SDK its executable declares);
   * the same with every behavior on (--sdk-everything);
-  * a copy whose executable declares each SDK given (vtool; signed ad hoc with the app's entitlements)
-    — on macOS 27, 26.5 as well as 27: a build made with Xcode 26 declares 26.5 and runs there too.
+  * a copy whose executable declares each SDK given (vtool; signed ad hoc with the app's
+    entitlements): the versions WebKit gates its behaviors on tell which of them starts it, and
+    26.5 is what a build made with Xcode 26 declares.
 
-and counts, per window, the DNS questions for `pbaiacanary` (a fetch made by this Mac for a profile
-with a proxy) and for the control `pbaiacontrol` (a profile without a proxy, which the system is
-expected to fetch for: the capture sees such packets). A measurement: exit 0 always.
+Each variant has a self-test proxy of its own, started with a tag of its own (selftest_proxy.py
+--aia-tag): new certificates, naming `pbaiacanary<tag>` (loaded in a profile with the proxy) and
+`pbaiacontrol<tag>` (the control: a profile without a proxy, for which the system does fetch on
+macOS 27). A name already asked for can be answered from a cache: the first version of this script
+used one name for every variant and, in run 450, saw neither name in any variant, the control
+included. A variant whose control was not asked for cannot tell, and says so. A measurement: exit 0
+always.
 """
 import argparse
 import os
@@ -59,9 +64,9 @@ def declared_sdk(binary):
     return values.get("minos"), values.get("sdk")
 
 
-def copy_declaring(app, sdk, scratch, out):
-    """A copy of `app` whose executable declares `sdk`, or None."""
-    copy = os.path.join(scratch, "PrivacyBrowser.app")
+def copy_declaring(app, sdk, folder, entitlements):
+    """A copy of `app` in `folder` whose executable declares `sdk`, or None."""
+    copy = os.path.join(folder, "PrivacyBrowser.app")
     shutil.copytree(app, copy, symlinks=True)
     binary = os.path.join(copy, BINARY)
     minos, _ = declared_sdk(binary)
@@ -73,12 +78,48 @@ def copy_declaring(app, sdk, scratch, out):
         print(f"vtool: {done.stderr.strip()}", flush=True)
         return None
     os.replace(binary + ".declared", binary)
-    entitlements = os.path.join(out, "entitlements.plist")
-    with open(entitlements, "wb") as handle:
-        handle.write(subprocess.run(["codesign", "-d", "--entitlements", "-", "--xml", app], capture_output=True).stdout)
     subprocess.run(["codesign", "--force", "--options", "runtime", "--timestamp=none", "--entitlements", entitlements,
                     "--sign", "-", copy], capture_output=True)
     return copy
+
+
+def version_key(sdk):
+    try:
+        return tuple(int(part) for part in sdk.split("."))
+    except (AttributeError, ValueError):
+        return ()
+
+
+def run_variant(index, app, extra, out, title):
+    """The certificate check of `app`, with a proxy whose certificates name addresses of their own.
+    Returns (tag, begin, end, self-test output)."""
+    tag = f"v{index}{os.urandom(3).hex()}"
+    proxy = subprocess.Popen([sys.executable, os.path.join(ROOT, "scripts", "selftest_proxy.py"),
+                              "--http", str(PORTS["http"]), "--socks", str(PORTS["socks"]),
+                              "--tls-control", str(PORTS["tls-control"]), "--canary", str(PORTS["canary"]),
+                              "--aia-tag", tag],
+                             stdout=open(os.path.join(out, f"proxy-{index}.txt"), "w"), stderr=subprocess.STDOUT)
+    begin = time.time()
+    try:
+        if not (wait_for_port(PORTS["http"]) and wait_for_port(PORTS["tls-control"])):
+            print(f"::warning title={title}::variant {index}: the self-test proxy did not start", flush=True)
+            return tag, begin, time.time(), ""
+        environment = dict(os.environ, PB_SELFTEST_ONLY="certificates",
+                           PB_SELFTEST_HTTP_PROXY_PORT=str(PORTS["http"]),
+                           PB_SELFTEST_TLS_CONTROL_PORT=str(PORTS["tls-control"]),
+                           PB_SELFTEST_CANARY_PORT=str(PORTS["canary"]))
+        try:
+            result = subprocess.run([os.path.join(app, BINARY), "--self-test", *extra], env=environment,
+                                    capture_output=True, text=True, timeout=240)
+            output = result.stdout
+        except subprocess.TimeoutExpired as expired:
+            output = (expired.stdout or b"").decode(errors="replace") + "\n(timed out)"
+        # A question can follow the check by a moment.
+        time.sleep(4)
+        return tag, begin, time.time(), output
+    finally:
+        proxy.kill()
+        proxy.wait()
 
 
 def main():
@@ -90,82 +131,85 @@ def main():
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
     out = os.path.abspath(args.out)
+    entitlements = os.path.join(out, "entitlements.plist")
+    with open(entitlements, "wb") as handle:
+        handle.write(subprocess.run(["codesign", "-d", "--entitlements", "-", "--xml", args.app],
+                                    capture_output=True).stdout)
 
-    proxy = subprocess.Popen([sys.executable, os.path.join(ROOT, "scripts", "selftest_proxy.py"),
-                              "--http", str(PORTS["http"]), "--socks", str(PORTS["socks"]),
-                              "--tls-control", str(PORTS["tls-control"]),
-                              "--canary", str(PORTS["canary"])],
-                             stdout=open(os.path.join(out, "proxy.txt"), "w"), stderr=subprocess.STDOUT)
-    if not wait_for_port(PORTS["http"]):
-        print(f"::warning title={args.title}::the self-test proxy did not start", flush=True)
-        proxy.kill()
-        return 0
     capture_path = os.path.join(out, "capture.txt")
     capture = subprocess.Popen(["sudo", "tcpdump", "-i", "pktap,all", "-k", "NP", "-n", "-tt", "-l",
                                 "not host 127.0.0.1 and not host ::1"],
                                stdout=open(capture_path, "w"), stderr=open(os.path.join(out, "tcpdump.err"), "w"))
     time.sleep(2)
 
-    scratch = tempfile.mkdtemp(prefix="pb-aia-variants-")
-    variants = [("as built", args.app, [])]
-    variants.append(("as built, every behavior on", args.app, ["--sdk-everything"]))
-    for sdk in [value.strip() for value in args.sdk.split(",") if value.strip()]:
-        folder = os.path.join(scratch, sdk)
-        os.makedirs(folder)
-        copy = copy_declaring(args.app, sdk, folder, out)
-        if copy:
-            variants.append((f"declaring SDK {sdk}", copy, []))
-        else:
-            print(f"::warning title={args.title}::no copy declaring SDK {sdk}", flush=True)
-
-    environment = dict(os.environ, PB_SELFTEST_ONLY="certificates",
-                       PB_SELFTEST_HTTP_PROXY_PORT=str(PORTS["http"]),
-                       PB_SELFTEST_TLS_CONTROL_PORT=str(PORTS["tls-control"]),
-                       PB_SELFTEST_CANARY_PORT=str(PORTS["canary"]))
-    windows = []
-    for index, (name, app, extra) in enumerate(variants):
-        log = os.path.join(out, f"variant-{index}.txt")
-        begin = time.time()
+    built_minos, built_sdk = declared_sdk(os.path.join(args.app, BINARY))
+    variants = [("as built", None, []), ("as built, every behavior on", None, ["--sdk-everything"])]
+    variants += [(f"declaring SDK {sdk}", sdk, []) for sdk in
+                 [value.strip() for value in args.sdk.split(",") if value.strip()]]
+    results = []
+    for index, (name, sdk, extra) in enumerate(variants):
+        folder = tempfile.mkdtemp(prefix="pb-aia-variant-")
         try:
-            result = subprocess.run([os.path.join(app, BINARY), "--self-test", *extra], env=environment,
-                                    capture_output=True, text=True, timeout=240)
-            output = result.stdout
-        except subprocess.TimeoutExpired as expired:
-            output = (expired.stdout or b"").decode(errors="replace") + "\n(timed out)"
-        # A question can follow the check by a moment: the window closes a little after it.
-        time.sleep(4)
-        end = time.time()
-        with open(log, "w") as handle:
+            app, declared = args.app, (built_minos, built_sdk)
+            if sdk:
+                app = copy_declaring(args.app, sdk, folder, entitlements)
+                if not app:
+                    print(f"::warning title={args.title}::no copy declaring SDK {sdk}", flush=True)
+                    continue
+                declared = declared_sdk(os.path.join(app, BINARY))
+            tag, begin, end, output = run_variant(index, app, extra, out, args.title)
+        except Exception as error:  # noqa: BLE001 - one variant's failure leaves the others to measure
+            print(f"::warning title={args.title}::{name}: {error!r}", flush=True)
+            continue
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+        with open(os.path.join(out, f"variant-{index}.txt"), "w") as handle:
             handle.write(output)
-        windows.append((name, app, begin, end, output))
+        results.append((name, declared, extra, tag, begin, end, output))
         time.sleep(2)
 
     subprocess.run(["sudo", "pkill", "-INT", "-f", "tcpdump -i pktap"], capture_output=True)
     time.sleep(2)
-    proxy.kill()
-    shutil.rmtree(scratch, ignore_errors=True)
-
     with open(capture_path, errors="replace") as handle:
         lines = handle.read().splitlines()
-    for name, app, begin, end, output in windows:
-        minos, sdk = declared_sdk(os.path.join(app, BINARY)) if os.path.exists(os.path.join(app, BINARY)) else (None, None)
-        counts = {"pbaiacanary": [], "pbaiacontrol": []}
+
+    verdicts = []
+    for name, (minos, sdk), extra, tag, begin, end, output in results:
+        asked = {"canary": [], "control": []}
         for line in lines:
             match = LINE.match(line)
-            if not match or not begin <= float(match.group(1)) <= end:
+            if not match or "?" not in line:
                 continue
-            for name_part in counts:
-                if f"{name_part}.leak.example.com" in line and "?" in line:
-                    counts[name_part].append(match.group(2))
-        verdicts = [l for l in output.splitlines() if l.startswith(("PASS certificates", "FAIL certificates", "SELFTEST", "INFO WebKit's behaviors"))]
-        canary = counts["pbaiacanary"]
-        summary = (f"AIA-VARIANT {name} (declares minos {minos}, sdk {sdk}): the canary asked of this Mac's resolver "
-                   f"{len(canary)} time(s){' — by ' + '; '.join(sorted(set(canary))) if canary else ''}; "
-                   f"the control {len(counts['pbaiacontrol'])} time(s)")
+            for kind in asked:
+                if f"pbaia{kind}{tag}.leak.example.com" in line:
+                    asked[kind].append(match.group(2))
+        canary, control = asked["canary"], asked["control"]
+        if canary:
+            verdict = "LEAKS" + ("" if control else " (the control was not asked for)")
+        elif control:
+            verdict = "clean"
+        else:
+            verdict = "cannot tell: the control was not asked for"
+        verdicts.append((name, sdk, extra, verdict))
+        checks = [line for line in output.splitlines()
+                  if line.startswith(("PASS certificates", "FAIL certificates", "SELFTEST", "INFO WebKit's behaviors"))]
+        summary = (f"AIA-VARIANT {name} (declares minos {minos}, sdk {sdk}; names tagged {tag}): {verdict} — "
+                   f"the canary asked of this Mac's resolver {len(canary)} time(s)"
+                   f"{' by ' + '; '.join(sorted(set(canary))) if canary else ''}, "
+                   f"the control {len(control)} time(s){' by ' + '; '.join(sorted(set(control))) if control else ''}")
         print(summary, flush=True)
-        for verdict in verdicts:
-            print("    " + verdict, flush=True)
+        for check in checks:
+            print("    " + check, flush=True)
         notice(args.title, summary)
+
+    # The SDKs alone (no switch), ordered: the newest that stayed clean and the oldest that leaked.
+    by_sdk = sorted(((version_key(sdk), sdk, verdict) for name, sdk, extra, verdict in verdicts
+                     if not extra and sdk), key=lambda entry: entry[0])
+    clean = [sdk for key, sdk, verdict in by_sdk if verdict == "clean"]
+    leaking = [sdk for key, sdk, verdict in by_sdk if verdict.startswith("LEAKS")]
+    unknown = [sdk for key, sdk, verdict in by_sdk if verdict.startswith("cannot")]
+    notice(args.title, f"AIA-VARIANTS by SDK declared: clean {', '.join(clean) or 'none'}; "
+                       f"leaks {', '.join(leaking) or 'none'}; cannot tell {', '.join(unknown) or 'none'}")
     return 0
 
 
