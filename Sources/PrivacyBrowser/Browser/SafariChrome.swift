@@ -1205,7 +1205,13 @@ extension SafariChrome {
     static func prepareForCheck(arguments: [String]) -> Bool {
         guard !AppEnvironment.isSandboxed else { return false }
         isolateForCheck(arguments: arguments)
-        guard load(), installApplication() else { return false }
+        guard load() else { return false }
+        // As a profile's process does (SafariChromeHost): Safari's own folders are the home's
+        // before any of Safari's code runs, not the account's (which the sandbox refuses anyway).
+        if let realHome = SafariPaths.realHome, let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] {
+            SafariPaths.redirectGetters(from: realHome, to: home)
+        }
+        guard installApplication() else { return false }
         prepare()
         return true
     }

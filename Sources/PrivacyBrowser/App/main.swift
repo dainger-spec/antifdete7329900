@@ -44,6 +44,10 @@ MainActor.assumeIsolated {
         // the classes around AutoFill, history and export, the methods that wait — printed for CI
         // (SafariChromeInventory.swift). In a temporary home, held to a closed proxy.
         SafariChromeInventory.start(arguments: arguments)
+    } else if arguments.contains("--history-check") {
+        // Whether Safari's history can run inside a profile's process: its service's own code, in
+        // this process, with its database in the profile's home (SafariHistoryCheck; CI).
+        SafariHistoryCheck.run(arguments: arguments)
     } else if arguments.contains("--default-browser-check") {
         // Whether Safari's own question about the default browser throws in a profile's process of
         // this app, and what the system answers about http and https (SafariChrome; CI runs it on

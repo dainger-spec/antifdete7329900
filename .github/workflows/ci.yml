@@ -140,6 +140,16 @@ jobs:
         continue-on-error: true
         timeout-minutes: 4
         run: scripts/default_browser_check.sh build/unsandboxed/PrivacyBrowser.app build/egress27/default-browser "macOS 27 - default browser"
+      - name: Safari 27's history inside a profile's process (a measurement)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          set +e
+          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --history-check > build/egress27/history-check.txt 2>/dev/null
+          echo "exit $?"; cat build/egress27/history-check.txt
+          grep '^HISTORY-CHECK' build/egress27/history-check.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - history in a profile process::/'
+          exit 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -306,6 +316,18 @@ jobs:
         continue-on-error: true
         timeout-minutes: 4
         run: scripts/default_browser_check.sh build/unsandboxed/PrivacyBrowser.app build/default-browser "default browser"
+      - name: Safari's history inside a profile's process (a measurement)
+        # Whether Safari's History service's own code runs in a profile's process, with its database
+        # in the profile's home (SafariHistoryCheck). Never fails the build.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          set +e
+          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --history-check > build/history-check.txt 2>/dev/null
+          echo "exit $?"; cat build/history-check.txt
+          grep '^HISTORY-CHECK' build/history-check.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=history in a profile process::/'
+          exit 0
       - name: Compare the fingerprint surface with this Mac's real Safari (safaridriver)
         run: |
           sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
