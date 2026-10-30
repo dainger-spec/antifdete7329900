@@ -599,9 +599,11 @@ final class SelfTest {
         let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
         let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
         let before = ServerTrust.tally.counts
+        let allowedBefore = ServerTrust.tally.fetchAllowed
         try await load(URL(string: "https://aia-\(run).leak.example.com/pb-leak/aia?run=\(run)")!,
                        in: ProfileConfiguration(proxy: proxy, ephemeral: true))
         let after = ServerTrust.tally.counts
+        let allowedAfter = ServerTrust.tally.fetchAllowed
         let log = try await loadThroughProxy(repository, proxy, url: URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!) ?? ""
         guard log.contains("(tls handshake)") else {
             check("certificates: the self-test proxy answers HTTPS with its certificate", false,
@@ -610,6 +612,10 @@ final class SelfTest {
         }
         check("certificates: with a proxy, a certificate whose chain needs a fetch is checked without one, and refused",
               after.refused > before.refused, "evaluations \(before) → \(after)")
+        // The order of the calls is what keeps the fetch off (ServerTrust.evaluate): the trusts
+        // evaluated must say themselves that they may not fetch.
+        check("certificates: every trust evaluated says itself it may not fetch (policies set first, then fetching off)",
+              allowedAfter == allowedBefore && allowedAfter == 0, "still allowed to fetch: \(allowedBefore) → \(allowedAfter)")
         check("certificates: the browser refused it at the handshake, through the proxy",
               log.contains("tls refused by the client"), String(log.prefix(400)))
     }
@@ -1040,8 +1046,8 @@ final class SelfTest {
                   "\(report.places)")
             info("Safari chrome: Foundation's temporary directory in the profile's process is \(report.places["temporaryDirectory"] ?? "?")")
             check("Safari chrome: certificates are checked without fetching, and the leak page's were refused",
-                  report.trustEvaluated > 0 && report.trustRefused > 0,
-                  "evaluated \(report.trustEvaluated), refused \(report.trustRefused)")
+                  report.trustEvaluated > 0 && report.trustRefused > 0 && report.trustFetchAllowed == 0,
+                  "evaluated \(report.trustEvaluated), refused \(report.trustRefused), still allowed to fetch \(report.trustFetchAllowed)")
         } else {
             check("Safari chrome: the profile's process reported where its traffic goes", false, "no report in 40 s")
         }

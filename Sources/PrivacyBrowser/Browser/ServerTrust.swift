@@ -57,11 +57,29 @@ enum ServerTrust {
     }
 
     /// The evaluation itself: the system's SSL policy for `host`, network fetches off.
+    ///
+    /// In this order. "No network fetch" is kept as an option of the trust's policies
+    /// (`kSecPolicyCheckNoNetworkAccess`), and `SecTrustSetPolicies` replaces the policies: set
+    /// the other way round, the option is gone and trustd fetches after all (Security's
+    /// SecTrust.c; seen in CI run 413, where this process had the self-test's AIA canary name
+    /// resolved). Should fetching still be allowed, the certificate is refused unevaluated.
     static func evaluate(_ trust: SecTrust, host: String) -> Bool {
-        SecTrustSetNetworkFetchAllowed(trust, false)
         SecTrustSetPolicies(trust, SecPolicyCreateSSL(true, host as CFString))
+        SecTrustSetNetworkFetchAllowed(trust, false)
+        guard !fetchAllowed(trust) else {
+            tally.countFetchAllowed()
+            log.error("A certificate evaluation would have been allowed to fetch: refused unevaluated")
+            return false
+        }
         var error: CFError?
         return SecTrustEvaluateWithError(trust, &error)
+    }
+
+    /// Whether evaluating `trust` may go to the network, as the trust itself says.
+    static func fetchAllowed(_ trust: SecTrust) -> Bool {
+        var allowed: DarwinBoolean = true
+        guard SecTrustGetNetworkFetchAllowed(trust, &allowed) == errSecSuccess else { return true }
+        return allowed.boolValue
     }
 
     /// A trust object handed to the evaluating queue, which is then the only one touching it.
@@ -74,13 +92,19 @@ enum ServerTrust {
         private let lock = NSLock()
         private var evaluated = 0
         private var refused = 0
+        private var allowedToFetch = 0
         func count(refused wasRefused: Bool) {
             lock.withLock {
                 evaluated += 1
                 if wasRefused { refused += 1 }
             }
         }
+        /// An evaluation found its trust still allowed to fetch (and refused it unevaluated).
+        func countFetchAllowed() {
+            lock.withLock { allowedToFetch += 1 }
+        }
         var counts: (evaluated: Int, refused: Int) { lock.withLock { (evaluated, refused) } }
+        var fetchAllowed: Int { lock.withLock { allowedToFetch } }
     }
 }
 
