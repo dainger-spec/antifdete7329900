@@ -2879,45 +2879,87 @@ final class SelfTest {
         try? await manager.stop(profile.id)
     }
 
-    /// `--what-sites-see-check`: a new profile's snapshot next to this Mac's real Safari, taken as
-    /// the panel takes it, printed signal by signal — CI's step after the egress capture. Exit 0
-    /// when both were measured, 2 when Safari did not answer (CI warns), 1 when the profile's side
-    /// could not be taken.
-    static func whatSitesSeeCheck() {
+    /// `--what-sites-see-check [--safari-window] [--proxy host:port]`: a new profile's snapshot next
+    /// to this Mac's real Safari, taken as the panel takes it, printed signal by signal — CI's steps
+    /// after the egress capture. `--safari-window`: the profile in a process of its own showing
+    /// Safari's window, as the build without the App Sandbox shows a profile (refused when the
+    /// window would not be Safari's); without it, in this process and this app's window. `--proxy`:
+    /// an HTTP CONNECT proxy in the profile's settings, as a customer's profile has one; the
+    /// measuring page is on this Mac and loads directly, so the proxy need not answer. Exit 0 when
+    /// both were measured, 2 when Safari did not answer (CI warns), 1 when the profile's side could
+    /// not be taken.
+    static func whatSitesSeeCheck(arguments: [String]) {
         setvbuf(stdout, nil, _IOLBF, 0)
-        // The profile in this process, as in the self-test.
-        setenv("PB_PROFILE_PROCESS", "0", 1)
+        let inSafariWindow = arguments.contains("--safari-window")
+        let proxy: ProxySettings?
+        if let index = arguments.firstIndex(of: "--proxy") {
+            guard arguments.indices.contains(index + 1), let field = try? ProxyHostField.parse(arguments[index + 1]),
+                  let port = field.port else {
+                print("WHAT-SITES-SEE --proxy wants host:port")
+                exit(64)
+            }
+            proxy = ProxySettings(kind: .httpConnect, host: field.host, port: port)
+        } else {
+            proxy = nil
+        }
+        // In this process, as in the self-test, or in one of its own with Safari's window.
+        setenv("PB_PROFILE_PROCESS", inSafariWindow ? "1" : "0", 1)
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
-            print("WHAT-SITES-SEE TIMEOUT after 300 s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 360) {
+            print("WHAT-SITES-SEE TIMEOUT after 360 s")
             exit(1)
         }
-        Task { @MainActor in exit(await runWhatSitesSeeCheck()) }
+        Task { @MainActor in exit(await runWhatSitesSeeCheck(inSafariWindow: inSafariWindow, proxy: proxy)) }
         app.run()
     }
 
-    private static func runWhatSitesSeeCheck() async -> Int32 {
+    private static func runWhatSitesSeeCheck(inSafariWindow: Bool, proxy: ProxySettings?) async -> Int32 {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-what-sites-see-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let repository: ProfileRepository
         let profile: ProfileSummary
         do {
             repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "what-sites-see", iterations: 10_000))
-            profile = try repository.create(name: "What sites see", configuration: ProfileConfiguration(ephemeral: true))
+            profile = try repository.create(name: "What sites see", configuration: ProfileConfiguration(proxy: proxy))
         } catch {
             print("WHAT-SITES-SEE could not make a profile: \(error)")
             return 1
         }
+        let place = inSafariWindow ? "in Safari's window (a process of its own)" : "in this app's window (this process)"
+        print("WHAT-SITES-SEE measured: a new profile \(proxy == nil ? "without a proxy" : "with an HTTP proxy"), \(place), "
+              + "next to this Mac's Safari \(HostSafari.version)")
         let manager = ProfileManager(repository: repository)
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        if inSafariWindow {
+            do {
+                try await manager.launch(profile.id)
+            } catch {
+                print("WHAT-SITES-SEE the profile did not start: \(error)")
+                return 1
+            }
+            let deadline = Date().addingTimeInterval(90)
+            while hostsChrome == nil, Date() < deadline { try? await Task.sleep(nanoseconds: 200_000_000) }
+            guard hostsChrome == true else {
+                print("WHAT-SITES-SEE the profile's window is not Safari's (\(hostsChrome == nil ? "no answer in 90 s" : "this app's own window")): "
+                      + "nothing of Safari's window to measure")
+                try? await manager.stop(profile.id)
+                return 1
+            }
+        }
         let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
             do { try await manager.launch(id) } catch { print("INFO the profile's launch failed: \(error)") }
         })
         await snapshot.take()
         guard snapshot.step == .done else {
             print("WHAT-SITES-SEE the profile's side was not taken: \(snapshot.step)")
+            try? await manager.stop(profile.id)
             return 1
         }
+        // First, with the categories after it: what CI turns into notices on the job.
+        let count = snapshot.signals.first { $0.key == "probe.windowOwnCount" }
+        print("WHAT-SITES-SEE the window's own properties: profile \(count?.profile ?? "-"), Safari \(count?.safari ?? "-")")
         for category in SiteSignalCategory.allCases {
             let signals = snapshot.signals.filter { $0.category == category }
             print("WHAT-SITES-SEE \(category.rawValue): \(WhatSitesSeeView.summary(signals))")
@@ -2925,6 +2967,8 @@ final class SelfTest {
                 print("  \(signal.verdict) \(signal.key): profile=\(String((signal.profile ?? "-").prefix(160))) safari=\(String((signal.safari ?? "-").prefix(160)))")
             }
         }
+        let differing = snapshot.signals.filter { $0.verdict != .same && $0.verdict != .perWindow }.map(\.key)
+        print("WHAT-SITES-SEE differing: \(differing.isEmpty ? "none" : differing.joined(separator: " "))")
         try? await manager.stop(profile.id)
         print("WHAT-SITES-SEE compared with this Mac's Safari: \(snapshot.comparedWithSafari)")
         return snapshot.comparedWithSafari ? 0 : 2

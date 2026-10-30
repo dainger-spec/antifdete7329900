@@ -182,16 +182,48 @@ jobs:
         run: python3 scripts/live_compare.py --app build/unsandboxed/PrivacyBrowser.app --out build/live
       - name: What sites see — a new profile's snapshot next to this Mac's Safari, as the panel takes it
         # The sandboxed build: its snapshot's listener (127.0.0.1, network.server) is the one under
-        # test. Safari is asked to open the page as for a user; one that does not answer is a
-        # warning. After the egress capture, where Safari's own traffic would count.
+        # test, and its profiles are in this app's own window. Safari is asked to open the page as
+        # for a user; one that does not answer is a warning. After the egress capture, where
+        # Safari's own traffic would count.
         if: always()
         timeout-minutes: 8
         run: |
           set +e
           build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --what-sites-see-check | tee build/what-sites-see.txt
           code=${PIPESTATUS[0]}
-          # The summary as notices on the job, readable without the log.
-          grep "^WHAT-SITES-SEE" build/what-sites-see.txt | head -9 | cut -c1-300 | sed 's/^/::notice title=What sites see::/'
+          # The summary as notices on the job, readable without the log (ten at most per step).
+          grep "^WHAT-SITES-SEE" build/what-sites-see.txt | head -10 | cut -c1-1500 \
+            | sed 's/^/::notice title=What sites see - this app'"'"'s window without a proxy::/'
+          if [ "$code" = "2" ]; then echo "::warning::Safari did not answer the What-sites-see page on this runner"; exit 0; fi
+          exit $code
+      - name: What sites see — a profile with a proxy in Safari's window (the build without the App Sandbox)
+        # What a customer's profile is: a process of its own showing Safari's window, an HTTP proxy
+        # in its settings, WebRTC off. The proxy, 127.0.0.1:9, answers nothing: the measuring page
+        # is on this Mac and loads directly, and the lookup of the proxy's location gets no answer,
+        # so the profile keeps this Mac's language and time zone, as Safari does. Fails when the
+        # window would not be Safari's.
+        if: always()
+        timeout-minutes: 8
+        run: |
+          set +e
+          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --what-sites-see-check --safari-window --proxy 127.0.0.1:9 \
+            | tee build/what-sites-see-safari-window-proxy.txt
+          code=${PIPESTATUS[0]}
+          grep "^WHAT-SITES-SEE" build/what-sites-see-safari-window-proxy.txt | head -10 | cut -c1-1500 \
+            | sed 's/^/::notice title=What sites see - Safari'"'"'s window with a proxy::/'
+          if [ "$code" = "2" ]; then echo "::warning::Safari did not answer the What-sites-see page on this runner"; exit 0; fi
+          exit $code
+      - name: What sites see — a profile without a proxy in Safari's window (the build without the App Sandbox)
+        # Next to the step before: what the window changes, apart from what the proxy does.
+        if: always()
+        timeout-minutes: 8
+        run: |
+          set +e
+          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --what-sites-see-check --safari-window \
+            | tee build/what-sites-see-safari-window.txt
+          code=${PIPESTATUS[0]}
+          grep "^WHAT-SITES-SEE" build/what-sites-see-safari-window.txt | head -10 | cut -c1-1500 \
+            | sed 's/^/::notice title=What sites see - Safari'"'"'s window without a proxy::/'
           if [ "$code" = "2" ]; then echo "::warning::Safari did not answer the What-sites-see page on this runner"; exit 0; fi
           exit $code
       - uses: actions/upload-artifact@v4

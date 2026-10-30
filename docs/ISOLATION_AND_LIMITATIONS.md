@@ -52,7 +52,7 @@ since):
 | Session warm-up robot | through the app's launch path behind the self-test proxy, with short waits: a plan of three pages, a `javascript:` line (skipped) and a page the proxy closes unanswered (reported, the robot goes on) is visited in order in a new tab of the profile, each page taken as visited only once it has come (never before the proxy was asked for it), and an address that only jumps within the page shown at once (also when the page then rewrites the fragment); the requests carry the profile's User-Agent and the cookies the pages before set; at the proxy, each page's followed link comes at least the plan's time after the page, and the next page at least half that after the followed one; each page is scrolled (the pages see trusted scroll events); from each page only the plain same-site link is followed, with the page as Referer — never the sign-out, other-site, file or new-window links next to it; while the robot scrolls and clicks, each page's own world sees no `window.webkit` and no robot global; history and the pages' cookies are kept; Stop during a page ends the run before its next page is requested; closing its tab and a page's alert stop it; stopping the profile stops it first (while its store is still there), and the profile's data then seals as usual. Whether wheel and mouse events reached the page or the script fallback was used is reported |
 | Warm-up queue and report | two stopped profiles queued with one plan through `WarmUpCoordinator` behind the self-test proxy: they run one after the other and never both at once, each without a window of its own, and each is stopped and sealed before the next starts; the report of each run counts the profile's cookies per site (registrable domain) — two sites with one new cookie each for the first, and for the second, which already held a cookie of the site it visits, two cookies there of which one is new; a run from the queue counts as the profile's last run for its schedule, stored encrypted |
 | Paste as Typed | in a profile window, with a page's field focused: the palette's search finds what is typed; a page with no field focused gets nothing and is told so; a window without the keyboard gets nothing. Where this machine delivers synthesized key events to a page — a control key, sent as the password checks send theirs, arrives — the text arrives as typed: a trusted `keydown` per character on its own key (`H` on `KeyH`, `М` on `KeyV`), `Shift` down and up around capitals, `input` and `keyup`. Where the control does not arrive the typing is not shown, and the self-test says so in its notes (printed at the end of the CI job's log, and as a notice on the job). On the CI runner (macOS 26.6, run 426) the window was the key window and the control arrived: the typing was checked in full. In Safari's own window (a profile's process) the item is checked to be in Safari's Edit menu |
-| What sites see | the snapshot's listener on 127.0.0.1 serves its own page and refuses another token and a name that is not this Mac's; a profile's window (no proxy, its local requests protected) measures navigator, screen, the window, the request headers in their order, a ClientHello (JA3, JA4) and the APIs, and its ClientHello is a plain WebKit view's; the page is not in the profile's history and its window closes. A separate CI step takes a new profile's snapshot next to the runner's real Safari with the sandboxed build (§2, *What sites see*) |
+| What sites see | the snapshot's listener on 127.0.0.1 serves its own page and refuses another token and a name that is not this Mac's; a profile's window (no proxy, its local requests protected) measures navigator, screen, the window, the request headers in their order, a ClientHello (JA3, JA4) and the APIs, and its ClientHello is a plain WebKit view's; the page is not in the profile's history and its window closes. Separate CI steps take a new profile's snapshot next to the runner's real Safari: with the sandboxed build in this app's window, and with the build without the App Sandbox in Safari's window, with an HTTP proxy and without one (§2, *What sites see*) |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
@@ -186,8 +186,9 @@ here — DNS rebinding — is refused). The page, its scripts, its requests and 
 leave this Mac, and nothing is kept: the comparison is shown and gone with the sheet. In the
 sandboxed build this needs `network.server` (§9). The page is not written to the profile's
 history; a profile of this process closes the page's window when it has reported, a profile in
-Safari's own window leaves it to the user (the page says it is done). Safari opens the page in a
-tab of its own, as any page, and keeps it in its history.
+Safari's own window leaves it to the user (the page says it is done), and that window's own
+History menu, which Safari keeps in the profile's home (sealed with it), can list it as it lists
+any page. Safari opens the page in a tab of its own, as any page, and keeps it in its history.
 
 **What it does not measure.** HTTP/2 settings and the TCP SYN (they take a site's own server; CI's
 live comparison reads them on tls.peet.ws), and anything a third-party fingerprinting site adds on
@@ -204,15 +205,29 @@ Safari has (`ApplePaySession`, `ApplePaySetup`, `MerchantValidationEvent`, `Paym
 `PushManager`, and with them the count of the window's own properties (1006 against 1044). The
 window's own size and place differed, as two windows do, and were not compared.
 
+That profile was in this app's own window, with no proxy: not what a customer's profile is. In the
+build without the App Sandbox a profile runs in a process of its own, in Safari's window, whose
+web views Safari's own code builds — Safari's preferences, with the profile's store, privacy
+preferences and scripts put into them (`SafariChromeHost`) — and a customer's profile has a proxy,
+which turns more of WebKit off (`BrowserSession.featuresOffWithAProxy`). CI measures that case
+too: a new profile with an HTTP proxy in Safari's window, and one without a proxy in Safari's
+window to tell the window's part from the proxy's (the steps under *Checked by*).
+
 **Checked by** unit tests (a ClientHello parsed as a server reads it, also across two records;
 JA3 and JA4 against values computed apart from the code; what is not a ClientHello; the report
 flattened; the comparison and its groups; the page's escaping), the self-test (the listener
 answers its own page and refuses another token and another name; a profile's window, its local
 requests protected, measures every part — navigator, screen, window, headers in order, a
 ClientHello, APIs; its ClientHello is a plain WebKit view's; the page is neither in its history
-nor left open; all of it inside the egress capture), and CI's step "What sites see", which takes a
-new profile's snapshot next to the runner's real Safari with the sandboxed build after the
-capture (a Safari that does not answer is a warning).
+nor left open; all of it inside the egress capture), and CI's three "What sites see" steps, after
+the capture, each a new profile's snapshot next to the runner's real Safari
+(`--what-sites-see-check`): the sandboxed build's, a profile in this app's window; and the build's
+without the App Sandbox, a profile in Safari's window (`--safari-window`, refused when the window
+would not be Safari's) with an HTTP proxy (`--proxy 127.0.0.1:9`: nothing answers there; the
+measuring page is on this Mac and loads directly, and the proxy's location is not found, so the
+profile keeps this Mac's language and time zone, as Safari does) and without one. Each prints the
+count of the window's own properties on both sides, every group's summary and the signals that
+differ, as notices on the job; a Safari that does not answer is a warning.
 
 ### What remains impossible with public APIs
 

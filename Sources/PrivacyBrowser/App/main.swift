@@ -53,7 +53,7 @@ MainActor.assumeIsolated {
         // SelfTest.whatSitesSeeCheck).
         Localization.applyProcessLanguage()
         WebContentLanguage.decide(nil)
-        SelfTest.whatSitesSeeCheck()
+        SelfTest.whatSitesSeeCheck(arguments: arguments)
     } else if arguments.contains("--capture-sites") {
         // The app's own start-up, as far as web content can tell: its UI language is set, and the
         // first profile (no proxy) decides the language websites see.
