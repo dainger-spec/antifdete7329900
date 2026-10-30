@@ -44,6 +44,11 @@ MainActor.assumeIsolated {
         // the classes around AutoFill, history and export, the methods that wait — printed for CI
         // (SafariChromeInventory.swift). In a temporary home, held to a closed proxy.
         SafariChromeInventory.start(arguments: arguments)
+    } else if arguments.contains("--default-browser-check") {
+        // Whether Safari's own question about the default browser throws in a profile's process of
+        // this app, and what the system answers about http and https (SafariChrome; CI runs it on
+        // the app as built and on a copy declared a browser).
+        SafariChrome.runDefaultBrowserCheck(arguments: arguments)
     } else if arguments.contains("--nib-check") {
         // The nibs Safari's Bookmarks sidebar makes itself, made as it makes them, in a process
         // like a profile's; the self-test reads what it prints (SafariChrome.runNibCheck).

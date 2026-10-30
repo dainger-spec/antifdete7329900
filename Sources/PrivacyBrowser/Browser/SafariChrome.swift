@@ -255,6 +255,47 @@ enum SafariChrome {
         exit(0)
     }
 
+    /// `--default-browser-check`: whether Safari's own `-[GeneralPreferences
+    /// _defaultWebBrowserMayHaveChanged]` throws in a process like a profile's of this app. It did
+    /// when ⌘, opened Safari's settings in a profile's window (a nil in an array, on the owner's
+    /// Mac), and `stubChromeFeatures` replaces it since; the question is why. The owner's lead: an
+    /// app that is a browser as far as the system knows (it declares http and https) has its
+    /// question answered. So this prints what the system answers about http and https for this
+    /// app, then calls Safari's original on its General pane from a timer of AppKit's run loop,
+    /// where an exception is lived through and printed. CI runs it on this app as built and on a
+    /// copy that declares itself a browser.
+    static func runDefaultBrowserCheck(arguments: [String]) -> Never {
+        setvbuf(stdout, nil, _IOLBF, 0)
+        guard prepareForCheck(arguments: arguments) else {
+            print("DEFAULT-BROWSER Safari's chrome cannot be hosted in this build")
+            exit(2)
+        }
+        let application = NSApplication.shared
+        application.setActivationPolicy(.prohibited)
+        let workspace = NSWorkspace.shared
+        let own = Bundle.main.bundleIdentifier ?? ""
+        for scheme in ["http", "https"] {
+            guard let page = URL(string: "\(scheme)://example.com/") else { continue }
+            let all = workspace.urlsForApplications(toOpen: page).map { Bundle(url: $0)?.bundleIdentifier ?? $0.lastPathComponent }
+            print("DEFAULT-BROWSER \(scheme): the default is \(workspace.urlForApplication(toOpen: page).map { Bundle(url: $0)?.bundleIdentifier ?? $0.path } ?? "nil"); "
+                  + "\(all.count) application(s) open it; this app (\(own)) among them: \(all.contains { $0.caseInsensitiveCompare(own) == .orderedSame })")
+        }
+        ExceptionLog.onCaughtInRunLoop = { exception, _ in
+            print("DEFAULT-BROWSER threw \(exception.name.rawValue): \(LogRedaction.exceptionReason(exception.reason ?? ""))")
+        }
+        let caller = DefaultBrowserQuestion()
+        caller.perform(#selector(DefaultBrowserQuestion.ask), with: nil, afterDelay: 0.3)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            MainActor.assumeIsolated {
+                print("DEFAULT-BROWSER exceptions: \(ExceptionLog.reported)")
+                removeCheckHome()
+                exit(0)
+            }
+        }
+        application.run()
+        exit(0)
+    }
+
     /// The nibs of Safari's Bookmarks sidebar, which its controller makes itself.
     static let checkedNibs = ["AnnotatedBookmarksSidebarViewController", "AnnotatedBookmarksSidebarExpandedTableCellView",
                               "AnnotatedBookmarksSidebarExpandedTableCellViewV2"]
@@ -812,8 +853,13 @@ enum SafariChrome {
         // look, and, by its name, on the system's notice of a change, which would need no click to
         // come. It built an array from the answer and a nil in it threw. Nothing here shows that
         // pane any more, and nothing needs to know which browser is the default.
-        replaceWithConstant("GeneralPreferences", "_defaultWebBrowserMayHaveChanged") { nil }
+        // Its own implementation is kept for `--default-browser-check`, which calls it to see why.
+        defaultBrowserQuestion = replaceWithConstant("GeneralPreferences", "_defaultWebBrowserMayHaveChanged") { nil }
     }
+
+    /// Safari's own `-[GeneralPreferences _defaultWebBrowserMayHaveChanged]`, before
+    /// `stubChromeFeatures` replaced it.
+    static var defaultBrowserQuestion: IMP?
 
     /// What ⌘, and Settings… do in Safari's menu (a profile's process asks the manager).
     static var onShowSettings: (() -> Void)?
@@ -868,14 +914,16 @@ enum SafariChrome {
 
     /// Replaces one object-returning method with a constant. On arm64 a block that only returns a
     /// value stands in for a method of any arity: the arguments are left in their registers.
-    private static func replaceWithConstant(_ className: String, _ selectorName: String, _ value: @escaping () -> AnyObject?) {
+    /// Returns the implementation it replaced.
+    @discardableResult
+    private static func replaceWithConstant(_ className: String, _ selectorName: String, _ value: @escaping () -> AnyObject?) -> IMP? {
         guard let cls = NSClassFromString(className),
               let method = class_getInstanceMethod(cls, NSSelectorFromString(selectorName)) else {
             log.notice("Nothing to replace: -[\(className, privacy: .public) \(selectorName, privacy: .public)]")
-            return
+            return nil
         }
         let replacement: @convention(block) (AnyObject) -> AnyObject? = { _ in value() }
-        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        return method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
 
     // MARK: The menu
@@ -1122,6 +1170,33 @@ private final class NibLoader: NSObject {
             print("NIB-CHECK \(name): asked of the main bundle")
             let nib = NSNib(nibNamed: name, bundle: .main)
             print("NIB-CHECK \(name): \(nib == nil ? "not made" : "made")")
+        }
+    }
+}
+
+/// Asks Safari's own General pane whether the default browser changed (`--default-browser-check`),
+/// from a timer of AppKit's run loop.
+private final class DefaultBrowserQuestion: NSObject {
+    @objc func ask() {
+        MainActor.assumeIsolated {
+            guard let original = SafariChrome.defaultBrowserQuestion else {
+                print("DEFAULT-BROWSER not in this Safari: -[GeneralPreferences _defaultWebBrowserMayHaveChanged]")
+                return
+            }
+            guard let paneClass = NSClassFromString("GeneralPreferences") as? NSObject.Type else {
+                print("DEFAULT-BROWSER not in this Safari: GeneralPreferences")
+                return
+            }
+            // A preferences module is had through its class, as Safari's settings window has it.
+            let shared = NSSelectorFromString("sharedInstance")
+            let pane = (paneClass as AnyObject).responds(to: shared)
+                ? (paneClass as AnyObject).perform(shared)?.takeUnretainedValue() as? NSObject
+                : nil
+            let asked = pane ?? paneClass.init()
+            print("DEFAULT-BROWSER asking \(pane == nil ? "a new" : "the shared") \(String(describing: type(of: asked)))")
+            typealias Question = @convention(c) (AnyObject, Selector) -> Void
+            unsafeBitCast(original, to: Question.self)(asked, NSSelectorFromString("_defaultWebBrowserMayHaveChanged"))
+            print("DEFAULT-BROWSER answered without an exception")
         }
     }
 }

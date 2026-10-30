@@ -134,6 +134,11 @@ jobs:
           grep -E '^(INVENTORY|LS) ' build/egress27/safari-inventory.txt | head -10 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - Safari inventory::/'
           grep -E '^XPC [^ ]*Safari' build/egress27/safari-inventory.txt | head -10 | cut -c1-600 | sed 's/^/::notice title=macOS 27 - XPC services of Safari frameworks::/'
           exit 0
+      - name: Safari 27's question about the default browser — as built, and declared a browser (a measurement)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 4
+        run: scripts/default_browser_check.sh build/unsandboxed/PrivacyBrowser.app build/egress27/default-browser "macOS 27 - default browser"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -292,6 +297,14 @@ jobs:
             | sed 's/^/::notice title=Safari inventory - menu::/'
           echo "::group::the inventory"; cat build/safari-inventory.txt; echo "::endgroup::"
           exit 0
+      - name: Safari's question about the default browser — as built, and declared a browser (a measurement)
+        # Whether -[GeneralPreferences _defaultWebBrowserMayHaveChanged], which threw on a nil when ⌘,
+        # opened Safari's settings in a profile's window, throws because the app is no http/https
+        # handler (SafariChrome.runDefaultBrowserCheck). Never fails the build.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 4
+        run: scripts/default_browser_check.sh build/unsandboxed/PrivacyBrowser.app build/default-browser "default browser"
       - name: Compare the fingerprint surface with this Mac's real Safari (safaridriver)
         run: |
           sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
