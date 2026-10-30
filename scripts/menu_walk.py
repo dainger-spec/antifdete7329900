@@ -67,7 +67,9 @@ def behaviour(item):
                               (r"^asks the system to start", "starts an application"), (r"^asks the Finder", "Finder"),
                               (r"^shares", "shares"), (r"^the sharing menu", "sharing menu"), (r"Help", "Help"),
                               (r"character viewer", "character viewer"), (r"^asks to quit", "quit"),
-                              (r"^asks to hide the other", "hides other apps"), (r"^our notice", "our unavailable notice"),
+                              (r"^asks to hide the other", "hides other apps"), (r"^our notice", "our notice"),
+                              (r"^nothing in the responder chain", "not taken"), (r"^another application started", "starts another app"),
+                              (r"^another application came to the front", "another app in front"),
                               (r"Settings", "our Settings")):
             if re.search(pattern, effect):
                 words.add(word)

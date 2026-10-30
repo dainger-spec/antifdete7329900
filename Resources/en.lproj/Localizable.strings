@@ -925,6 +925,8 @@
 "safari.unavailable.title" = "This Safari feature is not available in a profile";
 "safari.unavailable.item" = "“%@” relies on services of the real Safari that a profile does not have, so it did not work. The profile keeps running; the details are in the log.";
 "safari.unavailable.action" = "This relies on services of the real Safari that a profile does not have, so it did not work. The profile keeps running; the details are in the log.";
+"safari.autofill.closed.title" = "AutoFill from this Mac is off in profiles";
+"safari.autofill.closed.text" = "This Mac's passwords, cards and contact card are yours, not the profile's: a profile does not fill its pages from them. The profile's own passwords are in its Passwords window.";
 
 /* Profile export and import; crash recovery */
 "profiles.row.export" = "Export Profile…";

@@ -927,6 +927,31 @@ enum SafariChrome {
         // NO: nothing of Safari's to fill a field with.
         replaceWithConstant("BrowserViewController", "_shouldOfferAnyTypeOfAutoFill") { nil }
         replaceWithConstant("FormDataController", "shouldOfferAddressBookAutoFillInTextField:formMetadata:") { nil }
+        closeAutoFillInsertActions()
+    }
+
+    /// The actions of the Edit menu's AutoFill items (Contact…, Passwords…, Credit Card…): the
+    /// system's AutoFill, filling a page from the account's own contact card, passwords and cards.
+    static let autoFillInsertActions = ["_handleInsertFromContactsCommand:", "_handleInsertFromPasswordsCommand:",
+                                        "_handleInsertFromCreditCardsCommand:"]
+
+    /// Those actions say they are off, however they are sent — the Edit menu (whose items are taken
+    /// out as well), a context menu, a key. On macOS 26, Passwords… in a profile's window had
+    /// Safari's helper (SafariPlatformSupport) write into the real Safari's container and
+    /// ~/Library/Safari and fetch over its own connection, as this Mac (the menu walk, CI run 452).
+    private static func closeAutoFillInsertActions() {
+        var replaced: Set<UInt> = []
+        let notice: @convention(block) (AnyObject, AnyObject?) -> Void = { _, _ in
+            MainActor.assumeIsolated { SafariChrome.presentNotice(L("safari.autofill.closed.title"), L("safari.autofill.closed.text")) }
+        }
+        for owner in [NSResponder.self, NSView.self, NSTextView.self, WKWebView.self] as [AnyClass] {
+            for name in autoFillInsertActions {
+                guard let method = class_getInstanceMethod(owner, NSSelectorFromString(name)),
+                      replaced.insert(UInt(bitPattern: method)).inserted else { continue }
+                method_setImplementation(method, imp_implementationWithBlock(notice))
+            }
+        }
+        log.notice("The AutoFill insert actions are off: \(replaced.count, privacy: .public) implementation(s) replaced")
     }
 
     /// A form went on without Safari's AutoFill seeing it.

@@ -74,14 +74,21 @@ enum SafariMenuWalk {
         }
         Task { @MainActor in
             let list = entries()
-            emit(["event": "list", "count": list.count, "from": from])
+            // The AutoFill items' actions, sent as a key or a context menu sends them: whether
+            // anything still acts on them once their items are out of the menu (SafariChrome).
+            let direct = SafariChrome.autoFillInsertActions
+            emit(["event": "list", "count": list.count + direct.count, "from": from])
             var index = max(0, from)
             while index < list.count {
                 await walk(list[index], at: index)
                 index += 1
             }
+            while index < list.count + direct.count {
+                await sendDirectly(direct[index - list.count], at: index)
+                index += 1
+            }
             WalkRecorder.uninstall()
-            emit(["event": "done", "count": list.count])
+            emit(["event": "done", "count": list.count + direct.count])
             isWalking = false
         }
     }
@@ -166,6 +173,30 @@ enum SafariMenuWalk {
         ]
         if let skipped = entry.skipped { fields["skipped"] = skipped }
         emit(fields)
+        await restore(keeping: windowsBefore)
+    }
+
+    /// An action sent to the first responder with no menu item, as a key or a context menu sends
+    /// it: what still acts on it.
+    private static func sendDirectly(_ name: String, at index: Int) async {
+        await bringWindowForward()
+        let windowsBefore = Set(NSApp.windows.map { ObjectIdentifier($0) })
+        let before = look()
+        WalkRecorder.reset()
+        let path = "(sent to the first responder) \(name)"
+        emit(["event": "begin", "index": index, "path": path, "action": name, "keys": "-",
+              "time": Date().timeIntervalSince1970])
+        let taken = NSApp.sendAction(NSSelectorFromString(name), to: nil, from: nil)
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        let after = look()
+        var seen = WalkRecorder.take()
+        if !taken { seen.effects.append("nothing in the responder chain takes it") }
+        for window in NSApp.windows where !windowsBefore.contains(ObjectIdentifier(window)) && window.isVisible {
+            seen.effects.append("\(window.isSheet ? "a sheet" : "a window"): \(describe(window))")
+        }
+        emit(["event": "end", "index": index, "path": path, "action": name, "enabled": true, "chosen": taken,
+              "effects": seen.effects, "changes": differences(before, after), "exceptions": seen.exceptions,
+              "time": Date().timeIntervalSince1970])
         await restore(keeping: windowsBefore)
     }
 
