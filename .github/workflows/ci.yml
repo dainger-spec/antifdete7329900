@@ -96,7 +96,12 @@ jobs:
       - name: What WebKit 27 hands back of a page's script (only when a script's answer could not be read)
         if: always()
         run: |
-          grep '^INFO js results' build/egress27/selftest.txt 2>/dev/null | head -10 | cut -c1-1500 \
+          grep '^INFO js results' build/egress27/selftest.txt 2>/dev/null | head -10 | cut -c1-2000 \
+            | sed 's/^/::notice title=macOS 27 - JavaScript results::/' || true
+      - name: What WebKit 27 hands back of a page's script, continued
+        if: always()
+        run: |
+          grep '^INFO js results' build/egress27/selftest.txt 2>/dev/null | sed -n '11,20p' | cut -c1-2000 \
             | sed 's/^/::notice title=macOS 27 - JavaScript results::/' || true
       - uses: actions/upload-artifact@v4
         if: always()
