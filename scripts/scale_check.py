@@ -65,18 +65,27 @@ def report(steps):
     if draw:
         lines.append(f"**The window with {draw['rows']} rows** drawn in {round(draw['ms'] / 1000, 2)} s "
                      f"({'written' if draw['written'] else 'NOT written'}).\n")
-    lines.append("**Running at once** (launched as the list's Launch does for a selection; memory: each profile's own "
-                 "process and WebKit's that work for it):\n")
+    lines.append("**Running at once** (launched as the list's Launch does for a selection; memory: the profiles' own "
+                 "processes and WebKit's that started for them; pressure: the kernel's, 1 normal, 2 warning, 4 critical):\n")
     lines.append("| Profiles | Windows up | Start, median / slowest | All up after | Memory, all / per profile | "
-                 "Processors busy | Free / compressed / swap | Stop all |")
-    lines.append("|---|---|---|---|---|---|---|---|")
+                 "Processes | Pressure | Processors busy | Free / compressed / swap | Stop all | Left after stop |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
+    pressure_names = {1: "1 normal", 2: "2 warning", 4: "4 critical"}
     for run in steps.get("run", []):
         machine_memory = run.get("machine", {})
         lines.append(f"| {run['profiles']} | {run['windowsUp']} | {round(run['startMedianMs'] / 1000, 1)} s / "
                      f"{round(run['startMaxMs'] / 1000, 1)} s | {round(run['allWindowsUpMs'] / 1000, 1)} s | "
-                     f"{round(run['memoryMB'])} MB / {round(run['memoryPerProfileMB'])} MB | {run['cpuBusyPercent']} % | "
+                     f"{round(run['memoryMB'])} MB / {round(run['memoryPerProfileMB'])} MB | {run.get('processCount', '?')} | "
+                     f"{pressure_names.get(run.get('pressure'), run.get('pressure', '?'))} | {run['cpuBusyPercent']} % | "
                      f"{round(machine_memory.get('freeMB', -1))} / {round(machine_memory.get('compressedMB', -1))} / "
-                     f"{round(machine_memory.get('swapUsedMB', -1))} MB | {round(run['stopAllMs'] / 1000, 1)} s |")
+                     f"{round(machine_memory.get('swapUsedMB', -1))} MB | {round(run['stopAllMs'] / 1000, 1)} s | "
+                     f"{len(run.get('leftAfterStop', []))} |")
+    lines.append("")
+    for run in steps.get("run", []):
+        if run.get("byKind"):
+            lines.append(f"- {run['profiles']} running, by kind: {'; '.join(run['byKind'])}")
+        if run.get("leftAfterStop"):
+            lines.append(f"- {run['profiles']} running, still there 3 s after the stop: {', '.join(run['leftAfterStop'])}")
     lines.append("")
     quit_step = steps.get("quit", [{}])[0]
     if quit_step:

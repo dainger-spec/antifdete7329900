@@ -16,10 +16,10 @@ import SwiftUI
 ///      what they must find; the window itself drawn with every row (`profiles-<N>.png`).
 ///   3. Running: groups of profiles launched as the list's Launch does for a selection (one after
 ///      the other, each in a process of its own with Safari's window, its start page loading
-///      through the self-test proxy), the time until each window is up, then what they take — each
-///      profile's processes (its own and WebKit's that work for it) by memory footprint, the
-///      machine's free memory, compression and swap, and how busy its processors were — and
-///      the time to stop them all.
+///      through the self-test proxy), the time until each window is up, then what they take — the
+///      profiles' own processes and WebKit's that started for them, by memory footprint and kind,
+///      the kernel's memory pressure, the machine's free memory, compression and swap, and how busy
+///      its processors were — the time to stop them all, and what still ran after.
 ///   4. Quitting: profiles running with a cookie set by their pages, the app's quit (every one
 ///      stopped and sealed at once), how long it took and how each seal went, then each launched
 ///      again on a page that sets nothing, and its cookie looked for: none may be lost.
@@ -199,16 +199,20 @@ enum ScaleCheck {
             // The pages load and the machine settles; then what they take.
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             let cpuAfter = cpuTicks()
-            var perProfile: [[String: Any]] = []
-            var totalMB = 0.0
-            for id in group {
-                guard let pid = manager.processIdentifier(of: id) else { continue }
-                let processes = family(of: pid)
-                let megabytes = processes.reduce(0.0) { $0 + $1.megabytes }
-                totalMB += megabytes
-                perProfile.append(["pid": Int(pid), "MB": (megabytes * 10).rounded() / 10,
-                                   "processes": processes.map { "\($0.name) \(Int($0.megabytes)) MB" }])
+            let profilePIDs = group.compactMap { manager.processIdentifier(of: $0) }
+            let processes = groupProcesses(profiles: profilePIDs, since: batchStart)
+            let totalMB = processes.reduce(0.0) { $0 + $1.megabytes }
+            var counts: [String: Int] = [:]
+            var kindMB: [String: Double] = [:]
+            for process in processes {
+                counts[process.kind, default: 0] += 1
+                kindMB[process.kind, default: 0] += process.megabytes
             }
+            let byKind = counts.keys.sorted().map { "\($0): \(counts[$0] ?? 0), \(Int(kindMB[$0] ?? 0)) MB" }
+            let perProfile: [[String: Any]] = profilePIDs.map { pid in
+                ["pid": Int(pid), "MB": ((footprint(of: pid).map { Double($0) / 1_048_576 } ?? 0) * 10).rounded() / 10]
+            }
+            let pressure = memoryPressure()
             let busy: Double? = {
                 guard let before = cpuBefore, let after = cpuAfter, after.total > before.total else { return nil }
                 return (Double(after.busy - before.busy) / Double(after.total - before.total) * 1000).rounded() / 10
@@ -220,13 +224,17 @@ enum ScaleCheck {
                 }
             }
             let stopMs = milliseconds(since: stopStart)
+            let machine = machineMemory()
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            // What still runs three seconds after every profile was stopped.
+            let left = processes.filter { kill($0.pid, 0) == 0 }.map(\.name)
             report("run", ["profiles": groupSize, "windowsUp": running.count, "launchCallsMs": allIssued,
                            "startMedianMs": median(startTimes), "startMaxMs": startTimes.max() ?? 0,
                            "allWindowsUpMs": windowsUp.max() ?? 0, "memoryMB": (totalMB * 10).rounded() / 10,
                            "memoryPerProfileMB": group.isEmpty ? 0 : (totalMB / Double(group.count) * 10).rounded() / 10,
-                           "cpuBusyPercent": busy ?? -1, "machine": machineMemory(), "stopAllMs": stopMs,
-                           "errors": errors, "each": perProfile])
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+                           "processCount": processes.count, "byKind": byKind, "pressure": pressure,
+                           "cpuBusyPercent": busy ?? -1, "machine": machine, "stopAllMs": stopMs,
+                           "leftAfterStop": left, "errors": errors, "each": perProfile])
         }
 
         // 4. Quitting with profiles running, and nothing lost.
@@ -308,15 +316,50 @@ enum ScaleCheck {
         return total
     }
 
-    /// A profile's process and the processes that work for it (WebKit's, the services it started),
-    /// by the system's record of which process is responsible for which, with their footprints.
-    private static func family(of pid: pid_t) -> [(name: String, megabytes: Double)] {
-        var found: [(name: String, megabytes: Double)] = []
-        for candidate in allProcesses() where candidate == pid || XPCServiceWatch.responsible(for: candidate) == pid {
+    /// The processes of a group of profiles, with their footprints: each profile's own process, and
+    /// every process inside an `.xpc` bundle that started after the group was launched — WebKit's
+    /// web content, networking and GPU processes, and the services of Safari's frameworks. They are
+    /// found by when they started, not by the system's record of who is responsible for them:
+    /// responsibility is inherited, so WebKit's processes are held to this app's first process, not
+    /// to the profile's (run 456 counted the profiles' own processes only). Nothing else on the
+    /// runner starts WebKit while the check runs; the names are in the report, so it would show.
+    private static func groupProcesses(profiles: [pid_t], since start: Date) -> [(pid: pid_t, name: String, kind: String, megabytes: Double)] {
+        var found: [(pid: pid_t, name: String, kind: String, megabytes: Double)] = []
+        let earliest = start.addingTimeInterval(-1)
+        for candidate in allProcesses() {
+            let kind: String
+            if profiles.contains(candidate) {
+                kind = "profile"
+            } else if let path = executable(of: candidate), path.contains(".xpc/"),
+                      let started = startTime(of: candidate), started >= earliest {
+                let bundle = path.components(separatedBy: "/").first { $0.hasSuffix(".xpc") } ?? path
+                kind = bundle.replacingOccurrences(of: ".xpc", with: "").replacingOccurrences(of: "com.apple.WebKit.", with: "")
+            } else {
+                continue
+            }
             guard let bytes = footprint(of: candidate) else { continue }
-            found.append((name: name(of: candidate), megabytes: Double(bytes) / 1_048_576))
+            found.append((pid: candidate, name: name(of: candidate), kind: kind, megabytes: Double(bytes) / 1_048_576))
         }
         return found.sorted { $0.megabytes > $1.megabytes }
+    }
+
+    private static func executable(of pid: pid_t) -> String? {
+        var path = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4) // PROC_PIDPATHINFO_MAXSIZE
+        return proc_pidpath(pid, &path, UInt32(path.count)) > 0 ? String(cString: path) : nil
+    }
+
+    private static func startTime(of pid: pid_t) -> Date? {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1_000_000)
+    }
+
+    /// The kernel's memory pressure: 1 normal, 2 warning, 4 critical (as Activity Monitor's graph).
+    private static func memoryPressure() -> Int {
+        var level: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        return sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0) == 0 ? Int(level) : -1
     }
 
     private static func allProcesses() -> [pid_t] {

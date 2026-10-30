@@ -99,6 +99,10 @@ enum SafariMenuWalkCheck {
         // profile's process keeps its preferences in its own home; the manager's are here).
         let preferencesDomain = Bundle.main.bundleIdentifier ?? "dev.local.PrivacyBrowser"
         let keysBefore = Set(UserDefaults.standard.persistentDomain(forName: preferencesDomain)?.keys.map { $0 } ?? [])
+        // And the account's own com.apple.Safari preferences outside Safari's container, read as a
+        // file: whether a profile's process writes Safari's domain there.
+        let safariPreferences = realHome + "/Library/Preferences/com.apple.Safari.plist"
+        let safariBefore = PreferencesFile(path: safariPreferences)
 
         let walk = Walk()
         let manager = ProfileManager(repository: repository)
@@ -183,6 +187,20 @@ enum SafariMenuWalkCheck {
                 print("MENUWALK-INFO the profile's process ended between items (status \(walk.exited ?? -1)); starting it again")
             }
         }
+        // Where the profile's process keeps preferences: every property list under a Preferences
+        // folder of its home, read while it still runs (its home is sealed when it stops).
+        let profileHomes = (try? FileManager.default.contentsOfDirectory(atPath: root.path + "/profiles")) ?? []
+        for name in profileHomes {
+            let home = root.path + "/profiles/" + name + "/home.noindex"
+            let found = FileManager.default.enumerator(atPath: home)?.compactMap { $0 as? String }
+                .filter { $0.contains("Preferences/") && $0.hasSuffix(".plist") }.sorted() ?? []
+            var described: [String] = []
+            for path in found {
+                let keys = PreferencesFile(path: home + "/" + path)?.keys.sorted() ?? []
+                described.append("\(path) (\(keys.count) keys: \(keys.prefix(40).joined(separator: ", ")))")
+            }
+            print("MENUWALK-INFO preferences in the profile's home: " + (described.isEmpty ? "none" : described.joined(separator: "; ")))
+        }
         if manager.isRunning(profile.id) { try? await manager.stop(profile.id) }
         try? await Task.sleep(nanoseconds: 1_000_000_000)
 
@@ -220,10 +238,31 @@ enum SafariMenuWalkCheck {
         let keysAfter = Set(UserDefaults.standard.persistentDomain(forName: preferencesDomain)?.keys.map { $0 } ?? [])
         print("MENUWALK-INFO the app's own preferences (\(preferencesDomain)) in the account's home: keys added during the walk "
               + "\(keysAfter.subtracting(keysBefore).sorted())")
+        let safariAfter = PreferencesFile(path: safariPreferences)
+        let added = (safariAfter?.keys ?? []).subtracting(safariBefore?.keys ?? []).sorted()
+        print("MENUWALK-INFO the account's ~/Library/Preferences/com.apple.Safari.plist: before the walk "
+              + (safariBefore?.summary ?? "absent") + ", after it " + (safariAfter?.summary ?? "absent")
+              + "; keys added \(added)")
         print("MENUWALK-INFO walked \(walk.items.count) of \(walk.count ?? 0) items in \(launches) launch(es); "
               + (walk.done ? "the walk got to the end" : "the walk did NOT get to the end"))
         return walk.done ? 0 : 1
     }
+}
+
+/// A property list's top-level keys and when it was last written, read as a file.
+private struct PreferencesFile {
+    let keys: Set<String>
+    let modified: Date
+
+    init?(path: String) {
+        guard let data = FileManager.default.contents(atPath: path),
+              let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any],
+              let modified = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date else { return nil }
+        keys = Set(plist.keys)
+        self.modified = modified
+    }
+
+    var summary: String { "\(keys.count) keys, written \(modified)" }
 }
 
 /// The files written under some folders, as FSEvents tells them, with when it told: the menu walk
