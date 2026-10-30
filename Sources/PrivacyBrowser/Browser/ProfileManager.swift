@@ -167,7 +167,7 @@ final class ProfileManager: ObservableObject {
             probedBeforeLaunch = true
         }
         // A proxy that does not work leaves the profile with no page loaded: said in words, by the
-        // same probe the Proxies sheet's check runs, while the profile starts.
+        // same probe the Proxies section's check runs, while the profile starts.
         if let proxy = stored.proxy, !runsInProfileProcess, !probedBeforeLaunch {
             diagnoseProxy(of: id, proxy, startURL: stored.startURL)
         }

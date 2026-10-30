@@ -49,16 +49,18 @@ struct ProfileListView: View {
     @State private var showingAutomation = false
     @State private var filter: ProfileFilter = .all
     @State private var search = ""
-    /// The Proxies sheet, or what a profile whose proxy does not work says: one at a time, so
-    /// that "Show in Proxies" can go from the one to the other.
+    /// What a profile whose proxy does not work says; "Show in Proxies" goes from it to the
+    /// window's Proxies section, with that proxy selected.
     @State private var proxySheet: ProxySheet?
+    /// The window's section (the profiles, or the proxy list), and the proxies selected there.
+    @State private var section: ProfilesSection = .profiles
+    @State private var proxySelection: Set<UUID> = []
     @State private var assigningProxies: ProxyAssignView.Request?
     /// Profiles of the selection waiting for the one confirmation that deletes them all.
     @State private var pendingBulkDelete: [UUID] = []
 
     var body: some View {
-        ProfilesScreen(rows: rows, isWorking: model.isWorking, sync: syncLine,
-                       filter: $filter, search: $search, actions: actions)
+        screen
             .sheet(item: $editing) { target in ProfileEditorView(target: target) }
             .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
             .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
@@ -89,12 +91,10 @@ struct ProfileListView: View {
             } message: { _ in
                 Text(L("profiles.delete.message"))
             }
-            .sheet(item: $proxySheet, onDismiss: showProxyProblems) { sheet in
-                switch sheet {
-                case let .list(selecting): ProxyListView(initialSelection: selecting)
-                case .problems: ProxyProblemView { id in proxySheet = .list(selecting: [id]) }
-                }
+            .sheet(item: $proxySheet, onDismiss: showProxyProblems) { _ in
+                ProxyProblemView { id in showProxies(selecting: [id]) }
             }
+            .onChange(of: section) { _, _ in showProxyProblems() }
             // A profile that was started with a proxy that does not work.
             .onReceive(model.$proxyProblems) { problems in
                 if !problems.isEmpty, proxySheet == nil { proxySheet = .problems }
@@ -103,7 +103,7 @@ struct ProfileListView: View {
             .onReceive(model.$proxiesRequest) { requested in
                 guard requested else { return }
                 model.proxiesRequest = false
-                if proxySheet == nil { proxySheet = .list(selecting: []) }
+                showProxies(selecting: [])
             }
             .sheet(item: $assigningProxies) { request in ProxyAssignView(request: request) }
             // ⌘K.
@@ -173,9 +173,35 @@ struct ProfileListView: View {
         return commands
     }
 
-    /// After the Proxies sheet: what profiles said about their proxies meanwhile.
+    /// After the Proxies section: what profiles said about their proxies meanwhile.
+    /// The next profile whose proxy does not work — not over the Proxies section that "Show in
+    /// Proxies" opened: the rest come when the profiles show again.
     private func showProxyProblems() {
-        if proxySheet == nil, !model.proxyProblems.isEmpty { proxySheet = .problems }
+        if proxySheet == nil, section == .profiles, !model.proxyProblems.isEmpty { proxySheet = .problems }
+    }
+
+    /// The screen, with the sidebar's count of proxies kept current as the list changes.
+    @ViewBuilder
+    private var screen: some View {
+        if let proxyList = model.proxyList {
+            ObservingProxyList(proxies: proxyList) { list in profilesScreen(proxyCount: list.entries.count) }
+        } else {
+            profilesScreen(proxyCount: nil)
+        }
+    }
+
+    private func profilesScreen(proxyCount: Int?) -> ProfilesScreen {
+        ProfilesScreen(rows: rows, isWorking: model.isWorking, sync: syncLine,
+                       filter: $filter, search: $search, actions: actions,
+                       section: $section, proxyCount: proxyCount,
+                       proxies: AnyView(ProxyListView(selection: $proxySelection)))
+    }
+
+    /// The window's Proxies section; with `ids`, those proxies selected (else the selection it had).
+    private func showProxies(selecting ids: Set<UUID>) {
+        proxySheet = nil
+        if !ids.isEmpty { proxySelection = ids }
+        withAnimation(Theme.appearAnimation) { section = .proxies }
     }
 
     /// Warm-up of several profiles (the selection's bar): the warm-up queue, with them ticked.
@@ -245,7 +271,7 @@ struct ProfileListView: View {
             openSettings: { openSettings() },
             changePassword: { changingPassword = true },
             warmUpQueue: { queuePreselection = []; warmingUpSeveral = true },
-            openProxies: { proxySheet = .list(selecting: []) },
+            openProxies: { showProxies(selecting: []) },
             launchSeveral: { ids in Task { await model.launchProfiles(ids) } },
             stopSeveral: { ids in Task { await model.stopProfiles(ids) } },
             warmUpSeveral: { ids in warmUpSeveral(ids) },
@@ -254,19 +280,18 @@ struct ProfileListView: View {
     }
 }
 
-/// The proxy sheets of the Profiles window.
+/// The proxy sheet of the Profiles window.
 enum ProxySheet: Identifiable, Equatable {
-    /// The Proxies sheet, with these proxies selected.
-    case list(selecting: Set<UUID>)
     /// What profiles whose proxy does not work say (`AppModel.proxyProblems`).
     case problems
 
-    var id: String {
-        switch self {
-        case .list: return "list"
-        case .problems: return "problems"
-        }
-    }
+    var id: String { "problems" }
+}
+
+/// What the Profiles window's main area shows: the profiles (through a filter), or the proxy list.
+enum ProfilesSection: Equatable {
+    case profiles
+    case proxies
 }
 
 // MARK: - What the screen shows
@@ -425,6 +450,11 @@ struct ProfilesScreen: View {
     @Binding var filter: ProfileFilter
     @Binding var search: String
     var actions = ProfileActions()
+    /// The proxy list as a section of the window (the sidebar's Proxies, `proxies`), and how
+    /// many proxies it holds; nil: no such section.
+    var section: Binding<ProfilesSection> = .constant(.profiles)
+    var proxyCount: Int?
+    var proxies: AnyView?
     /// Rows selected with ⌘- and ⇧-click; with two or more, `ProfileBulkBar` acts on them all.
     @State private var selection = ProfileSelection()
 
@@ -434,22 +464,26 @@ struct ProfilesScreen: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ProfilesSidebar(rows: rows, sync: sync, filter: $filter, actions: actions)
+            ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount, actions: actions)
                 .frame(width: Self.sidebarWidth)
             Rectangle().fill(Theme.hairline).frame(width: 1)
-            VStack(spacing: 0) {
-                header
-                Rectangle().fill(Theme.divider).frame(height: 1)
-                if selectedRows.count >= 2 {
-                    ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
-                                   selectAll: { selection.select(displayOrder.map(\.id)) },
-                                   clear: { selection.clear() })
-                        .transition(.opacity)
+            if section.wrappedValue == .proxies, let proxies {
+                proxies
+            } else {
+                VStack(spacing: 0) {
+                    header
+                    Rectangle().fill(Theme.divider).frame(height: 1)
+                    if selectedRows.count >= 2 {
+                        ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
+                                       selectAll: { selection.select(displayOrder.map(\.id)) },
+                                       clear: { selection.clear() })
+                            .transition(.opacity)
+                    }
+                    content
                 }
-                content
+                .background(Theme.surface)
+                .animation(Theme.hoverAnimation, value: selectedRows.count >= 2)
             }
-            .background(Theme.surface)
-            .animation(Theme.hoverAnimation, value: selectedRows.count >= 2)
         }
         .background(Theme.surface)
         .ignoresSafeArea(.container, edges: .top)
@@ -503,7 +537,6 @@ struct ProfilesScreen: View {
             Menu {
                 Button(L("profiles.menu.warmUpSeveral"), action: actions.warmUpQueue)
                     .disabled(rows.isEmpty)
-                Button(L("profiles.menu.proxies"), action: actions.openProxies)
                 Divider()
                 Button(L("profiles.menu.import"), action: actions.importProfile)
                 Divider()
@@ -669,6 +702,9 @@ private struct ProfilesSidebar: View {
     let rows: [ProfileRowItem]
     let sync: SyncLine
     @Binding var filter: ProfileFilter
+    @Binding var section: ProfilesSection
+    /// Nil: the window has no Proxies section (no list model).
+    let proxyCount: Int?
     let actions: ProfileActions
 
     var body: some View {
@@ -680,6 +716,7 @@ private struct ProfilesSidebar: View {
                 .padding(.bottom, 22)
             item(.all)
             item(.running)
+            if let proxyCount { proxiesItem(proxyCount) }
             Text(L("profiles.filters"))
                 .font(.lumenColumn)
                 .foregroundStyle(Theme.textTertiary)
@@ -723,17 +760,30 @@ private struct ProfilesSidebar: View {
     }
 
     private func item(_ value: ProfileFilter) -> some View {
-        let count = rows.filter(value.includes).count
-        let selected = filter == value
-        return Button {
-            withAnimation(Theme.appearAnimation) { filter = value }
+        sidebarButton(symbol: value.symbol, title: value.title, count: rows.filter(value.includes).count,
+                      selected: section == .profiles && filter == value) {
+            filter = value
+            section = .profiles
+        }
+    }
+
+    /// The proxy list: a section of the window, beside the profiles.
+    private func proxiesItem(_ count: Int) -> some View {
+        sidebarButton(symbol: "network", title: L("proxies.title"), count: count, selected: section == .proxies) {
+            section = .proxies
+        }
+    }
+
+    private func sidebarButton(symbol: String, title: String, count: Int, selected: Bool, choose: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(Theme.appearAnimation) { choose() }
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: value.symbol)
+                Image(systemName: symbol)
                     .font(.system(size: 13))
                     .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
                     .frame(width: 18)
-                Text(value.title)
+                Text(title)
                     .font(.system(size: 13, weight: selected ? .medium : .regular))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)

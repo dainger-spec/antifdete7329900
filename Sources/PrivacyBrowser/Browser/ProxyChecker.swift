@@ -19,7 +19,7 @@ import Foundation
 ///
 /// PRIVACY: the probe's connections go to the proxy alone (the service is named to the proxy, which
 /// resolves and reaches it); the lookup is a request to a third-party service through the proxy.
-/// Both only when the user asks for a check (the Proxies sheet), and the probe when a profile with a
+/// Both only when the user asks for a check (the Proxies section), and the probe when a profile with a
 /// proxy starts (`ProfileManager`), to say why it would load nothing.
 @MainActor
 enum ProxyChecker {

@@ -3,11 +3,11 @@ import SwiftUI
 
 /// What the Profiles window says when a profile was started with a proxy that does not work
 /// (`AppModel.proxyProblems`): which profile, which proxy, what the probe found — step by step,
-/// in words, with what to do — and Check, the full check the Proxies sheet runs. The profile
+/// in words, with what to do — and Check, the full check the Proxies section runs. The profile
 /// itself loads nothing meanwhile: it never goes around its proxy. Several are said one after
 /// the other.
 struct ProxyProblemView: View {
-    /// Shows a proxy of the list in the Proxies sheet (in place of this one).
+    /// Shows a proxy of the list in the Profiles window's Proxies section (in place of this sheet).
     let showInList: (UUID) -> Void
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss

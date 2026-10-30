@@ -152,7 +152,7 @@ enum ProxyState: Equatable {
 
 // MARK: - Report
 
-/// What a check found, step by step and in words, with what to do about it: the Proxies sheet's
+/// What a check found, step by step and in words, with what to do about it: the Proxies section's
 /// report on a proxy, and what a profile whose proxy did not work at its launch says — one text
 /// for both, from the same probe (`ProxyProbe`).
 struct ProxyReport {

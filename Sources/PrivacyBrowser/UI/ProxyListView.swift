@@ -3,33 +3,38 @@ import BrowserCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The proxy list (Profiles window → ⋯ → Proxies…): the proxies kept at hand, encrypted in the
-/// vault, with what their last check found — working or how not, the type, where they exit, how
-/// slow they are, and how many profiles use each. Import adds a pasted list; Check checks the
-/// selection (or all) through each proxy itself, step by step; Assign gives the selected proxies
-/// to profiles, in turn; Edit changes one, and the profiles that use it follow; Export writes the
-/// list out (passwords in plaintext, said so first); Delete removes them from the list (each
-/// profile keeps its own copy). One proxy selected: its last check, step by step, below.
+/// The proxy list, a section of the Profiles window (its sidebar's Proxies): the proxies kept at
+/// hand, encrypted in the vault, with what their last check found — working or how not, the type,
+/// where they exit, how slow they are, and how many profiles use each. Import adds a pasted list;
+/// Check checks the selection (or all) through each proxy itself, step by step; Assign gives the
+/// selected proxies to profiles, in turn; Edit changes one, and the profiles that use it follow;
+/// Export writes the list out (passwords in plaintext, said so first); Delete removes them from the
+/// list (each profile keeps its own copy). The selected proxy's last check, step by step, below;
+/// the first proxy is selected when the list opens.
+///
+/// A section of the window rather than a sheet: the sheet was wider than its own frame (the UI
+/// snapshots of run 429 showed it cut on both sides at 940 pt, and a narrow window cut it more),
+/// and a proxy, like a profile, is what the window is for.
 struct ProxyListView: View {
-    /// What to start with selected (a profile's proxy, from "Show in Proxies").
-    var initialSelection: Set<UUID> = []
+    /// The selected proxies, kept by the window while another section shows ("Show in Proxies"
+    /// selects a profile's proxy).
+    @Binding var selection: Set<UUID>
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
         if let proxies = model.proxyList {
-            ProxyListPanel(proxies: proxies, profileCounts: model.proxyUseCounts, initialSelection: initialSelection)
+            ProxyListPanel(proxies: proxies, profileCounts: model.proxyUseCounts, selection: $selection)
         }
     }
 }
 
-/// The sheet's body over a list model (rendered with a sample list by `--render-ui-snapshots`).
+/// The section's body over a list model (rendered with a sample list by `--render-ui-snapshots`).
 struct ProxyListPanel: View {
     @ObservedObject var proxies: ProxyListModel
     /// How many profiles use each proxy, by `ProxyList.identity(of:)`.
     var profileCounts: [String: Int] = [:]
-    @Environment(\.dismiss) private var dismiss
+    @Binding var selection: Set<UUID>
 
-    @State private var selection: Set<UUID>
     @State private var search = ""
     @State private var adding = false
     @State private var importing = false
@@ -38,18 +43,13 @@ struct ProxyListPanel: View {
     @State private var editing: ProxyListEntry?
     @State private var confirmingDelete = false
 
-    init(proxies: ProxyListModel, profileCounts: [String: Int] = [:], initialSelection: Set<UUID> = []) {
-        _proxies = ObservedObject(wrappedValue: proxies)
-        self.profileCounts = profileCounts
-        _selection = State(initialValue: initialSelection)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(title: L("proxies.title"), subtitle: L("proxies.explanation"))
+            header
+            Rectangle().fill(Theme.divider).frame(height: 1)
             toolbar
                 .padding(.horizontal, 24)
-                .padding(.bottom, 12)
+                .padding(.vertical, 12)
             if let loadError = proxies.loadError {
                 Label(String(format: L("proxies.error.loadDetail"), loadError), systemImage: "exclamationmark.triangle.fill")
                     .font(.lumenSecondary)
@@ -62,19 +62,18 @@ struct ProxyListPanel: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 12)
                 .frame(maxHeight: .infinity)
-            if !proxies.entries.isEmpty {
-                reportPane
+            // One proxy selected: its last check. Nothing selected, or several: no pane, rather than
+            // half a window saying to select one.
+            if let entry = single {
+                reportPane(entry)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)
             }
-            SheetFooter(leading: { footerStatus }, buttons: {
-                Button(L("common.done")) { dismiss() }
-                    .buttonStyle(.lumenPrimary)
-                    .keyboardShortcut(.defaultAction)
-            })
         }
-        .frame(width: 940, height: 720)
-        .background(Theme.raised)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Theme.surface)
+        .onAppear(perform: selectFirstIfNone)
+        .onChange(of: proxies.entries.map(\.id)) { _, _ in selectFirstIfNone() }
         .sheet(isPresented: $adding) {
             ProxyEditView(proxies: proxies, entry: nil, profileCount: 0) { added in selection = [added] }
         }
@@ -123,6 +122,13 @@ struct ProxyListPanel: View {
         return proxies.list.entry(id)
     }
 
+    /// With nothing of the list selected, its first proxy: the report shows a check at once.
+    private func selectFirstIfNone() {
+        if selection.intersection(proxies.entries.map(\.id)).isEmpty, let first = visible.first {
+            selection = [first.id]
+        }
+    }
+
     private func profileCount(_ entry: ProxyListEntry) -> Int {
         profileCounts[ProxyList.identity(of: entry.proxy)] ?? 0
     }
@@ -134,12 +140,86 @@ struct ProxyListPanel: View {
         return L("proxies.delete.message") + " " + String(format: L("proxies.delete.used"), used)
     }
 
-    private var toolbar: some View {
-        HStack(spacing: 8) {
+    // MARK: The header and the toolbar
+
+    /// The window's header band, as the profiles have theirs: the title and how the list stands,
+    /// the search, the rarer actions (⋯) and Add.
+    private var header: some View {
+        HStack(spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    title
+                    Text(summary)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .monospacedDigit()
+                }
+                title
+            }
+            .lineLimit(1)
+            Spacer(minLength: 12)
+            if proxies.isChecking {
+                ProgressView().controlSize(.small).transition(.opacity)
+            }
+            LumenSearchField(text: $search, prompt: L("proxies.search"))
+                .frame(width: 200)
+            moreMenu
             Button { adding = true } label: { Label(L("proxies.add"), systemImage: "plus") }
-                .buttonStyle(.lumenSecondary)
+                .buttonStyle(.lumenPrimary)
                 .disabled(proxies.loadError != nil)
                 .help(L("proxies.add.help"))
+        }
+        .padding(.leading, 24)
+        .padding(.trailing, 16)
+        .frame(height: 52)
+        .animation(Theme.hoverAnimation, value: proxies.isChecking)
+    }
+
+    private var title: some View {
+        Text(L("proxies.title"))
+            .font(.lumenTitle)
+            .kerning(-0.2)
+            .foregroundStyle(Theme.textPrimary)
+            .fixedSize()
+    }
+
+    /// "Checked 3 of 9" while a check runs; else how many answered at their last check.
+    private var summary: String {
+        if proxies.isChecking {
+            return String(format: L("proxies.checking.progress"), proxies.checkedCount, proxies.checkTotal)
+        }
+        let checked = proxies.entries.compactMap(\.lastCheck)
+        return String(format: L("proxies.summary"), proxies.entries.count, checked.filter(\.isAlive).count,
+                      checked.filter { !$0.isAlive }.count)
+    }
+
+    /// Edit, Export and Delete: each also in a proxy's own menu (a right click), and Delete on the
+    /// Delete key.
+    private var moreMenu: some View {
+        Menu {
+            Button(L("proxies.edit")) { editing = single }
+                .disabled(single == nil || proxies.loadError != nil)
+            Button(L("proxies.export")) { exporting = true }
+                .disabled(proxies.entries.isEmpty)
+            Divider()
+            Button(L("proxies.delete"), role: .destructive) { confirmingDelete = true }
+                .disabled(selectedVisible.isEmpty)
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .tint(Theme.textSecondary)
+        .fixedSize()
+        .frame(width: 28, height: 28)
+        .hoverHighlight(cornerRadius: Theme.controlRadius)
+        .help(L("profiles.menu.more"))
+        .accessibilityLabel(L("profiles.menu.more"))
+    }
+
+    /// What is done to the list most: no wider than the narrowest window has room for.
+    private var toolbar: some View {
+        HStack(spacing: 8) {
             Button { importing = true } label: { Label(L("proxies.import"), systemImage: "square.and.arrow.down") }
                 .buttonStyle(.lumenSecondary)
                 .disabled(proxies.loadError != nil)
@@ -163,20 +243,11 @@ struct ProxyListPanel: View {
             }
             .buttonStyle(.lumenSecondary)
             .disabled(proxies.entries.isEmpty)
-            Button { editing = single } label: { Label(L("proxies.edit"), systemImage: "pencil") }
-                .buttonStyle(.lumenSecondary)
-                .disabled(single == nil || proxies.loadError != nil)
-            Button { exporting = true } label: { Label(L("proxies.export"), systemImage: "square.and.arrow.up") }
-                .buttonStyle(.lumenSecondary)
-                .disabled(proxies.entries.isEmpty)
-            Button(role: .destructive) { confirmingDelete = true } label: { Label(L("proxies.delete"), systemImage: "trash") }
-                .buttonStyle(.lumenDestructive)
-                .disabled(selectedVisible.isEmpty)
-            Spacer(minLength: 12)
-            LumenSearchField(text: $search, prompt: L("proxies.search"))
-                .frame(width: 160)
+            Spacer(minLength: 0)
         }
     }
+
+    // MARK: The list and the report
 
     @ViewBuilder
     private var content: some View {
@@ -191,33 +262,40 @@ struct ProxyListPanel: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .card(fill: Theme.raisedInset)
         } else {
-            VStack(alignment: .leading, spacing: 6) {
-                ProxyColumnHeader()
-                ScrollViewReader { scroller in
-                    List(selection: $selection) {
-                        ForEach(visible) { entry in
-                            ProxyRow(entry: entry, checking: proxies.checking.contains(entry.id), profiles: profileCount(entry))
-                                .tag(entry.id)
-                                .id(entry.id)
+            GeometryReader { geometry in
+                let columns = ProxyColumns(contentWidth: geometry.size.width)
+                VStack(alignment: .leading, spacing: 6) {
+                    ProxyColumnHeader(columns: columns)
+                    ScrollViewReader { scroller in
+                        List(selection: $selection) {
+                            ForEach(visible) { entry in
+                                ProxyRow(entry: entry, checking: proxies.checking.contains(entry.id), profiles: profileCount(entry),
+                                         columns: columns)
+                                    .tag(entry.id)
+                                    .id(entry.id)
+                            }
                         }
-                    }
-                    .overlay {
-                        if visible.isEmpty {
-                            Text(L("proxies.noMatches")).font(.lumenBody).foregroundStyle(Theme.textSecondary)
+                        .overlay {
+                            if visible.isEmpty {
+                                Text(L("proxies.noMatches")).font(.lumenBody).foregroundStyle(Theme.textSecondary)
+                            }
                         }
-                    }
-                    .scrollContentBackground(.hidden)
-                    .background(Theme.raisedInset)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-                    .contextMenu(forSelectionType: UUID.self) { ids in
-                        if !ids.isEmpty { menu(for: ids) }
-                    } primaryAction: { ids in
-                        // Double-click: check them again.
-                        if !proxies.isChecking { proxies.check(ids) }
-                    }
-                    .onAppear {
-                        // Opened for one proxy (a profile's): it is in view.
-                        if selection.count == 1, let id = selection.first { scroller.scrollTo(id, anchor: .center) }
+                        .scrollContentBackground(.hidden)
+                        .background(Theme.raisedInset)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+                        .contextMenu(forSelectionType: UUID.self) { ids in
+                            if !ids.isEmpty { menu(for: ids) }
+                        } primaryAction: { ids in
+                            // Double-click: check them again.
+                            if !proxies.isChecking { proxies.check(ids) }
+                        }
+                        .onDeleteCommand {
+                            if !selectedVisible.isEmpty { confirmingDelete = true }
+                        }
+                        .onAppear {
+                            // Opened for one proxy (a profile's): it is in view.
+                            if selection.count == 1, let id = selection.first { scroller.scrollTo(id, anchor: .center) }
+                        }
                     }
                 }
             }
@@ -225,35 +303,25 @@ struct ProxyListPanel: View {
     }
 
     /// The selected proxy's last check, step by step, with what to do about it.
-    @ViewBuilder
-    private var reportPane: some View {
-        Group {
-            if let entry = single {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if entry.lastCheck == nil, !proxies.checking.contains(entry.id) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(entry.displayName).font(.lumenSection).foregroundStyle(Theme.textPrimary)
-                                Text(entry.kindKnown ? L("proxies.report.unchecked") : L("proxies.type.unknown.help"))
-                                    .font(.lumenSecondary)
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        } else {
-                            ProxyReportView(report: ProxyReport(proxy: entry.proxy, check: entry.lastCheck,
-                                                                checking: proxies.checking.contains(entry.id)),
-                                            checkedAt: proxies.checking.contains(entry.id) ? nil : entry.lastCheck?.checkedAt)
-                        }
+    private func reportPane(_ entry: ProxyListEntry) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if entry.lastCheck == nil, !proxies.checking.contains(entry.id) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(entry.displayName).font(.lumenSection).foregroundStyle(Theme.textPrimary)
+                        Text(entry.kindKnown ? L("proxies.report.unchecked") : L("proxies.type.unknown.help"))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
+                } else {
+                    ProxyReportView(report: ProxyReport(proxy: entry.proxy, check: entry.lastCheck,
+                                                        checking: proxies.checking.contains(entry.id)),
+                                    checkedAt: proxies.checking.contains(entry.id) ? nil : entry.lastCheck?.checkedAt)
                 }
-            } else {
-                Text(L("proxies.report.none"))
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textTertiary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
         }
         .frame(height: 210)
         .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Theme.raisedInset))
@@ -277,32 +345,14 @@ struct ProxyListPanel: View {
             confirmingDelete = true
         }
     }
-
-    @ViewBuilder
-    private var footerStatus: some View {
-        if proxies.isChecking {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text(String(format: L("proxies.checking.progress"), proxies.checkedCount, proxies.checkTotal))
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textSecondary)
-                    .monospacedDigit()
-            }
-        } else if !proxies.entries.isEmpty {
-            let checked = proxies.entries.compactMap(\.lastCheck)
-            Text(String(format: L("proxies.summary"), proxies.entries.count, checked.filter(\.isAlive).count,
-                        checked.filter { !$0.isAlive }.count))
-                .font(.lumenSecondary)
-                .foregroundStyle(Theme.textTertiary)
-                .monospacedDigit()
-        }
-    }
 }
 
 // MARK: - Rows
 
-/// Column widths of the proxy list (the name takes what is left).
-private enum ProxyColumns {
+/// Column widths of the proxy list, and which optional columns fit (the name takes what is
+/// left): below these widths the list drops the exit IP, then when it was checked, as the
+/// profiles' table drops its own optional columns.
+struct ProxyColumns {
     static let status: CGFloat = 18
     static let kind: CGFloat = 70
     static let exit: CGFloat = 176
@@ -311,25 +361,43 @@ private enum ProxyColumns {
     static let checked: CGFloat = 92
     static let profiles: CGFloat = 56
     static let gap: CGFloat = 10
+    static let minimumName: CGFloat = 150
+    /// The list's own row inset, on both sides.
+    static let inset: CGFloat = 18
+
+    let showsIP: Bool
+    let showsChecked: Bool
+
+    init(contentWidth: CGFloat) {
+        let fixed = 2 * Self.inset + Self.status + Self.kind + Self.exit + Self.latency + Self.profiles + 5 * Self.gap + Self.minimumName
+        showsChecked = contentWidth >= fixed + Self.checked + Self.gap
+        showsIP = contentWidth >= fixed + Self.checked + Self.ip + 2 * Self.gap
+    }
 }
 
 private struct ProxyColumnHeader: View {
+    let columns: ProxyColumns
+
     var body: some View {
         HStack(spacing: ProxyColumns.gap) {
             Color.clear.frame(width: ProxyColumns.status, height: 1)
             Text(L("proxies.column.proxy")).frame(maxWidth: .infinity, alignment: .leading)
             Text(L("proxies.column.type")).frame(width: ProxyColumns.kind, alignment: .leading)
             Text(L("proxies.column.exit")).frame(width: ProxyColumns.exit, alignment: .leading)
-            Text(L("proxies.column.ip")).frame(width: ProxyColumns.ip, alignment: .leading)
+            if columns.showsIP {
+                Text(L("proxies.column.ip")).frame(width: ProxyColumns.ip, alignment: .leading)
+            }
             Text(L("proxies.column.latency")).frame(width: ProxyColumns.latency, alignment: .trailing)
-            Text(L("proxies.column.checked")).frame(width: ProxyColumns.checked, alignment: .leading)
+            if columns.showsChecked {
+                Text(L("proxies.column.checked")).frame(width: ProxyColumns.checked, alignment: .leading)
+            }
             Text(L("proxies.column.profiles")).frame(width: ProxyColumns.profiles, alignment: .trailing)
         }
         .font(.lumenColumn)
         .foregroundStyle(Theme.textTertiary)
         .lineLimit(1)
         // The list's own row inset, so the titles stand over their columns.
-        .padding(.horizontal, 18)
+        .padding(.horizontal, ProxyColumns.inset)
     }
 }
 
@@ -337,6 +405,7 @@ private struct ProxyRow: View {
     let entry: ProxyListEntry
     let checking: Bool
     let profiles: Int
+    let columns: ProxyColumns
 
     var body: some View {
         HStack(spacing: ProxyColumns.gap) {
@@ -365,23 +434,27 @@ private struct ProxyRow: View {
                 .help(entry.kindKnown ? "" : L("proxies.type.unknown.help"))
             ProxyExitLabel(check: entry.lastCheck, checking: checking, showsCity: true)
                 .frame(width: ProxyColumns.exit, alignment: .leading)
-            Text(entry.lastCheck?.isAlive == true ? (entry.lastCheck?.exitIP ?? "") : "")
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(width: ProxyColumns.ip, alignment: .leading)
+            if columns.showsIP {
+                Text(entry.lastCheck?.isAlive == true ? (entry.lastCheck?.exitIP ?? "") : "")
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(width: ProxyColumns.ip, alignment: .leading)
+            }
             Text(ProxyCheckText.latency(entry.lastCheck))
                 .font(.lumenBody)
                 .foregroundStyle(ProxyCheckText.isSlow(entry.lastCheck) ? Theme.warning : Theme.textSecondary)
                 .monospacedDigit()
                 .lineLimit(1)
                 .frame(width: ProxyColumns.latency, alignment: .trailing)
-            Text(entry.lastCheck.map { $0.checkedAt.formatted(.relative(presentation: .named)) } ?? "")
-                .font(.lumenSecondary)
-                .foregroundStyle(Theme.textTertiary)
-                .lineLimit(1)
-                .frame(width: ProxyColumns.checked, alignment: .leading)
+            if columns.showsChecked {
+                Text(entry.lastCheck.map { $0.checkedAt.formatted(.relative(presentation: .named)) } ?? "")
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .frame(width: ProxyColumns.checked, alignment: .leading)
+            }
             Text(profiles.formatted())
                 .font(.lumenBody)
                 .foregroundStyle(profiles > 0 ? Theme.textSecondary : Theme.textTertiary)

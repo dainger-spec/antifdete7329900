@@ -564,7 +564,7 @@ profile, only while the option is on: turning it off (or removing the proxy) del
 profile is saved. A lookup still under way when the option is turned off, or the proxy removed
 or replaced, neither stores an IP nor warns.
 
-**Proxy list and its checker** (Profiles → ⋯ → Proxies…): proxies kept to give to profiles, encrypted
+**Proxy list and its checker** (the Profiles window's sidebar → Proxies): proxies kept to give to profiles, encrypted
 in the vault under their own key (`proxies.bin`, this Mac only; §3). A check talks to the proxy
 and to nothing else, in two parts:
 
@@ -585,7 +585,7 @@ and to nothing else, in two parts:
    store would get (`allowFailover = false`), in a URLSession of its own (no cookies, no cache,
    this Mac's Safari User-Agent): exit IP, country, time zone, city and network.
 
-At most eight proxies are checked at a time, and only when the user asks (the Proxies sheet, or
+At most eight proxies are checked at a time, and only when the user asks (the Proxies section, or
 **Check Proxy** after a launch), never in the background. A proxy that does not work never falls
 back to a direct connection, so this Mac's own address is never what a service sees; a proxy whose
 settings cannot be applied is not checked at all. The self-test checks this against an

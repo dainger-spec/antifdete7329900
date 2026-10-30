@@ -30,7 +30,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var deviceSettings = DeviceSettings()
     /// The app's own settings (Settings…, ⌘,).
     let settings = AppSettings()
-    /// The Proxies sheet is asked for from outside the Profiles window (Settings → Proxies).
+    /// The Proxies section is asked for from outside the Profiles window (Settings → Proxies).
     @Published var proxiesRequest = false
     /// The command palette (⌘K) is open in the Profiles window.
     @Published var showingPalette = false
@@ -75,7 +75,7 @@ final class AppModel: ObservableObject {
         settings.onBrowsingChange = { [weak self] preferences in self?.manager?.sendPreferences(preferences) }
     }
 
-    /// Settings → Proxies → the list: the Profiles window opens its Proxies sheet.
+    /// Settings → Proxies → the list: the Profiles window shows its Proxies section.
     func showProxyList() {
         guard proxyList != nil else { return }
         activateProfilesWindow()
@@ -770,7 +770,7 @@ final class AppModel: ObservableObject {
 struct ProfileDetails: Equatable {
     /// "host:port" of its proxy; nil when it connects directly.
     var proxyEndpoint: String?
-    /// Which proxy of the list it uses (`ProxyList.identity(of:)`): the Proxies sheet counts them.
+    /// Which proxy of the list it uses (`ProxyList.identity(of:)`): the Proxies section counts them.
     var proxyIdentity: String?
     /// Where the proxy was last seen exiting (ISO 3166-1 alpha-2), when a lookup found it.
     var exitCountryCode: String?

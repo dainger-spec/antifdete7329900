@@ -368,7 +368,7 @@ enum UISnapshots {
 
     // MARK: Proxy list
 
-    /// The Proxies sheet with proxies as checks left them — working (one of them slow), each way
+    /// The Proxies section with proxies as checks left them — working (one of them slow), each way
     /// of failing the list tells apart (silent after connecting, login rejected, host not found,
     /// refused, no connection), one whose type the first check is to find — from a temporary
     /// vault; its report on the silent one and on a working one; the Edit and Export sheets; and
@@ -386,11 +386,17 @@ enum UISnapshots {
             let counts = [ProxyList.identity(of: berlin.proxy): 3, ProxyList.identity(of: silent.proxy): 2,
                           ProxyList.identity(of: entries[1].proxy): 1]
             var problems = 0
-            problems += await Shot(name: "sheet-proxies", size: CGSize(width: 940, height: 720), titled: false) {
-                ProxyListPanel(proxies: proxies, profileCounts: counts, initialSelection: [silent.id])
+            // The Profiles window's Proxies section: wide, with a proxy that stays silent selected; in
+            // the narrowest window, with one that works.
+            let rows = sampleRows()
+            func section(selecting id: UUID) -> AnyView {
+                AnyView(ProxyListPanel(proxies: proxies, profileCounts: counts, selection: .constant([id])))
+            }
+            problems += await Shot(name: "proxies", size: CGSize(width: 1180, height: 740)) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: silent.id))
             }.capture(into: folder)
-            problems += await Shot(name: "sheet-proxies-works", size: CGSize(width: 940, height: 720), titled: false) {
-                ProxyListPanel(proxies: proxies, profileCounts: counts, initialSelection: [berlin.id])
+            problems += await Shot(name: "proxies-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620)) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: berlin.id))
             }.capture(into: folder)
             problems += await Shot(name: "sheet-proxy-edit", size: CGSize(width: 560, height: 400), titled: false) {
                 ProxyEditView(proxies: proxies, entry: berlin, profileCount: 3)
@@ -748,9 +754,13 @@ private struct ProfilesPreview: View {
     var sync: SyncLine = .off
     var isWorking = false
     var actions = ProfileActions()
+    var section: ProfilesSection = .profiles
+    var proxyCount: Int? = 9
+    var proxies: AnyView?
 
     var body: some View {
-        ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions)
+        ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
+                       section: .constant(section), proxyCount: proxyCount, proxies: proxies)
     }
 }
 

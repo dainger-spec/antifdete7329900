@@ -307,7 +307,7 @@ session's data store is gone, or the tab has a dialog waiting. ISOLATION_AND_LIM
 ## Proxy list and several profiles at once
 
 ```
-ProxyListView (sheet, ⋯ → Proxies…) ── ProxyListModel (AppModel.proxyList, made at unlock, dropped at lock)
+ProxyListView (the Profiles window's Proxies section, its sidebar) ── ProxyListModel (AppModel.proxyList, made at unlock, dropped at lock)
    │  unlock    ProxyList.takeIn(profileProxies:) once: the profiles' own proxies become entries
    │  Import…   ProxyImportView: ProxyListImport.read(text) → report per line → ProxyList.add
    │            (dedupe by host:port:user, limit; a line without a scheme: type unknown until checked)

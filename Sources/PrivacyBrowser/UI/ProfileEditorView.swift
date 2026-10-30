@@ -458,7 +458,7 @@ struct ProfileEditorView: View {
     }
 
     /// Check: a proxy of the list through the list — what it finds is the entry's, as a check in
-    /// the Proxies sheet — or the line of "New" on its own (nothing is added to the list).
+    /// the Proxies section — or the line of "New" on its own (nothing is added to the list).
     private func checkProxy() {
         guard !checking else { return }
         switch draft.proxyMode {

@@ -4,7 +4,7 @@ import SwiftUI
 /// Gives proxies of the list to profiles: the profiles on the left, the proxies on the right,
 /// and what each profile will get below — the first profile the first proxy, the second the
 /// second, and round again when there are more profiles than proxies (one proxy: every profile
-/// gets it). Opened from the Proxies sheet with the proxies selected there, or from the Profiles
+/// gets it). Opened from the Proxies section with the proxies selected there, or from the Profiles
 /// list with the profiles selected there. Saved as the editor saves a profile; a running profile
 /// uses its new proxy from its next launch.
 struct ProxyAssignView: View {

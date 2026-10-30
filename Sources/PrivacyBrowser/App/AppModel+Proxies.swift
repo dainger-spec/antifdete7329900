@@ -25,7 +25,7 @@ extension AppModel {
     }
 
     /// The profiles that used the list's entry as it was (`previous`) take it as it is now — an
-    /// edit in the Proxies sheet, or a check that found its type (`ProfileRepository.follow`).
+    /// edit in the Proxies section, or a check that found its type (`ProfileRepository.follow`).
     /// Says which profiles could not be changed (they keep their proxy as it was).
     func followProxyEntry(_ entry: ProxyListEntry, previous: ProxySettings) {
         guard let repository else { return }
@@ -61,13 +61,13 @@ extension AppModel {
         proxyProblems.removeAll { $0.id == problem.id }
     }
 
-    /// Check, from a problem: the profile's proxy checked as the Proxies sheet checks one
+    /// Check, from a problem: the profile's proxy checked as the Proxies section checks one
     /// (`ProxyListModel.checkProfileProxy`). Nil while locked.
     func checkProxy(of problem: ProxyProblem) async -> ProxyCheckResult? {
         await proxyList?.checkProfileProxy(problem.proxy)
     }
 
-    /// The problem's proxy in the list (added when it is not there), for the Proxies sheet to show.
+    /// The problem's proxy in the list (added when it is not there), for the Proxies section to show.
     func proxyEntryID(of problem: ProxyProblem) -> UUID? {
         proxyList?.entryID(for: problem.proxy)
     }
