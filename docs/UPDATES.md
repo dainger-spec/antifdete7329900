@@ -8,8 +8,9 @@ it implements and how it is proven.
 |---|---|
 | §4, the formats of the files on disk | in force (`DocumentFormat`; `FormatPolicyTests`, the self-test's `formatPolicy`) |
 | §2, the signed feed and its checks | in BrowserCore (`UpdateVerifier`, `UpdateSigner`, `BuildVersion`; `UpdateTests`) and `pbupdate`; no app uses it yet |
-| §3, the installer helper | in every build (`Contents/Helpers/PrivacyBrowser Updater.app`; `UpdateInstaller`, tested on real signed bundles by `UpdateInstallerTests`); the app does not start it yet |
-| §3 the quit gate, §5 the check, §6 release, §7 the screen | not yet |
+| §3, the installer helper | in every build (`Contents/Helpers/PrivacyBrowser Updater.app`; `UpdateInstaller`, tested on real signed bundles by `UpdateInstallerTests`) |
+| §3 the quit gate, Install Now; §5 the check; §7 the screen | in the app (`AppUpdater`, `UpdateGate`, `UpdatesView`); the gate in the self-test (`updateGate`), the sheet in the UI snapshots; only builds with a feed URL have an updater |
+| §6 release; the end-to-end scenarios of §8 | not yet |
 
 Two facts make updates harder here than in most apps:
 
@@ -163,9 +164,17 @@ If any check fails, **the update is not installed**: it stays staged for the nex
 next launch says which profile failed and why. A crash never installs anything: the helper is
 started only by the gate.
 
+How the gate is built (`UpdateGate`, `AppModel.installUpdateAtQuit`): `QuitCoordinator` calls it at
+the one moment it can pass — when the quit has sealed everything (or nothing ran) — and only for a
+quit the user asked for: **never at a logout, restart or shutdown**, which would stop the helper
+with everything else; the update then waits for the next quit. A profile process killed after its
+30 seconds is counted (`ProfileProcess.forcedExits`) from the moment the quit began. The disk is
+looked at for every folder in the vault's `profiles/`, so the gate works with the vault locked too.
+
 **Update now** while profiles run: a confirmation lists everything that will be stopped — profiles
-with windows, in their own processes, warm-ups without a window, launches and seals under way — and
-only on confirmation does the quit path run. If the gate fails then, the app does not exit: it stays
+with windows, in their own processes, warm-ups without a window, launches and seals under way
+(`ProfileManager.activity`) — and only on confirmation does the quit path run: every profile stopped
+and sealed, the vault locked, then the gate. If the gate fails then, the app does not exit: it stays
 locked, says why, and keeps the update.
 
 The helper is the only process that touches the bundle: `Contents/Helpers/PrivacyBrowser
@@ -290,7 +299,12 @@ read before any vault is unlocked.
     stores' proxies, and the updater's session is not a data store.
 - **The switch.** "Check for updates automatically" off means off: no timer, no request at launch,
   nothing. "Check Now" is a request the user makes by pressing it. Default on in a build that has a
-  feed URL.
+  feed URL: the first check a minute after launch, then every 6 hours.
+- **The request itself** (`AppUpdater`): its own ephemeral `URLSession` — no cookies, no cache, no
+  credentials — with the same two headers from every Mac (`User-Agent: PrivacyBrowser`,
+  `Accept-Language: en`), and the appcast refused above 1 MB. The archive is downloaded by the same
+  session into a temporary file and moved into the staging folder, where its length, SHA-256 and
+  Ed25519 signature are checked before it counts as downloaded.
 
 ## 6. Signing, notarization, `scripts/release.sh`
 
@@ -303,12 +317,16 @@ every push and the release path is not untested code on the day there is an acco
 
 ## 7. Interface
 
-An **Updates** sheet (Profiles window → ⋯ → Updates…): the version running; Check Now; "Check for
-updates automatically"; what to do with an update (install at quit — the default — or only tell
-me); the release notes as text; the state — up to date, checking, downloading, "downloaded,
-installs when you quit", failed with the reason, not available in this build (no feed URL), or a
-location the update cannot be installed to. Install Now asks first when profiles run, listing them.
-In the UI snapshots.
+An **Updates** sheet (Profiles window → ⋯ → Updates…, `UpdatesView`): the version running; Check
+Now; "Check for updates automatically"; what to do with an update (download it and install at quit
+— the default — or only tell me, then Download); the release notes as text; the state — not checked
+yet, up to date (when), checking, downloading, "downloaded and checked, installs when you quit",
+failed with the reason, not available in this build (no feed URL), or a place the update cannot be
+installed to (App Translocation; a folder this user cannot write). Install Now asks first, listing
+what it will stop. What the server sees is said under the settings. After an update the sheet says
+which one this launch is; an update that was not installed — refused, rolled back, given up, or not
+handed over at the last quit — is said once at the next launch. In the UI snapshots
+(`sheet-updates-ready`, `sheet-updates-up-to-date`, `sheet-updates-unavailable`).
 
 ## 8. How it is proven
 

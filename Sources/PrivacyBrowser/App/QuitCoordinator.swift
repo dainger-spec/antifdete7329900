@@ -15,37 +15,64 @@ import AppKit
 /// the normal run loop, and `terminate:` is sent again once nothing is left (`.terminateNow`).
 /// Only a logout, restart or shutdown waits inside `terminate:` — cancelling it would cancel the
 /// logout — and its quit Apple Event has no web view below it.
+///
+/// An update is handed to its installer here and nowhere else (docs/UPDATES.md §3): once every
+/// profile is sealed — or none ran — at the end of a quit the user asked for. Never at a logout,
+/// restart or shutdown (the installer would be stopped with everything else): the update waits for
+/// the next quit. A crash never gets here, so it never installs anything.
 @MainActor
 final class QuitCoordinator {
     private let hasActivity: @MainActor () -> Bool
     private let lockForQuit: @MainActor () async -> Void
     private let willSeal: @MainActor () -> Void
     private let terminate: @MainActor () -> Void
+    private let hasUpdate: @MainActor () -> Bool
+    private let installUpdate: @MainActor () async -> Void
     private var quitTask: Task<Void, Never>?
     private var replyPending = false
     private var sealed = false
+    private var updateHandled = false
 
     /// - Parameters:
     ///   - hasActivity: a profile is running, launching or sealing, or a Lock is under way.
     ///   - lockForQuit: closes every window and seals every profile; returns when done.
     ///   - willSeal: called once when a cancelled quit starts sealing (shows the progress).
     ///   - terminate: sends `terminate:` again (`NSApp.terminate(nil)`; the self-test records it).
+    ///   - hasUpdate: an update is downloaded and checked, to be handed to its installer.
+    ///   - installUpdate: runs the gate and, if it passes, starts the installer; the app then exits.
     init(hasActivity: @escaping @MainActor () -> Bool,
          lockForQuit: @escaping @MainActor () async -> Void,
          willSeal: @escaping @MainActor () -> Void = {},
-         terminate: @escaping @MainActor () -> Void) {
+         terminate: @escaping @MainActor () -> Void,
+         hasUpdate: @escaping @MainActor () -> Bool = { false },
+         installUpdate: @escaping @MainActor () async -> Void = {}) {
         self.hasActivity = hasActivity
         self.lockForQuit = lockForQuit
         self.willSeal = willSeal
         self.terminate = terminate
+        self.hasUpdate = hasUpdate
+        self.installUpdate = installUpdate
         _ = Self.powerOffObserver
     }
 
     /// The answer for `applicationShouldTerminate(_:)`.
     func shouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // Sealed (or nothing to seal): this is the second terminate:.
-        guard !sealed, hasActivity() else { return .terminateNow }
-        if Self.powerOffRequested || Self.isSystemQuitEvent(NSAppleEventManager.shared().currentAppleEvent) {
+        let systemQuit = Self.powerOffRequested || Self.isSystemQuitEvent(NSAppleEventManager.shared().currentAppleEvent)
+        // Sealed (or nothing to seal): this is the second terminate: — or the first, with nothing to do.
+        guard !sealed, hasActivity() else {
+            // The one moment an update may go to its installer: every profile is sealed, and this
+            // is a quit the user asked for. The gate looks again before anything is started.
+            if !updateHandled, !systemQuit, hasUpdate() {
+                updateHandled = true
+                Task { @MainActor in
+                    await self.installUpdate()
+                    self.terminate()
+                }
+                return .terminateCancel
+            }
+            return .terminateNow
+        }
+        if systemQuit {
             if !replyPending {
                 replyPending = true
                 Task { @MainActor in

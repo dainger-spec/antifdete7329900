@@ -37,6 +37,14 @@ final class AppModel: ObservableObject {
     private(set) var proxyList: ProxyListModel?
     private var managerObservation: AnyCancellable?
     private var lockTask: Task<Void, Never>?
+    /// The app's updater; nil in a build without an update feed (`AppUpdater.Configuration.main`),
+    /// and until the app's window first appears (`startUpdates`).
+    @Published private(set) var updater: AppUpdater?
+    private var updatesStarted = false
+    /// "Install Now" is stopping the profiles and checking the quit (`installUpdateNow`).
+    @Published private(set) var isInstallingUpdate = false
+    /// Profile processes this app had killed before the quit under way began (`ProfileProcess.forcedExits`).
+    private var forcedExitsBeforeQuit: Int?
 
     /// The main Profiles window (SwiftUI `Window` scene), captured via `WindowReader`. Brought
     /// back to the front when a profile's windows all close, and on dock reopen.
@@ -210,7 +218,10 @@ final class AppModel: ObservableObject {
     /// after every seal attempt is force-sealed instead of left decrypted (also when the quit
     /// joins a Lock already under way). See `WebDataStoreVault.forceSealWhenStoreStaysInUse`.
     func lock(forQuit: Bool = false) async {
-        if forQuit { manager?.prepareForQuit() }
+        if forQuit {
+            manager?.prepareForQuit()
+            forcedExitsBeforeQuit = forcedExitsBeforeQuit ?? ProfileProcess.forcedExits
+        }
         if let lockTask {
             await lockTask.value
             return
@@ -592,6 +603,89 @@ final class AppModel: ObservableObject {
         change(&updated)
         try updated.save(to: vault)
         deviceSettings = updated
+    }
+
+    // MARK: Updates (docs/UPDATES.md)
+
+    /// Once, when the app's window first appears — never in the self-test, the snapshots or a
+    /// profile's own process: the updater of a build with a feed, its automatic checks when they
+    /// are on, and what became of the last update when it was not installed.
+    func startUpdates() {
+        guard !updatesStarted else { return }
+        updatesStarted = true
+        guard let configuration = AppUpdater.Configuration.main() else { return }
+        let updater = AppUpdater(configuration: configuration)
+        self.updater = updater
+        updater.start()
+        switch updater.notice {
+        case .outcome(let outcome)?:
+            switch outcome.result {
+            case .installed: break // the Updates sheet says which update this launch is
+            case .rolledBack: showError(String(format: L("updates.notice.rolledBack"), outcome.version, outcome.detail))
+            case .refused: showError(String(format: L("updates.notice.refused"), outcome.version, outcome.detail))
+            case .gaveUp: showError(String(format: L("updates.notice.gaveUp"), outcome.version, outcome.detail))
+            }
+        case .deferred(let reason)?:
+            showError(String(format: L("updates.notice.deferred"), reason))
+        case nil:
+            break
+        }
+    }
+
+    /// The check at the end of the quit under way, with what that quit had to kill.
+    private func updateGate(forcedExitsBefore: Int?) -> UpdateGate.Verdict {
+        UpdateGate.check(vaultRoot: root, hasActivity: hasActivity,
+                         forcedExits: ProfileProcess.forcedExits - (forcedExitsBefore ?? ProfileProcess.forcedExits))
+    }
+
+    /// At the end of a quit that sealed every profile (`QuitCoordinator`): the gate, then the
+    /// installer. Whatever stops it is said at the next launch; the app quits either way.
+    func installUpdateAtQuit() async {
+        guard let updater, updater.isReady else { return }
+        switch await updater.installAtQuit(gate: updateGate(forcedExitsBefore: forcedExitsBeforeQuit)) {
+        case .started, .nothingReady: break
+        case .refused(let reasons): updater.rememberNotInstalled(reasons.joined(separator: "; "))
+        case .blocked: break // the Updates sheet says where the app has to be
+        case .failed(let reason): updater.rememberNotInstalled(reason)
+        }
+    }
+
+    /// "Install Now": the quit path, asked for here — every profile stopped and sealed (the vault
+    /// locked) — then the gate. If it does not pass, the app does not quit: it stays locked, says
+    /// why, and keeps the update for the next quit.
+    func installUpdateNow() async {
+        guard let updater, updater.isReady, !isInstallingUpdate else { return }
+        isInstallingUpdate = true
+        defer { isInstallingUpdate = false }
+        let before = ProfileProcess.forcedExits
+        await lock(forQuit: true)
+        switch await updater.installAtQuit(gate: updateGate(forcedExitsBefore: before)) {
+        case .started:
+            NSApp.terminate(nil)
+        case .refused(let reasons):
+            showError(String(format: L("updates.now.refused"), reasons.joined(separator: "\n")))
+        case .blocked:
+            showError(L("updates.now.blocked"))
+        case .failed(let reason):
+            showError(String(format: L("updates.now.failed"), reason))
+        case .nothingReady:
+            break
+        }
+    }
+
+    /// What a quit would stop now, one line per profile, for Install Now's confirmation.
+    func updateStopsList() -> [String] {
+        guard let manager else { return [] }
+        let names = Dictionary(profiles.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        return manager.activity().map { entry in
+            let name = names[entry.id] ?? entry.id.uuidString
+            switch entry.activity {
+            case .window(ownProcess: true): return String(format: L("updates.stops.ownProcess"), name)
+            case .window(ownProcess: false): return String(format: L("updates.stops.window"), name)
+            case .warmUpOnly: return String(format: L("updates.stops.warmUp"), name)
+            case .busy: return String(format: L("updates.stops.busy"), name)
+            }
+        }.sorted()
     }
 
     // MARK: Helpers

@@ -34,6 +34,37 @@ enum UISnapshots {
         app.run()
     }
 
+    /// The Updates sheet: a release downloaded and ready, with its notes; up to date with automatic
+    /// checks off; and a build without an update feed. Previews fetch nothing.
+    private static func updates(into folder: URL, model: AppModel) async -> Int {
+        let configuration = AppUpdater.Configuration(
+            feed: URL(string: "https://updates.example/privacybrowser/appcast.json")!, keys: [:], version: "0.1.0",
+            build: BuildVersion("1")!, bundleIdentifier: "dev.local.PrivacyBrowser",
+            app: URL(fileURLWithPath: "/Applications/PrivacyBrowser.app"),
+            staging: URL(fileURLWithPath: "/nonexistent/updates"))
+        let item = AppcastItem(
+            version: "0.2.0", build: "2", minimumSystemVersion: "14.0",
+            url: URL(string: "https://updates.example/privacybrowser/PrivacyBrowser-0.2.0.zip")!, length: 48_210_944,
+            sha256: String(repeating: "0", count: 64), keyID: "0123456789abcdef", edSignature: Data(count: 64),
+            publishedAt: Date().addingTimeInterval(-2 * 3600),
+            notes: "• Safari's chrome: the proxy hook holds on macOS 27.\n• Proxies: a proxy that stays silent after the connection is named as such.\n"
+                + "• Files a newer version wrote are refused, never written over.")
+        var problems = 0
+        let ready = AppUpdater(preview: .ready(item), configuration: configuration)
+        problems += await Shot(name: "sheet-updates-ready", size: CGSize(width: 560, height: 640), titled: false) {
+            UpdatesForm(updater: ready).environmentObject(model)
+        }.capture(into: folder)
+        let upToDate = AppUpdater(preview: .upToDate(checkedAt: Date().addingTimeInterval(-25 * 60)), configuration: configuration,
+                                  automaticChecks: false, installPolicy: .notifyOnly)
+        problems += await Shot(name: "sheet-updates-up-to-date", size: CGSize(width: 560, height: 460), titled: false) {
+            UpdatesForm(updater: upToDate).environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "sheet-updates-unavailable", size: CGSize(width: 560, height: 260), titled: false) {
+            UpdatesView().environmentObject(model)
+        }.capture(into: folder)
+        return problems
+    }
+
     private static func run(into folder: URL) async -> Int {
         var problems = 0
         do {
@@ -126,6 +157,7 @@ enum UISnapshots {
         problems += await Shot(name: "sheet-change-password", size: CGSize(width: 420, height: 330), titled: false) {
             ChangePasswordView().environmentObject(model)
         }.capture(into: folder)
+        problems += await updates(into: folder, model: model)
         problems += await proxyList(into: folder)
         // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
         problems += await browserWindows(into: folder)

@@ -134,7 +134,12 @@ final class SafariHomeVault {
     /// A profile's process is running on this home — possibly one left behind by a manager that
     /// crashed: its files are in use and must not be sealed from under it.
     func isInUse(profileID: UUID) -> Bool {
-        let descriptor = open(Self.lockURL(forHome: homeDirectory(for: profileID)).path, O_RDWR)
+        Self.isHeld(lock: Self.lockURL(forHome: homeDirectory(for: profileID)))
+    }
+
+    /// A process holds this home lock (`holdWhileRunning`).
+    nonisolated static func isHeld(lock: URL) -> Bool {
+        let descriptor = open(lock.path, O_RDWR)
         guard descriptor >= 0 else { return false }
         defer { close(descriptor) }
         if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {

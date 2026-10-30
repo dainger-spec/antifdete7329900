@@ -16,6 +16,7 @@ struct PrivacyBrowserApp: App {
                     appDelegate.model = model
                     model.profilesWindow = window
                     Theme.applyChrome(to: window)
+                    model.startUpdates()
                 })
         }
         // The sidebar runs to the top of the window, under the traffic lights.
@@ -75,7 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lockForQuit: { [weak self] in await self?.model?.lock(forQuit: true) },
         // Closing the profile windows reveals the Profiles window, whose rows show "Encrypting…".
         willSeal: { [weak self] in self?.model?.activateProfilesWindow() },
-        terminate: { NSApp.terminate(nil) })
+        terminate: { NSApp.terminate(nil) },
+        // An update goes to its installer only at the end of a quit that sealed every profile.
+        hasUpdate: { [weak self] in self?.model?.updater?.isReady ?? false },
+        installUpdate: { [weak self] in await self?.model?.installUpdateAtQuit() })
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when launched as a bare SwiftPM executable (`swift run`) instead of an .app bundle.

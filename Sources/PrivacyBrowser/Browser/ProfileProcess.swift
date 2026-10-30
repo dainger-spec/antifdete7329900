@@ -41,6 +41,9 @@ final class ProfileProcess {
     }
 
     let profileID: UUID
+    /// Running only for a warm-up, without a window, until asked for one (an update's confirmation
+    /// lists what a quit would stop).
+    private(set) var isForWarmUpOnly: Bool
     private let process: Process
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ProfileProcess")
     /// Called on the main actor when the child has exited, however it exited.
@@ -53,14 +56,24 @@ final class ProfileProcess {
     var isRunning: Bool { process.isRunning }
     var processIdentifier: Int32 { process.processIdentifier }
 
-    private init(profileID: UUID, process: Process) {
+    private init(profileID: UUID, isForWarmUpOnly: Bool, process: Process) {
         self.profileID = profileID
+        self.isForWarmUpOnly = isForWarmUpOnly
         self.process = process
     }
+
+    /// How many profile processes this app had to kill (`waitUntilExit`). Such a profile did not
+    /// end through its own quit path, and an update is not installed at the end of a quit that had
+    /// to do it (docs/UPDATES.md §3).
+    private(set) static var forcedExits = 0
 
     /// Asks the profile to do something. Nothing happens if it has already gone.
     func send(_ command: ProfileCommand) {
         guard let commands, process.isRunning, let data = ProfileChannel.encode(command) else { return }
+        switch command {
+        case .activate, .openWindow, .openURL, .showLibrary, .showPasswords: isForWarmUpOnly = false
+        default: break
+        }
         do {
             try commands.write(contentsOf: data)
         } catch {
@@ -112,7 +125,7 @@ final class ProfileProcess {
         // processes' memory and the pipe buffer.
         keyPipe.fileHandleForWriting.write(record)
 
-        let child = ProfileProcess(profileID: profileID, process: process)
+        let child = ProfileProcess(profileID: profileID, isForWarmUpOnly: forWarmUpOnly, process: process)
         // The same pipe carries the commands after the grant; it stays open until the child exits.
         child.commands = keyPipe.fileHandleForWriting
         ProfileChannel.readLines(from: eventPipe.fileHandleForReading) { [weak child] line in
@@ -197,6 +210,7 @@ final class ProfileProcess {
         if process.isRunning {
             log.error("Profile \(self.profileID.uuidString, privacy: .public) did not quit in \(Int(seconds), privacy: .public)s; killing it. Its data is sealed again at the next unlock")
             kill(process.processIdentifier, SIGKILL)
+            Self.forcedExits += 1
             while process.isRunning {
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }

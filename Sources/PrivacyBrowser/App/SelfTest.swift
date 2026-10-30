@@ -135,6 +135,7 @@ final class SelfTest {
             try await fingerprintSurface(repository)
             try await recoverySealing(repository)
             try formatPolicy(repository)
+            try updateGate(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
@@ -2200,6 +2201,47 @@ final class SelfTest {
         check("format policy: a home is not sealed over a newer version's archive",
               sealRefusedAsNewer && (try? Data(contentsOf: archive)) == newer, String(describing: sealRefusal))
         try? FileManager.default.removeItem(at: home)
+    }
+
+    // MARK: Update gate (docs/UPDATES.md §3)
+
+    /// The check before an update may be handed to its installer, on this Mac's real layout and
+    /// vault: a sealed profile passes it; website data or a Safari home left in plaintext, or a home
+    /// a process still holds, fails it and names the profile; so do activity and a killed process.
+    private func updateGate(_ repository: ProfileRepository) throws {
+        let profile = try repository.create(name: "Update gate", configuration: ProfileConfiguration())
+        defer { try? repository.delete(profile.id) }
+        let id = profile.id.uuidString
+        func verdict(activity: Bool = false, killed: Int = 0) -> UpdateGate.Verdict {
+            UpdateGate.check(vaultRoot: repository.root, hasActivity: activity, forcedExits: killed)
+        }
+        func ours(_ verdict: UpdateGate.Verdict) -> [String] { verdict.reasons.filter { $0.contains(id) } }
+
+        check("update gate: a sealed profile passes it", ours(verdict()).isEmpty, verdict().reasons.joined(separator: "; "))
+        check("update gate: a profile still running, starting or sealing fails it", !verdict(activity: true).passed)
+        check("update gate: a profile process killed during the quit fails it", !verdict(killed: 1).passed)
+
+        let leftover = WebDataStoreVault.layout.searchRoots[0].appendingPathComponent("WebsiteDataStore/\(id.lowercased())", isDirectory: true)
+        try FileManager.default.createDirectory(at: leftover, withIntermediateDirectories: true)
+        let withData = ours(verdict())
+        try? FileManager.default.removeItem(at: leftover)
+        check("update gate: website data left in plaintext fails it", withData.contains { $0.contains("website data") }, withData.joined(separator: "; "))
+
+        let home = repository.directory(for: profile.id).appendingPathComponent("home.noindex", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let withHome = ours(verdict())
+        try? FileManager.default.removeItem(at: home)
+        check("update gate: a Safari home left in plaintext fails it", withHome.contains { $0.contains("Safari's home") }, withHome.joined(separator: "; "))
+
+        // Held the way a profile's process holds its home (`SafariHomeVault.holdWhileRunning`).
+        let lock = repository.directory(for: profile.id).appendingPathComponent("home.lock")
+        let descriptor = open(lock.path, O_RDWR | O_CREAT, 0o600)
+        flock(descriptor, LOCK_EX)
+        let held = ours(verdict())
+        flock(descriptor, LOCK_UN)
+        close(descriptor)
+        check("update gate: a home a process still holds fails it", held.contains { $0.contains("holds its home") }, held.joined(separator: "; "))
+        check("update gate: passes again once all of that is gone", ours(verdict()).isEmpty, verdict().reasons.joined(separator: "; "))
     }
 
     // MARK: Window lifecycle (regression test for the close/quit crash)

@@ -623,6 +623,33 @@ final class ProfileManager: ObservableObject {
     /// The running session of a profile (self-test hook).
     func session(for id: UUID) -> BrowserSession? { sessions[id] }
 
+    /// What a profile is doing that a quit would stop (an update's confirmation lists them).
+    enum Activity: Equatable {
+        /// Running with a window, here or in its own process.
+        case window(ownProcess: Bool)
+        /// Running only for a warm-up, without a window.
+        case warmUpOnly
+        /// Starting, or being encrypted.
+        case busy
+    }
+
+    /// Every profile a quit would stop now, and how it runs.
+    func activity() -> [(id: UUID, activity: Activity)] {
+        var found: [(id: UUID, activity: Activity)] = []
+        for (id, session) in sessions {
+            let activity: Activity = session.hasVisibleWindow ? .window(ownProcess: false) : .warmUpOnly
+            found.append((id: id, activity: activity))
+        }
+        for (id, child) in children {
+            let activity: Activity = child.isForWarmUpOnly ? .warmUpOnly : .window(ownProcess: true)
+            found.append((id: id, activity: activity))
+        }
+        for id in busyProfileIDs where sessions[id] == nil && children[id] == nil {
+            found.append((id: id, activity: .busy))
+        }
+        return found
+    }
+
     /// Lock / Quit: refuse new launches, let launches and seals already under way finish (a
     /// suspended launch seals again instead of opening a window), then stop and seal every
     /// running profile. Returns when nothing is running, launching or sealing.
