@@ -90,6 +90,8 @@ enum SafariChrome {
         _ = (applicationClass as AnyObject).perform(shared)
         let installed = NSApp?.isKind(of: applicationClass) ?? false
         log.notice("NSApp is \(String(describing: NSApp.map { type(of: $0) }), privacy: .public), Safari's own: \(installed, privacy: .public)")
+        // An exception AppKit's run loop catches is reported through NSApp, which is Safari's now.
+        if let application = NSApp { ExceptionLog.watchReportException(of: type(of: application)) }
         return installed
     }
 
@@ -231,7 +233,6 @@ enum SafariChrome {
     /// what one measured crash asked for; see `docs/SAFARI_PROCESS.md` §9.1.
     static func prepare() {
         guard isAvailable else { return }
-        installExceptionLogging()
         disableStateRestoration()
         setUpSearchEnginePreferenceObserver()
         bridgeImageLookups()
@@ -322,40 +323,6 @@ enum SafariChrome {
             values[key] = value.map { String(describing: $0) } ?? "unset"
         }
         return values
-    }
-
-    /// Every failure of a hosted chrome so far has been an Objective-C exception or a trap inside
-    /// Safari's code, and AppKit turns the ones thrown during layout into a crash that prints
-    /// nothing. The objc runtime's exception preprocessor runs at the throw itself, which is the
-    /// only place the reason and the frames below it can still be read. Logged, never swallowed:
-    /// the exception goes on to be thrown as before.
-    private static func installExceptionLogging() {
-        typealias Preprocessor = @convention(c) (AnyObject) -> AnyObject
-        typealias Install = @convention(c) (Preprocessor) -> Preprocessor
-        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "objc_setExceptionPreprocessor") else { return }
-        let install = unsafeBitCast(symbol, to: Install.self)
-        _ = install({ thrown in
-            // The exception's own callStackSymbols are empty at this point — it has not been
-            // raised yet — so the live stack is read instead.
-            var addresses = [UnsafeMutableRawPointer?](repeating: nil, count: 48)
-            let count = backtrace(&addresses, 48)
-            var frames: [String] = []
-            if let symbols = backtrace_symbols(&addresses, count) {
-                for index in 0..<Int(count) {
-                    if let symbol = symbols[index] { frames.append(String(cString: symbol)) }
-                }
-                free(symbols)
-            }
-            let logger = Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
-            // The exception's name in clear; its reason can quote a page's address or a path.
-            let exceptionName = (thrown as? NSException)?.name.rawValue ?? String(describing: type(of: thrown))
-            let reason = (thrown as? NSException)?.reason ?? String(describing: thrown)
-            // One line per frame: os_log truncates a long message, and the frames that matter are
-            // the ones at the end of it (that is how the first dictionary-key crash stayed hidden).
-            logger.error("\(exceptionName, privacy: .public): \(reason, privacy: .private)")
-            for frame in frames { logger.error("  \(frame, privacy: .public)") }
-            return thrown
-        })
     }
 
     /// Safari's windows are documents, and macOS keeps asking a document to encode its restorable
@@ -889,6 +856,17 @@ extension SafariChrome {
     /// itself with one that has it set.
     private static let checkHomePrefix = "pb-check-safari-chrome-"
 
+    /// A process like a profile's, for a check: Safari's frameworks loaded, `NSApp` Safari's own
+    /// application object and its chrome prepared — in a home of its own, held to a closed proxy.
+    /// False when the frameworks cannot be loaded here (the sandboxed build). The home goes with
+    /// `removeCheckHome()`.
+    static func prepareForCheck(arguments: [String]) -> Bool {
+        isolateForCheck(arguments: arguments)
+        guard load(), installApplication() else { return false }
+        prepare()
+        return true
+    }
+
     private static func isolateForCheck(arguments: [String]) {
         guard ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] == nil else {
             let closed = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 1)
@@ -917,7 +895,7 @@ extension SafariChrome {
         exit(3)
     }
 
-    private static func removeCheckHome() {
+    static func removeCheckHome() {
         guard let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"],
               URL(fileURLWithPath: home).lastPathComponent.hasPrefix(checkHomePrefix) else { return }
         try? FileManager.default.removeItem(atPath: home)

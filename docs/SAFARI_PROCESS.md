@@ -617,6 +617,18 @@ which hid the callers that mattered for three rounds — log one frame per line.
 no `callStackSymbols` before it is raised, so the preprocessor reads the live stack with
 `backtrace()` instead.
 
+A third, learnt the hard way (2026-10-30, ⌘, in a profile's window on the owner's Mac): the
+exception preprocessor is a chain. CoreFoundation installs one, and that one is what writes an
+`NSException`'s call stack into it. The hook here used to replace it rather than call it, so every
+exception went on without its call stack; AppKit, catching one in its run loop, then aborted in
+`-[NSException hashString]` (`_HIE_CaptureExceptionTelltaleOnce`) — a crash with an empty
+"Application Specific Information" where AppKit would otherwise have logged the exception and gone
+on. The hook now lives in `ExceptionLog` (every process, from `main`): it calls the preprocessor it
+replaced first, writes each exception's name, its reason with addresses, paths and quoted text cut
+out (in clear; the full reason privately) and its frames, and also hooks `reportException:` and the
+uncaught-exception handler. `PrivacyBrowser --exception-check` throws one in the run loop with these
+hooks and, with `--replacing`, the earlier way; the self-test runs both.
+
 What the hosted chrome does once all of that is in place, measured by hand: the window with Safari's
 toolbar, tab bar and address bar; our `WKWebView` rendering in its tab; the sidebar, built from
 `LibraryViewController.nib` out of Safari.app; the start page; new tabs and new windows; tab groups;

@@ -1017,6 +1017,7 @@ enum ProfileNetworkGuard {
             }
         }
         report.pinBypasses = pinBypasses()
+        report.exceptionCallStacks = ExceptionLog.preprocessorKeepsCallStacks()
         let trust = ServerTrust.tally.counts
         report.trustEvaluated = trust.evaluated
         report.trustRefused = trust.refused
@@ -1175,6 +1176,9 @@ struct ProfileNetworkReport: Codable, Equatable {
     var trustFetchAllowed = 0
     /// Safari's Edit menu has Paste as Typed (`SafariChrome.addPasteAsTyped`).
     var pasteAsTypedInMenu = false
+    /// An exception passed through the process's exception preprocessor keeps its call stack:
+    /// CoreFoundation's own preprocessor is still in the chain (`ExceptionLog`).
+    var exceptionCallStacks = false
     /// With a proxy: the kernel refuses this process any UDP (`ProfileNetworkGuard.closeTheProcess`).
     var udpClosed = false
     /// The kernel refuses this process the real Safari's places (`SafariPaths`).

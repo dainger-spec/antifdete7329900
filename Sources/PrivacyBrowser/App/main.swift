@@ -6,6 +6,15 @@ import AppKit
 // Top-level code runs on the main thread; Swift 5 mode does not infer main-actor isolation for it.
 MainActor.assumeIsolated {
     let arguments = CommandLine.arguments
+    if arguments.contains("--exception-check") {
+        // An exception thrown inside AppKit's run loop, with this build's exception hooks or the
+        // earlier way (ExceptionLog.swift): installs its own, so it comes before the line below.
+        ExceptionLog.runCheck(arguments: arguments)
+        exit(0)
+    }
+    // Every exception of every process in the log, readable, with CoreFoundation's own
+    // preprocessor kept in the chain (ExceptionLog.swift says why that matters).
+    ExceptionLog.install()
     if arguments.contains("--self-test") {
         SelfTest.start()
     } else if arguments.contains("--selftest-write-vault") {

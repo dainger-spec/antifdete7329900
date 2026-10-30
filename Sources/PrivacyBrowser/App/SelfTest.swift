@@ -139,6 +139,7 @@ final class SelfTest {
         debugSwitchesStayDebugSwitches()
         // Each group on its own: an error one did not expect fails that group, by name, and the
         // run goes on with the next, so that one error never hides the checks after it.
+        await group("exceptions") { try await exceptionChecks() }
         await group("storage isolation and shims") { try await storageIsolationAndShims(repository) }
         await group("device generations") { try await deviceGenerations(repository) }
         await group("fingerprint surface") { try await fingerprintSurface(repository) }
@@ -1348,11 +1349,79 @@ final class SelfTest {
             check("Safari chrome, second launch: every web view on the profile's store, none with WebRTC, the kernel's closures in place",
                   networkReport.map { $0.webViews > 0 && $0.webViewsOffProfile == 0 && $0.webViewsWithWebRTC == 0 && $0.udpClosed && $0.safariPlacesClosed } == true,
                   String(describing: networkReport))
+            info("exceptions: in the profile's process with Safari's chrome, an exception passed through the preprocessor keeps its call stack: "
+                 + "\(networkReport.map { String($0.exceptionCallStacks) } ?? "no report")")
             try? await manager.stop(profile.id)
         }
         await manager.shutDown()
         info("egress-window end \(Date().timeIntervalSince1970)")
         check("Safari chrome: nothing went wrong while it ran", messages.isEmpty, messages.joined(separator: " | "))
+    }
+
+    // MARK: Exceptions
+
+    /// An exception thrown in AppKit's run loop is written down, readably, and lived through
+    /// (`ExceptionLog`), in a process of its own (`--exception-check`): with this build's hooks, and
+    /// — the control — with the earlier hook, which replaced CoreFoundation's preprocessor instead
+    /// of calling it and is what took a profile's process down on ⌘, in Safari's chrome.
+    private func exceptionChecks() async throws {
+        info("exceptions: in this process an exception passed through the preprocessor keeps its call stack: "
+             + "\(ExceptionLog.preprocessorKeepsCallStacks())")
+        guard let executable = Bundle.main.executableURL else {
+            check("exceptions: this build's executable is there to run the check", false)
+            return
+        }
+        let chained = await runOwnExecutable(executable, ["--exception-check"], timeout: 30)
+        let logged = chained.output.split(separator: "\n").filter { $0.hasPrefix("EXCEPTION-CHECK logged:") }.joined(separator: " | ")
+        check("exceptions: one thrown in AppKit's run loop is caught, reported and lived through (CoreFoundation's preprocessor kept in the chain)",
+              !chained.signaled && chained.status == 0 && chained.output.contains("EXCEPTION-CHECK lived through it; reportException: saw 1"),
+              chained.output.trimmingCharacters(in: .whitespacesAndNewlines))
+        check("exceptions: the log has its name and its reason in clear, with the address and the quoted name cut out",
+              logged.contains("PBExceptionCheck") && logged.contains("a check of this build at <url> for \"…\"")
+                  && !logged.contains("bank.example") && !logged.contains("Alice"),
+              logged)
+        // The same in a process like a profile's: NSApp is Safari's own application object, Safari's
+        // frameworks loaded and prepared. Only a build without the App Sandbox can host them.
+        let inSafari = await runOwnExecutable(executable, ["--exception-check", "--safari"], timeout: 60)
+        if inSafari.status == 2, inSafari.output.contains("cannot be hosted") {
+            info("exceptions with Safari's application object: not in this build (\(AppEnvironment.isSandboxed ? "sandboxed" : "frameworks did not load"))")
+        } else {
+            check("exceptions: with Safari's own application object as NSApp, one thrown in the run loop reaches reportException: and is lived through",
+                  !inSafari.signaled && inSafari.status == 0 && inSafari.output.contains("EXCEPTION-CHECK lived through it; reportException: saw 1"),
+                  inSafari.output.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        let control = await runOwnExecutable(executable, ["--exception-check", "--replacing"], timeout: 30)
+        let first = control.output.split(separator: "\n").first.map(String.init) ?? ""
+        info("exceptions, the control (the earlier hook, CoreFoundation's preprocessor replaced): "
+             + (control.signaled ? "died by signal \(control.status)" : "lived, exit \(control.status)") + " — \(first)")
+    }
+
+    /// This build's executable with `arguments`, in a process of its own: what it printed, and how it
+    /// ended (an exit status, or the signal that ended it).
+    private func runOwnExecutable(_ executable: URL, _ arguments: [String], timeout: TimeInterval) async
+        -> (output: String, status: Int32, signaled: Bool) {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return ("could not start: \(error)", -1, false)
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        if process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+            return ("did not end within \(Int(timeout)) s", -1, false)
+        }
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return (output, process.terminationStatus, process.terminationReason == .uncaughtSignal)
     }
 
     // MARK: Tabs, history, bookmarks
