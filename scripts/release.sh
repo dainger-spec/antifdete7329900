@@ -71,6 +71,23 @@ APP_VERSION="$VERSION" APP_BUILD="$BUILD" SANDBOX="$SANDBOX" APP_DIR="$OUT/app" 
 APP="$OUT/app/PrivacyBrowser.app"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")" == "$BUILD" ]] \
   || { echo "error: the app's CFBundleVersion is not $BUILD" >&2; exit 1; }
+# An executable that declares macOS 15's SDK or newer gets WebKit's network loader, and with it, on
+# macOS 27, this Mac fetched a certificate's missing intermediate outside a profile's proxy: every
+# SDK from 15.0 on, 26.5 (what Xcode 26 declares) among them; 14.x was clean (CI run 451,
+# scripts/aia_variants.py; docs/ISOLATION_AND_LIMITATIONS.md §2). Until that is closed, a release is
+# made only from a build that declares an older SDK — Xcode 27's SwiftPM writes 14.0. A dry run
+# says so and goes on.
+DECLARED_SDK="$(xcrun vtool -show-build "$APP/Contents/MacOS/PrivacyBrowser" | awk '$1 == "sdk" { print $2; exit }')"
+if [[ "${DECLARED_SDK%%.*}" -ge 15 ]]; then
+  if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    DRY+=("the build declares SDK $DECLARED_SDK: a signed release of it would be refused (docs/ISOLATION_AND_LIMITATIONS.md §2)")
+  else
+    echo "error: the build declares SDK $DECLARED_SDK, which turns on WebKit's network loader: on macOS 27 a" \
+      "certificate's intermediate was fetched outside a profile's proxy (docs/ISOLATION_AND_LIMITATIONS.md §2)." \
+      "Build with Xcode 27, whose SwiftPM declares 14.0." >&2
+    exit 1
+  fi
+fi
 
 # 2. Notarize and staple (an Apple account's notary profile and a Developer ID signature).
 if [[ -n "${NOTARY_PROFILE:-}" && "$SIGN_IDENTITY" != "-" ]]; then

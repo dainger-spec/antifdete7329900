@@ -2,6 +2,7 @@ import AppKit
 import BrowserCore
 import CryptoKit
 import Network
+import Security
 import os
 import WebKit
 
@@ -727,7 +728,8 @@ final class SelfTest {
         }
         info("egress-token pbaiacanary")
         info("egress-token pbocspcanary")
-        func load(_ url: URL, in configuration: ProfileConfiguration) async throws {
+        // What the load ended with, as WebKit gave it to the tab (`describeFailure`).
+        func load(_ url: URL, in configuration: ProfileConfiguration) async throws -> String {
             let profile = try repository.create(name: "Certificates", configuration: configuration)
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
             defer { session.shutDown() }
@@ -736,9 +738,10 @@ final class SelfTest {
             tab.webView.load(URLRequest(url: url))
             _ = await waitUntil(timeout: 20) { !tab.isLoading }
             try? await Task.sleep(nanoseconds: 1_500_000_000)
+            return describeFailure(tab.lastProvisionalError)
         }
         if let controlPort = environment["PB_SELFTEST_TLS_CONTROL_PORT"].flatMap(Int.init) {
-            try await load(URL(string: "https://localhost:\(controlPort)/pb-aia-control")!, in: ProfileConfiguration(ephemeral: true))
+            _ = try await load(URL(string: "https://localhost:\(controlPort)/pb-aia-control")!, in: ProfileConfiguration(ephemeral: true))
             info("egress-control pbaiacontrol")
         }
 
@@ -746,10 +749,18 @@ final class SelfTest {
         let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
         let before = ServerTrust.tally.counts
         let allowedBefore = ServerTrust.tally.fetchAllowed
-        try await load(URL(string: "https://aia-\(run).leak.example.com/pb-leak/aia?run=\(run)")!,
-                       in: ProfileConfiguration(proxy: proxy, ephemeral: true))
+        let arrivalsBefore = ServerTrust.tally.arrivals
+        let failure = try await load(URL(string: "https://aia-\(run).leak.example.com/pb-leak/aia?run=\(run)")!,
+                                     in: ProfileConfiguration(proxy: proxy, ephemeral: true))
         let after = ServerTrust.tally.counts
         let allowedAfter = ServerTrust.tally.fetchAllowed
+        let arrivalsAfter = ServerTrust.tally.arrivals
+        // How the certificate's question came to this process and how the load ended: whether
+        // something before this process's answer had evaluated the trust, and what the error
+        // carried (CI compares the SDKs WebKit's behaviors follow, scripts/aia_variants.py).
+        info("certificates: through the proxy, \(arrivalsAfter.arrived - arrivalsBefore.arrived) trust(s) reached this process, "
+             + "\(arrivalsAfter.evaluated - arrivalsBefore.evaluated) already evaluated, "
+             + "\(arrivalsAfter.fetchAllowed - arrivalsBefore.fetchAllowed) still allowed to fetch; the load ended with: \(failure)")
         let log = try await loadThroughProxy(repository, proxy, url: URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!) ?? ""
         guard log.contains("(tls handshake)") else {
             check("certificates: the self-test proxy answers HTTPS with its certificate", false,
@@ -764,6 +775,25 @@ final class SelfTest {
               allowedAfter == allowedBefore && allowedAfter == 0, "still allowed to fetch: \(allowedBefore) → \(allowedAfter)")
         check("certificates: the browser refused it at the handshake, through the proxy",
               log.contains("tls refused by the client"), String(log.prefix(400)))
+    }
+
+    /// The error a load ended with: its domain and code, the keys it carried, and of the server
+    /// trust among them whether it was evaluated and may fetch — read without evaluating it.
+    private func describeFailure(_ error: NSError?) -> String {
+        guard let error else { return "no failure" }
+        var parts = ["\(error.domain) \(error.code)", "keys [\(error.userInfo.keys.sorted().joined(separator: ", "))]"]
+        if let value = error.userInfo[NSURLErrorFailingURLPeerTrustErrorKey],
+           CFGetTypeID(value as CFTypeRef) == SecTrustGetTypeID() {
+            let trust = value as! SecTrust
+            var result = SecTrustResultType.invalid
+            _ = SecTrustGetTrustResult(trust, &result)
+            parts.append("its peer trust " + (result == .invalid ? "not evaluated" : "evaluated (result \(result.rawValue))")
+                         + ", fetching " + (ServerTrust.fetchAllowed(trust) ? "allowed" : "off"))
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            parts.append("underlying \(underlying.domain) \(underlying.code) keys [\(underlying.userInfo.keys.sorted().joined(separator: ", "))]")
+        }
+        return parts.joined(separator: "; ")
     }
 
     // MARK: Nothing of a page handed outside the profile

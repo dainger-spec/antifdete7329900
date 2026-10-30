@@ -165,16 +165,17 @@ jobs:
           scripts/sdk_check.sh build/unsandboxed/PrivacyBrowser.app build/egress27/sdk-check "macOS 27 - SDK behaviors" \
             "$(xcrun --show-sdk-version)" build/egress27/sdk-check/ui
       - name: From which declared SDK this Mac fetches a certificate's address outside a profile's proxy, on macOS 27 (a measurement)
-        # Run 450: with the executables declaring macOS 27's SDK, a profile with a proxy had the AIA
-        # canary resolved by this Mac (run 448: the same with WebKit's switch). The certificate check
-        # alone under a capture, once per SDK WebKit gates its behaviors on, each with names of its
-        # own (scripts/aia_variants.py); 26.5 is what an Xcode 26 build declares. Never fails the build.
+        # Run 451: clean with 14.0 to 14.4, the AIA canary fetched with every SDK from 15.0 to 27.0
+        # (26.5, what an Xcode 26 build declares, among them) and with WebKit's switch. Kept on the
+        # edges: 14.4, 15.0, 26.5 and this Xcode's — each with names of its own, its control seen —
+        # and the certificate check's own lines on how the trust came (scripts/aia_variants.py).
+        # Never fails the build.
         if: always()
         continue-on-error: true
         timeout-minutes: 15
         run: |
           python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app \
-            --sdk "14.2,14.4,15.0,15.2,15.4,15.5,26.1,26.5,26.6,$(xcrun --show-sdk-version)" \
+            --sdk "14.4,15.0,26.5,$(xcrun --show-sdk-version)" \
             --out build/egress27/aia-variants --title "macOS 27 - AIA variants"
       - name: Which SDK SwiftPM writes into an executable on macOS 27 (a measurement)
         if: always()

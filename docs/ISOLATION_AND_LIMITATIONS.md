@@ -157,25 +157,31 @@ names.
 
 **The executables declare the SDK SwiftPM writes, not macOS 27's, and the app does not use
 `+[WKProcessPool _setLinkedOnOrAfterEverything]`** (WebKit's own switch for every behavior, made for
-Safari). With either, on macOS 27, a profile with a proxy had the self-test's AIA canary — the
-address a certificate names for its missing intermediate — resolved by this Mac, outside the proxy,
-caught by the egress capture: run 448 with the switch, run 450 with the executables declaring macOS
-27's SDK (build-app.sh gave the linker the real SDK); runs 447 and 449, declaring 14.0, were clean.
-The capture names this app, not WebKit's network process, as the one the fetch was made for; by
-WebKit's source the network process hands every server-trust question the app's identity
-(`SecTrustSetClientAuditToken`), and among what a newer SDK turns on is WebKit's network loader
-(`UseCFNetworkNetworkLoader`, macOS 15) — a reading of the source, not a measurement. Which SDK
-starts it is measured: the certificate check alone, once per SDK WebKit gates on, each with
-certificates of its own naming addresses no earlier variant used (`scripts/aia_variants.py`). Its
-first version reused one name for every variant and read clean where the full self-test leaked: in
-those variants not even the control was asked for (run 450), so they could not tell. Whether 26.5,
-what a build made with Xcode 26 declares, starts it on macOS 27 is among what it answers. On macOS
-26 the capture has not seen the system fetch for the control in any of the eight runs read (a
-profile without a proxy, where macOS 27 does fetch), so there the check cannot tell either. CI shows
-what follows the SDK on each runner: the app as built and a copy declaring another SDK, by the
-window's own properties and the screen, with the app's screens rendered from both (`--sdk-check`,
-`scripts/sdk_check.sh`); and which SDK SwiftPM writes, built four ways
-(`scripts/swiftpm_sdk_probe.sh`).
+Safari). On macOS 27, from macOS 15's SDK on, a profile with a proxy has this Mac fetch a
+certificate's missing intermediate outside the proxy: the self-test's AIA canary — the address a
+certificate names for its missing intermediate — was resolved by this Mac, caught by the egress
+capture, in run 448 with the switch and in run 450 with the executables declaring macOS 27's SDK
+(runs 447 and 449, declaring 14.0, were clean). Run 451 measured it per SDK WebKit gates its
+behaviors on (`scripts/aia_variants.py`: the certificate check alone, each variant with certificates
+of its own naming addresses no earlier variant used, and its control — a profile without a proxy,
+for which the system does fetch — seen in every one): **clean with 14.0, 14.2 and 14.4; the canary
+fetched with 15.0, 15.2, 15.4, 15.5, 26.1, 26.5, 26.6 and 27.0**, and with the switch. 26.5 is what
+a build made with Xcode 26 declares: such a build leaks on macOS 27. Builds made with Xcode 27
+declare 14.0 (its SwiftPM writes the deployment target), and `scripts/release.sh` refuses to release
+a build that declares 15.0 or newer. Of what WebKit turns on at 15.0 (WTF's
+`computeSDKAlignedBehaviors`), one thing is about the network: its network loader
+(`UseCFNetworkNetworkLoader`, `_usesNWLoader`); the capture names this app, not WebKit's network
+process, as the one the fetch was made for. How the loader comes to fetch, and so how to close it,
+is measured next (the certificate check now says whether a certificate's question reached this app
+already evaluated, and what the failed load carried). Until then, a page of a profile on macOS 27
+lacks `trustedTypes` and Safari 27's other SDK-gated names. The first version of that measurement
+reused one name for every variant and read clean where the full self-test leaked (run 450): in its
+variants not even the control was asked for. On macOS 26 the capture has not seen the system fetch
+for the control in any of the eight runs read, so there the check cannot tell: whether a build
+declaring 26.5 fetches on macOS 26 is not known. CI shows what follows the SDK on each runner: the
+app as built and a copy declaring another SDK, by the window's own properties and the screen, with
+the app's screens rendered from both (`--sdk-check`, `scripts/sdk_check.sh`); and which SDK SwiftPM
+writes, built four ways (`scripts/swiftpm_sdk_probe.sh`).
 
 `DigitalCredential` and `MediaSessionCoordinator` do not follow the SDK: WebKit turns them on only
 for a process with an entitlement Apple grants (`com.apple.developer.web-browser`,

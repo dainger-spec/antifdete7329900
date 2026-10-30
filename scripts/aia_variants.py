@@ -192,7 +192,8 @@ def main():
             verdict = "cannot tell: the control was not asked for"
         verdicts.append((name, sdk, extra, verdict))
         checks = [line for line in output.splitlines()
-                  if line.startswith(("PASS certificates", "FAIL certificates", "SELFTEST", "INFO WebKit's behaviors"))]
+                  if line.startswith(("PASS certificates", "FAIL certificates", "SELFTEST", "INFO WebKit's behaviors",
+                                      "INFO certificates"))]
         summary = (f"AIA-VARIANT {name} (declares minos {minos}, sdk {sdk}; names tagged {tag}): {verdict} — "
                    f"the canary asked of this Mac's resolver {len(canary)} time(s)"
                    f"{' by ' + '; '.join(sorted(set(canary))) if canary else ''}, "

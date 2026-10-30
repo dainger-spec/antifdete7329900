@@ -71,6 +71,9 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
     /// instead), and why the last one did: the warm-up robot tells a failed visit by them.
     private(set) var failedNavigations = 0
     private(set) var lastNavigationError: String?
+    /// The error the last load that failed before its page came ended with, as WebKit gave it
+    /// (the self-test's certificate check says what it carried).
+    private(set) var lastProvisionalError: NSError?
     /// Main-frame navigations whose page committed (held weakly): who started a load knows by it
     /// when its page came. The URL and `isLoading` do not always tell: a load requested while the
     /// tab's previous one is still being decided can leave the tab, for a moment, with no address
@@ -303,6 +306,7 @@ extension BrowserTab: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         if let navigation { abandonedNavigations.add(navigation) }
         let nsError = error as NSError
+        lastProvisionalError = nsError
         if let reason = proxyAuthFailure {
             // The load was cancelled by this tab itself, at the proxy's challenge (fail-closed).
             proxyAuthFailure = nil

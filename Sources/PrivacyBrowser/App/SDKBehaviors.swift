@@ -13,12 +13,13 @@ import WebKit
 /// `window.trustedTypes`, which Safari 27 has.
 ///
 /// The executables declare what SwiftPM writes, and `+[WKProcessPool _setLinkedOnOrAfterEverything]`
-/// (WebKit's own switch for every behavior at once, made for Safari) is not used: on macOS 27, with
-/// the switch or with macOS 27's SDK declared, a profile with a proxy had the self-test's AIA canary —
-/// the address a certificate names for its missing intermediate — resolved by this Mac, outside the
-/// proxy (CI run 448 with the switch, run 450 with the SDK; runs 447 and 449, declaring 14.0, were
-/// clean). From which SDK it starts, 26.5 among them, is measured (scripts/aia_variants.py). Only
-/// `--sdk-everything` (CI's measurements) and `--sdk-check --everything` call the switch.
+/// (WebKit's own switch for every behavior at once, made for Safari) is not used: on macOS 27, from
+/// macOS 15's SDK on, a profile with a proxy has the self-test's AIA canary — the address a
+/// certificate names for its missing intermediate — resolved by this Mac, outside the proxy (CI run
+/// 451, scripts/aia_variants.py: clean with 14.0 to 14.4, fetched with every SDK from 15.0 to 27.0,
+/// 26.5 among them, and with the switch). Of what WebKit turns on at 15.0, its network loader is
+/// the one about the network. Only `--sdk-everything` (CI's measurements) and `--sdk-check
+/// --everything` call the switch.
 enum SDKBehaviors {
     /// Whether `matchSafari` turned every behavior on in this process (the self-test says so).
     private(set) static var matched = false
