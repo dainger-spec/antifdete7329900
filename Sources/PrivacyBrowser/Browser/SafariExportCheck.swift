@@ -221,7 +221,9 @@ private final class ExportAnswers: @unchecked Sendable {
             print("EXPORT-CHECK Safari's exporter was given \(root == nil ? "no bookmarks" : "bookmarks") to write to "
                   + "\(ExportAnswers.shared?.place(location.map { URL(fileURLWithPath: $0) }) ?? "?")")
             let made = original(exporter, selector, root, path, hide)
-            print("EXPORT-CHECK Safari's exporter \(made == nil ? "was not made" : "was made")")
+            // Whether the exporter writes as it is made: then a failure can be told at once.
+            let there = location.map { FileManager.default.fileExists(atPath: $0) } ?? false
+            print("EXPORT-CHECK Safari's exporter \(made == nil ? "was not made" : "was made"); the file there as it returns: \(there)")
             return made
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
