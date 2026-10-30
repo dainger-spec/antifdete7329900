@@ -63,8 +63,9 @@ def report(steps):
         lines.append(f"- tags in the sidebar: {filters['tags']} ({filters['tagsExpected']} expected)\n")
     draw = steps.get("draw", [{}])[0]
     if draw:
-        lines.append(f"**The window with {draw['rows']} rows** drawn in {round(draw['ms'] / 1000, 2)} s "
-                     f"({'written' if draw['written'] else 'NOT written'}).\n")
+        lines.append(f"**The window with {draw['rows']} rows** drawn in {round(draw['ms'] / 1000, 2)} s"
+                     + (f", with {draw['rowsFew']} rows in {round(draw['msFew'] / 1000, 2)} s" if "msFew" in draw else "")
+                     + f" (each including 1.5 s of waiting for the window; {'written' if draw['written'] else 'NOT written'}).\n")
     lines.append("**Running at once** (launched as the list's Launch does for a selection; memory: the profiles' own "
                  "processes and WebKit's that started for them; pressure: the kernel's, 1 normal, 2 warning, 4 critical):\n")
     lines.append("| Profiles | Windows up | Start, median / slowest | All up after | Memory, all / per profile | "
@@ -84,6 +85,8 @@ def report(steps):
     for run in steps.get("run", []):
         if run.get("byKind"):
             lines.append(f"- {run['profiles']} running, by kind: {'; '.join(run['byKind'])}")
+        if run.get("notUp"):
+            lines.append(f"- {run['profiles']} running, no window: {'; '.join(run['notUp'])}")
         if run.get("leftAfterStop"):
             lines.append(f"- {run['profiles']} running, still there 3 s after the stop: {', '.join(run['leftAfterStop'])}")
     lines.append("")
@@ -97,6 +100,10 @@ def report(steps):
     if kept:
         lines.append(f"**Nothing lost:** {kept['cookieKept']} of {kept['profiles']} profiles had their page's cookie after "
                      f"the quit and a new launch. {('Missing: ' + '; '.join(kept['missing'])) if kept['missing'] else ''}")
+    disk = steps.get("disk", [{}])[0]
+    if disk:
+        lines.append(f"**On disk after the runs:** the vault takes {round(disk['vaultBytes'] / 1048576, 1)} MB for "
+                     f"{disk['profiles']} profiles, {disk['launched']} of which have run once, on a page or two each.")
     last = steps.get("launch-last", [{}])[0]
     if last:
         lines.append(f"**With {last['profiles']} profiles in the vault**, one more launch: "

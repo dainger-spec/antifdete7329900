@@ -164,9 +164,14 @@ enum ScaleCheck {
         let tagsStarted = Date()
         let tags = ProfileFilter.tags(of: rows)
         report("filter", ["filters": filters, "tags": tags.count, "tagsExpected": 8, "tagsMs": milliseconds(since: tagsStarted)])
+        // The window drawn with 20 rows and with all of them: what the number of rows costs.
+        let fewStarted = Date()
+        let fewDrawn = await draw(Array(rows.prefix(20)), into: out.appendingPathComponent("profiles-20.png"))
+        let fewMs = milliseconds(since: fewStarted)
         let drawStarted = Date()
         let drawn = await draw(rows, into: out.appendingPathComponent("profiles-\(count).png"))
-        report("draw", ["rows": rows.count, "ms": milliseconds(since: drawStarted), "written": drawn])
+        report("draw", ["rows": rows.count, "ms": milliseconds(since: drawStarted), "written": drawn && fewDrawn,
+                        "rowsFew": min(20, rows.count), "msFew": fewMs])
 
         // 3. Running.
         let manager = ProfileManager(repository: repository)
@@ -176,6 +181,8 @@ enum ScaleCheck {
         manager.onProfileRunning = { id, _ in running[id] = Date() }
         manager.onChildSealed = { id, sealed in seals[id] = sealed }
         manager.onError = { message in errors.append(message) }
+        var exits: [UUID: Int32] = [:]
+        manager.onChildExited = { id, status in exits[id] = status }
         let proxiedIDs = ids.enumerated().filter { $0.offset % 3 != 2 }.map { $0.element }
         var offset = 0
         for groupSize in groups {
@@ -194,6 +201,15 @@ enum ScaleCheck {
             let allIssued = milliseconds(since: batchStart)
             let deadline = Date().addingTimeInterval(60 + Double(groupSize) * 6)
             while running.count < group.count, Date() < deadline { try? await Task.sleep(nanoseconds: 250_000_000) }
+            // A profile whose window did not come up: whether its process ended, or runs without one.
+            let notUp = group.filter { running[$0] == nil }.map { id -> String in
+                let index = ids.firstIndex(of: id) ?? -1
+                if let status = exits[id] { return "profile \(index): its process ended (status \(status))" }
+                if let pid = manager.processIdentifier(of: id) {
+                    return "profile \(index): its process \(pid) runs (\(footprint(of: pid).map { "\($0 / 1_048_576) MB" } ?? "?")), no window"
+                }
+                return "profile \(index): no process"
+            }
             let startTimes = group.compactMap { id in running[id].map { $0.timeIntervalSince(launchCalls[id] ?? batchStart) * 1000 } }
             let windowsUp = group.compactMap { id in running[id].map { $0.timeIntervalSince(batchStart) * 1000 } }
             // The pages load and the machine settles; then what they take.
@@ -234,7 +250,7 @@ enum ScaleCheck {
                            "memoryPerProfileMB": group.isEmpty ? 0 : (totalMB / Double(group.count) * 10).rounded() / 10,
                            "processCount": processes.count, "byKind": byKind, "pressure": pressure,
                            "cpuBusyPercent": busy ?? -1, "machine": machine, "stopAllMs": stopMs,
-                           "leftAfterStop": left, "errors": errors, "each": perProfile])
+                           "leftAfterStop": left, "notUp": notUp, "errors": errors, "each": perProfile])
         }
 
         // 4. Quitting with profiles running, and nothing lost.
@@ -294,6 +310,9 @@ enum ScaleCheck {
         while !lastUp, Date() < lastDeadline { try? await Task.sleep(nanoseconds: 250_000_000) }
         report("launch-last", ["profiles": count, "up": lastUp, "ms": milliseconds(since: lastStart)])
         try? await checker.stop(lastID)
+        // What the vault takes once the profiles have run: each one launched holds its sealed data.
+        let launched = Set(proxiedIDs.prefix(offset) + quitGroup + [lastID]).count
+        report("disk", ["vaultBytes": size(of: root), "profiles": count, "launched": launched])
         print("SCALE-DONE")
         return 0
     }
