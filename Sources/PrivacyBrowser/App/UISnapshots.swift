@@ -99,6 +99,14 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-proxied", size: CGSize(width: 1180, height: 560)) {
             ProfilesPreview(rows: rows, filter: .proxied, sync: .failed)
         }.capture(into: folder)
+        // The command palette (⌘K), as it opens and with something typed.
+        let paletteCommands = paletteSample(rows)
+        problems += await Shot(name: "palette", size: CommandPaletteView.size, titled: false) {
+            CommandPaletteView(commands: paletteCommands)
+        }.capture(into: folder)
+        problems += await Shot(name: "palette-search", size: CommandPaletteView.size, titled: false) {
+            CommandPaletteView(commands: paletteCommands, query: "north")
+        }.capture(into: folder)
         // A tag chosen in the sidebar; the search also finds a profile by its tags and notes.
         problems += await Shot(name: "profiles-tag", size: CGSize(width: 1180, height: 560)) {
             ProfilesPreview(rows: rows, filter: .tag("ads"), sync: .off)
@@ -546,6 +554,23 @@ enum UISnapshots {
     }
 
     // MARK: Sample data
+
+    /// The palette's commands for the sample rows, as the Profiles window builds them.
+    static func paletteSample(_ rows: [ProfileRowItem]) -> [CommandPaletteView.Command] {
+        var commands = [CommandPaletteView.Command(id: "new", title: L("palette.newProfile"), symbol: "plus", run: {})]
+        for row in rows {
+            let detail = row.paletteDetail
+            let key = row.isRunning ? "palette.newWindow" : "palette.launch"
+            commands.append(CommandPaletteView.Command(id: "row-\(row.id)", title: String(format: L(key), row.name),
+                                                       detail: detail, symbol: row.isRunning ? "macwindow.badge.plus" : "play.circle", run: {}))
+        }
+        commands.append(CommandPaletteView.Command(id: "proxies", title: L("palette.proxies"), symbol: "network", run: {}))
+        for section in SettingsSection.allCases.prefix(4) {
+            commands.append(CommandPaletteView.Command(id: section.rawValue, title: String(format: L("palette.settings"), L(section.titleKey)),
+                                                       symbol: section.symbol, run: {}))
+        }
+        return commands
+    }
 
     static func sampleRows() -> [ProfileRowItem] {
         func id(_ n: UInt8) -> UUID { UUID(uuid: (n, 0x1C, 0x5E, 0x17, 0, n, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, n)) }

@@ -1021,6 +1021,7 @@ enum ProfileNetworkGuard {
         report.trustEvaluated = trust.evaluated
         report.trustRefused = trust.refused
         report.trustFetchAllowed = ServerTrust.tally.fetchAllowed
+        report.pasteAsTypedInMenu = SafariChrome.pasteAsTypedInMenu
         report.udpClosed = closures.sorted.contains("udp")
         report.safariPlacesClosed = closures.sorted.contains("safari-places")
         report.safariPathsRedirected = SafariPaths.redirected
@@ -1172,6 +1173,8 @@ struct ProfileNetworkReport: Codable, Equatable {
     /// Of those, the ones whose trust still allowed fetching once set not to (refused
     /// unevaluated). Zero is right.
     var trustFetchAllowed = 0
+    /// Safari's Edit menu has Paste as Typed (`SafariChrome.addPasteAsTyped`).
+    var pasteAsTypedInMenu = false
     /// With a proxy: the kernel refuses this process any UDP (`ProfileNetworkGuard.closeTheProcess`).
     var udpClosed = false
     /// The kernel refuses this process the real Safari's places (`SafariPaths`).

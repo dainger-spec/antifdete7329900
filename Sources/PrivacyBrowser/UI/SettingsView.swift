@@ -29,6 +29,11 @@ struct SettingsView: View {
         .frame(width: Self.size.width, height: Self.size.height)
         .background(Theme.raised)
         .tint(Theme.accentFill)
+        // A section asked for from elsewhere (the command palette).
+        .onReceive(model.$settingsSection.compactMap { $0 }) { requested in
+            section = requested
+            model.settingsSection = nil
+        }
     }
 
     private var sidebar: some View {
@@ -561,6 +566,7 @@ struct ShortcutSettings: View {
 
     static let groups: [ShortcutGroup] = [
         ShortcutGroup(titleKey: "settings.shortcuts.app", shortcuts: [
+            Shortcut(keys: "⌘K", titleKey: "menu.commandPalette"),
             Shortcut(keys: "⌘,", titleKey: "settings.shortcuts.settings"),
             Shortcut(keys: "⌘Q", titleKey: "settings.shortcuts.quit"),
         ]),
@@ -575,6 +581,7 @@ struct ShortcutSettings: View {
         ]),
         ShortcutGroup(titleKey: "settings.shortcuts.pages", shortcuts: [
             Shortcut(keys: "⌘L", titleKey: "menu.openLocation"),
+            Shortcut(keys: "⌃⌘V", titleKey: "menu.pasteAsTyped"),
             Shortcut(keys: "⌘R", titleKey: "menu.reload"),
             Shortcut(keys: "⌘[", titleKey: "menu.back"),
             Shortcut(keys: "⌘]", titleKey: "menu.forward"),

@@ -215,3 +215,11 @@ jobs:
         run: |
           echo "::error::the UI snapshot step failed (a capture was not written or a click did not reach its button); see its log"
           exit 1
+      - name: The self-test's notes (what it measured, skipped, or could not show on this runner)
+        # Its INFO lines, last in the log, so that they can be read without the whole log.
+        if: always()
+        run: |
+          for variant in sandboxed unsandboxed; do
+            echo "--- self-test notes ($variant)"
+            grep -h "^INFO" "build/egress/selftest-$variant.txt" | cut -c1-400 || true
+          done

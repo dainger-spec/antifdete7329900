@@ -315,9 +315,28 @@ CI (`.github/workflows/ci.yml`) runs on every push:
      `<private>` as it was written, and the self-test searches a bundle's bytes for a profile's
      name, notes and proxy credentials. **Copy Short Report** puts the version, macOS, this Mac's
      Safari and WebKit and the app's checks of itself on the clipboard. Nothing is sent.
-   - **Updates**, **Keyboard Shortcuts** (the app's own, as its menus define them) and **About**
-     (version, macOS, this Mac's Safari and WebKit, the build; links when the release sets
-     `WEBSITE_URL` / `SUPPORT_URL`).
+   - **Updates**, **Keyboard Shortcuts** (the app's own, as its menus define them: ⌘K and ⌃⌘V
+     among them) and **About** (version, macOS, this Mac's Safari and WebKit, the build; links when
+     the release sets `WEBSITE_URL` / `SUPPORT_URL`).
+14. **Command palette** (⌘K, **File** menu): the Profiles window comes to the front (opened again
+   if it was closed) with a search field over what the app can do — each profile's own commands
+   (launch, or new window and stop while it runs; edit; warm up), found by its name, its tags or
+   the country it exits in; the proxies; warming up several profiles; Sync Now; Lock; each section
+   of Settings; Copy Short Report. Each word typed matches the start of a word, then the inside of
+   one, then letters in order. ↑/↓ choose, Return runs, Esc closes. In a page that uses ⌘K itself,
+   the page gets the key first, as in Safari.
+15. **Paste as Typed** (⌃⌘V, **Edit** menu — in a profile shown in Safari's own window, in Safari's
+   Edit menu): the clipboard's text is typed into the page's focused field as a person types it,
+   for a field that refuses pasting or watches typing. Each character is a key down and a key up
+   on the key a Mac's US or Russian layout has for it, with Shift pressed and let go around a
+   capital; 60–180 ms between keys (more after a space or a punctuation mark, and now and then a
+   pause of up to a second), each key held 30–110 ms; they start once the shortcut's keys are let
+   go. They are real key events sent to the window, so the page sees trusted `keydown`, `input`
+   and `keyup` events. A character no key types on these layouts (an emoji, an accented letter, a
+   new line, a tab) is given as an input method gives text, without a key. At most 2000
+   characters (more would take many minutes). It types only while the page has the keyboard: a
+   key or a click of yours stops it, and so does another window or tab; a word says how far it
+   got. What a page can still tell: [ISOLATION_AND_LIMITATIONS.md §8d](docs/ISOLATION_AND_LIMITATIONS.md).
 
 ## What is implemented, and how
 

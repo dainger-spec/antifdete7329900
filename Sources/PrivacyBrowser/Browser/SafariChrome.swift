@@ -767,12 +767,34 @@ enum SafariChrome {
             return false
         }
         removePrivateWindowItems(from: menu)
+        addPasteAsTyped(to: menu)
         NSApplication.shared.mainMenu = menu
         log.notice("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
         return true
     }
 
     private static var menuObjects: [Any]?
+
+    /// Safari's Edit menu has Paste as Typed (the profile's process reports it).
+    private(set) static var pasteAsTypedInMenu = false
+
+    /// Paste as Typed (⌃⌘V) after the Paste items of Safari's Edit menu, the menu that has
+    /// `paste:`: the app's own item, typing into Safari's web view that has the keyboard.
+    private static func addPasteAsTyped(to menu: NSMenu) {
+        guard let edit = menu.items.compactMap(\.submenu)
+            .first(where: { $0.items.contains { $0.action == #selector(NSText.paste(_:)) } }) else {
+            log.error("Safari's menu has no Edit menu with Paste: no Paste as Typed in its windows")
+            return
+        }
+        let lastPaste = edit.items.lastIndex { item in
+            item.action.map { NSStringFromSelector($0).lowercased().contains("paste") } == true
+        } ?? edit.items.count - 1
+        let item = NSMenuItem(title: L("menu.pasteAsTyped"), action: #selector(PasteAsTypedItem.pasteAsTyped(_:)), keyEquivalent: "v")
+        item.keyEquivalentModifierMask = [.command, .control]
+        item.target = PasteAsTypedItem.shared
+        edit.insertItem(item, at: lastPaste + 1)
+        pasteAsTypedInMenu = true
+    }
 
     /// "New Private Window" goes: a private window of Safari's would be built, like every web view
     /// here, on the profile's own store — a window that says private and keeps everything. A
@@ -922,4 +944,12 @@ extension SafariChrome {
         // Only reached if execv failed; carry on without the profile home.
         log.error("Could not restart with CFFIXED_USER_HOME: \(String(cString: strerror(errno)), privacy: .public)")
     }
+}
+
+/// What Paste as Typed in Safari's Edit menu calls (`SafariChrome.addPasteAsTyped`).
+@MainActor
+private final class PasteAsTypedItem: NSObject {
+    static let shared = PasteAsTypedItem()
+
+    @objc func pasteAsTyped(_ sender: Any?) { HumanPaste.pasteIntoKeyWindow() }
 }

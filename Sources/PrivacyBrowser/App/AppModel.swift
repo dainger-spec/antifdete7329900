@@ -32,6 +32,10 @@ final class AppModel: ObservableObject {
     let settings = AppSettings()
     /// The Proxies sheet is asked for from outside the Profiles window (Settings → Proxies).
     @Published var proxiesRequest = false
+    /// The command palette (⌘K) is open in the Profiles window.
+    @Published var showingPalette = false
+    /// A section of Settings to show when it next appears (the command palette).
+    @Published var settingsSection: SettingsSection?
     /// This quit has recorded the profiles to reopen (a quit locks in more than one round).
     private var recordedProfilesToReopen = false
 

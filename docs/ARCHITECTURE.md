@@ -483,6 +483,27 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
                      process of its own, unsandboxed only), README.txt → NSSavePanel; nothing sent
 ```
 
+## Command palette and Paste as Typed
+
+```
+⌘K (File menu: CommandPaletteButton) ── the Profiles window to the front (openWindow(id:) when closed)
+   │  AppModel.showingPalette → ProfileListView's sheet: CommandPaletteView(commands:)
+   │  commands: ＋; per profile launch or new window and stop, edit, warm up (ProfileRowItem.paletteDetail:
+   │  its exit country and tags, searched with the title); proxies; warm up several; Sync Now; Lock;
+   │  each SettingsSection (AppModel.settingsSection → SettingsView's section); Copy Short Report
+   └  CommandPaletteView.rank → CommandSearch.score (BrowserCore): each word of the query the start
+      of a word, inside a word, or its letters in order; best first, ties in the list's order
+
+⌃⌘V (Edit menu; in a profile's process Safari's Edit menu, SafariChrome.addPasteAsTyped)
+   └  HumanPaste.pasteIntoKeyWindow ── the WKWebView at or above the key window's first responder
+         HumanPaste.type: hasKeyboard (key window, first responder) and hasFocusedField (a content
+         world of the app's own) → HumanTyping.plan (BrowserCore: each character's key on a US or a
+         Russian layout, Shift, pauses, holds) → per key: Shift down (CGEvent flagsChanged) →
+         NSEvent keyDown → hold → keyUp → Shift up, through NSWindow.sendEvent; a character without
+         a key → insertText; a local event monitor stops it on the user's key or click (the typed
+         keys bypass NSApp), and so does losing the keyboard → HumanPaste.explain (a sheet)
+```
+
 ## Concurrency
 
 - UI, `ProfileManager`, `BrowserSession`, window controllers and `WebDataStoreVault` are

@@ -144,6 +144,7 @@ final class SelfTest {
             try await localRequests(repository)
             try await cookiesAtCreation(repository)
             try await diagnosticsBundle(repository)
+            try await pasteAsTyped(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
@@ -1055,6 +1056,7 @@ final class SelfTest {
             check("Safari chrome: certificates are checked without fetching, and the leak page's were refused",
                   report.trustEvaluated > 0 && report.trustRefused > 0 && report.trustFetchAllowed == 0,
                   "evaluated \(report.trustEvaluated), refused \(report.trustRefused), still allowed to fetch \(report.trustFetchAllowed)")
+            check("Safari chrome: Safari's Edit menu has Paste as Typed (⌃⌘V)", report.pasteAsTypedInMenu)
         } else {
             check("Safari chrome: the profile's process reported where its traffic goes", false, "no report in 40 s")
         }
@@ -2680,6 +2682,119 @@ final class SelfTest {
         check("diagnostics: the short report names the version, macOS, Safari and WebKit, and the checks made",
               named && report.contains("✓"), report)
         info("diagnostics: the short report reads\n\(report)")
+    }
+
+    /// Paste as Typed, in a real window: in the key window the text arrives in the page's focused
+    /// field as typing — trusted keydown, input and keyup events, Shift around a capital, each
+    /// character's own key — and a page with no focused field is told so; a window without the
+    /// keyboard gets nothing (a runner that gives none is reported: the typing is then not shown).
+    /// The command palette ranks what is typed.
+    private func pasteAsTyped(_ repository: ProfileRepository) async throws {
+        let commands = ["Launch Northwind", "Settings: Startup", "Edit Research…", "Proxies…"].map { title in
+            CommandPaletteView.Command(id: title, title: title, symbol: "circle", run: {})
+        }
+        let ranked = CommandPaletteView.rank(commands, query: "north").map(\.title)
+        let all = CommandPaletteView.rank(commands, query: "  ").map(\.title)
+        check("palette: what is typed finds the command, and nothing typed shows all of them in order",
+              ranked == ["Launch Northwind"] && all == commands.map(\.title), "\(ranked)")
+
+        let profile = try repository.create(name: "Typing", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let policy = NSApp.activationPolicy()
+        defer {
+            session.shutDown()
+            try? repository.delete(profile.id)
+            NSApp.setActivationPolicy(policy)
+        }
+        // Key events reach a web view in a key window, which the self-test's .prohibited
+        // activation policy never gives (as in the password checks).
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.activate(ignoringOtherApps: true)
+        let controller = session.openWindow(url: nil)
+        guard let tab = controller.selectedTab, let window = controller.window else {
+            check("paste as typed: a profile window with a tab", false)
+            return
+        }
+        window.makeKeyAndOrderFront(nil)
+        let webView = tab.webView
+        let page = """
+        <!doctype html><title>typing</title><input id="field">
+        <script>
+        window.typed = [];
+        for (const kind of ['keydown', 'keyup', 'input']) {
+          document.addEventListener(kind, (e) => window.typed.push([kind, e.isTrusted, e.key || e.data || '', e.code || '']), true);
+        }
+        </script>
+        """
+        webView.loadHTMLString(page, baseURL: nil)
+        let loaded = await waitUntil(timeout: 10) { webView.title == "typing" && !webView.isLoading }
+        let isKey = await waitUntil(timeout: 3) { window.isKeyWindow }
+        _ = window.makeFirstResponder(webView)
+        _ = try? await js(webView, "document.getElementById('field').focus(); return true;")
+        info("paste as typed: app active: \(NSApp.isActive); key window: \(isKey)")
+        guard loaded else {
+            check("paste as typed: the page to type in loads", false, webView.title ?? "nil")
+            return
+        }
+        func field() async -> String {
+            (try? await js(webView, "return document.getElementById('field').value;")) as? String ?? ""
+        }
+        let text = "Hi, Мир 1!"
+        guard isKey else {
+            // A person types only where the keyboard is: into a window without it, nothing.
+            let outcome = await HumanPaste.type(text, into: webView, speed: 8)
+            let value = await field()
+            check("paste as typed: into a window without the keyboard nothing is typed, and it says so",
+                  outcome == HumanPaste.Outcome.notAField && value.isEmpty, "outcome \(outcome), field \(value)")
+            info("paste as typed: this runner gives the window no keyboard — the typing itself is not shown here")
+            return
+        }
+        // The control: one key down and up as the password checks send theirs. Where it does not
+        // reach the page, no synthesized key does on this machine, Paste as Typed's included.
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            if let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [],
+                                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                            context: nil, characters: "z", charactersIgnoringModifiers: "z",
+                                            isARepeat: false, keyCode: 0x06) {
+                window.sendEvent(event)
+            }
+        }
+        var control = await field()
+        let controlDeadline = Date().addingTimeInterval(2)
+        while control != "z", Date() < controlDeadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            control = await field()
+        }
+        _ = try? await js(webView, "document.getElementById('field').value = ''; document.activeElement.blur(); return true;")
+        let unfocused = await HumanPaste.type("x", into: webView, speed: 8)
+        let untouched = await field()
+        check("paste as typed: with no field focused in the page, nothing is typed and it says so",
+              unfocused == HumanPaste.Outcome.notAField && untouched.isEmpty, "\(unfocused), field \(untouched)")
+        _ = try? await js(webView, "document.getElementById('field').focus(); window.typed = []; return true;")
+        guard control == "z" else {
+            let none = await HumanPaste.type(text, into: webView, speed: 8)
+            info("paste as typed: synthesized key events do not reach the page on this runner (the control key did not arrive; Paste as Typed: \(none)) — the typing itself is not shown here")
+            return
+        }
+        let outcome = await HumanPaste.type(text, into: webView, speed: 8)
+        var value = await field()
+        let deadline = Date().addingTimeInterval(3)
+        while value != text, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            value = await field()
+        }
+        let events = (try? await js(webView, "return window.typed;")) as? [[Any]] ?? []
+        check("paste as typed: the clipboard's text arrives in the page's focused field, as typed",
+              outcome == HumanPaste.Outcome.typed(text.count) && value == text, "outcome \(outcome), field \(value)")
+        let keydowns = events.filter { $0.first as? String == "keydown" }
+        let characterDowns = keydowns.filter { ($0[2] as? String) != "Shift" }
+        let trusted: Bool = !events.isEmpty && events.allSatisfy { ($0[1] as? Bool) == true }
+        let shift: Bool = keydowns.contains { ($0[2] as? String) == "Shift" }
+        let codes: Bool = characterDowns.contains { ($0[2] as? String) == "H" && ($0[3] as? String) == "KeyH" }
+            && characterDowns.contains { ($0[2] as? String) == "М" && ($0[3] as? String) == "KeyV" }
+        check("paste as typed: the page sees trusted key events — a key down per character, on its own key (H on KeyH, М on KeyV), Shift around a capital",
+              trusted && characterDowns.count == text.count && shift && codes,
+              "\(events.prefix(16).map { $0.map { "\($0)" }.joined(separator: " ") })")
     }
 
     private func appSettings(_ repository: ProfileRepository) async throws {

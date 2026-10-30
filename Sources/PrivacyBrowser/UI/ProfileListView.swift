@@ -101,6 +101,10 @@ struct ProfileListView: View {
                 if proxySheet == nil { proxySheet = .list(selecting: []) }
             }
             .sheet(item: $assigningProxies) { request in ProxyAssignView(request: request) }
+            // ⌘K.
+            .sheet(isPresented: $model.showingPalette) {
+                CommandPaletteView(commands: paletteCommands, onClose: { model.showingPalette = false })
+            }
             .confirmationDialog(String(format: L("profiles.bulk.delete.title"), pendingBulkDelete.count),
                                 isPresented: Binding(get: { !pendingBulkDelete.isEmpty }, set: { if !$0 { pendingBulkDelete = [] } }),
                                 titleVisibility: .visible,
@@ -111,6 +115,55 @@ struct ProfileListView: View {
             } message: { ids in
                 Text(String(format: L("profiles.bulk.delete.message"), names(ids)))
             }
+    }
+
+    /// What the command palette (⌘K) offers: making a profile, each profile's own commands, the
+    /// proxies, the warm-up queue, Lock and Sync, each section of Settings, the short report.
+    private var paletteCommands: [CommandPaletteView.Command] {
+        typealias Command = CommandPaletteView.Command
+        let actions = self.actions
+        var commands = [Command(id: "new", title: L("palette.newProfile"), symbol: "plus", run: actions.newProfile)]
+        for row in rows {
+            let detail = row.paletteDetail
+            switch row.activity {
+            case .running:
+                commands.append(Command(id: "window-\(row.id)", title: String(format: L("palette.newWindow"), row.name),
+                                        detail: detail, symbol: "macwindow.badge.plus", run: { actions.newWindow(row.id) }))
+                commands.append(Command(id: "stop-\(row.id)", title: String(format: L("palette.stop"), row.name),
+                                        detail: detail, symbol: "stop.circle", run: { actions.stop(row.id) }))
+            case .stopped:
+                commands.append(Command(id: "launch-\(row.id)", title: String(format: L("palette.launch"), row.name),
+                                        detail: detail, symbol: "play.circle", run: { actions.launch(row.id) }))
+            case .starting, .sealing:
+                break
+            }
+            commands.append(Command(id: "edit-\(row.id)", title: String(format: L("palette.edit"), row.name),
+                                    detail: detail, symbol: "slider.horizontal.3", run: { actions.edit(row.id) }))
+            commands.append(Command(id: "warm-\(row.id)", title: String(format: L("palette.warmUp"), row.name),
+                                    detail: detail, symbol: "flame", run: { actions.warmUp(row.id) }))
+        }
+        commands.append(Command(id: "proxies", title: L("palette.proxies"), symbol: "network", run: actions.openProxies))
+        commands.append(Command(id: "warmQueue", title: L("profiles.menu.warmUpSeveral"), symbol: "flame", run: actions.warmUpQueue))
+        if let syncNow = actions.syncNow {
+            commands.append(Command(id: "sync", title: L("palette.syncNow"), symbol: "arrow.triangle.2.circlepath", run: syncNow))
+        }
+        commands.append(Command(id: "lock", title: L("profiles.action.lock"), symbol: "lock", run: actions.lock))
+        for section in SettingsSection.allCases {
+            commands.append(Command(id: "settings-\(section.rawValue)", title: String(format: L("palette.settings"), L(section.titleKey)),
+                                    symbol: section.symbol, run: {
+                model.settingsSection = section
+                openSettings()
+            }))
+        }
+        commands.append(Command(id: "report", title: L("settings.diagnostics.copy"), symbol: "doc.on.doc", run: {
+            Task {
+                let snapshot = Diagnostics.snapshot(model: model)
+                let report = Diagnostics.shortReport(snapshot, checks: await Diagnostics.checks(snapshot))
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(report, forType: .string)
+            }
+        }))
+        return commands
     }
 
     /// After the Proxies sheet: what profiles said about their proxies meanwhile.
@@ -235,6 +288,12 @@ struct ProfileRowItem: Identifiable {
     /// Grouped under "Running" (also while it starts or seals).
     var isActive: Bool { activity != .stopped }
     var usesProxy: Bool { if case .proxy = exit { return true } else { return false } }
+    /// Under the profile's commands in the palette (⌘K): the country it exits in, then its tags.
+    var paletteDetail: String {
+        var parts: [String] = []
+        if case let .proxy(_, code?) = exit { parts.append(CountryNames.name(for: code)) }
+        return (parts + tags).joined(separator: " · ")
+    }
 
     /// "Mac · Safari 26", "iPhone · Safari 26": the device the profile presents as.
     static func appearsAs(_ generation: DeviceGeneration) -> String {

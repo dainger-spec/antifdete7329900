@@ -29,6 +29,12 @@ struct PrivacyBrowserApp: App {
                     .keyboardShortcut("t")
                 Button(L("menu.reopenClosedTab")) { keyBrowserWindow?.reopenClosedTab() }
                     .keyboardShortcut("t", modifiers: [.command, .shift])
+                Divider()
+                CommandPaletteButton(model: model)
+            }
+            CommandGroup(after: .pasteboard) {
+                Button(L("menu.pasteAsTyped")) { HumanPaste.pasteIntoKeyWindow() }
+                    .keyboardShortcut("v", modifiers: [.command, .control])
             }
             CommandMenu(L("menu.browser")) {
                 Button(L("menu.openLocation")) { keyBrowserWindow?.focusAddressBar() }
@@ -150,5 +156,22 @@ private struct WindowReader: NSViewRepresentable {
         DispatchQueue.main.async {
             if let window = nsView.window { onResolve(window) }
         }
+    }
+}
+
+/// ⌘K: the command palette, in the Profiles window — brought to the front, or opened again if it
+/// was closed.
+private struct CommandPaletteButton: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(L("menu.commandPalette")) {
+            if model.profilesWindow == nil { openWindow(id: "profiles") }
+            model.activateProfilesWindow()
+            model.showingPalette = true
+        }
+        .keyboardShortcut("k")
+        .disabled(model.phase != .unlocked)
     }
 }

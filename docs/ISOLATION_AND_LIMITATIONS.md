@@ -51,6 +51,7 @@ since):
 | Profile sync (two devices) | a second vault bootstrapped from a sync folder with the master password stands in for another Mac: a cookie imported into the stopped profile on A joins the synced cookies at its launch, a page's persistent cookie at its stop (its session cookie not); the folder holds no cookie name, value or domain; on B the start page's first request already carries both; B's change of one and deletion of the other reach A's store before its first page; settings changed on both, B's later: B's on both Macs, A's kept as `config.bin.conflict` |
 | Session warm-up robot | through the app's launch path behind the self-test proxy, with short waits: a plan of three pages, a `javascript:` line (skipped) and a page the proxy closes unanswered (reported, the robot goes on) is visited in order in a new tab of the profile, each page taken as visited only once it has come (never before the proxy was asked for it), and an address that only jumps within the page shown at once (also when the page then rewrites the fragment); the requests carry the profile's User-Agent and the cookies the pages before set; at the proxy, each page's followed link comes at least the plan's time after the page, and the next page at least half that after the followed one; each page is scrolled (the pages see trusted scroll events); from each page only the plain same-site link is followed, with the page as Referer — never the sign-out, other-site, file or new-window links next to it; while the robot scrolls and clicks, each page's own world sees no `window.webkit` and no robot global; history and the pages' cookies are kept; Stop during a page ends the run before its next page is requested; closing its tab and a page's alert stop it; stopping the profile stops it first (while its store is still there), and the profile's data then seals as usual. Whether wheel and mouse events reached the page or the script fallback was used is reported |
 | Warm-up queue and report | two stopped profiles queued with one plan through `WarmUpCoordinator` behind the self-test proxy: they run one after the other and never both at once, each without a window of its own, and each is stopped and sealed before the next starts; the report of each run counts the profile's cookies per site (registrable domain) — two sites with one new cookie each for the first, and for the second, which already held a cookie of the site it visits, two cookies there of which one is new; a run from the queue counts as the profile's last run for its schedule, stored encrypted |
+| Paste as Typed | in a profile window, with a page's field focused: the palette's search finds what is typed; a page with no field focused gets nothing and is told so; a window without the keyboard gets nothing. Where this machine delivers synthesized key events to a page — a control key, sent as the password checks send theirs, arrives — the text arrives as typed: a trusted `keydown` per character on its own key (`H` on `KeyH`, `М` on `KeyV`), `Shift` down and up around capitals, `input` and `keyup`. Where the control does not arrive (the password row above: not on the CI runner), the typing is not shown, and the self-test says which in its notes, printed at the end of the CI job's log. In Safari's own window (a profile's process) the item is checked to be in Safari's Edit menu |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
@@ -960,6 +961,43 @@ time; the plan (`warmup.bin`) and the schedule (`warmup-schedule.bin`) stay on t
 schedule only runs while the app is open and unlocked: it is a timer in the app, not a system
 job. The ready-made lists (general, by interest, and 26 countries) are part of the app; nothing is
 fetched to build one.
+
+## 8d. Paste as Typed
+
+⌃⌘V types the clipboard's text into the page's focused field instead of pasting it, for a field
+that refuses pasting or a page that watches how a field is filled (`HumanPaste`, with the plan
+from `HumanTyping` in BrowserCore).
+
+**What the page gets.** For each character, a key down and a key up on the key a Mac's US
+layout has for it, or the Russian layout (ЙЦУКЕН) for a Cyrillic letter: `key` is the character,
+`code` its key (`М` is `KeyV`, as on a Mac set to Russian), `shiftKey` for a capital or a shifted
+symbol, with a `keydown` and `keyup` of `Shift` (`ShiftLeft`) around it, and an `input` event of
+the inserted text. They are AppKit key events sent to the window (`NSWindow.sendEvent`), handled
+by WebKit as the keyboard's: `isTrusted` is true, and the characters "ignoring modifiers" are
+what a keyboard gives (Shift still applies: Shift-1 is `!` in both). The first key comes once the
+shortcut's keys are let go and a moment later; then 60–180 ms between keys, 50–250 ms more after a
+space or a punctuation mark, on about one key in 33 a pause of 0.4–1 s, each key held 30–110 ms.
+
+**What a page can still tell.**
+- The rhythm is random within fixed ranges: no person's rhythm, no typing mistakes and no
+  corrections, no speed that changes with the word. A site that models typing can tell.
+- The layout is the US one for Latin letters and the Russian one for Cyrillic, whatever this
+  Mac's own layout is: on a Mac set to AZERTY or German, `code` differs from what its keyboard
+  would send; a text that mixes the scripts switches layouts between letters as no one types.
+- A character no key types on these layouts — an emoji, an accented letter, a new line, a tab —
+  comes as an input method commits text: an `input` event with no `keydown` (Return would send a
+  form, Tab would leave the field).
+- Before typing, the app asks the page whether a field has the focus, in a content world of its
+  own (`callAsyncJavaScript`): no page script sees it, but as every script an app runs, it counts
+  as a user gesture — the page has had one anyway, the click into its field.
+
+**Limits.** It types only while the page has the keyboard — the window is the key window and the
+web view its first responder — as a person's typing goes only there: a key or a click of the
+user's stops it (seen by a local event monitor, which the typed keys, sent to the window, never
+reach), and so does another window or tab; the word after it says how many characters were
+typed. At most 2000 characters. One typing at a time. In a profile shown in Safari's own window
+(its own process) the item is added to Safari's Edit menu and types into Safari's web view that
+has the keyboard; the command palette (⌘K) is the manager's and is not in that window's menu.
 
 ## 9. App Sandbox
 
