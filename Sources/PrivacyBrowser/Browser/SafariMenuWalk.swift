@@ -52,6 +52,8 @@ enum SafariMenuWalk {
     private static var isWalking = false
     private static var send: (String) -> Void = { _ in }
     private static var session: BrowserSession?
+    /// The page the profile's window showed when the walk began: every item is chosen on it.
+    private static var startPage: URL?
 
     /// Starts the walk at item `from` (after a crash, the one after the item that crashed).
     /// `send` carries one line of JSON per message to the manager.
@@ -60,6 +62,8 @@ enum SafariMenuWalk {
         isWalking = true
         Self.send = send
         Self.session = session
+        startPage = NSApp.windows.first { SafariChromeHost.isBrowserWindow($0) && $0.isVisible }
+            .flatMap { webView(in: $0.contentView)?.url }
         WalkRecorder.install()
         // What an item brings up in another application (the Passwords app, a picker of the
         // system's) is not a window of this process: the system tells it.
@@ -211,6 +215,17 @@ enum SafariMenuWalk {
         NSApp.activate(ignoringOtherApps: true)
         browser?.makeKeyAndOrderFront(nil)
         try? await Task.sleep(nanoseconds: 200_000_000)
+        // On the page the walk began on: an item before may have opened a tab or another page
+        // (run 456: after File › New Tab every item ran on an empty tab, where Print, Share and
+        // Export as PDF are disabled).
+        if let page = startPage, let browser, let webView = webView(in: browser.contentView), webView.url != page {
+            webView.load(URLRequest(url: page))
+            let deadline = Date().addingTimeInterval(8)
+            while webView.isLoading || webView.url != page, Date() < deadline {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            browser.makeFirstResponder(webView)
+        }
     }
 
     /// Back to where the item began: what it opened closed, the app shown, no window minimized
