@@ -67,6 +67,8 @@ ALLOWED_IN_FILE = {
     ("SafariChrome.swift", "name"): "a nib's name in Safari's frameworks",
     ("SafariChrome.swift", "url.path"): "a nib inside Safari's frameworks",
     ("SafariChrome.swift", "bundle?.bundlePath ?? \"the main bundle\""): "a bundle's path",
+    ("SafariChrome.swift", "nibName"): "the name of a nib Safari's code asks AppKit for",
+    ("SafariChrome.swift", "given.bundlePath"): "the bundle Safari's code asked for a nib: Safari's own, or this app's",
     ("SafariChrome.swift", "String(cString: strerror(errno))"): "a system error's text",
     ("SafariChrome.swift", "String(describing: NSApp.map { type(of: $0) })"): "a class name",
     ("SafariChromeHost.swift", "structural.joined(separator: \", \")"): "names of Safari's classes this macOS lacks",

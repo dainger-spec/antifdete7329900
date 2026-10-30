@@ -62,6 +62,10 @@ enum ExceptionLog {
         let replacement: @convention(block) (AnyObject, NSException) -> Void = { application, exception in
             ExceptionLog.reported += 1
             ExceptionLog.write(exception, when: "caught by the run loop, which goes on", frames: exception.callStackSymbols)
+            // What the user was doing, read now (the run loop calls this on the main thread, in the
+            // event that threw); what to tell them, after this event is over.
+            let event = MainActor.assumeIsolated { NSApplication.shared.currentEvent?.type }
+            DispatchQueue.main.async { ExceptionLog.onCaughtInRunLoop?(exception, event) }
             if isAppKits {
                 original(application, selector, exception)
             } else {
@@ -144,6 +148,9 @@ enum ExceptionLog {
     fileprivate static var isProbing = false
     /// Exceptions `reportException:` has been handed in this process.
     private(set) static var reported = 0
+    /// Called after the event in which the run loop caught an exception, with that event's type: a
+    /// profile's process tells the user (`SafariChrome.installUnavailableNotice`).
+    static var onCaughtInRunLoop: ((NSException, NSEvent.EventType?) -> Void)?
 
     // MARK: The check
 
@@ -174,13 +181,17 @@ enum ExceptionLog {
                 exit(2)
             }
             print("EXCEPTION-CHECK NSApp is \(String(describing: type(of: NSApplication.shared)))")
+            // What the profile's window would tell the user, printed rather than shown.
+            SafariChrome.presentNotice = { title, text in print("EXCEPTION-CHECK the user is told: \(title) — \(text)") }
         }
         print("EXCEPTION-CHECK preprocessor: \(replacing ? "replacing the one before it" : "chained"); "
               + "an exception passed through it keeps its call stack: \(preprocessorKeepsCallStacks())")
         let application = NSApplication.shared
         application.setActivationPolicy(.prohibited)
         let thrower = Thrower()
-        thrower.perform(#selector(Thrower.throwOne), with: nil, afterDelay: 0.3)
+        // In Safari's case from a menu item's action, as Bookmarks and ⌘, were.
+        thrower.perform(arguments.contains("--safari") ? #selector(Thrower.throwFromMenuItem) : #selector(Thrower.throwOne),
+                        with: nil, afterDelay: 0.3)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             print("EXCEPTION-CHECK lived through it; reportException: saw \(ExceptionLog.reported)")
             for line in ExceptionLog.loggedLines(containing: Thrower.name.rawValue) {
@@ -209,6 +220,18 @@ private final class Thrower: NSObject {
         NSException(name: Self.name, reason: "a check of this build at https://bank.example.test/login for \"Alice\"",
                     userInfo: nil).raise()
     }
+
+    /// The same, from the action of a menu item, chosen as a key equivalent or a click would.
+    @objc func throwFromMenuItem() {
+        let menu = NSMenu()
+        let item = NSMenuItem(title: Self.itemTitle, action: #selector(throwOne), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        menu.performActionForItem(at: 0)
+    }
+
+    static let itemTitle = "PB check item" // l10n: not text
+
 }
 
 // Global, not captured: a C function pointer cannot carry context.

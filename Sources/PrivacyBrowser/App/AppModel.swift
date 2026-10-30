@@ -192,6 +192,11 @@ final class AppModel: ObservableObject {
             self?.refresh()
         }
         manager.onConfigurationChanged = { [weak self] _ in self?.refresh() }
+        // ⌘, in a profile's window: this app's Settings, in front.
+        manager.onShowSettings = {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
         manager.onShowPasswords = { [weak self] id in
             guard let self, let summary = self.profiles.first(where: { $0.id == id }) else { return }
             self.activateProfilesWindow()

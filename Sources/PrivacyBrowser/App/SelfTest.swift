@@ -1386,9 +1386,12 @@ final class SelfTest {
         if inSafari.status == 2, inSafari.output.contains("cannot be hosted") {
             info("exceptions with Safari's application object: not in this build (\(AppEnvironment.isSandboxed ? "sandboxed" : "frameworks did not load"))")
         } else {
-            check("exceptions: with Safari's own application object as NSApp, one thrown in the run loop reaches reportException: and is lived through",
+            check("exceptions: with Safari's own application object as NSApp, one thrown by a menu item's action reaches reportException: and is lived through",
                   !inSafari.signaled && inSafari.status == 0 && inSafari.output.contains("EXCEPTION-CHECK lived through it; reportException: saw 1"),
                   inSafari.output.trimmingCharacters(in: .whitespacesAndNewlines))
+            check("exceptions: the profile's window would tell the user that the menu item's Safari feature is not available, naming the item",
+                  inSafari.output.contains("EXCEPTION-CHECK the user is told:") && inSafari.output.contains("PB check item"),
+                  inSafari.output.split(separator: "\n").filter { $0.contains("told") }.joined(separator: " | "))
         }
         let control = await runOwnExecutable(executable, ["--exception-check", "--replacing"], timeout: 30)
         let first = control.output.split(separator: "\n").first.map(String.init) ?? ""

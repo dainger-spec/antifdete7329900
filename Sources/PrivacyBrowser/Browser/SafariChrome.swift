@@ -243,7 +243,9 @@ enum SafariChrome {
         tolerateNilDirectoryEnumeration()
         tolerateNilDirectoryListing()
         bridgeNibLookups()
+        bridgeNibInitializers()
         stubChromeFeatures()
+        installUnavailableNotice()
     }
 
     // MARK: Safari's own services
@@ -610,6 +612,55 @@ enum SafariChrome {
         method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
 
+    /// Safari's controllers also build nibs themselves — through AppKit's
+    /// `-[NSNib _initWithNibNamed:bundle:options:]`, which `-initWithNibNamed:bundle:` reaches too —
+    /// with a bundle that in this process is not the one the nib is in (the main bundle is this
+    /// app, not Safari.app), and `bridgeNibLookups` only sees the nibs a view controller loads.
+    /// AppKit then throws NSInternalInconsistencyException where Safari would have found its nib:
+    /// the Bookmarks sidebar (`-[AnnotatedBookmarksSidebarViewController _addTableView]`) took a
+    /// profile's process down that way. When the bundle given does not hold the nib and one of
+    /// Safari's does (`nibURL(named:)`), the nib is made from that file, on the same instance.
+    ///
+    /// Raw pointers throughout: this stands in for an initializer, which takes its receiver and
+    /// returns its result owned, and Swift must not retain or release either on the way.
+    private static func bridgeNibInitializers() {
+        typealias InitNamed = @convention(c) (UnsafeMutableRawPointer, Selector, UnsafeRawPointer?, UnsafeRawPointer?,
+                                              UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        typealias InitData = @convention(c) (UnsafeMutableRawPointer, Selector, UnsafeRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        let named = NSSelectorFromString("_initWithNibNamed:bundle:options:")
+        let fromData = NSSelectorFromString("initWithNibData:bundle:")
+        guard let method = class_getInstanceMethod(NSNib.self, named),
+              let dataMethod = class_getInstanceMethod(NSNib.self, fromData) else {
+            log.notice("No -[NSNib _initWithNibNamed:bundle:options:]: a nib Safari builds itself is looked for by AppKit alone")
+            return
+        }
+        let original = unsafeBitCast(method_getImplementation(method), to: InitNamed.self)
+        let initWithData = unsafeBitCast(method_getImplementation(dataMethod), to: InitData.self)
+        let replacement: @convention(block) (UnsafeMutableRawPointer, UnsafeRawPointer?, UnsafeRawPointer?,
+                                             UnsafeRawPointer?) -> UnsafeMutableRawPointer? = { nib, name, bundle, options in
+            if let name {
+                var nibName = Unmanaged<NSString>.fromOpaque(name).takeUnretainedValue() as String
+                if nibName.hasSuffix(".nib") { nibName = String(nibName.dropLast(4)) }
+                let given = bundle.map { Unmanaged<Bundle>.fromOpaque($0).takeUnretainedValue() } ?? Bundle.main
+                let inGiven = given.url(forResource: nibName, withExtension: "nib") != nil
+                if !inGiven, nibURL(named: nibName) == nil {
+                    log.error("\(nibName, privacy: .public).nib is neither in \(given.bundlePath, privacy: .public) nor in any of Safari's bundles: AppKit will refuse it")
+                }
+                if !inGiven, let url = nibURL(named: nibName), let data = try? Data(contentsOf: url) {
+                    let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
+                    log.notice("\(nibName, privacy: .public).nib, asked of \(given.bundlePath, privacy: .public), from \(url.path, privacy: .public)")
+                    let contents = data as NSData
+                    return withExtendedLifetime((contents, owner)) {
+                        initWithData(nib, fromData, UnsafeRawPointer(Unmanaged.passUnretained(contents).toOpaque()),
+                                     owner.map { UnsafeRawPointer(Unmanaged.passUnretained($0).toOpaque()) })
+                    }
+                }
+            }
+            return original(nib, named, name, bundle, options)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
     /// Every bundle Safari's chrome keeps nibs and assets in, under both the ordinary path and the
     /// cryptex one, since a Safari update moves the frameworks between them.
     private static let chromeBundles: [Bundle] = {
@@ -688,6 +739,70 @@ enum SafariChrome {
         // state worth restoring anyway (the profile decides what opens), and the windows are
         // marked not restorable as well, in openWindow.
         replaceWithConstant("BrowserDocument", "fileType") { "public.html" as NSString }
+        // ⌘, and Settings… open the app's own Settings (in the manager's process), not Safari's:
+        // Safari's are built on services this process does not have, and their General pane threw
+        // on its first look at the default browser (the owner's Mac, 2026-10-30). Elsewhere — the
+        // developer's standalone chrome — they do nothing.
+        replaceWithConstant("AppController", "showPreferences:") {
+            SafariChrome.onShowSettings?()
+            return nil
+        }
+        // What the General pane does when the default browser may have changed — on its own first
+        // look, and, by its name, on the system's notice of a change, which would need no click to
+        // come. It built an array from the answer and a nil in it threw. Nothing here shows that
+        // pane any more, and nothing needs to know which browser is the default.
+        replaceWithConstant("GeneralPreferences", "_defaultWebBrowserMayHaveChanged") { nil }
+    }
+
+    /// What ⌘, and Settings… do in Safari's menu (a profile's process asks the manager).
+    static var onShowSettings: (() -> Void)?
+
+    // MARK: When one of Safari's features cannot work here
+
+    /// The menu item whose action was last sent, and when.
+    private static var lastMenuItem: (title: String, at: Date)?
+    private static var isShowingUnavailable = false
+
+    /// An exception AppKit's run loop caught (and `ExceptionLog` wrote down) right after the user
+    /// chose a menu item, pressed a key or clicked is one of Safari's features failing for want of
+    /// what only the real Safari has. Instead of nothing happening, the profile's window says so,
+    /// naming the menu item when there was one. Nothing is said for an exception nobody asked for
+    /// (a timer, a page loading): the log has those. One notice at a time.
+    private static func installUnavailableNotice() {
+        _ = NotificationCenter.default.addObserver(forName: NSMenu.willSendActionNotification, object: nil, queue: nil) { note in
+            let title = (note.userInfo?["MenuItem"] as? NSMenuItem)?.title ?? ""
+            MainActor.assumeIsolated { lastMenuItem = (title, Date()) }
+        }
+        ExceptionLog.onCaughtInRunLoop = { _, eventType in
+            MainActor.assumeIsolated { showUnavailable(eventType: eventType) }
+        }
+    }
+
+    private static func showUnavailable(eventType: NSEvent.EventType?) {
+        let item = lastMenuItem.flatMap { Date().timeIntervalSince($0.at) < 3 ? $0.title : nil }
+        let byInput = eventType.map { [.keyDown, .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseUp].contains($0) } ?? false
+        guard item != nil || byInput else { return }
+        lastMenuItem = nil
+        let text = item.map { $0.isEmpty ? L("safari.unavailable.action") : String(format: L("safari.unavailable.item"), $0) }
+            ?? L("safari.unavailable.action")
+        presentNotice(L("safari.unavailable.title"), text)
+    }
+
+    /// Shows a notice in the profile's window: a sheet on it, one at a time. `--exception-check`
+    /// prints it instead.
+    static var presentNotice: @MainActor (String, String) -> Void = { title, text in
+        guard !isShowingUnavailable else { return }
+        isShowingUnavailable = true
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = text
+        alert.addButton(withTitle: L("common.ok"))
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window) { _ in MainActor.assumeIsolated { isShowingUnavailable = false } }
+        } else {
+            alert.runModal()
+            isShowingUnavailable = false
+        }
     }
 
     /// Replaces one object-returning method with a constant. On arm64 a block that only returns a

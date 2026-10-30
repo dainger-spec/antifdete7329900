@@ -82,6 +82,8 @@ enum ProfileSessionHost {
         if SafariChromeHost.prepareForChildProcess(configuration: stored) {
             log.notice("Safari's chrome is hosted in this process")
         }
+        // ⌘, and Settings… in Safari's menu: the manager's Settings, not Safari's.
+        SafariChrome.onShowSettings = { ProfileSessionHost.send(.showSettings) }
         // The app's browsing settings as this process starts: its first window opens by them.
         if let json = ProcessInfo.processInfo.environment[ProfileProcess.browsingPreferencesVariable],
            let preferences = try? JSONDecoder().decode(BrowsingPreferences.self, from: Data(json.utf8)) {

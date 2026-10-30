@@ -43,6 +43,8 @@ final class ProfileManager: ObservableObject {
     /// A profile's stored configuration changed outside the editor (a proxy lookup remembered a
     /// new exit location): the Profiles list shows it.
     var onConfigurationChanged: ((UUID) -> Void)?
+    /// A profile's window asked for Settings (⌘, in Safari's chrome): the app's own open.
+    var onShowSettings: (() -> Void)?
     /// Settings → Proxies: a profile whose proxy does not work is not started at all — its proxy is
     /// asked first (`refusesFailingProxy`), and `onProxyLaunchRefused` says how it failed.
     var refusesFailingProxy: () -> Bool = { false }
@@ -367,6 +369,8 @@ final class ProfileManager: ObservableObject {
             case .configurationSaved:
                 try? self.repository.bumpRevision(id)
                 self.onConfigurationChanged?(id)
+            case .showSettings:
+                self.onShowSettings?()
             }
         }
         child.onExit = { [weak self] status in

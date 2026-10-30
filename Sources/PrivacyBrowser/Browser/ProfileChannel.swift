@@ -59,6 +59,10 @@ enum ProfileEvent: Codable {
     /// never to save passwords for): the manager records the new revision in the index, which
     /// only it writes (`ProfileRepository.onRevisionBump`), and shows the settings again.
     case configurationSaved
+    /// Settings asked for in the profile's window (⌘, or Settings… in Safari's chrome): the
+    /// manager opens its own Settings. Safari's own are built on services this process does not
+    /// have, and took it down (`SafariChrome.stubChromeFeatures`).
+    case showSettings
 }
 
 /// One line of JSON per message, and a prefix on the way back so that Safari's own output on the
