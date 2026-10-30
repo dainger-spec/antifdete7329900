@@ -61,9 +61,26 @@ sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" "$ENTITLEMENTS" > "$ENTITLEMENTS_BUILT"
 plutil -lint "$ENTITLEMENTS_BUILT" >/dev/null
 ENTITLEMENTS="$ENTITLEMENTS_BUILT"
 
-swift build -c "$CONFIG" --product PrivacyBrowser
-swift build -c "$CONFIG" --product PrivacyBrowserUpdater
-BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
+# Each executable declares the SDK it is built with in its LC_BUILD_VERSION, as Xcode writes it, and
+# the oldest macOS the app runs on. Xcode 27's SwiftPM gives the linker the deployment target as the
+# SDK ("-platform_version macos 14.0.0 14.0.0"; Xcode 26's gives its SDK), and the frameworks that
+# follow the SDK — WebKit, AppKit — then behave as for an app of that year: no window.trustedTypes on
+# macOS 27, for one (docs/ISOLATION_AND_LIMITATIONS.md §2). So the linker is told both;
+# declared_sdk checks each executable.
+MIN_MACOS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Resources/Info.plist)"
+SDK_VERSION="$(xcrun --show-sdk-version)"
+SDK_FLAGS=(-Xlinker -platform_version -Xlinker macos -Xlinker "$MIN_MACOS" -Xlinker "$SDK_VERSION")
+declared_sdk() {
+  local declared
+  declared="$(xcrun vtool -show-build "$1" | awk '$1 == "sdk" { print $2; exit }')"
+  [[ "$declared" == "$SDK_VERSION" ]] || { echo "error: $1 declares SDK ${declared:-none}, not $SDK_VERSION" >&2; exit 1; }
+}
+
+swift build -c "$CONFIG" "${SDK_FLAGS[@]}" --product PrivacyBrowser
+swift build -c "$CONFIG" "${SDK_FLAGS[@]}" --product PrivacyBrowserUpdater
+BIN_DIR="$(swift build -c "$CONFIG" "${SDK_FLAGS[@]}" --show-bin-path)"
+declared_sdk "$BIN_DIR/PrivacyBrowser"
+declared_sdk "$BIN_DIR/PrivacyBrowserUpdater"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -133,7 +150,8 @@ fi
 # The packet-tunnel system extension (NE=1: signed and embedded; NE=check: built and laid out
 # beside the app, unsigned, so CI checks it compiles against the SDK and its plists are valid).
 if [[ "$NE" == "1" || "$NE" == "check" ]]; then
-  swift build -c "$CONFIG" --product PacketTunnelExtension
+  swift build -c "$CONFIG" "${SDK_FLAGS[@]}" --product PacketTunnelExtension
+  declared_sdk "$BIN_DIR/PacketTunnelExtension"
   if [[ "$NE" == "1" ]]; then
     SYSEXT="$APP/Contents/Library/SystemExtensions/$EXTENSION_ID.systemextension"
   else

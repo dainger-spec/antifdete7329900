@@ -4,8 +4,8 @@
 # WebKit's behaviors as its SDK gives them and with every one on, as Safari has them (--everything).
 # It shows whether window.trustedTypes and the window's other interfaces (by name), and the screen's
 # visible frame (screen.availHeight), follow the SDK, and whether WebKit's switch puts a page where
-# Safari's is. Given a folder, it also renders the app's screens from the copy (--render-ui-snapshots,
-# in English): what AppKit draws differently for that SDK.
+# Safari's is. Given a folder, it also renders the app's screens from both (--render-ui-snapshots, in
+# English, into as-built/ and sdk-<SDK>/): what AppKit draws differently for each SDK.
 #
 #   scripts/sdk_check.sh <PrivacyBrowser.app> <out dir> <notice title> <SDK for the copy> [<snapshots dir>]
 #
@@ -50,10 +50,13 @@ if [ -n "$minos" ] && xcrun vtool -set-build-version macos "$minos" "$sdk" -repl
   run "$copy" "sdk-$sdk"
   run "$copy" "sdk-$sdk-everything" --everything
   if [ -n "$snapshots" ]; then
-    mkdir -p "$snapshots"
+    mkdir -p "$snapshots/as-built" "$snapshots/sdk-$sdk"
     snapshots="$(cd "$snapshots" && pwd)"
-    PRIVACYBROWSER_LANG=en "$copy/$binary" --render-ui-snapshots "$snapshots/en" > "$snapshots/en.log" 2>&1 \
-      || echo "::warning title=$title::the copy that declares SDK $sdk did not render every screen: $(tail -1 "$snapshots/en.log")"
+    for side in "as-built:$app" "sdk-$sdk:$copy"; do
+      name="${side%%:*}" bundle="${side#*:}"
+      PRIVACYBROWSER_LANG=en "$bundle/$binary" --render-ui-snapshots "$snapshots/$name/en" > "$snapshots/$name/en.log" 2>&1 \
+        || echo "::warning title=$title::$name did not render every screen: $(tail -1 "$snapshots/$name/en.log")"
+    done
   fi
 else
   echo "::warning title=$title::the copy's build version could not be set (minos '$minos'): $(tail -1 "$out/vtool.txt")"

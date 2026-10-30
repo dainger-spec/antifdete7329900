@@ -2,7 +2,7 @@
 """Which of WebKit's behaviors that follow an app's SDK makes this Mac resolve a certificate's AIA
 address outside a profile's proxy?
 
-    python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app --sdk "$(xcrun --show-sdk-version)" \\
+    python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app --sdk "26.5,$(xcrun --show-sdk-version)" \\
         --out build/aia-variants --title "AIA variants"
 
 CI run 448 (macOS 27): with every one of those behaviors on (+[WKProcessPool
@@ -15,7 +15,8 @@ a packet capture with process names, three times, each in a window of its own:
 
   * the app as built: WebKit's behaviors as the SDK its executable declares gives them;
   * the same with every behavior on (--sdk-everything);
-  * a copy whose executable declares <sdk> (vtool; signed ad hoc with the app's entitlements).
+  * a copy whose executable declares each SDK given (vtool; signed ad hoc with the app's entitlements)
+    — on macOS 27, 26.5 as well as 27: a build made with Xcode 26 declares 26.5 and runs there too.
 
 and counts, per window, the DNS questions for `pbaiacanary` (a fetch made by this Mac for a profile
 with a proxy) and for the control `pbaiacontrol` (a profile without a proxy, which the system is
@@ -83,7 +84,7 @@ def copy_declaring(app, sdk, scratch, out):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", required=True)
-    parser.add_argument("--sdk", required=True, help="the SDK the copy declares")
+    parser.add_argument("--sdk", required=True, help="the SDKs the copies declare, comma-separated")
     parser.add_argument("--out", required=True)
     parser.add_argument("--title", default="AIA variants")
     args = parser.parse_args()
@@ -108,11 +109,14 @@ def main():
     scratch = tempfile.mkdtemp(prefix="pb-aia-variants-")
     variants = [("as built", args.app, [])]
     variants.append(("as built, every behavior on", args.app, ["--sdk-everything"]))
-    copy = copy_declaring(args.app, args.sdk, scratch, out)
-    if copy:
-        variants.append((f"declaring SDK {args.sdk}", copy, []))
-    else:
-        print(f"::warning title={args.title}::no copy declaring SDK {args.sdk}", flush=True)
+    for sdk in [value.strip() for value in args.sdk.split(",") if value.strip()]:
+        folder = os.path.join(scratch, sdk)
+        os.makedirs(folder)
+        copy = copy_declaring(args.app, sdk, folder, out)
+        if copy:
+            variants.append((f"declaring SDK {sdk}", copy, []))
+        else:
+            print(f"::warning title={args.title}::no copy declaring SDK {sdk}", flush=True)
 
     environment = dict(os.environ, PB_SELFTEST_ONLY="certificates",
                        PB_SELFTEST_HTTP_PROXY_PORT=str(PORTS["http"]),

@@ -146,28 +146,29 @@ decision before anything changes):
 
 **WebKit's behaviors that follow the SDK.** WebKit turns some of its features on for an app only
 when the app's executable declares a recent enough SDK (`linkedOnOrAfterSDKWithBehavior`), and for
-Safari always: WTF's `computeSDKAlignedBehaviors` returns every behavior when the process is Safari.
-This app's executable, built by SwiftPM, declares the SDK of its platform in Package.swift — "sdk
-14.0", measured on the owner's build with Xcode 27.1 — so every behavior WebKit gates after macOS 14
-was off in every page: among them, by WebKit's open source, the network loader Safari uses
-(`UseCFNetworkNetworkLoader`, macOS 15), `focus` dispatched before the client is told (15.4),
-`user-select` superseding `-webkit-user-select` (27), and Trusted Types (the owner's Mac with macOS
-27: `window.trustedTypes` there in Safari 27, missing in a profile). `+[WKProcessPool
-_setLinkedOnOrAfterEverything]` is WebKit's own switch for this, made for Safari: every behavior on,
-whatever SDK the app declares (`SDKBehaviors`; rules 1–3). **The app does not switch it on**: in CI
-run 448 (macOS 27), with it on, a profile with a proxy had the self-test's AIA canary — the address
-a certificate names for its missing intermediate — resolved by this Mac, outside the proxy, caught
-by the egress capture (runs 446 and 447 without it were clean). The same applies to declaring a
-newer SDK, which turns on the same network loader; which behavior resolves the address is measured
-(`scripts/aia_variants.py`) before either is used. Other frameworks follow the declared SDK too (AppKit's
-visible frame of the screen, which WebKit gives pages as `screen.availHeight`, is measured for it).
-CI shows what follows the SDK on each runner: the app as built and a copy whose executable declares
-the runner's own SDK, each without and with the switch, by the window's own properties and the
-screen, with the app's screens rendered from the copy (`--sdk-check`, `scripts/sdk_check.sh`); and
-which SDK SwiftPM writes, built four ways (`scripts/swiftpm_sdk_probe.sh`).
+Safari always (WTF's `computeSDKAlignedBehaviors` returns every one when the process is Safari);
+AppKit and the other frameworks follow the declared SDK too. Xcode 27's SwiftPM gives the linker the
+deployment target as the SDK (`-platform_version macos 14.0.0 14.0.0`; Xcode 26's gives its SDK,
+26.5), so a build made with Xcode 27 declared "sdk 14.0" — measured on the owner's build with Xcode
+27.1 — and on macOS 27 its pages lacked what Safari 27's have: by the window's own properties,
+`trustedTypes` and the five Trusted Types interfaces, and they had `MutationEvent`, which Safari 27
+no longer has (CI run 448, `scripts/sdk_check.sh`). Each executable now declares the SDK it is built
+with and macOS 26 as its oldest system: `scripts/build-app.sh` gives the linker both and refuses a
+build that declares another SDK; the self-test checks the declared SDK. With macOS 27's SDK
+declared, a page has what Safari 27's has, by those names.
+
+`+[WKProcessPool _setLinkedOnOrAfterEverything]` — WebKit's own switch for this, made for Safari:
+every behavior on, whatever the SDK — is **not** used. With it, on macOS 27, a profile with a proxy
+had the self-test's AIA canary (the address a certificate names for its missing intermediate)
+resolved by this Mac, outside the proxy; as built, and as a copy declaring macOS 27's SDK, it did not
+(CI runs 448 and 449, `scripts/aia_variants.py`: the certificate check alone under a packet capture,
+per variant). It stays a measurement switch (`--sdk-everything`, `--sdk-check --everything`).
 `DigitalCredential` and `MediaSessionCoordinator` do not follow the SDK: WebKit turns them on only
 for a process with an entitlement Apple grants (`com.apple.developer.web-browser`,
-`com.apple.developer.group-session.urlactivity`).
+`com.apple.developer.group-session.urlactivity`). Nor, by CI's measure, does the screen's
+available height: the visible frame AppKit gives WebKit (`screen.availHeight`) moved its bottom edge,
+where the Dock is, by 3 points between runs of the same build, whatever the SDK declared, and was the
+same for every SDK once it had moved (CI run 448, macOS 26 and 27).
 
 ### What the public WKWebView / WebKit APIs let a profile control
 

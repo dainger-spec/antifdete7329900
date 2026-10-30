@@ -2,28 +2,23 @@ import AppKit
 import MachO
 import WebKit
 
-/// WebKit's behaviors that follow the SDK an app was built with, set as WebKit sets them for Safari.
+/// WebKit's behaviors that follow the SDK an app was built with, and the SDK this executable declares.
 ///
 /// WebKit turns some of its features on for an app only when the app's executable declares a recent
-/// enough SDK (`linkedOnOrAfterSDKWithBehavior`: the network loader Safari uses, Trusted Types by
-/// default, `user-select` superseding `-webkit-user-select`, and more), and for Safari always: WTF's
-/// `computeSDKAlignedBehaviors` returns every behavior when the process is Safari. SwiftPM writes the
-/// platform of Package.swift into the executable as its SDK ("sdk 14.0" on the owner's build with
-/// Xcode 27.1), so every behavior gated after macOS 14 was off in every page — on the owner's Mac with
-/// macOS 27, `window.trustedTypes`, which Safari 27 has and a profile did not. `+[WKProcessPool
-/// _setLinkedOnOrAfterEverything]` is WebKit's own switch for this, made for Safari (WTF: "This can be
-/// removed once Safari calls _setLinkedOnOrAfterEverything everywhere"): every behavior on, as in
-/// Safari, whatever SDK this app was built with. WebKit hands the set to every process it starts
-/// (`client-sdk-aligned-behaviors`), and reads it as preferences are made, so it is set first thing,
-/// before any web view or web process exists.
+/// enough SDK (`linkedOnOrAfterSDKWithBehavior`: Trusted Types by default, `MutationEvent` off,
+/// `user-select` superseding `-webkit-user-select`, and more), and for Safari always: WTF's
+/// `computeSDKAlignedBehaviors` returns every behavior when the process is Safari. Xcode 27's SwiftPM
+/// wrote the deployment target into the executable as its SDK ("sdk 14.0" on the owner's build), so
+/// on macOS 27 a profile's page lacked `window.trustedTypes`, which Safari 27 has. The executables
+/// now declare the SDK they are built with (scripts/build-app.sh), which gives a page what Safari's
+/// has (docs/ISOLATION_AND_LIMITATIONS.md §2).
 ///
-/// The app does not switch it on. In CI run 448 (macOS 27), with every behavior on, a profile with a
-/// proxy had the self-test's AIA canary — the address a certificate names for its missing
-/// intermediate — resolved by this Mac, outside the proxy (the egress capture; runs 446 and 447
-/// without it were clean). Among what it turns on is WebKit's network loader
-/// (`UseCFNetworkNetworkLoader`, macOS 15), which an executable declaring a newer SDK gets as well;
-/// which behavior does it is measured (scripts/aia_variants.py). Only `--sdk-everything` (CI's
-/// measurements) and `--sdk-check --everything` call it.
+/// `+[WKProcessPool _setLinkedOnOrAfterEverything]`, WebKit's own switch for every behavior at once,
+/// made for Safari, is not used: with it, in CI runs 448 and 449 on macOS 27, a profile with a proxy
+/// had the self-test's AIA canary — the address a certificate names for its missing intermediate —
+/// resolved by this Mac, outside the proxy, and with the SDK declared it did not
+/// (scripts/aia_variants.py). Only `--sdk-everything` (CI's measurements) and `--sdk-check
+/// --everything` call it.
 enum SDKBehaviors {
     /// Whether `matchSafari` turned every behavior on in this process (the self-test says so).
     private(set) static var matched = false

@@ -1759,8 +1759,14 @@ final class SelfTest {
             }
         }
 
-        // Which of WebKit's behaviors that follow an app's SDK this run has (SDKBehaviors).
+        // Which of WebKit's behaviors that follow an app's SDK this run has (SDKBehaviors), and the
+        // SDK the executable declares: macOS 26's or newer, never the deployment target Xcode 27's
+        // SwiftPM wrote in its place (14.0). That it is exactly the SDK of the build is checked as
+        // the app is built (scripts/build-app.sh).
         info("WebKit's behaviors that follow the SDK: \(SDKBehaviors.matched ? "every one, as Safari's (--sdk-everything)" : "this build's, the macOS \(SDKBehaviors.linkedSDK ?? "?") SDK's")")
+        let declaredMajor = SDKBehaviors.linkedSDK.flatMap { $0.split(separator: ".").first }.flatMap { Int($0) } ?? 0
+        check("the app declares the SDK of macOS 26 or newer, not the deployment target SwiftPM writes",
+              declaredMajor >= 26, "declares \(SDKBehaviors.linkedSDK ?? "none")")
 
         // A persistent profile's store is made with a browser's share of the disk
         // (BrowserStorageQuota): Safari's quota is then WebKit's own answer. Read in a world the

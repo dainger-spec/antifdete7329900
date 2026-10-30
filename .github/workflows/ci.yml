@@ -169,7 +169,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 15
         run: |
-          python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app --sdk "$(xcrun --show-sdk-version)" \
+          python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app --sdk "26.5,$(xcrun --show-sdk-version)" \
             --out build/egress27/aia-variants --title "macOS 27 - AIA variants"
       - name: Which SDK SwiftPM writes into an executable on macOS 27 (a measurement)
         if: always()
@@ -371,7 +371,7 @@ jobs:
           find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -name 'PrivacyBrowser*.ips' -newer "$since" 2>/dev/null \
             | while read -r report; do python3 scripts/crash_summary.py "$report" | head -60; done
           exit 0
-      - name: What follows the SDK — the build as made, and a copy that declares this Xcode's SDK (a measurement)
+      - name: What follows the SDK — the build as made (this Xcode's SDK), and a copy that declares SDK 14 (a measurement)
         # Whether window.trustedTypes and the window's other interfaces, the screen's visible frame
         # (screen.availHeight) and the app's own screens follow the SDK the executable declares, and
         # whether WebKit's switch (SDKBehaviors) puts a page where Safari's is. Never fails the build.
@@ -379,8 +379,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: 6
         run: |
+          # Xcode 26 builds declare their SDK (26.5); the copy declares what an Xcode 27 build does (14.0).
           scripts/sdk_check.sh build/unsandboxed/PrivacyBrowser.app build/sdk-check "SDK behaviors" \
-            "$(xcrun --show-sdk-version)" build/sdk-check/ui
+            14.0 build/sdk-check/ui
       - name: Which of WebKit's SDK behaviors resolves a certificate's address outside a profile's proxy (a measurement)
         # CI run 448: with every behavior on, a profile with a proxy had the AIA canary resolved by
         # this Mac. The certificate check alone, under a capture: as built, every behavior on, and a
@@ -389,7 +390,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 15
         run: |
-          python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app --sdk "$(xcrun --show-sdk-version)" \
+          python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app --sdk "14.0,$(xcrun --show-sdk-version)" \
             --out build/sdk-check/aia-variants --title "AIA variants"
       - name: Which SDK SwiftPM writes into an executable (a measurement)
         if: always()
