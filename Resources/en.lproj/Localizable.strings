@@ -141,6 +141,8 @@
 "editor.section.privacy" = "Privacy";
 "editor.section.sync" = "Sync";
 "editor.startURL" = "Start URL";
+"editor.search" = "Search engine";
+"editor.search.note" = "What the address bar and the warm-up search with, through the profile's proxy; from the profile's next start. In a profile shown in Safari's own window, that window's address bar searches with Safari's engine.";
 "editor.subtitle.direct" = "Connects directly";
 "editor.subtitle.new" = "Its own cookies, identity and network";
 "editor.subtitle.proxy" = "Through a proxy";
@@ -732,7 +734,7 @@
 "warmup.group.interest" = "By interest";
 "warmup.invisible" = "The warm-up runs in a window of the profile placed off every screen: nothing opens in front of you, and closing this sheet does not stop it.";
 "warmup.minutes" = "Time it may take";
-"warmup.note" = "The search uses DuckDuckGo, as the address bar. The robot works in its own hidden window; stopping the profile, or a page asking a question, stops the run.";
+"warmup.note" = "The search uses the profile's search engine, as the address bar does. The robot works in its own hidden window; stopping the profile, or a page asking a question, stops the run.";
 "warmup.page.search" = "search";
 "warmup.pages.more" = "and %ld more";
 "warmup.pagesToVisit" = "Pages to visit: %ld";
@@ -966,6 +968,8 @@
 "settings.newProfiles.quic" = "QUIC (HTTP/3)";
 "settings.newProfiles.quic.detail" = "Off for every profile with a proxy: QUIC goes around HTTP and SOCKS5 proxies. Without a proxy, as in Safari.";
 "settings.newProfiles.quic.value" = "Off with a proxy";
+"settings.newProfiles.search" = "Search engine";
+"settings.newProfiles.search.detail" = "What a new profile's address bar and warm-up search with. Each profile changes it in its editor (General).";
 "settings.behavior.subtitle" = "How the app's browser windows behave, in every profile.";
 "settings.behavior.autoFill" = "AutoFill passwords";
 "settings.behavior.autoFill.detail" = "Offers saved logins and asks to save new ones. Each profile has its own switch too; both must be on.";

@@ -456,7 +456,12 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
    │                 open at Stop) → ProfileManager.stop → tabs.bin; the next launch →
    │                 BrowserSession.openFirstWindows(restoring:); not ephemeral, not without history;
    │                 confirmQuit → QuitCoordinator(confirm:) — asked after terminate: returns
-   │  New profiles   newProfileMatchesConnection → ProfileDraft.matchProxyLocation of ＋
+   │  New profiles   newProfileMatchesConnection → ProfileDraft.matchProxyLocation of ＋;
+   │                 newProfileSearchEngine → ProfileDraft.searchEngine of ＋ →
+   │                 ProfileConfiguration.searchEngine (nil = SearchEngine.standard, DuckDuckGo;
+   │                 one a later build knows reads as nil) → BrowserWindowController.addressURL,
+   │                 WarmUpRobot (WarmUpPlan.pages(searchEngine:)); Safari's own window keeps
+   │                 Safari's engine (SafariChrome's search providers)
    │  Behavior       BrowsingPreferences (AutoFill, tab position, closing several tabs, zoom,
    │  Downloads      download folder, ask each time, Dock letters) → BrowsingPreferences.current here;
    │                 ProfileCommand.preferences to every profile process (ProfileManager.sendPreferences),

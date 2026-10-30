@@ -94,6 +94,11 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// this profile's WebRTC through its SOCKS5 proxy. Nil when the tunnel is not available.
     public var webRTCRelay: WebRTCRelay?
 
+    /// What the address bar searches with (and the warm-up's searches). Nil: `SearchEngine.standard`
+    /// — every profile from before there was a choice, and one a later build gave an engine this
+    /// one does not know.
+    public var searchEngine: SearchEngine?
+
     public init(startURL: URL? = nil,
                 userAgent: String? = nil,
                 proxy: ProxySettings? = nil,
@@ -111,7 +116,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 passwordAutoFill: Bool = true,
                 passwordNeverSaveSites: [String] = [],
                 syncCookies: Bool = true,
-                settingsModifiedAt: Date? = nil) {
+                settingsModifiedAt: Date? = nil,
+                searchEngine: SearchEngine? = nil) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -130,6 +136,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.passwordNeverSaveSites = passwordNeverSaveSites
         self.syncCookies = syncCookies
         self.settingsModifiedAt = settingsModifiedAt
+        self.searchEngine = searchEngine
     }
 
     /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
@@ -256,7 +263,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
-             syncCookies, settingsModifiedAt
+             syncCookies, settingsModifiedAt, searchEngine
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -285,6 +292,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         passwordNeverSaveSites = try c.decodeIfPresent([String].self, forKey: .passwordNeverSaveSites) ?? defaults.passwordNeverSaveSites
         syncCookies = try c.decodeIfPresent(Bool.self, forKey: .syncCookies) ?? defaults.syncCookies
         settingsModifiedAt = try? c.decodeIfPresent(Date.self, forKey: .settingsModifiedAt)
+        // One a later build knows and this one does not is the standard one here, not a failure.
+        searchEngine = try? c.decodeIfPresent(SearchEngine.self, forKey: .searchEngine)
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -309,6 +318,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(passwordNeverSaveSites, forKey: .passwordNeverSaveSites)
         try c.encode(syncCookies, forKey: .syncCookies)
         try c.encodeIfPresent(settingsModifiedAt, forKey: .settingsModifiedAt)
+        try c.encodeIfPresent(searchEngine, forKey: .searchEngine)
     }
 
     public var historyPolicy: HistoryStore.Policy {

@@ -70,12 +70,12 @@ public struct WarmUpPlan: Codable, Equatable, Sendable {
         public var reason: Reason
     }
 
-    /// The pages to visit, and the lines that are not.
-    public func pages() -> (pages: [Page], problems: [Problem]) {
+    /// The pages to visit, and the lines that are not; the search with the profile's `engine`.
+    public func pages(searchEngine engine: SearchEngine = .standard) -> (pages: [Page], problems: [Problem]) {
         var pages: [Page] = []
         var problems: [Problem] = []
         var seen: Set<String> = []
-        if let search = WebAddress.searchURL(for: searchQuery) {
+        if let search = WebAddress.searchURL(for: searchQuery, engine: engine) {
             pages.append(Page(url: search, kind: .search))
             seen.insert(search.absoluteString)
         }

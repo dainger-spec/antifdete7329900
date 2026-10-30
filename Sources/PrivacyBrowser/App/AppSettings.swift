@@ -1,4 +1,5 @@
 import AppKit
+import BrowserCore
 import Foundation
 
 /// What the app's settings say about browsing in every profile — the part a profile's own process
@@ -80,6 +81,7 @@ final class AppSettings: ObservableObject {
         static let startup = "PBSettingsStartup"
         static let confirmQuit = "PBSettingsConfirmQuit"
         static let newProfileMatchesConnection = "PBSettingsNewProfileMatchesConnection"
+        static let newProfileSearchEngine = "PBSettingsNewProfileSearchEngine"
         static let proxyFailure = "PBSettingsProxyFailure"
         static let passwordAutoFill = "PBSettingsPasswordAutoFill"
         static let newTabsNextToCurrent = "PBSettingsNewTabsNextToCurrent"
@@ -103,6 +105,10 @@ final class AppSettings: ObservableObject {
     /// A new profile takes its time zone and its languages from where its connection comes out.
     @Published var newProfileMatchesConnection: Bool {
         didSet { defaults.set(newProfileMatchesConnection, forKey: Key.newProfileMatchesConnection) }
+    }
+    /// The search engine a new profile starts with (`ProfileConfiguration.searchEngine`).
+    @Published var newProfileSearchEngine: SearchEngine {
+        didSet { defaults.set(newProfileSearchEngine.rawValue, forKey: Key.newProfileSearchEngine) }
     }
     @Published var proxyFailure: ProxyFailure {
         didSet { defaults.set(proxyFailure.rawValue, forKey: Key.proxyFailure) }
@@ -129,6 +135,7 @@ final class AppSettings: ObservableObject {
         startup = defaults.string(forKey: Key.startup).flatMap(Startup.init) ?? .profilesWindow
         confirmQuit = defaults.object(forKey: Key.confirmQuit) as? Bool ?? true
         newProfileMatchesConnection = defaults.object(forKey: Key.newProfileMatchesConnection) as? Bool ?? true
+        newProfileSearchEngine = defaults.string(forKey: Key.newProfileSearchEngine).flatMap(SearchEngine.init) ?? .standard
         proxyFailure = defaults.string(forKey: Key.proxyFailure).flatMap(ProxyFailure.init) ?? .launchAndExplain
         var browsing = BrowsingPreferences()
         browsing.passwordAutoFill = defaults.object(forKey: Key.passwordAutoFill) as? Bool ?? true

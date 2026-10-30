@@ -163,6 +163,14 @@ struct ProfileEditorForm: View {
                 TextField(L("editor.startURL"), text: $draft.startURL, prompt: Text(verbatim: ""))
                     .lumenField("https://example.com", isEmpty: draft.startURL.isEmpty)
             }
+            EditorRow(L("editor.search")) {
+                Picker(L("editor.search"), selection: $draft.searchEngine) {
+                    ForEach(SearchEngine.allCases, id: \.self) { Text(verbatim: $0.name).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            EditorNote(L("editor.search.note"))
             EditorDivider()
             EditorToggle(L("editor.ephemeral.title"), detail: L("editor.ephemeral.detail"), isOn: $draft.ephemeral)
         }

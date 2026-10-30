@@ -2426,12 +2426,14 @@ final class SelfTest {
         let defaultStart: Bool = fresh.startup == AppSettings.Startup.profilesWindow
         let defaultFailure: Bool = fresh.proxyFailure == AppSettings.ProxyFailure.launchAndExplain
         let defaultBrowsing: Bool = fresh.browsing == BrowsingPreferences()
-        check("settings: the defaults — the Profiles window after unlocking, quitting asks, new profiles follow the connection, a failing proxy's profile starts and says why, AutoFill on, new tabs next to the current one, closing several tabs asks, 100 %, the Downloads folder, two letters, no tabs restored",
-              defaultStart && fresh.confirmQuit && fresh.newProfileMatchesConnection && defaultFailure && defaultBrowsing,
+        let defaultSearch: Bool = fresh.newProfileSearchEngine == SearchEngine.standard
+        check("settings: the defaults — the Profiles window after unlocking, quitting asks, new profiles follow the connection and search with the standard engine, a failing proxy's profile starts and says why, AutoFill on, new tabs next to the current one, closing several tabs asks, 100 %, the Downloads folder, two letters, no tabs restored",
+              defaultStart && fresh.confirmQuit && fresh.newProfileMatchesConnection && defaultSearch && defaultFailure && defaultBrowsing,
               String(describing: fresh.browsing))
         fresh.startup = .reopenProfiles
         fresh.confirmQuit = false
         fresh.newProfileMatchesConnection = false
+        fresh.newProfileSearchEngine = .ecosia
         fresh.proxyFailure = .doNotLaunch
         fresh.browsing.passwordAutoFill = false
         fresh.browsing.newTabsNextToCurrent = false
@@ -2450,19 +2452,34 @@ final class SelfTest {
         let rereadStart: Bool = reread.startup == AppSettings.Startup.reopenProfiles
         let rereadFailure: Bool = reread.proxyFailure == AppSettings.ProxyFailure.doNotLaunch
         let rereadBrowsing: Bool = reread.browsing == expected
+        let rereadSearch: Bool = reread.newProfileSearchEngine == SearchEngine.ecosia
         check("settings: every setting is read back as it was set, each from its own key",
-              rereadStart && !reread.confirmQuit && !reread.newProfileMatchesConnection && rereadFailure && rereadBrowsing,
+              rereadStart && !reread.confirmQuit && !reread.newProfileMatchesConnection && rereadSearch && rereadFailure && rereadBrowsing,
               String(describing: reread.browsing))
         defaults.set(3.7, forKey: "PBSettingsPageZoom")
         defaults.set(9, forKey: "PBSettingsDockInitials")
         defaults.set("sideways", forKey: "PBSettingsStartup")
+        defaults.set("someEngine", forKey: "PBSettingsNewProfileSearchEngine")
         let odd = AppSettings(defaults: defaults)
         let oddZoom: Bool = odd.browsing.pageZoom == 1
         let oddLetters: Bool = odd.browsing.dockInitials == 2
         let oddStart: Bool = odd.startup == AppSettings.Startup.profilesWindow
-        check("settings: what is out of range — a zoom of 370 %, nine letters, an unknown start — is read as the default",
-              oddZoom && oddLetters && oddStart,
-              "zoom \(odd.browsing.pageZoom), letters \(odd.browsing.dockInitials), start \(odd.startup.rawValue)")
+        let oddSearch: Bool = odd.newProfileSearchEngine == SearchEngine.standard
+        check("settings: what is out of range — a zoom of 370 %, nine letters, an unknown start, an unknown search engine — is read as the default",
+              oddZoom && oddLetters && oddStart && oddSearch,
+              "zoom \(odd.browsing.pageZoom), letters \(odd.browsing.dockInitials), start \(odd.startup.rawValue), search \(odd.newProfileSearchEngine.rawValue)")
+
+        // A profile's search engine through the editor: one chosen is kept; the standard one is
+        // stored as none, as profiles from before the choice have it, so saving such a profile
+        // unchanged is no edit.
+        let bingDraft = ProfileDraft(name: "Bing", configuration: ProfileConfiguration(searchEngine: .bing))
+        let plainDraft = ProfileDraft(name: "Plain", configuration: ProfileConfiguration())
+        let bingSaved: SearchEngine? = try bingDraft.makeConfiguration().searchEngine
+        let plainSaved: SearchEngine? = try plainDraft.makeConfiguration().searchEngine
+        let plainShown: Bool = plainDraft.searchEngine == SearchEngine.standard
+        check("settings: the editor keeps a profile's search engine, and stores the standard one as none",
+              bingSaved == SearchEngine.bing && plainSaved == nil && plainShown,
+              "kept \(bingSaved?.rawValue ?? "none"), standard stored as \(plainSaved?.rawValue ?? "none")")
 
         // A quit that asks: "no" stops nothing and quits nothing; "yes" seals, then quits.
         var sealRounds = 0
@@ -2485,7 +2502,7 @@ final class SelfTest {
               acceptedReply && quit && sealRounds == 1, "seal rounds \(sealRounds), terminate \(terminated)")
 
         // In a browser window of a profile (never shown).
-        let profile = try repository.create(name: "Settings", configuration: ProfileConfiguration(ephemeral: true))
+        let profile = try repository.create(name: "Settings", configuration: ProfileConfiguration(ephemeral: true, searchEngine: .bing))
         let key = try repository.profileKey(for: profile.id)
         let session = try makeSession(repository, profile.id, key: key)
         defer {
@@ -2495,6 +2512,11 @@ final class SelfTest {
         BrowsingPreferences.current = BrowsingPreferences()
         let controller = BrowserWindowController(session: session)
         defer { controller.close() }
+        let searched: String = controller.addressURL("cats & dogs")?.absoluteString ?? ""
+        let opened: String = controller.addressURL("example.com")?.absoluteString ?? ""
+        check("settings: the address bar of a profile's window searches with the profile's engine, and opens an address as it is",
+              searched == "https://www.bing.com/search?q=cats%20%26%20dogs" && opened == "https://example.com",
+              "\(searched), \(opened)")
         let first = controller.addTab(url: nil)
         _ = controller.addTab(url: nil)
         controller.selectTab(at: 0)

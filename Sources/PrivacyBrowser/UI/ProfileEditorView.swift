@@ -58,6 +58,7 @@ struct ProfileDraft {
     var historyRetentionDays = 90
     var passwordAutoFill = true
     var syncCookies = true
+    var searchEngine = SearchEngine.standard
 
     struct RetentionChoice: Hashable {
         var days: Int
@@ -110,6 +111,7 @@ struct ProfileDraft {
         historyRetentionDays = c.historyRetentionDays ?? 0
         passwordAutoFill = c.passwordAutoFill
         syncCookies = c.syncCookies
+        searchEngine = c.searchEngine ?? .standard
     }
 
     var hasProxy: Bool { proxyMode != .direct }
@@ -207,6 +209,9 @@ struct ProfileDraft {
         // (ProfileConfiguration.keepingStoredState).
         configuration.passwordAutoFill = passwordAutoFill
         configuration.syncCookies = syncCookies
+        // The standard engine is stored as none, as every profile from before the choice has it:
+        // saving such a profile unchanged is no edit.
+        configuration.searchEngine = searchEngine == .standard ? nil : searchEngine
         try configuration.validate()
         return configuration
     }
@@ -285,6 +290,7 @@ struct ProfileEditorView: View {
             draft.name = String(format: L("editor.defaultName"), model.profiles.count + 1)
             // Settings → New Profiles.
             draft.matchProxyLocation = model.settings.newProfileMatchesConnection
+            draft.searchEngine = model.settings.newProfileSearchEngine
         }
     }
 

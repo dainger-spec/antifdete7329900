@@ -119,6 +119,28 @@ final class FormatPolicyTests: XCTestCase {
         XCTAssertEqual(configuration.proxy?.username, "u")
         XCTAssertEqual(configuration.timeZoneIdentifier, "Europe/Berlin")
         XCTAssertEqual(configuration.webRTCPolicy, .disabled)
+        XCTAssertNil(configuration.searchEngine, "no engine named: the standard one")
+    }
+
+    /// A profile's search engine: one this build knows is read back; one only a later build knows
+    /// reads as none (the standard engine) and costs nothing else of the settings; the standard
+    /// engine, stored as none, is written as released versions write settings.
+    func testTheSearchEngineOfOtherVersionsReads() throws {
+        var configuration = ProfileConfiguration(searchEngine: .ecosia)
+        let written = try JSONCoding.encoder.encode(configuration)
+        XCTAssertEqual(try ProfileRepository.decodeConfiguration(written).searchEngine, .ecosia)
+
+        let later = Self.releasedConfiguration.replacingOccurrences(of: #""syncCookies":true"#,
+                                                                    with: #""searchEngine":"someEngine","syncCookies":true"#)
+        XCTAssertNotEqual(later, Self.releasedConfiguration)
+        let read = try ProfileRepository.decodeConfiguration(Data(later.utf8))
+        XCTAssertNil(read.searchEngine)
+        XCTAssertEqual(read.proxy?.host, "203.0.113.5")
+        XCTAssertEqual(read.timeZoneIdentifier, "Europe/Berlin")
+
+        configuration.searchEngine = nil
+        let standard = String(decoding: try JSONCoding.encoder.encode(configuration), as: UTF8.self)
+        XCTAssertFalse(standard.contains("searchEngine"), standard)
     }
 
     /// This version writes the files that never had a format marker as before — no `format`, so

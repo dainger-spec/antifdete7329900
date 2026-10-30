@@ -54,10 +54,6 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private var isClosing = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserWindow")
 
-    /// Search used for address-bar input that is not a URL (`WebAddress`). Queries go through the
-    /// profile's proxy.
-    static let searchURLTemplate = WebAddress.searchURLTemplate
-
     init(session: BrowserSession) {
         self.session = session
         self.profileName = session.profileName
@@ -169,8 +165,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             model: chrome,
             open: { [weak self] url in self?.openFromStartPage(url) },
             submit: { [weak self] text in
-                guard let url = BrowserWindowController.url(fromAddressBarInput: text) else { return }
-                self?.openFromStartPage(url)
+                guard let self, let url = self.addressURL(text) else { return }
+                self.openFromStartPage(url)
             }))
         // Part of the chrome (dark), unlike the web views beside it (the system's appearance).
         startPage.appearance = Theme.chromeAppearance
@@ -400,7 +396,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     @objc private func addressEntered() {
-        guard let url = Self.url(fromAddressBarInput: addressField.stringValue) else { return }
+        guard let url = addressURL(addressField.stringValue) else { return }
         load(url)
         if let webView = selectedTab?.webView { window?.makeFirstResponder(webView) }
     }
@@ -413,8 +409,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         return true
     }
 
-    static func url(fromAddressBarInput input: String) -> URL? {
-        WebAddress.url(fromAddressBarInput: input)
+    /// What the address bar (or the start page's field) opens for `input`: a web address, else a
+    /// search with the profile's engine (`ProfileConfiguration.searchEngine`), through its proxy.
+    func addressURL(_ input: String) -> URL? {
+        WebAddress.url(fromAddressBarInput: input, engine: session?.configuration.searchEngine ?? .standard)
     }
 
     // MARK: Bookmarks and history

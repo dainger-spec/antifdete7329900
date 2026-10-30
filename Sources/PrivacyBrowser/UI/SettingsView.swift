@@ -284,6 +284,13 @@ private struct NewProfileSettings: View {
                        effect: .newProfiles) {
                 SettingSwitch(isOn: $settings.newProfileMatchesConnection, label: L("settings.newProfiles.matchConnection"))
             }
+            SettingRow(L("settings.newProfiles.search"), detail: L("settings.newProfiles.search.detail"), effect: .newProfiles) {
+                Picker(L("settings.newProfiles.search"), selection: $settings.newProfileSearchEngine) {
+                    ForEach(SearchEngine.allCases, id: \.self) { Text(verbatim: $0.name).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
             SettingRow(L("settings.newProfiles.quic"), detail: L("settings.newProfiles.quic.detail"), effect: .always) {
                 Text(L("settings.newProfiles.quic.value"))
                     .font(.lumenBody)

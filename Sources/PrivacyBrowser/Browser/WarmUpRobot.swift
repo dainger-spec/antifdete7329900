@@ -150,7 +150,7 @@ final class WarmUpRobot: ObservableObject {
     @discardableResult
     func start(_ plan: WarmUpPlan, in session: BrowserSession) -> Bool {
         guard !isRunning, session.dataStore != nil else { return false }
-        let pages = plan.pages().pages
+        let pages = plan.pages(searchEngine: session.configuration.searchEngine ?? .standard).pages
         guard !pages.isEmpty else { return false }
         let controller = session.openOffscreenWindow()
         guard let tab = controller.tabs.first else {

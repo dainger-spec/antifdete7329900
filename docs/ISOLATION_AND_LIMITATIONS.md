@@ -831,7 +831,8 @@ persistent cookies sync between Macs, encrypted with the profile's key inside th
 
 **⋯ → Warm Up…** visits a list of pages in one profile, one after the other, to give it a
 browsing past (cookies, history, site preferences) before it is used: a search first if one is
-given (the address bar's engine, DuckDuckGo), then the addresses in their order (http and https
+given (with the profile's search engine, as from its address bar — DuckDuckGo unless the profile's
+editor names another), then the addresses in their order (http and https
 only, at most 50; other lines are listed with the reason and skipped). For each page it:
 - loads it in **its own tab of the profile** — the profile's data store, proxy (fail-closed as
   always), User-Agent, shims and AutoFill, exactly as when the user browses; the visits go into

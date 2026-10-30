@@ -78,6 +78,32 @@ final class WarmUpPlanTests: XCTestCase {
                        "https://duckduckgo.com/?q=cats%20%26%20dogs%3F")
         XCTAssertNil(WebAddress.url(fromAddressBarInput: "   "))
     }
+
+    /// A profile's search engine: the address bar and the warm-up's search use its results page;
+    /// an address is opened whatever the engine; a profile that names none searches as before.
+    func testEachSearchEngineSearchesWithItsOwnResultsPage() {
+        XCTAssertEqual(WebAddress.url(fromAddressBarInput: "cats & dogs?", engine: .google)?.absoluteString,
+                       "https://www.google.com/search?q=cats%20%26%20dogs%3F")
+        XCTAssertEqual(WebAddress.searchURL(for: "weather", engine: .yahoo)?.absoluteString,
+                       "https://search.yahoo.com/search?p=weather")
+        XCTAssertEqual(WebAddress.searchURL(for: "погода", engine: .yandex)?.absoluteString,
+                       "https://yandex.ru/search/?text=%D0%BF%D0%BE%D0%B3%D0%BE%D0%B4%D0%B0")
+        XCTAssertEqual(WebAddress.url(fromAddressBarInput: "example.com", engine: .bing)?.absoluteString, "https://example.com")
+        for engine in SearchEngine.allCases {
+            let url = WebAddress.searchURL(for: "a b", engine: engine)
+            XCTAssertEqual(url?.scheme, "https", engine.rawValue)
+            XCTAssertEqual(url?.absoluteString, engine.searchURLTemplate + "a%20b", engine.rawValue)
+            XCTAssertFalse(engine.name.isEmpty, engine.rawValue)
+        }
+        XCTAssertEqual(Set(SearchEngine.allCases.map(\.searchURLTemplate)).count, SearchEngine.allCases.count)
+
+        XCTAssertEqual(SearchEngine.standard, .duckDuckGo, "a profile from before the choice searches as it did")
+        XCTAssertEqual(WebAddress.searchURL(for: "x")?.absoluteString, "https://duckduckgo.com/?q=x")
+        let plan = WarmUpPlan(addresses: "example.org", searchQuery: "weather berlin")
+        XCTAssertEqual(plan.pages(searchEngine: .bing).pages.map(\.url.absoluteString),
+                       ["https://www.bing.com/search?q=weather%20berlin", "https://example.org"])
+        XCTAssertEqual(plan.pages().pages.first?.url.absoluteString, "https://duckduckgo.com/?q=weather%20berlin")
+    }
 }
 
 final class WebAddressTests: XCTestCase {
