@@ -78,9 +78,10 @@ def behaviour(item):
             match = re.match(r"^(a window|a sheet): (\S+)", effect)
             if match:
                 words.add(f"{match.group(1).split()[1]} {match.group(2)}")
-    for change in item.get("changes", []):
-        kind = change.split(":")[0] if ":" in change else change
-        words.add("changes " + kind.strip())
+    # Which part of the window changed (key window, first responder, page, zoom) follows the
+    # state the items before left and how fast a page loaded: the record keeps that it changed.
+    if item.get("changes"):
+        words.add("changes the window")
     if item.get("exceptions"):
         names = sorted({entry.split(":")[0] for entry in item["exceptions"]})
         words.add("exception " + ", ".join(names))
