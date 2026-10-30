@@ -2458,6 +2458,27 @@ final class SelfTest {
         let plainKept: Bool = plainConfiguration.tags.isEmpty && plainConfiguration.notes.isEmpty && plainConfiguration.avatar == nil
         check("editor: a profile without them is saved without them", plainKept)
 
+        // Time zone and language: from the connection, chosen, or a place picked at random.
+        var manual = ProfileDraft(name: "Locale", configuration: ProfileConfiguration())
+        manual.localeMode = .manual
+        manual.timeZone = "Asia/Tokyo"
+        manual.language = "ja-JP"
+        let manualSaved = try manual.makeConfiguration()
+        var random = ProfileDraft(name: "Locale", configuration: ProfileConfiguration())
+        random.pickRandomPlace()
+        let randomSaved = try random.makeConfiguration()
+        let connectionSaved = try ProfileDraft(name: "Locale", configuration: ProfileConfiguration()).makeConfiguration()
+        let manualKept: Bool = manualSaved.timeZoneIdentifier == "Asia/Tokyo" && manualSaved.languageOverride == "ja-JP"
+            && !manualSaved.matchProxyLocation && manualSaved.effectiveLocaleSource == LocaleSource.manual
+        let randomPlace = LocalePlaces.place(timeZone: randomSaved.timeZoneIdentifier, language: randomSaved.languageOverride)
+        let randomKept: Bool = randomSaved.localeSource == LocaleSource.random && randomPlace != nil
+            && ProfileDraft(name: "Locale", configuration: randomSaved).localeMode == LocaleSource.random
+        let connectionKept: Bool = connectionSaved.timeZoneIdentifier == nil && connectionSaved.languageOverride == nil
+            && connectionSaved.matchProxyLocation && connectionSaved.localeSource == nil
+        check("editor: time zone and language from the connection, chosen, or a place picked at random — saved as such and shown again so",
+              manualKept && randomKept && connectionKept,
+              "manual \(manualSaved.timeZoneIdentifier ?? "-") \(manualSaved.languageOverride ?? "-"), random \(randomSaved.timeZoneIdentifier ?? "-") \(randomSaved.languageOverride ?? "-")")
+
         let row = ProfileRowItem(id: UUID(), name: "Northwind", activity: .stopped, exit: .direct, ephemeral: false,
                                  appearsAs: "", lastUsed: nil, tags: ["ads", "US"], notes: "Renews monthly")
         let other = ProfileRowItem(id: UUID(), name: "Research", activity: .stopped, exit: .direct, ephemeral: false,

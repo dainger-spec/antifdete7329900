@@ -252,9 +252,11 @@ final class ProfileManager: ObservableObject {
         if let lookup { proxyLookupFinished(lookup, for: id, name: summary.name, stored: stored) }
         var configuration = stored.applying(location)
         configuration.webRTCRelay = await webRTCRelay(for: id, configuration)
-        // Before the first web view of the run: WebKit reads its language list only once.
-        WebContentLanguage.decide(location?.webLanguage)
-        noteLanguageMismatch(for: id, wanted: location?.webLanguage)
+        // Before the first web view of the run: WebKit reads its language list only once. The
+        // profile's own language when one is set, else its proxy country's.
+        let language = stored.webLanguage(for: location)
+        WebContentLanguage.decide(language)
+        noteLanguageMismatch(for: id, wanted: language)
         let session: BrowserSession
         do {
             let passwordSettings = ProfilePasswordSettings(repository: repository, profileID: id, profileName: summary.name,

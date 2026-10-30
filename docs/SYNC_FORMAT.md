@@ -220,7 +220,8 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
   (not by what the browser stores itself, such as the proxy location). Saving the editor with
   nothing changed is no change. An older build drops the field (and `syncCookies`, which then
   reads as on, `searchEngine`, which then reads as DuckDuckGo, the profile's `tags`, `notes`
-  and `avatar`, its `windowSize` and the `safariVersion` it names) when it rewrites a
+  and `avatar`, its `windowSize`, the `safariVersion` it names, `localRequests`,
+  `languageOverride` and `localeSource`) when it rewrites a
   configuration, so its edit loses to one made by this build;
   two versions without the time, and edits within the same second, fall back to the resolver
   (`keepRemote`, local copy as `config.bin.conflict`).

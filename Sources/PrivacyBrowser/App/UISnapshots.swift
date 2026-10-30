@@ -131,8 +131,13 @@ enum UISnapshots {
         location.geoMode = .fixed
         location.latitude = "52.52"
         location.longitude = "13.405"
-        location.overrideTimeZone = true
+        location.localeMode = .manual
         location.timeZone = "Europe/Berlin"
+        location.language = "de-DE"
+        var randomLocale = draft
+        randomLocale.localeMode = .random
+        randomLocale.timeZone = "Asia/Tokyo"
+        randomLocale.language = "ja-JP"
         var ephemeral = draft
         ephemeral.ephemeral = true
         let editors: [(String, ProfileDraft, ProfileEditorForm.Topic, Bool, String?)] = [
@@ -141,6 +146,7 @@ enum UISnapshots {
             ("editor-identity", draft, .identity, false, nil),
             ("editor-identity-safari-version", namedVersion, .identity, false, nil),
             ("editor-location", location, .location, false, nil),
+            ("editor-location-random-mismatch", randomLocale, .location, false, nil),
             ("editor-privacy", draft, .privacy, false, nil),
             ("editor-privacy-direct-allowed", directAllowed, .privacy, false, nil),
             ("editor-data-ephemeral", ephemeral, .data, false, L("editor.proxy.error.kindUnknown")),

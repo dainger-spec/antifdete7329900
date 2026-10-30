@@ -44,8 +44,11 @@ struct ProfileDraft {
     var latitude = ""
     var longitude = ""
     var accuracy = "50"
-    var overrideTimeZone = false
+    /// Where the time zone and language come from; Manual and Random use `timeZone` and
+    /// `language` ("" for language: this Mac's).
+    var localeMode = LocaleSource.connection
     var timeZone = TimeZone.current.identifier
+    var language = ""
     var matchProxyLocation = true
     /// Carried through unchanged (a cache for launching; see ProfileConfiguration).
     var lastProxyLocation: ProxyLocation?
@@ -150,9 +153,13 @@ struct ProfileDraft {
             longitude = String(lon)
             accuracy = String(acc)
         }
-        overrideTimeZone = c.timeZoneIdentifier != nil
+        localeMode = c.effectiveLocaleSource
         timeZone = c.timeZoneIdentifier ?? TimeZone.current.identifier
+        language = c.languageOverride ?? ""
         matchProxyLocation = c.matchProxyLocation
+        // With a proxy it does not follow and nothing of its own: this Mac's time zone and
+        // languages, which is a choice of its own — Manual, with this Mac's values.
+        if localeMode == .connection && !c.matchProxyLocation && c.proxy != nil { localeMode = .manual }
         lastProxyLocation = c.lastProxyLocation
         warnOnProxyIPChange = c.warnOnProxyIPChange
         webRTC = c.webRTCPolicy
@@ -173,6 +180,18 @@ struct ProfileDraft {
     }
 
     var hasProxy: Bool { proxyMode != .direct }
+
+    /// The place a random choice picked, when the time zone and language are one.
+    var randomPlace: LocalePlaces.Place? { LocalePlaces.place(timeZone: timeZone, language: language) }
+
+    /// Random: another place's time zone and language.
+    mutating func pickRandomPlace() {
+        var generator = SystemRandomNumberGenerator()
+        let place = LocalePlaces.random(using: &generator, otherThan: localeMode == .random ? randomPlace : nil)
+        timeZone = place.timeZone
+        language = place.language
+        localeMode = .random
+    }
 
     /// Geolocation back to Deny, its coordinates forgotten.
     mutating func resetGeolocation() {
@@ -262,8 +281,18 @@ struct ProfileDraft {
             }
             configuration.geolocation = .fixed(latitude: lat, longitude: lon, accuracyMeters: acc)
         }
-        configuration.timeZoneIdentifier = overrideTimeZone ? timeZone : nil
-        configuration.matchProxyLocation = matchProxyLocation
+        switch localeMode {
+        case .connection:
+            configuration.timeZoneIdentifier = nil
+            configuration.languageOverride = nil
+            configuration.matchProxyLocation = true
+        case .manual, .random:
+            configuration.timeZoneIdentifier = timeZone
+            configuration.languageOverride = language.isEmpty ? nil : language
+            configuration.matchProxyLocation = false
+        }
+        // Manual and the connection are said by the fields themselves; only Random is written.
+        configuration.localeSource = localeMode == .random ? .random : nil
         configuration.lastProxyLocation = lastProxyLocation
         configuration.warnOnProxyIPChange = warnOnProxyIPChange
         configuration.webRTCPolicy = webRTC
@@ -374,7 +403,9 @@ struct ProfileEditorView: View {
         } else {
             draft.name = String(format: L("editor.defaultName"), model.profiles.count + 1)
             // Settings → New Profiles.
-            draft.matchProxyLocation = model.settings.newProfileMatchesConnection
+            if !model.settings.newProfileMatchesConnection {
+                draft.localeMode = .manual
+            }
             draft.searchEngine = model.settings.newProfileSearchEngine
             draft.localRequests = model.settings.newProfileBlocksLocalRequests ? .protected : .allowed
             if model.settings.newProfileRandomWindowSize, let visible = WindowSizing.visibleScreen {

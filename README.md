@@ -174,7 +174,9 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    Pro's screen allows below its menu bar; or a size of its own — a real window, which is what a
    page measures; the screen pages see stays this Mac's, since WebKit on macOS cannot declare
    another without CSS giving it away; one larger than the screen opens as large as it allows,
-   and the editor says so); geolocation (with Reset) and time zone; local requests (protected by
+   and the editor says so); geolocation (with Reset); time zone and language — from the connection,
+   manual (a time zone and a language of its own), or random (a country's own pair, picked once
+   and kept; one that is not where the proxy comes out is warned about); local requests (protected by
    default: a page from the internet cannot reach this Mac or the local network — without a proxy
    by a rule list; with one this Mac is always refused and the rest goes through the proxy); Safe
    Browsing; history recording and retention, AutoFill,

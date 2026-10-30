@@ -379,7 +379,7 @@ struct ProfileEditorForm: View {
                         .lumenField("localhost, example.com", isEmpty: draft.proxyExcludedDomains.isEmpty)
                 }
                 ProxyLocationCard(draft: $draft)
-                if draft.matchProxyLocation && !draft.overrideTimeZone {
+                if draft.localeMode == .connection {
                     EditorNote(L("editor.tz.fromProxy.note"))
                 }
                 EditorToggle(L("editor.proxy.warnIPChange"), detail: L("editor.proxy.warnIPChange.note"),
@@ -502,20 +502,99 @@ struct ProfileEditorForm: View {
                 }
             }
             EditorDivider()
-            EditorToggle(L("editor.tz.override"), isOn: $draft.overrideTimeZone)
-            if draft.overrideTimeZone {
-                EditorRow(L("editor.tz")) {
-                    Picker(L("editor.tz"), selection: $draft.timeZone) {
-                        ForEach(ProfileEditorForm.timeZones, id: \.self) { Text(verbatim: $0).tag($0) }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                }
-            } else if draft.hasProxy {
-                EditorNote(L("editor.tz.fromProxyHint"))
-            }
+            localeChoice
             EditorNote(L("editor.location.footer"))
         }
+    }
+
+    /// Time zone and language: from the connection, chosen, or a place picked at random.
+    @ViewBuilder
+    private var localeChoice: some View {
+        EditorRow(L("editor.locale")) {
+            Picker(L("editor.locale"), selection: localeMode) {
+                Text(L("editor.locale.connection")).tag(LocaleSource.connection)
+                Text(L("editor.locale.manual")).tag(LocaleSource.manual)
+                Text(L("editor.locale.random")).tag(LocaleSource.random)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+        }
+        switch draft.localeMode {
+        case .connection:
+            EditorNote(L(draft.hasProxy ? "editor.locale.connection.proxy" : "editor.locale.connection.direct"))
+        case .manual:
+            EditorRow(L("editor.tz")) {
+                Picker(L("editor.tz"), selection: $draft.timeZone) {
+                    ForEach(ProfileEditorForm.timeZones, id: \.self) { Text(verbatim: $0).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            EditorRow(L("editor.language")) {
+                Picker(L("editor.language"), selection: $draft.language) {
+                    Text(L("editor.language.thisMac")).tag("")
+                    ForEach(Self.languageChoices(including: draft.language), id: \.self) { tag in
+                        Text(verbatim: Self.languageName(tag)).tag(tag)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+        case .random:
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("editor.locale.randomChosen"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                    Text(verbatim: randomSummary)
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.textPrimary)
+                }
+                Spacer(minLength: 12)
+                Button(L("editor.locale.pickAnother")) { draft.pickRandomPlace() }
+                    .buttonStyle(.lumenSecondary)
+            }
+        }
+        if let mismatch = localeMismatch {
+            EditorNote(mismatch, tone: .warning)
+        }
+        EditorNote(L("editor.language.note"))
+    }
+
+    /// Switching to Random picks a place at once.
+    private var localeMode: Binding<LocaleSource> {
+        Binding(get: { draft.localeMode },
+                set: { mode in
+                    if mode == .random { draft.pickRandomPlace() } else { draft.localeMode = mode }
+                })
+    }
+
+    /// "Germany · Europe/Berlin · de-DE".
+    private var randomSummary: String {
+        let country = draft.randomPlace.map { CountryNames.name(for: $0.country) }
+        return ([country, draft.timeZone, draft.language.isEmpty ? nil : draft.language] as [String?])
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// Said when a time zone of the profile's own is not where its proxy was last seen to come out.
+    private var localeMismatch: String? {
+        guard draft.localeMode != .connection, draft.hasProxy, let location = draft.knownProxyLocation,
+              location.timeZoneIdentifier != draft.timeZone else { return nil }
+        let place = location.countryCode.map(CountryNames.name(for:)) ?? location.timeZoneIdentifier
+        return String(format: L("editor.locale.mismatch"), draft.timeZone, place)
+    }
+
+    /// The languages offered, with the one chosen even when it is not among them.
+    static func languageChoices(including chosen: String) -> [String] {
+        let all = LocalePlaces.languages
+        return chosen.isEmpty || all.contains(chosen) ? all : all + [chosen]
+    }
+
+    /// "Deutsch (Deutschland) — de-DE" in the app's language.
+    static func languageName(_ tag: String) -> String {
+        let name = Locale.current.localizedString(forIdentifier: tag) ?? tag
+        return name == tag ? tag : "\(name) — \(tag)"
     }
 
     // MARK: Privacy
@@ -844,20 +923,16 @@ private struct ProxyLocationCard: View {
                 }
             }
             Spacer(minLength: 12)
-            if draft.overrideTimeZone {
+            if draft.localeMode == .connection {
+                Text(L("editor.location.followsProxy"))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .lineLimit(1)
+            } else {
                 Text(String(format: L("editor.location.fixedZone"), draft.timeZone))
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
-            } else {
-                Toggle(isOn: $draft.matchProxyLocation) {
-                    Text(L("editor.location.followsProxy"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.accent)
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .fixedSize()
             }
         }
         .padding(12)

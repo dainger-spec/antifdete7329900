@@ -125,6 +125,26 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// protected unless the person allowed it.
     public var localRequests: LocalRequests
 
+    /// The language websites see (`Accept-Language`, `navigator.language`), BCP 47; nil: the
+    /// connection's (its proxy's country when the profile follows it), else this Mac's.
+    public var languageOverride: String?
+
+    /// Where the time zone and language come from, as the editor shows it; nil: from the fields
+    /// themselves — a time zone or language set is manual, none is the connection's. Only a
+    /// random choice is written (`LocaleSource.random`).
+    public var localeSource: LocaleSource?
+
+    /// Where the time zone and language come from.
+    public var effectiveLocaleSource: LocaleSource {
+        localeSource ?? (timeZoneIdentifier != nil || languageOverride != nil ? .manual : .connection)
+    }
+
+    /// The language a launch gives websites: the one set, else the proxy country's (`location`,
+    /// found when the profile follows its proxy), else nil — this Mac's.
+    public func webLanguage(for location: ProxyLocation?) -> String? {
+        languageOverride ?? location?.webLanguage
+    }
+
     /// The local-network rule list applies (`LocalNetworkRules`): protected, and no proxy — with
     /// one, this Mac is blocked by the proxied list, and the rest goes through the proxy.
     public var blocksLocalNetwork: Bool { proxy == nil && localRequests == .protected }
@@ -155,7 +175,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 avatar: ProfileAvatarStyle? = nil,
                 windowSize: WindowSize? = nil,
                 safariVersion: String? = nil,
-                localRequests: LocalRequests = .protected) {
+                localRequests: LocalRequests = .protected,
+                languageOverride: String? = nil,
+                localeSource: LocaleSource? = nil) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -181,6 +203,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.windowSize = windowSize
         self.safariVersion = safariVersion
         self.localRequests = localRequests
+        self.languageOverride = languageOverride
+        self.localeSource = localeSource
     }
 
     /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
@@ -309,7 +333,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
              syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
-             localRequests
+             localRequests, languageOverride, localeSource
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -353,6 +377,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             .flatMap { DeviceGeneration.isSafariVersion($0) ? $0 : nil }
         // Fail-closed: anything but an explicit "allowed" is protected.
         localRequests = (try? c.decodeIfPresent(LocalRequests.self, forKey: .localRequests)) ?? .protected
+        languageOverride = (try? c.decodeIfPresent(String.self, forKey: .languageOverride))
+            .flatMap { LocalePlaces.isLanguageTag($0) ? $0 : nil }
+        localeSource = try? c.decodeIfPresent(LocaleSource.self, forKey: .localeSource)
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -385,6 +412,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encodeIfPresent(windowSize, forKey: .windowSize)
         try c.encodeIfPresent(safariVersion, forKey: .safariVersion)
         if localRequests != .protected { try c.encode(localRequests, forKey: .localRequests) }
+        try c.encodeIfPresent(languageOverride, forKey: .languageOverride)
+        try c.encodeIfPresent(localeSource, forKey: .localeSource)
     }
 
     public var historyPolicy: HistoryStore.Policy {
@@ -413,6 +442,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         }
         try proxy?.validate()
         try geolocation.validate()
+        if let languageOverride, !LocalePlaces.isLanguageTag(languageOverride) {
+            throw CoreError.invalidConfiguration("a language is a tag such as de-DE")
+        }
         if let safariVersion, !DeviceGeneration.isSafariVersion(safariVersion) {
             throw CoreError.invalidConfiguration("a Safari version is written like 26.0 or 26.0.1")
         }
