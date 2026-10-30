@@ -150,6 +150,16 @@ jobs:
           echo "exit $?"; cat build/egress27/history-check.txt
           grep '^HISTORY-CHECK' build/egress27/history-check.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - history in a profile process::/'
           exit 0
+      - name: Safari 27's File › Export › Bookmarks… in a profile's process (a measurement)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          set +e
+          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --export-check > build/egress27/export-check.txt 2>/dev/null
+          echo "exit $?"; cat build/egress27/export-check.txt
+          grep '^EXPORT-CHECK' build/egress27/export-check.txt | head -20 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - export in a profile process::/'
+          exit 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -327,6 +337,18 @@ jobs:
           build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --history-check > build/history-check.txt 2>/dev/null
           echo "exit $?"; cat build/history-check.txt
           grep '^HISTORY-CHECK' build/history-check.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=history in a profile process::/'
+          exit 0
+      - name: Safari's File › Export › Bookmarks… in a profile's process (a measurement)
+        # Where its save panel opens in a process whose home is the profile's, what Safari's
+        # exporter is given, and what it writes where (SafariExportCheck). Never fails the build.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          set +e
+          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --export-check > build/export-check.txt 2>/dev/null
+          echo "exit $?"; cat build/export-check.txt
+          grep '^EXPORT-CHECK' build/export-check.txt | head -20 | cut -c1-500 | sed 's/^/::notice title=export in a profile process::/'
           exit 0
       - name: Compare the fingerprint surface with this Mac's real Safari (safaridriver)
         run: |

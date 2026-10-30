@@ -48,6 +48,10 @@ MainActor.assumeIsolated {
         // Whether Safari's history can run inside a profile's process: its service's own code, in
         // this process, with its database in the profile's home (SafariHistoryCheck; CI).
         SafariHistoryCheck.run(arguments: arguments)
+    } else if arguments.contains("--export-check") {
+        // What Safari's File › Export › Bookmarks… does in a profile's process: where its save panel
+        // opens, what its exporter is given, what it writes where (SafariExportCheck; CI).
+        SafariExportCheck.run(arguments: arguments)
     } else if arguments.contains("--default-browser-check") {
         // Whether Safari's own question about the default browser throws in a profile's process of
         // this app, and what the system answers about http and https (SafariChrome; CI runs it on
