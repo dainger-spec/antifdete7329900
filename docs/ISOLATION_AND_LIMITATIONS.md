@@ -144,6 +144,27 @@ decision before anything changes):
   A persistent profile no longer needs it: its store is made with a browser's ratios and WebKit
   answers Safari's figure itself (`BrowserStorageQuota`; the script leaves any larger figure alone).
 
+**WebKit's behaviors that follow the SDK.** WebKit turns some of its features on for an app only
+when the app's executable declares a recent enough SDK (`linkedOnOrAfterSDKWithBehavior`), and for
+Safari always: WTF's `computeSDKAlignedBehaviors` returns every behavior when the process is Safari.
+This app's executable, built by SwiftPM, declares the SDK of its platform in Package.swift — "sdk
+14.0", measured on the owner's build with Xcode 27.1 — so every behavior WebKit gates after macOS 14
+was off in every page: among them, by WebKit's open source, the network loader Safari uses
+(`UseCFNetworkNetworkLoader`, macOS 15), `focus` dispatched before the client is told (15.4),
+`user-select` superseding `-webkit-user-select` (27), and Trusted Types (the owner's Mac with macOS
+27: `window.trustedTypes` there in Safari 27, missing in a profile). Every process of this app calls
+`+[WKProcessPool _setLinkedOnOrAfterEverything]` first thing — WebKit's own switch, made for Safari
+— so its WebKit behaviors are Safari's whatever SDK it declares (`SDKBehaviors`; rules 1–3). WebKit
+hands them to every process it starts. Other frameworks follow the declared SDK too (AppKit's
+visible frame of the screen, which WebKit gives pages as `screen.availHeight`, is measured for it).
+CI shows what follows the SDK on each runner: the app as built and a copy whose executable declares
+the runner's own SDK, each without and with the switch, by the window's own properties and the
+screen, with the app's screens rendered from the copy (`--sdk-check`, `scripts/sdk_check.sh`); and
+which SDK SwiftPM writes, built four ways (`scripts/swiftpm_sdk_probe.sh`).
+`DigitalCredential` and `MediaSessionCoordinator` do not follow the SDK: WebKit turns them on only
+for a process with an entitlement Apple grants (`com.apple.developer.web-browser`,
+`com.apple.developer.group-session.urlactivity`).
+
 ### What the public WKWebView / WebKit APIs let a profile control
 
 | Attribute | Mechanism | Reach |

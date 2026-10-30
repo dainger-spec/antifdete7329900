@@ -1756,6 +1756,11 @@ final class SelfTest {
             }
         }
 
+        // WebKit's behaviors that follow an app's SDK (Trusted Types and the rest) are Safari's —
+        // every one on — in this process, whatever SDK the app was built with (SDKBehaviors).
+        check("surface: WebKit's behaviors that follow the SDK are Safari's, every one (_setLinkedOnOrAfterEverything)",
+              SDKBehaviors.matched, "this WebKit has no such switch; built with the macOS \(SDKBehaviors.linkedSDK ?? "?") SDK")
+
         // A persistent profile's store is made with a browser's share of the disk
         // (BrowserStorageQuota): Safari's quota is then WebKit's own answer. Read in a world the
         // profile's scripts are not in, which would otherwise map an app's figure to Safari's.

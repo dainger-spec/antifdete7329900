@@ -153,6 +153,18 @@ jobs:
           echo "exit $?"; cat build/egress27/history-check-fallback.txt
           grep '^HISTORY-CHECK' build/egress27/history-check-fallback.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - history in a profile process (fallback)::/'
           exit 0
+      - name: What follows the SDK on macOS 27 — the build as made, and a copy that declares Xcode 27's SDK (a measurement)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          scripts/sdk_check.sh build/unsandboxed/PrivacyBrowser.app build/egress27/sdk-check "macOS 27 - SDK behaviors" \
+            "$(xcrun --show-sdk-version)" build/egress27/sdk-check/ui
+      - name: Which SDK SwiftPM writes into an executable on macOS 27 (a measurement)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 6
+        run: scripts/swiftpm_sdk_probe.sh build/egress27/swiftpm-sdk "macOS 27 - SwiftPM's SDK version"
       - name: Safari 27's File › Export › Bookmarks… in a profile's process (a measurement)
         if: always()
         continue-on-error: true
@@ -344,6 +356,27 @@ jobs:
           echo "exit $?"; cat build/history-check-fallback.txt
           grep '^HISTORY-CHECK' build/history-check-fallback.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=history in a profile process (fallback)::/'
           exit 0
+      - name: What follows the SDK — the build as made, and a copy that declares this Xcode's SDK (a measurement)
+        # Whether window.trustedTypes and the window's other interfaces, the screen's visible frame
+        # (screen.availHeight) and the app's own screens follow the SDK the executable declares, and
+        # whether WebKit's switch (SDKBehaviors) puts a page where Safari's is. Never fails the build.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          scripts/sdk_check.sh build/unsandboxed/PrivacyBrowser.app build/sdk-check "SDK behaviors" \
+            "$(xcrun --show-sdk-version)" build/sdk-check/ui
+      - name: Which SDK SwiftPM writes into an executable (a measurement)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 6
+        run: scripts/swiftpm_sdk_probe.sh build/sdk-check/swiftpm "SwiftPM's SDK version"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk-check
+          path: build/sdk-check
+          if-no-files-found: ignore
       - name: Safari's File › Export › Bookmarks… in a profile's process (a measurement)
         # Where its save panel opens in a process whose home is the profile's, what Safari's
         # exporter is given, and what it writes where (SafariExportCheck). Never fails the build.

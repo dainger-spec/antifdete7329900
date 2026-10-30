@@ -6,6 +6,15 @@ import AppKit
 // Top-level code runs on the main thread; Swift 5 mode does not infer main-actor isolation for it.
 MainActor.assumeIsolated {
     let arguments = CommandLine.arguments
+    if arguments.contains("--sdk-check") {
+        // What follows the SDK this build was made with — a page's interfaces, the screen's visible
+        // frame — with WebKit's behaviors as the build's or, with --everything, as Safari's
+        // (SDKBehaviors.swift; scripts/sdk_check.sh). It sets them itself, so it comes first.
+        SDKCheck.run(arguments: arguments)
+    }
+    // WebKit's behaviors that follow an app's SDK, every one on, as WebKit has them for Safari:
+    // before any web view or web process exists (SDKBehaviors.swift says why).
+    SDKBehaviors.matchSafari()
     if arguments.contains("--exception-check") {
         // An exception thrown inside AppKit's run loop, with this build's exception hooks or the
         // earlier way (ExceptionLog.swift): installs its own, so it comes before the line below.
