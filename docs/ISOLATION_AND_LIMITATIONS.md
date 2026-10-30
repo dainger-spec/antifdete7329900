@@ -800,6 +800,26 @@ launch (one that would make the process windowless) are not in the process, and 
 `TMPDIR` are in the profile's home. Foundation's own temporary directory is reported, not
 checked: where it reads it from is the system's.
 
+**Preferences.** `CFFIXED_USER_HOME` moves what asks the process for its home; it does not move
+where cfprefsd keeps a preferences domain, which stays the account's real `~/Library/Preferences`
+(measured by the menu walk, CI run 457, macOS 26 and 27: no preferences file in a profile's home).
+So nothing of a profile's that must stay its own is written to a domain:
+
+- The settings a profile gives Safari's own services (AutoFill, Safari Suggestions, Safe Browsing,
+  DNS prefetching, and the rest of `SafariChrome.servicePreferenceValues`) live in its process's
+  argument domain only, which every lookup sees first and which is never written. They used to be
+  written to `com.apple.Safari` as well, which put them in the account's
+  `~/Library/Preferences/com.apple.Safari.plist` — among the real Safari's places, the same file for
+  every profile. **Checked by the self-test**: Safari's lookups in the profile's process answer
+  with the profile's values, and that file is not written while the profile runs.
+- **Open:** what Safari's chrome saves through the standard defaults — its window's frame, its
+  toolbar, sidebar and favorites bar, the start page's sections, some WebKit preferences it keeps,
+  dates of its own updates — goes to this app's own domain, `~/Library/Preferences/<bundle id>.plist`
+  in the account's real home: shared by every profile and the manager, outside the vault. No page
+  data was seen there in the walk; whether something of a profile's browsing could land there (a
+  recent search, say) is not measured. Keeping it per profile is a decision of the owner's (it
+  would start every existing profile from Safari's defaults for these).
+
 **The system log.** Lines the app writes to the unified log (kept on disk at notice level and
 above, and in a sysdiagnose) carry the user's data only as `<private>`: profile names, proxy hosts
 and exit IPs, addresses, paths, settings and error texts. In clear are only a profile's random id,

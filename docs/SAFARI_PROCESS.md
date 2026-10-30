@@ -553,7 +553,10 @@ blockers, each named by its own crash:
    `+[NSApplication _crashOnException:]`. `CFFIXED_USER_HOME` moves the domain into a directory of
    ours (§9, and `--paths` confirms `NSHomeDirectory()`, Application Support and Caches all follow),
    which is both the fix and the per-profile layout; a seeded `com.apple.Safari.plist` there is what
-   supplies the values rather than skipping them.
+   supplies the values rather than skipping them. (Measured later, CI run 457: with
+   `CFFIXED_USER_HOME` the domain is no longer refused, but it is kept in the account's real
+   `~/Library/Preferences`, not in the profile's directory — no preferences file appeared in a
+   profile's home. What it fixed was the refusal; ISOLATION_AND_LIMITATIONS.md, "Preferences".)
 3. **The main bundle is not Safari's.** Its chrome asks the main bundle for icons by name — CoreUI
    says so: *"unable to find a bundle 'NSBundle </tmp>' with identifier '(null)'"* — so icons are
    `nil` and an array built from one throws, in

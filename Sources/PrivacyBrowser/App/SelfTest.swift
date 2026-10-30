@@ -684,6 +684,16 @@ final class SelfTest {
         func sameDocumentNavigation(_ webView: WKWebView, navigation: WKNavigation?, type: Int) { sameDocument.append(type) }
     }
 
+    /// A preferences file's keys and when it was written, as one line (or "absent"), read as a file.
+    private static func preferencesFileState(_ path: String) -> String {
+        guard let data = FileManager.default.contents(atPath: path),
+              let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] else {
+            return "absent"
+        }
+        let written = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+        return "\(plist.count) keys (\(plist.keys.sorted().joined(separator: ", "))), written \(written.map { "\($0)" } ?? "?")"
+    }
+
     private static func javaScriptError(_ error: Error) -> String {
         let error = error as NSError
         let message = error.userInfo["WKJavaScriptExceptionMessage"] as? String
@@ -1042,6 +1052,10 @@ final class SelfTest {
 
         info("egress-token \(run)")
         info("egress-window begin \(Date().timeIntervalSince1970)")
+        // The account's own com.apple.Safari preferences outside Safari's container, as a file:
+        // a profile's settings for Safari's services stay in its process (SafariChrome).
+        let accountSafariPreferences = SafariPaths.realHome.map { $0 + "/Library/Preferences/com.apple.Safari.plist" }
+        let accountSafariBefore = accountSafariPreferences.map(Self.preferencesFileState)
         // The XPC services that start while the profile runs, and what they hold open in the real
         // Safari's places: the profile's guard does not see a service asked for through libxpc.
         let xpcWatch = SafariPaths.realHome.map { XPCServiceWatch(realHome: $0) }
@@ -1192,6 +1206,10 @@ final class SelfTest {
                   report.safariPreferences["UniversalSearchEnabled"] == "0"
                     && report.safariPreferences["AutoFillPasswords"] == "0",
                   "\(report.safariPreferences)")
+            let accountSafariAfter = accountSafariPreferences.map(Self.preferencesFileState)
+            check("Safari chrome: the profile's settings for Safari's services stay in its process — the account's ~/Library/Preferences/com.apple.Safari.plist is not written",
+                  accountSafariAfter == accountSafariBefore,
+                  "before: \(accountSafariBefore ?? "?"), now: \(accountSafariAfter ?? "?")")
             info("Safari chrome: WebKit \(report.webKitVersion)")
             // The preference decides dns-prefetch only before WebKit 7621; from then on the
             // content rules do (checked above with <a ping>), so this is a check only there.

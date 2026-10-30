@@ -330,8 +330,8 @@ enum SafariChrome {
     // MARK: Safari's own services
 
     /// The `com.apple.Safari` keys this file sets for a profile, and what each one is set to.
-    /// Safari's chrome reads them from the profile's own preferences (the process has a home of its
-    /// own, `CFFIXED_USER_HOME`), so they are the profile's and nobody else's.
+    /// They live in the profile's process only (`configureSafarisOwnServices`), so they are the
+    /// profile's and nobody else's.
     ///
     ///   * Safari's own AutoFill saves passwords into the user's iCloud Keychain — shared by every
     ///     profile and by the real Safari, the opposite of what a profile is for, and next to this
@@ -374,20 +374,24 @@ enum SafariChrome {
         ]
     }
 
-    /// Writes `servicePreferenceValues` into the profile's `com.apple.Safari` domain, and puts the
-    /// same values in the argument domain of this process — which every domain's lookups see
-    /// before what is stored or registered, and which is never written anywhere — in case some
-    /// part of Safari reads them from a domain other than the one written. Called before Safari's
-    /// frameworks load.
+    /// Puts `servicePreferenceValues` in the argument domain of this process, which every
+    /// domain's lookups see before what is stored or registered, and which is never written
+    /// anywhere. Called before Safari's frameworks load.
+    ///
+    /// Nothing is written to a preferences domain: `CFFIXED_USER_HOME` moves the process's home,
+    /// not where cfprefsd keeps a domain. These settings used to be written to `com.apple.Safari`
+    /// as well, meant as the profile's own, and the menu walk (CI run 457, macOS 26 and 27) found
+    /// them in the account's real ~/Library/Preferences/com.apple.Safari.plist — every profile's
+    /// launch writing the same file, outside the vault, among the real Safari's places — and no
+    /// preferences file in the profile's home. Measured in run 460 with the argument domain alone:
+    /// Core Foundation's lookup of `com.apple.Safari`, a suite of it and the standard defaults all
+    /// answer with the profile's values, and the account's file is not written.
     static func configureSafarisOwnServices(for configuration: ProfileConfiguration) {
-        let domain = "com.apple.Safari" as CFString
         var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         for (key, value) in servicePreferenceValues(for: configuration) {
-            CFPreferencesSetAppValue(key as CFString, value ? kCFBooleanTrue : kCFBooleanFalse, domain)
             arguments[key] = value
         }
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
-        CFPreferencesAppSynchronize(domain)
         servicePreferenceKeys = servicePreferenceValues(for: configuration).map(\.0)
         log.notice("Safari's own services are set for this profile (\(servicePreferenceKeys.count, privacy: .public) keys)")
     }
