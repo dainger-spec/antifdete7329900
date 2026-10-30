@@ -17,6 +17,8 @@ import os
 ///     page's own files, if it has any), and the keys of the texts its error pages show.
 ///   * WAITING: every method of Safari's frameworks whose name says it waits for an answer
 ///     ("Blocking", "WaitUntil", "UntilResponse", "Synchronous", "WaitFor").
+///   * FORMS: every method of Safari's frameworks, in whatever class, whose name says it takes a
+///     form's submission or saves a password: where Safari's own offer to save one starts.
 ///   * BOOKMARKS-FILE: what a new profile's Safari keeps as bookmarks.
 ///
 /// In a home of its own and held to a closed proxy (`SafariChrome.prepareForCheck`): nothing here
@@ -133,6 +135,7 @@ enum SafariChromeInventory {
         ("SUBSCRIPTION", "(?i)cloudsubscription|featureavailability", nil),
     ]
     private static let waiting = "(?i)blocking|waituntil|untilresponse|synchronous|waitfor"
+    private static let forms = "(?i)submitform|willsubmit|didsubmit|formvalues|formdelegate|savepassword|savecredential|offertosave|shouldoffer|passwordsav"
 
     private static func classes() {
         let images = (0..<_dyld_image_count()).compactMap { _dyld_get_image_name($0).map { String(cString: $0) } }
@@ -149,6 +152,9 @@ enum SafariChromeInventory {
                 let methods = methodList(cls, prefix: "-") + (object_getClass(cls).map { methodList($0, prefix: "+") } ?? [])
                 for method in methods where method.name.range(of: waiting, options: .regularExpression) != nil {
                     print("WAITING \(name) \(method.prefix)\(method.name) \(method.types)")
+                }
+                for method in methods where method.name.range(of: forms, options: .regularExpression) != nil {
+                    print("FORMS \(name) \(method.prefix)\(method.name) \(method.types)")
                 }
                 for topic in topics where name.range(of: topic.classes, options: .regularExpression) != nil {
                     let shown = methods.filter { topic.methods == nil || $0.name.range(of: topic.methods!, options: .regularExpression) != nil }
