@@ -348,6 +348,20 @@ jobs:
         run: |
           grep "^PAYMENTS-NAMES" build/payments.txt 2>/dev/null | head -10 | cut -c1-4000 \
             | sed 's/^/::notice title=Payments and push - window names::/' || true
+      - name: The window's own properties a profile without a proxy lacks, by name (a measurement)
+        # Without a proxy a profile in Safari's window has 1019 of Safari's 1044: WebRTC's 23 and
+        # two more, which only a count named so far. The same page as the step above, the profile
+        # without a proxy.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          set +e
+          python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --trust system --out build/payments-direct \
+            --proxy none --variants shipped-safari-window | tee build/payments-direct.txt
+          grep "^PAYMENTS-NAMES" build/payments-direct.txt | head -5 | cut -c1-4000 \
+            | sed 's/^/::notice title=Window names - Safari'"'"'s window without a proxy::/'
+          exit 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -360,6 +374,7 @@ jobs:
             build/leaks
             build/egress
             build/payments
+            build/payments-direct
           if-no-files-found: ignore
       - name: App Sandbox container migration (unsandboxed data → sandboxed first launch)
         run: |
