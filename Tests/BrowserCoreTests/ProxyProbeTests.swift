@@ -53,6 +53,48 @@ final class ProxyProbeTests: XCTestCase {
         XCTAssertEqual(unknown.failedStep, 1)
     }
 
+    /// A VPN whose DNS answers every name with a substitute address (fake IP), a name that does not
+    /// exist too: what fails afterwards at that address is said as that, not as a proxy that
+    /// refuses, closes or says nothing.
+    func testAVPNsSubstituteAddressesAreToldApart() {
+        for address in ["198.18.0.1", "198.19.255.254", "240.0.0.91", "255.255.255.255", "::ffff:198.18.0.7", "::FFFF:240.0.0.1"] {
+            XCTAssertTrue(SubstituteDNS.isSubstitute(address), address)
+        }
+        for address in ["198.17.255.255", "198.20.0.1", "239.255.255.255", "203.0.113.5", "127.0.0.1", "10.0.0.1",
+                        "100.64.0.1", "2001:db8::5", "fc00::1", "::1", "198.18.0", "198.18.0.256", "240.0.0.91.1",
+                        "proxy.example", ""] {
+            XCTAssertFalse(SubstituteDNS.isSubstitute(address), address)
+        }
+
+        let fake = ["240.0.0.91"]
+        for verdict: ProxyDiagnosis.Verdict in [.refused, .unreachable, .connectTimeout, .silent, .closedWithoutAnswer] {
+            let said = ProxyProbe.substituted(ProxyDiagnosis(verdict: verdict), addresses: fake)
+            XCTAssertEqual(said.verdict, .substituteDNS, "\(verdict)")
+            XCTAssertEqual(said.connectedAddress, "240.0.0.91", "\(verdict)")
+            XCTAssertEqual(said.failedStep, 1)
+            XCTAssertFalse(said.isWorking)
+        }
+        // The connection taken, at the second address: that one is said.
+        XCTAssertEqual(ProxyProbe.substituted(ProxyDiagnosis(verdict: .closedWithoutAnswer, connectedAddress: "198.18.0.9"),
+                                              addresses: ["198.18.0.8", "198.18.0.9"]).connectedAddress, "198.18.0.9")
+        // Something answered: the VPN reached a real host by its name, and what it said stands.
+        for verdict: ProxyDiagnosis.Verdict in [.works, .reachable, .notAProxy, .credentialsNeeded, .credentialsRejected,
+                                                .refusedByProxy, .noUpstream] {
+            XCTAssertEqual(ProxyProbe.substituted(ProxyDiagnosis(verdict: verdict), addresses: fake).verdict, verdict)
+        }
+        // One real address among them is a real answer; no address, nothing to say.
+        XCTAssertEqual(ProxyProbe.substituted(ProxyDiagnosis(verdict: .refused), addresses: ["240.0.0.91", "203.0.113.5"]).verdict, .refused)
+        XCTAssertEqual(ProxyProbe.substituted(ProxyDiagnosis(verdict: .refused), addresses: []).verdict, .refused)
+
+        // An address written in the settings is not a resolver's answer: what fails there keeps its verdict.
+        for host in ["198.18.0.1", "240.0.0.91", "2001:db8::5"] {
+            XCTAssertTrue(ProbeSocket.isNumeric(host), host)
+        }
+        for host in ["proxy.example", "no-such-proxy.invalid", ""] {
+            XCTAssertFalse(ProbeSocket.isNumeric(host), host)
+        }
+    }
+
     func testSomethingThatIsNoProxyIsSaidSoWithWhatItAnswered() throws {
         let server = try FakeProxyServer(.banner("SSH-2.0-OpenSSH_9.6\r\n"))
         defer { server.stop() }
@@ -173,6 +215,9 @@ final class ProxyProbeTests: XCTestCase {
         let read = try JSONDecoder().decode(ProxyDiagnosis.self, from: later)
         XCTAssertEqual(read.verdict, .silent)
         XCTAssertEqual(read.kinds, [.socks5])
+        // The substitute verdict and its address survive a round trip.
+        let substitute = ProxyDiagnosis(verdict: .substituteDNS, connectedAddress: "240.0.0.91")
+        XCTAssertEqual(try JSONDecoder().decode(ProxyDiagnosis.self, from: JSONEncoder().encode(substitute)), substitute)
     }
 
     func testWirePieces() {

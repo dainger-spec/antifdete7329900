@@ -478,6 +478,7 @@
 "proxies.advice.refusedByProxy" = "Proxies tied to IP addresses answer all others like this: add this Mac's IP address in the provider's dashboard. A plan that does not allow this site or port answers so too.";
 "proxies.advice.resolverFailed" = "Check this Mac's internet connection and DNS, or enter the proxy by its IP address.";
 "proxies.advice.silent" = "This is how a proxy with an IP whitelist treats addresses that are not on it: add this Mac's public IP address to the whitelist in the provider's dashboard, or switch the proxy to a user name and password. If the whitelist is right, the proxy's back end is down: ask the provider.";
+"proxies.advice.substituteDNS" = "Check the address for a typo. For the real answer, check the proxy with the VPN turned off, or exclude its name from the VPN's substitute addresses (fake IP) in the VPN's settings.";
 "proxies.advice.unreachable" = "Check this Mac's network connection: a VPN or a firewall on this Mac can be in the way.";
 "proxies.assign.unknownLeftOut" = "Ticked proxies whose type is not known yet are left out: %ld. Check them first.";
 "proxies.assign.unknownType" = "Type unknown";
@@ -506,6 +507,7 @@
 "proxies.explain.refusedByProxy" = "It answered: “%@”.";
 "proxies.explain.resolverFailed" = "The DNS lookup of “%@” failed or got no answer, so whether the proxy exists is not known.";
 "proxies.explain.silent" = "The port is open and took the connection. Then nothing came back — not to a SOCKS5 greeting, not to an HTTP request.";
+"proxies.explain.substituteDNS" = "The name “%1$@” resolved to %2$@ — an address from a range no real host on the internet has, which a VPN's DNS gives out in place of real ones (fake IP). Such a DNS answers every name, even one that does not exist, and the connection to that address got no proxy's answer. Whether there is no such host or the proxy does not answer cannot be told from this Mac.";
 "proxies.explain.unreachable" = "There is no route from this Mac to %@.";
 "proxies.export" = "Export…";
 "proxies.export.action" = "Export with Passwords (%ld)…";
@@ -542,6 +544,7 @@
 "proxies.state.refusedByProxy" = "Refuses this Mac";
 "proxies.state.resolverFailed" = "DNS lookup failed";
 "proxies.state.silent" = "Silent after connecting";
+"proxies.state.substituteDNS" = "VPN's substitute DNS";
 "proxies.state.unreachable" = "Host unreachable";
 "proxies.step.connection" = "Connection";
 "proxies.step.connection.open" = "Port %ld takes connections";
@@ -570,6 +573,7 @@
 "proxies.step.name.ip" = "An IP address: nothing to look up";
 "proxies.step.name.notFound" = "No such host";
 "proxies.step.name.resolved" = "Resolves to %@";
+"proxies.step.name.substitute" = "A VPN's substitute address, %@: the VPN connects by the name";
 "proxies.step.notReached" = "Not reached";
 "proxies.step.through" = "Through the proxy";
 "proxies.step.through.answered" = "Answered";
@@ -684,6 +688,7 @@
 "proxies.title.refusedByProxy" = "The proxy refuses to serve this Mac";
 "proxies.title.resolverFailed" = "The proxy's name could not be looked up";
 "proxies.title.silent" = "The proxy takes the connection and stays silent";
+"proxies.title.substituteDNS" = "The proxy's name was answered by a VPN's substitute DNS";
 "proxies.title.unchecked" = "Not checked yet";
 "proxies.title.unreachable" = "The proxy's host cannot be reached";
 "proxies.title.works" = "The proxy works";

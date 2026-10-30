@@ -478,6 +478,7 @@
 "proxies.advice.refusedByProxy" = "Так прокси, привязанные к IP-адресам, отвечают всем остальным: добавьте IP этого Mac в кабинете провайдера. Так же отвечает тариф, который не разрешает этот сайт или порт.";
 "proxies.advice.resolverFailed" = "Проверьте интернет и DNS этого Mac или укажите прокси по IP-адресу.";
 "proxies.advice.silent" = "Так прокси с белым списком IP встречает адреса не из списка: добавьте внешний IP этого Mac в белый список в кабинете провайдера или переключите прокси на вход по логину и паролю. Если белый список в порядке — у прокси упал бэкенд: напишите провайдеру.";
+"proxies.advice.substituteDNS" = "Проверьте адрес на опечатку. Чтобы увидеть настоящий ответ, проверьте прокси с выключенным VPN или исключите его имя из подменных адресов (fake IP) в настройках VPN.";
 "proxies.advice.unreachable" = "Проверьте сеть этого Mac: мешать может VPN или файрвол на этом Mac.";
 "proxies.assign.unknownLeftOut" = "Отмеченные прокси с ещё неизвестным типом не назначаются: %ld. Сначала проверьте их.";
 "proxies.assign.unknownType" = "Тип неизвестен";
@@ -506,6 +507,7 @@
 "proxies.explain.refusedByProxy" = "Его ответ: «%@».";
 "proxies.explain.resolverFailed" = "DNS-запрос имени «%@» не удался или остался без ответа, поэтому неизвестно, существует ли прокси.";
 "proxies.explain.silent" = "Порт открыт и принял соединение. Но дальше — ни слова: ни на приветствие SOCKS5, ни на HTTP-запрос.";
+"proxies.explain.substituteDNS" = "Имя «%1$@» разрешилось в %2$@ — адрес из диапазона, которого нет ни у одного настоящего хоста в интернете: такие адреса вместо настоящих выдаёт DNS у VPN (fake IP). Такой DNS отвечает на любое имя, даже несуществующее, а соединение с этим адресом ответа прокси не получило. Отсюда не отличить: такого хоста нет или прокси не отвечает.";
 "proxies.explain.unreachable" = "От этого Mac нет маршрута до %@.";
 "proxies.export" = "Экспорт…";
 "proxies.export.action" = "Экспортировать с паролями (%ld)…";
@@ -542,6 +544,7 @@
 "proxies.state.refusedByProxy" = "Отказывает этому Mac";
 "proxies.state.resolverFailed" = "Сбой DNS";
 "proxies.state.silent" = "Молчит после соединения";
+"proxies.state.substituteDNS" = "Подменный DNS VPN";
 "proxies.state.unreachable" = "Хост недоступен";
 "proxies.step.connection" = "Соединение";
 "proxies.step.connection.open" = "Порт %ld принимает соединения";
@@ -570,6 +573,7 @@
 "proxies.step.name.ip" = "IP-адрес: искать нечего";
 "proxies.step.name.notFound" = "Такого хоста нет";
 "proxies.step.name.resolved" = "Разрешается в %@";
+"proxies.step.name.substitute" = "Подменный адрес VPN, %@: VPN соединяется по имени";
 "proxies.step.notReached" = "Не дошли";
 "proxies.step.through" = "Через прокси";
 "proxies.step.through.answered" = "Ответ получен";
@@ -684,6 +688,7 @@
 "proxies.title.refusedByProxy" = "Прокси отказывается обслуживать этот Mac";
 "proxies.title.resolverFailed" = "Не удалось узнать адрес прокси";
 "proxies.title.silent" = "Прокси принимает соединение и молчит";
+"proxies.title.substituteDNS" = "Имя прокси ответил подменный DNS VPN";
 "proxies.title.unchecked" = "Ещё не проверялся";
 "proxies.title.unreachable" = "Хост прокси недоступен";
 "proxies.title.works" = "Прокси работает";

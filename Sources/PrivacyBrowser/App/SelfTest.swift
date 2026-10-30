@@ -2187,8 +2187,16 @@ final class SelfTest {
         info("egress-control \(control)")
         let unknownHost = "proxy-\(control).selftest.invalid"
         let unresolvedProbe = await ProxyChecker.probe(latencySamples: 1).run(ProxySettings(kind: .socks5, host: unknownHost, port: 1080))
-        check("proxy probe: a proxy whose host name does not exist is told apart (host not found)",
-              unresolvedProbe.verdict == .hostNotFound, String(describing: unresolvedProbe))
+        // Behind a VPN whose DNS gives every name a substitute address (fake IP), no resolver says
+        // "no such host": the probe must then say that, not that a proxy refused or closed.
+        let substituted = unresolvedProbe.verdict == .substituteDNS
+            && unresolvedProbe.connectedAddress.map(SubstituteDNS.isSubstitute) == true
+        if substituted {
+            info("this Mac's resolver gives a name that does not exist a VPN's substitute address "
+                 + "(\(unresolvedProbe.connectedAddress ?? "")): the probe says so, as host not found cannot be told here")
+        }
+        check("proxy probe: a proxy whose host name does not exist is told apart (host not found, or a VPN's substitute DNS said as that)",
+              unresolvedProbe.verdict == .hostNotFound || substituted, String(describing: unresolvedProbe))
         let unresolved = ProxyChecker.result(of: await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: unknownHost, port: 1080)))
         check("proxy checker: a proxy whose host does not resolve is dead (nothing goes direct)",
               unresolved.failure == .noAnswer, String(describing: unresolved))

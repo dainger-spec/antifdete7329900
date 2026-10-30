@@ -2,7 +2,8 @@ import Foundation
 
 /// Asks a proxy, one step at a time, what it is and whether it works (`ProxyDiagnosis`):
 ///
-///   1. its name, resolved (an IP address is taken as it is);
+///   1. its name, resolved (an IP address is taken as it is) — when every address is a VPN's
+///      substitute (`SubstituteDNS`) and no proxy answers there, that is the verdict;
 ///   2. a TCP connection to it;
 ///   3. a handshake as a SOCKS5 proxy and, on another connection at the same time, as an HTTP
 ///      proxy (CONNECT) — whichever answers is what it is, whatever the list says;
@@ -75,7 +76,28 @@ public struct ProxyProbe: Sendable {
         case .failed(let reason): return ProxyDiagnosis(verdict: .resolverFailed, answer: reason)
         case .addresses(let found): addresses = found
         }
+        let diagnosis = diagnose(proxy, at: addresses)
+        // An address written in the settings was not a resolver's answer.
+        return ProbeSocket.isNumeric(proxy.host) ? diagnosis : Self.substituted(diagnosis, addresses: addresses.map(\.text))
+    }
 
+    /// A verdict that no proxy answered, about a name all of whose addresses are a VPN's substitutes
+    /// (`SubstituteDNS`), said as that instead: behind such a DNS a name that does not exist gets an
+    /// address too and fails only at the connection, inside the VPN, so "refused" or "closes at
+    /// once" would send the person after the wrong thing. Whatever did answer (a proxy, a login,
+    /// something else) is kept: the VPN reached a real host by the name.
+    static func substituted(_ diagnosis: ProxyDiagnosis, addresses: [String]) -> ProxyDiagnosis {
+        guard let first = addresses.first, addresses.allSatisfy(SubstituteDNS.isSubstitute) else { return diagnosis }
+        switch diagnosis.verdict {
+        case .refused, .unreachable, .connectTimeout, .silent, .closedWithoutAnswer:
+            return ProxyDiagnosis(verdict: .substituteDNS, connectedAddress: diagnosis.connectedAddress ?? first)
+        default:
+            return diagnosis
+        }
+    }
+
+    /// Steps 2 to 6, at the addresses the name resolved to.
+    private func diagnose(_ proxy: ProxySettings, at addresses: [ProbeSocket.Address]) -> ProxyDiagnosis {
         // 2. A connection: the first address that takes one.
         var failures: [ProbeSocket.ConnectFailure] = []
         var reached: ProbeSocket.Address?

@@ -62,7 +62,7 @@ enum ProxyState: Equatable {
         case .dead: return "xmark.circle.fill"
         case let .failed(verdict):
             switch verdict {
-            case .hostNotFound, .resolverFailed: return "questionmark.circle.fill"
+            case .hostNotFound, .resolverFailed, .substituteDNS: return "questionmark.circle.fill"
             case .refused: return "nosign"
             case .unreachable, .connectTimeout: return "xmark.circle.fill"
             case .silent: return "hourglass"
@@ -106,6 +106,7 @@ enum ProxyState: Equatable {
             switch verdict {
             case .hostNotFound: return L("proxies.state.hostNotFound")
             case .resolverFailed: return L("proxies.state.resolverFailed")
+            case .substituteDNS: return L("proxies.state.substituteDNS")
             case .refused: return L("proxies.state.refused")
             case .unreachable: return L("proxies.state.unreachable")
             case .connectTimeout: return L("proxies.state.connectTimeout")
@@ -134,6 +135,7 @@ enum ProxyState: Equatable {
             switch verdict {
             case .hostNotFound: return L("proxies.title.hostNotFound")
             case .resolverFailed: return L("proxies.title.resolverFailed")
+            case .substituteDNS: return L("proxies.title.substituteDNS")
             case .refused: return L("proxies.title.refused")
             case .unreachable: return L("proxies.title.unreachable")
             case .connectTimeout: return L("proxies.title.connectTimeout")
@@ -222,6 +224,9 @@ struct ProxyReport {
                 return (String(format: L("proxies.explain.hostNotFound"), host), L("proxies.advice.hostNotFound"))
             case .resolverFailed:
                 return (String(format: L("proxies.explain.resolverFailed"), host), L("proxies.advice.resolverFailed"))
+            case .substituteDNS:
+                return (String(format: L("proxies.explain.substituteDNS"), host, diagnosis?.connectedAddress ?? "—"), // l10n: not text
+                        L("proxies.advice.substituteDNS"))
             case .refused:
                 return (String(format: L("proxies.explain.refused"), host, proxy.port), L("proxies.advice.refused"))
             case .unreachable:
@@ -276,7 +281,9 @@ struct ProxyReport {
             if isIPAddress(proxy.host) {
                 name = L("proxies.step.name.ip")
             } else if let address = diagnosis.connectedAddress {
-                name = String(format: L("proxies.step.name.resolved"), address)
+                // A VPN's substitute is no real address of the proxy: the VPN connects to it by name.
+                name = SubstituteDNS.isSubstitute(address) ? String(format: L("proxies.step.name.substitute"), address)
+                                                           : String(format: L("proxies.step.name.resolved"), address)
             } else {
                 name = L("proxies.step.name.found")
             }

@@ -16,6 +16,11 @@ public struct ProxyDiagnosis: Codable, Equatable, Sendable {
         case hostNotFound
         /// The resolver did not answer, or failed (no network, a DNS problem), so nothing is known.
         case resolverFailed
+        /// The name was answered by a VPN's DNS with substitute addresses only (`SubstituteDNS`), and
+        /// no proxy answered there: such a DNS gives any name an address, one that does not exist
+        /// too, so whether the host exists cannot be told from this Mac (`connectedAddress` is the
+        /// substitute tried).
+        case substituteDNS
         /// The host refused the connection: nothing listens on that port.
         case refused
         /// The host cannot be reached at all (no route to it).
@@ -67,7 +72,8 @@ public struct ProxyDiagnosis: Codable, Equatable, Sendable {
     /// What the proxy said where it says why: an HTTP status line, a SOCKS5 reply, the first bytes
     /// of something else. Never a user name or password.
     public var answer: String?
-    /// The address the connection was made to, as the resolver gave it.
+    /// The address the connection was made to, as the resolver gave it (for `substituteDNS`, the
+    /// one tried).
     public var connectedAddress: String?
     /// How long setting up a tunnel took, in milliseconds (connection, handshake, login, tunnel
     /// answered), once per try that got that far.
@@ -100,7 +106,7 @@ public struct ProxyDiagnosis: Codable, Equatable, Sendable {
     /// connection, 3 the handshake, 4 the login, 5 the tunnel; nil when none did.
     public var failedStep: Int? {
         switch verdict {
-        case .hostNotFound, .resolverFailed: return 1
+        case .hostNotFound, .resolverFailed, .substituteDNS: return 1
         case .refused, .unreachable, .connectTimeout: return 2
         case .silent, .closedWithoutAnswer, .notAProxy: return 3
         case .credentialsNeeded, .credentialsRejected, .refusedByProxy: return 4

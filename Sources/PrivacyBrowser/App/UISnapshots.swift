@@ -336,8 +336,9 @@ enum UISnapshots {
     }
 
     /// The sample list: working (one of them slow), each way of failing the list tells apart (silent
-    /// after connecting, login rejected, host not found, refused, no connection), and one whose type
-    /// the first check is to find. Berlin first, the silent one fourth.
+    /// after connecting, login rejected, host not found, a VPN's substitute DNS, refused, no
+    /// connection), and one whose type the first check is to find. Berlin first, the silent one
+    /// fourth, the VPN's substitute DNS seventh.
     static func sampleProxyEntries() -> [ProxyListEntry] {
         [
             ProxyListEntry(label: "Berlin 1", proxy: ProxySettings(kind: .socks5, host: "203.0.113.10", port: 1080,
@@ -357,6 +358,8 @@ enum UISnapshots {
                                                                   connectedAddress: "192.0.2.7"))),
             ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "proxy.example.invalid", port: 1080),
                            lastCheck: sampleFailed(ProxyDiagnosis(verdict: .hostNotFound))),
+            ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "gate.example.org", port: 1080),
+                           lastCheck: sampleFailed(ProxyDiagnosis(verdict: .substituteDNS, connectedAddress: "198.18.0.91"))),
             ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "192.0.2.99", port: 1080),
                            lastCheck: sampleFailed(ProxyDiagnosis(verdict: .refused))),
             ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "198.51.100.77", port: 9000),
@@ -370,18 +373,18 @@ enum UISnapshots {
     // MARK: Proxy list
 
     /// The Proxies section with proxies as checks left them — working (one of them slow), each way
-    /// of failing the list tells apart (silent after connecting, login rejected, host not found,
-    /// refused, no connection), one whose type the first check is to find — from a temporary
-    /// vault; its report on the silent one and on a working one; the Edit and Export sheets; and
-    /// what a profile whose proxy did not work at its launch says. Nothing is checked here and
-    /// nothing goes to the network.
+    /// of failing the list tells apart (silent after connecting, login rejected, host not found, a
+    /// VPN's substitute DNS, refused, no connection), one whose type the first check is to find —
+    /// from a temporary vault; its report on the silent one, on the one behind a VPN's substitute
+    /// DNS and on a working one; the Edit and Export sheets; and what a profile whose proxy did not
+    /// work at its launch says. Nothing is checked here and nothing goes to the network.
     private static func proxyList(into folder: URL) async -> Int {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-snapshots-proxies-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         do {
             let vault = try MasterVault.create(in: root, password: "snapshots", iterations: 10_000)
             let entries = sampleProxyEntries()
-            let berlin = entries[0], silent = entries[3]
+            let berlin = entries[0], silent = entries[3], substitute = entries[6]
             try ProxyList(entries: entries).save(to: vault)
             let proxies = ProxyListModel(vault: vault) { print("FAIL sample proxy list: \($0)") }
             let counts = [ProxyList.identity(of: berlin.proxy): 3, ProxyList.identity(of: silent.proxy): 2,
@@ -395,6 +398,9 @@ enum UISnapshots {
             }
             problems += await Shot(name: "proxies", size: CGSize(width: 1180, height: 740)) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: silent.id))
+            }.capture(into: folder)
+            problems += await Shot(name: "proxies-substitute-dns", size: CGSize(width: 1180, height: 740)) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: substitute.id))
             }.capture(into: folder)
             problems += await Shot(name: "proxies-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620)) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: berlin.id))

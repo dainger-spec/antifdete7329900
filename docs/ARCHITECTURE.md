@@ -350,7 +350,9 @@ ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── Pr
   costing the whole list, and an unreadable list is shown empty and never written over.
 - A check is two parts, both talking to the proxy only. The probe (`ProxyProbe`, BrowserCore, POSIX
   sockets) takes the steps a connection takes and stops at the first that fails, so that each way
-  of failing is its own verdict: the name does not exist or the resolver failed; the port refuses,
+  of failing is its own verdict: the name does not exist or the resolver failed, or every address
+  it got is a VPN's substitute (fake IP, `SubstituteDNS`: 198.18.0.0/15, 240.0.0.0/4) and nothing
+  answered there — behind such a DNS a name that does not exist gets an address too; the port refuses,
   cannot be reached or does not answer the connection; it takes the connection and then says
   nothing (`silent` — an IP whitelist without this Mac, a dead back end), closes at once, or
   answers as something else; it wants a login, refuses the one given, or refuses this Mac (403);

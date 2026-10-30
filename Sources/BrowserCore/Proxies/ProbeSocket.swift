@@ -69,6 +69,19 @@ enum ProbeSocket {
         return addresses.isEmpty ? .notFound : .addresses(addresses)
     }
 
+    /// Whether `host` is an IP address in a form the resolver takes as it is, without asking anyone
+    /// (`AI_NUMERICHOST`): its addresses are what was written, not a resolver's answer.
+    static func isNumeric(_ host: String) -> Bool {
+        var hints = addrinfo()
+        hints.ai_family = AF_UNSPEC
+        hints.ai_socktype = streamType
+        hints.ai_flags = AI_NUMERICHOST
+        var list: UnsafeMutablePointer<addrinfo>?
+        let status = getaddrinfo(host, nil, &hints, &list)
+        if let list { freeaddrinfo(list) }
+        return status == 0
+    }
+
     /// `EAI_NODATA` ("no address for this name"), which the C libraries number differently and
     /// Glibc does not always export.
     #if canImport(Darwin)
