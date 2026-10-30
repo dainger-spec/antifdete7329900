@@ -128,6 +128,10 @@ enum SafariChromeHost {
             log.error("Safari's chrome did not open a window for \(session.profileName, privacy: .private); using ours")
             return false
         }
+        // The profile's window size on the first window; one Safari opens later (⌘N) is Safari's.
+        if let size = session.configuration.windowSize, let window = controller.window {
+            WindowSizing.apply(size, to: window)
+        }
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)

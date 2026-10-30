@@ -463,7 +463,10 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
    │                 ProfileConfiguration.searchEngine (nil = SearchEngine.standard, DuckDuckGo;
    │                 one a later build knows reads as nil) → BrowserWindowController.addressURL,
    │                 WarmUpRobot (WarmUpPlan.pages(searchEngine:)); Safari's own window keeps
-   │                 Safari's engine (SafariChrome's search providers)
+   │                 Safari's engine (SafariChrome's search providers);
+   │                 newProfileRandomWindowSize → WindowSize.randomSafe(fitting: visible screen) →
+   │                 ProfileConfiguration.windowSize → WindowSizing.apply on each BrowserWindowController
+   │                 (and the first window of Safari's chrome): a real frame, never a declared screen
    │  Behavior       BrowsingPreferences (AutoFill, tab position, closing several tabs, zoom,
    │  Downloads      download folder, ask each time, Dock letters) → BrowsingPreferences.current here;
    │                 ProfileCommand.preferences to every profile process (ProfileManager.sendPreferences),

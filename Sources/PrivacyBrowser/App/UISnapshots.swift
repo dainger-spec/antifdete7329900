@@ -143,6 +143,25 @@ enum UISnapshots {
                 EditorPreview(draft: sample, topic: topic, isNew: isNew, error: error)
             }.capture(into: folder)
         }
+        // The window size, against a sample screen (a 16-inch MacBook Pro's, less menu bar and
+        // Dock; a 13-inch's for the one that does not fit).
+        var preset = draft
+        preset.setWindowSize(.mac(screen: .pro14))
+        var random = newProfile
+        random.setWindowSize(.custom(width: 1284, height: 806))
+        random.windowSizeIsRandom = true
+        var tooLarge = draft
+        tooLarge.setWindowSize(.mac(screen: .pro16))
+        let windows: [(String, ProfileDraft, Bool, CGSize)] = [
+            ("editor-window-preset", preset, false, CGSize(width: 1728, height: 1024)),
+            ("editor-window-random", random, true, CGSize(width: 1728, height: 1024)),
+            ("editor-window-too-large", tooLarge, false, CGSize(width: 1470, height: 862)),
+        ]
+        for (name, sample, isNew, visible) in windows {
+            problems += await Shot(name: name, size: ProfileEditorForm.size, titled: false) {
+                EditorPreview(draft: sample, topic: .window, isNew: isNew, visibleScreen: visible)
+            }.capture(into: folder)
+        }
         problems += await proxyFieldInEditor(into: folder, draft: draft)
         // The other sheets, as they open.
         let model = AppModel()
@@ -620,11 +639,12 @@ private struct EditorPreview: View {
     var isNew = false
     var error: String?
     var savedProxies: [ProxyListEntry] = []
+    var visibleScreen: CGSize? = CGSize(width: 1728, height: 1024)
 
     var body: some View {
         ProfileEditorForm(draft: $draft, topic: $topic, isNew: isNew, avatarID: UISnapshots.sampleRows()[1].id,
                           error: error, tunnelCarriesWebRTC: false, savedProxies: savedProxies,
-                          knownTags: ["ads", "DE", "US", "warm-up", "Q4 campaign"])
+                          knownTags: ["ads", "DE", "US", "warm-up", "Q4 campaign"], visibleScreen: visibleScreen)
     }
 }
 

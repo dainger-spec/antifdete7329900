@@ -70,6 +70,43 @@ struct ProfileDraft {
         ProfileAvatarStyle(color: avatarColor, letters: avatarLetters).normalized
     }
 
+    /// The window size as the editor holds it (`WindowSize`).
+    enum WindowChoice: Hashable {
+        /// As the app opens windows: this Mac as it is.
+        case app
+        case mac(MacScreen)
+        case custom
+    }
+    var windowChoice = WindowChoice.app
+    var windowWidth = ""
+    var windowHeight = ""
+    /// The size was chosen at random when the profile was made (Settings → New Profiles).
+    var windowSizeIsRandom = false
+
+    /// The size chosen, nil for none or for numbers that are not a window.
+    var windowSize: WindowSize? {
+        switch windowChoice {
+        case .app: return nil
+        case .mac(let screen): return .mac(screen: screen)
+        case .custom:
+            guard let width = Int(windowWidth.trimmingCharacters(in: .whitespaces)),
+                  let height = Int(windowHeight.trimmingCharacters(in: .whitespaces)) else { return nil }
+            let size = WindowSize.custom(width: width, height: height)
+            return size.isValid ? size : nil
+        }
+    }
+
+    mutating func setWindowSize(_ size: WindowSize?) {
+        switch size {
+        case nil: windowChoice = .app
+        case .mac(let screen)?: windowChoice = .mac(screen)
+        case let .custom(width, height)?:
+            windowChoice = .custom
+            windowWidth = String(width)
+            windowHeight = String(height)
+        }
+    }
+
     struct RetentionChoice: Hashable {
         var days: Int
         var labelKey: String
@@ -126,6 +163,7 @@ struct ProfileDraft {
         notes = c.notes
         avatarColor = c.avatar?.color
         avatarLetters = c.avatar?.letters ?? ""
+        setWindowSize(c.windowSize)
     }
 
     var hasProxy: Bool { proxyMode != .direct }
@@ -229,6 +267,11 @@ struct ProfileDraft {
         configuration.tags = ProfileTags.normalized(tags)
         configuration.notes = String(notes.trimmingCharacters(in: .whitespacesAndNewlines).prefix(ProfileConfiguration.maximumNotesLength))
         configuration.avatar = avatarStyle
+        if windowChoice == .custom && windowSize == nil {
+            throw CoreError.invalidConfiguration(String(format: L("editor.window.error"), WindowSize.minimumWidth,
+                                                        WindowSize.maximumWidth, WindowSize.minimumHeight, WindowSize.maximumHeight))
+        }
+        configuration.windowSize = windowSize
         try configuration.validate()
         return configuration
     }
@@ -286,7 +329,7 @@ struct ProfileEditorView: View {
                           tunnelCarriesWebRTC: tunnel.canCarryWebRTC,
                           onCancel: { dismiss() }, onSave: save, onTunnelSettings: { showingTunnel = true },
                           savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
-                          knownTags: knownTags)
+                          knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen)
     }
 
     /// The tags of every profile, each once, for the tag field to offer.
@@ -317,6 +360,11 @@ struct ProfileEditorView: View {
             // Settings → New Profiles.
             draft.matchProxyLocation = model.settings.newProfileMatchesConnection
             draft.searchEngine = model.settings.newProfileSearchEngine
+            if model.settings.newProfileRandomWindowSize, let visible = WindowSizing.visibleScreen {
+                var generator = SystemRandomNumberGenerator()
+                draft.setWindowSize(WindowSize.randomSafe(fitting: (Int(visible.width), Int(visible.height)), using: &generator))
+                draft.windowSizeIsRandom = true
+            }
         }
     }
 

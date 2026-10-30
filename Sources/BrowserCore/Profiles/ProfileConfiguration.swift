@@ -112,6 +112,10 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// letter of its name.
     public var avatar: ProfileAvatarStyle?
 
+    /// How large the profile's browser windows open (`WindowSize`: a real window, never a size
+    /// only told to pages). Nil: as the app opens windows.
+    public var windowSize: WindowSize?
+
     public static let maximumNotesLength = 4000
 
     public init(startURL: URL? = nil,
@@ -135,7 +139,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 searchEngine: SearchEngine? = nil,
                 tags: [String] = [],
                 notes: String = "",
-                avatar: ProfileAvatarStyle? = nil) {
+                avatar: ProfileAvatarStyle? = nil,
+                windowSize: WindowSize? = nil) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -158,6 +163,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.tags = ProfileTags.normalized(tags)
         self.notes = String(notes.prefix(Self.maximumNotesLength))
         self.avatar = avatar?.normalized
+        self.windowSize = windowSize
     }
 
     /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
@@ -284,7 +290,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
-             syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar
+             syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -320,6 +326,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         tags = ProfileTags.normalized((try? c.decodeIfPresent([String].self, forKey: .tags)) ?? [])
         notes = String(((try? c.decodeIfPresent(String.self, forKey: .notes)) ?? "").prefix(Self.maximumNotesLength))
         avatar = (try? c.decodeIfPresent(ProfileAvatarStyle.self, forKey: .avatar))?.normalized
+        // A size a later build knows and this one does not, or one out of bounds: as the app
+        // opens windows.
+        windowSize = (try? c.decodeIfPresent(WindowSize.self, forKey: .windowSize)).flatMap { $0.isValid ? $0 : nil }
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -349,6 +358,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         if !tags.isEmpty { try c.encode(tags, forKey: .tags) }
         if !notes.isEmpty { try c.encode(notes, forKey: .notes) }
         try c.encodeIfPresent(avatar, forKey: .avatar)
+        try c.encodeIfPresent(windowSize, forKey: .windowSize)
     }
 
     public var historyPolicy: HistoryStore.Policy {
@@ -377,6 +387,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         }
         try proxy?.validate()
         try geolocation.validate()
+        if let windowSize, !windowSize.isValid {
+            throw CoreError.invalidConfiguration("window size must be \(WindowSize.minimumWidth)–\(WindowSize.maximumWidth) × \(WindowSize.minimumHeight)–\(WindowSize.maximumHeight) points")
+        }
     }
 }
 

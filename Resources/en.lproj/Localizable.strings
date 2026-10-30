@@ -141,6 +141,18 @@
 "editor.topic.profile" = "Profile";
 "editor.topic.connection" = "Connection";
 "editor.topic.identity" = "Identity";
+"editor.topic.window" = "Window";
+"editor.window.size" = "Window size";
+"editor.window.app" = "As it is (real device)";
+"editor.window.custom" = "Custom size";
+"editor.window.width" = "Width";
+"editor.window.height" = "Height";
+"editor.window.points" = "points";
+"editor.window.preset" = "%@″ %@ — %d × %d";
+"editor.window.random" = "Chosen at random when the profile was made (Settings → New Profiles), so that profiles do not all open with the same window.";
+"editor.window.error" = "A window must be %d–%d points wide and %d–%d points high.";
+"editor.window.tooLarge" = "Larger than this Mac's screen allows (%d × %d without the menu bar and Dock): the window will be %d × %d — a page measures the window it is really in.";
+"editor.window.note" = "The window really opens at this size: a page measures the window it is in, so what it sees is true. The screen it is told about stays this Mac's — WebKit on macOS cannot declare another, and a claimed one is given away by CSS (device-width) and by full screen. In Safari's own window, the first window opens at this size.";
 "editor.topic.location" = "Location and Language";
 "editor.topic.privacy" = "Privacy";
 "editor.topic.data" = "Data";
@@ -985,6 +997,8 @@
 "settings.newProfiles.quic.value" = "Off with a proxy";
 "settings.newProfiles.search" = "Search engine";
 "settings.newProfiles.search.detail" = "What a new profile's address bar and warm-up search with. Each profile changes it in its editor (Profile).";
+"settings.newProfiles.randomWindow" = "Random safe window size";
+"settings.newProfiles.randomWindow.detail" = "A new profile gets a window size of its own, at random among those that fit this Mac's screen (two thirds to nine tenths of it each way), so that profiles do not all open with the same window. A real window: a page measures it.";
 "settings.behavior.subtitle" = "How the app's browser windows behave, in every profile.";
 "settings.behavior.autoFill" = "AutoFill passwords";
 "settings.behavior.autoFill.detail" = "Offers saved logins and asks to save new ones. Each profile has its own switch too; both must be on.";

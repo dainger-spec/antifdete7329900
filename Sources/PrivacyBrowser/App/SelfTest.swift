@@ -138,6 +138,7 @@ final class SelfTest {
             try updateGate(repository)
             try await appSettings(repository)
             try editorLabels()
+            try await windowSizes(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
@@ -2450,6 +2451,52 @@ final class SelfTest {
               byTag && bySearch && sidebarTags == ["ads", "mobile", "US"], "sidebar tags \(sidebarTags)")
     }
 
+    /// A profile's window size: its window really opens at it — a page measures the window it is
+    /// in — and never larger than the screen allows; a new profile's random size fits.
+    private func windowSizes(_ repository: ProfileRepository) async throws {
+        guard let visible = WindowSizing.visibleScreen else {
+            info("window size: no screen to measure against; skipped")
+            return
+        }
+        func frame(of size: WindowSize) async throws -> (window: CGSize, page: [Int]) {
+            let profile = try repository.create(name: "Window size", configuration: ProfileConfiguration(ephemeral: true, windowSize: size))
+            let key = try repository.profileKey(for: profile.id)
+            let session = try makeSession(repository, profile.id, key: key)
+            let controller = BrowserWindowController(session: session)
+            defer {
+                controller.close()
+                session.shutDown()
+                try? repository.delete(profile.id)
+            }
+            let window = controller.window?.frame.size ?? .zero
+            guard let tab = controller.addTab(url: nil) else { return (window, []) }
+            tab.webView.loadHTMLString("<!doctype html><title>measured</title>", baseURL: nil)
+            _ = await waitUntil(timeout: 10) { tab.webView.title == "measured" }
+            let measured = try? await js(tab.webView, "return [window.outerWidth, window.outerHeight]")
+            return (window, ((measured as? [NSNumber]) ?? []).map(\.intValue))
+        }
+        let wanted = WindowSize.custom(width: 1000, height: 700)
+        let expected = WindowSizing.fitted(wanted, in: visible)
+        let sized = try await frame(of: wanted)
+        let pageSize: [Int] = [Int(sized.window.width), Int(sized.window.height)]
+        check("window size: a profile's window opens at its size (as large as the screen allows)",
+              sized.window == expected, "window \(sized.window), expected \(expected), screen \(visible)")
+        check("window size: a page measures that window — outerWidth × outerHeight are its real frame",
+              sized.page == pageSize, "page \(sized.page), window \(sized.window)")
+        let huge = try await frame(of: .custom(width: 7000, height: 4000))
+        check("window size: one larger than the screen opens as large as the screen allows, never larger",
+              huge.window.width <= visible.width && huge.window.height <= visible.height
+                && huge.window == WindowSizing.fitted(.custom(width: 7000, height: 4000), in: visible),
+              "window \(huge.window), screen \(visible)")
+        var generator = SystemRandomNumberGenerator()
+        let fits = (0..<50).allSatisfy { _ in
+            let random = WindowSize.randomSafe(fitting: (Int(visible.width), Int(visible.height)), using: &generator)
+            return WindowSizing.fitted(random, in: visible) == CGSize(width: random.frame.width, height: random.frame.height)
+                || visible.width < CGFloat(WindowSize.minimumWidth) || visible.height < CGFloat(WindowSize.minimumHeight)
+        }
+        check("window size: a new profile's random size always fits this Mac's screen", fits, "screen \(visible)")
+    }
+
     private func appSettings(_ repository: ProfileRepository) async throws {
         defer { BrowsingPreferences.current = BrowsingPreferences() }
         let suite = "pb-selftest-settings-\(UUID().uuidString)"
@@ -2463,13 +2510,16 @@ final class SelfTest {
         let defaultFailure: Bool = fresh.proxyFailure == AppSettings.ProxyFailure.launchAndExplain
         let defaultBrowsing: Bool = fresh.browsing == BrowsingPreferences()
         let defaultSearch: Bool = fresh.newProfileSearchEngine == SearchEngine.standard
-        check("settings: the defaults — the Profiles window after unlocking, quitting asks, new profiles follow the connection and search with the standard engine, a failing proxy's profile starts and says why, AutoFill on, new tabs next to the current one, closing several tabs asks, 100 %, the Downloads folder, two letters, no tabs restored",
-              defaultStart && fresh.confirmQuit && fresh.newProfileMatchesConnection && defaultSearch && defaultFailure && defaultBrowsing,
+        let defaultWindow: Bool = fresh.newProfileRandomWindowSize
+        check("settings: the defaults — the Profiles window after unlocking, quitting asks, new profiles follow the connection, search with the standard engine and get a random window size, a failing proxy's profile starts and says why, AutoFill on, new tabs next to the current one, closing several tabs asks, 100 %, the Downloads folder, two letters, no tabs restored",
+              defaultStart && fresh.confirmQuit && fresh.newProfileMatchesConnection && defaultSearch && defaultWindow
+                && defaultFailure && defaultBrowsing,
               String(describing: fresh.browsing))
         fresh.startup = .reopenProfiles
         fresh.confirmQuit = false
         fresh.newProfileMatchesConnection = false
         fresh.newProfileSearchEngine = .ecosia
+        fresh.newProfileRandomWindowSize = false
         fresh.proxyFailure = .doNotLaunch
         fresh.browsing.passwordAutoFill = false
         fresh.browsing.newTabsNextToCurrent = false
@@ -2489,8 +2539,10 @@ final class SelfTest {
         let rereadFailure: Bool = reread.proxyFailure == AppSettings.ProxyFailure.doNotLaunch
         let rereadBrowsing: Bool = reread.browsing == expected
         let rereadSearch: Bool = reread.newProfileSearchEngine == SearchEngine.ecosia
+        let rereadWindow: Bool = !reread.newProfileRandomWindowSize
         check("settings: every setting is read back as it was set, each from its own key",
-              rereadStart && !reread.confirmQuit && !reread.newProfileMatchesConnection && rereadSearch && rereadFailure && rereadBrowsing,
+              rereadStart && !reread.confirmQuit && !reread.newProfileMatchesConnection && rereadSearch && rereadWindow
+                && rereadFailure && rereadBrowsing,
               String(describing: reread.browsing))
         defaults.set(3.7, forKey: "PBSettingsPageZoom")
         defaults.set(9, forKey: "PBSettingsDockInitials")

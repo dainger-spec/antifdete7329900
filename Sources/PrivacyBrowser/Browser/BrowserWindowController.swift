@@ -93,7 +93,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         window.backgroundColor = Theme.NS.toolbar
         buildInterface(in: window)
         WebContentAppearance.shared.follow(webContainer)
-        window.center()
+        // The profile's window size (Profile editor → Window), a real frame; a mobile generation's
+        // window is its device's screen instead.
+        if deviceScreen == nil, let size = session.configuration.windowSize {
+            WindowSizing.apply(size, to: window)
+        } else {
+            window.center()
+        }
         // @Published emits before the value changes; read the store on the next main-actor turn.
         libraryObservation = library.$bookmarks.sink { [weak self] _ in
             Task { @MainActor in self?.updateBookmarkButton() }

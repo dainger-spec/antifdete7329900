@@ -8,7 +8,7 @@ import SwiftUI
 struct ProfileEditorForm: View {
     /// The editor's parts, in the order the screen shows them.
     enum Topic: String, CaseIterable, Identifiable {
-        case profile, connection, identity, location, privacy, data
+        case profile, connection, identity, window, location, privacy, data
         var id: String { rawValue }
 
         var titleKey: String {
@@ -16,6 +16,7 @@ struct ProfileEditorForm: View {
             case .profile: return "editor.topic.profile"
             case .connection: return "editor.topic.connection"
             case .identity: return "editor.topic.identity"
+            case .window: return "editor.topic.window"
             case .location: return "editor.topic.location"
             case .privacy: return "editor.topic.privacy"
             case .data: return "editor.topic.data"
@@ -27,6 +28,7 @@ struct ProfileEditorForm: View {
             case .profile: return "person.crop.square"
             case .connection: return "network"
             case .identity: return "safari"
+            case .window: return "macwindow"
             case .location: return "location"
             case .privacy: return "hand.raised"
             case .data: return "externaldrive"
@@ -54,6 +56,8 @@ struct ProfileEditorForm: View {
     var onCheckProxy: () -> Void = {}
     /// The tags of the other profiles, offered under the tag field.
     var knownTags: [String] = []
+    /// This Mac's screen less its menu bar and Dock: a window size larger than it is said to be.
+    var visibleScreen: CGSize?
 
     static let size = CGSize(width: 760, height: 660)
     static let indexWidth: CGFloat = 172
@@ -145,6 +149,7 @@ struct ProfileEditorForm: View {
         case .profile: profile
         case .connection: connection
         case .identity: identity
+        case .window: windowPart
         case .location: location
         case .privacy: privacy
         case .data: data
@@ -372,6 +377,67 @@ struct ProfileEditorForm: View {
             }
             EditorNote(L("editor.network.footer"))
         }
+    }
+
+    // MARK: Window
+
+    private var windowPart: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            EditorRow(L("editor.window.size")) {
+                Picker(L("editor.window.size"), selection: $draft.windowChoice) {
+                    Text(L("editor.window.app")).tag(ProfileDraft.WindowChoice.app)
+                    ForEach(MacScreen.allCases, id: \.self) { screen in
+                        Text(Self.presetName(screen)).tag(ProfileDraft.WindowChoice.mac(screen))
+                    }
+                    Text(L("editor.window.custom")).tag(ProfileDraft.WindowChoice.custom)
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            if draft.windowChoice == .custom {
+                HStack(spacing: 8) {
+                    TextField(L("editor.window.width"), text: $draft.windowWidth, prompt: Text(verbatim: ""))
+                        .lumenField("1280", isEmpty: draft.windowWidth.isEmpty)
+                        .frame(width: 96)
+                    Text(verbatim: "×").foregroundStyle(Theme.textSecondary)
+                    TextField(L("editor.window.height"), text: $draft.windowHeight, prompt: Text(verbatim: ""))
+                        .lumenField("800", isEmpty: draft.windowHeight.isEmpty)
+                        .frame(width: 96)
+                    Text(L("editor.window.points"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer(minLength: 0)
+                }
+                if draft.windowSizeIsRandom {
+                    EditorNote(L("editor.window.random"))
+                }
+            }
+            if let warning = windowWarning {
+                EditorNote(warning, tone: .warning)
+            }
+            EditorNote(L("editor.window.note"))
+        }
+    }
+
+    /// "14.2″ MacBook Pro — 1512 × 945": a preset by its Mac and the window it gives.
+    static func presetName(_ screen: MacScreen) -> String {
+        let frame = WindowSize.mac(screen: screen).frame
+        return String(format: L("editor.window.preset"), screen.diagonal, screen.family, frame.width, frame.height)
+    }
+
+    /// Said when the size cannot be had: numbers that are not a window, or a window larger than
+    /// this Mac's screen allows — with the size it will really be.
+    private var windowWarning: String? {
+        if draft.windowChoice == .custom && draft.windowSize == nil && !(draft.windowWidth.isEmpty && draft.windowHeight.isEmpty) {
+            return String(format: L("editor.window.error"), WindowSize.minimumWidth, WindowSize.maximumWidth,
+                          WindowSize.minimumHeight, WindowSize.maximumHeight)
+        }
+        guard let size = draft.windowSize, let visible = visibleScreen else { return nil }
+        let frame = size.frame
+        guard CGFloat(frame.width) > visible.width || CGFloat(frame.height) > visible.height else { return nil }
+        let fitted = WindowSizing.fitted(size, in: visible)
+        return String(format: L("editor.window.tooLarge"), Int(visible.width), Int(visible.height),
+                      Int(fitted.width), Int(fitted.height))
     }
 
     // MARK: Location and language

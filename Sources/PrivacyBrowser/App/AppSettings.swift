@@ -82,6 +82,7 @@ final class AppSettings: ObservableObject {
         static let confirmQuit = "PBSettingsConfirmQuit"
         static let newProfileMatchesConnection = "PBSettingsNewProfileMatchesConnection"
         static let newProfileSearchEngine = "PBSettingsNewProfileSearchEngine"
+        static let newProfileRandomWindowSize = "PBSettingsNewProfileRandomWindowSize"
         static let proxyFailure = "PBSettingsProxyFailure"
         static let passwordAutoFill = "PBSettingsPasswordAutoFill"
         static let newTabsNextToCurrent = "PBSettingsNewTabsNextToCurrent"
@@ -110,6 +111,11 @@ final class AppSettings: ObservableObject {
     @Published var newProfileSearchEngine: SearchEngine {
         didSet { defaults.set(newProfileSearchEngine.rawValue, forKey: Key.newProfileSearchEngine) }
     }
+    /// A new profile gets a window size of its own, at random among the ones that fit this Mac's
+    /// screen (`WindowSize.randomSafe`), so that profiles do not all open with the same window.
+    @Published var newProfileRandomWindowSize: Bool {
+        didSet { defaults.set(newProfileRandomWindowSize, forKey: Key.newProfileRandomWindowSize) }
+    }
     @Published var proxyFailure: ProxyFailure {
         didSet { defaults.set(proxyFailure.rawValue, forKey: Key.proxyFailure) }
     }
@@ -136,6 +142,7 @@ final class AppSettings: ObservableObject {
         confirmQuit = defaults.object(forKey: Key.confirmQuit) as? Bool ?? true
         newProfileMatchesConnection = defaults.object(forKey: Key.newProfileMatchesConnection) as? Bool ?? true
         newProfileSearchEngine = defaults.string(forKey: Key.newProfileSearchEngine).flatMap(SearchEngine.init) ?? .standard
+        newProfileRandomWindowSize = defaults.object(forKey: Key.newProfileRandomWindowSize) as? Bool ?? true
         proxyFailure = defaults.string(forKey: Key.proxyFailure).flatMap(ProxyFailure.init) ?? .launchAndExplain
         var browsing = BrowsingPreferences()
         browsing.passwordAutoFill = defaults.object(forKey: Key.passwordAutoFill) as? Bool ?? true

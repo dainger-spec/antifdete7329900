@@ -291,6 +291,10 @@ private struct NewProfileSettings: View {
                 .labelsHidden()
                 .fixedSize()
             }
+            SettingRow(L("settings.newProfiles.randomWindow"), detail: L("settings.newProfiles.randomWindow.detail"),
+                       effect: .newProfiles) {
+                SettingSwitch(isOn: $settings.newProfileRandomWindowSize, label: L("settings.newProfiles.randomWindow"))
+            }
             SettingRow(L("settings.newProfiles.quic"), detail: L("settings.newProfiles.quic.detail"), effect: .always) {
                 Text(L("settings.newProfiles.quic.value"))
                     .font(.lumenBody)
