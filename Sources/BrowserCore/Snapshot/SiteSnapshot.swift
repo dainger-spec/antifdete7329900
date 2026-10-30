@@ -20,7 +20,7 @@ public struct SiteSnapshot: Codable, Equatable, Sendable {
         var values: [String: String] = [:]
         parsed.flatten(into: &values, prefix: "")
         if let clientHello {
-            for (key, value) in clientHello.values { values["tls." + key] = value }
+            for (key, value) in clientHello.values { values["tls.\(key)"] = value }
         }
         self.values = values
     }
@@ -52,7 +52,8 @@ enum JSONValue: Decodable {
         switch self {
         case .string(let value): return value
         case .number(let value):
-            return value == value.rounded() && abs(value) < 1e15 ? String(Int64(value)) : String(value)
+            let whole: Bool = value == value.rounded() && value.magnitude < 1e15
+            return whole ? String(Int64(value)) : String(value)
         case .bool(let value): return value ? "true" : "false"
         case .null: return "null"
         case .array(let items): return "[" + items.map(\.text).joined(separator: ",") + "]"
@@ -63,7 +64,7 @@ enum JSONValue: Decodable {
     /// Objects become dotted keys; everything else one value.
     func flatten(into values: inout [String: String], prefix: String) {
         if case .object(let members) = self {
-            for (key, member) in members { member.flatten(into: &values, prefix: prefix.isEmpty ? key : prefix + "." + key) }
+            for (key, member) in members { member.flatten(into: &values, prefix: prefix.isEmpty ? key : "\(prefix).\(key)") }
         } else if !prefix.isEmpty {
             values[prefix] = text
         }
@@ -107,7 +108,7 @@ public enum SiteComparison {
     /// `.onlyProfile` (the profile's own snapshot, nothing to compare with).
     public static func compare(profile: SiteSnapshot, safari: SiteSnapshot?) -> [SiteSignal] {
         let keys = Set(profile.values.keys).union(safari.map { Array($0.values.keys) } ?? [])
-        return keys.map { key in
+        let signals = keys.map { (key: String) -> SiteSignal in
             let mine = profile.values[key], theirs = safari?.values[key]
             let verdict: SiteSignal.Verdict
             if perWindow(key) {
@@ -119,7 +120,10 @@ public enum SiteComparison {
             }
             return SiteSignal(key: key, category: category(of: key), profile: mine, safari: theirs, verdict: verdict)
         }
-        .sorted { ($0.category.order, $0.key) < ($1.category.order, $1.key) }
+        return signals.sorted { (first: SiteSignal, second: SiteSignal) -> Bool in
+            if first.category != second.category { return first.category.order < second.category.order }
+            return first.key < second.key
+        }
     }
 
     /// Where a key is listed. The probe's keys by what they describe.
@@ -191,7 +195,7 @@ public enum SiteSnapshotPage {
     /// A new token for one snapshot's side: "pbwss-<random hex>-profile".
     public static func token(_ side: Side) -> String {
         let random = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-        return tokenPrefix + String(random.prefix(20)) + "-" + side.rawValue
+        return "\(tokenPrefix)\(random.prefix(20))-\(side.rawValue)"
     }
 
     public static func url(port: UInt16, token: String) -> URL {

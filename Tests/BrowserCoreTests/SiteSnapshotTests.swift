@@ -7,25 +7,51 @@ final class SiteSnapshotTests: XCTestCase {
     /// A ClientHello as a client sends it, with GREASE in the suites, the extensions, the groups
     /// and the versions; `split`: carried by two records, cut after that many handshake bytes.
     static func clientHello(split: Int? = nil) -> [UInt8] {
-        func u16(_ value: Int) -> [UInt8] { [UInt8(value >> 8 & 0xFF), UInt8(value & 0xFF)] }
-        func list16(_ values: [UInt16]) -> [UInt8] { values.flatMap { u16(Int($0)) } }
-        let name = Array("example.com".utf8)
-        let sni = u16(name.count + 3) + [0] + u16(name.count) + name
-        let groups = u16(8) + list16([0x0A0A, 0x001d, 0x0017, 0x0018])
-        let protocols = [Array("h2".utf8), Array("http/1.1".utf8)].flatMap { [UInt8($0.count)] + $0 }
-        let alpn = u16(protocols.count) + protocols
-        let signatures = u16(6) + list16([0x0403, 0x0804, 0x0401])
-        let versions = [UInt8(6)] + list16([0x1A1A, 0x0304, 0x0303])
+        func u16(_ value: Int) -> [UInt8] { [UInt8(truncatingIfNeeded: value >> 8), UInt8(truncatingIfNeeded: value)] }
+        func list16(_ values: [UInt16]) -> [UInt8] {
+            var bytes: [UInt8] = []
+            for value in values { bytes += u16(Int(value)) }
+            return bytes
+        }
+        func withLength16(_ content: [UInt8]) -> [UInt8] { u16(content.count) + content }
+        let name: [UInt8] = Array("example.com".utf8)
+        var nameEntry: [UInt8] = [0]
+        nameEntry += withLength16(name)
+        let sni = withLength16(nameEntry)
+        let groups = withLength16(list16([0x0A0A, 0x001d, 0x0017, 0x0018]))
+        var protocols: [UInt8] = []
+        for text in ["h2", "http/1.1"] {
+            protocols.append(UInt8(text.utf8.count))
+            protocols += Array(text.utf8)
+        }
+        let alpn = withLength16(protocols)
+        let signatures = withLength16(list16([0x0403, 0x0804, 0x0401]))
+        var versions: [UInt8] = [6]
+        versions += list16([0x1A1A, 0x0304, 0x0303])
         let extensions: [(UInt16, [UInt8])] = [
             (0x2A2A, []), (0x0000, sni), (0x0017, []), (0xff01, [0]), (0x000a, groups),
             (0x000b, [1, 0]), (0x0010, alpn), (0x000d, signatures), (0x002b, versions),
         ]
-        let extensionBytes = extensions.flatMap { u16(Int($0.0)) + u16($0.1.count) + $0.1 }
-        let suites = list16([0x3A3A, 0x1301, 0x1302, 0x1303, 0xc02c, 0xc02b])
-        var body = u16(0x0303) + [UInt8](repeating: 7, count: 32) + [32] + [UInt8](repeating: 1, count: 32)
-        body += u16(suites.count) + suites + [1, 0] + u16(extensionBytes.count) + extensionBytes
-        let handshake: [UInt8] = [0x01, UInt8(body.count >> 16 & 0xFF), UInt8(body.count >> 8 & 0xFF), UInt8(body.count & 0xFF)] + body
-        func record(_ fragment: [UInt8]) -> [UInt8] { [0x16, 0x03, 0x01] + u16(fragment.count) + fragment }
+        var extensionBytes: [UInt8] = []
+        for (type, data) in extensions {
+            extensionBytes += u16(Int(type))
+            extensionBytes += withLength16(data)
+        }
+        var body: [UInt8] = u16(0x0303)
+        body += [UInt8](repeating: 7, count: 32)
+        body.append(32)
+        body += [UInt8](repeating: 1, count: 32)
+        body += withLength16(list16([0x3A3A, 0x1301, 0x1302, 0x1303, 0xc02c, 0xc02b]))
+        body += [1, 0]
+        body += withLength16(extensionBytes)
+        var handshake: [UInt8] = [0x01, UInt8(truncatingIfNeeded: body.count >> 16)]
+        handshake += u16(body.count)
+        handshake += body
+        func record(_ fragment: [UInt8]) -> [UInt8] {
+            var record: [UInt8] = [0x16, 0x03, 0x01]
+            record += withLength16(fragment)
+            return record
+        }
         guard let split else { return record(handshake) }
         return record(Array(handshake[..<split])) + record(Array(handshake[split...]))
     }
@@ -71,7 +97,10 @@ final class SiteSnapshotTests: XCTestCase {
         }
         // Cipher suites said to be longer than the message.
         var broken = full
-        broken[5 + 4 + 2 + 32 + 1 + 32] = 0x7F
+        // The record's header (5), the handshake's (4), the version (2), random (32), the session
+        // id's length and the id (1 + 32): the cipher suites' length.
+        let suitesLength = 76
+        broken[suitesLength] = 0x7F
         XCTAssertThrowsError(try TLSClientHello.parse(broken)) { error in
             XCTAssertEqual(error as? TLSClientHello.ParseError, .malformed)
         }

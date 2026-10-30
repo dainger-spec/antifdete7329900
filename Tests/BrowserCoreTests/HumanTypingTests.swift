@@ -40,7 +40,7 @@ final class HumanTypingTests: XCTestCase {
         XCTAssertEqual(plan[0].pauseBefore, 0)
         for stroke in plan.dropFirst() {
             XCTAssertGreaterThanOrEqual(stroke.pauseBefore, 0.06)
-            XCTAssertLessThanOrEqual(stroke.pauseBefore, 0.18 + 0.25 + 1.0)
+            XCTAssertLessThanOrEqual(stroke.pauseBefore, 1.43, "0.18 between keys, 0.25 after a mark, 1.0 to think")
             XCTAssertTrue((0.03...0.11).contains(stroke.hold))
         }
         let pauses = plan.dropFirst().map(\.pauseBefore)

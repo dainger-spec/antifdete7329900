@@ -93,8 +93,14 @@ public enum StoredZip {
     /// self-test's reading of it, not a general ZIP reader.
     public static func entries(of archive: Data) -> [(path: String, data: Data)]? {
         let bytes = [UInt8](archive)
-        func le16(_ at: Int) -> Int { Int(bytes[at]) | Int(bytes[at + 1]) << 8 }
-        func le32(_ at: Int) -> Int { le16(at) | le16(at + 2) << 16 }
+        func le16(_ at: Int) -> Int {
+            let low = Int(bytes[at]), high = Int(bytes[at + 1])
+            return low | (high << 8)
+        }
+        func le32(_ at: Int) -> Int {
+            let low = le16(at), high = le16(at + 2)
+            return low | (high << 16)
+        }
         guard bytes.count >= 22 else { return nil }
         let end = bytes.count - 22
         guard le32(end) == 0x0605_4b50 else { return nil }
@@ -125,19 +131,30 @@ public enum StoredZip {
         return crc ^ 0xFFFF_FFFF
     }
 
-    private static let table: [UInt32] = (0..<256).map { index in
+    private static let table: [UInt32] = (0..<256).map { (index: Int) -> UInt32 in
+        let polynomial: UInt32 = 0xEDB8_8320
         var value = UInt32(index)
-        for _ in 0..<8 { value = value & 1 == 1 ? 0xEDB8_8320 ^ (value >> 1) : value >> 1 }
+        for _ in 0..<8 {
+            let shifted = value >> 1
+            value = value & 1 == 1 ? shifted ^ polynomial : shifted
+        }
         return value
     }
 
-    /// MS-DOS time and date, which ZIP stores (local time, two-second steps, from 1980).
+    /// MS-DOS time and date, which ZIP stores (local time, two-second steps, from 1980). One step
+    /// per line: Swift on Linux gave up type-checking the two in one expression each (CI run 424).
     static func dosTime(_ date: Date) -> (time: UInt16, date: UInt16) {
         let parts = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
-        let year = min(max((parts.year ?? 1980) - 1980, 0), 127)
-        let time = UInt16((parts.hour ?? 0) << 11 | (parts.minute ?? 0) << 5 | (parts.second ?? 0) / 2)
-        let day = UInt16(year << 9 | (parts.month ?? 1) << 5 | (parts.day ?? 1))
-        return (time, day)
+        let years: Int = (parts.year ?? 1980) - 1980
+        let year: Int = min(max(years, 0), 127)
+        let hour: Int = parts.hour ?? 0
+        let minute: Int = parts.minute ?? 0
+        let second: Int = parts.second ?? 0
+        let month: Int = parts.month ?? 1
+        let dayOfMonth: Int = parts.day ?? 1
+        let time: Int = (hour << 11) | (minute << 5) | (second / 2)
+        let day: Int = (year << 9) | (month << 5) | dayOfMonth
+        return (UInt16(truncatingIfNeeded: time), UInt16(truncatingIfNeeded: day))
     }
 }
 

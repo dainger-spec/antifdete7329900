@@ -36,7 +36,9 @@ public struct TLSClientHello: Equatable, Sendable {
 
     /// GREASE: 0x0A0A, 0x1A1A … 0xFAFA.
     public static func isGREASE(_ value: UInt16) -> Bool {
-        value & 0x0F0F == 0x0A0A && value >> 8 == value & 0xFF
+        let high: UInt16 = value >> 8
+        let low: UInt16 = value & 0x00FF
+        return high == low && (low & 0x000F) == 0x000A
     }
 
     /// The ClientHello at the start of what a client sent (its handshake may span records).
@@ -47,13 +49,15 @@ public struct TLSClientHello: Equatable, Sendable {
         while true {
             guard bytes.count >= offset + 5 else { throw ParseError.incomplete }
             guard bytes[offset] == 0x16, bytes[offset + 1] == 0x03 else { throw ParseError.notAClientHello }
-            let length = Int(bytes[offset + 3]) << 8 | Int(bytes[offset + 4])
+            let lengthHigh = Int(bytes[offset + 3]), lengthLow = Int(bytes[offset + 4])
+            let length: Int = (lengthHigh << 8) | lengthLow
             guard bytes.count >= offset + 5 + length else { throw ParseError.incomplete }
             handshake += bytes[(offset + 5)..<(offset + 5 + length)]
             offset += 5 + length
             if handshake.count >= 4 {
                 guard handshake[0] == 0x01 else { throw ParseError.notAClientHello }
-                let needed = Int(handshake[1]) << 16 | Int(handshake[2]) << 8 | Int(handshake[3])
+                let first = Int(handshake[1]), second = Int(handshake[2]), third = Int(handshake[3])
+                let needed: Int = (first << 16) | (second << 8) | third
                 if handshake.count >= 4 + needed {
                     return try parseBody(Array(handshake[4..<(4 + needed)]))
                 }
@@ -106,7 +110,14 @@ public struct TLSClientHello: Equatable, Sendable {
     }
 
     private static func pairs(_ bytes: [UInt8]) -> [UInt16] {
-        stride(from: 0, to: bytes.count - 1, by: 2).map { UInt16(bytes[$0]) << 8 | UInt16(bytes[$0 + 1]) }
+        var values: [UInt16] = []
+        var index = 0
+        while index + 1 < bytes.count {
+            let high = UInt16(bytes[index]), low = UInt16(bytes[index + 1])
+            values.append((high << 8) | low)
+            index += 2
+        }
+        return values
     }
 
     // MARK: Fingerprints
@@ -144,12 +155,13 @@ public struct TLSClientHello: Equatable, Sendable {
            Character(tail).isLetter || Character(tail).isNumber {
             alpnPart = String(Character(head)) + String(Character(tail))
         } else if let first = alpn.first, let head = first.utf8.first, let tail = first.utf8.last {
-            alpnPart = String(String(format: "%02x", head).prefix(1)) + String(String(format: "%02x", tail).suffix(1))
+            let headHex = String(format: "%02x", head), tailHex = String(format: "%02x", tail)
+            alpnPart = "\(headHex.prefix(1))\(tailHex.suffix(1))"
         } else {
             alpnPart = "00"
         }
         func twoDigits(_ count: Int) -> String { count < 10 ? "0\(count)" : String(min(count, 99)) }
-        let a = "t" + version + name + twoDigits(cipherSuites.count) + twoDigits(extensions.count) + alpnPart
+        let a = "t\(version)\(name)\(twoDigits(cipherSuites.count))\(twoDigits(extensions.count))\(alpnPart)"
         func hex(_ values: [UInt16]) -> String { values.map { String(format: "%04x", $0) }.joined(separator: ",") }
         func truncatedHash(_ text: String) -> String {
             String(SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined().prefix(12))
@@ -159,7 +171,7 @@ public struct TLSClientHello: Equatable, Sendable {
         var cInput = hex(sortedExtensions)
         if !signatureAlgorithms.isEmpty { cInput += "_" + hex(signatureAlgorithms) }
         let c = sortedExtensions.isEmpty ? "000000000000" : truncatedHash(cInput)
-        return a + "_" + b + "_" + c
+        return "\(a)_\(b)_\(c)"
     }
 
     /// What "What sites see" lists of a ClientHello, one line each.
@@ -195,7 +207,9 @@ private struct Reader {
     }
 
     mutating func u16() throws -> UInt16 {
-        UInt16(try u8()) << 8 | UInt16(try u8())
+        let high = UInt16(try u8())
+        let low = UInt16(try u8())
+        return (high << 8) | low
     }
 
     mutating func bytes(_ count: Int) throws -> [UInt8] {
