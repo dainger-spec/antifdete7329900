@@ -2225,8 +2225,25 @@ final class SelfTest {
         check("first WebKit use: deleting a never-launched profile does not call remove(forIdentifier:)",
               WebDataStoreVault.removeCallCount == removalsBefore && (try? repository.summary(for: fresh.id)) == nil)
 
+        // Fail-closed, before anything has touched WebKit: a profile that protects its local requests
+        // (every profile without a proxy, by default) does not start without its rule list, which
+        // `ContentRules.prepare` compiles.
+        let protected = try repository.create(name: "Protected first", configuration: ProfileConfiguration(ephemeral: true))
+        var refusal = "started"
+        do {
+            try makeSession(repository, protected.id, key: repository.profileKey(for: protected.id)).shutDown()
+        } catch CoreError.invalidConfiguration(let message) {
+            refusal = message
+        }
+        try repository.delete(protected.id)
+        check("local requests: a profile that protects them does not start before its rule list is ready",
+              refusal == "the local-network rule list is not ready", refusal)
+
         // An ephemeral profile as the first WebKit use: its non-persistent store needs WebKit initialized.
-        let ephemeral = try repository.create(name: "Ephemeral first", configuration: ProfileConfiguration(ephemeral: true))
+        // Its local requests allowed, so that it needs no rule list (compiling one initializes WebKit).
+        var firstConfiguration = ProfileConfiguration(ephemeral: true)
+        firstConfiguration.localRequests = .allowed
+        let ephemeral = try repository.create(name: "Ephemeral first", configuration: firstConfiguration)
         let session = try makeSession(repository, ephemeral.id, key: repository.profileKey(for: ephemeral.id))
         check("first WebKit use: ephemeral profile starts without crashing", session.dataStore != nil)
         session.shutDown()

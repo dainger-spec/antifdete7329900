@@ -513,9 +513,10 @@ unless the person allows them (editor → Privacy → **Local requests**; Settin
 | Without a proxy | the local-network rule list (`LocalNetworkRules`): every load to this Mac (loopback, `0.0.0.0`) or a private network — 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, fc00::/7, fe80::/10, their IPv4-mapped forms, `.local`, `.home.arpa`, `.lan`, `.internal` names — is blocked, unless the page itself is on this Mac or that network | as in Safari |
 | With a proxy | this Mac: always blocked by the proxied list (the system never sends loopback through a proxy); the local network: through the proxy, to its network, not this one | the same — not a choice with a proxy |
 
-Fail-closed: a profile that needs the list does not start without it, and in Safari's chrome the
-list is one of those no "content blockers off" switch turns off. Checked by the self-test in a
-real web view, with a page whose address is a public name: protected, its fetches to the loopback
+Fail-closed: a profile that needs the list does not start without it (checked by the self-test
+before anything has touched WebKit: such a profile's session is refused, "the local-network rule
+list is not ready"), and in Safari's chrome the list is one of those no "content blockers off"
+switch turns off. Checked by the self-test in a real web view, with a page whose address is a public name: protected, its fetches to the loopback
 canary, to `10.255.255.1` and to a `.local` name are refused and the canary takes no connection;
 allowed, the loopback fetch reaches the canary. The patterns by unit tests (each range, the
 internet next to it, a page on the network keeping its own loads).
