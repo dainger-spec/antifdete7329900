@@ -11,7 +11,7 @@ it implements and how it is proven.
 | §3, the installer helper | in every build (`Contents/Helpers/PrivacyBrowser Updater.app`; `UpdateInstaller`, tested on real signed bundles by `UpdateInstallerTests`) |
 | §3 the quit gate, Install Now; §5 the check; §7 the screen | in the app (`AppUpdater`, `UpdateGate`, `UpdatesView`); the gate in the self-test (`updateGate`), the sheet in the UI snapshots; only builds with a feed URL have an updater |
 | §6, `scripts/release.sh` | runs dry in CI on every push (ad hoc, a throwaway key, no notarization); a real release needs the account and the key from the environment |
-| the end-to-end scenarios of §8 | in CI on every push, sandboxed and unsandboxed builds (`scripts/update_check.py`, `--selftest-updates`) |
+| the end-to-end scenarios of §8 | in CI on every push, sandboxed and unsandboxed builds (`scripts/update_check.py`, `--selftest-updates`); first passed in CI run 410 |
 
 Two facts make updates harder here than in most apps:
 
@@ -360,8 +360,8 @@ handed over at the last quit — is said once at the next launch. In the UI snap
   checks use `scripts/selftest_proxy.py` — then runs the old build's `--selftest-updates run`
   (`UpdateSelfTest`) with its own updater, under a packet capture with each packet's process:
   - with automatic checks off, not one request: the feed counts none in 8 seconds in which one
-    would have been due, and the capture holds not one packet of the app; its control — the first
-    request once checks are on — is in the capture;
+    would have been due, and the capture holds not one packet of the app; its control — the app's
+    packets to the feed once checks are on — is in the capture;
   - an older build is never offered (a feed of build 1 and 0.9 to build 1);
   - a stale appcast (validly signed, older than one accepted), a forged one (its list changed
     under the signature) and a changed archive (one byte) are refused, nothing kept;
@@ -369,8 +369,11 @@ handed over at the last quit — is said once at the next launch. In the UI snap
     up without one — in the unsandboxed build, each in its own process — the gate does not pass
     and nothing is handed over: no request written, no installer running;
   - the quit path stops and seals both; the gate passes, no process had to be killed, and the real
-    installer is started; the script sees the swap, finds no profile data in plaintext at that
-    moment, sees the new build started by the installer and the installer's "installed";
+    installer is started; the script sees the swap and, at that moment, looks for profile data in
+    plaintext where it can see from outside the app — and says what it could not see: macOS may keep a
+    sandboxed app's container from other programs, and there the app's own gate, which ran inside
+    it, is the check — then sees the new build started by the installer and the installer's
+    "installed";
   - the new build's `--selftest-updates verify` opens the old build's vault, profiles, settings and
     bookmarks, starts a profile from the website data the old build sealed, and seals it again;
   - every request the feed got carries the same headers from any Mac — `User-Agent:

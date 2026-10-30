@@ -205,21 +205,33 @@ def build_number(app):
 
 def plaintext_left(vault, profile_ids, roots):
     """What of the profiles is in plaintext on disk: Safari's home in the vault, and website data —
-    a folder named after the profile — under WebKit's roots (as WebKitDataLayout finds it)."""
-    left, unreadable = [], []
+    a folder named after the profile — under WebKit's roots (as WebKitDataLayout finds it). Also what
+    this script could not look into: from outside the app, macOS may keep a sandboxed app's
+    container from view, and a folder it cannot see proves nothing either way."""
+    left, unseen = [], []
     names = {u.lower() for u in profile_ids}
+    profiles = os.path.join(vault, "profiles")
+    try:
+        os.listdir(profiles)
+    except OSError as error:
+        unseen.append(f"{profiles}: {error.strerror}")
     for uuid in profile_ids:
         for name in ("home.noindex", "home"):
-            if os.path.exists(os.path.join(vault, "profiles", uuid, name)):
+            if os.path.exists(os.path.join(profiles, uuid, name)):
                 left.append(f"{uuid}/{name}")
     for root in roots:
-        if not os.path.isdir(root):
+        try:
+            os.listdir(root)
+        except FileNotFoundError:
+            continue  # WebKit made nothing there: nothing to leave in plaintext
+        except OSError as error:
+            unseen.append(f"{root}: {error.strerror}")
             continue
-        for path, directories, _ in os.walk(root, onerror=lambda error: unreadable.append(str(error))):
+        for path, directories, _ in os.walk(root, onerror=lambda error: unseen.append(f"{error.filename}: {error.strerror}")):
             left.extend(os.path.join(path, d) for d in directories if d.lower() in names)
             if path.count(os.sep) - root.count(os.sep) >= 4:
                 directories[:] = []
-    return left, unreadable
+    return left, unseen
 
 
 def stop_capture(capture):
@@ -345,11 +357,13 @@ def main():
         swapped = handed and wait(180, lambda: build_number(old_app) == NEW[1])
         check("the installer replaced the old build with the new one", swapped, f"build {build_number(old_app)}")
         if swapped:
-            left, unreadable = plaintext_left(vault, profile_ids, roots)
-            check("at the swap, no profile's data is in plaintext on disk", not left, ", ".join(left))
-            if unreadable:
-                print(f"INFO part of the disk could not be read from outside the app ({len(unreadable)}): "
-                      "the app's own gate checked it at the hand-over")
+            left, unseen = plaintext_left(vault, profile_ids, roots)
+            print(f"INFO at the swap the script looked at {vault}/profiles and {roots}"
+                  + (f"; could not see into: {unseen}" if unseen else "; it saw into all of them"), flush=True)
+            check("at the swap, no profile's data is in plaintext where this script can see", not left, ", ".join(left))
+            if unseen:
+                print("INFO what this script could not see, the app's own gate checked at the hand-over "
+                      "(\"after the quit's seal, every profile is sealed\")", flush=True)
         relaunched = swapped and wait(60, lambda: bool(app_processes(old_app)))
         check("the installer started the new build", relaunched)
         said = subprocess.run(["log", "show", "--last", "15m", "--style", "compact", "--predicate",
