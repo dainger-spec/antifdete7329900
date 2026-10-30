@@ -1158,6 +1158,13 @@ final class SelfTest {
             check("Safari chrome: no web view of the process has WebRTC in its engine",
                   report.webViewsWithWebRTC == 0, "\(report.webViewsWithWebRTC) of \(report.webViews) have")
             check("Safari chrome: WebKit's own default store is closed", report.defaultStoreClosed)
+            // The leak page submits a login form before it reports: Safari's own AutoFill must not
+            // see it (its save would go to the owner's own passwords; SafariChrome.closeSafarisAutoFill).
+            check("Safari chrome: a login form submitted in Safari's window went on without Safari's own AutoFill (passwords, cards, other forms), and nothing reached Safari's offers to save",
+                  report.safariFormSubmissionsKept >= 1 && report.safariSaveOffersReached == 0,
+                  "\(report.safariFormSubmissionsKept) submission(s) kept from it, \(report.safariSaveOffersReached) offer(s) to save reached")
+            check("Safari chrome: the kernel refuses the process the XPC services of Safari's frameworks (SafariPlatformSupport's helper reaches the real Safari's data and keychain)",
+                  report.safariXPCServicesClosed, String(describing: report.missing))
             check("Safari chrome: the process's own connections carry the profile's proxy", report.processProxy)
             check("Safari chrome: the process made its three probe requests", report.probes.count == 3, "\(report.probes)")
             check("Safari chrome: this Safari has every class and method the chrome relies on",
@@ -1385,9 +1392,10 @@ final class SelfTest {
     /// it (the owner's Mac showed one, Safari's SafariPlatformSupport helper, in the real container).
     private func reportXPCServices(_ seen: [(service: XPCServiceWatch.Service, opened: [String])], profilePIDs: Set<pid_t>) {
         let ours = profilePIDs.union([getpid()])
+        let ownResponsible = XPCServiceWatch.responsible(for: getpid())
         func whose(_ service: XPCServiceWatch.Service) -> String {
             guard let responsible = service.responsible else { return "responsible process not known" }
-            return ours.contains(responsible) ? "for this app" : "for pid \(responsible)"
+            return ours.contains(responsible) || responsible == ownResponsible ? "for this app" : "for pid \(responsible)"
         }
         info("XPC services started while the profile ran in Safari's chrome: "
              + (seen.isEmpty ? "none" : seen.map { "\($0.service.bundleName) (pid \($0.service.pid), \(whose($0.service)))" }.joined(separator: ", ")))
@@ -1395,6 +1403,14 @@ final class SelfTest {
             info("XPC service \(entry.service.bundleName) (pid \(entry.service.pid), \(whose(entry.service))) held open in the real Safari's places: "
                  + entry.opened.prefix(20).joined(separator: ", "))
         }
+        // The profile's process is closed to them (ProfileNetworkGuard.closeTheProcess). Ours: the
+        // system holds this app — or what this app runs under, as CI's runner — responsible.
+        let safaris = seen.filter { entry in
+            entry.service.bundleName.hasPrefix("com.apple.Safari")
+                && entry.service.responsible.map { ours.contains($0) || $0 == ownResponsible } ?? true
+        }
+        check("Safari chrome: no XPC service of Safari's frameworks started for the profile",
+              safaris.isEmpty, safaris.map { "\($0.service.bundleName) (pid \($0.service.pid))" }.joined(separator: ", "))
     }
 
     // MARK: Exceptions

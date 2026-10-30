@@ -323,6 +323,7 @@ enum SafariChrome {
         bridgeNibLookups()
         bridgeNibInitializers()
         stubChromeFeatures()
+        closeSafarisAutoFill()
         installUnavailableNotice()
     }
 
@@ -864,6 +865,95 @@ enum SafariChrome {
     /// What ⌘, and Settings… do in Safari's menu (a profile's process asks the manager).
     static var onShowSettings: (() -> Void)?
 
+    // MARK: Safari's own AutoFill
+
+    /// Safari's own AutoFill never sees a form of a profile's page, and never offers anything. On
+    /// the owner's Mac, after our offer to save a password, Safari's followed: its save goes to the
+    /// owner's own passwords, shared by every profile and the real Safari, and the
+    /// `AutoFillPasswords` setting, off in the profile, is not what that path reads. So it is
+    /// closed where a form comes in, not by a setting:
+    ///   * WebKit hands a submitted form to the web view's input or navigation delegate, which in
+    ///     Safari's window is Safari's (`BrowserInputDelegate`). Every class of Safari's frameworks
+    ///     that implements one of WebKit's four ways of being told lets the submission go on, and
+    ///     does nothing else: Safari's passwords, credit cards and other forms never get it
+    ///     (`formSubmissionsKept`).
+    ///   * Behind that, Safari's offers to save a password or a credit card do nothing, and are
+    ///     counted if anything reaches them all the same (`saveOffersReached`: none is right).
+    ///   * Its offers to fill a field — its passwords, cards and the user's own contact card — are
+    ///     off, and the Edit menu's AutoFill items that insert them are gone (`installMainMenu`).
+    /// Our own offer to save a password comes from the page's isolated world, not from these.
+    private static func closeSafarisAutoFill() {
+        typealias Handler = @convention(block) () -> Void
+        let delegates: [(String, Any)] = [
+            ("webView:willSubmitForm:submissionHandler:",
+             { (_: AnyObject, _: AnyObject?, _: AnyObject?, handler: Handler?) in keep(handler) } as @convention(block) (AnyObject, AnyObject?, AnyObject?, Handler?) -> Void),
+            ("_webView:willSubmitFormValues:userObject:submissionHandler:",
+             { (_: AnyObject, _: AnyObject?, _: AnyObject?, _: AnyObject?, handler: Handler?) in keep(handler) }
+                as @convention(block) (AnyObject, AnyObject?, AnyObject?, AnyObject?, Handler?) -> Void),
+            ("_webView:willSubmitFormValues:frameInfo:sourceFrameInfo:userObject:submissionHandler:",
+             { (_: AnyObject, _: AnyObject?, _: AnyObject?, _: AnyObject?, _: AnyObject?, _: AnyObject?, handler: Handler?) in keep(handler) }
+                as @convention(block) (AnyObject, AnyObject?, AnyObject?, AnyObject?, AnyObject?, AnyObject?, Handler?) -> Void),
+            ("_webView:willSubmitFormValues:frameInfo:sourceFrameInfo:userObject:requestURL:method:submissionHandler:",
+             { (_: AnyObject, _: AnyObject?, _: AnyObject?, _: AnyObject?, _: AnyObject?, _: AnyObject?, _: AnyObject?, _: AnyObject?, handler: Handler?) in keep(handler) }
+                as @convention(block) (AnyObject, AnyObject?, AnyObject?, AnyObject?, AnyObject?, AnyObject?, AnyObject?, AnyObject?, Handler?) -> Void),
+        ]
+        var closed: [String] = []
+        for className in classesOfSafarisImages() {
+            guard let cls = NSClassFromString(className) else { continue }
+            for (selectorName, block) in delegates {
+                let selector = NSSelectorFromString(selectorName)
+                // Only a class's own method: one it inherits is its superclass's to replace.
+                guard let method = class_getInstanceMethod(cls, selector),
+                      class_getSuperclass(cls).flatMap({ class_getInstanceMethod($0, selector) }) != method else { continue }
+                method_setImplementation(method, imp_implementationWithBlock(block))
+                closed.append("-[\(className) \(selectorName)]")
+            }
+        }
+        if closed.isEmpty {
+            log.error("No class of Safari's takes a submitted form here: Safari's own AutoFill is not closed where forms come in")
+        } else {
+            log.notice("Safari's own AutoFill gets no form: \(closed.joined(separator: ", "), privacy: .public)")
+        }
+        for (className, selectorName) in [
+            ("FormDataController", "offerToSaveCredentialsFromForm:forFrame:passwordGenerationCredentials:completionHandler:"),
+            ("CreditCardDataController",
+             "_offerToSaveCreditCardData:submittedToFrameInBrowserViewController:fromFrameInBrowserViewController:finishedSavingFormDataBlock:"),
+        ] {
+            replaceWithConstant(className, selectorName) {
+                saveOffersReached += 1
+                return nil
+            }
+        }
+        // NO: nothing of Safari's to fill a field with.
+        replaceWithConstant("BrowserViewController", "_shouldOfferAnyTypeOfAutoFill") { nil }
+        replaceWithConstant("FormDataController", "shouldOfferAddressBookAutoFillInTextField:formMetadata:") { nil }
+    }
+
+    /// A form went on without Safari's AutoFill seeing it.
+    private static func keep(_ handler: (@convention(block) () -> Void)?) {
+        formSubmissionsKept += 1
+        handler?()
+    }
+
+    /// Forms submitted in Safari's window that went on without Safari's AutoFill, and times one of
+    /// its offers to save was reached all the same (none is right): the network report has both.
+    private(set) static var formSubmissionsKept = 0
+    private(set) static var saveOffersReached = 0
+
+    /// The names of the classes of every image of Safari's frameworks loaded in this process.
+    private static func classesOfSafarisImages() -> [String] {
+        let images = (0..<_dyld_image_count()).compactMap { _dyld_get_image_name($0).map { String(cString: $0) } }
+            .filter { $0.contains(".framework/") && $0.contains("/Safari") }
+        var names: [String] = []
+        for image in images {
+            var count: UInt32 = 0
+            guard let list = objc_copyClassNamesForImage(image, &count) else { continue }
+            names += (0..<Int(count)).map { String(cString: list[$0]) }
+            free(list)
+        }
+        return names
+    }
+
     // MARK: When one of Safari's features cannot work here
 
     /// The menu item whose action was last sent, and when.
@@ -958,6 +1048,7 @@ enum SafariChrome {
             return false
         }
         removePrivateWindowItems(from: menu)
+        removeAutoFillInsertItems(from: menu)
         addPasteAsTyped(to: menu)
         NSApplication.shared.mainMenu = menu
         log.notice("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
@@ -997,6 +1088,32 @@ enum SafariChrome {
                 menu.removeItem(item)
             }
         }
+    }
+
+    /// The Edit menu's AutoFill items insert Safari's own: the user's contact card, their
+    /// passwords and credit cards — into a profile's page, which is theirs to keep apart from it
+    /// (`closeSafarisAutoFill`). Gone, and their submenu with them when they were all it had (a
+    /// submenu Safari fills only as it opens is empty to begin with, and stays). True when an item
+    /// was removed.
+    @discardableResult
+    private static func removeAutoFillInsertItems(from menu: NSMenu) -> Bool {
+        let inserting: Set<String> = ["_handleInsertFromContactsCommand:", "_handleInsertFromPasswordsCommand:",
+                                      "_handleInsertFromCreditCardsCommand:"]
+        var removed = false
+        for item in menu.items {
+            if let submenu = item.submenu {
+                if removeAutoFillInsertItems(from: submenu) {
+                    removed = true
+                    if submenu.items.allSatisfy(\.isSeparatorItem) { menu.removeItem(item) }
+                }
+                continue
+            }
+            if let action = item.action, inserting.contains(NSStringFromSelector(action)) {
+                menu.removeItem(item)
+                removed = true
+            }
+        }
+        return removed
     }
 
     // MARK: Opening a window

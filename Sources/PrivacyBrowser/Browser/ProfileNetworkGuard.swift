@@ -784,29 +784,42 @@ enum ProfileNetworkGuard {
     nonisolated private static func closeTheProcess(udp: Bool) -> [String] {
         var rules: [String] = []
         if udp { rules.append("(deny network-outbound (remote udp \"*:*\"))") }
+        var placesClosed = false
         if let realHome = SafariPaths.realHome, let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"],
            realHome != home {
             rules.append("(deny file-read* file-write* \(SafariPaths.sandboxFilter(realHome: realHome)))")
+            placesClosed = true
         }
-        guard !rules.isEmpty else { return [] }
         typealias SandboxInit = @convention(c) (UnsafePointer<CChar>, UInt64, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) -> Int32
         guard let symbol = dlsym(dlopen(nil, RTLD_NOW), "sandbox_init") else {
-            return ["sandbox_init (UDP and the real Safari's places stay open)"]
+            return ["sandbox_init (UDP, the real Safari's places and Safari's XPC services stay open)"]
         }
         let sandboxInit = unsafeBitCast(symbol, to: SandboxInit.self)
-        let profile = "(version 1)(allow default)" + rules.joined()
-        var error: UnsafeMutablePointer<CChar>?
-        guard sandboxInit(profile, 0, &error) == 0 else {
+        let logger = Logger(subsystem: "PrivacyBrowser", category: "ProfileNetworkGuard")
+        var missing: [String] = []
+        // The XPC services that Safari's frameworks bring start for whichever process asks, as
+        // processes of their own — outside this one's home, proxy and sandbox — and the hooks on
+        // NSXPCConnection do not see one asked for through libxpc. The one seen starting for the
+        // hosted chrome, SafariPlatformSupport's helper, may read and write the real Safari's
+        // container and history and the owner's passwords in the keychain (its entitlements, in
+        // CI's inventory), and it reaches the network itself. The kernel refuses them by name
+        // (WebKit's own services are com.apple.WebKit.*, and stay).
+        let services = "(deny mach-lookup (xpc-service-name-prefix \"com.apple.Safari\"))"
+        for attempt in [rules + [services], rules] where !attempt.isEmpty {
+            let profile = "(version 1)(allow default)" + attempt.joined()
+            var error: UnsafeMutablePointer<CChar>?
+            if sandboxInit(profile, 0, &error) == 0 {
+                if attempt.contains(services) { closures.insert("safari-xpc-services") } else { missing.append("sandbox: Safari's XPC services stay open") }
+                if udp { closures.insert("udp") }
+                if placesClosed { closures.insert("safari-places") }
+                logger.notice("The kernel closes to this process: \(closures.sorted.joined(separator: ", "), privacy: .public)")
+                return missing
+            }
             let reason = error.map { String(cString: $0) } ?? "unknown"
-            Logger(subsystem: "PrivacyBrowser", category: "ProfileNetworkGuard")
-                .error("The process could not be closed: \(reason, privacy: .private) (\(profile, privacy: .private))")
-            return ["sandbox: not applied (\(reason))"]
+            logger.error("The process could not be closed: \(reason, privacy: .private) (\(profile, privacy: .private))")
+            missing.append("sandbox: not applied (\(reason))")
         }
-        if udp { closures.insert("udp") }
-        if rules.count > (udp ? 1 : 0) { closures.insert("safari-places") }
-        Logger(subsystem: "PrivacyBrowser", category: "ProfileNetworkGuard")
-            .notice("The kernel closes to this process: \(closures.sorted.joined(separator: ", "), privacy: .public)")
-        return []
+        return missing
     }
 
     /// What the kernel closed to this process (`closeTheProcess`): "udp", "safari-places".
@@ -1038,8 +1051,11 @@ enum ProfileNetworkGuard {
         report.trustRefused = trust.refused
         report.trustFetchAllowed = ServerTrust.tally.fetchAllowed
         report.pasteAsTypedInMenu = SafariChrome.pasteAsTypedInMenu
+        report.safariFormSubmissionsKept = SafariChrome.formSubmissionsKept
+        report.safariSaveOffersReached = SafariChrome.saveOffersReached
         report.udpClosed = closures.sorted.contains("udp")
         report.safariPlacesClosed = closures.sorted.contains("safari-places")
+        report.safariXPCServicesClosed = closures.sorted.contains("safari-xpc-services")
         report.safariPathsRedirected = SafariPaths.redirected
         report.workerPreferences = BrowserSession.workerPreferencesApplied
         report.webKitVersion = WebKitBuild.version
@@ -1191,6 +1207,11 @@ struct ProfileNetworkReport: Codable, Equatable {
     var trustFetchAllowed = 0
     /// Safari's Edit menu has Paste as Typed (`SafariChrome.addPasteAsTyped`).
     var pasteAsTypedInMenu = false
+    /// Forms submitted in Safari's window that went on without Safari's own AutoFill seeing them,
+    /// and times one of its offers to save a password or a card was reached all the same (none is
+    /// right; `SafariChrome.closeSafarisAutoFill`).
+    var safariFormSubmissionsKept = 0
+    var safariSaveOffersReached = 0
     /// An exception passed through the process's exception preprocessor keeps its call stack:
     /// CoreFoundation's own preprocessor is still in the chain (`ExceptionLog`).
     var exceptionCallStacks = false
@@ -1198,6 +1219,9 @@ struct ProfileNetworkReport: Codable, Equatable {
     var udpClosed = false
     /// The kernel refuses this process the real Safari's places (`SafariPaths`).
     var safariPlacesClosed = false
+    /// The kernel refuses this process the XPC services of Safari's frameworks
+    /// (`ProfileNetworkGuard.closeTheProcess`).
+    var safariXPCServicesClosed = false
     /// The path getters of Safari's frameworks that answer with the profile's home (`SafariPaths`).
     var safariPathsRedirected: [String] = []
     /// With a proxy: what became of a UDP datagram and of a QUIC connection, by name.

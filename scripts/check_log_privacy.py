@@ -71,6 +71,7 @@ ALLOWED_IN_FILE = {
     ("SafariChrome.swift", "given.bundlePath"): "the bundle Safari's code asked for a nib: Safari's own, or this app's",
     ("SafariChrome.swift", "String(cString: strerror(errno))"): "a system error's text",
     ("SafariChrome.swift", "String(describing: NSApp.map { type(of: $0) })"): "a class name",
+    ("SafariChrome.swift", "closed.joined(separator: \", \")"): "names of Safari's classes and the WebKit selectors closed in them",
     ("SafariChromeHost.swift", "structural.joined(separator: \", \")"): "names of Safari's classes this macOS lacks",
     ("SafariChromeHost.swift", "patched.joined(separator: \", \")"): "names of Safari's configuration factories",
     ("ProxyGeoLookup.swift", "service.url.host ?? \"?\""): "a geolocation service of the app's own list, not the proxy",

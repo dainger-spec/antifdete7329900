@@ -115,7 +115,7 @@ final class XPCServiceWatch: @unchecked Sendable {
     /// `responsibility_get_pid_responsible_for_pid`, the system's record of which process a helper
     /// works for (what Activity Monitor and the privacy prompts go by); not public API, so looked
     /// up, and nil where this macOS does not have it.
-    private static func responsible(for pid: pid_t) -> pid_t? {
+    static func responsible(for pid: pid_t) -> pid_t? {
         typealias Responsible = @convention(c) (pid_t) -> pid_t
         guard let symbol = responsibleSymbol else { return nil }
         let answer = unsafeBitCast(symbol, to: Responsible.self)(pid)
