@@ -43,11 +43,16 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
     public var lastSync: SyncStatus?
     /// The local automation API (`AutomationHTTP`): nil until it is first set up.
     public var automation: AutomationSettings?
+    /// The profiles that had a window when the app last quit, for the next unlock to start again
+    /// (the app's Settings → Startup); used once, and kept only while that setting asks for it.
+    public var reopenAtUnlock: [UUID]?
 
-    public init(syncTarget: SyncTarget? = nil, lastSync: SyncStatus? = nil, automation: AutomationSettings? = nil) {
+    public init(syncTarget: SyncTarget? = nil, lastSync: SyncStatus? = nil, automation: AutomationSettings? = nil,
+                reopenAtUnlock: [UUID]? = nil) {
         self.syncTarget = syncTarget
         self.lastSync = lastSync
         self.automation = automation
+        self.reopenAtUnlock = reopenAtUnlock
     }
 }
 

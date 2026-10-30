@@ -333,7 +333,8 @@ itself checks them with, and the script lists what a real release still needs wh
 
 ## 7. Interface
 
-An **Updates** sheet (Profiles window → ⋯ → Updates…, `UpdatesView`): the version running; Check
+The **Updates** section of the app's Settings window (⌘, or Profiles window → ⋯ → Settings…;
+`UpdatesPane` in `SettingsView`; it was a sheet of its own before the settings had one window): the version running; Check
 Now; "Check for updates automatically"; what to do with an update (download it and install at quit
 — the default — or only tell me, then Download); the release notes as text; the state — not checked
 yet, up to date (when), checking, downloading, "downloaded and checked, installs when you quit",
@@ -342,7 +343,7 @@ installed to (App Translocation; a folder this user cannot write). Install Now a
 what it will stop. What the server sees is said under the settings. After an update the sheet says
 which one this launch is; an update that was not installed — refused, rolled back, given up, or not
 handed over at the last quit — is said once at the next launch. In the UI snapshots
-(`sheet-updates-ready`, `sheet-updates-up-to-date`, `sheet-updates-unavailable`).
+(`settings-updates-ready`, `settings-updates-up-to-date`, `settings-updates-unavailable`).
 
 ## 8. How it is proven
 

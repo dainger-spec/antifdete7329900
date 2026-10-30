@@ -1,94 +1,45 @@
 import BrowserCore
 import SwiftUI
 
-/// Updates (Profiles window → ⋯ → Updates…, docs/UPDATES.md §7): the version running, what the
-/// updater knows, the release notes as text, automatic checks, what to do with a release, Check Now
-/// and Install Now — which asks first, and lists what it stops.
-struct UpdatesView: View {
+/// Updates (Settings → Updates, docs/UPDATES.md §7): the version running, what the updater knows,
+/// the release notes as text, automatic checks, what to do with a release, Check Now and Install
+/// Now — which asks first, and lists what it stops.
+struct UpdatesPane: View {
     @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        if let updater = model.updater {
-            UpdatesForm(updater: updater)
-        } else {
-            UpdatesUnavailable()
-        }
-    }
+    @ObservedObject var updater: AppUpdater
+    @State private var confirming = false
 
     /// "0.1.0 (1)": the running app's version and build.
     static var runningVersion: String {
         let info = Bundle.main.infoDictionary ?? [:]
         return "\(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))"
     }
-}
-
-/// A build without an update feed (every development build): nothing is ever asked.
-private struct UpdatesUnavailable: View {
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(title: L("updates.title"))
-            Form {
-                LabeledContent(L("updates.version"), value: UpdatesView.runningVersion)
-                Text(L("updates.unavailable")).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(L("updates.version"))
+                    .font(.lumenLabel)
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 12)
+                Text(verbatim: Self.runningVersion)
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
             }
-            .lumenForm()
-            SheetFooter {
-                Button(L("common.done")) { dismiss() }
-                    .buttonStyle(.lumenPrimary)
-                    .keyboardShortcut(.defaultAction)
+            .padding(.top, 12)
+            Text(stateText)
+                .font(.lumenBody)
+                .foregroundStyle(stateColor)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+            if let installed = installedNotice {
+                Text(installed)
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.top, 8)
             }
-        }
-        .frame(width: 560)
-        .background(Theme.raised)
-    }
-}
-
-struct UpdatesForm: View {
-    @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-    @ObservedObject var updater: AppUpdater
-    @State private var confirming = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(title: L("updates.title"))
-            Form {
-                LabeledContent(L("updates.version"), value: UpdatesView.runningVersion)
-                Section(L("updates.state")) {
-                    Text(stateText).foregroundStyle(stateColor)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let installed = installedNotice {
-                        Text(installed).font(.callout).foregroundStyle(.secondary)
-                    }
-                }
-                if let item = updater.state.item {
-                    Section(String(format: L("updates.notes"), item.version)) {
-                        // Plain text, never a page: the notes come from the feed, and nothing of it
-                        // is rendered by WebKit outside a profile.
-                        ScrollView {
-                            Text(verbatim: item.notes.isEmpty ? L("updates.notes.none") : item.notes) // l10n: the feed's own text
-                                .font(.callout)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(maxHeight: 160)
-                    }
-                }
-                Section(L("updates.settings")) {
-                    Toggle(L("updates.automatic"), isOn: $updater.automaticChecks)
-                    Picker(L("updates.policy"), selection: $updater.installPolicy) {
-                        Text(L("updates.policy.atQuit")).tag(UpdateInstallPolicy.atQuit)
-                        Text(L("updates.policy.notifyOnly")).tag(UpdateInstallPolicy.notifyOnly)
-                    }
-                    Text(L("updates.privacy")).font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .lumenForm()
-            SheetFooter {
+            HStack(spacing: 8) {
                 Button(L("updates.checkNow")) { Task { await updater.checkNow() } }
                     .buttonStyle(.lumenSecondary)
                     .disabled(isBusy)
@@ -98,20 +49,46 @@ struct UpdatesForm: View {
                 }
                 if updater.isReady {
                     Button(L("updates.installNow")) { confirming = true }
-                        .buttonStyle(.lumenSecondary)
+                        .buttonStyle(.lumenPrimary)
                         .disabled(model.isInstallingUpdate)
                 }
-                Button(L("common.done")) { dismiss() }
-                    .buttonStyle(.lumenPrimary)
-                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.vertical, 12)
+            if let item = updater.state.item {
+                Text(String(format: L("updates.notes"), item.version))
+                    .font(.lumenSection)
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.top, 4)
+                // Plain text, never a page: the notes come from the feed, and nothing of it is
+                // rendered by WebKit outside a profile.
+                ScrollView {
+                    Text(verbatim: item.notes.isEmpty ? L("updates.notes.none") : item.notes) // l10n: the feed's own text
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
+                .frame(maxHeight: 140)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.raisedInset))
+                .padding(.top, 6)
+                .padding(.bottom, 4)
+            }
+            SettingRow(L("updates.automatic"), detail: L("updates.privacy"), effect: .now) {
+                SettingSwitch(isOn: $updater.automaticChecks, label: L("updates.automatic"))
+            }
+            SettingRow(L("updates.policy"), detail: L("settings.updates.policy.detail"), effect: .now) {
+                Picker(L("updates.policy"), selection: $updater.installPolicy) {
+                    Text(L("updates.policy.atQuit")).tag(UpdateInstallPolicy.atQuit)
+                    Text(L("updates.policy.notifyOnly")).tag(UpdateInstallPolicy.notifyOnly)
+                }
+                .labelsHidden()
+                .fixedSize()
             }
         }
-        .frame(width: 560)
-        .background(Theme.raised)
         .alert(confirmTitle, isPresented: $confirming) {
             Button(model.updateStopsList().isEmpty ? L("updates.installNow.confirm") : L("updates.installNow.confirmStopping"),
                    role: .destructive) {
-                dismiss()
                 Task { await model.installUpdateNow() }
             }
             Button(L("common.cancel"), role: .cancel) {}
@@ -158,7 +135,7 @@ struct UpdatesForm: View {
         case .ready, .available: return Theme.running
         case .blocked: return Theme.warning
         case .failed: return Theme.danger
-        default: return .secondary
+        default: return Theme.textSecondary
         }
     }
 

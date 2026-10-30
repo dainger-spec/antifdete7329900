@@ -441,6 +441,26 @@ configs read as the default generation).
   `false`. Browser windows are not restorable, so AppKit never writes their titles (the
   profile names) to Saved Application State.
 
+## Settings
+
+```
+SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettings (AppModel.settings, @MainActor)
+   │  a key per setting in the app's defaults (PBSettings…, PBProfileProcess): read on its own,
+   │  out of range → the default; a download folder in the App Sandbox → a bookmark, opened for the run
+   │  Startup        startup (.profilesWindow | .reopenProfiles) → AppModel: quit records
+   │                 StartupReopen.toRecord(manager.activity()) in DeviceSettings.reopenAtUnlock
+   │                 (encrypted), the next unlock launches StartupReopen.toLaunch(…) once;
+   │                 confirmQuit → QuitCoordinator(confirm:) — asked after terminate: returns
+   │  New profiles   newProfileMatchesConnection → ProfileDraft.matchProxyLocation of ＋
+   │  Behavior       BrowsingPreferences (AutoFill, tab position, closing several tabs, zoom,
+   │  Downloads      download folder, ask each time, Dock letters) → BrowsingPreferences.current here;
+   │                 ProfileCommand.preferences to every profile process (ProfileManager.sendPreferences)
+   │                 → BrowsingPreferences.current there, DockIcon
+   │  Proxies        proxyFailure → ProfileManager.refusesFailingProxy: the launch probe first,
+   │                 onProxyLaunchRefused → ProxyProblem(notStarted: true)
+   └  Updates        UpdatesPane (AppUpdater)
+```
+
 ## Concurrency
 
 - UI, `ProfileManager`, `BrowserSession`, window controllers and `WebDataStoreVault` are

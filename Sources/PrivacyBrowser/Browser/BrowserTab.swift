@@ -520,12 +520,24 @@ extension BrowserTab: WKUIDelegate {
 // MARK: - WKDownloadDelegate
 
 extension BrowserTab: WKDownloadDelegate {
-    /// LIMITATION: downloaded files are written to ~/Downloads unencrypted; they are outside the
-    /// profile's encrypted storage. In the App Sandbox this needs
-    /// `com.apple.security.files.downloads.read-write`.
+    /// LIMITATION: downloaded files are written unencrypted, outside the profile's encrypted
+    /// storage: to the folder Settings → Downloads names (the Downloads folder by default), or
+    /// where the save panel is told to when the settings ask each time. In the App Sandbox the
+    /// Downloads folder needs `com.apple.security.files.downloads.read-write`, another folder the
+    /// bookmark the settings keep to it, and the save panel's choice is the user's own.
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
-        completionHandler(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename))
+        let preferences = BrowsingPreferences.current
+        guard preferences.askWhereToSave, let window = webView.window, window.isVisible else {
+            completionHandler(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename, in: preferences.downloadFolderURL))
+            return
+        }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = Self.safeDownloadName(suggestedFilename)
+        panel.directoryURL = preferences.downloadFolderURL
+        panel.canCreateDirectories = true
+        // No destination: WebKit cancels the download, and nothing is written.
+        panel.beginSheetModal(for: window) { answer in completionHandler(answer == .OK ? panel.url : nil) }
     }
 
     /// A download's challenges: its certificate as a page's (`ServerTrust`), the proxy's own with
@@ -539,15 +551,25 @@ extension BrowserTab: WKDownloadDelegate {
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        // Cancelled in the save panel: nothing failed.
+        if (error as NSError).domain == NSURLErrorDomain, (error as NSError).code == NSURLErrorCancelled { return }
         showMessage(String(format: L("download.failed"), error.localizedDescription))
     }
 
-    static func uniqueDownloadURL(suggestedFilename: String) -> URL {
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+    /// The suggested name without what would take it out of the folder or hide it.
+    static func safeDownloadName(_ suggestedFilename: String) -> String {
         let safeName = suggestedFilename.replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
             .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-        var destination = downloads.appendingPathComponent(safeName.isEmpty ? "download" : safeName)
+        return safeName.isEmpty ? "download" : safeName
+    }
+
+    /// A name in `folder` (the Downloads folder by default) that no file has yet.
+    static func uniqueDownloadURL(suggestedFilename: String,
+                                  in folder: URL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]) -> URL {
+        let downloads = folder
+        let safeName = safeDownloadName(suggestedFilename)
+        var destination = downloads.appendingPathComponent(safeName)
         let base = destination.deletingPathExtension().lastPathComponent
         let ext = destination.pathExtension
         var counter = 1

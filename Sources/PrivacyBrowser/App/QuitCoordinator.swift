@@ -28,6 +28,7 @@ final class QuitCoordinator {
     private let terminate: @MainActor () -> Void
     private let hasUpdate: @MainActor () -> Bool
     private let installUpdate: @MainActor () async -> Void
+    private let confirm: (@MainActor () async -> Bool)?
     private var quitTask: Task<Void, Never>?
     private var replyPending = false
     private var sealed = false
@@ -40,18 +41,23 @@ final class QuitCoordinator {
     ///   - terminate: sends `terminate:` again (`NSApp.terminate(nil)`; the self-test records it).
     ///   - hasUpdate: an update is downloaded and checked, to be handed to its installer.
     ///   - installUpdate: runs the gate and, if it passes, starts the installer; the app then exits.
+    ///   - confirm: asked before anything is stopped, when profiles run (Settings → Startup →
+    ///     confirm quit); false keeps the app open as it was. Never asked at a logout, restart or
+    ///     shutdown, which cannot wait for an answer.
     init(hasActivity: @escaping @MainActor () -> Bool,
          lockForQuit: @escaping @MainActor () async -> Void,
          willSeal: @escaping @MainActor () -> Void = {},
          terminate: @escaping @MainActor () -> Void,
          hasUpdate: @escaping @MainActor () -> Bool = { false },
-         installUpdate: @escaping @MainActor () async -> Void = {}) {
+         installUpdate: @escaping @MainActor () async -> Void = {},
+         confirm: (@MainActor () async -> Bool)? = nil) {
         self.hasActivity = hasActivity
         self.lockForQuit = lockForQuit
         self.willSeal = willSeal
         self.terminate = terminate
         self.hasUpdate = hasUpdate
         self.installUpdate = installUpdate
+        self.confirm = confirm
         _ = Self.powerOffObserver
     }
 
@@ -86,6 +92,11 @@ final class QuitCoordinator {
             // Starts once the event that called terminate: has returned, i.e. once WebKit's
             // frames (and the web view they hold) are off the stack.
             quitTask = Task { @MainActor in
+                // Asked here, after that: nothing has been stopped yet, and "no" leaves it so.
+                if let confirm = self.confirm, !(await confirm()) {
+                    self.quitTask = nil
+                    return
+                }
                 self.willSeal()
                 await self.sealEverything()
                 self.quitTask = nil

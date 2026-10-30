@@ -247,6 +247,9 @@ enum ProfileSessionHost {
                 Task { @MainActor in
                     ProfileSessionHost.send(.networkReport(await ProfileNetworkGuard.report(probe: probe)))
                 }
+            case .preferences(let preferences):
+                BrowsingPreferences.current = preferences
+                DockIcon.show(initials: preferences.dockInitials, of: profileName)
             case .startWarmUp(let plan):
                 if manager?.startWarmUp(profileID, plan: plan) != true {
                     ProfileSessionHost.log.error("Warm-up of \(self.profileID.uuidString, privacy: .public) did not start")
@@ -265,8 +268,15 @@ enum ProfileSessionHost {
 
         /// Whether a command can be acted on before the profile's session exists.
         private func isImmediate(_ command: ProfileCommand) -> Bool {
-            if case .stop = command { return true }
-            return false
+            switch command {
+            case .stop, .preferences: return true
+            default: return false
+            }
+        }
+
+        /// The profile's name, for its Dock icon.
+        private var profileName: String {
+            (try? repository.summary(for: profileID).name) ?? ""
         }
 
         /// A window of the profile. In Safari's chrome a window is Safari's to open, and it comes

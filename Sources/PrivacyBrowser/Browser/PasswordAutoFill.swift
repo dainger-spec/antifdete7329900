@@ -495,7 +495,8 @@ final class ProfilePasswordSettings {
         (try? repository.loadConfiguration(profileID)) ?? launchConfiguration
     }
 
-    var autoFill: Bool { current.passwordAutoFill }
+    /// The app's switch (Settings → Behavior) and the profile's own: both must be on.
+    var autoFill: Bool { BrowsingPreferences.current.passwordAutoFill && current.passwordAutoFill }
 
     func isNeverSaved(_ origin: WebOrigin) -> Bool {
         PasswordMatching.isNeverSaved(origin, sites: current.passwordNeverSaveSites)

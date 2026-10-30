@@ -136,6 +136,7 @@ final class SelfTest {
             try await recoverySealing(repository)
             try formatPolicy(repository)
             try updateGate(repository)
+            try await appSettings(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
@@ -2098,6 +2099,20 @@ final class SelfTest {
                       && model.list.entry(for: ProxySettings(kind: .socks5, host: loopback, port: silentPort))?.lastCheck?.diagnosis?.verdict == .silent,
                   String(describing: fromProblem))
             await manager.shutDown()
+            // Settings → Proxies → do not start it: the proxy is asked first, and a profile whose
+            // proxy does not work stays stopped, saying why; one whose proxy works starts.
+            let refusing = ProfileManager(repository: repository)
+            var refused: [(UUID, ProxyDiagnosis.Verdict)] = []
+            refusing.refusesFailingProxy = { true }
+            refusing.onProxyProblem = { _, _, _ in }
+            refusing.onProxyLaunchRefused = { id, _, diagnosis in refused.append((id, diagnosis.verdict)) }
+            try await refusing.launch(silentProfile.id)
+            try await refusing.launch(workingProfile.id)
+            check("launch: set not to start a profile whose proxy does not work, the silent one stays stopped and says why; the working one starts",
+                  !refusing.isRunning(silentProfile.id) && refused.map { $0.0 } == [silentProfile.id] && refused.first?.1 == .silent
+                      && refusing.isRunning(workingProfile.id),
+                  refused.map { "\($0.0 == silentProfile.id ? "silent" : "working"): \($0.1.rawValue)" }.joined(separator: ", "))
+            await refusing.shutDown()
             try repository.delete(silentProfile.id)
             try repository.delete(workingProfile.id)
         }
@@ -2316,6 +2331,171 @@ final class SelfTest {
         close(descriptor)
         check("update gate: a home a process still holds fails it", held.contains { $0.contains("holds its home") }, held.joined(separator: "; "))
         check("update gate: passes again once all of that is gone", ours(verdict()).isEmpty, verdict().reasons.joined(separator: "; "))
+    }
+
+    // MARK: Settings (one window, ⌘,)
+
+    /// The app's settings: each kept in its own key and read back as set, what is out of range read
+    /// as the default; a quit that asks first and stops nothing on "no"; and in a browser window,
+    /// where a new tab goes and the zoom it opens at, the question before closing a window of
+    /// several tabs, AutoFill's switch over the profile's own, where a download goes, the letters
+    /// on a profile's Dock icon, which profiles a quit keeps to reopen, and the settings as a
+    /// profile's own process gets them.
+    private func appSettings(_ repository: ProfileRepository) async throws {
+        defer { BrowsingPreferences.current = BrowsingPreferences() }
+        let suite = "pb-selftest-settings-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            check("settings: a defaults suite of the self-test's own", false)
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let fresh = AppSettings(defaults: defaults)
+        check("settings: the defaults — the Profiles window after unlocking, quitting asks, new profiles follow the connection, a failing proxy's profile starts and says why, AutoFill on, new tabs next to the current one, closing several tabs asks, 100 %, the Downloads folder, two letters",
+              fresh.startup == .profilesWindow && fresh.confirmQuit && fresh.newProfileMatchesConnection
+                  && fresh.proxyFailure == .launchAndExplain && fresh.browsing == BrowsingPreferences(),
+              String(describing: fresh.browsing))
+        fresh.startup = .reopenProfiles
+        fresh.confirmQuit = false
+        fresh.newProfileMatchesConnection = false
+        fresh.proxyFailure = .doNotLaunch
+        fresh.browsing.passwordAutoFill = false
+        fresh.browsing.newTabsNextToCurrent = false
+        fresh.browsing.warnClosingTabs = false
+        fresh.browsing.pageZoom = 1.25
+        fresh.browsing.askWhereToSave = true
+        fresh.browsing.dockInitials = 3
+        let reread = AppSettings(defaults: defaults)
+        var expected = BrowsingPreferences()
+        expected.passwordAutoFill = false
+        expected.newTabsNextToCurrent = false
+        expected.warnClosingTabs = false
+        expected.pageZoom = 1.25
+        expected.askWhereToSave = true
+        expected.dockInitials = 3
+        check("settings: every setting is read back as it was set, each from its own key",
+              reread.startup == .reopenProfiles && !reread.confirmQuit && !reread.newProfileMatchesConnection
+                  && reread.proxyFailure == .doNotLaunch && reread.browsing == expected,
+              String(describing: reread.browsing))
+        defaults.set(3.7, forKey: "PBSettingsPageZoom")
+        defaults.set(9, forKey: "PBSettingsDockInitials")
+        defaults.set("sideways", forKey: "PBSettingsStartup")
+        let odd = AppSettings(defaults: defaults)
+        check("settings: what is out of range — a zoom of 370 %, nine letters, an unknown start — is read as the default",
+              odd.browsing.pageZoom == 1 && odd.browsing.dockInitials == 2 && odd.startup == .profilesWindow,
+              "zoom \(odd.browsing.pageZoom), letters \(odd.browsing.dockInitials), start \(odd.startup.rawValue)")
+
+        // A quit that asks: "no" stops nothing and quits nothing; "yes" seals, then quits.
+        var sealRounds = 0
+        var terminated = 0
+        var answers = [false, true]
+        let coordinator = QuitCoordinator(hasActivity: { sealRounds == 0 }, lockForQuit: { sealRounds += 1 },
+                                          terminate: { terminated += 1 },
+                                          confirm: { answers.isEmpty ? true : answers.removeFirst() })
+        let declined = coordinator.shouldTerminate(NSApp)
+        _ = await waitUntil(timeout: 2) { answers.count == 1 }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        check("settings: a quit while profiles run asks first, and \"no\" stops nothing and quits nothing",
+              declined == .terminateCancel && answers.count == 1 && sealRounds == 0 && terminated == 0,
+              "seal rounds \(sealRounds), terminate \(terminated)")
+        let accepted = coordinator.shouldTerminate(NSApp)
+        let quit = await waitUntil(timeout: 5) { terminated == 1 }
+        check("settings: \"yes\" stops and encrypts every profile, then quits",
+              accepted == .terminateCancel && quit && sealRounds == 1, "seal rounds \(sealRounds), terminate \(terminated)")
+
+        // In a browser window of a profile (never shown).
+        let profile = try repository.create(name: "Settings", configuration: ProfileConfiguration(ephemeral: true))
+        let key = try repository.profileKey(for: profile.id)
+        let session = try makeSession(repository, profile.id, key: key)
+        defer {
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        BrowsingPreferences.current = BrowsingPreferences()
+        let controller = BrowserWindowController(session: session)
+        defer { controller.close() }
+        let first = controller.addTab(url: nil)
+        _ = controller.addTab(url: nil)
+        controller.selectTab(at: 0)
+        let nextTo = controller.addTab(url: nil)
+        BrowsingPreferences.current.newTabsNextToCurrent = false
+        controller.selectTab(at: 0)
+        let atEnd = controller.addTab(url: nil)
+        check("settings: a new tab opens next to the current one, or — set so — after the last",
+              controller.tabs.firstIndex { $0 === nextTo } == 1 && controller.tabs.firstIndex { $0 === atEnd } == controller.tabs.count - 1,
+              "next to: \(controller.tabs.firstIndex { $0 === nextTo } ?? -1), at the end: \(controller.tabs.firstIndex { $0 === atEnd } ?? -1) of \(controller.tabs.count)")
+        BrowsingPreferences.current.pageZoom = 1.25
+        let zoomed = controller.addTab(url: nil)
+        check("settings: a new tab's pages open at the zoom the settings give",
+              zoomed?.webView.pageZoom == 1.25 && first?.webView.pageZoom == 1,
+              "new \(zoomed?.webView.pageZoom ?? 0), earlier \(first?.webView.pageZoom ?? 0)")
+        // What a page sees of a zoom (said, not checked: it is WebKit's, as in Safari).
+        if let plain = first?.webView, let big = zoomed?.webView {
+            plain.loadHTMLString("<!doctype html><title>100</title>", baseURL: nil)
+            big.loadHTMLString("<!doctype html><title>125</title>", baseURL: nil)
+            _ = await waitUntil(timeout: 10) { plain.title == "100" && big.title == "125" }
+            let at100 = try? await js(plain, "return [window.devicePixelRatio, window.innerWidth]")
+            let at125 = try? await js(big, "return [window.devicePixelRatio, window.innerWidth]")
+            info("settings: what a page sees at 100 % and at 125 % (devicePixelRatio, innerWidth): \(String(describing: at100)) → \(String(describing: at125))")
+        }
+
+        var asked: [Int] = []
+        let previousAsk = BrowserWindowController.askToCloseTabs
+        BrowserWindowController.askToCloseTabs = { _, count, answer in
+            asked.append(count)
+            answer(false)
+        }
+        defer { BrowserWindowController.askToCloseTabs = previousAsk }
+        if let window = controller.window {
+            BrowsingPreferences.current.warnClosingTabs = true
+            let closedAsked = controller.windowShouldClose(window)
+            BrowsingPreferences.current.warnClosingTabs = false
+            let closedUnasked = controller.windowShouldClose(window)
+            check("settings: the close button of a window of several tabs asks first, and \"no\" keeps it open; set off, it closes unasked",
+                  !closedAsked && asked == [controller.tabs.count] && closedUnasked && asked.count == 1, "asked \(asked)")
+        } else {
+            check("settings: the browser window exists", false)
+        }
+
+        let configuration = try repository.loadConfiguration(profile.id, key: key)
+        let passwords = ProfilePasswordSettings(repository: repository, profileID: profile.id, profileName: profile.name,
+                                                launchConfiguration: configuration)
+        BrowsingPreferences.current.passwordAutoFill = false
+        let offInSettings = passwords.autoFill
+        BrowsingPreferences.current.passwordAutoFill = true
+        check("settings: AutoFill works only while both the app's switch and the profile's are on",
+              !offInSettings && passwords.autoFill == configuration.passwordAutoFill)
+
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-downloads-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var chosen = BrowsingPreferences()
+        chosen.downloadFolder = folder.path
+        let destination = BrowserTab.uniqueDownloadURL(suggestedFilename: "../report:1.pdf", in: chosen.downloadFolderURL)
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        check("settings: a download goes to the folder chosen, under a name that cannot leave it; a profile's own process is told the Downloads folder by path",
+              destination.deletingLastPathComponent().standardizedFileURL.path == folder.standardizedFileURL.path
+                  && destination.lastPathComponent == "_report_1.pdf"
+                  && BrowsingPreferences().forProfileProcess.downloadFolder == downloads.path,
+              destination.path)
+
+        check("settings: a profile's Dock icon shows the first letters of its name, and none means the app's icon",
+              DockIcon.letters(2, of: "North wind") == "No" && DockIcon.letters(3, of: "AB") == "AB"
+                  && DockIcon.image(initials: 0, of: "North wind") == nil && DockIcon.image(initials: 2, of: "North wind") != nil)
+
+        let a = UUID(), b = UUID(), c = UUID(), d = UUID(), gone = UUID()
+        let recorded = StartupReopen.toRecord([(id: a, activity: .window(ownProcess: false)), (id: b, activity: .warmUpOnly),
+                                               (id: c, activity: .busy), (id: d, activity: .window(ownProcess: true))])
+        check("settings: a quit keeps to reopen the profiles with a window, not one warming up or starting; an unlock starts those that still exist, each once",
+              recorded == [a, d] && StartupReopen.toLaunch(recorded: [a, gone, a, d], existing: [d, a]) == [a, d])
+
+        var sent = BrowsingPreferences()
+        sent.pageZoom = 1.5
+        sent.dockInitials = 1
+        let line = ProfileChannel.encode(ProfileCommand.preferences(sent)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        let received = ProfileChannel.decode(ProfileCommand.self, from: line.trimmingCharacters(in: .newlines))
+        var receivedRight = false
+        if case .preferences(let preferences)? = received { receivedRight = preferences == sent }
+        check("settings: a profile's own process gets the settings over its channel as they were sent", receivedRight, line)
     }
 
     // MARK: Window lifecycle (regression test for the close/quit crash)

@@ -283,6 +283,8 @@ struct ProfileEditorView: View {
             }
         } else {
             draft.name = String(format: L("editor.defaultName"), model.profiles.count + 1)
+            // Settings → New Profiles.
+            draft.matchProxyLocation = model.settings.newProfileMatchesConnection
         }
     }
 

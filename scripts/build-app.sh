@@ -21,6 +21,7 @@
 #   APP_VERSION=0.2.0 APP_BUILD=2      CFBundleShortVersionString and CFBundleVersion
 #   UPDATE_FEED_URL=https://…/appcast.json UPDATE_PUBLIC_KEYS="<key id>=<base64>,…" [UPDATE_TEAM_ID=…]
 #                                      the app checks for updates (without a feed URL it has no updater)
+#   WEBSITE_URL=https://… SUPPORT_URL=https://…   the links Settings → About shows (none without them)
 #
 # Requires macOS 14+ and Xcode 15+ (or the matching Command Line Tools).
 set -euo pipefail
@@ -90,6 +91,14 @@ if [[ -n "${UPDATE_PUBLIC_KEYS:-}" ]]; then
   done
 fi
 [[ -z "${UPDATE_TEAM_ID:-}" ]] || /usr/libexec/PlistBuddy -c "Add :PBUpdateTeamID string $UPDATE_TEAM_ID" "$PLIST"
+# Settings → About links to these; https only, as the app reads them.
+for link in "WEBSITE_URL:PBWebsiteURL" "SUPPORT_URL:PBSupportURL"; do
+  variable="${link%%:*}" key="${link#*:}"
+  value="${!variable:-}"
+  [[ -z "$value" ]] && continue
+  [[ "$value" == https://* ]] || { echo "error: $variable must be https" >&2; exit 1; }
+  /usr/libexec/PlistBuddy -c "Add :$key string $value" "$PLIST"
+done
 plutil -lint "$PLIST" >/dev/null
 
 # The installer helper (docs/UPDATES.md §3): an app of its own, outside the sandbox, that the app

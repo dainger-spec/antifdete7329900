@@ -33,6 +33,9 @@ enum ProfileCommand: Codable {
     /// Say where this profile's traffic goes (`ProfileNetworkGuard.report`); with `probe`, also
     /// fetch it once by each of the process's own ways of making a request.
     case checkNetwork(probe: URL?)
+    /// The app's settings for browsing (Settings → Behavior, Downloads), sent when the process
+    /// starts and whenever they change; they apply at once.
+    case preferences(BrowsingPreferences)
 }
 
 enum ProfileEvent: Codable {

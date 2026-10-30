@@ -87,7 +87,7 @@ Background tabs keep running. WebKit may throttle timers in views that aren't in
 |---|---|---|
 | WebKit networking process | WebKit runs one network process per app, with one session per data store inside it | Isolation is per session (logical), not per OS process |
 | Device fingerprint | see §2 | Profiles can be linked by fingerprinting |
-| Downloads folder | Downloads go to `~/Downloads` in plaintext | Outside the encrypted storage |
+| Downloads folder | Downloads go to `~/Downloads` in plaintext — or the folder Settings → Downloads names, or where the save panel is told (asking each time) | Outside the encrypted storage |
 
 ## 2. Fingerprinting and "Apple device" consistency
 
@@ -1014,6 +1014,17 @@ is out of scope either way (above).
   during that wait doesn't start a second shutdown. If WebKit never lets go of a store, the
   quit forces the seal (archive + delete, `webdata.forced` marker) and logs it.
 - Clicking the Dock icon with no window open shows the Profiles window again.
+- **Settings → Startup** can ask before quitting: the question comes once the event that called
+  `terminate:` has returned, before anything is stopped, and "no" leaves everything running
+  (never asked at a logout, restart or shutdown). It can also start again, after the next unlock,
+  the profiles that had a window when the app quit: their ids are kept in the encrypted
+  `settings.bin`, only while that setting is on, and used once.
+- **Settings** are this Mac's, in the app's defaults (per key; nothing secret in them — a chosen
+  download folder is its path, and in the App Sandbox a bookmark to it). A profile in its own
+  process gets the browsing ones over its channel when it starts and whenever they change
+  (`ProfileCommand.preferences`), the download folder written out as a path, since that
+  process's home is the profile's own. In Safari's own window, tabs, zoom and downloads follow
+  Safari's settings instead.
 
 **Crash fix.** Earlier builds released a browser window's controller from inside
 `windowWillClose`. That could free the `NSWindow` while AppKit was still closing it (a

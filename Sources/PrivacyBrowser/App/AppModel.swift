@@ -28,6 +28,12 @@ final class AppModel: ObservableObject {
     /// Where `startOver()` moved the previous vault (shown on the setup screen).
     @Published private(set) var movedAsideVaultPath: String?
     @Published private(set) var deviceSettings = DeviceSettings()
+    /// The app's own settings (Settings…, ⌘,).
+    let settings = AppSettings()
+    /// The Proxies sheet is asked for from outside the Profiles window (Settings → Proxies).
+    @Published var proxiesRequest = false
+    /// This quit has recorded the profiles to reopen (a quit locks in more than one round).
+    private var recordedProfilesToReopen = false
 
     private(set) var repository: ProfileRepository?
     private(set) var manager: ProfileManager?
@@ -61,6 +67,15 @@ final class AppModel: ObservableObject {
         phase = MasterVault.exists(in: root) ? .locked : .setup
         // No profile's page is handed to Quick Look, Services or another app (`HandOffs`).
         HandOffs.closeForWebViews()
+        // Profiles in processes of their own get changed browsing settings at once.
+        settings.onBrowsingChange = { [weak self] preferences in self?.manager?.sendPreferences(preferences) }
+    }
+
+    /// Settings → Proxies → the list: the Profiles window opens its Proxies sheet.
+    func showProxyList() {
+        guard proxyList != nil else { return }
+        activateProfilesWindow()
+        proxiesRequest = true
     }
 
     var hasRunningProfiles: Bool { manager?.hasRunningProfiles ?? false }
@@ -196,6 +211,10 @@ final class AppModel: ObservableObject {
         manager.onProxyProblem = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis)
         }
+        manager.refusesFailingProxy = { [weak self] in self?.settings.proxyFailure == .doNotLaunch }
+        manager.onProxyLaunchRefused = { [weak self] id, proxy, diagnosis in
+            self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis, notStarted: true)
+        }
         do {
             deviceSettings = try DeviceSettings.load(from: vault)
         } catch {
@@ -207,7 +226,34 @@ final class AppModel: ObservableObject {
         restartAutomation()
         phase = .unlocked
         refresh()
-        Task { await manager.recoverUnsealedProfiles() }
+        // A quit that was not finished (an update refused at Install Now) recorded what ran then;
+        // the next quit records afresh.
+        recordedProfilesToReopen = false
+        Task {
+            await manager.recoverUnsealedProfiles()
+            await self.reopenProfilesFromLastQuit()
+        }
+    }
+
+    /// Settings → Startup: the profiles that had a window when the app last quit start again —
+    /// those that still exist. The list is used once.
+    private func reopenProfilesFromLastQuit() async {
+        guard let recorded = deviceSettings.reopenAtUnlock, !recorded.isEmpty else { return }
+        try? updateDeviceSettings { $0.reopenAtUnlock = nil }
+        guard settings.startup == .reopenProfiles else { return }
+        for id in StartupReopen.toLaunch(recorded: recorded, existing: profiles.map(\.id)) {
+            await launch(id)
+        }
+    }
+
+    /// At the start of a quit: the profiles with a window now are kept for the next unlock when the
+    /// settings ask to reopen them; otherwise nothing is kept.
+    private func recordProfilesToReopen() {
+        guard !recordedProfilesToReopen, let manager, repository != nil else { return }
+        recordedProfilesToReopen = true
+        let open = settings.startup == .reopenProfiles ? StartupReopen.toRecord(manager.activity()) : []
+        guard open != (deviceSettings.reopenAtUnlock ?? []) else { return }
+        try? updateDeviceSettings { $0.reopenAtUnlock = open.isEmpty ? nil : open }
     }
 
     /// Lock (and Quit): waits for launches and seals under way, then stops and seals every
@@ -219,6 +265,7 @@ final class AppModel: ObservableObject {
     /// joins a Lock already under way). See `WebDataStoreVault.forceSealWhenStoreStaysInUse`.
     func lock(forQuit: Bool = false) async {
         if forQuit {
+            recordProfilesToReopen()
             manager?.prepareForQuit()
             forcedExitsBeforeQuit = forcedExitsBeforeQuit ?? ProfileProcess.forcedExits
         }

@@ -163,5 +163,17 @@ final class AutomationAPITests: XCTestCase {
         let earlier = Data("{\"lastSync\":null}".utf8)
         let settings = try JSONDecoder().decode(DeviceSettings.self, from: earlier)
         XCTAssertNil(settings.automation)
+        XCTAssertNil(settings.reopenAtUnlock)
+    }
+
+    func testTheProfilesToReopenAreKeptEncryptedWithTheDeviceSettings() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-reopen-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = try MasterVault.create(in: root, password: "reopen", iterations: 1_000)
+        let ids = [UUID(), UUID()]
+        try DeviceSettings(reopenAtUnlock: ids).save(to: vault)
+        XCTAssertEqual(try DeviceSettings.load(from: vault).reopenAtUnlock, ids)
+        let file = try Data(contentsOf: root.appendingPathComponent("settings.bin"))
+        XCTAssertNil(file.range(of: Data(ids[0].uuidString.utf8)), "the ids are not in the file in clear")
     }
 }

@@ -60,6 +60,13 @@ struct PrivacyBrowserApp: App {
                     .keyboardShortcut("y")
             }
         }
+        // ⌘, and the app menu's Settings…; also ⋯ → Settings… in the Profiles window.
+        Settings {
+            SettingsView()
+                .environmentObject(model)
+                .preferredColorScheme(.dark)
+                .background(WindowReader { window in Theme.applyChrome(to: window) })
+        }
     }
 
     @MainActor
@@ -79,7 +86,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         terminate: { NSApp.terminate(nil) },
         // An update goes to its installer only at the end of a quit that sealed every profile.
         hasUpdate: { [weak self] in self?.model?.updater?.isReady ?? false },
-        installUpdate: { [weak self] in await self?.model?.installUpdateAtQuit() })
+        installUpdate: { [weak self] in await self?.model?.installUpdateAtQuit() },
+        confirm: { [weak self] in self?.confirmQuit() ?? true })
+
+    /// Settings → Startup → confirm quit: asked when profiles run, before any of them is stopped.
+    private func confirmQuit() -> Bool {
+        guard let model, model.settings.confirmQuit else { return true }
+        let running = model.updateStopsList()
+        guard !running.isEmpty else { return true }
+        let alert = NSAlert()
+        alert.messageText = L("quit.confirm.title")
+        alert.informativeText = L("quit.confirm.message") + "\n" + running.map { "• " + $0 }.joined(separator: "\n")
+        alert.addButton(withTitle: L("quit.confirm.quit"))
+        alert.addButton(withTitle: L("common.cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when launched as a bare SwiftPM executable (`swift run`) instead of an .app bundle.

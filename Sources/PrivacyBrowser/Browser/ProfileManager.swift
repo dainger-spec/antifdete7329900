@@ -43,6 +43,11 @@ final class ProfileManager: ObservableObject {
     /// A profile's stored configuration changed outside the editor (a proxy lookup remembered a
     /// new exit location): the Profiles list shows it.
     var onConfigurationChanged: ((UUID) -> Void)?
+    /// Settings → Proxies: a profile whose proxy does not work is not started at all — its proxy is
+    /// asked first (`refusesFailingProxy`), and `onProxyLaunchRefused` says how it failed.
+    var refusesFailingProxy: () -> Bool = { false }
+    var onProxyLaunchRefused: ((UUID, ProxySettings, ProxyDiagnosis) -> Void)?
+
     /// A profile that was started has a proxy that does not work, and the probe says how
     /// (`diagnoseProxy`): it would load no page — fail-closed — and this is what says why.
     var onProxyProblem: ((UUID, ProxySettings, ProxyDiagnosis) -> Void)?
@@ -147,9 +152,24 @@ final class ProfileManager: ObservableObject {
         let summary = try repository.summary(for: id)
         let key = try repository.profileKey(for: id)
         let stored = try repository.loadConfiguration(id, key: key)
+        // Settings → Proxies → "Do not start it": the proxy is asked before anything is decrypted,
+        // and a profile whose proxy does not work stays stopped; the Profiles window says why.
+        var probedBeforeLaunch = false
+        if let proxy = stored.proxy, !runsInProfileProcess, refusesFailingProxy(), (try? proxy.validate()) != nil {
+            let (probe, reportsNoUpstream) = launchProbe(startURL: stored.startURL)
+            let diagnosis = await probe.run(proxy)
+            if !diagnosis.isWorking, diagnosis.verdict != .noUpstream || reportsNoUpstream {
+                log.notice("Not starting \(id.uuidString, privacy: .public): its proxy does not work (\(diagnosis.verdict.rawValue, privacy: .public))")
+                onProxyLaunchRefused?(id, proxy, diagnosis)
+                return
+            }
+            probedBeforeLaunch = true
+        }
         // A proxy that does not work leaves the profile with no page loaded: said in words, by the
         // same probe the Proxies sheet's check runs, while the profile starts.
-        if let proxy = stored.proxy, !runsInProfileProcess { diagnoseProxy(of: id, proxy, startURL: stored.startURL) }
+        if let proxy = stored.proxy, !runsInProfileProcess, !probedBeforeLaunch {
+            diagnoseProxy(of: id, proxy, startURL: stored.startURL)
+        }
         // A profile's own process runs its profile itself: it never starts another process. A
         // profile whose WebRTC goes through the packet tunnel stays here: the tunnel's routes are
         // this process's, and a process of its own would keep a view of the tunnel of its own,
@@ -375,6 +395,14 @@ final class ProfileManager: ObservableObject {
         children[id] = child
         runningProfileIDs.insert(id)
         try? repository.markLaunched(id)
+        // The app's settings for browsing, before anything else is asked of it.
+        child.send(.preferences(BrowsingPreferences.current.forProfileProcess))
+    }
+
+    /// The app's settings for browsing changed: every profile in a process of its own gets them
+    /// (a profile in this process reads `BrowsingPreferences.current` itself).
+    func sendPreferences(_ preferences: BrowsingPreferences) {
+        for child in children.values { child.send(.preferences(preferences.forProfileProcess)) }
     }
 
     /// Probes the proxy of a profile that is starting (`ProxyProbe`), and says what is wrong with it
@@ -386,15 +414,7 @@ final class ProfileManager: ObservableObject {
     /// load through it.
     private func diagnoseProxy(of id: UUID, _ proxy: ProxySettings, startURL: URL?) {
         guard onProxyProblem != nil, (try? proxy.validate()) != nil else { return }
-        var configured = ProxyChecker.probe(latencySamples: 1)
-        var targetsStartPage = false
-        if let url = startURL, ["http", "https"].contains(url.scheme?.lowercased() ?? ""), let host = url.host, !host.isEmpty {
-            configured.targetHost = host
-            configured.targetPort = url.port ?? (url.scheme?.lowercased() == "http" ? 80 : 443)
-            targetsStartPage = true
-        }
-        let probe = configured
-        let reportsNoUpstream = targetsStartPage
+        let (probe, reportsNoUpstream) = launchProbe(startURL: startURL)
         Task { @MainActor [weak self] in
             let diagnosis = await probe.run(proxy)
             guard let self, !diagnosis.isWorking, diagnosis.verdict != .noUpstream || reportsNoUpstream,
@@ -402,6 +422,18 @@ final class ProfileManager: ObservableObject {
             self.log.notice("The proxy of \(id.uuidString, privacy: .public) does not work: \(diagnosis.verdict.rawValue, privacy: .public)")
             self.onProxyProblem?(id, proxy, diagnosis)
         }
+    }
+
+    /// The probe a launch runs: one tunnel, to the start page's site (without one, the first
+    /// geolocation service — and then a proxy that cannot reach only that is not reported).
+    private func launchProbe(startURL: URL?) -> (ProxyProbe, reportsNoUpstream: Bool) {
+        var configured = ProxyChecker.probe(latencySamples: 1)
+        if let url = startURL, ["http", "https"].contains(url.scheme?.lowercased() ?? ""), let host = url.host, !host.isEmpty {
+            configured.targetHost = host
+            configured.targetPort = url.port ?? (url.scheme?.lowercased() == "http" ? 80 : 443)
+            return (configured, true)
+        }
+        return (configured, false)
     }
 
     /// The task's value if it finishes within `seconds`, else nil; the task keeps running.

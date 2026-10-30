@@ -48,10 +48,12 @@ extension AppModel {
 
     /// A profile that was started has a proxy that does not work: the Profiles window comes to the
     /// front and says so (one problem per profile: the latest).
-    func reportProxyProblem(of id: UUID, proxy: ProxySettings, diagnosis: ProxyDiagnosis) {
+    /// `notStarted`: the settings keep such a profile stopped (Settings → Proxies), and it was.
+    func reportProxyProblem(of id: UUID, proxy: ProxySettings, diagnosis: ProxyDiagnosis, notStarted: Bool = false) {
         guard let profile = profiles.first(where: { $0.id == id }) else { return }
         proxyProblems.removeAll { $0.profileID == id }
-        proxyProblems.append(ProxyProblem(profileID: id, profileName: profile.name, proxy: proxy, diagnosis: diagnosis))
+        proxyProblems.append(ProxyProblem(profileID: id, profileName: profile.name, proxy: proxy, diagnosis: diagnosis,
+                                          notStarted: notStarted))
         activateProfilesWindow()
     }
 
@@ -114,4 +116,7 @@ struct ProxyProblem: Identifiable, Equatable {
     let profileName: String
     let proxy: ProxySettings
     let diagnosis: ProxyDiagnosis
+    /// The profile was not started (Settings → Proxies → do not start it); otherwise it runs and
+    /// loads nothing.
+    var notStarted = false
 }

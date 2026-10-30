@@ -30,6 +30,7 @@ struct RootView: View {
 /// the sheets its actions open.
 struct ProfileListView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.openSettings) private var openSettings
     @State private var editing: ProfileEditorView.Target?
     @State private var passwordsFor: ProfileSummary?
     @State private var importingCookiesFor: ProfileSummary?
@@ -45,7 +46,6 @@ struct ProfileListView: View {
     @State private var showingSync = false
     @State private var showingTunnel = false
     @State private var showingAutomation = false
-    @State private var showingUpdates = false
     @State private var filter: ProfileFilter = .all
     @State private var search = ""
     /// The Proxies sheet, or what a profile whose proxy does not work says: one at a time, so
@@ -75,7 +75,6 @@ struct ProfileListView: View {
             .sheet(isPresented: $showingSync) { SyncSettingsView() }
             .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
             .sheet(isPresented: $showingAutomation) { AutomationSettingsView() }
-            .sheet(isPresented: $showingUpdates) { UpdatesView() }
             .confirmationDialog(String(format: L("profiles.delete.title"), pendingDelete?.name ?? ""),
                                 isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                                 presenting: pendingDelete) { profile in
@@ -94,6 +93,12 @@ struct ProfileListView: View {
             // A profile that was started with a proxy that does not work.
             .onReceive(model.$proxyProblems) { problems in
                 if !problems.isEmpty, proxySheet == nil { proxySheet = .problems }
+            }
+            // Settings → Proxies → the list.
+            .onReceive(model.$proxiesRequest) { requested in
+                guard requested else { return }
+                model.proxiesRequest = false
+                if proxySheet == nil { proxySheet = .list(selecting: []) }
             }
             .sheet(item: $assigningProxies) { request in ProxyAssignView(request: request) }
             .confirmationDialog(String(format: L("profiles.bulk.delete.title"), pendingBulkDelete.count),
@@ -175,7 +180,7 @@ struct ProfileListView: View {
             syncNow: model.syncTarget == nil ? nil : { Task { await model.syncNow() } },
             openTunnel: { showingTunnel = true },
             openAutomation: { showingAutomation = true },
-            openUpdates: { showingUpdates = true },
+            openSettings: { openSettings() },
             changePassword: { changingPassword = true },
             warmUpQueue: { queuePreselection = []; warmingUpSeveral = true },
             openProxies: { proxySheet = .list(selecting: []) },
@@ -304,7 +309,7 @@ struct ProfileActions {
     var openTunnel: () -> Void = {}
     /// The local automation API's settings (`AutomationSettingsView`).
     var openAutomation: () -> Void = {}
-    var openUpdates: () -> Void = {}
+    var openSettings: () -> Void = {}
     var changePassword: () -> Void = {}
     /// Several profiles warmed up one after the other (`WarmUpQueueView`).
     var warmUpQueue: () -> Void = {}
@@ -415,7 +420,7 @@ struct ProfilesScreen: View {
                 Button(L("profiles.menu.tunnel"), action: actions.openTunnel)
                 Button(L("profiles.menu.automation"), action: actions.openAutomation)
                 Divider()
-                Button(L("profiles.menu.updates"), action: actions.openUpdates)
+                Button(L("profiles.menu.settings"), action: actions.openSettings)
                 Button(L("profiles.menu.changePassword"), action: actions.changePassword)
             } label: {
                 Image(systemName: "ellipsis")

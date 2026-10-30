@@ -227,16 +227,20 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     // MARK: Tabs
 
     /// Adds a tab. `configuration` is only passed for popups (WebKit supplies it); otherwise the
-    /// session's standard configuration is used.
+    /// session's standard configuration is used. `afterSelected` nil: where the app's settings put
+    /// a new tab (next to the current one, or after the last); the tab's pages open at the zoom the
+    /// settings give (`BrowsingPreferences`).
     @discardableResult
     func addTab(url: URL?, configuration: WKWebViewConfiguration? = nil, select: Bool = true,
-                afterSelected: Bool = true) -> BrowserTab? {
+                afterSelected: Bool? = nil) -> BrowserTab? {
         guard let session else { return nil }
         let tab = BrowserTab(configuration: configuration ?? session.makeWebViewConfiguration(),
                              context: session.tabContext)
         tab.host = self
         tab.startsEmpty = url == nil && configuration == nil
-        let index = afterSelected && !tabs.isEmpty ? selectedIndex + 1 : tabs.count
+        tab.webView.pageZoom = BrowsingPreferences.current.pageZoom
+        let nextToCurrent = afterSelected ?? BrowsingPreferences.current.newTabsNextToCurrent
+        let index = nextToCurrent && !tabs.isEmpty ? selectedIndex + 1 : tabs.count
         tabs.insert(tab, at: index)
         if !select && index <= selectedIndex { selectedIndex += 1 }
         if let url { tab.load(url) }
@@ -490,6 +494,33 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     // MARK: Lifecycle
+
+    /// Closing a window of several tabs was confirmed: the close that follows is not asked about.
+    private var closeConfirmed = false
+
+    /// Asks whether to close a window of `count` tabs, as a sheet on it; the answer comes to
+    /// `answer`. The self-test answers in its place.
+    static var askToCloseTabs: @MainActor (NSWindow, Int, @escaping (Bool) -> Void) -> Void = { window, count, answer in
+        let alert = NSAlert()
+        alert.messageText = String(format: L("window.closeTabs.title"), count)
+        alert.informativeText = L("window.closeTabs.message")
+        alert.addButton(withTitle: L("window.closeTabs.confirm"))
+        alert.addButton(withTitle: L("common.cancel"))
+        alert.beginSheetModal(for: window) { answer($0 == .alertFirstButtonReturn) }
+    }
+
+    /// The window's close button with more than one tab asks first (Settings → Behavior): the last
+    /// window of a profile stops it. A close the app makes itself — Stop, Lock, Quit — is a plain
+    /// `close()` and never asks.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard BrowsingPreferences.current.warnClosingTabs, !isForWarmUp, tabs.count > 1, !closeConfirmed else { return true }
+        Self.askToCloseTabs(sender, tabs.count) { [weak self] confirmed in
+            guard confirmed, let self else { return }
+            self.closeConfirmed = true
+            sender.performClose(nil)
+        }
+        return false
+    }
 
     func windowWillClose(_ notification: Notification) {
         tearDown()

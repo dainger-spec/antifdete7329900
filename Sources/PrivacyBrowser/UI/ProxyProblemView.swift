@@ -54,8 +54,10 @@ struct ProxyProblemPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(title: String(format: L("proxyProblem.title"), problem.profileName),
-                        subtitle: String(format: L("proxyProblem.subtitle"), problem.proxy.displayAddress))
+            SheetHeader(title: String(format: L(problem.notStarted ? "proxyProblem.title.notStarted" : "proxyProblem.title"),
+                                      problem.profileName),
+                        subtitle: String(format: L(problem.notStarted ? "proxyProblem.subtitle.notStarted" : "proxyProblem.subtitle"),
+                                         problem.proxy.displayAddress))
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if checking {
@@ -66,7 +68,8 @@ struct ProxyProblemPanel: View {
                                 .foregroundStyle(Theme.textSecondary)
                         }
                     } else if let result, result.isAlive {
-                        Label(L("proxyProblem.worksNow"), systemImage: "checkmark.circle.fill")
+                        Label(L(problem.notStarted ? "proxyProblem.worksNow.notStarted" : "proxyProblem.worksNow"),
+                              systemImage: "checkmark.circle.fill")
                             .font(.lumenLabel)
                             .foregroundStyle(Theme.running)
                             .fixedSize(horizontal: false, vertical: true)
