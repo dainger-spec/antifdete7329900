@@ -195,7 +195,9 @@ private struct SignalRow: View {
 
     private func labelled(_ label: String, _ text: String?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(label).font(.lumenSecondary).foregroundStyle(Theme.textTertiary).frame(width: 52, alignment: .leading)
+            // Wide enough for "Профиль" on one line ("Профил" and "ь" under it at 52).
+            Text(label).font(.lumenSecondary).foregroundStyle(Theme.textTertiary).lineLimit(1).fixedSize()
+                .frame(minWidth: 64, alignment: .leading)
             value(text)
         }
     }

@@ -114,14 +114,17 @@ struct ProfileEditorForm: View {
                             .font(.system(size: 12))
                             .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
                             .frame(width: 16)
+                        // Two lines rather than cut ("Location and L…"): the index keeps its width.
                         Text(L(part.titleKey))
                             .font(.system(size: 13, weight: selected ? .medium : .regular))
                             .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(1)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 8)
-                    .frame(height: 28)
+                    .padding(.vertical, 4)
+                    .frame(minHeight: 28)
                     .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
                         .fill(selected ? Color.white.opacity(0.08) : .clear))
                     .contentShape(Rectangle())
@@ -512,10 +515,15 @@ struct ProfileEditorForm: View {
         }
     }
 
-    /// Time zone and language: from the connection, chosen, or a place picked at random.
+    /// Time zone and language: from the connection, chosen, or a place picked at random. The three
+    /// choices are wider than a row has room for beside their title (which was squeezed into a
+    /// column a word wide, "langu-age"): they go under it.
     @ViewBuilder
     private var localeChoice: some View {
-        EditorRow(L("editor.locale")) {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L("editor.locale"))
+                .font(.lumenLabel)
+                .foregroundStyle(Theme.textPrimary)
             Picker(L("editor.locale"), selection: localeMode) {
                 Text(L("editor.locale.connection")).tag(LocaleSource.connection)
                 Text(L("editor.locale.manual")).tag(LocaleSource.manual)

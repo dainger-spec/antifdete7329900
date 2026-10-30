@@ -80,14 +80,18 @@ struct ProxyProblemPanel: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 16)
             }
-            SheetFooter(leading: {
-                if more > 0 {
-                    Text(String(format: L("proxyProblem.more"), more))
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textTertiary)
-                        .monospacedDigit()
-                }
-            }, buttons: {
+            // How many more profiles have a proxy problem, on a line of its own above the buttons:
+            // beside them, in Russian, it was squeezed into four lines.
+            if more > 0 {
+                Text(String(format: L("proxyProblem.more"), more))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 10)
+            }
+            SheetFooter(buttons: {
                 Button(L("proxyProblem.showInList"), action: showInList)
                     .buttonStyle(.lumenGhost)
                     .disabled(checking)
