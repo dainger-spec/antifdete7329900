@@ -16,6 +16,8 @@
 //   PacketTunnelExtension  macOS only: the NEPacketTunnelProvider system extension's executable.
 //                   Packaged and signed into the app only by `NE=1 scripts/build-app.sh`.
 //   PrivacyBrowser  macOS app (SwiftUI + AppKit + WebKit). macOS only.
+//   pbupdate        Makes and checks the signed update feed (scripts/release.sh, docs/UPDATES.md)
+//                   with BrowserCore's own checks. macOS and Linux.
 //
 import PackageDescription
 
@@ -49,11 +51,17 @@ var targets: [Target] = [
         dependencies: ["TunnelCore"],
         path: "Tests/TunnelCoreTests"
     ),
+    .executableTarget(
+        name: "pbupdate",
+        dependencies: ["BrowserCore"],
+        path: "Sources/pbupdate"
+    ),
 ]
 
 var products: [Product] = [
     .library(name: "BrowserCore", targets: ["BrowserCore"]),
     .library(name: "TunnelCore", targets: ["TunnelCore"]),
+    .executable(name: "pbupdate", targets: ["pbupdate"]),
 ]
 
 #if os(macOS)

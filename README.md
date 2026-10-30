@@ -321,7 +321,9 @@ Sources/
     Archive/                       encrypted chunk stream, directory archiver, WebKitDataLayout
     Sync/                          envelope/codec, engine, SyncTransport contract
       Transports/                  LocalDirectorySyncTransport (local-only), HTTPSyncTransport (server-ready)
-    Support/                       errors, atomic 0600 writes, encrypted document files
+    Updates/                       the signed update feed (Appcast, UpdateVerifier, UpdateSigner), BuildVersion
+    Support/                       errors, atomic 0600 writes, encrypted document files, DocumentFormat
+  pbupdate/                        makes and checks the update feed: keys, a release's signature, the appcast
   PrivacyBrowser/                  macOS app (SwiftUI + AppKit + WebKit)
     App/                           main.swift, PrivacyBrowserApp, AppModel (+Proxies), ProxyListModel, AppEnvironment,
                                    SelfTest, SiteCapture, WarmUpCoordinator (warm-up queue and schedule)

@@ -4,6 +4,12 @@ Status, 2026-10-30: **design decided, implementation follows in steps** (one top
 green after each). This document is the decision and the rules; each later commit says which part
 it implements and how it is proven.
 
+| Part | State |
+|---|---|
+| §4, the formats of the files on disk | in force (`DocumentFormat`; `FormatPolicyTests`, the self-test's `formatPolicy`) |
+| §2, the signed feed and its checks | in BrowserCore (`UpdateVerifier`, `UpdateSigner`, `BuildVersion`; `UpdateTests`) and `pbupdate`; no app uses it yet |
+| §3 quit and install, §5 the check, §6 release, §7 the screen | not yet |
+
 Two facts make updates harder here than in most apps:
 
 - **Quitting is encrypting.** A running profile's data is decrypted on disk; it is sealed when the
@@ -96,17 +102,24 @@ app exits normally                                process of the bundle to be go
 ```
 
 **The appcast** is one static file: a JSON envelope `{"format": 1, "keyID": …, "payload": <base64
-of the appcast JSON>, "signature": <base64 Ed25519 of those payload bytes>}`. The payload lists the
-releases: `version` (CFBundleShortVersionString), `build` (CFBundleVersion, compared numerically,
-component by component), `minimumSystemVersion`, `url` (https), `length`, `sha256`, `edSignature`
-(Ed25519 of the zip's bytes), `publishedAt`, and `notes` — plain text. The payload also carries
-`generatedAt`: the app remembers the newest it accepted and refuses an older appcast (a mirror or
-a cache replaying an old, validly signed list cannot hold an update back for good, nor serve one
-older than what was already seen).
+of the appcast JSON>, "signature": <base64 Ed25519 of those payload bytes>}`. The signature is over
+the payload's bytes, checked before anything in them is read. The payload lists the releases:
+`version` (CFBundleShortVersionString), `build` (CFBundleVersion: whole numbers separated by dots,
+compared component by component — anything else refuses the list), `minimumSystemVersion`, `url`
+(https only), `length`, `sha256`, `keyID` and `edSignature` (the key that signed the zip, and the
+Ed25519 signature of the zip's bytes), `publishedAt`, and `notes` — plain text. A release that
+cannot be judged (not https, not a build number, not a SHA-256) refuses the whole list. The payload
+also carries `generatedAt`: the app remembers the newest it accepted and refuses an older appcast (a
+mirror or a cache replaying an old, validly signed list cannot hold an update back for good, nor
+serve one older than what was already seen). An envelope of a newer `format` is not judged at all.
 
 **Keys.** Public keys are in the app's `Info.plist` (`PBUpdatePublicKeys`, `keyID → base64`), put
-there by `build-app.sh` from the release environment. Several at once allow rotation: a new key is
-shipped in one release and used from the next. The private key never enters the repository or CI.
+there by `build-app.sh` from the release environment; a key's id is the first 8 bytes of the SHA-256
+of its raw public key, in hex, and an entry whose id is not its key's is ignored. Several at once
+allow rotation: a new key is shipped in one release and used from the next; each release names the
+key that signed its zip. The private key never enters the repository or CI. `pbupdate` (a small
+tool in this package, built on macOS and Linux) makes keys, signs a release and the appcast, and
+checks them — with the same BrowserCore code the app checks them with.
 
 **Never installed:** an appcast or a zip whose signature does not check with an embedded key; a zip
 whose length or hash differs from the item; a bundle that is unsigned, whose signature does not
