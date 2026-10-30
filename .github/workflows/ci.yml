@@ -188,8 +188,10 @@ jobs:
         timeout-minutes: 8
         run: |
           set +e
-          build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --what-sites-see-check
-          code=$?
+          build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --what-sites-see-check | tee build/what-sites-see.txt
+          code=${PIPESTATUS[0]}
+          # The summary as notices on the job, readable without the log.
+          grep "^WHAT-SITES-SEE" build/what-sites-see.txt | head -9 | cut -c1-300 | sed 's/^/::notice title=What sites see::/'
           if [ "$code" = "2" ]; then echo "::warning::Safari did not answer the What-sites-see page on this runner"; exit 0; fi
           exit $code
       - uses: actions/upload-artifact@v4
@@ -235,3 +237,6 @@ jobs:
             echo "--- self-test notes ($variant)"
             grep -h "^INFO" "build/egress/selftest-$variant.txt" | cut -c1-400 || true
           done
+          # What real input reached on this runner, as notices on the job (readable without the log).
+          grep -h "^INFO \(paste as typed\|what sites see\|password AutoFill\)" build/egress/selftest-unsandboxed.txt \
+            | head -8 | cut -c1-300 | sed 's/^/::notice title=self-test::/' || true
