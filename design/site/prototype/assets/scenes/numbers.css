@@ -1,0 +1,24 @@
+/* Home scene "numbers" (tools/templates/pages/home/numbers.mjs). Scoped to the scene; the engine and the shared
+   type (.h-xl, .h-xxl, .dim, .scene, .scene-pin) are in site.css. */
+
+.nums { position: relative; padding: 168px 0 156px; overflow: hidden; }
+.nm-bg { position: absolute; inset: 0; background-image: var(--tile); background-size: 216px 176px; opacity: 0.16; }
+.nm-lit { position: absolute; inset: 0; background-image: var(--tile); background-size: 216px 176px; opacity: 1; filter: saturate(1.4) brightness(1.25); -webkit-mask-image: radial-gradient(70% 20% at 50% calc(8% + var(--p, 0.3) * 84%), #000, transparent 78%); mask-image: radial-gradient(70% 20% at 50% calc(8% + var(--p, 0.3) * 84%), #000, transparent 78%); }
+.nums::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, var(--backdrop), transparent 14%, transparent 86%, var(--backdrop)); }
+.nm-list { position: relative; z-index: 1; display: grid; justify-items: center; gap: 112px; text-align: center; }
+.nm-item { display: grid; gap: 12px; justify-items: center; }
+.nm-n { font: 600 112px/1 var(--font-display); letter-spacing: -0.05em; color: #FFFFFF; font-variant-numeric: tabular-nums; text-shadow: 0 0 40px rgba(6, 7, 9, 0.9); }
+.nm-n small { font-size: 0.42em; letter-spacing: -0.02em; color: var(--text-secondary); }
+.nm-code code { background: none; border: 0; padding: 0; font: 600 68px/1.1 var(--font-mono); color: #FFFFFF; letter-spacing: -0.02em; white-space: normal; }
+.nm-t { max-width: 520px; font: 500 21px/30px var(--font); color: var(--text-secondary); text-shadow: 0 0 24px rgba(6, 7, 9, 0.95); }
+.nm-link { margin-top: -40px; }
+.js .nm-item.reveal:not(.in) { transform: translateY(48px); }
+.js .nm-item.reveal { transition-duration: 700ms; }
+
+@media (max-width: 599px) {
+  .nums { padding: 120px 0 112px; }
+  .nm-list { gap: 76px; }
+  .nm-n { font-size: 76px; }
+  .nm-code code { font-size: 36px; }
+  .nm-t { font-size: 17px; line-height: 25px; padding: 0 12px; }
+}

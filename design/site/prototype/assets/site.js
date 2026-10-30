@@ -2,9 +2,8 @@
 // the content is in the HTML, menus and FAQ are <details>, the billing switch and the proxy demo are
 // CSS, and every picture shows its final state. This file only adds motion and conveniences:
 //   - the header turns to glass once the page scrolls under it;
-//   - home: a presentation in scenes that play with the scroll ("Scenes": a MacBook whose lid opens and
-//     one half of the mark comes out of its screen, words that light up, facts and counts that come up);
-//     none of it without JavaScript, with Reduce Motion or in shots;
+//   - home: a presentation in scenes that play with the scroll ("Scenes"; each scene's own script is in
+//     assets/scenes/); none of it without JavaScript, with Reduce Motion or in shots;
 //   - reveal on scroll (once), never with Reduce Motion;
 //   - features: the proxy demo switches itself off once when first seen;
 //   - the local navigation's active section (features, docs);
@@ -267,74 +266,6 @@
     io.observe(el);
   };
 
-  // The MacBook on the first screen: its display wakes, the code comes up from the seam, and the left half
-  // comes out of the screen (a CSS transition on its canvas), then the chips. About 3 s, once.
-  // The MacBook on the first screen, driven by the opening scene's progress p: the lid opens (0.02–0.30),
-  // the display wakes (0.06–0.20), the code comes up from the seam (0.22–0.52), the left half comes out of
-  // the screen (0.52–0.76), the chips and the caption follow (0.76–0.93). Without scenes: finished.
-  document.querySelectorAll('[data-mbp]').forEach((mbp) => {
-    const art = mbp.closest('[data-art]'), pin = mbp.closest('.scene-pin') || art;
-    const scr = mbp.querySelector('canvas[data-codeart="screen"]'), pop = mbp.querySelector('canvas[data-codeart="pop"]');
-    const gScr = mbp.querySelector('[data-glow-of="screen"]'), gPop = mbp.querySelector('[data-glow-of="pop"]');
-    if (!scr || !pop) return;
-    let A = null, B = null, L = null, tok = null, reveal = Infinity, raf = 0, q = 1;
-    const light = { x: 0, y: 0, tx: 0, ty: 0, a: 0, ta: 0, r: 110 };
-    function layout() {
-      const scale = Math.min(3, Math.max(2, (window.devicePixelRatio || 1) * 1.5));
-      A = surface(scr, scale, 8.5); B = surface(pop, scale, 8.5);
-      if (!A.W || !A.H) return false;
-      L = { cx: A.W * 0.47, cy: A.H * 0.5, R: A.H * 0.36, LH: 10.5 };
-      tok = tokenMaps(L, A.cw);
-      [pop, gPop].forEach((c) => { if (c) { c.style.setProperty('--ox', `${L.cx}px`); c.style.setProperty('--oy', `${L.cy}px`); } });
-      return true;
-    }
-    function draw() {
-      if (!A) return;
-      A.ctx.clearRect(0, 0, A.W, A.H); B.ctx.clearRect(0, 0, B.W, B.H);
-      paintSeam(A, L, 1, 1);
-      paintHalves(A, L, { which: [1], ghost: true, t: reveal, tokens: tok });
-      paintHalves(B, L, { which: [0], t: reveal, tokens: tok, light });
-      mirror(gScr, A); mirror(gPop, B);
-    }
-    const set = (el, k, v) => el.style.setProperty(k, v);
-    function apply(p) {
-      const lid = clamp01((p - 0.02) / 0.28), wake = clamp01((p - 0.06) / 0.14), code = clamp01((p - 0.22) / 0.3);
-      q = easeInOut(clamp01((p - 0.52) / 0.24));
-      const note = clamp01((p - 0.76) / 0.08), cap = clamp01((p - 0.8) / 0.13);
-      set(mbp, '--lid', `${(10 + 34 * (1 - easeOut(lid))).toFixed(2)}deg`);
-      set(mbp, '--wake', (0.3 + 0.7 * wake).toFixed(3));
-      set(mbp, '--q', q.toFixed(4));
-      set(mbp, '--note', note.toFixed(3)); set(art, '--note', note.toFixed(3));
-      set(pin, '--cap', cap.toFixed(3));
-      const ms = code >= 1 ? Infinity : 150 + code * 1350;
-      if (ms !== reveal) { reveal = ms; draw(); }
-    }
-    layout();
-    if (scenesOn) { reveal = 0; onScene('intro', apply); } else draw();
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (layout()) draw(); });
-    let rt = 0;
-    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (layout()) draw(); }, 120); });
-    // The half that came out faces us, so the pointer maps onto it by its box: a soft light over its code.
-    function frame() {
-      raf = 0;
-      light.x += (light.tx - light.x) * 0.2; light.y += (light.ty - light.y) * 0.2; light.a += (light.ta - light.a) * 0.12;
-      const moving = Math.abs(light.tx - light.x) > 0.4 || Math.abs(light.ty - light.y) > 0.4 || Math.abs(light.ta - light.a) > 0.01;
-      if (!moving) light.a = light.ta;
-      draw();
-      if (moving) raf = requestAnimationFrame(frame);
-    }
-    if (finePointer && !still()) {
-      art.addEventListener('pointermove', (e) => {
-        if (q < 0.98) return;
-        const r = pop.getBoundingClientRect();
-        light.tx = (e.clientX - r.left) / r.width * B.W; light.ty = (e.clientY - r.top) / r.height * B.H;
-        if (light.a < 0.01) { light.x = light.tx; light.y = light.ty; }
-        light.ta = 1; if (!raf) raf = requestAnimationFrame(frame);
-      });
-      art.addEventListener('pointerleave', () => { light.ta = 0; if (!raf) raf = requestAnimationFrame(frame); });
-    }
-  });
-
   // The faint code: behind the first screen ("field", quieter behind the words and round the Mac, a light
   // under the pointer) and behind page titles ("texture", still).
   document.querySelectorAll('canvas[data-codeart="field"], canvas[data-codeart="texture"]').forEach((canvas) => {
@@ -453,71 +384,16 @@
   // data-r="a b" gets --t, the same progress mapped onto [a, b]. CSS turns those into motion; the hooks
   // below draw what CSS cannot. Counts ([data-count]) climb with the --t of the part they sit in.
 
-  // The real thing: the outline renders into colour (a sweep from the top), the camera pulls back until the
-  // page sits on the MacBook's display, then the profiles change — and the site's country and language.
-  document.querySelectorAll('[data-scene="zoom"]').forEach((sc) => {
-    if (!scenesOn) return;
-    const pin = sc.querySelector('.scene-pin'), page = sc.querySelector('[data-zm-page]'), screen = sc.querySelector('[data-zm-screen]');
-    const lines = Array.from(sc.querySelectorAll('[data-zm-line]'));
-    const ks = Array.from(sc.querySelectorAll('[data-zm-k]'));
-    const set = (el, k, v) => el.style.setProperty(k, v);
-    let s0 = 1, dx = 0, dy = 0, last = 0;
-    function measure() {
-      const r = screen.getBoundingClientRect(), pr = pin.getBoundingClientRect();
-      // Landscape: the page fills the window. Portrait (phones): it fills the width, so it stays readable.
-      s0 = (pr.height > pr.width ? pr.width / r.width : Math.max(pr.width / r.width, pr.height / r.height)) * 1.04;
-      dx = pr.width / 2 - (r.left - pr.left + r.width / 2);
-      dy = pr.height / 2 - (r.top - pr.top + r.height / 2);
-    }
-    function apply(p) {
-      last = p;
-      const render = clamp01((p - 0.06) / 0.24), zoom = easeInOut(clamp01((p - 0.33) / 0.22));
-      page.style.transform = `translate(${(dx * (1 - zoom)).toFixed(1)}px, ${(dy * (1 - zoom)).toFixed(1)}px) scale(${(s0 + (1 - s0) * zoom).toFixed(4)})`;
-      set(sc, '--render', render.toFixed(4));
-      set(sc, '--scan', render > 0.001 && render < 0.999 ? '1' : '0');
-      set(sc, '--ov', (clamp01((p - 0.01) / 0.04) * (1 - clamp01((p - 0.31) / 0.04))).toFixed(3));
-      set(lines[0], '--l', (clamp01((p - 0.02) / 0.04) * (1 - clamp01((p - 0.165) / 0.02))).toFixed(3));
-      set(lines[1], '--l', clamp01((p - 0.18) / 0.025).toFixed(3));
-      set(sc, '--hd', clamp01((p - 0.5) / 0.08).toFixed(3));
-      const f = 0.025, a1 = clamp01((p - 0.72) / f), a2 = clamp01((p - 0.86) / f);
-      const on = [1 - a1, a1 * (1 - a2), a2];
-      ks.forEach((el) => set(el, '--on', on[+el.dataset.zmK].toFixed(3)));
-    }
-    measure();
-    window.addEventListener('resize', () => { measure(); apply(last); });
-    onScene('zoom', apply);
-  });
-
-  // The proxy: light pulses run from the profile to the site with the scroll; the proxy goes down, the beam
-  // beyond it goes dark, and the pulses stop at it.
-  document.querySelectorAll('[data-scene="beam"]').forEach((sc) => {
-    if (!scenesOn) return;
-    const route = sc.querySelector('.bm-route');
-    const l1 = Array.from(sc.querySelectorAll('.l1 .pk')), l2 = Array.from(sc.querySelectorAll('.l2 .pk'));
-    const frac = (x) => x - Math.floor(x);
-    const fade = (x) => smooth(x * 8) * (1 - smooth((x - 0.86) * 8));
-    onScene('beam', (p) => {
-      const t = clamp01(p / 0.8), down = clamp01((t - 0.4) / 0.08);
-      route.style.setProperty('--down', down.toFixed(3));
-      l1.forEach((k, i) => { const x = frac(t * 3 + i / 3); k.style.setProperty('--x', x.toFixed(4)); k.style.setProperty('--o', fade(x).toFixed(3)); });
-      l2.forEach((k, i) => { const x = frac(t * 3 + i / 2); k.style.setProperty('--x', x.toFixed(4)); k.style.setProperty('--o', ((1 - down) * fade(x)).toFixed(3)); });
-    });
-  });
-
-  // Strength in numbers: each number counts up once, when it comes into view.
-  document.querySelectorAll('.nm-item [data-count]').forEach((n) => {
-    const to = +n.dataset.count;
-    if (!to || !scenesOn || !('IntersectionObserver' in window)) return;
-    n.textContent = '0';
-    const io = new IntersectionObserver((entries) => {
-      if (!entries.some((e) => e.isIntersecting)) return;
-      io.disconnect();
-      const t0 = performance.now(), dur = to > 100 ? 1400 : 900;
-      const tick = (t) => { const k = Math.min(1, (t - t0) / dur); n.textContent = String(Math.round(to * easeOut(k))); if (k < 1) requestAnimationFrame(tick); };
-      requestAnimationFrame(tick);
-    }, { threshold: 0.6 });
-    io.observe(n);
-  });
+  // Scene scripts (assets/scenes/<scene>.js, loaded before this file) queue a function on
+  // window.LumenScenes; each is called here with the engine's helpers, before the first frame. A script
+  // that comes later is called at once.
+  const sceneAPI = {
+    scenesOn, still, reduced, shot, finePointer, onScene, onFirstSight, clamp01, smooth, easeOut, easeInOut,
+    codeart: { surface, paintHalves, paintSeam, tokenMaps, mirror, MONO, CODE },
+  };
+  const queued = Array.isArray(window.LumenScenes) ? window.LumenScenes : [];
+  window.LumenScenes = { push: (fn) => fn(sceneAPI) };
+  queued.forEach((fn) => { try { fn(sceneAPI); } catch (e) { console.error(e); } });
 
   if (scenesOn) {
     const scenes = Array.from(document.querySelectorAll('[data-scene]')).map((el) => ({

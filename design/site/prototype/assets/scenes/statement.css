@@ -1,0 +1,11 @@
+/* Home scene "statement" (tools/templates/pages/home/statement.mjs). Scoped to the scene; the engine and the shared
+   type (.h-xl, .h-xxl, .dim, .scene, .scene-pin) are in site.css. */
+
+.statement .scene-pin { display: flex; align-items: center; }
+.manifest { max-width: 1080px; font: 600 56px/68px var(--font-display); letter-spacing: -0.03em; color: #F3F5F9; text-wrap: pretty; }
+.manifest .acc { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.js-scenes .manifest .w { opacity: calc(0.13 + 0.87 * clamp(0, (var(--p, 0) * 1.3 - 0.08) * var(--n) - var(--i), 1)); }
+
+@media (max-width: 599px) {
+  .manifest { font-size: 32px; line-height: 40px; }
+}

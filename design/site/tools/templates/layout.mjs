@@ -90,7 +90,7 @@ function protoBar(ctx) {
 </div>`;
 }
 
-export function document(ctx, { title, description, body, bodyClass = '', hideFooter = false, scripts = [] }) {
+export function document(ctx, { title, description, body, bodyClass = '', hideFooter = false, styles = [], scripts = [] }) {
   const { lang, c } = ctx;
   const fullTitle = title ? `${plain(title)} — ${productName()}` : `${productName()} — ${plain(c.meta.tagline)}`;
   description = plain(description || c.meta.description);
@@ -106,7 +106,7 @@ export function document(ctx, { title, description, body, bodyClass = '', hideFo
 <link rel="icon" type="image/svg+xml" href="${FAVICON}">
 <link rel="alternate" hreflang="ru" href="../ru/${ctx.other}">
 <link rel="alternate" hreflang="en" href="../en/${ctx.other}">
-<link rel="stylesheet" href="../assets/site.css">
+<link rel="stylesheet" href="../assets/site.css">${styles.map((x) => `\n<link rel="stylesheet" href="../assets/${x}">`).join('')}
 <script>document.documentElement.classList.replace('no-js','js');(function(){var q=new URLSearchParams(location.search),h=document.documentElement;if(q.get('shot')==='1')h.classList.add('shot');if(q.get('rec')==='1')h.classList.add('rec');try{if(q.get('tbd')==='1'||localStorage.getItem('lumen-site-tbd')==='1')h.classList.add('tbd-on');if(q.get('rm')==='1'||localStorage.getItem('lumen-site-rm')==='1')h.classList.add('rm');}catch(e){}})();</script>
 </head>
 <body class="${esc(bodyClass)}">

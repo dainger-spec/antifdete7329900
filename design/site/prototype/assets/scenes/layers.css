@@ -1,0 +1,57 @@
+/* Home scene "layers" (tools/templates/pages/home/layers.mjs). Scoped to the scene; the engine and the shared
+   type (.h-xl, .h-xxl, .dim, .scene, .scene-pin) are in site.css. */
+
+.ly-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); align-items: center; gap: 48px; }
+.ly-text .lead { margin-top: 18px; }
+.ly-labels { list-style: none; display: grid; gap: 16px; margin-top: 40px; }
+.ly-labels li { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 14px; align-items: center; }
+.ly-ic { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; background: rgba(255, 255, 255, 0.07); color: var(--text-primary); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.ly-labels b { display: block; font: 600 16px/21px var(--font); }
+.ly-labels li > span:last-child > span { display: block; font: 400 14px/20px var(--font); color: var(--text-secondary); }
+.ly-stage { position: relative; height: 600px; perspective: 1700px; }
+.ly-stack { position: absolute; left: 50%; top: 56%; width: 400px; height: 260px; margin: -130px 0 0 -200px; transform-style: preserve-3d; transform: rotateX(58deg) rotateZ(-36deg); }
+.ly { --c: #8FB2FF; position: absolute; inset: 0; transform-style: preserve-3d; transform: translateZ(calc(var(--k) * (8px + var(--t, 1) * 66px))); }
+.ly:nth-child(2) { --c: #B794FF; }
+.ly:nth-child(3) { --c: #F2C46B; }
+.ly:nth-child(4) { --c: #6BE3A4; }
+.ly:nth-child(5) { --c: #FF8FB1; }
+.ly-face { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 12px; padding: 26px 30px; border-radius: 26px; background: linear-gradient(140deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.03) 60%), rgba(12, 14, 19, 0.82); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 46px color-mix(in srgb, var(--c) 16%, transparent); color: var(--text-primary); }
+.ly-name { position: absolute; left: 30px; top: -2px; transform: translateY(-100%); font: 600 13px/18px var(--font); color: var(--c); opacity: var(--t, 1); white-space: nowrap; }
+.lyf-bar { display: flex; align-items: center; gap: 7px; }
+.lyf-bar i { width: 10px; height: 10px; border-radius: 50%; background: #FF5F57; }
+.lyf-bar i:nth-child(2) { background: #FEBC2E; }
+.lyf-bar i:nth-child(3) { background: #28C840; }
+.lyf-bar em { flex: 1; height: 16px; margin-left: 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.10); }
+.lyf-page { display: grid; gap: 9px; }
+.lyf-page i { height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.12); }
+.lyf-page i.s { width: 60%; }
+.lyf-chip { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; height: 34px; padding: 0 14px; border-radius: 99px; background: rgba(255, 255, 255, 0.07); font: 600 15px/1 var(--font-mono); }
+.lyf-row { display: grid; grid-template-columns: 16px 1fr 12px; align-items: center; gap: 10px; color: var(--c); }
+.lyf-row i { height: 9px; border-radius: 5px; background: rgba(255, 255, 255, 0.12); }
+.lyf-net { display: flex; align-items: center; gap: 8px; color: var(--c); }
+.lyf-net .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--c); }
+.lyf-net .ln { flex: 1; height: 2px; background: var(--c); }
+.lyf-net .ln.dash { background: none; border-top: 2px dashed rgba(255, 255, 255, 0.25); }
+.lyf-net.off { color: #FF8C85; opacity: 0.8; }
+.lyf-key { display: flex; align-items: center; gap: 12px; color: var(--c); }
+.lyf-key code { background: none; border: 0; padding: 0; font: 600 22px/1 var(--font-mono); color: var(--text-primary); }
+.js-scenes .ly-labels li { opacity: var(--t, 0); transform: translateX(calc((1 - var(--t, 0)) * -20px)); }
+
+@media (max-width: 1099px) {
+  .ly-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .ly-stage { height: 460px; order: -1; }
+}
+
+@media (max-width: 599px) {
+  .ly-stage { height: 380px; }
+  .ly-stack { width: 280px; height: 182px; margin: -91px 0 0 -140px; }
+  .ly { transform: translateZ(calc(var(--k) * (6px + var(--t, 1) * 44px))); }
+  .ly-face { padding: 16px 18px; gap: 8px; border-radius: 18px; }
+  .ly-name { left: 18px; font-size: 11px; }
+  .lyf-key code { font-size: 16px; }
+  .lyf-chip { height: 28px; font-size: 12px; padding: 0 10px; }
+  .ly-labels { gap: 12px; margin-top: 28px; }
+  .js-scenes .ly-labels { display: none; }
+  .js-scenes .ly-name { font-size: 12px; }
+  .js-scenes .ly-stage { height: 360px; }
+}

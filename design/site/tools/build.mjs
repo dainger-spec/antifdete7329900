@@ -77,6 +77,7 @@ export async function build({ only } = {}) {
         body: out.body,
         bodyClass: out.bodyClass,
         hideFooter: out.hideFooter,
+        styles: out.styles,
         scripts: out.scripts,
       });
       const file = path.join(SITE, 'prototype', lang, `${page.slug}.html`);
