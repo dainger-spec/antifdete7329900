@@ -9,9 +9,12 @@ import os
 ///     its key, its target, and whether it is enabled with a window of Safari's open.
 ///   * LS: what LaunchServices answers in a process with a home of its own about Safari and the
 ///     default browser (Safari's General pane threw on a nil from that corner).
-///   * AUTOFILL, HISTORY, EXPORT, BOOKMARKS, SETTINGS: the classes of Safari's frameworks around
-///     saving passwords and AutoFill, its history, exporting and importing browser data, the
-///     Bookmarks sidebar and its settings, with their methods.
+///   * AUTOFILL, HISTORY, EXPORT, BOOKMARKS, SETTINGS, ERRORPAGE, SUBSCRIPTION: the classes of
+///     Safari's frameworks around saving passwords and AutoFill, its history, exporting and
+///     importing browser data, the Bookmarks sidebar, its settings, the page it shows when a page
+///     cannot be loaded, and its check of iCloud+ features, with their methods.
+///   * RESOURCE, ERRORTEXT: the files of Safari's frameworks whose names say "error" (its error
+///     page's own files, if it has any), and the keys of the texts its error pages show.
 ///   * WAITING: every method of Safari's frameworks whose name says it waits for an answer
 ///     ("Blocking", "WaitUntil", "UntilResponse", "Synchronous", "WaitFor").
 ///   * BOOKMARKS-FILE: what a new profile's Safari keeps as bookmarks.
@@ -51,6 +54,7 @@ enum SafariChromeInventory {
                 launchServices()
                 menu()
                 classes()
+                resources()
                 bookmarksFile()
                 print("INVENTORY done")
                 SafariChrome.removeCheckHome()
@@ -125,6 +129,8 @@ enum SafariChromeInventory {
         ("EXPORT", "(?i)export|import", "(?i)export|import|write|save|url|path|directory|finish|complete"),
         ("BOOKMARKS", "(?i)annotatedbookmarks|bookmarkssidebar|bookmarkstable", nil),
         ("SETTINGS", "(?i)^General(Preferences|Settings)|PreferencesUIController", nil),
+        ("ERRORPAGE", "(?i)errorpage|pageerror|loaderror|errorview|errorcontroller|navigationerror|cannotopen|cantopen|failedtoload", nil),
+        ("SUBSCRIPTION", "(?i)cloudsubscription|featureavailability", nil),
     ]
     private static let waiting = "(?i)blocking|waituntil|untilresponse|synchronous|waitfor"
 
@@ -165,6 +171,40 @@ enum SafariChromeInventory {
             return (prefix, NSStringFromSelector(method_getName(method)), types)
         }
     }
+
+    // MARK: Safari's files
+
+    private static func resources() {
+        inventoryStep = "the frameworks' files"
+        let frameworks = (0..<_dyld_image_count()).compactMap { _dyld_get_image_name($0).map { String(cString: $0) } }
+            .filter { $0.contains(".framework/") && $0.contains("/Safari") }
+            .compactMap { image in image.range(of: ".framework").map { String(image[..<$0.upperBound]) } }
+        for framework in Set(frameworks).sorted() {
+            guard let resources = Bundle(path: framework)?.resourcePath,
+                  let files = FileManager.default.enumerator(atPath: resources)?.allObjects as? [String] else { continue }
+            // One language's copy of a localized file stands for all of them.
+            let named = files.filter { $0.range(of: "(?i)error", options: .regularExpression) != nil }
+                .filter { !$0.contains(".lproj/") || $0.hasPrefix("en.lproj/") || $0.hasPrefix("Base.lproj/") }
+            for file in named.sorted().prefix(80) {
+                print("RESOURCE \((framework as NSString).lastPathComponent)/\(file)")
+            }
+            // Where the words of its error page are, by what they say: the key names the place.
+            for file in files where file.hasSuffix(".loctable") || (file.hasPrefix("en.lproj/") && file.hasSuffix(".strings")) {
+                let url = URL(fileURLWithPath: resources).appendingPathComponent(file)
+                guard let data = try? Data(contentsOf: url),
+                      let table = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { continue }
+                let english = (table["en"] as? [String: Any]) ?? table
+                for (key, value) in english.sorted(by: { $0.key < $1.key }) {
+                    guard let text = value as? String,
+                          text.range(of: errorWords, options: .regularExpression) != nil else { continue }
+                    print("ERRORTEXT \((framework as NSString).lastPathComponent)/\(file) \(key.prefix(160)) = \(text.prefix(160))")
+                }
+            }
+        }
+    }
+
+    /// What Safari's error pages say ("Safari can’t establish a secure connection…").
+    private static let errorWords = "(?i)can.t (establish a secure connection|open the page|find the server|connect to the server)"
 
     // MARK: A new profile's bookmarks
 
