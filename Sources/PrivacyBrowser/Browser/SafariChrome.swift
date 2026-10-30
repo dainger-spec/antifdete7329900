@@ -858,9 +858,11 @@ extension SafariChrome {
 
     /// A process like a profile's, for a check: Safari's frameworks loaded, `NSApp` Safari's own
     /// application object and its chrome prepared — in a home of its own, held to a closed proxy.
-    /// False when the frameworks cannot be loaded here (the sandboxed build). The home goes with
-    /// `removeCheckHome()`.
+    /// False in the sandboxed build, which runs no process per profile and cannot be held to the
+    /// closed proxy (UDP stays open to it, so the guard refuses), and when the frameworks cannot be
+    /// loaded here. The home goes with `removeCheckHome()`.
     static func prepareForCheck(arguments: [String]) -> Bool {
+        guard !AppEnvironment.isSandboxed else { return false }
         isolateForCheck(arguments: arguments)
         guard load(), installApplication() else { return false }
         prepare()
