@@ -133,6 +133,7 @@ jobs:
           echo "exit $?"
           grep -E '^(INVENTORY|LS) ' build/egress27/safari-inventory.txt | head -10 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - Safari inventory::/'
           grep -E '^XPC [^ ]*Safari' build/egress27/safari-inventory.txt | head -10 | cut -c1-600 | sed 's/^/::notice title=macOS 27 - XPC services of Safari frameworks::/'
+          echo "::group::the inventory"; cat build/egress27/safari-inventory.txt; echo "::endgroup::"
           exit 0
       - name: Safari 27's question about the default browser — as built, and declared a browser (a measurement)
         if: always()

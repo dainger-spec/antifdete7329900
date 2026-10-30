@@ -20,6 +20,9 @@ import Security
 ///     ("Blocking", "WaitUntil", "UntilResponse", "Synchronous", "WaitFor").
 ///   * FORMS: every method of Safari's frameworks, in whatever class, whose name says it takes a
 ///     form's submission or saves a password: where Safari's own offer to save one starts.
+///   * LOADERRORS: every method, in whatever class, whose name says it fails a load or shows an
+///     error page: where Safari's own error page (`StandardErrorPage.html` and the rest) is built,
+///     for ours to stand in.
 ///   * XPC: every XPC service bundled in a framework this process has loaded, with what its
 ///     entitlements say about files and containers. Such a service starts for whichever process
 ///     asks, as a process of its own — outside the profile's home, proxy and sandbox.
@@ -141,6 +144,7 @@ enum SafariChromeInventory {
     ]
     private static let waiting = "(?i)blocking|waituntil|untilresponse|synchronous|waitfor"
     private static let forms = "(?i)submitform|willsubmit|didsubmit|formvalues|formdelegate|savepassword|savecredential|offertosave|shouldoffer|passwordsav"
+    private static let loadErrors = "(?i)errorpage|loaderror|failprovisional|didfailnavigation|didfailload|showerror|displayerror|errorview|pageloaderror"
 
     private static func classes() {
         let images = (0..<_dyld_image_count()).compactMap { _dyld_get_image_name($0).map { String(cString: $0) } }
@@ -160,6 +164,9 @@ enum SafariChromeInventory {
                 }
                 for method in methods where method.name.range(of: forms, options: .regularExpression) != nil {
                     print("FORMS \(name) \(method.prefix)\(method.name) \(method.types)")
+                }
+                for method in methods where method.name.range(of: loadErrors, options: .regularExpression) != nil {
+                    print("LOADERRORS \(name) \(method.prefix)\(method.name) \(method.types)")
                 }
                 for topic in topics where name.range(of: topic.classes, options: .regularExpression) != nil {
                     let shown = methods.filter { topic.methods == nil || $0.name.range(of: topic.methods!, options: .regularExpression) != nil }
