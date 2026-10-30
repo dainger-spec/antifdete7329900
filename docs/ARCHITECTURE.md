@@ -34,7 +34,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │        ├── TunnelManager ── packet tunnel: activation, VPN configuration, per-profile routes│
 │        ├── WebDataStoreVault ── seal/unseal WebKit dirs (WebKitDataLayout + archive)       │
 │        └── BrowserSession (one per running profile)                                        │
-│              ├── WKWebsiteDataStore(forIdentifier:) + proxyConfigurations                  │
+│              ├── WKWebsiteDataStore (identifier's dirs, a browser's quota) + proxies       │
 │              ├── WKUserContentController + PrivacyScripts (TZ / geo / WebRTC)              │
 │              ├── ProfileLibrary ── HistoryStore + BookmarkStore (observable, debounced)    │
 │              ├── LibraryWindowController ── bookmarks & history UI                         │
@@ -181,7 +181,7 @@ whole archive has authenticated.
   │ unwrap profile key                        │      │ close windows, tear down web views           │
   │ decrypt config.bin, open PasswordVault    │      │ drop WKWebsiteDataStore reference            │
   │ unseal webdata.pbsa → WebKit dirs         │ ───▶ │ wait → archive+encrypt dirs → webdata.pbsa   │
-  │ WKWebsiteDataStore(forIdentifier: uuid)   │      │ WKWebsiteDataStore.remove(forIdentifier:)    │
+  │ store of uuid, a browser's quota ratios   │      │ WKWebsiteDataStore.remove(forIdentifier:)    │
   │   .proxyConfigurations = [proxy]          │      │   (fails while in use → retry with backoff)  │
   │ user scripts (TZ / geo / WebRTC)          │      │ sweep leftovers, drop profile key            │
   │ window → start URL                        │      └──────────────────────────────────────────────┘

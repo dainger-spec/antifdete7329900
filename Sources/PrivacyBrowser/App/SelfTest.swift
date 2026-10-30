@@ -1603,6 +1603,24 @@ final class SelfTest {
                 check("surface (iPhone): screen", string(probed, "screen") == "390x844x390x844x3", string(probed, "screen"))
             }
         }
+
+        // A persistent profile's store is made with a browser's share of the disk
+        // (BrowserStorageQuota): Safari's quota is then WebKit's own answer. Read in a world the
+        // profile's scripts are not in, which would otherwise map an app's figure to Safari's.
+        let persistent = try repository.create(name: "Quota", configuration: ProfileConfiguration(webRTCPolicy: .unrestricted))
+        let quotaSession = try makeSession(repository, persistent.id, key: repository.profileKey(for: persistent.id))
+        let madeWithRatios = BrowserStorageQuota.lastStoreHadBrowserRatios
+        let quotaTab = BrowserTab(configuration: quotaSession.makeWebViewConfiguration(), context: quotaSession.tabContext)
+        try await PageLoader.load(quotaTab.webView, html: page, baseURL: origin)
+        let nativeQuota = try await js(quotaTab.webView, "return (await navigator.storage.estimate()).quota;", world: .defaultClient) as? NSNumber
+        let macQuota = PrivacyScripts.safariStorageQuota(for: .macOS).rounded(.up)
+        check("storage quota: a persistent profile's store gives a site Safari's share itself (WebKit's own answer, no script)",
+              madeWithRatios && nativeQuota?.doubleValue == macQuota,
+              "made with a browser's ratios: \(madeWithRatios), quota \(nativeQuota?.stringValue ?? "nil") vs \(String(format: "%.0f", macQuota))")
+        quotaTab.tearDown()
+        quotaSession.shutDown()
+        await WebDataStoreVault(repository: repository).deleteData(profileID: persistent.id)
+        try repository.delete(persistent.id)
     }
 
     /// The probe from the app bundle (build-app.sh copies it), else from PB_SELFTEST_PROBE.

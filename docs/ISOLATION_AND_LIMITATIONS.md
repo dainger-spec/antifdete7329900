@@ -139,9 +139,10 @@ decision before anything changes):
   has none (`patchSafariObject` in `PrivacyScripts`): a stand-in for an object of Safari's, and one
   of the window's own properties (rules 1 and 4). The count of a profile's own properties measured
   so far includes it.
-- The storage quota: the same script wraps `navigator.storage.estimate()` to answer Safari's quota
-  (`patchStorageQuota`), a figure WebKit itself computes from its data store's configuration
-  (`originQuotaRatio`, higher for a browser than for an app) (rule 1).
+- The storage quota of an ephemeral profile: the same script wraps `navigator.storage.estimate()`
+  to answer Safari's quota (`patchStorageQuota`) where WebKit answers an app's 1000 MiB (rule 1).
+  A persistent profile no longer needs it: its store is made with a browser's ratios and WebKit
+  answers Safari's figure itself (`BrowserStorageQuota`; the script leaves any larger figure alone).
 
 ### What the public WKWebView / WebKit APIs let a profile control
 
@@ -341,10 +342,16 @@ What a profile changed to get there (each was a difference before):
   languages, read from the global domain, as Safari does.
 - **Fonts.** A WKWebView lets pages use fonts the user installed; Safari shows them only the
   system's. The profile sets the WebKit preference Safari sets (private, applied only if present).
-- **Storage quota.** WebKit gives an app that is not a browser a fixed 1000 MiB per origin — the
-  small quota private-mode detectors look for. Safari reports 60 % of a *standard* 128 GB volume
-  (WebKit reports a standard capacity rather than the real disk's, so the figure is 82 463 372 084
-  on every Mac, a tenth of it in a third-party frame); `estimate()` now reports the same.
+- **Storage quota.** Safari reports 60 % of a *standard* 128 GB volume per origin (WebKit reports a
+  standard capacity rather than the real disk's, so the figure is 82 463 372 084 on every Mac, a
+  tenth of it in a third-party frame). WebKit gives an app that is not a browser less: 15 % of that
+  volume in a persistent store (20 615 843 021, measured in CI run 429 for a new profile next to
+  Safari) and a fixed 1000 MiB in a non-persistent one — the small quota private-mode detectors look
+  for. A profile's persistent store is now made with a browser's ratios, 0.6 per origin and 0.8 in
+  all (`BrowserStorageQuota`: WebKit's own computation, through the data store's configuration, as
+  Safari's stores are made), so WebKit itself answers Safari's figure; the self-test reads it in a
+  world the profile's scripts are not in. An ephemeral profile's non-persistent store still gets
+  1000 MiB from WebKit, and the profile's script maps that to Safari's figure.
 - **Geolocation permission.** `permissions.query({name: 'geolocation'})` threw a TypeError (the shim
   built a fake status); it is now the engine's own `PermissionStatus`, 'prompt' until the page asks.
 - **Wrappers under JavaScriptCore.** With relay-only WebRTC the wrapper added a

@@ -126,11 +126,23 @@ final class WebDataStoreVault {
 
     /// Creates a profile's persistent data store. Always use this instead of calling
     /// `WKWebsiteDataStore(forIdentifier:)` directly, so `deleteData` knows it may remove it.
+    ///
+    /// The store is the one `WKWebsiteDataStore(forIdentifier:)` makes — the same directories —
+    /// but with a browser's share of the disk for what sites store (`BrowserStorageQuota`), as
+    /// Safari's own stores have it. A store of this identifier WebKit still holds (a seal it has
+    /// not let go of yet) is that store again, as `forIdentifier:` would return it: never a second
+    /// one on the same directories.
     static func makeStore(for profileID: UUID) -> WKWebsiteDataStore {
         registeredStoreIDs.insert(profileID)
         excludeRootsFromCopies()
-        return WKWebsiteDataStore(forIdentifier: profileID)
+        if let live = liveStores.object(forKey: profileID as NSUUID) { return live }
+        let store = BrowserStorageQuota.persistentStore(identifier: profileID) ?? WKWebsiteDataStore(forIdentifier: profileID)
+        liveStores.setObject(store, forKey: profileID as NSUUID)
+        return store
     }
+
+    /// The stores `makeStore` made that WebKit or the app still hold, by profile.
+    private static let liveStores = NSMapTable<NSUUID, WKWebsiteDataStore>.strongToWeakObjects()
 
     private static var rootsExcluded = false
 
