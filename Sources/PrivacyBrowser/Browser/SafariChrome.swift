@@ -1051,6 +1051,7 @@ enum SafariChrome {
         removeAutoFillInsertItems(from: menu)
         addPasteAsTyped(to: menu)
         NSApplication.shared.mainMenu = menu
+        keepAutoFillInsertItemsOut()
         log.notice("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
         return true
     }
@@ -1115,6 +1116,27 @@ enum SafariChrome {
         }
         return removed
     }
+
+    /// AppKit adds the Edit menu's system items itself once the menu bar is up — AutoFill among
+    /// them — so the items taken out above came back: the menu walk found Edit › AutoFill ›
+    /// Contact… and Passwords… there, enabled, in a profile's window (CI run 452). They are taken
+    /// out again whenever a menu gets an item, and as a menu opens.
+    private static func keepAutoFillInsertItemsOut() {
+        guard !isKeepingAutoFillOut else { return }
+        isKeepingAutoFillOut = true
+        for name in [NSMenu.didAddItemNotification, NSMenu.didBeginTrackingNotification] {
+            _ = NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { note in
+                guard let menu = note.object as? NSMenu else { return }
+                // Not while AppKit is still adding to the menu: once it is done.
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { _ = SafariChrome.removeAutoFillInsertItems(from: menu) }
+                }
+            }
+        }
+        if let menu = NSApplication.shared.mainMenu { removeAutoFillInsertItems(from: menu) }
+    }
+
+    private static var isKeepingAutoFillOut = false
 
     // MARK: Opening a window
 
