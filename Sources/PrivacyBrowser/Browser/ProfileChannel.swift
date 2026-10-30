@@ -63,6 +63,22 @@ enum ProfileEvent: Codable {
     /// manager opens its own Settings. Safari's own are built on services this process does not
     /// have, and took it down (`SafariChrome.stubChromeFeatures`).
     case showSettings
+    /// The process is quitting and sealing the profile's data: the manager shows the profile as
+    /// being encrypted until the process exits.
+    case sealing
+    /// How the profile's WebKit data was sealed, just before the process exits.
+    case sealed(ProfileSealReport)
+}
+
+/// How a profile's WebKit data was sealed as its process quit: whether WebKit let the store go
+/// (`forced` false) or it had to be sealed from under it (`WebDataStoreVault.forceSeal`), after how
+/// many attempts, and how long the seal took. The self-test reads it.
+struct ProfileSealReport: Codable, Equatable {
+    var forced = false
+    var attempts = 0
+    var seconds = 0.0
+    /// Pages of Safari's chrome closed before the seal (`ProfileNetworkGuard.closeEveryPage`).
+    var pagesClosed = 0
 }
 
 /// One line of JSON per message, and a prefix on the way back so that Safari's own output on the

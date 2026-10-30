@@ -120,6 +120,7 @@ enum SafariChromeHost {
 
     static func open(session: BrowserSession, url: URL?) -> Bool {
         guard isPrepared else { return false }
+        watchWindows()
         // Registered before the window exists: Safari builds the first web view while opening it,
         // and that web view must already get the profile's data store.
         ProfileNetworkGuard.register(session: session)
@@ -137,6 +138,48 @@ enum SafariChromeHost {
         NSApplication.shared.activate(ignoringOtherApps: true)
         log.notice("A profile runs in Safari's chrome")
         return true
+    }
+
+    // MARK: Safari's windows as the profile's windows
+
+    /// The last of Safari's browser windows has closed: the profile's process quits, which seals
+    /// its data — as closing a profile's last window of ours does (`BrowserSession`). Without this
+    /// the profile went on running with no window, until stopped from the Profiles window.
+    static var onLastWindowClosed: (() -> Void)?
+    private static var isWatchingWindows = false
+    private static var isClosingEveryWindow = false
+
+    private static func watchWindows() {
+        guard !isWatchingWindows else { return }
+        isWatchingWindows = true
+        _ = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { note in
+            guard let closing = note.object as? NSWindow else { return }
+            MainActor.assumeIsolated {
+                guard !isClosingEveryWindow, isBrowserWindow(closing) else { return }
+                let others = NSApp.windows.filter { $0 !== closing && $0.isVisible && isBrowserWindow($0) }
+                if others.isEmpty {
+                    log.notice("Safari's last window of this profile closed: the profile quits")
+                    onLastWindowClosed?()
+                }
+            }
+        }
+    }
+
+    /// A browser window of Safari's: its controller is Safari's `BrowserWindowController` (ours,
+    /// of the same name, lives in this module and is named with it).
+    static func isBrowserWindow(_ window: NSWindow) -> Bool {
+        guard let controller = window.windowController else { return false }
+        return NSStringFromClass(type(of: controller)) == "BrowserWindowController"
+    }
+
+    /// Closes every browser window of Safari's, as a quit or a stop does before the profile's data
+    /// is sealed: the windows go when the user quits, rather than staying up through the seal.
+    static func closeEveryWindow() {
+        isClosingEveryWindow = true
+        defer { isClosingEveryWindow = false }
+        for window in NSApp.windows where isBrowserWindow(window) && window.isVisible {
+            window.close()
+        }
     }
 }
 

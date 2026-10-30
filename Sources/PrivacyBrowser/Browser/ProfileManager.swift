@@ -45,6 +45,12 @@ final class ProfileManager: ObservableObject {
     var onConfigurationChanged: ((UUID) -> Void)?
     /// A profile's window asked for Settings (⌘, in Safari's chrome): the app's own open.
     var onShowSettings: (() -> Void)?
+    /// A profile's WebKit data was sealed here, and how (a profile's process tells its manager).
+    var onSealed: ((UUID, ProfileSealReport) -> Void)?
+    /// A profile's process told how it sealed its data, just before it exited (the self-test).
+    var onChildSealed: ((UUID, ProfileSealReport) -> Void)?
+    /// Pages of Safari's chrome closed by a quit, before the seal (`prepareForQuit`).
+    private var pagesClosedForQuit = 0
     /// Settings → Proxies: a profile whose proxy does not work is not started at all — its proxy is
     /// asked first (`refusesFailingProxy`), and `onProxyLaunchRefused` says how it failed.
     var refusesFailingProxy: () -> Bool = { false }
@@ -371,6 +377,16 @@ final class ProfileManager: ObservableObject {
                 self.onConfigurationChanged?(id)
             case .showSettings:
                 self.onShowSettings?()
+            case .sealing:
+                // Quitting on its own (⌘Q, its last window closed): encrypting until it exits. A
+                // stop asked for from here has taken the child out of `children` and keeps the
+                // profile busy itself, until after the exit.
+                guard self.children[id] === child else { break }
+                self.busyProfileIDs.insert(id)
+                self.objectWillChange.send()
+            case .sealed(let report):
+                self.log.notice("Profile \(id.uuidString, privacy: .public) sealed its data in \(Int(report.seconds), privacy: .public) s, attempts \(report.attempts, privacy: .public), forced \(report.forced, privacy: .public), pages closed \(report.pagesClosed, privacy: .public)")
+                self.onChildSealed?(id, report)
             }
         }
         child.onExit = { [weak self] status in
@@ -379,6 +395,8 @@ final class ProfileManager: ObservableObject {
             self.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.children[id] = nil
             self.runningProfileIDs.remove(id)
+            // Sealing on its own (`.sealing`) ends with the process.
+            self.busyProfileIDs.remove(id)
             // A warm-up cannot outlive the process it ran in; what it collected is still shown.
             if self.reportedWarmUp[id]?.isRunning == true { self.reportedWarmUp[id]?.phase = .stopped }
             // Nothing holds those files now. Sealed whatever way the process ended: one that crashed
@@ -690,7 +708,10 @@ final class ProfileManager: ObservableObject {
         // `session` is now the last reference; it is released when this scope ends, but its
         // data store reference was already dropped in shutDown().
         if !ephemeral, let key {
-            try await webDataVault.seal(profileID: id, key: key)
+            let started = Date()
+            let result = try await webDataVault.seal(profileID: id, key: key)
+            onSealed?(id, ProfileSealReport(forced: result.forced, attempts: result.attempts,
+                                            seconds: Date().timeIntervalSince(started), pagesClosed: pagesClosedForQuit))
         }
     }
 
@@ -706,6 +727,15 @@ final class ProfileManager: ObservableObject {
     /// `WebDataStoreVault.forceSealWhenStoreStaysInUse`). Also reaches seals already retrying.
     func prepareForQuit() {
         webDataVault.forceSealWhenStoreStaysInUse = true
+        // Safari's chrome: its windows go first, before anything is sealed — the window disappears
+        // when the user quits instead of staying up through the seal — and so do the pages of the
+        // windows it closed earlier and keeps for reopening, which would keep the store in use.
+        // What is left of the retries is for WebKit to let the store go, not for Safari to.
+        if SafariChromeHost.isHosting {
+            SafariChromeHost.closeEveryWindow()
+            pagesClosedForQuit = ProfileNetworkGuard.closeEveryPage()
+            webDataVault.retryDelays = [1, 1, 2]
+        }
     }
 
     /// The running session of a profile (self-test hook).

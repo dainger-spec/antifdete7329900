@@ -76,6 +76,9 @@ ALLOWED_IN_FILE = {
     ("ProxyGeoLookup.swift", "service.url.host ?? \"?\""): "a geolocation service of the app's own list, not the proxy",
     ("ContentRules.swift", "identifier"): "the rule list's identifier, a constant of the code",
     ("ExceptionLog.swift", "when"): "where an exception was seen: a fixed text of that file",
+    ("ProfileManager.swift", "report.forced"): "a yes/no: whether a seal was forced",
+    ("ProfileManager.swift", "report.attempts"): "a count of seal attempts",
+    ("ProfileManager.swift", "report.pagesClosed"): "a count of pages closed",
     ("ExceptionLog.swift", "redactedReason"):
         "an exception's reason with every address, path, e-mail, quote and long number cut out "
         "(LogRedaction, LogRedactionTests); the full reason is logged privately",

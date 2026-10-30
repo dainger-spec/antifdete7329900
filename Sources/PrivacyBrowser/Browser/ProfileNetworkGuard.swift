@@ -61,6 +61,21 @@ enum ProfileNetworkGuard {
     private static var webViewsCaughtByNet = 0
     /// Every web view this process has built, held weakly, for `report`.
     private static let webViews = NSHashTable<WKWebView>.weakObjects()
+
+    /// Closes the page of every web view still alive in this process (`-[WKWebView _close]`), as
+    /// quitting does before the profile's data is sealed: Safari's chrome keeps the web views of
+    /// windows it has closed (for reopening them), and a page that is not closed keeps the
+    /// profile's store in use. Returns how many were closed.
+    @discardableResult
+    static func closeEveryPage() -> Int {
+        let close = NSSelectorFromString("_close")
+        var closed = 0
+        for view in webViews.allObjects where view.responds(to: close) {
+            view.perform(close)
+            closed += 1
+        }
+        return closed
+    }
     /// WebKit's real default store, closed and kept alive so that WebKit keeps handing out this one.
     private static var realDefaultStore: WKWebsiteDataStore?
     /// Hooks that could not be installed because what they patch is not in this macOS.

@@ -1017,6 +1017,8 @@ final class SelfTest {
         manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
         var networkReport: ProfileNetworkReport?
         manager.onNetworkReport = { _, report in networkReport = report }
+        var sealReport: ProfileSealReport?
+        manager.onChildSealed = { _, report in sealReport = report }
 
         info("egress-token \(run)")
         info("egress-window begin \(Date().timeIntervalSince1970)")
@@ -1301,7 +1303,18 @@ final class SelfTest {
         for (what, host) in [("the page's icon", "icon-"), ("its touch icon", "touchicon-"), ("its OpenSearch description", "osd-")] {
             info("Safari chrome: \(what) \(log.targets.contains { $0.target.hasPrefix(host + run) } ? "was fetched through the proxy" : "was not fetched (not exercised)")")
         }
+        // A stop: Safari's window goes first, then the seal, whose retries no longer wait for Safari
+        // (it keeps the pages of the windows it closes); the process reports how the seal went.
+        sealReport = nil
+        let stopStarted = Date()
         try? await manager.stop(profile.id)
+        let stopSeconds = Date().timeIntervalSince(stopStarted)
+        _ = await waitUntil(timeout: 5) { sealReport != nil }
+        check("Safari chrome: a stop ends the profile's process within 15 s, its data sealed and the seal reported (it took 20 s and more of retries)",
+              stopSeconds < 15 && sealReport != nil, "\(Int(stopSeconds)) s, \(String(describing: sealReport))")
+        info("Safari chrome: the stop sealed the profile's data "
+             + (sealReport.map { $0.forced ? "by force (WebKit kept the store in use)" : "without force (WebKit let the store go)" } ?? "(no report)")
+             + ", attempts \(sealReport?.attempts ?? 0), pages closed first \(sealReport?.pagesClosed ?? 0), seal \(Int(sealReport?.seconds ?? 0)) s, stop \(Int(stopSeconds)) s")
         // What Safari's window visited is in the profile's own, encrypted history (`HostedPageHistory`).
         let visited = (try? repository.historyStore(for: profile.id, key: repository.profileKey(for: profile.id)).entries().map(\.url)) ?? []
         check("Safari chrome: the pages Safari's window visited are in the profile's own encrypted history",

@@ -162,8 +162,12 @@ enum ProfileSessionHost {
                 ProfileSessionHost.send(.error(message))
             }
             // The profile's last window closed: this process exists for that profile only, so
-            // it quits — and quitting is what seals the data.
+            // it quits — and quitting is what seals the data. Safari's windows count as the
+            // profile's windows here (SafariChromeHost).
             manager.onReturnToProfiles = { MainActor.assumeIsolated { NSApp.terminate(nil) } }
+            SafariChromeHost.onLastWindowClosed = { NSApp.terminate(nil) }
+            // How the data was sealed, told to the manager before this process exits.
+            manager.onSealed = { _, report in ProfileSessionHost.send(.sealed(report)) }
             manager.onWarmUpProgress = { [weak self, weak manager] id in
                 guard let robot = manager?.warmUpRobot(for: id) else { return }
                 let status = robot.status
@@ -182,6 +186,12 @@ enum ProfileSessionHost {
                 lockForQuit: {
                     manager.prepareForQuit()
                     await manager.shutDown()
+                },
+                // The manager shows the profile as being encrypted, and Safari's windows go now,
+                // not after the seal: a quit that keeps its window up for seconds looks like a hang.
+                willSeal: {
+                    ProfileSessionHost.send(.sealing)
+                    SafariChromeHost.closeEveryWindow()
                 },
                 terminate: { NSApp.terminate(nil) })
             Task { @MainActor in

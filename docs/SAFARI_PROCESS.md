@@ -698,6 +698,19 @@ AutoFill is installed into Safari's content controller with its handlers when th
 applied to it (`BrowserSession.applyProfile`), and Safari's own state in the profile's home is
 sealed between runs like everything else (`SafariHomeVault`).
 
+**Safari's windows are the profile's windows** (2026-10-30, after the owner's Mac showed otherwise).
+The profile's process used to know only windows of its own: closing Safari's last window left the
+profile running with none, and a quit or a stop left Safari's windows up while the data was sealed —
+whose store their pages kept in use, so all five attempts failed (1 + 2 + 3 + 5 + 8 s of waiting)
+before the seal was forced, and ⌘Q looked like it did nothing for twenty seconds. Now
+`SafariChromeHost` watches Safari's browser windows: the last one closing quits the process (which
+seals); a quit closes them first, before anything is sealed, then closes the pages Safari keeps for
+reopening closed windows (`ProfileNetworkGuard.closeEveryPage`), and the retries are short. The
+manager shows the profile as being encrypted from the moment the process starts sealing, and the
+process tells it how the seal went (`ProfileSealReport`: forced or not, attempts, seconds); the
+self-test wants a stop of a profile in Safari's chrome done within 15 s and says whether the seal
+was forced.
+
 **Which private pieces this needs.** `SafariChrome.expectedPieces` lists every class and method
 reached for by name. `PrivacyBrowser --check-safari-chrome` prints which this macOS has (CI runs it;
 it loads Safari's frameworks in a temporary home of its own, held to a closed proxy, as a profile's
