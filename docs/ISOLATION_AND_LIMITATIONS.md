@@ -131,6 +131,18 @@ APIs*). A change under this rule is described against it and decided before it i
 CI measures it against the runner's real Safari (*What sites see*, *Measured against this Mac's
 Safari*).
 
+**Where the code does not follow it yet** (found when the rule was written down; each waits for a
+decision before anything changes):
+
+- `window.safari`: a macOS profile's privacy script makes Safari's `window.safari` — its
+  `pushNotification` object, `permission()` and `requestPermission()` — in JavaScript when a page
+  has none (`patchSafariObject` in `PrivacyScripts`): a stand-in for an object of Safari's, and one
+  of the window's own properties (rules 1 and 4). The count of a profile's own properties measured
+  so far includes it.
+- The storage quota: the same script wraps `navigator.storage.estimate()` to answer Safari's quota
+  (`patchStorageQuota`), a figure WebKit itself computes from its data store's configuration
+  (`originQuotaRatio`, higher for a browser than for an app) (rule 1).
+
 ### What the public WKWebView / WebKit APIs let a profile control
 
 | Attribute | Mechanism | Reach |
