@@ -108,7 +108,8 @@ struct ProxyListPanel: View {
         guard !query.isEmpty else { return proxies.entries }
         return proxies.entries.filter { entry in
             [entry.label, entry.address, entry.proxy.username ?? "", entry.lastCheck?.exitIP ?? "", entry.lastCheck?.city ?? "",
-             entry.lastCheck?.countryCode.map(CountryNames.name(for:)) ?? "", entry.state(checking: false).shortText]
+             entry.lastCheck?.countryCode.map(CountryNames.name(for:)) ?? "", entry.state(checking: false).shortText,
+             entry.origin == .service ? L("proxies.origin.service.short") : ""]
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         }
     }
@@ -322,6 +323,10 @@ struct ProxyListPanel: View {
                                                         checking: proxies.checking.contains(entry.id)),
                                     checkedAt: proxies.checking.contains(entry.id) ? nil : entry.lastCheck?.checkedAt)
                 }
+                Text(entry.originLine)
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.top, 10)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
@@ -523,12 +528,23 @@ extension ProxyListEntry {
     /// The line under the name: the address (when a label is the name) and the user name.
     var detailLine: String {
         var parts: [String] = []
+        // The service's proxies say so where every list shows them; the user's own are the rule.
+        if origin == .service { parts.append(L("proxies.origin.service.short")) }
         if !label.isEmpty { parts.append(address) }
         if let user = proxy.username, !user.isEmpty { parts.append(user) }
         return parts.joined(separator: " · ") // l10n: not text
     }
 
     func state(checking: Bool) -> ProxyState { ProxyState(check: lastCheck, checking: checking) }
+
+    /// Where the proxy came from, and since when, for its report.
+    var originLine: String {
+        let date = addedAt.timeIntervalSince1970 > 0 ? addedAt.formatted(date: .long, time: .omitted) : nil
+        switch origin {
+        case .user: return date.map { String(format: L("proxies.origin.user.since"), $0) } ?? L("proxies.origin.user")
+        case .service: return date.map { String(format: L("proxies.origin.service.since"), $0) } ?? L("proxies.origin.service")
+        }
+    }
 }
 
 @MainActor

@@ -525,6 +525,11 @@
 "proxies.import.kind.help" = "Found by Check: both SOCKS5 and HTTP are tried on the first check, and the one that answers is the proxy's type. Until then the proxy is given to no profile.";
 "proxies.import.unknownKinds" = "Lines without a scheme: %ld — the first check finds their type.";
 "proxies.menu.edit" = "Edit…";
+"proxies.origin.service" = "Given by PrivacyBrowser's service";
+"proxies.origin.service.short" = "From the service";
+"proxies.origin.service.since" = "Given by PrivacyBrowser's service on %@";
+"proxies.origin.user" = "Added by you";
+"proxies.origin.user.since" = "Added by you on %@";
 "proxies.profiles.help" = "Profiles that use this proxy: %ld";
 "proxies.report.advice" = "What to do";
 "proxies.report.checkedAt" = "Checked %@";

@@ -525,6 +525,11 @@
 "proxies.import.kind.help" = "«Определит проверка»: при первой проверке пробуются и SOCKS5, и HTTP, и тот, что ответил, становится типом прокси. До этого прокси не назначается профилям.";
 "proxies.import.unknownKinds" = "Строк без схемы: %ld — их тип определит первая проверка.";
 "proxies.menu.edit" = "Изменить…";
+"proxies.origin.service" = "Выдан сервисом PrivacyBrowser";
+"proxies.origin.service.short" = "Из сервиса";
+"proxies.origin.service.since" = "Выдан сервисом PrivacyBrowser %@";
+"proxies.origin.user" = "Добавлен вами";
+"proxies.origin.user.since" = "Добавлен вами %@";
 "proxies.profiles.help" = "Профилей с этим прокси: %ld";
 "proxies.report.advice" = "Что делать";
 "proxies.report.checkedAt" = "Проверен %@";

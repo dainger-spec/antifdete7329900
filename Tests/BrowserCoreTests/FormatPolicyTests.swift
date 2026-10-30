@@ -41,11 +41,12 @@ final class FormatPolicyTests: XCTestCase {
         try SecureFile.write(AEAD.seal(json, key: file.key, aad: file.aad), to: XCTUnwrap(file.url))
     }
 
-    /// `body` is refused as a newer version's `what`, and the file at `url` is left as it was.
-    private func assertRefused(_ what: String, keeps url: URL, line: UInt = #line, _ body: () throws -> Void) throws {
+    /// `body` is refused as a newer version's `what` (of format `supported + 1`), and the file at
+    /// `url` is left as it was.
+    private func assertRefused(_ what: String, keeps url: URL, supported: Int = 1, line: UInt = #line, _ body: () throws -> Void) throws {
         let before = try Data(contentsOf: url)
         XCTAssertThrowsError(try body(), line: line) { error in
-            XCTAssertEqual(error as? CoreError, .newerFormat(what: what, found: 2, supported: 1), line: line)
+            XCTAssertEqual(error as? CoreError, .newerFormat(what: what, found: supported + 1, supported: supported), line: line)
         }
         XCTAssertEqual(try Data(contentsOf: url), before, "\(what) was written over", line: line)
     }
@@ -60,17 +61,19 @@ final class FormatPolicyTests: XCTestCase {
         }
     }
 
-    /// A newer version's `file` is refused when it is read (`read`), saved over (`write`, and the
-    /// file's own save of `sample`) and deleted, and left as it was.
+    /// A newer version's `file` — one format past the newest this version has of it — is refused
+    /// when it is read (`read`), saved over (`write`, and the file's own save of `sample`) and
+    /// deleted, and left as it was.
     private func assertNewerRefused<Document: Codable>(_ file: EncryptedDocumentFile<Document>, sample: Document, line: UInt = #line,
                                               read: () throws -> Void, write: () throws -> Void = {}) throws {
-        try plant(newer, in: file)
+        let supported = file.supportedFormat
+        try plant(Data(#"{"format": \#(supported + 1), "somethingNew": true}"#.utf8), in: file)
         let url = try XCTUnwrap(file.url)
         let what = url.lastPathComponent
-        try assertRefused(what, keeps: url, line: line) { try read() }
-        try assertRefused(what, keeps: url, line: line) { try write(); try read() }
-        try assertRefused(what, keeps: url, line: line) { try file.save(sample) }
-        try assertRefused(what, keeps: url, line: line) { try file.remove() }
+        try assertRefused(what, keeps: url, supported: supported, line: line) { try read() }
+        try assertRefused(what, keeps: url, supported: supported, line: line) { try write(); try read() }
+        try assertRefused(what, keeps: url, supported: supported, line: line) { try file.save(sample) }
+        try assertRefused(what, keeps: url, supported: supported, line: line) { try file.remove() }
     }
 
     /// The JSON of a sealed file of this version, opened with `open`.

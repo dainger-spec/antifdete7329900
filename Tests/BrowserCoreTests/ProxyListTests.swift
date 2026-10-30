@@ -365,12 +365,59 @@ final class ProxyListTests: XCTestCase {
         XCTAssertEqual(list.entries.first?.label, "kept")
         XCTAssertNil(list.entries.first?.lastCheck)
 
-        var future = ProxyList()
-        future.format = 2
-        try ProxyList.file(for: vault).save(future)
+        try SecureFile.write(AEAD.seal(Data(#"{"format": 3, "entries": []}"#.utf8), key: ProxyList.file(for: vault).key,
+                                       aad: "proxy-list:v1:\(vault.vaultID.uuidString)"),
+                             to: root.appendingPathComponent("proxies.bin"))
         XCTAssertThrowsError(try ProxyList.load(from: vault)) { error in
-            XCTAssertEqual(error as? CoreError, .newerFormat(what: "proxies.bin", found: 2, supported: 1))
+            XCTAssertEqual(error as? CoreError, .newerFormat(what: "proxies.bin", found: 3, supported: 2))
         }
+    }
+
+    /// Where a proxy came from: the user, or PrivacyBrowser's service (which does not exist yet). A
+    /// list of the user's own proxies is the file every version reads, as before; one with a
+    /// service's proxy is format 2, which a version from before origins refuses rather than read it
+    /// as the user's and write it back without its origin.
+    func testWhereAProxyCameFrom() throws {
+        // Whole seconds: the file keeps times to the second.
+        let added = Date(timeIntervalSince1970: 1_790_000_000)
+        var list = ProxyList()
+        list.add(lines("socks5://u:p@a.example:1080\nb.example:3128"), at: added)
+        XCTAssertTrue(list.takeIn(profileProxies: [ProxySettings(kind: .httpConnect, host: "c.example", port: 8080)], at: added).count == 1)
+        XCTAssertEqual(list.entries.map(\.origin), [.user, .user, .user], "imported, pasted and taken in: the user's")
+
+        func written(_ list: ProxyList) throws -> [String: Any] {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(list)) as? [String: Any])
+        }
+        var json = try written(list)
+        XCTAssertEqual(json["format"] as? Int, 1)
+        XCTAssertTrue((json["entries"] as? [[String: Any]])?.allSatisfy { $0["origin"] == nil } == true, "the user's: written as before")
+
+        let given = ProxyListEntry(label: "From the service", proxy: ProxySettings(kind: .socks5, host: "s.example", port: 1080,
+                                                                                    username: "svc", password: "x"),
+                                   addedAt: added, origin: .service)
+        var withService = ProxyList(entries: list.entries + [given])
+        json = try written(withService)
+        XCTAssertEqual(json["format"] as? Int, 2)
+        XCTAssertEqual((json["entries"] as? [[String: Any]])?.map { $0["origin"] as? String }, [nil, nil, nil, "service"])
+
+        // Kept through the vault, a check and an edit.
+        let vault = try MasterVault.create(in: root, password: "pw", iterations: 1_000)
+        withService.record(ProxyCheckResult(checkedAt: Date(timeIntervalSince1970: 1_800_000_000), exitIP: "203.0.113.9",
+                                            countryCode: "DE", timeZoneIdentifier: "Europe/Berlin", latencyMilliseconds: 42), for: given.id)
+        try withService.update(given.id, label: "Renamed", proxy: given.proxy)
+        try withService.save(to: vault)
+        let reopened = try ProxyList.load(from: vault)
+        XCTAssertEqual(reopened, withService)
+        XCTAssertEqual(reopened.entry(given.id)?.origin, .service)
+        XCTAssertEqual(reopened.entries.filter { $0.origin == .user }.count, 3)
+
+        // A file from before origins, of this version's format 1 or a service's 2: read as written.
+        let before = #"{"format": 1, "entries": [{"id": "\#(UUID().uuidString)", "addedAt": "2026-01-01T00:00:00Z", "#
+            + #""proxy": {"kind": "socks5", "host": "h.example", "port": 2, "tlsToProxy": false, "excludedDomains": []}}]}"#
+        XCTAssertEqual(try JSONCoding.decoder.decode(ProxyList.self, from: Data(before.utf8)).entries.map(\.origin), [.user])
+        // Removing the service's proxy makes it the file every version reads again.
+        withService.remove([given.id])
+        XCTAssertEqual(try written(withService)["format"] as? Int, 1)
     }
 }
 

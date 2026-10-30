@@ -88,6 +88,16 @@ public struct ProxyCheckResult: Codable, Equatable, Sendable {
     }
 }
 
+/// Where a proxy of the list came from. Only the user's own exist for now: PrivacyBrowser's own
+/// proxy service does not yet. The list, its file and its screens tell the two apart already, so
+/// that the service's proxies can come without the manager being made over.
+public enum ProxyOrigin: String, Codable, Sendable {
+    /// Typed, pasted or imported by the user, or taken in from a profile's own settings.
+    case user
+    /// Given by PrivacyBrowser's proxy service.
+    case service
+}
+
 /// One proxy of the list: its settings as a profile would use them, the name the user gave it, and
 /// what its last check found.
 public struct ProxyListEntry: Codable, Equatable, Identifiable, Sendable {
@@ -100,15 +110,18 @@ public struct ProxyListEntry: Codable, Equatable, Identifiable, Sendable {
     public var kindKnown: Bool
     public var addedAt: Date
     public var lastCheck: ProxyCheckResult?
+    /// Added by the user, or given by the service. Nothing the list does yet depends on it.
+    public var origin: ProxyOrigin
 
     public init(id: UUID = UUID(), label: String = "", proxy: ProxySettings, kindKnown: Bool = true, addedAt: Date = Date(),
-                lastCheck: ProxyCheckResult? = nil) {
+                lastCheck: ProxyCheckResult? = nil, origin: ProxyOrigin = .user) {
         self.id = id
         self.label = label
         self.proxy = proxy
         self.kindKnown = kindKnown
         self.addedAt = addedAt
         self.lastCheck = lastCheck
+        self.origin = origin
     }
 
     /// "host:port", an IPv6 host in brackets.
@@ -121,11 +134,12 @@ public struct ProxyListEntry: Codable, Equatable, Identifiable, Sendable {
     public var displayName: String { label.isEmpty ? address : label }
 
     private enum CodingKeys: String, CodingKey {
-        case id, label, proxy, kindKnown, addedAt, lastCheck
+        case id, label, proxy, kindKnown, addedAt, lastCheck, origin
     }
 
     /// Tolerant: a check result that no longer decodes (written by a later build) is dropped, never
-    /// a reason to lose the proxy. An entry from before types could be unknown has a known one.
+    /// a reason to lose the proxy. An entry from before types could be unknown has a known one; one
+    /// from before origins, or without one, is the user's.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -134,6 +148,20 @@ public struct ProxyListEntry: Codable, Equatable, Identifiable, Sendable {
         kindKnown = try c.decodeIfPresent(Bool.self, forKey: .kindKnown) ?? true
         addedAt = try c.decodeIfPresent(Date.self, forKey: .addedAt) ?? Date(timeIntervalSince1970: 0)
         lastCheck = (try? c.decodeIfPresent(ProxyCheckResult.self, forKey: .lastCheck)) ?? nil
+        origin = try c.decodeIfPresent(ProxyOrigin.self, forKey: .origin) ?? .user
+    }
+
+    /// The user's own proxies are written as they were before origins (no key), so that a list of
+    /// them stays the format every version reads (`ProxyList.format(for:)`).
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(label, forKey: .label)
+        try c.encode(proxy, forKey: .proxy)
+        try c.encode(kindKnown, forKey: .kindKnown)
+        try c.encode(addedAt, forKey: .addedAt)
+        try c.encodeIfPresent(lastCheck, forKey: .lastCheck)
+        if origin != .user { try c.encode(origin, forKey: .origin) }
     }
 
     /// The proxy as a profile can use it: nil while its type is unknown.
@@ -158,7 +186,6 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// More than any provider's list a person would paste; keeps the file and the checks bounded.
     public static let maximumEntries = 10_000
 
-    var format = 1
     public private(set) var entries: [ProxyListEntry]
     /// The profiles' own proxies have been taken into the list (`takeIn(profileProxies:)`): it is
     /// done once, so that a proxy removed from the list later does not come back.
@@ -365,7 +392,9 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// this one does not know) is left out rather than costing the whole list.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        format = try c.decodeIfPresent(Int.self, forKey: .format) ?? 1
+        // A newer one is refused before this, by the file (`EncryptedDocumentFile.supportedFormat`).
+        let declared = try c.decodeIfPresent(Int.self, forKey: .format) ?? 1
+        guard (1...Self.supportedFormat).contains(declared) else { throw CoreError.unsupportedFormat("proxy list format \(declared)") }
         var list = try c.nestedUnkeyedContainer(forKey: .entries)
         var entries: [ProxyListEntry] = []
         while !list.isAtEnd {
@@ -381,9 +410,23 @@ public struct ProxyList: Codable, Equatable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(format, forKey: .format)
+        try c.encode(Self.format(for: entries), forKey: .format)
         try c.encode(entries, forKey: .entries)
         try c.encode(profilesTakenIn, forKey: .profilesTakenIn)
+    }
+
+    /// The newest format of the file this version reads and writes.
+    static let supportedFormat = 2
+
+    /// The format this list is written in.
+    var format: Int { Self.format(for: entries) }
+
+    /// The format the list is written in: 1 while every proxy in it is the user's own — the file
+    /// as every version reads it — and 2 once one came from the service. A version from before
+    /// origins would read that one as the user's and write it back without its origin, so it is to
+    /// refuse the file instead (docs/UPDATES.md, R4).
+    static func format(for entries: [ProxyListEntry]) -> Int {
+        entries.contains { $0.origin != .user } ? 2 : 1
     }
 
     /// Moves an unkeyed container past an element that did not decode.
@@ -395,14 +438,12 @@ public struct ProxyList: Codable, Equatable, Sendable {
 extension ProxyList {
     static func file(for vault: UnlockedVault) throws -> EncryptedDocumentFile<ProxyList> {
         EncryptedDocumentFile(url: vault.root.appendingPathComponent("proxies.bin"), key: try vault.proxyListKey,
-                              aad: "proxy-list:v1:\(vault.vaultID.uuidString)")
+                              aad: "proxy-list:v1:\(vault.vaultID.uuidString)", supportedFormat: supportedFormat)
     }
 
     /// The vault's proxy list; empty before the first proxy was added.
     public static func load(from vault: UnlockedVault) throws -> ProxyList {
-        let list = try file(for: vault).load() ?? ProxyList()
-        guard list.format == 1 else { throw CoreError.unsupportedFormat("proxy list format \(list.format)") }
-        return list
+        try file(for: vault).load() ?? ProxyList()
     }
 
     public func save(to vault: UnlockedVault) throws {
