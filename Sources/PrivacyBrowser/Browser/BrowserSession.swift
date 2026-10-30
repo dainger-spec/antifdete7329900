@@ -296,6 +296,27 @@ final class BrowserSession {
         return controller
     }
 
+    /// The profile's first windows at a start: the tabs it left open last time (`tabs`, Settings →
+    /// Startup → restore tabs), window by window with the tab that was shown; without them, one
+    /// window on the start page.
+    func openFirstWindows(restoring tabs: OpenTabs?, startURL: URL?) {
+        guard let tabs, !tabs.windows.isEmpty else {
+            openWindow(url: startURL)
+            return
+        }
+        for window in tabs.windows {
+            let controller = BrowserWindowController(session: self)
+            windows.append(controller)
+            controller.showWindow(nil)
+            for url in window.tabs { controller.addTab(url: url, select: false, afterSelected: false) }
+            controller.selectTab(at: window.selected)
+        }
+    }
+
+    /// The windows as the profile left them, for its next start: the last one the user closed, or
+    /// every one open when the profile was stopped. Nil while none was closed.
+    private(set) var lastOpenTabs: OpenTabs?
+
     /// A window for the warm-up robot: a real window with a real tab, because WebKit only loads,
     /// scrolls and runs scripts for content that is in one, but placed far off every screen so the
     /// user never sees it and it never takes focus. Closed when the run ends.
@@ -365,6 +386,8 @@ final class BrowserSession {
         // window closing, and a profile that is only being warmed up has not lost a window at all.
         // (Without this, a warm-up ending would have quit a profile the user was browsing in.)
         guard !isClosing, !controller.isForWarmUp, !hasVisibleWindow else { return }
+        // The last window: what the profile leaves open is what it had in it.
+        if let closed = controller.closedTabs { lastOpenTabs = OpenTabs(windows: [closed]) }
         onAllWindowsClosed?()
     }
 
@@ -400,6 +423,9 @@ final class BrowserSession {
         // `tearDown()` nils each window's delegate, so `close()` here never calls back into us.
         let toClose = windows
         windows.removeAll()
+        // Stopped with windows open: what the profile leaves open is all of them.
+        let shown = toClose.filter { !$0.isForWarmUp }
+        if !shown.isEmpty { lastOpenTabs = OpenTabs(windows: shown.map(\.openTabs)) }
         libraryWin?.window?.delegate = nil
         libraryWin?.close()
         for controller in toClose {

@@ -535,11 +535,23 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         }
     }
 
+    /// The window's tabs as a start can open them again (Settings → Startup → restore tabs): every
+    /// tab's address, and the one shown.
+    var openTabs: OpenTabs.Window {
+        OpenTabs.Window(tabs: tabs.map { $0.url ?? Self.blankPage }, selected: selectedIndex)
+    }
+
+    /// `openTabs` as it was when the window closed: its tabs are gone after.
+    private(set) var closedTabs: OpenTabs.Window?
+
+    private static let blankPage = URL(string: "about:blank")!
+
     /// Tears down every tab so the web views (and with them the profile's data store) can be
     /// deallocated promptly.
     func tearDown() {
         guard !isClosing else { return }
         isClosing = true
+        if !isForWarmUp { closedTabs = openTabs }
         libraryObservation = nil
         startPageObservation = nil
         tabs.forEach { $0.tearDown() }

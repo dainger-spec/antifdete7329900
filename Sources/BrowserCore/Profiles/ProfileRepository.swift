@@ -375,6 +375,29 @@ public final class ProfileRepository: @unchecked Sendable {
         try warmUpScheduleFile(for: id).save(schedule)
     }
 
+    // MARK: Open tabs (this Mac only)
+
+    func openTabsURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("tabs.bin") }
+
+    func openTabsFile(for id: UUID) throws -> EncryptedDocumentFile<OpenTabs> {
+        EncryptedDocumentFile(url: openTabsURL(for: id), key: try profileKey(for: id).derive(info: "open-tabs", salt: id.rawBytes),
+                              aad: "open-tabs:v1:\(id.uuidString)")
+    }
+
+    /// The tabs the profile left open when it last stopped (`OpenTabs`), or nil when none were kept.
+    public func openTabs(for id: UUID) throws -> OpenTabs? {
+        try openTabsFile(for: id).load()
+    }
+
+    public func saveOpenTabs(_ tabs: OpenTabs, for id: UUID) throws {
+        try openTabsFile(for: id).save(tabs)
+    }
+
+    /// Forgets them: the setting was turned off, or the profile keeps no history.
+    public func removeOpenTabs(for id: UUID) throws {
+        try openTabsFile(for: id).remove()
+    }
+
     // MARK: Sync support (raw encrypted files; see SyncEngine)
 
     func currentIndex() -> ProfileIndex {

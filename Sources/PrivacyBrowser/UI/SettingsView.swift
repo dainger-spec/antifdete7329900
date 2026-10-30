@@ -263,6 +263,9 @@ private struct StartupSettings: View {
                 .labelsHidden()
                 .fixedSize()
             }
+            SettingRow(L("settings.startup.restoreTabs"), detail: L("settings.startup.restoreTabs.detail"), effect: .profileLaunch) {
+                SettingSwitch(isOn: $settings.browsing.restoreTabs, label: L("settings.startup.restoreTabs"))
+            }
             SettingRow(L("settings.startup.confirmQuit"), detail: L("settings.startup.confirmQuit.detail"), effect: .now) {
                 SettingSwitch(isOn: $settings.confirmQuit, label: L("settings.startup.confirmQuit"))
             }

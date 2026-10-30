@@ -150,6 +150,7 @@ final class FormatPolicyTests: XCTestCase {
             XCTAssertEqual(DocumentFormat.declared(in: data), 1, name)
         }
         try repository.saveCookieJar(CookieJarDocument(), for: id)
+        try repository.saveOpenTabs(OpenTabs(windows: [.init(tabs: [URL(string: "https://a.example/")!])]), for: id)
         try ProxyList().save(to: vault)
         let history = try repository.historyStore(for: id, key: key)
         XCTAssertTrue(history.recordVisit(url: URL(string: "https://a.example/")!, title: "A"))
@@ -163,6 +164,7 @@ final class FormatPolicyTests: XCTestCase {
             ("proxies.bin", try json(at: vault.root.appendingPathComponent("proxies.bin")) { try ProxyList.file(for: vault).open($0) }),
             ("history.bin", try json(at: repository.historyURL(for: id)) { try HistoryStore.file(url: nil, profileID: id, profileKey: key).open($0) }),
             ("bookmarks.bin", try json(at: repository.bookmarksURL(for: id)) { try BookmarkStore.file(url: nil, profileID: id, profileKey: key).open($0) }),
+            ("tabs.bin", try json(at: repository.openTabsURL(for: id)) { try repository.openTabsFile(for: id).open($0) }),
         ]
         for (name, data) in marked {
             XCTAssertEqual((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["format"] as? Int, 1, name)
@@ -267,6 +269,13 @@ final class FormatPolicyTests: XCTestCase {
         try repository.queueImportedCookies([cookie], for: id)
         repository.clearImportedCookies(id)
         XCTAssertFalse(FileManager.default.fileExists(atPath: queue.path))
+    }
+
+    func testOpenTabsOfANewerVersion() throws {
+        let tabs = OpenTabs(windows: [.init(tabs: [URL(string: "https://a.example/")!])])
+        try assertNewerRefused(repository.openTabsFile(for: id), sample: tabs,
+                               read: { _ = try repository.openTabs(for: id) },
+                               write: { try repository.saveOpenTabs(tabs, for: id) })
     }
 
     func testWarmUpFilesOfANewerVersion() throws {

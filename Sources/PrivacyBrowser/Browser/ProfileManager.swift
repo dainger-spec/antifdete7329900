@@ -135,7 +135,8 @@ final class ProfileManager: ObservableObject {
             // A profile that is only being warmed up has no window yet: a launch now gives it one.
             if !session.hasVisibleWindow, openingWindow,
                !SafariChromeHost.open(session: session, url: session.configuration.startURL) {
-                session.openWindow(url: session.configuration.startURL)
+                session.openFirstWindows(restoring: restorableTabs(of: id, session.configuration),
+                                         startURL: session.configuration.startURL)
             }
             session.bringToFront()
             return
@@ -296,7 +297,7 @@ final class ProfileManager: ObservableObject {
         // not available, our own window as before. A launch for a warm-up opens none: the robot
         // browses in a window of its own that the user never sees.
         if openingWindow, !SafariChromeHost.open(session: session, url: configuration.startURL) {
-            session.openWindow(url: configuration.startURL)
+            session.openFirstWindows(restoring: restorableTabs(of: id, configuration), startURL: configuration.startURL)
         }
         try? repository.markLaunched(id)
         if lookup == nil, let lookupTask {
@@ -339,7 +340,8 @@ final class ProfileManager: ObservableObject {
             languages: languages,
             locale: languages.first.map { $0.replacingOccurrences(of: "-", with: "_") },
             timeZone: stored.timeZoneIdentifier ?? location?.timeZoneIdentifier,
-            forWarmUpOnly: forWarmUpOnly)
+            forWarmUpOnly: forWarmUpOnly,
+            preferences: BrowsingPreferences.current.forProfileProcess)
         child.onEvent = { [weak self] event in
             guard let self else { return }
             switch event {
@@ -421,6 +423,40 @@ final class ProfileManager: ObservableObject {
                   self.isRunning(id) || self.busyProfileIDs.contains(id) else { return }
             self.log.notice("The proxy of \(id.uuidString, privacy: .public) does not work: \(diagnosis.verdict.rawValue, privacy: .public)")
             self.onProxyProblem?(id, proxy, diagnosis)
+        }
+    }
+
+    // MARK: Open tabs (Settings → Startup → restore tabs)
+
+    /// A profile that keeps them — not an ephemeral one, nor one that keeps no history: what it
+    /// left open is as much a record of where it went as its history.
+    private func keepsOpenTabs(_ configuration: ProfileConfiguration) -> Bool {
+        BrowsingPreferences.current.restoreTabs && !configuration.ephemeral && configuration.historyEnabled
+    }
+
+    /// The tabs a start opens again, when the settings ask and the profile keeps them.
+    private func restorableTabs(of id: UUID, _ configuration: ProfileConfiguration) -> OpenTabs? {
+        guard keepsOpenTabs(configuration) else { return nil }
+        do {
+            return try repository.openTabs(for: id)
+        } catch {
+            log.error("The open tabs of \(id.uuidString, privacy: .public) could not be read: \(error.logKind, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// What a stopping profile leaves open is kept for its next start; with the setting off, or a
+    /// profile that keeps none, what was kept is forgotten. A run without a window of the user's (a
+    /// warm-up) leaves what was kept as it was.
+    private func rememberOpenTabs(of id: UUID, _ tabs: OpenTabs?, configuration: ProfileConfiguration) {
+        do {
+            if !keepsOpenTabs(configuration) {
+                try repository.removeOpenTabs(for: id)
+            } else if let tabs, !tabs.windows.isEmpty {
+                try repository.saveOpenTabs(tabs, for: id)
+            }
+        } catch {
+            log.error("The open tabs of \(id.uuidString, privacy: .public) could not be kept: \(error.logKind, privacy: .public)")
         }
     }
 
@@ -638,6 +674,7 @@ final class ProfileManager: ObservableObject {
             }
         }
         session.shutDown()
+        rememberOpenTabs(of: id, session.lastOpenTabs, configuration: session.configuration)
         // `session` is now the last reference; it is released when this scope ends, but its
         // data store reference was already dropped in shutDown().
         if !ephemeral, let key {

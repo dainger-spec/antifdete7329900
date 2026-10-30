@@ -94,7 +94,8 @@ final class ProfileProcess {
                       languages: [String],
                       locale: String?,
                       timeZone: String?,
-                      forWarmUpOnly: Bool = false) throws -> ProfileProcess {
+                      forWarmUpOnly: Bool = false,
+                      preferences: BrowsingPreferences = BrowsingPreferences()) throws -> ProfileProcess {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
         let process = Process()
@@ -108,7 +109,8 @@ final class ProfileProcess {
         process.arguments = arguments
 
         process.environment = try childEnvironment(inheriting: ProcessInfo.processInfo.environment, home: home,
-                                                   vaultRoot: vaultRoot, timeZone: timeZone, forWarmUpOnly: forWarmUpOnly)
+                                                   vaultRoot: vaultRoot, timeZone: timeZone, forWarmUpOnly: forWarmUpOnly,
+                                                   preferences: preferences)
 
         let keyPipe = Pipe()
         process.standardInput = keyPipe
@@ -159,11 +161,17 @@ final class ProfileProcess {
     /// Every name a profile's process can find in its environment (the self-test checks it).
     static let environmentNames = inheritedEnvironment.union([
         "HOME", "TMPDIR", "PATH", "CFFIXED_USER_HOME", "PRIVACYBROWSER_VAULT_DIR", "TZ", "__XPC_TZ", "PB_WARM_UP_ONLY",
+        browsingPreferencesVariable,
     ])
+
+    /// The app's browsing settings as the process starts (`BrowsingPreferences`, JSON): its first
+    /// window opens by them — its tabs restored, its zoom — before anything arrives on its channel.
+    static let browsingPreferencesVariable = "PB_BROWSING"
 
     /// The environment of a profile's process, built from `inheritedEnvironment` and the profile.
     static func childEnvironment(inheriting parent: [String: String], home: URL, vaultRoot: URL,
-                                 timeZone: String?, forWarmUpOnly: Bool) throws -> [String: String] {
+                                 timeZone: String?, forWarmUpOnly: Bool,
+                                 preferences: BrowsingPreferences = BrowsingPreferences()) throws -> [String: String] {
         var environment = parent.filter { inheritedEnvironment.contains($0.key) }
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         // Safari's frameworks, and anything else asking for the user's home through Foundation,
@@ -187,6 +195,9 @@ final class ProfileProcess {
         // Started to warm the profile up and nothing else: it opens no window of its own and
         // quits when the run ends, which is what seals what the run collected.
         if forWarmUpOnly { environment["PB_WARM_UP_ONLY"] = "1" }
+        if let json = try? JSONEncoder().encode(preferences) {
+            environment[browsingPreferencesVariable] = String(decoding: json, as: UTF8.self)
+        }
         return environment
     }
 

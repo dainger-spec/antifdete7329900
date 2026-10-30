@@ -134,6 +134,8 @@ Application Support/PrivacyBrowser/      (0700)
     cookies-baseline.bin          AES-GCM(cookie-baseline key, CookieBaseline JSON)   [this Mac only: the store at the last record or apply]
     warmup.bin                    AES-GCM(warm-up key, WarmUpPlan JSON)               [this Mac only: the last warm-up plan]
     warmup-schedule.bin           AES-GCM(warm-up-schedule key, WarmUpSchedule JSON)  [this Mac only, not exported: every N hours, last run]
+    tabs.bin                      AES-GCM(open-tabs key, OpenTabs JSON)               [this Mac only, not synced or exported: http(s) tabs
+                                                                                       left open, with Settings → Startup → restore tabs]
     config.bin.conflict, passwords.bin.conflict   the other device's version after a sync conflict (encrypted as the file)
     history.bin                   AES-GCM(history key, HistoryDocument JSON)          [not for ephemeral profiles]
     bookmarks.bin                 AES-GCM(bookmarks key, BookmarkDocument JSON)
@@ -450,12 +452,15 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
    │  Startup        startup (.profilesWindow | .reopenProfiles) → AppModel: quit records
    │                 StartupReopen.toRecord(manager.activity()) in DeviceSettings.reopenAtUnlock
    │                 (encrypted), the next unlock launches StartupReopen.toLaunch(…) once;
+   │                 restoreTabs → BrowserSession.lastOpenTabs (the last window closed, or every one
+   │                 open at Stop) → ProfileManager.stop → tabs.bin; the next launch →
+   │                 BrowserSession.openFirstWindows(restoring:); not ephemeral, not without history;
    │                 confirmQuit → QuitCoordinator(confirm:) — asked after terminate: returns
    │  New profiles   newProfileMatchesConnection → ProfileDraft.matchProxyLocation of ＋
    │  Behavior       BrowsingPreferences (AutoFill, tab position, closing several tabs, zoom,
    │  Downloads      download folder, ask each time, Dock letters) → BrowsingPreferences.current here;
-   │                 ProfileCommand.preferences to every profile process (ProfileManager.sendPreferences)
-   │                 → BrowsingPreferences.current there, DockIcon
+   │                 ProfileCommand.preferences to every profile process (ProfileManager.sendPreferences),
+   │                 and PB_BROWSING (JSON) as it starts → BrowsingPreferences.current there, DockIcon
    │  Proxies        proxyFailure → ProfileManager.refusesFailingProxy: the launch probe first,
    │                 onProxyLaunchRefused → ProxyProblem(notStarted: true)
    └  Updates        UpdatesPane (AppUpdater)

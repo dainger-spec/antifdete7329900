@@ -1018,7 +1018,11 @@ is out of scope either way (above).
   `terminate:` has returned, before anything is stopped, and "no" leaves everything running
   (never asked at a logout, restart or shutdown). It can also start again, after the next unlock,
   the profiles that had a window when the app quit: their ids are kept in the encrypted
-  `settings.bin`, only while that setting is on, and used once.
+  `settings.bin`, only while that setting is on, and used once. **Restore tabs** keeps the http(s)
+  addresses a profile left open (`tabs.bin`, encrypted with the profile's key, never synced or
+  exported) and opens them at its next start: never for an ephemeral profile or one that keeps no
+  history, and turning it off forgets them at the profile's next stop. What a file holds is
+  filtered again when read: only web addresses are ever opened from it.
 - **Settings** are this Mac's, in the app's defaults (per key; nothing secret in them — a chosen
   download folder is its path, and in the App Sandbox a bookmark to it). A profile in its own
   process gets the browsing ones over its channel when it starts and whenever they change

@@ -81,6 +81,11 @@ enum ProfileSessionHost {
         if SafariChromeHost.prepareForChildProcess(configuration: stored) {
             log.notice("Safari's chrome is hosted in this process")
         }
+        // The app's browsing settings as this process starts: its first window opens by them.
+        if let json = ProcessInfo.processInfo.environment[ProfileProcess.browsingPreferencesVariable],
+           let preferences = try? JSONDecoder().decode(BrowsingPreferences.self, from: Data(json.utf8)) {
+            BrowsingPreferences.current = preferences
+        }
         let delegate = Delegate(profileID: profileID, repository: repository)
         Self.delegate = delegate
         let application = NSApplication.shared

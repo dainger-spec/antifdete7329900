@@ -24,6 +24,9 @@ struct BrowsingPreferences: Codable, Equatable {
     /// How many letters of a profile's name its Dock icon shows, when it runs in a process of its
     /// own; 0: the app's icon as it is.
     var dockInitials = 2
+    /// A profile opens again with the tabs it left open (Settings → Startup); not an ephemeral one,
+    /// nor one that keeps no history.
+    var restoreTabs = false
 
     static let zoomChoices: [Double] = [0.75, 0.85, 0.9, 1, 1.1, 1.15, 1.25, 1.5, 1.75, 2]
 
@@ -86,6 +89,7 @@ final class AppSettings: ObservableObject {
         static let downloadFolderBookmark = "PBSettingsDownloadFolderBookmark"
         static let askWhereToSave = "PBSettingsAskWhereToSave"
         static let dockInitials = "PBSettingsDockInitials"
+        static let restoreTabs = "PBSettingsRestoreTabs"
         /// `ProfileProcess.isEnabled` reads it: the switch was there before the settings window.
         static let profileProcess = "PBProfileProcess"
     }
@@ -138,6 +142,7 @@ final class AppSettings: ObservableObject {
         if let initials = defaults.object(forKey: Key.dockInitials) as? Int, (0...3).contains(initials) {
             browsing.dockInitials = initials
         }
+        browsing.restoreTabs = defaults.object(forKey: Key.restoreTabs) as? Bool ?? false
         self.browsing = browsing
         BrowsingPreferences.current = browsing
         openDownloadFolder()
@@ -150,6 +155,7 @@ final class AppSettings: ObservableObject {
         defaults.set(browsing.pageZoom, forKey: Key.pageZoom)
         defaults.set(browsing.askWhereToSave, forKey: Key.askWhereToSave)
         defaults.set(browsing.dockInitials, forKey: Key.dockInitials)
+        defaults.set(browsing.restoreTabs, forKey: Key.restoreTabs)
         if let folder = browsing.downloadFolder {
             defaults.set(folder, forKey: Key.downloadFolder)
         } else {

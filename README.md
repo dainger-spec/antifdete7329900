@@ -267,8 +267,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    setting a sentence on what it does and when it takes effect (at once, for new tabs, at a
    profile's next start, at the app's next start, for new profiles, or "not a choice"):
    - **Startup:** after unlocking, the Profiles window alone or also the profiles that had a window
-     at the last quit (kept encrypted in `settings.bin`, used once); confirm quitting (⌘Q lists
-     what it stops and asks first).
+     at the last quit (kept encrypted in `settings.bin`, used once); restore tabs (a profile opens
+     again with the pages it left open and the tab that was in front — never an ephemeral profile
+     nor one that keeps no history; `tabs.bin`, encrypted with the profile's key, this Mac only);
+     confirm quitting (⌘Q lists what it stops and asks first).
    - **New Profiles:** time zone and language from the connection; QUIC — off with a proxy,
      always (it goes around proxies), not a switch.
    - **Behavior:** AutoFill passwords (the app's switch over each profile's own); new tabs next to
