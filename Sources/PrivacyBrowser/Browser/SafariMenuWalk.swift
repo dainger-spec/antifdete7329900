@@ -77,6 +77,7 @@ enum SafariMenuWalk {
             }
         }
         Task { @MainActor in
+            probePreferences()
             let list = entries()
             // The AutoFill items' actions, sent as a key or a context menu sends them: whether
             // anything still acts on them once their items are out of the menu (SafariChrome).
@@ -95,6 +96,35 @@ enum SafariMenuWalk {
             emit(["event": "done", "count": list.count + direct.count])
             isWalking = false
         }
+    }
+
+    /// Where this process's preferences go (measurement branch): Safari's code writes its own
+    /// keys into this app's preferences domain, which run 456 found in the account's real home.
+    /// Whether a domain named by a path in the profile's home is kept there instead.
+    private static func probePreferences() {
+        guard let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] else { return }
+        let realHome = SafariPaths.realHome ?? ""
+        let path = home + "/Library/Preferences/pb.walk.probe"
+        let suite = UserDefaults(suiteName: path)
+        suite?.set("written", forKey: "PBWalkProbe")
+        let synchronized = suite?.synchronize() ?? false
+        let manager = FileManager.default
+        let named = "pb.walk.probe.plist"
+        let found = [path + ".plist", realHome + "/Library/Preferences/" + named,
+                     realHome + "/Library/Preferences" + path + ".plist"].filter { manager.fileExists(atPath: $0) }
+        let standard = UserDefaults.standard
+        standard.set("written", forKey: "PBWalkProbeStandard")
+        standard.synchronize()
+        let domain = Bundle.main.bundleIdentifier ?? "?"
+        let homePlist = home + "/Library/Preferences/" + domain + ".plist"
+        let realPlist = realHome + "/Library/Preferences/" + domain + ".plist"
+        let realHas = (NSDictionary(contentsOfFile: realPlist)?["PBWalkProbeStandard"]) != nil
+        let homeHas = (NSDictionary(contentsOfFile: homePlist)?["PBWalkProbeStandard"]) != nil
+        emit(["event": "info", "text": "preferences: a suite named by a path in the profile's home "
+              + "(synchronize \(synchronized), read back \(suite?.string(forKey: "PBWalkProbe") ?? "nothing")) is written to "
+              + (found.isEmpty ? "no file found" : found.map { $0.hasPrefix(home) ? "the profile's home" : $0 }.joined(separator: ", "))
+              + "; this app's own domain (\(domain)) written through the standard defaults reaches "
+              + "the account's real home: \(realHas), the profile's home: \(homeHas)"])
     }
 
     // MARK: The items

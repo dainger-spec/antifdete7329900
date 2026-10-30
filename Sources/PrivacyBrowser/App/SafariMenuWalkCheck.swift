@@ -138,6 +138,8 @@ enum SafariMenuWalkCheck {
                 print("MENUWALK-PROGRESS \(fields["index"] as? Int ?? -1) \(fields["path"] as? String ?? "?")")
             case "done":
                 walk.done = true
+            case "info":
+                print("MENUWALK-INFO the profile's process: \(fields["text"] as? String ?? "?")")
             default:
                 break
             }
