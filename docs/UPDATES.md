@@ -307,7 +307,9 @@ read before any vault is unlocked.
   feed URL: the first check a minute after launch, then every 6 hours.
 - **The request itself** (`AppUpdater`): its own ephemeral `URLSession` — no cookies, no cache, no
   credentials — with the same two headers from every Mac (`User-Agent: PrivacyBrowser`,
-  `Accept-Language: en`), and the appcast refused above 1 MB. The archive is downloaded by the same
+  `Accept-Language: en`), and the appcast refused above 1 MB. Its server trust is the system's; the
+  one exception is the end-to-end scenarios' local feed, accepted by its certificate's hash only in
+  their own mode (§8). The archive is downloaded by the same
   session into a temporary file and moved into the staging folder, where its length, SHA-256 and
   Ed25519 signature are checked before it counts as downloaded.
 
@@ -373,8 +375,13 @@ handed over at the last quit — is said once at the next launch. In the UI snap
     bookmarks, starts a profile from the website data the old build sealed, and seals it again;
   - every request the feed got carries the same headers from any Mac — `User-Agent:
     PrivacyBrowser`, `Accept-Language: en`, no cookie, no credentials, no query string.
-  The feed's certificate is trusted for the run (`security add-trusted-cert`) and removed after: the
-  updater's own code takes no exception for it.
+  The feed's certificate is self-signed, and a runner's trust settings cannot be changed without
+  someone at the screen (CI run 407: `security authorizationdb write` refused, -60005). So the
+  scenario mode — and only it: a build of the check's own bundle id (`….PBUpdateCheck`),
+  `PB_SELFTEST_UPDATES=1`, its own command line — names that one certificate to the updater by the
+  SHA-256 of its DER (`UpdateTestTrust`), and a server presenting exactly it is accepted. Nothing in
+  the app sets it; for every other server, and in every other run, the system's evaluation is all
+  there is.
 
 ## 9. Not done
 

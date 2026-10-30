@@ -13,10 +13,12 @@ It makes everything an update needs, the way scripts/release.sh would, but local
   real release, oldest), "downgrade" (only build 1 and 0.9), "valid" (the real release, newest);
   "forged" is "valid" with its list changed under its signature; "tampered" serves "valid" with
   one byte of the zip changed;
-* a local HTTPS feed (a self-signed certificate for localhost, trusted for the run and removed
-  after), like scripts/selftest_proxy.py for the proxies: `/appcast.json` serves what
+* a local HTTPS feed, like scripts/selftest_proxy.py for the proxies: `/appcast.json` serves what
   `/__control/serve?mode=…` asks for, `/__control/hits` counts the appcast's requests, and every
-  request of the app is kept, headers included.
+  request of the app is kept, headers included. Its certificate is self-signed for localhost; a
+  runner's trust settings cannot be changed without someone at the screen (`security
+  authorizationdb write` is refused, -60005), so the app under test is given that one
+  certificate's SHA-256 (`PB_SELFTEST_UPDATE_CERT_SHA256`, honoured by the scenario mode only).
 
 Then the old build runs `--selftest-updates run` (UpdateSelfTest.swift), under a packet capture with
 each packet's process (pktap): no request with automatic checks off — checked by the capture too,
@@ -29,12 +31,12 @@ helper's own word ("Update: installed") in the unified log, quits it, and runs t
 `--selftest-updates verify`: the old build's vault, profiles and data open. Every request the feed
 got must carry the same headers from any Mac — no cookie, no query, User-Agent "PrivacyBrowser".
 
-It replaces an app, trusts a certificate system-wide and captures packets (sudo): a CI runner's
-job only. Exit code 1 on any failure.
+It replaces an app and captures packets (sudo): a CI runner's job only. Exit code 1 on any failure.
 """
 import argparse
 import base64
 import datetime
+import hashlib
 import json
 import os
 import plistlib
@@ -257,9 +259,8 @@ def main():
          "-days", "7", "-subj", f"/CN={CERT_NAME}",
          "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1",
          "-addext", "extendedKeyUsage=serverAuth"])
-    run(["sudo", "security", "authorizationdb", "write", "com.apple.trust-settings.admin", "allow"])
-    run(["sudo", "security", "add-trusted-cert", "-d", "-r", "trustRoot", "-p", "ssl",
-         "-k", "/Library/Keychains/System.keychain", cert])
+    with open(cert) as handle:
+        cert_sha256 = hashlib.sha256(ssl.PEM_cert_to_DER_cert(handle.read())).hexdigest()
 
     capture = None
     try:
@@ -310,7 +311,8 @@ def main():
             roots = [os.path.join(home, "Library/WebKit", BUNDLE_ID), os.path.join(home, "Library/Caches", BUNDLE_ID)]
         binary = os.path.join(old_app, "Contents/MacOS/PrivacyBrowser")
         environment = dict(os.environ, PB_SELFTEST_UPDATES="1", PRIVACYBROWSER_VAULT_DIR=vault,
-                           PB_SELFTEST_UPDATE_CONTROL=f"https://localhost:{args.port}/__control")
+                           PB_SELFTEST_UPDATE_CONTROL=f"https://localhost:{args.port}/__control",
+                           PB_SELFTEST_UPDATE_CERT_SHA256=cert_sha256)
         run_log = os.path.join(out, "run.txt")
         print("::group::the old build: --selftest-updates run", flush=True)
         with open(run_log, "w") as handle:
@@ -405,8 +407,6 @@ def main():
     finally:
         if capture and capture.poll() is None:
             subprocess.run(["sudo", "kill", "-INT", str(capture.pid)])
-        subprocess.run(["sudo", "security", "remove-trusted-cert", "-d", cert])
-        subprocess.run(["sudo", "security", "delete-certificate", "-c", CERT_NAME, "/Library/Keychains/System.keychain"])
 
     print(f"UPDATE CHECK ({args.variant}) {'PASSED' if not failures else 'FAILED: ' + '; '.join(failures)}")
     return 0 if not failures else 1

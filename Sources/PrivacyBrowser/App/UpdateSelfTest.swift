@@ -18,7 +18,9 @@ import Foundation
 /// sealed again on stop.
 ///
 /// It makes a vault in `PRIVACYBROWSER_VAULT_DIR` and hands a real update to the installer, which
-/// replaces this very app: only with `PB_SELFTEST_UPDATES=1`, which only that script sets.
+/// replaces this very app: only in a build with the update check's own bundle id
+/// (`….PBUpdateCheck`) and with `PB_SELFTEST_UPDATES=1`, which only that script sets. It names the
+/// local feed's certificate to the updater (`UpdateTestTrust`, `PB_SELFTEST_UPDATE_CERT_SHA256`).
 @MainActor
 enum UpdateSelfTest {
     static let password = "update-check"
@@ -27,10 +29,14 @@ enum UpdateSelfTest {
     static func start(arguments: [String]) {
         setvbuf(stdout, nil, _IOLBF, 0)
         let environment = ProcessInfo.processInfo.environment
-        guard environment["PB_SELFTEST_UPDATES"] == "1", environment["PRIVACYBROWSER_VAULT_DIR"] != nil else {
-            print("--selftest-updates replaces this app with another build: only scripts/update_check.py runs it "
-                + "(PB_SELFTEST_UPDATES=1 and PRIVACYBROWSER_VAULT_DIR)")
+        guard environment["PB_SELFTEST_UPDATES"] == "1", environment["PRIVACYBROWSER_VAULT_DIR"] != nil,
+              Bundle.main.bundleIdentifier?.hasSuffix(".PBUpdateCheck") == true else {
+            print("--selftest-updates replaces this app with another build: only scripts/update_check.py runs it, "
+                + "in a build of its own bundle id (….PBUpdateCheck), with PB_SELFTEST_UPDATES=1 and PRIVACYBROWSER_VAULT_DIR")
             exit(64)
+        }
+        if let hex = environment["PB_SELFTEST_UPDATE_CERT_SHA256"] {
+            UpdateTestTrust.certificateSHA256 = Data(hexadecimal: hex)
         }
         let index = arguments.firstIndex(of: "--selftest-updates")
         let phase = index.flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } ?? ""
@@ -243,7 +249,7 @@ enum UpdateSelfTest {
 
     // MARK: The local feed (scripts/update_check.py)
 
-    private static let control = URLSession(configuration: .ephemeral)
+    private static let control = URLSession(configuration: .ephemeral, delegate: UpdateTestTrust(), delegateQueue: nil)
 
     /// Has the feed serve `mode`: valid, downgrade, stale, forged or tampered.
     private static func serve(_ mode: String) async throws {
@@ -261,5 +267,22 @@ enum UpdateSelfTest {
         }
         let (data, _) = try await control.data(from: url)
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+private extension Data {
+    /// "a1b2…" → its bytes; nil unless it is an even number of hex digits.
+    init?(hexadecimal text: String) {
+        let digits = Array(text.utf8)
+        guard digits.count % 2 == 0, !digits.isEmpty else { return nil }
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(digits.count / 2)
+        var index = 0
+        while index < digits.count {
+            guard let byte = UInt8(String(decoding: digits[index..<index + 2], as: UTF8.self), radix: 16) else { return nil }
+            bytes.append(byte)
+            index += 2
+        }
+        self.init(bytes)
     }
 }

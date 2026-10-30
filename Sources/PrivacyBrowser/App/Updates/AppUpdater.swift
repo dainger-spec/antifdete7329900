@@ -1,5 +1,6 @@
 import AppKit
 import BrowserCore
+import CryptoKit
 import Foundation
 import os
 
@@ -393,7 +394,7 @@ final class AppUpdater: ObservableObject, Updater {
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 30 * 60
         configuration.waitsForConnectivity = false
-        return URLSession(configuration: configuration)
+        return URLSession(configuration: configuration, delegate: UpdateTestTrust(), delegateQueue: nil)
     }()
 
     private static func fetch(_ url: URL, limit: Int) async throws -> Data {
@@ -443,6 +444,29 @@ final class AppUpdater: ObservableObject, Updater {
             return URL(fileURLWithPath: String(cString: directory), isDirectory: true)
         }
         return FileManager.default.homeDirectoryForCurrentUser
+    }
+}
+
+/// The update scenarios' local feed (`UpdateSelfTest`, scripts/update_check.py) has a certificate of
+/// its own, which no system on a CI runner trusts — and a runner's trust settings cannot be changed
+/// without someone at the screen. That mode alone, behind `PB_SELFTEST_UPDATES=1`, its own command
+/// line and its own bundle id, names the certificate here by the SHA-256 of its DER, and a server
+/// presenting exactly that certificate is accepted. The app never sets it: nil, and every server
+/// gets the system's evaluation and nothing else.
+final class UpdateTestTrust: NSObject, URLSessionDelegate {
+    nonisolated(unsafe) static var certificateSHA256: Data?
+
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard let pinned = Self.certificateSHA256,
+              challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust,
+              let leaf = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first,
+              Data(SHA256.hash(data: SecCertificateCopyData(leaf) as Data)) == pinned else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        completionHandler(.useCredential, URLCredential(trust: trust))
     }
 }
 
