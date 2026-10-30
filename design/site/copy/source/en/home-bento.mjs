@@ -6,7 +6,7 @@ export default {
   head: ['And everything you expect', 'from Safari.'],
   passwords: {
     t: 'Passwords',
-    d: 'AutoFill as in Safari: save, update, fill.',
+    d: 'AutoFill, just like Safari: save, update, fill.',
     site: 'shop.example',
     signIn: 'Sign in',
     user: 'anna@shop.example',
@@ -31,7 +31,7 @@ export default {
   },
   cookies: {
     t: 'Cookie import',
-    d: 'JSON and cookies.txt from extensions, Puppeteer, Playwright and Selenium.',
+    d: 'Bring a sign-in over from another browser: JSON or cookies.txt.',
     window: 'Import Cookies — Store',
     file: 'cookies.txt',
     format: 'Format: Netscape cookies.txt',
@@ -60,6 +60,13 @@ export default {
     d: 'Close it, and nothing is left.',
     name: 'Guest',
     row: 'Ephemeral · nothing kept',
+    window: 'History — Guest',
+    notice: 'Ephemeral profile: history is kept in memory only and discarded when the profile stops.',
+    rows: [
+      { t: 'Catalog', u: 'shop.example' },
+      { t: 'Cart', u: 'shop.example' },
+      { t: 'Checkout', u: 'pay.example' },
+    ],
     empty: 'No history.',
   },
   link: 'All features',

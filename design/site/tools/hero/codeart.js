@@ -10,7 +10,7 @@
   const LIGHT = (() => { const v = [-0.42, -0.58, 0.7], l = Math.hypot(v[0], v[1], v[2]); return v.map((x) => x / l); })();
   const TOKENS = [
     [[-0.42, -0.66, 'de-DE'], [-0.08, -0.84, 'Europe/Berlin'], [0.3, -0.72, 'cookies'], [0.62, -0.46, 'store']],
-    [[-0.58, 0.2, 'en-US'], [-0.24, 0.1, 'America/New_York'], [0.14, 0.08, 'cookies'], [0.5, 0.06, 'ads']],
+    [[-0.48, 0.2, 'en-US'], [-0.24, 0.1, 'America/New_York'], [0.14, 0.08, 'cookies'], [0.5, 0.06, 'ads']],
   ];
   const HALF_RGB = ['226,231,240', '196,211,255'];
   const EDGE_RGB = '160,184,252';
@@ -40,7 +40,9 @@
   }
   /// Every character of the figure: fn(char, x (left), y (middle), alpha, "r,g,b", {qx, qy, half}) with qx, qy
   /// the position in the half's own unit disc.
-  function eachChar(cw, L, { which = [0, 1], ghost = 0, gain = 1, tokens = null }, fn) {
+  /// flat (0..1) eases the sphere shading of half 1 (the one that stays on the display) towards an even
+  /// brightness, so the half reads clearly next to the bright floating one; gains = per-half brightness.
+  function eachChar(cw, L, { which = [0, 1], ghost = 0, gain = 1, gains = [1, 1], flat = 0, tokens = null }, fn) {
     const { cx, cy, R, LH } = L;
     const [ox, oy] = OFF;
     const i0 = Math.max(0, Math.floor((cx - 1.3 * R) / cw)), i1 = Math.ceil((cx + 1.3 * R) / cw);
@@ -67,7 +69,8 @@
         if (r2 > 0.92) a += 0.08;
         if (edge) a += 0.25;
         if (tk) a += 0.12;
-        a *= gain;
+        if (flat > 0 && half === 1) a = a + (0.5 + 0.3 * shade + ((h >>> 9) & 15) / 120 + (edge ? 0.25 : 0) + (tk ? 0.12 : 0) - a) * flat;
+        a *= gain * gains[half];
         let rgb = edge ? EDGE_RGB : HALF_RGB[half];
         if (faint) { a *= 0.16 * ghost; rgb = '130,150,215'; }
         if (a < 0.03) continue;

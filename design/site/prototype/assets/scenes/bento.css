@@ -24,7 +24,7 @@
 .js .sc-bento .bx.reveal { transition-duration: 700ms; }
 
 /* The app's pieces: windows, sheets, buttons */
-.sc-bento .mw, .sc-bento .pw-win, .sc-bento .hs-win, .sc-bento .ck-sheet, .sc-bento .sy-mac, .sc-bento .ex-sheet, .sc-bento .ep-row {
+.sc-bento .mw, .sc-bento .pw-win, .sc-bento .hs-win, .sc-bento .ck-sheet, .sc-bento .sy-mac, .sc-bento .ex-sheet, .sc-bento .ep-win, .sc-bento .ep-row {
   background: #16181E; border-radius: 13px;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 28px 60px -18px rgba(0, 0, 0, 0.75);
 }
@@ -44,7 +44,8 @@
 .sc-bento .mb.pri { background: #2F6BEF; color: #FFFFFF; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18); }
 
 /* Passwords: a sign-in page in the profile's Safari, and the prompt from the toolbar's key */
-.sc-bento .pw-win { position: absolute; left: 34px; top: 0; width: 480px; height: 360px; overflow: hidden; }
+.sc-bento .pw-wrap { position: absolute; left: max(34px, calc(50% - 368px)); top: 0; width: 480px; height: 360px; }
+.sc-bento .pw-win { position: absolute; inset: 0; overflow: hidden; }
 .sc-bento .pw-page { display: grid; justify-items: center; align-content: start; padding-top: 34px; height: 100%; background: #0E0F13; }
 .sc-bento .pw-form { display: grid; gap: 10px; width: 250px; }
 .sc-bento .pw-form b { font: 600 22px/28px var(--font-display); letter-spacing: -0.01em; color: #F3F4F7; margin-bottom: 8px; }
@@ -52,7 +53,7 @@
 .sc-bento .pw-dots { letter-spacing: 2px; box-shadow: inset 0 0 0 1px #2F6BEF, 0 0 0 3px rgba(47, 107, 239, 0.35); }
 .sc-bento .pw-go { display: grid; place-items: center; height: 38px; margin-top: 4px; border-radius: 9px; background: #F2F3F5; font: 600 14px/1 var(--font); color: #0B0C0F; }
 .sc-bento .pw-pop {
-  position: absolute; left: 470px; top: 52px; width: 300px; display: grid; gap: 8px; padding: 18px 18px 16px; border-radius: 14px;
+  position: absolute; left: 432px; top: 50px; width: 300px; display: grid; z-index: 1; gap: 8px; padding: 18px 18px 16px; border-radius: 14px;
   background: rgba(38, 41, 48, 0.94); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 30px 70px -10px rgba(0, 0, 0, 0.75);
 }
@@ -80,7 +81,7 @@
 .sc-bento .ck-doc { color: #B4C8FF; }
 .sc-bento .ck-file b { display: block; font: 600 14px/18px var(--font); color: #ECEEF2; }
 .sc-bento .ck-file em { display: block; font: 400 12px/16px var(--font); font-style: normal; color: var(--text-tertiary); }
-.sc-bento .ck-pre { display: block; overflow: hidden; white-space: pre; tab-size: 2; padding: 10px 12px; border-radius: 9px; border: 0; background: #0D0F13; font: 400 11.5px/18px var(--font-mono); color: #8E97A8; }
+.sc-bento .ck-pre { display: block; overflow: hidden; white-space: pre; tab-size: 2; padding: 10px 12px; border-radius: 9px; border: 0; background: #0D0F13; font: 400 11.5px/18px var(--font-mono); color: #8E97A8; -webkit-mask-image: linear-gradient(90deg, #000 76%, transparent 98%); mask-image: linear-gradient(90deg, #000 76%, transparent 98%); }
 .sc-bento .ck-sum { display: flex; align-items: center; gap: 7px; font: 400 13px/18px var(--font); color: var(--text-secondary); }
 .sc-bento .ck-sum .icon { color: #4CC38A; }
 
@@ -117,18 +118,23 @@
 .sc-bento .ex-lock { position: absolute; right: 12px; bottom: 12px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #2F6BEF; color: #FFFFFF; }
 .sc-bento .ex-name { font: 500 13px/18px var(--font); color: #ECEEF2; }
 
-/* Ephemeral: a profile that keeps nothing — its window, once closed, is only a fading outline */
-.sc-bento .bx-ep .bx-art { padding: 0 30px; }
-.sc-bento .ep-ghost {
-  position: absolute; left: 30px; right: 30px; top: 46px; bottom: -40px; border-radius: 14px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
-  -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 92%); mask-image: linear-gradient(180deg, #000 30%, transparent 92%);
+/* Ephemeral: the guest's History window as it closes — its visits go one by one, the window dims and
+   draws back, the app's notice stays; in front, the profile's row as the list labels it. --x (bento.js,
+   scenes only) runs 0 → 1 as the tile rises; without scenes it is 1: closed. */
+.sc-bento .bx-ep .bx-art { padding: 0; }
+.sc-bento .ep-win {
+  position: absolute; left: 30px; right: 30px; top: 0; height: 320px; overflow: hidden; transform-origin: 50% 0;
+  opacity: calc(1 - 0.4 * var(--x, 1)); transform: scale(calc(1 - 0.045 * var(--x, 1)));
 }
-.sc-bento .ep-ghost .mw-tl { position: absolute; left: 14px; top: 46px; }
-.sc-bento .ep-ghost .mw-tl i { background: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2); }
-.sc-bento .ep-empty { position: absolute; left: 0; right: 0; top: 128px; text-align: center; font: 400 14px/20px var(--font); color: var(--text-tertiary); }
-.sc-bento .ep-row { position: absolute; left: 50px; right: 50px; top: 0; z-index: 1; display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 12px; padding: 12px 14px; }
+.sc-bento .ep-body { position: relative; display: grid; gap: 2px; padding: 12px 14px; }
+.sc-bento .ep-note { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 8px; align-items: start; margin-bottom: 6px; padding: 10px 12px; border-radius: 9px; background: rgba(255, 255, 255, 0.05); font: 400 12.5px/17px var(--font); color: var(--text-secondary); }
+.sc-bento .ep-note .icon { margin-top: 3px; color: var(--text-tertiary); }
+.sc-bento .ep-visit { display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: center; gap: 11px; height: 46px; padding: 0 8px; opacity: calc(1 - clamp(0, (var(--x, 1) - var(--i) * 0.18) / 0.34, 1)); }
+.sc-bento .ep-visit .fav { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: #262B36; font: 600 12px/1 var(--font); font-style: normal; color: #D9DFEA; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.sc-bento .ep-visit b { display: block; font: 500 14px/18px var(--font); color: #ECEEF2; }
+.sc-bento .ep-visit em { display: block; font: 400 12px/16px var(--font); font-style: normal; color: var(--text-tertiary); }
+.sc-bento .ep-empty { position: absolute; left: 0; right: 0; top: 118px; text-align: center; font: 400 14px/20px var(--font); color: var(--text-tertiary); opacity: clamp(0, (var(--x, 1) - 0.66) / 0.3, 1); }
+.sc-bento .ep-row { position: absolute; left: 52px; right: 52px; bottom: 30px; z-index: 1; display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 12px; padding: 12px 14px; }
 .sc-bento .ep-row .avatar { display: grid; place-items: center; font-weight: 600; }
 .sc-bento .ep-row b { display: block; font: 600 15px/20px var(--font); color: #ECEEF2; }
 .sc-bento .ep-row em { display: flex; align-items: center; gap: 6px; font: 400 12.5px/17px var(--font); font-style: normal; color: var(--text-tertiary); }
@@ -136,7 +142,18 @@
 @media (max-width: 1099px) {
   .sc-bento .bx-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sc-bento .bx.w2 { grid-column: span 2; }
-  .sc-bento .bx-pw .pw-pop { left: auto; right: 34px; }
+  /* Export takes one column here, beside Ephemeral: the sheet, and the file it made at its corner */
+  .sc-bento .bx.bx-ex { grid-column: auto; }
+  .sc-bento .bx-ex .bx-art { display: block; padding: 0; }
+  .sc-bento .ex-sheet { position: absolute; left: 30px; right: 104px; top: 0; width: auto; }
+  .sc-bento .ex-file { position: absolute; right: 22px; bottom: 30px; gap: 10px; }
+  .sc-bento .ex-doc { width: 84px; height: 106px; clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%); }
+  .sc-bento .ex-doc .fold { width: 22px; height: 22px; }
+  .sc-bento .ex-mark { width: 44px; height: 44px; border-radius: 11px; }
+  .sc-bento .ex-mark svg { width: 26px; height: 26px; }
+  .sc-bento .ex-lock { width: 22px; height: 22px; right: 8px; bottom: 8px; }
+  .sc-bento .ex-lock svg { width: 11px; height: 11px; }
+  .sc-bento .ex-name { max-width: 120px; text-align: center; font-size: 12px; line-height: 16px; }
 }
 
 /* Phone: one column; each picture is recomposed for a narrow tile rather than squeezed */
@@ -149,11 +166,15 @@
   .sc-bento .bx-copy { padding: 26px 24px 0; font-size: 20px; line-height: 26px; }
   .sc-bento .bx-art { flex: none; margin-top: 24px; }
 
-  .sc-bento .bx-pw .bx-art { height: 330px; }
-  .sc-bento .pw-win { left: 20px; right: 20px; width: auto; }
-  .sc-bento .pw-form { width: 210px; justify-self: start; margin-left: 22px; }
-  .sc-bento .pw-pop { left: 20px; right: 20px; top: 54px; width: auto; }
-  .sc-bento .pw-pop::before { left: auto; right: 22px; }
+  /* The prompt hangs from the key at the right; the sign-in it answers shows below it */
+  .sc-bento .bx-pw .bx-art { height: 420px; }
+  .sc-bento .pw-wrap { left: 20px; right: 20px; width: auto; height: 460px; }
+  .sc-bento .pw-page { padding-top: 0; }
+  .sc-bento .pw-form { width: 220px; justify-self: start; margin: 226px 0 0 22px; }
+  .sc-bento .pw-pop { left: auto; right: 8px; top: 50px; width: calc(100% - 24px); padding: 16px 14px 14px; }
+  .sc-bento .pw-pop .pw-ic { display: none; }
+  .sc-bento .pw-pop b { margin-top: 0; }
+  .sc-bento .pw-pop::before { left: auto; right: 14px; }
   .sc-bento .bx-hs .bx-art { height: 300px; }
   .sc-bento .hs-win { left: 20px; right: -40px; }
   .sc-bento .bx-ck .bx-art { height: 320px; }
@@ -162,12 +183,13 @@
 
   .sc-bento .bx-sy .bx-art { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; align-content: start; gap: 0; height: 410px; padding: 0 20px; overflow: hidden; }
   .sc-bento .sy-mac { width: auto; }
-  .sc-bento .sy-wire { max-width: none; height: 96px; display: grid; align-content: center; }
+  .sc-bento .sy-wire { max-width: none; height: 132px; display: grid; align-content: center; }
   .sc-bento .sy-wire code { line-height: 16px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent); mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent); }
-  .sc-bento .sy-wire code { height: 64px; }
 
   .sc-bento .bx-ex .bx-art { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; gap: 22px; padding: 0 16px 26px; }
-  .sc-bento .ex-sheet { width: auto; }
+  .sc-bento .ex-sheet { position: static; width: auto; }
+  .sc-bento .ex-file { position: static; }
+  .sc-bento .ex-name { max-width: none; text-align: left; }
   .sc-bento .ex-file { grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: center; gap: 16px; padding-left: 8px; }
   .sc-bento .ex-doc { width: 64px; height: 80px; clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
   .sc-bento .ex-doc .fold { width: 18px; height: 18px; }
@@ -176,7 +198,7 @@
   .sc-bento .ex-lock { width: 20px; height: 20px; right: 6px; bottom: 6px; }
   .sc-bento .ex-lock svg { width: 10px; height: 10px; }
   .sc-bento .ex-name { font-size: 15px; }
-  .sc-bento .bx-ep .bx-art { height: 280px; }
-  .sc-bento .ep-row { left: 36px; right: 36px; }
-  .sc-bento .ep-ghost { left: 20px; right: 20px; }
+  .sc-bento .bx-ep .bx-art { height: 330px; }
+  .sc-bento .ep-win { left: 16px; right: 16px; }
+  .sc-bento .ep-row { left: 34px; right: 34px; bottom: 26px; }
 }

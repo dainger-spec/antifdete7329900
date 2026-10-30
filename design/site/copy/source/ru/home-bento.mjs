@@ -6,7 +6,7 @@ export default {
   head: ['И всё, к чему вы привыкли', 'в Safari.'],
   passwords: {
     t: 'Пароли',
-    d: 'Автозаполнение как в Safari: сохранить, обновить, подставить.',
+    d: 'Автозаполнение {{nb:как в Safari:}} сохранить, обновить, подставить.',
     site: 'shop.example',
     signIn: 'Вход',
     user: 'anna@shop.example',
@@ -31,7 +31,7 @@ export default {
   },
   cookies: {
     t: 'Импорт cookies',
-    d: 'JSON и cookies.txt из расширений, Puppeteer, Playwright и Selenium.',
+    d: 'Перенесите вход из другого браузера: JSON или cookies.txt.',
     window: 'Импорт cookies — Магазин',
     file: 'cookies.txt',
     format: 'Формат: Netscape cookies.txt',
@@ -41,7 +41,7 @@ export default {
   },
   sync: {
     t: 'Синхронизация',
-    d: 'Профили на всех ваших Mac. На сервер уходит только шифр.',
+    d: 'Профили на всех ваших Mac. На сервер уходит {{nb:только шифр.}}',
     macs: ['MacBook Pro', 'iMac'],
     profiles: ['Магазин', 'Реклама', 'Поддержка'],
     synced: 'Синхронизировано',
@@ -57,9 +57,16 @@ export default {
   },
   ephemeral: {
     t: 'Временные профили',
-    d: 'Закрыли — и ничего не осталось.',
+    d: 'Закрыли — и {{nb:ничего не осталось.}}',
     name: 'Гость',
     row: 'Временный, без следов',
+    window: 'История — Гость',
+    notice: 'Эфемерный профиль: история хранится только в памяти и стирается при остановке профиля.',
+    rows: [
+      { t: 'Каталог', u: 'shop.example' },
+      { t: 'Корзина', u: 'shop.example' },
+      { t: 'Оплата', u: 'pay.example' },
+    ],
     empty: 'История пуста.',
   },
   link: 'Все возможности',

@@ -1,10 +1,11 @@
 /* Home scene "warmup" (tools/templates/pages/home/warmup.mjs): the profile's hidden window goes through the
    sites of its country while you work. Everything is scoped to .sc-warmup.
-   Two frames: A — the headline and the window (it fills the screen while the sites pass); B — the lead (on a
-   phone) and three facts, which the last part of the scene lifts into view (.wu: --t of data-r "0.85 1",
-   --lift from the script). Without scenes the frames simply stack: the finished picture. */
+   Two frames: A — the headline and the window (it fills the screen while the sites pass and the camera
+   slowly pushes in: .wu-stage, --t of data-r "0 0.82"); B — the lead (narrower screens) and three facts,
+   which the last part of the scene lifts into view (.wu: --t of data-r "0.85 1", --lift from the script).
+   Without scenes the frames simply stack: the finished picture. */
 
-.sc-warmup { --win-h: 560px; --win-r: 22px; --bar-h: 52px; --reeds: 60; overflow-x: clip; }
+.sc-warmup { --win-h: 560px; --win-r: 22px; --bar-h: 52px; --reeds: 40; overflow-x: clip; }
 
 /* MARK: Layout */
 .sc-warmup .wu { display: flex; flex-direction: column; gap: 72px; }
@@ -13,14 +14,15 @@
 .sc-warmup .wu-h { margin: 0; }
 .sc-warmup .wu-h span { display: block; }
 .sc-warmup .scene-pin .wu-lead { margin: 0; max-width: 420px; }
-.sc-warmup .wu-narrow { display: none; }
+.sc-warmup .wu-narrow, .sc-warmup .wu-short { display: none; }
+.sc-warmup .wu-short { margin: 14px 0 0; font: 400 17px/24px var(--font); color: var(--text-secondary); max-width: 520px; text-wrap: pretty; }
 
 /* MARK: The window — Safari 26, dark appearance, out of focus (grey lights): the profile's hidden window */
 .sc-warmup .wu-stage { position: relative; }
 .sc-warmup .wu-win {
-  position: relative; height: var(--win-h); border-radius: var(--win-r); overflow: hidden; isolation: isolate;
+  position: relative; z-index: 1; height: var(--win-h); border-radius: var(--win-r); overflow: hidden; isolation: isolate;
   background: #1C1D21; color: #E4E6EA;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.085), 0 1px 0 0 rgba(255, 255, 255, 0.06) inset, 0 30px 90px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.085), 0 1px 0 0 rgba(255, 255, 255, 0.06) inset, 0 40px 100px rgba(0, 0, 0, 0.6);
 }
 .sc-warmup .wu-bar {
   position: relative; z-index: 3; height: var(--bar-h); display: flex; align-items: center; gap: 10px; padding: 0 14px 0 18px;
@@ -41,62 +43,67 @@
   font: 500 13px/16px var(--font); color: #E4E6EA;
 }
 .sc-warmup .wu-pgi { position: absolute; left: 12px; top: 8px; color: #8A8F98; }
-.sc-warmup .wu-hosts { display: grid; min-width: 0; }
-.sc-warmup .wu-host { grid-area: 1 / 1; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; }
-.sc-warmup .wu-host.on { opacity: 1; }
+/* The hosts (in the address field and on the glass): stacked in one cell, the script rolls them */
+.sc-warmup .wu-hosts, .sc-warmup .wu-sites { display: grid; min-width: 0; }
+.sc-warmup .wu-host, .sc-warmup .wu-site { grid-area: 1 / 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; }
+.sc-warmup .wu-host { text-align: center; }
+.sc-warmup .wu-host.on, .sc-warmup .wu-site.on { opacity: 1; }
 /* Safari's loading line along the foot of the address field */
 .sc-warmup .wu-load {
   position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: #4F86F7;
   transform-origin: left; transform: scaleX(var(--l, 0)); opacity: var(--lo, 0);
 }
 
-/* MARK: The page, behind reeded glass (the reeds' refraction and frost are baked into the pictures, so the
-   page can scroll under them by moving the picture; the reeds' light and shade below stay put) */
-.sc-warmup .wu-view { position: absolute; inset: var(--bar-h) 0 0 0; overflow: hidden; background: #2A2C31; }
-.sc-warmup .wu-pg { position: absolute; left: 0; top: 0; width: 100%; display: block; opacity: 0; }
-.sc-warmup .wu-pg.on { opacity: 1; transform: translateY(-20%); } /* the finished picture: read a fifth of the way down */
+/* MARK: The page, behind reeded glass. The reeds bend light only sideways, so their refraction and frost are
+   baked into the pictures (frosted along x, crisp along y) and the page can scroll under them by moving
+   the picture; the reeds' edges below stay put. */
+.sc-warmup .wu-view { position: absolute; inset: var(--bar-h) 0 0 0; overflow: hidden; background: #E9ECF1; }
+.sc-warmup .wu-pg { position: absolute; left: 0; top: 0; width: 100%; display: block; opacity: 0; visibility: hidden; }
+.sc-warmup .wu-pg.on { opacity: 1; visibility: visible; transform: translateY(-17%); } /* the finished picture: read some way down */
 .sc-warmup .wu-pg img { display: block; width: 100%; height: auto; }
-/* The glass: each reed lit on its left and shaded on its right, a fine grain, a cool sheen from the top left,
-   a smoke that deepens to the edges and the foot (the readout sits there); the page moves, the glass does not */
-.sc-warmup .wu-tint {
+/* The glass: every reed has a fine lit edge on its left and a fine shaded edge on its right, so the seams read
+   as edges of glass; a cool sheen from the top left; the light kept in the upper part, a smoke only low down
+   where the readout sits; a fine grain that only breaks up banding */
+.sc-warmup .wu-glass {
   position: absolute; inset: 0; z-index: 1; pointer-events: none;
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 0, rgba(255, 255, 255, 0.012) 18%, rgba(255, 255, 255, 0) 50%, rgba(0, 0, 0, 0.05) 78%, rgba(0, 0, 0, 0.13) 100%) 0 0 / calc(100% / var(--reeds)) 100% repeat-x,
-    url("warmup/grain.png") 0 0 / 160px 160px repeat,
-    linear-gradient(118deg, rgba(200, 214, 255, 0.08), rgba(200, 214, 255, 0) 36%),
-    radial-gradient(120% 95% at 50% 30%, rgba(8, 9, 12, 0) 40%, rgba(8, 9, 12, 0.5) 100%),
-    linear-gradient(180deg, rgba(8, 9, 12, 0.5) 0, rgba(8, 9, 12, 0.28) 90px, rgba(8, 9, 12, 0.3) 45%, rgba(8, 9, 12, 0.78) 100%);
+    linear-gradient(90deg, rgba(255, 255, 255, 0.16) 0, rgba(255, 255, 255, 0.16) 1px, rgba(255, 255, 255, 0.045) 1px, rgba(255, 255, 255, 0.015) 14%, rgba(255, 255, 255, 0) 42%, rgba(0, 0, 0, 0.022) 74%, rgba(0, 0, 0, 0.06) calc(100% - 1px), rgba(0, 0, 0, 0.13) calc(100% - 1px)) 0 0 / calc(100% / var(--reeds)) 100% repeat-x,
+    url("warmup/grain.png") 0 0 / 64px 64px repeat,
+    linear-gradient(116deg, rgba(225, 233, 255, 0.09), rgba(225, 233, 255, 0) 34%),
+    linear-gradient(180deg, rgba(8, 9, 12, 0.10) 0, rgba(8, 9, 12, 0.04) 18%, rgba(8, 9, 12, 0.02) var(--smoke-0, 44%), rgba(8, 9, 12, 0.5) var(--smoke-1, 68%), rgba(8, 9, 12, 0.84) 100%),
+    radial-gradient(48% 62% at 0 100%, rgba(8, 9, 12, 0.42), rgba(8, 9, 12, 0) 100%),
+    radial-gradient(44% 62% at 100% 100%, rgba(8, 9, 12, 0.42), rgba(8, 9, 12, 0) 100%),
+    radial-gradient(130% 100% at 50% 30%, rgba(8, 9, 12, 0) 55%, rgba(8, 9, 12, 0.3) 100%);
 }
 
 /* The light the page behind the glass throws on the wall around the window: its own colours, very soft (tiny
    pictures, scaled up), faded at the edges; it changes with the page */
 .sc-warmup .wu-spill {
-  position: absolute; inset: -14% -10% -18%; z-index: 0; pointer-events: none;
-  -webkit-mask: radial-gradient(closest-side, #000 55%, transparent); mask: radial-gradient(closest-side, #000 55%, transparent);
+  position: absolute; inset: -16% -10% -20%; z-index: 0; pointer-events: none;
+  -webkit-mask: radial-gradient(closest-side, #000 50%, transparent); mask: radial-gradient(closest-side, #000 50%, transparent);
 }
 .sc-warmup .wu-spill i { position: absolute; inset: 0; background-size: 100% 100%; opacity: 0; }
-.sc-warmup .wu-spill i.on { opacity: 0.14; }
-.sc-warmup .wu-win { z-index: 1; }
+.sc-warmup .wu-spill i.on { opacity: 0.12; }
 
-/* MARK: On the glass — what this window is, the count of cookies and the page */
-.sc-warmup .wu-cap-hidden {
-  position: absolute; left: 44px; top: 30px; z-index: 2; font: 500 15px/20px var(--font); color: rgba(236, 238, 242, 0.78); letter-spacing: 0.01em;
-}
+/* MARK: On the glass — the count of cookies; the window, the site and the page */
 .sc-warmup .wu-read {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; padding: 0 44px 40px;
   display: flex; align-items: flex-end; justify-content: space-between; gap: 32px;
+  text-shadow: 0 1px 14px rgba(8, 9, 12, 0.45);
 }
-.sc-warmup .wu-count { display: flex; flex-direction: column; gap: 10px; }
+.sc-warmup .wu-count { display: flex; flex-direction: column; gap: 12px; }
 .sc-warmup .wu-n {
   font: 600 136px/0.84 var(--font-display); letter-spacing: -0.055em; font-variant-numeric: tabular-nums; color: #F6F7F9;
   margin-left: -0.04em;
 }
-.sc-warmup .wu-unit { font: 500 19px/24px var(--font); color: rgba(236, 238, 242, 0.74); }
-.sc-warmup .wu-prog { width: min(320px, 40%); display: grid; gap: 14px; padding-bottom: 5px; }
-.sc-warmup .wu-pgno { font: 500 19px/24px var(--font); color: rgba(236, 238, 242, 0.86); font-variant-numeric: tabular-nums; }
+.sc-warmup .wu-unit { font: 500 19px/24px var(--font); color: rgba(236, 238, 242, 0.78); }
+.sc-warmup .wu-prog { width: min(340px, 40%); display: grid; padding-bottom: 5px; }
+.sc-warmup .wu-eye { font: 500 15px/20px var(--font); letter-spacing: 0.01em; color: rgba(236, 238, 242, 0.72); }
+.sc-warmup .wu-sites { margin-top: 4px; font: 600 30px/38px var(--font-display); letter-spacing: -0.02em; color: #ECEEF2; }
+.sc-warmup .wu-pgno { margin-top: 6px; font: 500 17px/22px var(--font); color: rgba(236, 238, 242, 0.8); font-variant-numeric: tabular-nums; }
 /* Twelve pages, twelve segments: the line fills one as each page loads */
 .sc-warmup .wu-track {
-  display: block; height: 3px; background: rgba(255, 255, 255, 0.18); overflow: hidden;
+  display: block; height: 3px; margin-top: 14px; background: rgba(255, 255, 255, 0.2); overflow: hidden;
   -webkit-mask: linear-gradient(90deg, #000 calc(100% - 4px), transparent 0) 0 0 / calc((100% + 4px) / 12) 100% repeat-x;
   mask: linear-gradient(90deg, #000 calc(100% - 4px), transparent 0) 0 0 / calc((100% + 4px) / 12) 100% repeat-x;
 }
@@ -107,35 +114,60 @@
 .sc-warmup .wu-facts p { margin: 0; font: 400 19px/29px var(--font); color: var(--text-tertiary); max-width: 360px; text-wrap: pretty; }
 .sc-warmup .wu-facts strong { color: var(--text-primary); font-weight: 600; }
 
-/* MARK: Scenes — frame A fills the screen; the end of the scene lifts frame B into view */
+/* MARK: Scenes — frame A fills the screen while the camera pushes in; the end of the scene lifts frame B
+   into view, and what leaves under the header fades as it goes (--lt: the lift's own progress) */
 .js-scenes .sc-warmup { --win-h: clamp(360px, calc(100vh - 360px), 620px); --win-h: clamp(360px, calc(100svh - 360px), 620px); }
 .js-scenes .sc-warmup .scene-pin { justify-content: flex-start; }
-.js-scenes .sc-warmup .wu { gap: 64px; transform: translate3d(0, calc(var(--lift, 0px) * -1 * var(--t, 0)), 0); will-change: transform; }
+.js-scenes .sc-warmup .wu { --lt: var(--t, 0); gap: 64px; transform: translate3d(0, calc(var(--lift, 0px) * -1 * var(--t, 0)), 0); will-change: transform; }
 .js-scenes .sc-warmup .wu-a { height: 100vh; height: 100svh; justify-content: flex-end; padding-top: var(--header-h); padding-bottom: 40px; }
-.js-scenes .sc-warmup .wu-stage { transform: translate3d(0, calc((1 - var(--t, 1)) * 36px), 0) scale(calc(0.97 + 0.03 * var(--t, 1))); transform-origin: 50% 0; }
-.js-scenes .sc-warmup .wu-host { will-change: transform, opacity; }
+.js-scenes .sc-warmup .wu-head { opacity: calc(1 - var(--lt) * 1.7); }
+.js-scenes .sc-warmup .wu-stage { transform: scale(calc(0.94 + 0.06 * var(--t, 1))); transform-origin: 50% 0; }
+.js-scenes .sc-warmup .wu-host, .js-scenes .sc-warmup .wu-site { will-change: transform, opacity; }
 
-/* MARK: Narrower screens */
+/* MARK: Wide screens — the window breaks out of the column, a product shot rather than a card */
+@media (min-width: 1600px) {
+  .sc-warmup .wu-stage { width: min(1440px, 100vw - 160px); margin-left: calc((100% - min(1440px, 100vw - 160px)) / 2); }
+  .js-scenes .sc-warmup { --win-h: clamp(360px, calc(100svh - 360px), 700px); }
+}
+
+/* Short laptop screens: the window is lower, so the count is a size smaller */
+@media (min-width: 1100px) and (max-height: 800px) {
+  .sc-warmup .wu-n { font-size: 112px; }
+  .sc-warmup .wu-read { padding-bottom: 32px; }
+}
+
+/* MARK: Narrower screens — the lead moves under the window; a short line under the headline says what is
+   going on while the scene plays */
 @media (max-width: 1099px) {
-  .sc-warmup .wu-head { grid-template-columns: minmax(0, 1fr); }
+  .sc-warmup .wu-head { display: block; }
   .sc-warmup .wu-wide { display: none; }
   .sc-warmup .wu-narrow { display: block; max-width: 600px; }
+  .js-scenes .sc-warmup .wu-short { display: block; }
   .sc-warmup .wu-b { display: flex; flex-direction: column; gap: 36px; }
   .sc-warmup .wu-n { font-size: 112px; }
-  .js-scenes .sc-warmup { --win-h: clamp(340px, calc(100svh - 300px), 600px); }
+  .js-scenes .sc-warmup { --win-h: clamp(340px, calc(100svh - 340px), 600px); }
+}
+/* Tablets: the lead on the left, the facts stacked on the right */
+@media (min-width: 768px) and (max-width: 1099px) {
+  .sc-warmup .wu-b { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 56px; align-items: start; }
+  .sc-warmup .wu-facts { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .sc-warmup .wu-facts p { max-width: 460px; }
 }
 @media (max-width: 899px) {
-  .sc-warmup .wu-facts { grid-template-columns: minmax(0, 1fr); gap: 22px; }
-  .sc-warmup .wu-facts p { max-width: 560px; }
   .sc-warmup .wu-tools { display: none; }
 }
+@media (max-width: 767px) {
+  .sc-warmup .wu-facts { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .sc-warmup .wu-facts p { max-width: 560px; }
+}
 
-/* MARK: Phone — a tall window under the headline; the lead and the facts follow it */
+/* MARK: Phone — the headline, a short line, then a tall window; the lead and the facts follow it */
 @media (max-width: 599px) {
-  .sc-warmup { --win-h: 520px; --win-r: 18px; --bar-h: 46px; --reeds: 18; }
+  .sc-warmup { --win-h: 520px; --win-r: 18px; --bar-h: 46px; --reeds: 12; --smoke-0: 30%; --smoke-1: 54%; }
   .sc-warmup .wu { gap: 40px; }
-  .sc-warmup .wu-a { gap: 26px; }
+  .sc-warmup .wu-a { gap: 22px; }
   .sc-warmup .wu-b { gap: 30px; }
+  .sc-warmup .wu-short { margin-top: 12px; }
   .sc-warmup .wu-bar { gap: 8px; padding: 0 8px 0 14px; }
   .sc-warmup .wu-lights { gap: 6px; margin-right: 4px; }
   .sc-warmup .wu-lights i { width: 10px; height: 10px; }
@@ -143,16 +175,25 @@
   .sc-warmup .wu-prof { padding: 0 11px 0 8px; font-size: 15px; line-height: 18px; }
   .sc-warmup .wu-addr { flex: 1 1 auto; margin: 0; padding: 0 12px 0 30px; font-size: 15px; line-height: 18px; }
   .sc-warmup .wu-pgi { top: 7px; left: 10px; }
-  .sc-warmup .wu-cap-hidden { left: 22px; top: 18px; }
-  .sc-warmup .wu-read { flex-direction: column; align-items: stretch; gap: 20px; padding: 0 22px 24px; }
+  .sc-warmup .wu-read { flex-direction: column; align-items: stretch; gap: 22px; padding: 0 22px 24px; }
+  .sc-warmup .wu-count { gap: 8px; }
   .sc-warmup .wu-n { font-size: 96px; }
   .sc-warmup .wu-unit { font-size: 16px; line-height: 22px; }
-  .sc-warmup .wu-prog { width: 100%; gap: 10px; padding: 0; }
-  .sc-warmup .wu-pgno { font-size: 16px; line-height: 22px; }
+  .sc-warmup .wu-prog { width: 100%; padding: 0; }
+  .sc-warmup .wu-eye { display: none; }
+  .sc-warmup .wu-sites { margin-top: 0; font-size: 22px; line-height: 28px; }
+  .sc-warmup .wu-pgno { margin-top: 2px; font-size: 16px; line-height: 22px; }
+  .sc-warmup .wu-track { margin-top: 12px; }
   .sc-warmup .wu-facts p { font-size: 17px; line-height: 26px; }
-  .js-scenes .sc-warmup { --win-h: clamp(380px, calc(100svh - 250px), 600px); }
+  .js-scenes .sc-warmup { --win-h: clamp(340px, calc(100svh - 310px), 560px); }
   .js-scenes .sc-warmup .wu { gap: 40px; }
-  .js-scenes .sc-warmup .wu-a { padding-top: calc(var(--header-h) + 8px); }
+  .js-scenes .sc-warmup .wu-a { padding-top: calc(var(--header-h) + 8px); padding-bottom: 28px; }
+}
+/* Short phones: a smaller count, so the page still shows above the readout */
+@media (max-width: 599px) and (max-height: 740px) {
+  .sc-warmup .wu-read { gap: 16px; padding-bottom: 20px; }
+  .sc-warmup .wu-count { gap: 6px; }
+  .sc-warmup .wu-n { font-size: 76px; }
 }
 /* The smallest phones: the address field gives up its page glyph so the whole host fits */
 @media (max-width: 379px) {

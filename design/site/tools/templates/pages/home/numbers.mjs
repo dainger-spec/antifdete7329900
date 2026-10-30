@@ -1,62 +1,36 @@
-// Scene "numbers": strength in numbers, after Apple's display pages — big figures over a field of code
-// seen close up, like a display's subpixels; the code is tinted in the brand's blues only. A soft light
-// follows the scroll down the field (CSS, --p of the scene). Each figure climbs to its value as it
-// comes up the screen (numbers.js, with scenes only). Numbers only from copy/facts.mjs.
-//
-// Layout: the first figure alone and large; then the figures in pairs; a figure given as `code` (the
-// cipher) closes the column, wide.
+// Scene "numbers": the product in numbers, after Apple's display pages. The first figure stands alone,
+// huge, over a macro shot of a display showing the product's own code — every pixel three subpixel
+// stripes, in the brand's blues, with a shallow depth of field (assets/scenes/numbers/display.webp, a
+// still picture made once). The other figures follow in a row of columns, then the cipher, wide.
+// With scenes the camera drifts along the line of code as the section passes and each figure comes up
+// with the scroll (numbers.js; scroll-tied, nothing moves on its own; no counting, so no figure ever
+// shows a value that is not a fact). Without scenes: the finished picture. Numbers only from
+// copy/facts.mjs.
 import { inline, esc } from '../../../lib/html.mjs';
 import { linkArrow } from '../../components.mjs';
+import { twoTone } from './lib.mjs';
 
 export const assets = { styles: ['scenes/numbers.css'], scripts: ['scenes/numbers.js'] };
 
-// The field: the product's own code, as the first screen's field draws it (site.js "Code art"), set
-// in a fixed grid so the tile repeats without a seam whatever monospace font draws it.
-const CODE = [
-  'profile.store { exit: "DE"; lang: "de-DE"; tz: "Europe/Berlin"; proxy: socks5 }',
-  'profile.ads { exit: "US"; lang: "en-US"; tz: "America/New_York"; proxy: https }',
-  'cookies(profile) -> own; passwords(profile) -> own; history(profile) -> own',
-  'webkit.process(per: profile); window = safari',
-  'route(profile) = proxy; direct = closed; udp = closed; webrtc = closed',
-  'tls.handshake == safari; headers.order == safari; http2 == safari',
-  'vault.seal(aes-256-gcm, key: argon2id(master))',
-  'warmup(profile, sites: country(proxy)) -> cookies',
-];
-const COLS = 90, ROWS = 32, CW = 7.2, LH = 16;
-
-/// One tile of the field as an SVG data: URL. `tones`: a fill per column in turn (a subpixel triad).
-/// Every character is placed on the grid by its own x, so no font can drift it off the tile's edge.
-function tile(tones, size = 11) {
-  const ch = (i, j) => { const line = CODE[j % CODE.length] + '    '; return line[(i + j * 23) % line.length]; };
-  const xml = (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c);
-  const rows = [];
-  for (let j = 0; j < ROWS; j++) {
-    for (let k = 0; k < tones.length; k++) {
-      const xs = [], cs = [];
-      for (let i = k; i < COLS; i += tones.length) { const c = ch(i, j); if (c !== ' ') { xs.push(+(i * CW).toFixed(1)); cs.push(xml(c)); } }
-      if (cs.length) rows.push(`<text y="${(j * LH + LH * 0.72).toFixed(1)}" x="${xs.join(' ')}" fill="${tones[k]}">${cs.join('')}</text>`);
-    }
-  }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${(COLS * CW).toFixed(1)}" height="${ROWS * LH}" font-family="SF Mono,ui-monospace,Menlo,DejaVu Sans Mono,monospace" font-size="${size}">${rows.join('')}</svg>`;
-  return `url("data:image/svg+xml,${encodeURIComponent(svg).replace(/'/g, '%27').replace(/"/g, '%22')}")`;
-}
-
-const figure = (x, cls, lang) => `<div class="nm-item ${cls} reveal">${x.code
+const value = (x) => x.code
   ? `<span class="nm-n nm-code"><code>${esc(x.code)}</code></span>`
-  : `<span class="nm-n"><span class="nm-v" data-count="${esc(x.n)}">${esc(x.n)}</span>${x.of ? `<span class="nm-of">/${esc(x.of)}</span>` : ''}</span>`}<p class="nm-t">${inline(x.t, lang)}</p></div>`;
+  : `<span class="nm-n">${esc(x.n)}${x.of ? `<span class="nm-of">/${esc(x.of)}</span>` : ''}</span>`;
 
 export default function numbers(N, { lang }) {
   const [first, ...rest] = N.items;
-  const wide = rest.filter((x) => x.code), pairs = rest.filter((x) => !x.code);
-  const base = tile(['#AFC3EE']), lit = tile(['#7FA2F5', '#A9C2FF', '#DCE6FF']);
-  return `<section class="sc-numbers" data-scene="numbers" data-title="${esc(N.title)}" style="--tile-base:${esc(base)};--tile-lit:${esc(lit)}">
-  <div class="nm-field" aria-hidden="true"><i class="nm-base"></i><i class="nm-lit"></i></div>
-  <div class="container nm-wrap">
-    <h2 class="h-xl nm-head reveal">${inline(N.head, lang)}</h2>
-    ${figure(first, 'nm-hero', lang)}
-    <div class="nm-pairs">${pairs.map((x) => figure(x, 'nm-pair', lang)).join('')}</div>
-    ${wide.map((x) => figure(x, 'nm-wide', lang)).join('')}
-    <p class="nm-link reveal">${linkArrow('verification.html', N.link, lang)}</p>
+  const wide = rest.filter((x) => x.code), cols = rest.filter((x) => !x.code);
+  return `<section class="sc-numbers" data-scene="numbers" data-title="${esc(N.title)}">
+  <div class="container nm-top">
+    <h2 class="h-xl nm-head">${twoTone(N.head, lang)}</h2>
+  </div>
+  <div class="nm-hero">
+    <div class="nm-macro" aria-hidden="true"><img src="../assets/scenes/numbers/display.webp" width="2880" height="1600" alt="" decoding="async"></div>
+    <div class="nm-fig nm-first">${value(first)}<p class="nm-t">${inline(first.t, lang)}</p></div>
+  </div>
+  <div class="container nm-body">
+    <div class="nm-cols">${cols.map((x, i) => `<div class="nm-col nm-fig" style="--c:${i}">${value(x)}<p class="nm-t">${inline(x.t, lang)}</p></div>`).join('')}</div>
+    ${wide.map((x) => `<div class="nm-wide nm-fig">${value(x)}<p class="nm-t">${inline(x.t, lang)}</p></div>`).join('')}
+    <p class="nm-link">${linkArrow('verification.html', N.link, lang)}</p>
   </div>
 </section>`;
 }

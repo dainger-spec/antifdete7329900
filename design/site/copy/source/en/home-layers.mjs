@@ -2,8 +2,8 @@
 // ui — the words on the drawn layers (samples: the profiles Store, Ads, Support, as in the other scenes).
 export default {
   title: 'Isolation',
-  head: ['A profile is apart', 'at every level.'],
-  lead: 'Under every window: its own process, its own data, its own network and its own key.',
+  head: ['Isolated', 'at every level.'],
+  lead: 'Under every window: its own process, its own data, its own network and {{nb:its own key.}}',
   items: [
     { t: 'A Safari window', d: 'Its own tabs, history and bookmarks.' },
     { t: 'A process of its own', d: 'Its own WebKit, folder and temporary files.' },
@@ -15,7 +15,6 @@ export default {
     site: 'shop.example',
     orders: [['Desk lamp', 'Paid', '€49'], ['Ceramic mug', 'Shipped', '€18'], ['Linen tablecloth', 'New', '€64']],
     page: 'Orders',
-    procHead: ['Profile', 'Process'],
     procs: [['Store', 'own WebKit'], ['Ads', 'own WebKit'], ['Support', 'own WebKit']],
     net: [['Proxy', 'SOCKS5 · Germany'], ['Direct', 'closed'], ['WebRTC', 'off']],
     key: 'profile key',

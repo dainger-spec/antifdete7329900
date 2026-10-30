@@ -1,30 +1,36 @@
-/* Home scene "mission" (tools/templates/pages/home/mission.mjs): one Safari window becomes many — a deck that
-   spreads out as in Mission Control (a wide screen) or fans out like cards in Wallet (a phone). Everything is
-   scoped to .sc-mission. The room (.mi-room) is one design space, 1360 px wide, scaled to the page by --k
-   (assets/scenes/mission.js; the steps below without JavaScript). Each window is drawn at its own size and
-   placed by --fx/--fy (its centre in the room) and --fs (its scale); the script moves it from the deck to that
-   place. Without the script: the finished picture, every window in its place. */
+/* Home scene "mission" (tools/templates/pages/home/mission.mjs): one Safari window becomes many — the others
+   come out from behind it and spread as in Mission Control (a wide screen) or fan out like cards in Wallet (a
+   phone). Everything is scoped to .sc-mission. The room (.mi-room) is one design space, 1360 px wide, scaled to
+   the page by --k (assets/scenes/mission.js; the steps below without JavaScript). Each window is drawn at its
+   own size and placed by --fx/--fy (its centre in the room) and --fs (its scale); the script moves it from
+   behind the first window to that place. Without the script: the finished picture, every window in its place.
+   Phone: --strip is a window's bar (each window shows its bar above the next), --cardh the front window's
+   height in the finished picture, --h0 its height when the scene opens (the script; the same without it). */
 
-.sc-mission { --k: 1; --kp: 1; --strip: 56px; --cardh: 300px; overflow-x: clip; }
+.sc-mission { --k: 1; --kp: 1; --strip: 48px; --cardh: 360px; --h0: var(--cardh); overflow-x: clip; }
 @media (max-width: 1439px) { .sc-mission { --k: 0.92; } }
-@media (max-width: 1279px) { .sc-mission { --k: 0.82; } }
-@media (max-width: 1099px) { .sc-mission { --k: 0.68; } }
+@media (max-width: 1279px) { .sc-mission { --k: 0.86; } }
+@media (max-width: 1099px) { .sc-mission { --k: 0.7; } }
 
 /* MARK: Layout — the headline and the lead in one row; under them, the room */
-.sc-mission .mi-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 340px); column-gap: 48px; align-items: end; }
+.sc-mission .mi-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); column-gap: 48px; align-items: end; }
 .sc-mission .mi-h > span { display: block; }
-.sc-mission .mi-lead { margin: 0 0 6px; max-width: 340px; }
+.sc-mission .mi-lead { margin: 0 0 6px; max-width: 420px; }
 .sc-mission .mi-stage { position: relative; height: calc(var(--sh) * var(--k) * 1px); margin-top: 64px; }
 .sc-mission .mi-room {
   position: absolute; left: 50%; top: 50%; width: 1360px; height: calc(var(--sh) * 1px);
   transform: translate(-50%, -50%) scale(var(--k)); transform-origin: 50% 50%;
 }
-@media (max-width: 1099px) {
+@media (min-width: 960px) and (max-width: 1099px) {
+  .sc-mission .mi-head { grid-template-columns: minmax(0, 1fr) minmax(0, 330px); column-gap: 40px; }
+  .sc-mission .mi-lead { font-size: 19px; line-height: 28px; }
+}
+@media (max-width: 959px) {
   .sc-mission .mi-head { grid-template-columns: minmax(0, 1fr); }
   .sc-mission .mi-lead { margin-top: 20px; max-width: 560px; }
 }
 
-@media (min-width: 900px) and (max-width: 1199px) {
+@media (min-width: 600px) and (max-width: 1199px) {
   .sc-mission .mi-h { font-size: 48px; line-height: 52px; }
 }
 
@@ -32,7 +38,7 @@
 .sc-mission .mi-l2, .sc-mission .mi-lead { opacity: var(--t, 1); transform: translateY(calc((1 - var(--t, 1)) * 14px)); }
 .sc-mission .mi-labels { opacity: var(--t, 1); }
 
-/* MARK: A window — macOS 26: large corners, a hairline of light around it, the light its page gives off */
+/* MARK: A window — macOS 26: large corners, a hairline of light around it, a neutral shadow under it */
 .sc-mission .mi-win {
   position: absolute; left: 0; top: 0; width: calc(var(--w) * 1px); height: calc(var(--h) * 1px);
   transform: translate(calc(var(--fx) * 1px - 50%), calc(var(--fy) * 1px - 50%)) scale(var(--fs));
@@ -42,16 +48,15 @@
 .sc-mission .mi-frame {
   position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; isolation: isolate;
   border-radius: 24px; background: #FFFFFF; color: #1D1D1F;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.10), 0 0 90px 10px rgba(150, 175, 240, 0.07);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.10), 0 30px 80px rgba(0, 0, 0, 0.55);
 }
-.sc-mission .mi-win.dark .mi-frame { background: #15171C; color: #E6E8EC; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.13), 0 0 90px 10px rgba(150, 175, 240, 0.04); }
-/* Depth: windows further back are dimmer (--dim, from the script; a little for every window but the focused
-   one in the finished picture) */
+.sc-mission .mi-win.dark .mi-frame { background: #15171C; color: #E6E8EC; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.13), 0 30px 80px rgba(0, 0, 0, 0.55); }
+/* Depth while the windows come out from behind the first one (--dim, from the script): they start in its
+   shade and are at full brightness by the time they land, as in Mission Control */
 .sc-mission .mi-frame::after {
   content: ""; position: absolute; inset: 0; z-index: 5; border-radius: inherit; pointer-events: none;
-  background: #060709; opacity: var(--dim, 0.16);
+  background: #060709; opacity: var(--dim, 0);
 }
-.sc-mission .mi-win.focus .mi-frame::after { opacity: var(--dim, 0); }
 /* Mission Control's highlight around the window you are about to pick */
 .sc-mission .mi-ring {
   position: absolute; inset: -14px; border-radius: 36px; pointer-events: none;
@@ -68,6 +73,9 @@
 .sc-mission .mi-lights i:nth-child(1) { background: #FF5F57; }
 .sc-mission .mi-lights i:nth-child(2) { background: #FEBC2E; }
 .sc-mission .mi-lights i:nth-child(3) { background: #28C840; }
+/* Every window but the focused one is inactive: grey traffic lights, as macOS draws them */
+.sc-mission .mi-win:not(.focus) .mi-lights i { background: #D5D6DA; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.10); }
+.sc-mission .mi-win.dark:not(.focus) .mi-lights i { background: #4A4D55; box-shadow: none; }
 .sc-mission .mi-cap {
   height: 32px; display: inline-flex; align-items: center; gap: 2px; padding: 0 8px; border-radius: 999px; color: #3A3A3F; flex: none;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 246, 248, 0.94));
@@ -78,13 +86,13 @@
 .sc-mission .mi-hist { gap: 10px; padding: 0 10px; }
 .sc-mission .mi-hist svg:last-child { opacity: 0.32; }
 .sc-mission .mi-prof { gap: 7px; padding: 0 12px 0 8px; font: 500 13px/16px var(--font); color: #1D1D1F; white-space: nowrap; }
-.sc-mission .mi-prof .flag circle:last-child { stroke: rgba(0, 0, 0, 0.12); }
+.sc-mission .mi-prof .flag circle:last-child { stroke: rgba(0, 0, 0, 0.22); }
 .sc-mission .mi-addr {
   position: relative; flex: 0 1 340px; min-width: 0; margin-left: auto; justify-content: center; gap: 8px; padding: 0 16px 0 34px;
   font: 500 13px/16px var(--font); color: #1D1D1F;
 }
 .sc-mission .mi-pg { position: absolute; left: 12px; top: 8px; color: #8E8E93; }
-.sc-mission .mi-url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-mission .mi-url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
 .sc-mission .mi-tools { gap: 14px; padding: 0 12px; margin-left: auto; }
 /* The bar over a dark page */
 .sc-mission .dark .mi-bar { background: #1C1E24; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06); }
@@ -142,7 +150,7 @@
 .sc-mission .st-kpi span { font: 500 12px/16px var(--font); color: #6B6B71; }
 .sc-mission .st-kpi b { font: 600 23px/28px var(--font-display); letter-spacing: -0.015em; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sc-mission .st-kpi em { font: 500 12px/16px var(--font); color: #2E7D4F; }
-.sc-mission .st-row { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 12px; padding: 12px 24px 22px; }
+.sc-mission .st-row { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 12px; padding: 12px 24px 22px; }
 .sc-mission .st-card { display: flex; flex-direction: column; min-height: 0; padding: 14px 16px; border: 1px solid #ECECEF; border-radius: 12px; overflow: hidden; }
 .sc-mission .st-ct { display: flex; align-items: center; justify-content: space-between; gap: 10px; font: 500 12px/16px var(--font); color: #6B6B71; }
 .sc-mission .st-ct b { font: 600 13.5px/18px var(--font); color: #1D1D1F; }
@@ -163,6 +171,13 @@
 .sc-mission .st-orders li i.wait { background: #F8EFD9; color: #87601A; }
 .sc-mission .st-orders li i.ship { background: #ECEEF2; color: #4C5361; }
 .sc-mission .st-orders li em { text-align: right; }
+.sc-mission .st-orders li:nth-child(n + 6) { display: none; }
+/* Best sellers: only in the tall window a phone opens on */
+.sc-mission .st-top5 { display: none; }
+.sc-mission .st-top5 ul { list-style: none; margin: 10px 0 0; padding: 0; }
+.sc-mission .st-top5 li { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 12px; height: 46px; border-top: 1px solid #F1F1F3; font: 400 13px/16px var(--font); color: #3A3A3F; }
+.sc-mission .st-top5 li i { width: 30px; height: 30px; border-radius: 7px; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05); }
+.sc-mission .st-top5 li em { font-weight: 500; color: #1D1D1F; font-variant-numeric: tabular-nums; }
 
 /* Ads — an ads console (dark) */
 .sc-mission .ms-ads { background: #121418; color: #E3E6EB; }
@@ -322,8 +337,10 @@
 .sc-mission .mi-label svg { width: calc(16px / var(--k)); height: calc(16px / var(--k)); }
 .sc-mission .mi-label.focus { color: var(--text-primary); }
 
-/* MARK: Phones and small tablets — the deck fans out vertically, like cards in Wallet. Each window is the
-   card's real width (its bar and the profile in it at full size); only the site inside is scaled (--kp). */
+/* MARK: Phones and small tablets — the windows fan out vertically, like cards in Wallet. Each window is the
+   card's real width (its bar and the profile in it at full size); only the site inside is scaled (--kp). The
+   windows behind show only their bar (--strip = the bar's height), so their sites are never drawn; the front
+   one's site has a fixed height (--h0, the tall window the scene opens on) and its window clips it. */
 @media (max-width: 899px) {
   .sc-mission { --kp: 0.6; }
   .sc-mission .mi-stage { height: auto; margin-top: 40px; }
@@ -331,24 +348,38 @@
     position: relative; left: auto; top: auto; width: min(100% - 2 * var(--pad-inline), 560px); margin: 0 auto; height: calc(5 * var(--strip) + var(--cardh));
     transform: none;
   }
-  .sc-mission .mi-win { width: 100%; height: var(--cardh); transform: translateY(calc(var(--slot) * var(--strip))); }
-  .sc-mission .mi-frame { border-radius: 16px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 -10px 30px rgba(0, 0, 0, 0.55); }
-  .sc-mission .mi-win.dark .mi-frame { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16), 0 -10px 30px rgba(0, 0, 0, 0.55); }
-  .sc-mission .mi-frame::after { opacity: var(--dim, calc((5 - var(--slot)) * 0.05)); }
+  .sc-mission .mi-win { width: 100%; height: var(--cardh); transform: translateY(calc(var(--slot) * var(--strip))); transform-origin: 50% 0; }
+  .sc-mission .mi-frame { border-radius: 16px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 -6px 18px rgba(0, 0, 0, 0.3); }
+  .sc-mission .mi-win.dark .mi-frame { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16), 0 -6px 18px rgba(0, 0, 0, 0.3); }
+  .sc-mission .mi-win:not(.focus) .mi-page { display: none; }
+  .sc-mission .mi-win.focus .ms { height: calc((var(--h0) - var(--strip)) / var(--kp)); }
   .sc-mission .mi-ring, .sc-mission .mi-labels { display: none; }
-  .sc-mission .mi-bar { height: 46px; gap: 8px; padding: 0 8px 0 14px; }
+  .sc-mission .mi-bar { height: var(--strip); gap: 8px; padding: 0 8px 0 14px; }
   .sc-mission .mi-lights { gap: 6px; margin-right: 4px; }
   .sc-mission .mi-lights i { width: 10px; height: 10px; }
-  .sc-mission .mi-side, .sc-mission .mi-hist, .sc-mission .mi-tools { display: none; }
+  .sc-mission .mi-side, .sc-mission .mi-hist, .sc-mission .mi-tools, .sc-mission .mi-pg { display: none; }
   .sc-mission .mi-cap { height: 32px; }
   .sc-mission .mi-prof { font: 500 15px/18px var(--font); padding: 0 12px 0 8px; }
-  .sc-mission .mi-addr { flex: 1 1 auto; padding: 0 12px 0 30px; font: 500 12px/16px var(--font); }
-  .sc-mission .mi-pg { left: 9px; }
+  .sc-mission .mi-addr { flex: 1 1 auto; padding: 0 12px; font: 500 12px/16px var(--font); }
+  /* A short screen: the first four windows only (--slot4 is their order) */
+  .sc-mission.mi-few .mi-room { height: calc(3 * var(--strip) + var(--cardh)); }
+  .sc-mission.mi-few .mi-win { transform: translateY(calc(var(--slot4) * var(--strip))); }
+  .sc-mission.mi-few .mi-extra { display: none; }
+  /* The store in a tall, narrow window: its blocks one under another */
+  .sc-mission .st-row { flex: none; grid-template-columns: minmax(0, 1fr); }
+  .sc-mission .st-chart { height: 250px; }
+  .sc-mission .st-top5 { display: flex; }
+  .sc-mission .st-orders li:nth-child(n + 6) { display: grid; }
+}
+@media (max-width: 389px) {
+  .sc-mission .mi-bar { gap: 6px; padding: 0 6px 0 12px; }
+  .sc-mission .mi-lights { margin-right: 2px; }
+  .sc-mission .mi-addr { padding: 0 9px; font-size: 11.5px; }
 }
 @media (max-width: 599px) {
   .sc-mission { --kp: 0.42; }
-  .sc-mission .st-row { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
-  .sc-mission .st-chart .st-ct span { display: none; }
+  /* Each phrase of the headline on one line (a phone's height is the scene's tightest budget) */
+  .sc-mission .mi-h { font-size: clamp(28px, 8.2vw, 34px); line-height: 1.15; }
   .sc-mission .mi-stage { margin-top: 32px; }
   .sc-mission .mi-lead { margin-top: 16px; }
 }
@@ -356,6 +387,11 @@
 /* MARK: While the scene plays — the pinned frame: the headline at the top, the room in the height left */
 .js-scenes .sc-mission .mi { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; padding: calc(var(--header-h) + 40px) 0 28px; }
 .js-scenes .sc-mission .mi-stage { flex: 1; min-height: 0; height: auto; margin-top: 44px; }
+/* A laptop's short window: less air above and under the headline, so the windows can be larger */
+@media (min-width: 900px) and (max-height: 820px) {
+  .js-scenes .sc-mission .mi { padding-top: calc(var(--header-h) + 28px); padding-bottom: 20px; }
+  .js-scenes .sc-mission .mi-stage { margin-top: 32px; }
+}
 @media (max-width: 899px) {
   .sc-mission .mi-win { transform-origin: 50% 0; }
   .js-scenes .sc-mission .mi { padding: calc(var(--header-h) + 24px) 0 20px; }

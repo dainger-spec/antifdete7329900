@@ -12,7 +12,7 @@
   color: #F5F6F8; font-kerning: normal; hanging-punctuation: first;
 }
 .sc-statement .acc {
-  background: linear-gradient(180deg, #B9CCFF 8%, #7C9EF2 92%);
+  background: linear-gradient(180deg, #9DB8FF 10%, #7393EE 92%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .js-scenes .sc-statement .w {

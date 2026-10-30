@@ -77,7 +77,7 @@
 .sc-sites .mp-logo, .sc-sites .mp-title, .sc-sites .mp-most li, .sc-sites .mp-n, .sc-sites .mp-more {
   font-family: ui-serif, "New York", "Iowan Old Style", Charter, "Charter Web", Georgia, serif;
 }
-.sc-sites .sw-page [lang="ja"] { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans CJK JP", "IPAPGothic", sans-serif; }
+.sc-sites .sw-page [lang="ja"] { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans CJK JP", "IPAPGothic", sans-serif; word-break: auto-phrase; }
 .sc-sites .mp-title [lang="ja"], .sc-sites .mp-most li [lang="ja"], .sc-sites .mp-more [lang="ja"] { font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif CJK JP", "IPAPGothic", serif; }
 
 .sc-sites .mp-util {
@@ -108,7 +108,7 @@
 .sc-sites .mp-kick { font: 700 11px/14px var(--font); letter-spacing: 0.09em; text-transform: uppercase; color: #111214; }
 .sc-sites .mp-kick [lang="ja"] { letter-spacing: 0.04em; }
 .sc-sites .rl.mp-title { margin-top: 12px; font-size: 38px; line-height: 41px; font-weight: 700; letter-spacing: -0.012em; color: #0B0B0C; }
-.sc-sites .mp-title [lang="ja"] { font-size: 31px; letter-spacing: 0.01em; font-weight: 600; }
+.sc-sites .mp-title [lang="ja"] { font-size: 31px; letter-spacing: 0.01em; font-weight: 700; }
 .sc-sites .rl.mp-dek { margin-top: 14px; font: 400 16px/24px var(--font); color: #4A4B50; max-width: 34em; text-wrap: pretty; }
 .sc-sites .sw-page .rl.mp-dek-s { display: none; }
 .sc-sites .rl.mp-by { margin-top: 14px; font: 400 12px/16px var(--font); color: #8A8B90; }
@@ -228,7 +228,7 @@
 @media (max-width: 599px) {
   .sc-sites { --row: 62px; }
   .sc-sites .sit { row-gap: 22px; }
-  .js-scenes .sc-sites .sit { padding-top: 52px; }
+  .js-scenes .sc-sites .sit { padding-top: 56px; }
   .sc-sites .sw, .sc-sites .sit-light { border-radius: 16px; }
   .sc-sites .sw-bar { height: 46px; gap: 7px; padding: 0 8px 0 13px; }
   .sc-sites .sw-lights { gap: 6px; margin-right: 2px; }
@@ -275,13 +275,27 @@
   .js-scenes .sc-sites .sit-side { transform: none; opacity: var(--t, 1); }
   .js-scenes .sc-sites .sit-lead { display: none; }
 }
-@media (max-width: 599px) and (min-height: 900px) {
-  .js-scenes .sc-sites .sit-lead { display: block; }
-}
+/* Shorter phones (and phones in Safari, whose toolbars take a share of the screen — the pin is 100svh tall):
+   whole blocks leave, never a cut line. Under 800 px the list's label goes; under 740 the window drops its
+   edition bar and standfirst; under 620 (an iPhone SE in Safari) the nav and the list's mono line go too. */
 @media (max-width: 599px) and (max-height: 799px) {
   .js-scenes .sc-sites { --row: 56px; }
-  .js-scenes .sc-sites .sit { row-gap: 16px; padding-top: 48px; }
+  .js-scenes .sc-sites .sit { row-gap: 16px; }
   .js-scenes .sc-sites .sit-k { display: none; }
+}
+@media (max-width: 599px) and (max-height: 739px) {
+  .js-scenes .sc-sites { --row: 54px; }
+  .js-scenes .sc-sites .mp-util, .js-scenes .sc-sites .sw-page .rl.mp-dek-s { display: none; }
+  .js-scenes .sc-sites .mp-mast { padding-top: 16px; }
+}
+@media (max-width: 599px) and (max-height: 619px) {
+  .js-scenes .sc-sites { --row: 36px; }
+  .js-scenes .sc-sites .sit { row-gap: 14px; }
+  .js-scenes .sc-sites .sit-head { font-size: 30px; line-height: 34px; }
+  .js-scenes .sc-sites .mp-nav { height: 0; border-bottom: 0; overflow: hidden; }
+  .js-scenes .sc-sites .mp-main { padding-top: 14px; }
+  .js-scenes .sc-sites .sit-it { grid-template-areas: "who c t"; }
+  .js-scenes .sc-sites .sit-m { display: none; }
 }
 @media (max-width: 374px) {
   .sc-sites .sit-head { font-size: 31px; line-height: 36px; }

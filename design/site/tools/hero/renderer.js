@@ -133,7 +133,7 @@
   uniform float uHGain;
   uniform vec3 uLC[NLIGHT], uLU[NLIGHT], uLV[NLIGHT], uLCol[NLIGHT];
   uniform vec3 uBg;
-  uniform float uPool;
+  uniform float uPool, uPoolR;
   uniform int uSpp;
   uniform float uClamp;
 
@@ -186,7 +186,7 @@
         if (t > 0.0) { vec3 q = lp + ld * t; if (abs(q.x) < ${LID.hx} && q.z > 0.0 && q.z < LLEN) { tb = t; if (ld.y > 0.0) rad = display(q.xz); } }
       }
     }
-    if (uHGain > 0.0) {
+    if (uHGain > 0.0 && !fromLid) {
       vec3 n = normalize(cross(uHU, uHV));
       float dn = dot(L, n);
       if (abs(dn) > 1e-4) {
@@ -326,7 +326,7 @@
     if (uMat == 0) {
       // the floor: the page's black, a contact shadow under the Mac, a faint pool of light round it
       float d = sdRR(P.xz, vec2(${BASE.hx}, ${BASE.hz}), 10.5);
-      float pool = exp(-pow(length(P.xz * vec2(0.85, 1.25)) / 330.0, 2.0)) * uPool;
+      float pool = exp(-pow(length(P.xz * vec2(0.85, 1.25)) / uPoolR, 2.0)) * uPool;
       float vis = d < 45.0 ? occl(P, vec3(0.0, 1.0, 0.0), 1.6, 0.9) : 1.0;
       float soft = smoothstep(-8.0, 34.0, d);
       vis = min(vis, 0.12 + 0.88 * soft);
@@ -558,15 +558,17 @@
     if (o.on <= 0) return;
     const L = markLayout(o);
     // a deep, quiet glow behind the mark, so the panel reads as lit
+    const bk = (o.bg ?? 1) * o.on;
+    ctx.fillStyle = `rgba(7,11,24,${Math.min(1, bk).toFixed(3)})`; ctx.fillRect(0, 0, SCR.w, SCR.h);
     const g = ctx.createRadialGradient(L.cx, L.cy, 0, L.cx, L.cy, SCR.w * 0.62);
-    g.addColorStop(0, `rgba(22,38,84,${(0.55 * o.on).toFixed(3)})`); g.addColorStop(0.45, `rgba(9,16,38,${(0.5 * o.on).toFixed(3)})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+    g.addColorStop(0, `rgba(30,52,116,${Math.min(1, 0.62 * bk).toFixed(3)})`); g.addColorStop(0.45, `rgba(13,23,56,${Math.min(1, 0.55 * bk).toFixed(3)})`); g.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = g; ctx.fillRect(0, 0, SCR.w, SCR.h);
     const off = document.createElement('canvas'); off.width = SCR.w; off.height = SCR.h;
     const c2 = off.getContext('2d'); c2.font = `${L.fs}px ${MONO}`; c2.textBaseline = 'middle';
     const cw = c2.measureText('0').width;
     const tokens = tokenMaps(L, cw);
     const which = o.lifted ? [1] : [0, 1];
-    paintHalves(c2, cw, L, { which, ghost: o.lifted ? o.ghost : 0, gain: o.on, tokens });
+    paintHalves(c2, cw, L, { which, ghost: o.lifted ? o.ghost : 0, gain: o.on, gains: [1, o.rightGain ?? 1], flat: o.flat ?? 0, tokens });
     paintSeam(c2, L, o.seam ?? 1, (o.seam ?? 1) * o.on, L.LH / 12);
     ctx.save(); ctx.filter = `blur(${(L.LH * 0.42).toFixed(1)}px)`; ctx.globalAlpha = 0.75; ctx.drawImage(off, 0, 0); ctx.restore();
     ctx.drawImage(off, 0, 0);
@@ -726,7 +728,7 @@
       gl.uniform1f(P.u.uHGain, half ? half.gain * (o.halfLight ?? 3.0) : 0);
       if (half) { gl.uniform3fv(P.u.uHC, half.c); gl.uniform3fv(P.u.uHU, half.u); gl.uniform3fv(P.u.uHV, half.v); }
       gl.uniform3fv(P.u.uLC, Ls.c); gl.uniform3fv(P.u.uLU, Ls.u); gl.uniform3fv(P.u.uLV, Ls.v); gl.uniform3fv(P.u.uLCol, Ls.col);
-      gl.uniform3fv(P.u.uBg, bgLin); gl.uniform1f(P.u.uPool, o.pool ?? 1.2);
+      gl.uniform3fv(P.u.uBg, bgLin); gl.uniform1f(P.u.uPool, o.pool ?? 1.2); gl.uniform1f(P.u.uPoolR, o.poolR ?? 330);
       gl.uniform1i(P.u.uSpp, o.spp || 2); gl.uniform1f(P.u.uClamp, o.clamp ?? 10);
       const draw = (mesh, model, mat) => {
         gl.uniform1i(P.u.uMat, mat); gl.uniformMatrix4fv(P.u.uM, false, model); gl.uniformMatrix3fv(P.u.uNM, false, M.n3(model));
@@ -742,7 +744,7 @@
         gl.uniformMatrix4fv(Q.u.uVP, false, vp); gl.uniform3fv(Q.u.uU, half.gu); gl.uniform3fv(Q.u.uV, half.gv); gl.uniform1f(Q.u.uN, atlas.n);
         gl.bindVertexArray(glyphVao); gl.activeTexture(gl.TEXTURE0); gl.uniform1i(Q.u.uA, 0);
         // the glow (three times the cell, blurred), then the characters
-        gl.bindTexture(gl.TEXTURE_2D, atlas.glow); gl.uniform2f(Q.u.uSz, half.gsz[0] * 3, half.gsz[1] * 3); gl.uniform1f(Q.u.uK, o.half.glowK ?? 0.5);
+        gl.bindTexture(gl.TEXTURE_2D, atlas.glow); const gs = o.half.glowS ?? 3; gl.uniform2f(Q.u.uSz, half.gsz[0] * gs, half.gsz[1] * gs); gl.uniform1f(Q.u.uK, o.half.glowK ?? 0.5);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, glyphN);
         gl.bindTexture(gl.TEXTURE_2D, atlas.crisp); gl.uniform2f(Q.u.uSz, half.gsz[0], half.gsz[1]); gl.uniform1f(Q.u.uK, 1);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, glyphN);
@@ -781,9 +783,10 @@
     const pts = [];
     for (const z of [-110, 110]) for (const x of [-156, 156]) { pts.push(toPx([x, 0.8, z])); pts.push(toPx([x, 11.3, z])); }
     for (const x of [-156, 156]) { pts.push(toPx(M.xf(lid, [x, 0, LID.len]))); pts.push(toPx(M.xf(lid, [x, LID.t, LID.len]))); }
-    if (half) pts.push(toPx(half.c));
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-    return { ms: Math.round(performance.now() - t0), box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)].map(Math.round), half: half ? toPx(half.c).map(Math.round) : null };
+    let hbox = null;
+    if (half) { const hp = []; for (const a of [-1, 1]) for (const b of [-1, 1]) hp.push(toPx([half.c[0] + half.u[0] * a + half.v[0] * b, half.c[1] + half.u[1] * a + half.v[1] * b, half.c[2] + half.u[2] * a + half.v[2] * b])); hbox = [Math.min(...hp.map((q) => q[0])), Math.min(...hp.map((q) => q[1])), Math.max(...hp.map((q) => q[0])), Math.max(...hp.map((q) => q[1]))].map(Math.round); }
+    return { ms: Math.round(performance.now() - t0), box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)].map(Math.round), half: half ? toPx(half.c).map(Math.round) : null, hbox };
   }
 
   window.HERO = { init, frame, image: (type = 'image/png', q) => canvas.toDataURL(type, q) };

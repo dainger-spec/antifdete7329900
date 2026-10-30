@@ -3,8 +3,10 @@
 // key — each one drawn as the app or macOS would show it. Labels on hairlines name each layer as it
 // separates (desktop); on a phone one caption at a time, under the stack, names the layer that lifts.
 //
-// Timeline (--p of the scene): 0.02–0.28 the window turns (--rt), 0.26–0.56 the layers part (--et),
-// 0.36–0.80 the labels come in one by one. Without scenes: the finished view, every label shown.
+// Timeline (--p of the scene): 0.02–0.28 the window turns (--rt) from a large face-on shot, 0.26–0.56
+// the layers part (--et), 0.36–0.80 the labels come in one by one. Without scenes: the finished view,
+// every label shown. On a phone the view turns about one axis only, so each slab's words stay level
+// and large enough to read; one caption at a time names the layer that lifts.
 import { inline, esc } from '../../../lib/html.mjs';
 import { icon, flag } from '../../../lib/kit.mjs';
 import { avatar } from '../../components.mjs';
@@ -12,7 +14,7 @@ import { twoTone } from './lib.mjs';
 
 export const assets = { styles: ['scenes/layers.css'] };
 
-const FILES = ['passwords.bin', 'history.bin', 'cookies.bin', 'webdata.pbsa'];
+const FILES = ['passwords.bin', 'cookies.bin', 'history.bin', 'webdata.pbsa'];
 
 function faces(u) {
   const win = `<div class="ly-face lf-win">
@@ -26,12 +28,12 @@ function faces(u) {
   // The profiles' own processes, this one selected; it sits last, on the edge the stack shows.
   const procs = u.procs.map((x, i) => ({ x, i })).reverse();
   const proc = `<div class="ly-face lf-proc">
-      <div class="lp-head"><span>${esc(u.procHead[0])}</span><span>${esc(u.procHead[1])}</span></div>
-      ${procs.map(({ x: [n, p], i }) => `<div class="lp-row${i === 0 ? ' on' : ''}">${avatar(n, i, 18)}<span class="lp-n">${esc(n)}</span><span class="lp-p">${esc(p)}</span></div>`).join('')}
+      ${procs.map(({ x: [n, p], i }) => `<div class="lp-row${i === 0 ? ' on' : ''}">${avatar(n, i, 20)}<span class="lp-n">${esc(n)}</span><span class="lp-p">${esc(p)}</span></div>`).join('')}
     </div>`;
   const data = `<div class="ly-face lf-data">
       ${FILES.map((f) => `<div class="ld-file">${icon('doc', 15)}<code>${f}</code>${icon('lockFill', 10)}</div>`).join('')}
     </div>`;
+  // Each setting and its value side by side, in the band the slab above leaves visible.
   const net = `<div class="ly-face lf-net">
       <div class="ln-row"><span>${esc(u.net[0][0])}</span><b>${flag('DE', 14)}${esc(u.net[0][1])}</b></div>
       <div class="ln-row"><span>${esc(u.net[1][0])}</span><b>${icon('lockFill', 11)}${esc(u.net[1][1])}</b></div>

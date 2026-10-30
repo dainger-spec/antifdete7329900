@@ -1,7 +1,8 @@
 // Home scene "cta": the mark in code, drawn once per size on three canvases (left half, right half, the
 // seam) with site.js's code art; the scroll only moves and fades them (--q on .ct-art), so nothing is
-// redrawn while you scroll and nothing moves when you stop. --q: 0 when the mark's top enters the
-// window, 1 when it has risen 45 % of the window. Without scenes the mark is drawn whole (--q stays 1).
+// redrawn while you scroll and nothing moves when you stop. --q: 0 while the mark's centre is at the
+// bottom of the window, 1 when it reaches the middle — the halves meet where the reader is looking.
+// Without scenes the mark is drawn whole (--q stays 1).
 (window.LumenScenes = window.LumenScenes || []).push(function (api) {
   const art = document.querySelector('.sc-cta .ct-art');
   if (!art) return;
@@ -32,8 +33,8 @@
   let queued = false, last = -1;
   function update() {
     queued = false;
-    const vh = window.innerHeight, r = art.getBoundingClientRect();
-    const q = api.easeOut(api.clamp01((vh - r.top) / (vh * 0.45)));
+    const vh = window.innerHeight, r = art.getBoundingClientRect(), c = r.top + r.height / 2;
+    const q = api.easeInOut((vh * 0.98 - c) / (vh * 0.48));
     if (Math.abs(q - last) < 0.001) return;
     last = q;
     art.style.setProperty('--q', q.toFixed(4));

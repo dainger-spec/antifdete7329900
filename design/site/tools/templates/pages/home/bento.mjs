@@ -3,32 +3,37 @@
 // interface — the password prompt, the History window, the cookie import sheet, two Macs in sync, the
 // export sheet and its file, an ephemeral profile — drawn on the app's tokens, in its own words
 // (Localizable.strings). The pictures bleed off the tile's lower edge like a product shot.
-// Everything inside a picture is decorative (aria-hidden) and sample data (data-sample).
+// Everything inside a picture is decorative (aria-hidden) and sample data (data-sample). One picture moves
+// with the scroll (bento.js): the ephemeral profile's window empties and fades as its tile rises.
 import { inline, esc } from '../../../lib/html.mjs';
 import { icon, glyph } from '../../../lib/kit.mjs';
 import { linkArrow, avatar } from '../../components.mjs';
 import { twoTone } from './lib.mjs';
 
-export const assets = { styles: ['scenes/bento.css'] };
+export const assets = { styles: ['scenes/bento.css'], scripts: ['scenes/bento.js'] };
 
 const MAG = '<svg class="icon" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.4 10.4L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 const tl = '<span class="mw-tl"><i></i><i></i><i></i></span>';
 
 function passwords(P) {
-  return `<div class="pw-win">
-      <div class="mw-bar">${tl}<span class="mw-nav">${icon('chevronLeft', 13)}${icon('chevronRight', 13)}</span><span class="mw-url">${icon('lockFill', 9)}${esc(P.site)}</span><span class="mw-key">${icon('key', 13)}</span></div>
-      <div class="pw-page"><div class="pw-form">
-        <b>${esc(P.signIn)}</b>
-        <span class="pw-in">${esc(P.user)}</span>
-        <span class="pw-in pw-dots">••••••••••••</span>
-        <span class="pw-go">${esc(P.button)}</span>
-      </div></div>
-    </div>
-    <div class="pw-pop">
-      <span class="pw-ic">${icon('key', 18)}</span>
-      <b>${esc(P.ask)}</b>
-      <p>${esc(P.msg)}</p>
-      <div class="pw-btns"><span class="mb">${esc(P.notNow)}</span><span class="mb pri">${esc(P.save)}</span></div>
+  // The prompt hangs from the toolbar's key button: it sits in the window's own box, so its arrow stays
+  // under the key at every width.
+  return `<div class="pw-wrap">
+      <div class="pw-win">
+        <div class="mw-bar">${tl}<span class="mw-nav">${icon('chevronLeft', 13)}${icon('chevronRight', 13)}</span><span class="mw-url">${icon('lockFill', 9)}${esc(P.site)}</span><span class="mw-key">${icon('key', 13)}</span></div>
+        <div class="pw-page"><div class="pw-form">
+          <b>${esc(P.signIn)}</b>
+          <span class="pw-in">${esc(P.user)}</span>
+          <span class="pw-in pw-dots">••••••••••••</span>
+          <span class="pw-go">${esc(P.button)}</span>
+        </div></div>
+      </div>
+      <div class="pw-pop">
+        <span class="pw-ic">${icon('key', 18)}</span>
+        <b>${esc(P.ask)}</b>
+        <p>${esc(P.msg)}</p>
+        <div class="pw-btns"><span class="mb">${esc(P.notNow)}</span><span class="mb pri">${esc(P.save)}</span></div>
+      </div>
     </div>`;
 }
 
@@ -62,8 +67,10 @@ function sync(S) {
       ${S.profiles.map((p, i) => `<span class="sy-row">${avatar(p, i, 22)}<b>${esc(p)}</b>${icon('check', 12)}</span>`).join('')}
     </div>`;
   const lines = ['9f3a1c7e04b2d86f5e21', 'U2FsdGVkX1+q0Rk3vLwq', 'c41de09a77f3b8e2105d', 'mQ8xZ0pT4r+eW1sKdL9a', '04b2d86f9f3a1c7e5e21', 'X7hNq2Lr8vPc0YtA3eSg', 'b8e2105dc41de09a77f3'];
+  // The lock sits on the middle of the stream: the characters under it are left out, not cut through.
+  const gap = (l, j) => (j >= 2 && j <= 4 ? l.slice(0, 7) + ' '.repeat(6) + l.slice(13) : l);
   return `${mac(S.macs[0], 'laptop')}
-    <div class="sy-wire"><code>${lines.join('\n')}</code><span class="sy-lock">${icon('lockFill', 14)}</span></div>
+    <div class="sy-wire"><code>${lines.map(gap).join('\n')}</code><span class="sy-lock">${icon('lockFill', 14)}</span></div>
     ${mac(S.macs[1], 'desktop')}`;
 }
 
@@ -82,7 +89,17 @@ function exporting(E) {
 }
 
 function ephemeral(E) {
-  return `<div class="ep-ghost"><span class="mw-tl"><i></i><i></i><i></i></span><span class="ep-empty">${esc(E.empty)}</span></div>
+  // The guest's own History window as it closes: its visits go, the window fades, and the app's notice
+  // stays (bento.js ties this to the scroll; without scenes, the closed state). In front, the profile's
+  // row in the list, as the app labels it.
+  return `<div class="ep-win">
+      <div class="mw-bar">${tl}<span class="mw-title">${esc(E.window)}</span></div>
+      <div class="ep-body">
+        <span class="ep-note">${icon('hourglass', 12)}<span>${esc(E.notice)}</span></span>
+        <div class="ep-rows">${E.rows.map((r, i) => `<span class="ep-visit" style="--i:${i}"><i class="fav">${esc(r.t[0])}</i><span><b>${esc(r.t)}</b><em>${esc(r.u)}</em></span></span>`).join('')}</div>
+        <span class="ep-empty">${esc(E.empty)}</span>
+      </div>
+    </div>
     <div class="ep-row">${avatar(E.name, 4, 34)}<span><b>${esc(E.name)}</b><em>${icon('hourglass', 12)}${esc(E.row)}</em></span></div>`;
 }
 

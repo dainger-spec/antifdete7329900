@@ -1,10 +1,11 @@
-// Scene "mission": as many profiles as you need, each in a window of its own. One Safari window becomes many:
-// at first a deck of windows stands behind the one in front (only their bars peek out); as the scene scrolls
-// the deck spreads out the way Mission Control lays out a Mac's windows, and each window turns out to be a
+// Scene "mission": all your profiles at once, each in a window of its own. One Safari window becomes many:
+// the scene opens on a single window (the "Store" profile's shop admin); as it scrolls, the other windows come
+// out from behind it and everything spreads the way Mission Control lays out a Mac's windows — each window a
 // different profile on a different site. Under each window, as in Mission Control, its name: the profile's
-// flag and name. The front window — "Store" — keeps the focus ring.
-// On a phone the deck spreads vertically instead, like cards in Wallet: every window's bar (and with it the
-// profile: flag and name, at full size) shows above the next one; the front window shows whole at the foot.
+// flag and name. "Store" keeps the focus ring; the others show the inactive window's grey traffic lights.
+// On a phone the same window opens large under the first line, then slides down while the others fan out
+// above it like cards in Wallet: every window's bar (and with it the profile: flag and name, at full size)
+// shows above the next; the front window shows its site at the foot. A short phone screen gets four windows.
 //
 // The windows are drawn at their own size (a Mac window of 780–960 px) and scaled into the room; the room is
 // one design space (1360 wide) scaled to the page by --k (assets/scenes/mission.js; a ladder of steps in the
@@ -84,12 +85,13 @@ const chart = (lines, { w = 100, h = 40, grid = 4, fill = 0 } = {}) =>
 function store() {
   const nav = [['home', 'Übersicht', '', 1], ['box', 'Bestellungen', '12'], ['tag', 'Produkte'], ['person', 'Kunden'], ['mega', 'Marketing'], ['percent', 'Rabatte'], ['chart', 'Analysen']];
   const kpi = [['Umsatz', '2.410,80 €', '+12 %'], ['Bestellungen', '38', '+4'], ['Besucher', '1.204', '+9 %'], ['Konversionsrate', '3,1 %', '+0,4']];
-  const orders = [['#1048', 'Lena Hoffmann', 'Bezahlt', '48,90 €'], ['#1047', 'Jonas Weber', 'Bezahlt', '112,00 €'], ['#1046', 'Mia Schulz', 'Offen', '29,90 €'], ['#1045', 'Felix Wagner', 'Bezahlt', '64,50 €'], ['#1044', 'Anna Becker', 'Versandt', '89,00 €']];
+  const orders = [['#1048', 'Lena Hoffmann', 'Bezahlt', '48,90 €'], ['#1047', 'Jonas Weber', 'Bezahlt', '112,00 €'], ['#1046', 'Mia Schulz', 'Offen', '29,90 €'], ['#1045', 'Felix Wagner', 'Bezahlt', '64,50 €'], ['#1044', 'Anna Becker', 'Versandt', '89,00 €'], ['#1043', 'Paul Richter', 'Versandt', '36,40 €'], ['#1042', 'Emma Koch', 'Bezahlt', '74,80 €'], ['#1041', 'Noah Klein', 'Versandt', '52,00 €']];
+  const top = [['Hausmischung, 500 g', '14', '#C9B49A'], ['Äthiopien Guji, 250 g', '9', '#B7C2CF'], ['Espresso Nord, 1 kg', '6', '#3A3A3F'], ['Handmühle Classic', '3', '#D8D3CB']];
   const today = [0.08, 0.06, 0.05, 0.1, 0.22, 0.34, 0.3, 0.42, 0.56, 0.5, 0.62, 0.7, 0.66, 0.78];
   const prev = [0.06, 0.05, 0.08, 0.12, 0.18, 0.24, 0.3, 0.32, 0.38, 0.44, 0.42, 0.5, 0.54, 0.52];
   return `<div class="ms ms-store" lang="de">
     <aside class="st-side">
-      <div class="st-shop"><span class="st-logo">N</span><b>Nordröstung</b>${IC.chev}</div>
+      <div class="st-shop"><span class="st-logo">R</span><b>Röstwerk</b>${IC.chev}</div>
       <nav>${nav.map(([i, t, n, on]) => `<span${on ? ' class="on"' : ''}>${IC[i]}${t}${n ? `<em>${n}</em>` : ''}</span>`).join('')}</nav>
       <div class="st-sec">Verkaufskanäle</div>
       <nav><span>${IC.globe}Onlineshop</span><span>${IC.box}Marktplatz</span></nav>
@@ -105,6 +107,8 @@ function store() {
           <div class="st-axis"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span></div></div>
         <div class="st-card st-orders"><div class="st-ct"><b>Letzte Bestellungen</b><span>Alle ansehen</span></div>
           <ul>${orders.map(([n, who, st, v]) => `<li><b>${n}</b><span>${who}</span><i class="${st === 'Offen' ? 'wait' : st === 'Versandt' ? 'ship' : 'ok'}">${st}</i><em>${v}</em></li>`).join('')}</ul></div>
+        <div class="st-card st-top5"><div class="st-ct"><b>Meistverkauft</b><span>Heute</span></div>
+          <ul>${top.map(([t, q, c]) => `<li><i style="--c:${c}"></i><span>${t}</span><em>${q}</em></li>`).join('')}</ul></div>
       </div>
     </div>
   </div>`;
@@ -165,7 +169,7 @@ function support() {
 function qa() {
   const fields = [['お名前', '山田 花子', 1], ['メールアドレス', 'hanako@example.jp', 1], ['郵便番号', '150-0001', 0.45], ['都道府県', '東京都', 0.45, 1], ['住所', '渋谷区神宮前 1-2-3', 1]];
   return `<div class="ms ms-shop" lang="ja">
-    <div class="jp-stage">ステージング環境 · staging.hikari-shop.example</div>
+    <div class="jp-stage">ステージング環境 · テスト用データ</div>
     <header class="jp-top"><b>ひかり書店</b><span class="jp-steps"><i class="done">カート</i>${IC.chev}<i class="on">お届け先</i>${IC.chev}<i>お支払い</i>${IC.chev}<i>確認</i></span><span class="jp-lock">${IC.lockS}</span></header>
     <div class="jp-main">
       <div class="jp-form"><b class="jp-ht">お届け先</b>
@@ -226,16 +230,18 @@ function blog() {
 // MARK: The windows: profile, site, Safari window size, look; their place in the room and in the deck.
 // Order = the deck from the front (0) to the back. `row`/`col`: Mission Control on a wide screen.
 const SITES = [
-  { site: store, url: 'admin.nordroestung.example', w: 960, h: 600, dark: 0, row: 1, col: 1, s: 0.44 },
-  { site: ads, url: 'ads.reach.example', w: 900, h: 560, dark: 1, row: 0, col: 0, s: 0.4 },
+  { site: store, url: 'roestwerk.example', w: 960, h: 600, dark: 0, row: 1, col: 1, s: 0.44 },
+  { site: ads, url: 'reach.example', w: 900, h: 580, dark: 1, row: 0, col: 0, s: 0.4 },
   { site: support, url: 'desk.example', w: 940, h: 580, dark: 0, row: 0, col: 1, s: 0.4 },
-  { site: qa, url: 'staging.hikari-shop.example', w: 820, h: 580, dark: 0, row: 0, col: 2, s: 0.4 },
-  { site: sales, url: 'crm.pijplijn.example', w: 880, h: 540, dark: 1, row: 1, col: 2, s: 0.4 },
+  { site: qa, url: 'hikari-shop.example', w: 820, h: 580, dark: 0, row: 0, col: 2, s: 0.4 },
+  { site: sales, url: 'pijplijn.example', w: 880, h: 580, dark: 1, row: 1, col: 2, s: 0.4 },
   { site: blog, url: 'carnet.example', w: 780, h: 580, dark: 0, row: 1, col: 0, s: 0.4 },
 ];
 
-// Mission Control: rows centred in the room (ROOM wide), windows centred on their row's middle line, a label
-// under each. Everything in room pixels; the CSS and the script read the result from the windows' style.
+// Mission Control: rows centred in the room (ROOM wide), windows centred on their row's middle line; the
+// names of a row's windows sit on one line, under the row's lowest window. Everything in room pixels; the CSS
+// and the script read the result from the windows' style.
+const FEW = 4;
 const ROOM = 1360, GAP = 52, LABEL = 44, ROWGAP = 26;
 function layout() {
   const rows = [0, 1].map((r) => SITES.map((s, i) => ({ ...s, i })).filter((s) => s.row === r).sort((a, b) => a.col - b.col));
@@ -246,7 +252,7 @@ function layout() {
     const rh = Math.max(...hs), total = ws.reduce((a, b) => a + b, 0) + GAP * (row.length - 1);
     let x = (ROOM - total) / 2;
     row.forEach((s, k) => {
-      out[s.i] = { fx: x + ws[k] / 2, fy: y + rh / 2, fs: s.s, lx: x + ws[k] / 2, ly: y + rh / 2 + hs[k] / 2 + 16 };
+      out[s.i] = { fx: x + ws[k] / 2, fy: y + rh / 2, fs: s.s, lx: x + ws[k] / 2, ly: y + rh + 16 };
       x += ws[k] + GAP;
     });
     y += rh + LABEL + ROWGAP;
@@ -271,10 +277,11 @@ export default function scene(c, { lang }) {
   const n = SITES.length;
   const wins = SITES.map((s, i) => {
     const p = c.profiles[i], q = places[i];
-    // On a phone the deck goes top (the back) to bottom (the front): slot n-1 is the front window.
-    const slot = n - 1 - i;
-    return `<div class="mi-win${s.dark ? ' dark' : ''}${i === 0 ? ' focus' : ''}" data-i="${i}" style="--w:${s.w};--h:${s.h};--fx:${q.fx.toFixed(1)};--fy:${q.fy.toFixed(1)};--fs:${s.s};--slot:${slot};z-index:${n - i}">
-      ${i === 0 ? '<i class="mi-ring" data-r="0.52 0.64"></i>' : ''}<div class="mi-frame">
+    // On a phone the deck goes top (the back) to bottom (the front): slot n-1 is the front window. A short
+    // phone screen shows the first FEW windows only (.mi-few): --slot4 is their order then.
+    const slot = n - 1 - i, slot4 = i < FEW ? FEW - 1 - i : -1;
+    return `<div class="mi-win${s.dark ? ' dark' : ''}${i === 0 ? ' focus' : ''}${i >= FEW ? ' mi-extra' : ''}" data-i="${i}" style="--w:${s.w};--h:${s.h};--fx:${q.fx.toFixed(1)};--fy:${q.fy.toFixed(1)};--fs:${s.s};--slot:${slot};--slot4:${slot4};z-index:${n - i}">
+      ${i === 0 ? '<i class="mi-ring" data-r="0.56 0.68"></i>' : ''}<div class="mi-frame">
       ${bar(p, s.url)}
       <div class="mi-page">${s.site()}</div>
       </div>
@@ -284,12 +291,12 @@ export default function scene(c, { lang }) {
     const p = c.profiles[i], q = places[i];
     return `<span class="mi-label${i === 0 ? ' focus' : ''}" style="--lx:${q.lx.toFixed(1)};--ly:${q.ly.toFixed(1)}">${flag(p.code, 16)}${esc(p.name)}</span>`;
   }).join('');
-  return `<section class="scene sc-mission" data-scene="mission" data-title="${esc(c.title)}" style="--len:320vh">
+  return `<section class="scene sc-mission" data-scene="mission" data-title="${esc(c.title)}" style="--len:240vh">
   <div class="scene-pin">
     <div class="mi">
       <div class="container mi-head">
-        <h2 class="h-xl mi-h"><span class="mi-l1">${inline(c.head[0], lang)}</span> <span class="dim mi-l2" data-r="0.42 0.53">${inline(c.head[1], lang)}</span></h2>
-        <p class="lead mi-lead" data-r="0.5 0.62">${inline(c.lead, lang)}</p>
+        <h2 class="h-xl mi-h"><span class="mi-l1">${inline(c.head[0], lang)}</span> <span class="dim mi-l2" data-r="0.38 0.5">${inline(c.head[1], lang)}</span></h2>
+        <p class="lead mi-lead" data-r="0.46 0.58">${inline(c.lead, lang)}</p>
       </div>
       <div class="mi-stage" aria-hidden="true" style="--sh:${height}">
         <div class="mi-room" data-sample>

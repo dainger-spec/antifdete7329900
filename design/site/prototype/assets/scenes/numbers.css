@@ -1,69 +1,87 @@
-/* Home scene "numbers" (tools/templates/pages/home/numbers.mjs): strength in numbers over a field of
-   code seen close up. Scoped to .sc-numbers; the engine and the shared type are in site.css.
-   The field is two layers of the same tiles: a faint one everywhere (fading out at the edges), and a
-   lit one — the code in a triad of the brand's blues, like subpixels — seen only inside a soft light
-   that follows the reader down the section: --p (0 → 1 as the section scrolls past) moves its centre
-   from half a screen below the top to half a screen above the bottom. Without scenes the light rests
-   on the first figure. */
+/* Home scene "numbers" (tools/templates/pages/home/numbers.mjs): the product in numbers. Scoped to
+   .sc-numbers; the shared type is in site.css.
+   The first figure stands over a macro shot of a display (assets/scenes/numbers/display.webp: the
+   product's code, every pixel three subpixel stripes in the brand's blues, shallow depth of field). The
+   picture already falls to the page's black at its edges; a mask makes sure no crop ever shows an edge.
+   With scenes (numbers.js): --k (0 → 1 while the picture crosses the window) drifts the camera along
+   the line of code and brings the display up; --v (0 → 1) brings each figure up as it enters. Both are
+   transform and opacity only. Without scenes both are 1: the finished picture. */
 
-.sc-numbers { position: relative; overflow: hidden; padding: 176px 0 168px; isolation: isolate; }
-.sc-numbers .nm-field { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
-.sc-numbers .nm-base, .sc-numbers .nm-lit { position: absolute; inset: 0; background-size: 648px 512px; background-position: 50% 0; }
-.sc-numbers .nm-base {
-  background-image: var(--tile-base); opacity: 0.05;
-  -webkit-mask-image: linear-gradient(180deg, transparent, #000 14%, #000 86%, transparent), radial-gradient(85% 60% at 50% 50%, #000 40%, rgba(0, 0, 0, 0.35));
-  -webkit-mask-composite: source-in; mask-image: linear-gradient(180deg, transparent, #000 14%, #000 86%, transparent), radial-gradient(85% 60% at 50% 50%, #000 40%, rgba(0, 0, 0, 0.35));
-  mask-composite: intersect;
-}
-.sc-numbers .nm-lit {
-  --ly: calc(50vh + var(--p, 0) * (100% - 100vh));
-  background-image: var(--tile-lit); opacity: 0.34; will-change: transform;
-  -webkit-mask-image: radial-gradient(62% 36vh at 50% var(--ly), #000, rgba(0, 0, 0, 0.35) 45%, transparent 100%);
-  mask-image: radial-gradient(62% 36vh at 50% var(--ly), #000, rgba(0, 0, 0, 0.35) 45%, transparent 100%);
-}
+.sc-numbers { position: relative; overflow: hidden; padding: 168px 0 160px; }
+.sc-numbers .nm-top { text-align: center; }
+.sc-numbers .nm-head { margin: 0; }
 
-.sc-numbers .nm-wrap { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
-.sc-numbers .nm-head { margin-bottom: 72px; }
-.sc-numbers .nm-item { position: relative; display: grid; justify-items: center; gap: 14px; }
-/* A quiet pool of the page's black behind each figure, so the code reads as texture, never behind words */
-.sc-numbers .nm-item::before { content: ""; position: absolute; z-index: -1; inset: -56px -96px; border-radius: 50%; background: radial-gradient(closest-side, rgba(6, 7, 9, 0.92), rgba(6, 7, 9, 0.7) 55%, transparent); pointer-events: none; }
+/* The hero: the macro shot, and 448 over its darker upper half */
+.sc-numbers .nm-hero { position: relative; display: grid; place-items: center; height: clamp(640px, 50vw, 900px); }
+.sc-numbers .nm-macro {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 14%, #000 90%, transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 14%, #000 90%, transparent);
+}
+.sc-numbers .nm-macro img {
+  position: absolute; left: 50%; top: 50%; width: max(100%, 1440px); height: auto; min-height: 100%; object-fit: cover;
+  transform: translate(-50%, -50%) translateX(calc((0.5 - var(--k, 0.5)) * 72px)) scale(1.04);
+  opacity: calc(0.25 + 0.75 * var(--on, 1));
+}
+.sc-numbers .nm-first { position: relative; top: -15%; display: grid; justify-items: center; gap: 6px; text-align: center; }
 .sc-numbers .nm-n {
   display: inline-flex; align-items: baseline; color: #FFFFFF;
-  font: 600 128px/0.9 var(--font-display); letter-spacing: -0.055em; font-variant-numeric: tabular-nums;
-  text-shadow: 0 0 48px rgba(6, 7, 9, 0.85);
+  font: 600 88px/1 var(--font-display); letter-spacing: -0.045em; font-variant-numeric: tabular-nums;
 }
-.sc-numbers .nm-of { margin-left: 0.06em; font-size: 0.4em; letter-spacing: -0.02em; color: var(--text-tertiary); }
-.sc-numbers .nm-t { max-width: 330px; margin: 0; font: 500 19px/27px var(--font); color: var(--text-secondary); text-wrap: balance; text-shadow: 0 0 22px rgba(6, 7, 9, 0.95), 0 0 8px rgba(6, 7, 9, 0.9); }
+.sc-numbers .nm-first .nm-n {
+  font-size: 248px; letter-spacing: -0.065em;
+  background: linear-gradient(180deg, #FFFFFF 30%, #D4DDF0); -webkit-background-clip: text; background-clip: text; color: transparent;
+  padding: 0 0.04em; /* the clip keeps the last glyph's overhang */
+}
+.sc-numbers .nm-of { margin-left: 0.05em; font-size: 0.42em; letter-spacing: -0.02em; color: var(--text-tertiary); }
 
-.sc-numbers .nm-hero { gap: 26px; }
-.sc-numbers .nm-hero .nm-n { font-size: 216px; letter-spacing: -0.06em; }
-.sc-numbers .nm-hero .nm-t { max-width: 420px; font-size: 21px; line-height: 30px; }
-.sc-numbers .nm-pairs { display: grid; grid-template-columns: repeat(2, minmax(0, 420px)); justify-content: center; column-gap: 48px; row-gap: 104px; margin-top: 128px; }
-.sc-numbers .nm-wide { margin-top: 120px; }
-.sc-numbers .nm-code code { background: none; border: 0; padding: 0; font: 600 76px/1.05 var(--font-mono); letter-spacing: -0.03em; color: #FFFFFF; white-space: nowrap; }
-.sc-numbers .nm-wide .nm-t { max-width: 420px; }
-.sc-numbers .nm-link { margin-top: 72px; }
+.sc-numbers .nm-body { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.sc-numbers .nm-t { margin: 0; font: 500 17px/25px var(--font); color: var(--text-secondary); text-wrap: balance; }
+.sc-numbers .nm-first .nm-t { max-width: 460px; font-size: 21px; line-height: 30px; color: #C3C9D3; }
+
+/* The rest, in columns */
+.sc-numbers .nm-cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px; width: 100%; margin-top: 40px; }
+.sc-numbers .nm-col { display: grid; justify-items: center; align-content: start; gap: 16px; }
+.sc-numbers .nm-col .nm-t { max-width: 270px; text-wrap: pretty; }
+
+/* The cipher, wide */
+.sc-numbers .nm-wide { display: grid; justify-items: center; gap: 18px; margin-top: 128px; }
+.sc-numbers .nm-code code { background: none; border: 0; padding: 0; font: 600 72px/1.05 var(--font-mono); letter-spacing: -0.035em; color: #FFFFFF; white-space: nowrap; }
+.sc-numbers .nm-wide .nm-t { max-width: 360px; }
+.sc-numbers .nm-link { margin: 64px 0 0; }
 .sc-numbers .nm-link .link-arrow { font: 500 17px/22px var(--font); color: #8FB2FF; }
 
-.js .sc-numbers .nm-item.reveal:not(.in) { transform: translateY(40px); }
-.js .sc-numbers .nm-item.reveal { transition-duration: 700ms; }
+/* Scroll-tied entrance (scenes only; numbers.js sets --v on each figure) */
+.js-scenes .sc-numbers .nm-fig { opacity: var(--v, 1); transform: translateY(calc((1 - var(--v, 1)) * 28px)); }
+.js-scenes .sc-numbers .nm-first { transform: translateY(calc((1 - var(--v, 1)) * 28px)) scale(calc(0.96 + 0.04 * var(--v, 1))); }
+
+@media (min-width: 1600px) {
+  .sc-numbers .nm-first .nm-n { font-size: 280px; }
+}
 
 @media (max-width: 1099px) {
-  .sc-numbers .nm-hero .nm-n { font-size: 180px; }
-  .sc-numbers .nm-n { font-size: 108px; }
+  .sc-numbers .nm-first .nm-n { font-size: 208px; }
+  .sc-numbers .nm-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 72px; max-width: 640px; }
   .sc-numbers .nm-code code { font-size: 60px; }
 }
 
+/* Phone: the hero tall and narrow; the other figures two by two */
 @media (max-width: 599px) {
-  .sc-numbers { padding: 120px 0 112px; }
-  .sc-numbers .nm-base, .sc-numbers .nm-lit { background-size: 486px 384px; }
-  .sc-numbers .nm-lit { -webkit-mask-image: radial-gradient(90% 30vh at 50% var(--ly), #000, rgba(0, 0, 0, 0.35) 45%, transparent 100%); mask-image: radial-gradient(90% 30vh at 50% var(--ly), #000, rgba(0, 0, 0, 0.35) 45%, transparent 100%); }
-  .sc-numbers .nm-head { margin-bottom: 48px; }
-  .sc-numbers .nm-hero .nm-n { font-size: 132px; }
-  .sc-numbers .nm-n { font-size: 92px; }
-  .sc-numbers .nm-pairs { grid-template-columns: minmax(0, 1fr); row-gap: 72px; margin-top: 80px; }
-  .sc-numbers .nm-wide { margin-top: 72px; }
-  .sc-numbers .nm-code code { font-size: 40px; }
-  .sc-numbers .nm-t, .sc-numbers .nm-hero .nm-t { max-width: 300px; font-size: 17px; line-height: 25px; }
-  .sc-numbers .nm-link { margin-top: 56px; }
+  .sc-numbers { padding: 112px 0 104px; }
+  .sc-numbers .nm-hero { height: 540px; }
+  .sc-numbers .nm-macro img { width: auto; height: 100%; min-height: 0; max-width: none; }
+  .sc-numbers .nm-first { top: -14%; gap: 4px; }
+  .sc-numbers .nm-first .nm-n { font-size: 148px; letter-spacing: -0.06em; }
+  .sc-numbers .nm-first .nm-t { max-width: 300px; font-size: 18px; line-height: 26px; }
+  /* The other figures as rows, like a spec sheet: the figure, and beside it what it counts */
+  .sc-numbers .nm-cols { grid-template-columns: minmax(0, 1fr); gap: 0; max-width: none; margin-top: 8px; text-align: left; }
+  .sc-numbers .nm-col { grid-template-columns: 122px minmax(0, 1fr); justify-items: start; align-items: center; gap: 14px; padding: 20px 0; border-top: 1px solid var(--divider); }
+  .sc-numbers .nm-col:last-child { border-bottom: 1px solid var(--divider); }
+  .sc-numbers .nm-n { font-size: 56px; }
+  .sc-numbers .nm-t { font-size: 16px; line-height: 22px; }
+  .sc-numbers .nm-col .nm-t { max-width: none; text-wrap: pretty; }
+  .sc-numbers .nm-wide { gap: 12px; margin-top: 80px; }
+  .sc-numbers .nm-code code { font-size: 38px; }
+  .sc-numbers .nm-wide .nm-t { max-width: 280px; font-size: 16px; line-height: 23px; }
+  .sc-numbers .nm-link { margin-top: 48px; }
 }

@@ -1,31 +1,31 @@
-// Home scene "numbers": each figure climbs to its value as it comes up the screen — tied to the scroll,
-// so it stops when the scroll stops and runs back if you scroll back. From the moment the figure's top
-// enters the window (0) until it is 40 % of the window up (1); every figure is whole once it can be
-// read in the middle of the screen. Scenes only: without them (Reduce Motion, shots, no JavaScript)
-// the figures are simply their values.
+// Home scene "numbers": scroll-tied, scenes only (without them every figure and the picture are simply
+// finished). Two things follow the scroll, and stop when it stops:
+//  - the macro shot: --k (0 when its top enters the window, 1 when its bottom leaves) drifts the camera
+//    along the line of code; --on brings the display up while it rises into the lower half;
+//  - each figure: --v (0 → 1) while its top climbs from 96 % to 74 % of the window height (a column's
+//    figures a little after one another), so every figure is whole well below the middle of the window.
+// No figure counts: a count would show values that are not facts.
 (window.LumenScenes = window.LumenScenes || []).push(function (api) {
   if (!api.scenesOn) return;
-  const items = Array.from(document.querySelectorAll('.sc-numbers [data-count]'))
-    .map((n) => ({ n, to: +n.dataset.count, last: -1 }))
-    .filter((x) => x.to > 0);
-  if (!items.length) return;
-  // Keep each figure's width while it counts, so the line does not jitter.
-  const hold = () => items.forEach((x) => {
-    x.n.style.minWidth = ''; const keep = x.n.textContent; x.n.textContent = String(x.to);
-    x.n.style.display = 'inline-block'; x.n.style.textAlign = 'right';
-    x.n.style.minWidth = `${x.n.getBoundingClientRect().width}px`; x.n.textContent = keep;
-  });
-  hold();
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(hold);
-  let queued = false;
+  const root = document.querySelector('.sc-numbers');
+  if (!root) return;
+  const hero = root.querySelector('.nm-hero'), img = root.querySelector('.nm-macro img');
+  const figs = Array.from(root.querySelectorAll('.nm-fig')).map((el) => ({ el, c: +(el.style.getPropertyValue('--c') || 0), v: -1 }));
+  let k0 = -1, on0 = -1, queued = false;
   function update() {
     queued = false;
     const vh = window.innerHeight;
-    for (const x of items) {
-      const r = x.n.getBoundingClientRect();
-      const t = api.clamp01((vh - r.top) / (vh * 0.4));
-      const v = Math.round(x.to * api.easeOut(t));
-      if (v !== x.last) { x.last = v; x.n.textContent = String(v); }
+    const r = hero.getBoundingClientRect();
+    if (r.bottom > -vh && r.top < 2 * vh) {
+      const k = api.clamp01((vh - r.top) / (vh + r.height));
+      const on = api.smooth((vh - r.top) / (vh * 0.55));
+      if (Math.abs(k - k0) > 0.0005) { k0 = k; img.style.setProperty('--k', k.toFixed(4)); }
+      if (Math.abs(on - on0) > 0.002) { on0 = on; img.style.setProperty('--on', on.toFixed(3)); }
+    }
+    for (const f of figs) {
+      const t = f.el.getBoundingClientRect().top;
+      const v = api.easeOut((vh * (0.96 - f.c * 0.025) - t) / (vh * 0.22));
+      if (Math.abs(v - f.v) > 0.002) { f.v = v; f.el.style.setProperty('--v', v.toFixed(3)); }
     }
   }
   const kick = () => { if (!queued) { queued = true; requestAnimationFrame(update); } };

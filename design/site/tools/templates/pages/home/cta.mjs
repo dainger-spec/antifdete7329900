@@ -3,14 +3,14 @@
 // rises up the screen, and the seam of light between them comes on when they meet (cta.js; scroll-tied,
 // nothing moves on its own). Then the offer and the two buttons. Without scenes: the mark whole, lit.
 // Without JavaScript: the plain mark (.art-fallback).
-import { inline } from '../../../lib/html.mjs';
+import { inline, esc } from '../../../lib/html.mjs';
 import { glyph } from '../../../lib/kit.mjs';
 import { btn } from '../../components.mjs';
 
 export const assets = { styles: ['scenes/cta.css'], scripts: ['scenes/cta.js'] };
 
 export default function cta(ct, { lang }) {
-  return `<section class="sc-cta" data-scene="cta">
+  return `<section class="sc-cta" data-scene="cta" data-title="${esc(ct.navTitle)}">
   <div class="container ct-wrap">
     <div class="ct-art" aria-hidden="true">
       <i class="ct-glow"></i>

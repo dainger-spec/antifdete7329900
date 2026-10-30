@@ -2,8 +2,9 @@
 // place for this device on the page). *Starred* phrases are set in the accent blue.
 //
 // The paragraph is set word by word so each word can carry its own light (--i of --n). Typesetting is
-// done here, not by the browser: short words stick to the next word, a dash to the word before it, and
-// the last two words stay together, so no line ends on «в» and no line holds a single word.
+// done here, not by the browser: short words stick to the next word, a sentence's first word to its
+// second, a dash to the word before it, and the closing accent phrase stays whole, so no line ends on «в»
+// or on a lone «Сайты», and no line holds a single word.
 import { esc, plain } from '../../../lib/html.mjs';
 import { STICKY } from './lib.mjs';
 
@@ -28,6 +29,7 @@ function words(text, lang) {
     let glue = ' ';
     if (!next) glue = '';
     else if (sticky.has(x.w.toLowerCase())) glue = NBSP;            // «в отдельной», «и история»
+    else if (i === 0 || /[.!?]$/.test(list[i - 1].w)) glue = NBSP;     // a sentence never leaves its first word behind: «Сайты видят»
     else if (/^[—–]$/.test(next.w)) glue = NBSP;                       // «Safari —»
     else if (i >= tail) glue = NBSP;                                   // no lone word (or split phrase) on the last line
     return { ...x, glue };

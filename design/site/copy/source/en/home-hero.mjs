@@ -3,7 +3,7 @@
 export default {
   section: 'A multi-account browser',
   title: ['Every account', 'gets its own Safari.'],
-  lead: 'Its own cookies, IP, language and time zone for every profile. No signing in and out, and no leaks.',
+  lead: 'Its own cookies, IP, language and time zone for every profile. Every account open at once, and nothing leaks.',
   primary: 'Try it free',
   secondary: 'Features',
   caption: ['One Mac, many Safaris.', 'And they never mix.'],
