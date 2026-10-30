@@ -152,10 +152,14 @@ This app's executable, built by SwiftPM, declares the SDK of its platform in Pac
 was off in every page: among them, by WebKit's open source, the network loader Safari uses
 (`UseCFNetworkNetworkLoader`, macOS 15), `focus` dispatched before the client is told (15.4),
 `user-select` superseding `-webkit-user-select` (27), and Trusted Types (the owner's Mac with macOS
-27: `window.trustedTypes` there in Safari 27, missing in a profile). Every process of this app calls
-`+[WKProcessPool _setLinkedOnOrAfterEverything]` first thing — WebKit's own switch, made for Safari
-— so its WebKit behaviors are Safari's whatever SDK it declares (`SDKBehaviors`; rules 1–3). WebKit
-hands them to every process it starts. Other frameworks follow the declared SDK too (AppKit's
+27: `window.trustedTypes` there in Safari 27, missing in a profile). `+[WKProcessPool
+_setLinkedOnOrAfterEverything]` is WebKit's own switch for this, made for Safari: every behavior on,
+whatever SDK the app declares (`SDKBehaviors`; rules 1–3). **The app does not switch it on**: in CI
+run 448 (macOS 27), with it on, a profile with a proxy had the self-test's AIA canary — the address
+a certificate names for its missing intermediate — resolved by this Mac, outside the proxy, caught
+by the egress capture (runs 446 and 447 without it were clean). The same applies to declaring a
+newer SDK, which turns on the same network loader; which behavior resolves the address is measured
+(`scripts/aia_variants.py`) before either is used. Other frameworks follow the declared SDK too (AppKit's
 visible frame of the screen, which WebKit gives pages as `screen.availHeight`, is measured for it).
 CI shows what follows the SDK on each runner: the app as built and a copy whose executable declares
 the runner's own SDK, each without and with the switch, by the window's own properties and the

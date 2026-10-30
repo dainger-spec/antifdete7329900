@@ -15,10 +15,17 @@ import WebKit
 /// removed once Safari calls _setLinkedOnOrAfterEverything everywhere"): every behavior on, as in
 /// Safari, whatever SDK this app was built with. WebKit hands the set to every process it starts
 /// (`client-sdk-aligned-behaviors`), and reads it as preferences are made, so it is set first thing,
-/// before any web view or web process exists (main.swift). WebKit's own code and Safari's real state:
-/// the parity rule's first two points (docs/ISOLATION_AND_LIMITATIONS.md §2).
+/// before any web view or web process exists.
+///
+/// The app does not switch it on. In CI run 448 (macOS 27), with every behavior on, a profile with a
+/// proxy had the self-test's AIA canary — the address a certificate names for its missing
+/// intermediate — resolved by this Mac, outside the proxy (the egress capture; runs 446 and 447
+/// without it were clean). Among what it turns on is WebKit's network loader
+/// (`UseCFNetworkNetworkLoader`, macOS 15), which an executable declaring a newer SDK gets as well;
+/// which behavior does it is measured (scripts/aia_variants.py). Only `--sdk-everything` (CI's
+/// measurements) and `--sdk-check --everything` call it.
 enum SDKBehaviors {
-    /// Whether `matchSafari` turned every behavior on in this process (the self-test checks it).
+    /// Whether `matchSafari` turned every behavior on in this process (the self-test says so).
     private(set) static var matched = false
 
     /// Every SDK-aligned behavior on, as in Safari. False when this WebKit has no such switch.

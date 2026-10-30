@@ -184,8 +184,11 @@ final class SelfTest {
     }
 
     /// One group of checks: an error it throws, which none of its checks expected, fails the group
-    /// by name with the error, and the self-test goes on.
+    /// by name with the error, and the self-test goes on. With `PB_SELFTEST_ONLY` set (group names,
+    /// comma-separated), only those groups run: a measurement of one (scripts/aia_variants.py).
     private func group(_ name: String, _ body: () async throws -> Void) async {
+        if let only = ProcessInfo.processInfo.environment["PB_SELFTEST_ONLY"],
+           !only.split(separator: ",").contains(where: { $0 == name }) { return }
         do {
             try await body()
         } catch {
@@ -1756,10 +1759,8 @@ final class SelfTest {
             }
         }
 
-        // WebKit's behaviors that follow an app's SDK (Trusted Types and the rest) are Safari's —
-        // every one on — in this process, whatever SDK the app was built with (SDKBehaviors).
-        check("surface: WebKit's behaviors that follow the SDK are Safari's, every one (_setLinkedOnOrAfterEverything)",
-              SDKBehaviors.matched, "this WebKit has no such switch; built with the macOS \(SDKBehaviors.linkedSDK ?? "?") SDK")
+        // Which of WebKit's behaviors that follow an app's SDK this run has (SDKBehaviors).
+        info("WebKit's behaviors that follow the SDK: \(SDKBehaviors.matched ? "every one, as Safari's (--sdk-everything)" : "this build's, the macOS \(SDKBehaviors.linkedSDK ?? "?") SDK's")")
 
         // A persistent profile's store is made with a browser's share of the disk
         // (BrowserStorageQuota): Safari's quota is then WebKit's own answer. Read in a world the

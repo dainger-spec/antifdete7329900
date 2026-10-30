@@ -12,9 +12,10 @@ MainActor.assumeIsolated {
         // (SDKBehaviors.swift; scripts/sdk_check.sh). It sets them itself, so it comes first.
         SDKCheck.run(arguments: arguments)
     }
-    // WebKit's behaviors that follow an app's SDK, every one on, as WebKit has them for Safari:
-    // before any web view or web process exists (SDKBehaviors.swift says why).
-    SDKBehaviors.matchSafari()
+    // WebKit's behaviors that follow an app's SDK stay as this build's. Every one on, as WebKit has
+    // them for Safari, only when CI measures it (--sdk-everything): in run 448 a profile with a proxy
+    // had a certificate's address resolved by this Mac with them on (SDKBehaviors.swift).
+    if arguments.contains("--sdk-everything") { SDKBehaviors.matchSafari() }
     if arguments.contains("--exception-check") {
         // An exception thrown inside AppKit's run loop, with this build's exception hooks or the
         // earlier way (ExceptionLog.swift): installs its own, so it comes before the line below.
