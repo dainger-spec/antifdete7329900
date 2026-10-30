@@ -93,6 +93,18 @@ jobs:
         run: |
           grep -E '^(PASS|FAIL) certificates' build/egress27/selftest.txt 2>/dev/null | head -10 | cut -c1-1000 \
             | sed 's/^/::notice title=macOS 27 - certificates::/' || true
+      - name: What crashed on macOS 27, if anything (crash reports)
+        if: always()
+        run: |
+          mkdir -p build/egress27/crashes
+          shopt -s nullglob
+          for report in ~/Library/Logs/DiagnosticReports/PrivacyBrowser*.ips ~/Library/Logs/DiagnosticReports/com.apple.WebKit*.ips \
+                        /Library/Logs/DiagnosticReports/PrivacyBrowser*.ips /Library/Logs/DiagnosticReports/com.apple.WebKit*.ips; do
+            cp "$report" build/egress27/crashes/ 2>/dev/null || sudo cp "$report" build/egress27/crashes/
+          done
+          sudo chmod -R a+r build/egress27/crashes 2>/dev/null || true
+          python3 scripts/crash_summary.py build/egress27/crashes/*.ips | tee build/egress27/crashes/summary.txt
+          grep '^CRASH' build/egress27/crashes/summary.txt | grep -v '^CRASH none' | head -16 | cut -c1-300 | sed 's/^/::warning title=macOS 27 - crash::/' || true
       - name: A jump to a fragment in a profile with a proxy (a measurement)
         if: always()
         run: |
@@ -229,6 +241,21 @@ jobs:
             --selftest-log build/egress/selftest-unsandboxed.txt || status=1
           echo "::endgroup::"
           exit $status
+      - name: What crashed, if a process of the app or WebKit's crashed (crash reports)
+        # A profile's own process that dies leaves the self-test only "the profile quit
+        # unexpectedly"; macOS writes what happened to a crash report. Summarized here (the crashed
+        # thread's frames), and the reports themselves go into the fingerprint-surfaces artifact.
+        if: always()
+        run: |
+          mkdir -p build/crashes
+          shopt -s nullglob
+          for report in ~/Library/Logs/DiagnosticReports/PrivacyBrowser*.ips ~/Library/Logs/DiagnosticReports/com.apple.WebKit*.ips \
+                        /Library/Logs/DiagnosticReports/PrivacyBrowser*.ips /Library/Logs/DiagnosticReports/com.apple.WebKit*.ips; do
+            cp "$report" build/crashes/ 2>/dev/null || sudo cp "$report" build/crashes/
+          done
+          sudo chmod -R a+r build/crashes 2>/dev/null || true
+          python3 scripts/crash_summary.py build/crashes/*.ips | tee build/crashes/summary.txt
+          grep '^CRASH' build/crashes/summary.txt | grep -v '^CRASH none' | head -16 | cut -c1-300 | sed 's/^/::warning title=crash::/' || true
       - name: Safari's private classes and methods the hosted chrome relies on
         # SafariChrome.expectedPieces: a macOS whose Safari renamed or removed one fails here, by name,
         # instead of a profile's window quietly degrading on a user's Mac. After the self-test, so
@@ -370,6 +397,7 @@ jobs:
             build/egress
             build/payments
             build/payments-direct
+            build/crashes
           if-no-files-found: ignore
       - name: App Sandbox container migration (unsandboxed data → sandboxed first launch)
         run: |
