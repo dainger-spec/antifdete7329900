@@ -326,15 +326,7 @@ public struct ProxyList: Codable, Equatable, Sendable {
     public static func exportText(_ entries: [ProxyListEntry]) -> String {
         var lines = ["# PrivacyBrowser proxies. The user names and passwords below are in plaintext."]
         for entry in entries {
-            let proxy = entry.proxy
-            var line = ""
-            if entry.kindKnown {
-                line += proxy.kind == .socks5 ? "socks5://" : (proxy.tlsToProxy ? "https://" : "http://")
-            }
-            if let user = proxy.username, !user.isEmpty {
-                line += Self.userInfo(user) + ":" + Self.userInfo(proxy.password ?? "") + "@"
-            }
-            line += (proxy.host.contains(":") ? "[\(proxy.host)]" : proxy.host) + ":\(proxy.port)"
+            var line = ProxyListImport.line(for: entry.proxy, kindKnown: entry.kindKnown)
             let label = Self.cleanLabel(entry.label)
             if !label.isEmpty { line += "  # " + label }
             lines.append(line)

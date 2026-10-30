@@ -464,8 +464,24 @@ line without a scheme) is given to no profile until a check finds it. **Export**
 in the form Import reads, with the user names and passwords in plaintext — said in the sheet before
 anything is written — into a file only its owner can read (0600).
 
+**One proxy, one line.** Wherever one proxy is entered — the profile editor's *New*, the list's
+*Add* and *Edit* — it is one field, read by the same parser as a line of Import
+(`ProxyListImport.readField`): `host:port:user:pass`, `user:pass@host:port`,
+`scheme://user:pass@host:port`, `host:port`. A string the field takes is one Import takes, and a
+proxy written back (`ProxyListImport.line(for:)`, also what Export writes) reads back as the same
+proxy (unit-tested). The type comes from the scheme; without one it is **not known** — never
+taken from a default — until a check finds it (both handshakes are tried, `ProxyProbe`), or, while
+the line still names the same proxy (host, port, user name), it is the type already known for it.
+A profile never gets a proxy whose type is not known: Save checks such a line first and refuses it
+when no handshake answers. A check whose found type differs from the line's scheme wins over the
+scheme, as a check corrects a list entry. While the field is not being edited its password is
+covered by dots, found where it was written (`ProxyListImport.passwordRange`, unit-tested); where
+it cannot be found, the field shows the proxy's address with dots instead — never the password.
+Check from the field talks to the proxy alone (the probe), then makes the geolocation request
+through it, exactly as a check in the list; a check from *New* adds nothing to the list.
+
 **Giving profiles proxies of the list** (one to many, or several in turn, round-robin; the editor's
-*Choose from List…*) writes each profile's own configuration as an edit of its proxy would
+*From the List*) writes each profile's own configuration as an edit of its proxy would
 (`ProfileConfiguration.assigning`): the profile keeps a copy, so removing a proxy from the list
 changes no profile, and the copy syncs with the profile. The location remembered for the previous
 proxy is about another proxy and is dropped; the check's location of the new one is remembered in

@@ -118,6 +118,101 @@ public enum ProxyListImport {
         return report
     }
 
+    /// What one field holds: a single proxy typed or pasted where one proxy is entered (a profile's
+    /// editor, the list's Edit sheet), read by the same rules as a line of a pasted list (`read`) —
+    /// one parser for both, so a string the field takes is one the import takes, and the other way
+    /// round.
+    public enum Field: Equatable, Sendable {
+        /// Nothing (blank, or only a comment).
+        case empty
+        /// One proxy. Without a scheme its type is not known (`Line.kindGiven` false; `proxy.kind`
+        /// is a placeholder): a check finds it (`ProxyProbe`).
+        case proxy(Line)
+        /// Not a proxy, and why.
+        case problem(Reason)
+        /// More than one line that holds something: a list, which belongs in the import.
+        case several(Int)
+    }
+
+    /// `text` as one proxy (`Field`). Nothing is assumed about the type of a line without a scheme.
+    public static func readField(_ text: String) -> Field {
+        let report = read(text, defaultKind: nil)
+        if report.linesRead > 1 { return .several(report.linesRead) }
+        if let line = report.proxies.first { return .proxy(line) }
+        if let problem = report.problems.first { return .problem(problem.reason) }
+        return .empty
+    }
+
+    /// `proxy` written as one line in the form `read` takes back:
+    /// `scheme://user:password@host:port` — no scheme while its type is not known
+    /// (`kindKnown` false), the user name and password percent-encoded where they hold `:`, `@`,
+    /// `#`, `%` or spaces, an IPv6 host in brackets. The password is in it in plaintext.
+    public static func line(for proxy: ProxySettings, kindKnown: Bool = true) -> String {
+        var line = ""
+        if kindKnown {
+            line += proxy.kind == .socks5 ? "socks5://" : (proxy.tlsToProxy ? "https://" : "http://")
+        }
+        if let user = proxy.username, !user.isEmpty {
+            line += ProxyList.userInfo(user) + ":" + ProxyList.userInfo(proxy.password ?? "") + "@"
+        }
+        return line + (proxy.host.contains(":") ? "[\(proxy.host)]" : proxy.host) + ":\(proxy.port)"
+    }
+
+    /// Where the password is in `text` as it was typed or pasted — for the field to show it as dots
+    /// while it is not being edited. Nil when the text is not one proxy, has no password, or the
+    /// password is not found where `readField` read it from (the caller then shows none of it).
+    public static func passwordRange(in text: String) -> Range<String.Index>? {
+        guard case .proxy(let read) = readField(text), let password = read.proxy.password, !password.isEmpty else { return nil }
+        // The line `read` took: the first that is neither blank nor a comment.
+        var start = text.startIndex
+        while start < text.endIndex {
+            let end = text[start...].firstIndex(where: \.isNewline) ?? text.endIndex
+            let address = addressRange(in: text, line: start..<end)
+            let written = text[address]
+            if !written.isEmpty, !written.hasPrefix("#"), !written.hasPrefix("//") {
+                return passwordRange(in: text, address: address, password: password)
+            }
+            start = end < text.endIndex ? text.index(after: end) : text.endIndex
+        }
+        return nil
+    }
+
+    /// A line without the junk around it and without its ` # label` (as `read` and `splitLabel`).
+    private static func addressRange(in text: String, line: Range<String.Index>) -> Range<String.Index> {
+        func isJunk(_ character: Character) -> Bool { character.unicodeScalars.allSatisfy { junk.contains($0) } }
+        var lower = line.lowerBound, upper = line.upperBound
+        while lower < upper, isJunk(text[lower]) { lower = text.index(after: lower) }
+        var previous: Character?
+        var index = lower
+        while index < upper {
+            if text[index] == "#", let previous, previous.isWhitespace {
+                upper = index
+                break
+            }
+            previous = text[index]
+            index = text.index(after: index)
+        }
+        while upper > lower, isJunk(text[text.index(before: upper)]) { upper = text.index(before: upper) }
+        return lower..<upper
+    }
+
+    /// In `user:password@host:port` (after any scheme) the text between the first ":" and the last
+    /// "@"; in `host:port:user:password` what follows the third ":". Only when it is `password`.
+    private static func passwordRange(in text: String, address: Range<String.Index>, password: String) -> Range<String.Index>? {
+        let written = text[address]
+        let body = written.range(of: "://").map { written[$0.upperBound...] } ?? written
+        if let at = body.lastIndex(of: "@") {
+            guard let colon = body[..<at].firstIndex(of: ":") else { return nil }
+            let range = body.index(after: colon)..<at
+            let raw = String(text[range])
+            return (raw.removingPercentEncoding ?? raw) == password ? range : nil
+        }
+        let colons = body.indices.filter { body[$0] == ":" }
+        guard colons.count == 3 else { return nil }
+        let range = body.index(after: colons[2])..<body.endIndex
+        return String(text[range]) == password ? range : nil
+    }
+
     /// One address (without its label) as the proxy it names, and whether its type is known.
     static func proxy(in address: String, defaultKind: ProxySettings.Kind?) -> Result<(ProxySettings, kindGiven: Bool), ReasonError> {
         let field: ProxyHostField

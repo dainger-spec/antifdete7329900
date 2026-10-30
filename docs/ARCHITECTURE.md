@@ -314,12 +314,21 @@ ProxyListView (sheet, ⋯ → Proxies…) ── ProxyListModel (AppModel.proxyL
    │              2. working: ProxyGeoLookup.lookUp through the proxy, as the type found
    │                 (ProxyConfigurationFactory, allowFailover = false) → exit IP, country, city, network
    │            → ProxyCheckResult → ProxyList.record (a type found is the entry's) → profiles follow
-   │  Edit…     ProxyEditView → ProxyList.update → ProfileRepository.follow (the profiles that use it as it was)
+   │  Add/Edit  ProxyEditView: ProxyLineField (one line → ProxyListImport.readField; Check → ProxyChecker.check)
+   │            → ProxyListModel.addOne / update (+ the check from the sheet → ProxyList.record)
+   │            → ProfileRepository.follow (the profiles that use it as it was)
    │  Export…   ProxyExportView: plaintext warning → ProxyList.exportText → SecureFile.writeOwnerOnly (0600)
    │  Assign…   ProxyAssignView: ProxyList.rotation(of: proxies, over: profiles) → AppModel.assignProxies
    │            → ProfileRepository.assign → ProfileConfiguration.assigning (savingEdit of the proxy alone)
    │  report    ProxyReport (ProxyReportView): the state, the step that failed, in words, with advice
    └─ every change saved at once (proxies.bin); check results when the run ends or is stopped
+
+ProfileEditorView (Network tab) ── ProfileDraft.proxyMode: direct | saved | new (three buttons)
+   │  saved     SavedProxyList (the list's entries of a known type) → ProfileDraft.choose;
+   │            Check → ProxyListModel.checkProfileProxy (the result is the entry's)
+   │  new       ProxyLineField → ProxyLine (readField; type: scheme | check | known | not known yet);
+   │            Check → ProxyChecker.check (nothing added to the list); Save: type not known → check first
+   └─ ProfileDraft.makeProxy (+ the profile's own bypass list) → ProfileConfiguration.proxy
 
 ProfileManager.launch ── a proxy: ProxyProbe (one tunnel, to the start page's site) → not working →
    onProxyProblem → AppModel.proxyProblems → ProxyProblemView (the same report; Check Proxy:

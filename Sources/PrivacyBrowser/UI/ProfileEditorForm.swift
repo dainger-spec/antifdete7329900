@@ -31,13 +31,14 @@ struct ProfileEditorForm: View {
     var onCancel: () -> Void = {}
     var onSave: () -> Void = {}
     var onTunnelSettings: () -> Void = {}
-    /// The proxy list, for "Choose from list…" (empty: the picker is not shown); proxies whose
-    /// type no check has found yet are not in it.
+    /// The proxy list, for "From the list"; proxies whose type no check has found yet cannot be
+    /// chosen (they are given to no profile).
     var savedProxies: [ProxyListEntry] = []
+    /// A check run from the editor (Check, or Save finding a type) is under way.
+    var checkingProxy = false
+    var onCheckProxy: () -> Void = {}
 
     static let size = CGSize(width: 600, height: 660)
-    /// A menu is no place for thousands of items: the ones that answered, fastest first, lead.
-    static let pickerLimit = 200
 
     var body: some View {
         VStack(spacing: 0) {
@@ -96,10 +97,10 @@ struct ProfileEditorForm: View {
     @ViewBuilder
     private var subtitle: some View {
         HStack(spacing: 6) {
-            if draft.proxyEnabled, let location = draft.knownProxyLocation, let code = location.countryCode {
+            if draft.hasProxy, let location = draft.knownProxyLocation, let code = location.countryCode {
                 CountryFlag(code: code, size: 12)
                 Text(verbatim: "\(CountryNames.name(for: code)) · \(location.timeZoneIdentifier)")
-            } else if draft.proxyEnabled {
+            } else if draft.hasProxy {
                 Image(systemName: "network").font(.system(size: 11))
                 Text(L("editor.subtitle.proxy"))
             } else if isNew {
@@ -125,6 +126,13 @@ struct ProfileEditorForm: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
+                } else if checkingProxy {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(L("editor.footer.checking"))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
                 } else {
                     Text(L("editor.footer.note"))
                         .font(.lumenSecondary)
@@ -137,6 +145,7 @@ struct ProfileEditorForm: View {
                 Button(L("common.save"), action: onSave)
                     .buttonStyle(.lumenPrimary)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(checkingProxy)
             }
             .padding(.horizontal, 24)
             .frame(height: 60)
@@ -196,59 +205,34 @@ struct ProfileEditorForm: View {
         }
     }
 
-    /// With a proxy, WebRTC can only be on through the network extension's relay, and only for SOCKS5.
+    /// With a proxy, WebRTC can only be on through the network extension's relay, and only for
+    /// SOCKS5 (a proxy whose type is not known yet is not taken for one).
     private var webRTCLocked: Bool {
-        draft.proxyEnabled && !(draft.proxyKind == .socks5 && tunnelCarriesWebRTC)
+        draft.hasProxy && !(draft.chosenProxy?.kind == .socks5 && tunnelCarriesWebRTC)
     }
 
     private var network: some View {
         VStack(alignment: .leading, spacing: 14) {
-            EditorToggle(L("editor.proxy.use.title"), detail: L("editor.proxy.detail"), isOn: $draft.proxyEnabled)
-            if !savedProxies.isEmpty {
-                EditorRow(L("editor.proxy.fromList")) {
-                    Menu {
-                        ForEach(Array(ProxyCheckText.pickingOrder(savedProxies).prefix(Self.pickerLimit))) { entry in
-                            Button(ProxyCheckText.menuTitle(entry)) { draft.useProxy(entry.proxy) }
-                        }
-                    } label: {
-                        Text(L("editor.proxy.chooseFromList"))
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
+            EditorField(L("editor.proxy.connection")) {
+                Picker(L("editor.proxy.connection"), selection: $draft.proxyMode) {
+                    ForEach(ProfileDraft.ProxyMode.allCases) { Text(L($0.labelKey)).tag($0) }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 380)
             }
-            if draft.proxyEnabled {
-                EditorField(L("editor.proxy.type")) {
-                    Picker(L("editor.proxy.type"), selection: $draft.proxyKind) {
-                        Text(verbatim: "SOCKS5").tag(ProxySettings.Kind.socks5)
-                        Text(verbatim: "HTTP CONNECT").tag(ProxySettings.Kind.httpConnect)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 260)
+            switch draft.proxyMode {
+            case .direct:
+                EditorNote(L("editor.proxy.none.note"))
+            case .saved:
+                savedProxyChoice
+            case .new:
+                EditorField(L("proxyLine.field")) {
+                    ProxyLineField(line: $draft.proxyLine, checking: checkingProxy, onCheck: onCheckProxy)
                 }
-                HStack(alignment: .top, spacing: 12) {
-                    EditorField(L("editor.proxy.host")) {
-                        TextField(L("editor.proxy.host"), text: $draft.proxyHost, prompt: Text(verbatim: ""))
-                            .lumenField("proxy.example.com", isEmpty: draft.proxyHost.isEmpty)
-                    }
-                    EditorField(L("editor.proxy.port")) {
-                        TextField(L("editor.proxy.port"), text: $draft.proxyPort, prompt: Text(verbatim: ""))
-                            .lumenField("1080", isEmpty: draft.proxyPort.isEmpty)
-                    }
-                    .frame(width: 96)
-                }
-                HStack(alignment: .top, spacing: 12) {
-                    EditorField(L("editor.proxy.username")) {
-                        TextField(L("editor.proxy.username"), text: $draft.proxyUsername, prompt: Text(verbatim: "")).lumenField()
-                    }
-                    EditorField(L("editor.proxy.password")) {
-                        SecureField(L("editor.proxy.password"), text: $draft.proxyPassword, prompt: Text(verbatim: "")).lumenField()
-                    }
-                }
-                if draft.proxyKind == .httpConnect {
-                    EditorToggle(L("editor.proxy.tls"), isOn: $draft.proxyTLS)
-                }
+                EditorNote(L("editor.proxy.new.note"))
+            }
+            if draft.hasProxy {
                 EditorField(L("editor.proxy.bypass")) {
                     TextField(L("editor.proxy.bypass"), text: $draft.proxyExcludedDomains, prompt: Text(verbatim: ""))
                         .lumenField("localhost, example.com", isEmpty: draft.proxyExcludedDomains.isEmpty)
@@ -272,8 +256,9 @@ struct ProfileEditorForm: View {
                 .fixedSize()
                 .disabled(webRTCLocked)
             }
-            if draft.proxyEnabled {
-                if draft.proxyKind != .socks5 {
+            // Said for a proxy whose type is known; without one WebRTC stays off.
+            if draft.hasProxy, let kind = draft.chosenProxy?.kind {
+                if kind != .socks5 {
                     EditorNote(L("editor.webrtc.httpProxy"))
                 } else if tunnelCarriesWebRTC {
                     EditorNote(L("editor.webrtc.viaTunnel"))
@@ -315,7 +300,7 @@ struct ProfileEditorForm: View {
                     .labelsHidden()
                     .fixedSize()
                 }
-            } else if draft.proxyEnabled {
+            } else if draft.hasProxy {
                 EditorNote(L("editor.tz.fromProxyHint"))
             }
             EditorDivider()
@@ -325,6 +310,47 @@ struct ProfileEditorForm: View {
     }
 
     static let timeZones = TimeZone.knownTimeZoneIdentifiers.sorted()
+
+    /// "From the list": the list's proxies to choose one from, Check for the one chosen, and what
+    /// its last check found.
+    @ViewBuilder
+    private var savedProxyChoice: some View {
+        let usable = savedProxies.filter(\.kindKnown)
+        if usable.isEmpty {
+            EditorNote(L(savedProxies.isEmpty ? "editor.proxy.saved.empty" : "editor.proxy.saved.noneKnown"))
+        } else {
+            SavedProxyList(entries: usable, selection: Binding(
+                get: { draft.savedProxy?.id },
+                set: { id in if let entry = usable.first(where: { $0.id == id }) { draft.choose(entry) } }))
+            if let chosen = draft.savedProxy.flatMap({ chosen in usable.first { $0.id == chosen.id } }) {
+                HStack(spacing: 8) {
+                    Text(String(format: L("editor.proxy.saved.chosen"), chosen.displayName))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Button(action: onCheckProxy) {
+                        Label(L("proxyLine.check"), systemImage: "checkmark.shield")
+                    }
+                    .buttonStyle(.lumenSecondary)
+                    .disabled(checkingProxy)
+                    .help(L("editor.proxy.saved.check.help"))
+                }
+                if checkingProxy {
+                    ProxyLineCheckView(proxy: chosen.proxy, result: nil, checking: true)
+                } else if let check = chosen.lastCheck {
+                    ProxyLineCheckView(proxy: chosen.proxy, result: check)
+                }
+            } else if draft.savedProxy != nil {
+                EditorNote(L("editor.proxy.saved.gone"), tone: .warning)
+            }
+            let hidden = savedProxies.count - usable.count
+            if hidden > 0 {
+                EditorNote(String(format: L("editor.proxy.saved.hidden"), hidden))
+            }
+        }
+    }
 
     private var data: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -350,6 +376,95 @@ struct ProfileEditorForm: View {
                 .disabled(draft.ephemeral)
             EditorNote(L(draft.ephemeral ? "editor.sync.footer.ephemeral" : "editor.sync.footer"))
         }
+    }
+}
+
+// MARK: - Proxies of the list
+
+/// The list's proxies to choose one from, the ones that answered first (fastest first), each with
+/// what its last check found: its state, where it exits, its type and how slow it is.
+private struct SavedProxyList: View {
+    let entries: [ProxyListEntry]
+    @Binding var selection: UUID?
+    @State private var search = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if entries.count > 6 {
+                LumenSearchField(text: $search, prompt: L("editor.proxy.saved.search"))
+            }
+            ScrollViewReader { scroller in
+                List(selection: $selection) {
+                    ForEach(visible) { entry in
+                        SavedProxyRow(entry: entry)
+                            .tag(entry.id)
+                            .id(entry.id)
+                    }
+                }
+                .overlay {
+                    if visible.isEmpty {
+                        Text(L("proxies.noMatches")).font(.lumenBody).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .scrollContentBackground(.hidden)
+                .background(Theme.raisedInset)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+                .frame(height: 196)
+                .onAppear {
+                    if let selection { scroller.scrollTo(selection, anchor: .center) }
+                }
+            }
+        }
+    }
+
+    private var visible: [ProxyListEntry] {
+        let ordered = ProxyCheckText.pickingOrder(entries)
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return ordered }
+        return ordered.filter { entry in
+            [entry.label, entry.address, entry.proxy.username ?? "", entry.lastCheck?.city ?? "",
+             entry.lastCheck?.countryCode.map(CountryNames.name(for:)) ?? ""]
+                .contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+    }
+}
+
+private struct SavedProxyRow: View {
+    let entry: ProxyListEntry
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProxyStatusIcon(state: entry.state(checking: false))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.displayName)
+                    .font(.lumenLabel)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !entry.detailLine.isEmpty {
+                    Text(entry.detailLine)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            ProxyExitLabel(check: entry.lastCheck)
+                .frame(width: 130, alignment: .leading)
+            Text(entry.kindName)
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 56, alignment: .leading)
+            Text(ProxyCheckText.latency(entry.lastCheck))
+                .font(.lumenBody)
+                .foregroundStyle(ProxyCheckText.isSlow(entry.lastCheck) ? Theme.warning : Theme.textSecondary)
+                .monospacedDigit()
+                .frame(width: 56, alignment: .trailing)
+        }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -415,7 +530,7 @@ private struct ProxyLocationCard: View {
 // MARK: - Rows
 
 /// A labelled field: the label (12 / medium, secondary) above its control.
-private struct EditorField<Content: View>: View {
+struct EditorField<Content: View>: View {
     let label: String
     let content: Content
 

@@ -31,6 +31,7 @@ struct ProxyListPanel: View {
 
     @State private var selection: Set<UUID>
     @State private var search = ""
+    @State private var adding = false
     @State private var importing = false
     @State private var exporting = false
     @State private var assigning: ProxyAssignView.Request?
@@ -74,6 +75,9 @@ struct ProxyListPanel: View {
         }
         .frame(width: 940, height: 720)
         .background(Theme.raised)
+        .sheet(isPresented: $adding) {
+            ProxyEditView(proxies: proxies, entry: nil, profileCount: 0) { added in selection = [added] }
+        }
         .sheet(isPresented: $importing) {
             ProxyImportView(proxies: proxies) { added in selection = Set(added) }
         }
@@ -132,6 +136,10 @@ struct ProxyListPanel: View {
 
     private var toolbar: some View {
         HStack(spacing: 8) {
+            Button { adding = true } label: { Label(L("proxies.add"), systemImage: "plus") }
+                .buttonStyle(.lumenSecondary)
+                .disabled(proxies.loadError != nil)
+                .help(L("proxies.add.help"))
             Button { importing = true } label: { Label(L("proxies.import"), systemImage: "square.and.arrow.down") }
                 .buttonStyle(.lumenSecondary)
                 .disabled(proxies.loadError != nil)
@@ -479,109 +487,148 @@ enum ProxyCheckText {
     }
 }
 
-// MARK: - Edit
+// MARK: - Add and edit
 
-/// Changes one proxy of the list: its name, type, address and login. The profiles that use it as
-/// it was follow (`ProfileRepository.follow`); a changed proxy loses its last check.
+/// Adds one proxy to the list, or changes one: its name, and the proxy as one line in any of the
+/// forms providers sell (`ProxyLineField`), with Check beside it. The profiles that use an edited
+/// proxy as it was follow (`ProfileRepository.follow`); a changed proxy loses its last check — or
+/// gets the one just run from here. The type comes from the scheme; without one, from a check — or
+/// it stays the entry's own while the line still names that proxy. A proxy whose type was not
+/// known yet (a new one, or an import line without a scheme) may stay so until its first check;
+/// one whose type was known is never made unknown: Save checks it first.
 struct ProxyEditView: View {
     @ObservedObject var proxies: ProxyListModel
-    let entry: ProxyListEntry
+    /// Nil: a new proxy (Add).
+    let entry: ProxyListEntry?
     let profileCount: Int
+    /// The proxy just added (the list selects it).
+    var onAdded: (UUID) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
 
-    /// The type as the sheet offers it: SOCKS5, HTTP, HTTPS (TLS to the proxy), or left for a
-    /// check to find (only for an entry whose type is not known yet).
-    enum Kind: Hashable {
-        case unknown, socks5, http, https
-    }
-
     @State private var label: String
-    @State private var kind: Kind
-    @State private var host: String
-    @State private var port: String
-    @State private var username: String
-    @State private var password: String
+    @State private var line: ProxyLine
+    @State private var checking = false
     @State private var error: String?
 
-    init(proxies: ProxyListModel, entry: ProxyListEntry, profileCount: Int) {
+    /// `line`: what the field starts with (the screenshots' samples); by default the entry's proxy.
+    init(proxies: ProxyListModel, entry: ProxyListEntry?, profileCount: Int, line: ProxyLine? = nil,
+         onAdded: @escaping (UUID) -> Void = { _ in }) {
         _proxies = ObservedObject(wrappedValue: proxies)
         self.entry = entry
         self.profileCount = profileCount
-        let proxy = entry.proxy
-        _label = State(initialValue: entry.label)
-        _kind = State(initialValue: !entry.kindKnown ? .unknown : (proxy.kind == .socks5 ? .socks5 : (proxy.tlsToProxy ? .https : .http)))
-        _host = State(initialValue: proxy.host)
-        _port = State(initialValue: String(proxy.port))
-        _username = State(initialValue: proxy.username ?? "")
-        _password = State(initialValue: proxy.password ?? "")
+        self.onAdded = onAdded
+        _label = State(initialValue: entry?.label ?? "")
+        _line = State(initialValue: line ?? entry.map { ProxyLine(proxy: $0.proxy, kindKnown: $0.kindKnown) } ?? ProxyLine())
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(title: L("proxies.edit.title"), subtitle: L("proxies.edit.explanation"))
-            Form {
-                TextField(L("proxies.edit.name"), text: $label, prompt: Text(verbatim: entry.address))
-                Picker(L("proxies.edit.type"), selection: $kind) {
-                    if !entry.kindKnown { Text(L("proxies.import.kind.auto")).tag(Kind.unknown) }
-                    Text(verbatim: "SOCKS5").tag(Kind.socks5)
-                    Text(verbatim: "HTTP").tag(Kind.http)
-                    Text(verbatim: "HTTPS").tag(Kind.https)
+            SheetHeader(title: L(entry == nil ? "proxies.add.title" : "proxies.edit.title"),
+                        subtitle: L(entry == nil ? "proxies.add.explanation" : "proxies.edit.explanation"))
+            VStack(alignment: .leading, spacing: 14) {
+                EditorField(L("proxies.edit.name")) {
+                    TextField(L("proxies.edit.name"), text: $label, prompt: Text(verbatim: ""))
+                        .lumenField(entry?.address ?? L("proxies.edit.name.placeholder"), isEmpty: label.isEmpty)
                 }
-                TextField(L("proxies.edit.host"), text: $host)
-                TextField(L("proxies.edit.port"), text: $port)
-                TextField(L("proxies.edit.username"), text: $username)
-                SecureField(L("proxies.edit.password"), text: $password)
+                EditorField(L("proxies.edit.proxy")) {
+                    ProxyLineField(line: $line, checking: checking, onCheck: check)
+                }
                 if profileCount > 0 {
                     Text(String(format: L("proxies.edit.profiles"), profileCount))
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textSecondary)
                 }
                 if let error {
-                    Text(error).font(.lumenSecondary).foregroundStyle(Theme.danger)
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .lumenForm()
+            .padding(.horizontal, 24)
+            .padding(.bottom, 18)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
                     .buttonStyle(.lumenSecondary)
                     .keyboardShortcut(.cancelAction)
-                Button(L("common.save"), action: save)
+                Button(L(entry == nil ? "proxies.add.action" : "common.save"), action: save)
                     .buttonStyle(.lumenPrimary)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(checking || proxies.loadError != nil)
             }
         }
-        .frame(width: 480)
+        .frame(width: 560)
         .background(Theme.raised)
     }
 
+    /// Check: the proxy the line names, on its own; what it finds goes to the list with Save.
+    private func check() {
+        guard !checking, let proxy = line.checkable else { return }
+        checking = true
+        Task {
+            let result = await ProxyChecker.check(proxy)
+            checking = false
+            line.check = ProxyLine.Check(proxy: proxy, result: result)
+        }
+    }
+
     private func save() {
+        guard !checking else { return }
         error = nil
-        guard let number = Int(port.trimmingCharacters(in: .whitespaces)), (1...65535).contains(number) else {
-            error = L("proxies.edit.portInvalid")
+        let proxy: ProxySettings
+        var kindKnown = true
+        var lineLabel = ""
+        if case .proxy(let read) = line.field { lineLabel = read.label }
+        switch line.reading {
+        case .empty:
+            error = L("editor.proxy.error.empty")
             return
-        }
-        let user = username.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard user.isEmpty == password.isEmpty else {
-            error = L("proxies.edit.loginHalf")
+        case .problem(let message):
+            error = message
             return
+        case .proxy(let read, _):
+            proxy = read
+        case .kindUnknown(let read):
+            if let entry, entry.kindKnown {
+                // Known before: profiles may use it. Never made unknown — checked first.
+                guard let checkable = line.checkable else { return }
+                checking = true
+                Task {
+                    let result = await ProxyChecker.check(checkable)
+                    checking = false
+                    line.check = ProxyLine.Check(proxy: checkable, result: result)
+                    if case .kindUnknown = line.reading {
+                        if line.currentCheck?.proxy == checkable { error = L("editor.proxy.error.kindNotFound") }
+                        return
+                    }
+                    guard result.isAlive else {
+                        error = L("editor.proxy.error.notWorking")
+                        return
+                    }
+                    save()
+                }
+                return
+            }
+            proxy = read
+            kindKnown = false
         }
-        var proxy = entry.proxy
-        proxy.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        proxy.port = number
-        proxy.username = user.isEmpty ? nil : user
-        proxy.password = user.isEmpty ? nil : password
-        switch kind {
-        case .unknown: break // the placeholder stays, for a check to replace
-        case .socks5: proxy.kind = .socks5; proxy.tlsToProxy = false
-        case .http: proxy.kind = .httpConnect; proxy.tlsToProxy = false
-        case .https: proxy.kind = .httpConnect; proxy.tlsToProxy = true
-        }
-        if let problem = proxies.update(entry.id, label: label, proxy: proxy, kindKnown: kind != .unknown) {
-            error = problem
+        // A check from here, of the proxy as it is now, is its last check.
+        let check = line.currentCheck?.result
+        let name = label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? lineLabel : label
+        if let entry {
+            if let problem = proxies.update(entry.id, label: name, proxy: proxy, kindKnown: kindKnown, check: check) {
+                error = problem
+                return
+            }
         } else {
-            dismiss()
+            switch proxies.addOne(label: name, proxy: proxy, kindKnown: kindKnown, check: check) {
+            case .added(let id): onAdded(id)
+            case .failed(let problem):
+                error = problem
+                return
+            }
         }
+        dismiss()
     }
 }
 

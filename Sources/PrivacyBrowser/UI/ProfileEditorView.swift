@@ -9,18 +9,36 @@ struct ProfileDraft {
         var labelKey: String { self == .deny ? "editor.geo.deny" : "editor.geo.fixed" }
     }
 
+    /// How the profile reaches the network: three buttons, not menus in menus.
+    enum ProxyMode: String, CaseIterable, Identifiable {
+        /// Directly.
+        case direct
+        /// Through a proxy of the list.
+        case saved
+        /// Through a proxy typed or pasted here.
+        case new
+        var id: String { rawValue }
+
+        var labelKey: String {
+            switch self {
+            case .direct: return "editor.proxy.mode.none"
+            case .saved: return "editor.proxy.mode.saved"
+            case .new: return "editor.proxy.mode.new"
+            }
+        }
+    }
+
     var name = ""
     var startURL = ""
     var deviceGenerationID = DeviceGenerations.defaultID
     var customUserAgent = false
     var userAgent = ""
-    var proxyEnabled = false
-    var proxyKind: ProxySettings.Kind = .socks5
-    var proxyHost = ""
-    var proxyPort = ""
-    var proxyUsername = ""
-    var proxyPassword = ""
-    var proxyTLS = false
+    var proxyMode: ProxyMode = .direct
+    /// "New": the proxy as typed or pasted, one line.
+    var proxyLine = ProxyLine()
+    /// "From the list": the entry chosen, as the list had it then (`refreshSavedProxy`).
+    var savedProxy: ProxyListEntry?
+    /// The profile's own: a proxy of the list carries none.
     var proxyExcludedDomains = ""
     var geoMode: GeoMode = .deny
     var latitude = ""
@@ -56,21 +74,23 @@ struct ProfileDraft {
 
     init() {}
 
-    init(name: String, configuration c: ProfileConfiguration) {
+    /// `savedProxies`: the list's proxies — a profile whose proxy is one of them, reached the same
+    /// way (`ProxyList.sameConnection`), opens on "From the list" with it chosen.
+    init(name: String, configuration c: ProfileConfiguration, savedProxies: [ProxyListEntry] = []) {
         self.name = name
         startURL = c.startURL?.absoluteString ?? ""
         deviceGenerationID = c.deviceGenerationID ?? DeviceGenerations.defaultID
         customUserAgent = c.userAgent != nil
         userAgent = c.userAgent ?? ""
         if let proxy = c.proxy {
-            proxyEnabled = true
-            proxyKind = proxy.kind
-            proxyHost = proxy.host
-            proxyPort = String(proxy.port)
-            proxyUsername = proxy.username ?? ""
-            proxyPassword = proxy.password ?? ""
-            proxyTLS = proxy.tlsToProxy
+            proxyLine = ProxyLine(proxy: proxy)
             proxyExcludedDomains = proxy.excludedDomains.joined(separator: ", ")
+            if let entry = savedProxies.first(where: { $0.kindKnown && ProxyList.sameConnection($0.proxy, proxy) }) {
+                proxyMode = .saved
+                savedProxy = entry
+            } else {
+                proxyMode = .new
+            }
         }
         if case let .fixed(lat, lon, acc) = c.geolocation {
             geoMode = .fixed
@@ -92,68 +112,67 @@ struct ProfileDraft {
         syncCookies = c.syncCookies
     }
 
-    /// Fills the proxy fields with a proxy of the list ("Choose from list…"), as if typed: Save
-    /// stores it as any edit of the proxy. The bypass list stays the profile's own, as an
-    /// assignment from the Proxies sheet keeps it (`ProxySettings.withConnection(of:)`).
-    mutating func useProxy(_ proxy: ProxySettings) {
-        proxyEnabled = true
-        proxyKind = proxy.kind
-        proxyHost = proxy.host
-        proxyPort = String(proxy.port)
-        proxyUsername = proxy.username ?? ""
-        proxyPassword = proxy.password ?? ""
-        proxyTLS = proxy.tlsToProxy
+    var hasProxy: Bool { proxyMode != .direct }
+
+    /// The proxy the profile is to use, when it is chosen and its type is known.
+    var chosenProxy: ProxySettings? {
+        switch proxyMode {
+        case .direct: return nil
+        case .saved: return savedProxy?.usableProxy
+        case .new: return proxyLine.proxy
+        }
     }
 
-    /// The proxy these fields describe (nil without one). The Host field often holds a pasted
-    /// proxy string (socks5://user:pass@host:port, host:port, host:port:user:pass): it is split into
-    /// its parts; what is not a host is rejected.
+    /// "From the list": `entry`. What its last check found about where it exits becomes what the
+    /// profile knows, as when the list assigns it (`ProfileConfiguration.assigning`).
+    mutating func choose(_ entry: ProxyListEntry) {
+        savedProxy = entry
+        remember(entry.lastCheck, for: entry.proxy)
+    }
+
+    /// Keeps where `proxy` exits as `check` found it — the header, the location card and the time
+    /// zone show it before the first launch — as a launch's lookup through it would remember it:
+    /// the exit IP only while the profile asks to be warned when it changes.
+    mutating func remember(_ check: ProxyCheckResult?, for proxy: ProxySettings) {
+        guard var location = check?.location(for: proxy) else { return }
+        if !warnOnProxyIPChange { location.exitIP = nil }
+        lastProxyLocation = location
+    }
+
+    /// The proxy of the chosen mode (nil: none). Throws, in words for the person, when "From the
+    /// list" has none chosen, or the line is not one proxy, or its type is not known yet.
     func makeProxy() throws -> ProxySettings? {
-        guard proxyEnabled else { return nil }
-        let field: ProxyHostField
-        do {
-            field = try ProxyHostField.parse(proxyHost)
-        } catch {
-            throw CoreError.invalidConfiguration(String(format: L("editor.error.proxyHost"),
-                                                        proxyHost.trimmingCharacters(in: .whitespacesAndNewlines)))
-        }
-        var portText = proxyPort.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let pastedPort = field.port {
-            guard portText.isEmpty || Int(portText) == pastedPort else {
-                throw CoreError.invalidConfiguration(L("editor.error.proxyPortConflict"))
+        var proxy: ProxySettings
+        switch proxyMode {
+        case .direct:
+            return nil
+        case .saved:
+            guard let entry = savedProxy else { throw DraftProblem(L("editor.proxy.error.noneChosen")) }
+            guard let usable = entry.usableProxy else { throw DraftProblem(L("editor.proxy.error.kindUnknown")) }
+            proxy = usable
+        case .new:
+            switch proxyLine.reading {
+            case .empty: throw DraftProblem(L("editor.proxy.error.empty"))
+            case .problem(let message): throw DraftProblem(message)
+            case .kindUnknown: throw DraftProblem(L("editor.proxy.error.kindUnknown"))
+            case .proxy(let read, _): proxy = read
             }
-            portText = String(pastedPort)
         }
-        guard let port = Int(portText), (1...65535).contains(port) else {
-            throw CoreError.invalidConfiguration(L("editor.error.port"))
-        }
-        var user = proxyUsername.trimmingCharacters(in: .whitespacesAndNewlines)
-        var password = proxyPassword
-        if let pastedUser = field.username {
-            guard user.isEmpty || user == pastedUser else {
-                throw CoreError.invalidConfiguration(L("editor.error.proxyUserConflict"))
-            }
-            user = pastedUser
-            password = field.password ?? ""
-        }
-        // A scheme in the pasted string is more specific than the picker.
-        let kind = field.kind ?? proxyKind
-        return ProxySettings(
-            kind: kind,
-            host: field.host,
-            port: port,
-            username: user.isEmpty ? nil : user,
-            password: user.isEmpty ? nil : password,
-            // The TLS toggle is shown for HTTP CONNECT only; its hidden value must not leak into SOCKS5.
-            tlsToProxy: kind == .httpConnect && (field.tlsToProxy ?? proxyTLS),
-            excludedDomains: proxyExcludedDomains.split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        proxy.excludedDomains = proxyExcludedDomains.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return proxy
+    }
+
+    /// "New" holds a proxy without a scheme whose type no check has found yet: Save checks it first.
+    var needsKindCheck: Bool {
+        guard proxyMode == .new, case .kindUnknown = proxyLine.reading else { return false }
+        return true
     }
 
     /// What the last lookup through the proxy found, while these fields still describe that proxy
     /// (`ProxyLocation.endpoint(of:)`): nil once host, port or credentials name another one.
     var knownProxyLocation: ProxyLocation? {
-        guard let location = lastProxyLocation, let proxy = try? makeProxy() else { return nil }
+        guard let location = lastProxyLocation, let proxy = chosenProxy else { return nil }
         return location.proxyEndpoint == ProxyLocation.endpoint(of: proxy) ? location : nil
     }
 
@@ -193,6 +212,13 @@ struct ProfileDraft {
     }
 }
 
+/// What is wrong with a draft, in words for the person (shown as it is, without a prefix).
+struct DraftProblem: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}
+
 struct ProfileEditorView: View {
     enum Target: Identifiable {
         case new
@@ -213,18 +239,31 @@ struct ProfileEditorView: View {
     @State private var loaded = false
     @State private var showingTunnel = false
     @State private var tab: ProfileEditorForm.Tab = .general
+    /// A check run from the editor: Check, or Save finding a proxy's type.
+    @State private var checking = false
     @ObservedObject private var tunnel = TunnelManager.shared
 
     /// The glyph colour of a profile not created yet (it has no id).
     private static let newProfileAvatarID = UUID(uuid: (0x4C, 0x55, 0x4D, 0x45, 0x4E, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 1))
 
     var body: some View {
+        Group {
+            // The list as it changes: a check from here shows in its rows.
+            if let proxies = model.proxyList {
+                ObservingProxyList(proxies: proxies) { form(saved: $0.entries) }
+            } else {
+                form(saved: [])
+            }
+        }
+        .onAppear(perform: load)
+        .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
+    }
+
+    private func form(saved: [ProxyListEntry]) -> some View {
         ProfileEditorForm(draft: $draft, tab: $tab, isNew: target.isNew, avatarID: avatarID, error: error,
                           tunnelCarriesWebRTC: tunnel.canCarryWebRTC,
                           onCancel: { dismiss() }, onSave: save, onTunnelSettings: { showingTunnel = true },
-                          savedProxies: model.proxyList?.entries.filter(\.kindKnown) ?? [])
-            .onAppear(perform: load)
-            .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
+                          savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy)
     }
 
     private var avatarID: UUID {
@@ -237,7 +276,8 @@ struct ProfileEditorView: View {
         loaded = true
         if case .existing(let summary) = target {
             do {
-                draft = ProfileDraft(name: summary.name, configuration: try model.configuration(for: summary.id))
+                draft = ProfileDraft(name: summary.name, configuration: try model.configuration(for: summary.id),
+                                     savedProxies: model.proxyList?.entries ?? [])
             } catch {
                 self.error = String(format: L("editor.error.decrypt"), error.localizedDescription)
             }
@@ -246,7 +286,82 @@ struct ProfileEditorView: View {
         }
     }
 
+    /// Check: a proxy of the list through the list — what it finds is the entry's, as a check in
+    /// the Proxies sheet — or the line of "New" on its own (nothing is added to the list).
+    private func checkProxy() {
+        guard !checking else { return }
+        switch draft.proxyMode {
+        case .direct:
+            return
+        case .saved:
+            guard let entry = draft.savedProxy else { return }
+            checking = true
+            Task {
+                let result: ProxyCheckResult
+                if let proxies = model.proxyList {
+                    result = await proxies.checkProfileProxy(entry.proxy)
+                } else {
+                    result = await ProxyChecker.check(entry.proxy)
+                }
+                checking = false
+                refreshSavedProxy()
+                // Still the one chosen: where it exits is what the profile knows now.
+                if let chosen = draft.savedProxy, chosen.id == entry.id { draft.remember(result, for: chosen.proxy) }
+            }
+        case .new:
+            guard let proxy = draft.proxyLine.checkable else { return }
+            checking = true
+            Task {
+                let result = await ProxyChecker.check(proxy)
+                checking = false
+                take(result, for: proxy)
+            }
+        }
+    }
+
+    /// A check of the line's proxy: kept by the line, and — while the line still names that proxy —
+    /// where it exits is what the profile knows now.
+    private func take(_ result: ProxyCheckResult, for proxy: ProxySettings) {
+        draft.proxyLine.check = ProxyLine.Check(proxy: proxy, result: result)
+        if draft.proxyLine.currentCheck?.proxy == proxy, let resolved = draft.proxyLine.proxy {
+            draft.remember(result, for: resolved)
+        }
+    }
+
+    /// "From the list" holds the entry as it was when chosen: a check since may have found another
+    /// type, and the list may have lost it.
+    private func refreshSavedProxy() {
+        guard let chosen = draft.savedProxy, let proxies = model.proxyList else { return }
+        draft.savedProxy = proxies.list.entry(chosen.id)
+    }
+
     private func save() {
+        guard !checking else { return }
+        error = nil
+        // A line without a scheme whose type no check has found: Save checks it first — both
+        // handshakes are tried, and the one that answers is the type. A proxy that answers neither
+        // way is not saved; the field says why.
+        if draft.needsKindCheck, let proxy = draft.proxyLine.checkable {
+            checking = true
+            Task {
+                let result = await ProxyChecker.check(proxy)
+                checking = false
+                take(result, for: proxy)
+                guard !draft.needsKindCheck else {
+                    if draft.proxyLine.currentCheck?.proxy == proxy { error = L("editor.proxy.error.kindNotFound") }
+                    return
+                }
+                // The type is known now; a proxy that does not work is not saved unseen: the check
+                // is under the field, and Save again saves it as it is.
+                guard result.isAlive else {
+                    error = L("editor.proxy.error.notWorking")
+                    return
+                }
+                save()
+            }
+            return
+        }
+        if draft.proxyMode == .saved { refreshSavedProxy() }
         do {
             let configuration = try draft.makeConfiguration()
             switch target {
@@ -264,4 +379,12 @@ struct ProfileEditorView: View {
 
 private extension ProfileEditorView.Target {
     var isNew: Bool { if case .new = self { return true } else { return false } }
+}
+
+/// Shows `content` again whenever the proxy list changes.
+struct ObservingProxyList<Content: View>: View {
+    @ObservedObject var proxies: ProxyListModel
+    @ViewBuilder let content: (ProxyListModel) -> Content
+
+    var body: some View { content(proxies) }
 }

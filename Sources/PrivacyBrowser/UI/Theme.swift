@@ -276,11 +276,19 @@ extension View {
     func lumenField(_ placeholder: String, isEmpty: Bool, height: CGFloat? = 32) -> some View {
         modifier(LumenField(height: height, placeholder: isEmpty ? placeholder : nil))
     }
+
+    /// The same, for a field whose text holds a secret (a proxy string's password): while the field
+    /// is not being edited, `masked` — the text with the secret as dots — covers it. Nil: nothing
+    /// in the text is secret.
+    func lumenField(_ placeholder: String, isEmpty: Bool, masked: String?) -> some View {
+        modifier(LumenField(height: 32, placeholder: isEmpty ? placeholder : nil, masked: masked))
+    }
 }
 
 private struct LumenField: ViewModifier {
     let height: CGFloat?
     let placeholder: String?
+    var masked: String?
     @FocusState private var focused: Bool
 
     func body(content: Content) -> some View {
@@ -294,6 +302,20 @@ private struct LumenField: ViewModifier {
                         .font(.lumenBody)
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+            .overlay(alignment: .leading) {
+                // Opaque, over the text: a click goes through to the field, which then shows it all.
+                if let masked, !focused {
+                    Text(verbatim: masked)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .background(Theme.field)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }

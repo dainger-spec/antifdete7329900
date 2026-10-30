@@ -101,8 +101,6 @@ enum UISnapshots {
         }.capture(into: folder)
         // The profile editor, one picture per tab (sheets have no title bar).
         let draft = sampleDraft()
-        var unknownExit = draft
-        unknownExit.lastProxyLocation = nil
         var newProfile = ProfileDraft()
         newProfile.name = String(format: L("editor.defaultName"), 8)
         var privacy = draft
@@ -114,18 +112,17 @@ enum UISnapshots {
         var ephemeral = draft
         ephemeral.ephemeral = true
         let editors: [(String, ProfileDraft, ProfileEditorForm.Tab, Bool, String?)] = [
-            ("editor-network", draft, .network, false, nil),
-            ("editor-network-unchecked", unknownExit, .network, false, nil),
             ("editor-general-new", newProfile, .general, true, nil),
             ("editor-identity", draft, .identity, false, nil),
             ("editor-privacy", privacy, .privacy, false, nil),
-            ("editor-data-ephemeral", ephemeral, .data, false, L("editor.error.port")),
+            ("editor-data-ephemeral", ephemeral, .data, false, L("editor.proxy.error.kindUnknown")),
         ]
         for (name, sample, tab, isNew, error) in editors {
             problems += await Shot(name: name, size: ProfileEditorForm.size, titled: false) {
                 EditorPreview(draft: sample, tab: tab, isNew: isNew, error: error)
             }.capture(into: folder)
         }
+        problems += await proxyFieldInEditor(into: folder, draft: draft)
         // The other sheets, as they open.
         let model = AppModel()
         if let northwind = sampleSummary(name: "Northwind", id: rows[1].id) {
@@ -185,6 +182,105 @@ enum UISnapshots {
         return problems
     }
 
+    // MARK: One proxy, one line
+
+    /// The editor's network tab with each way of choosing a proxy: a pasted line that was checked
+    /// (it works, its type from the scheme); one without a scheme, not checked yet; a proxy of the
+    /// list; a line that is not a proxy (said at once under the field); and one whose check found
+    /// it silent after the connection. Nothing is checked here: the results are samples.
+    private static func proxyFieldInEditor(into folder: URL, draft: ProfileDraft) async -> Int {
+        let entries = sampleProxyEntries()
+        var problems = 0
+        var checked = draft
+        if let proxy = checked.proxyLine.checkable {
+            checked.proxyLine.check = ProxyLine.Check(proxy: proxy, result: sampleWorks(.socks5, "203.0.113.10", "DE", "Europe/Berlin",
+                                                                                        "Berlin", [80, 84, 97], asn: "AS64500",
+                                                                                        organization: "Example Networks"))
+        }
+        var saved = draft
+        saved.proxyMode = .saved
+        saved.choose(entries[0])
+        var unknownKind = draft
+        unknownKind.proxyLine = ProxyLine(text: "203.0.113.10:1080:nw-team:correct-horse")
+        unknownKind.lastProxyLocation = nil
+        var unreadable = draft
+        unreadable.proxyLine = ProxyLine(text: "proxy.northwind.example:80800:nw-team:correct-horse")
+        unreadable.lastProxyLocation = nil
+        var silent = draft
+        silent.proxyLine = ProxyLine(text: "198.51.100.40:8000")
+        silent.lastProxyLocation = nil
+        if let proxy = silent.proxyLine.checkable {
+            silent.proxyLine.check = ProxyLine.Check(proxy: proxy, result: sampleFailed(ProxyDiagnosis(verdict: .silent,
+                                                                                                         connectedAddress: "198.51.100.40")))
+        }
+        let shots: [(String, ProfileDraft)] = [
+            ("editor-network", checked),
+            ("editor-network-unchecked", unknownKind),
+            ("editor-network-saved", saved),
+            ("editor-network-unreadable", unreadable),
+            ("editor-network-silent", silent),
+        ]
+        for (name, sample) in shots {
+            problems += await Shot(name: name, size: ProfileEditorForm.size, titled: false) {
+                EditorPreview(draft: sample, tab: .network, savedProxies: entries)
+            }.capture(into: folder)
+        }
+        return problems
+    }
+
+    /// A check that found the proxy working, `checkedAt` 12 minutes ago.
+    static func sampleWorks(_ kind: ProxySettings.Kind, _ ip: String, _ country: String, _ zone: String, _ city: String,
+                            _ latencies: [Int], asn: String? = nil, organization: String? = nil) -> ProxyCheckResult {
+        var result = ProxyCheckResult(checkedAt: Date().addingTimeInterval(-12 * 60), exitIP: ip, countryCode: country,
+                                      timeZoneIdentifier: zone,
+                                      diagnosis: ProxyDiagnosis(verdict: .works, kinds: [kind], authentication: .accepted,
+                                                                connectedAddress: ip, latencies: latencies,
+                                                                latencyAttempts: latencies.count),
+                                      city: city, asn: asn, organization: organization)
+        result.latencyMilliseconds = result.diagnosis?.medianLatency
+        return result
+    }
+
+    /// A check that found the proxy not working, as `diagnosis` says.
+    static func sampleFailed(_ diagnosis: ProxyDiagnosis) -> ProxyCheckResult {
+        var result = ProxyCheckResult.dead(diagnosis.verdict == .credentialsNeeded ? .needsCredentials : .noAnswer,
+                                           at: Date().addingTimeInterval(-12 * 60))
+        result.diagnosis = diagnosis
+        return result
+    }
+
+    /// The sample list: working (one of them slow), each way of failing the list tells apart (silent
+    /// after connecting, login rejected, host not found, refused, no connection), and one whose type
+    /// the first check is to find. Berlin first, the silent one fourth.
+    static func sampleProxyEntries() -> [ProxyListEntry] {
+        [
+            ProxyListEntry(label: "Berlin 1", proxy: ProxySettings(kind: .socks5, host: "203.0.113.10", port: 1080,
+                                                                   username: "northwind", password: "sample"),
+                           lastCheck: sampleWorks(.socks5, "203.0.113.10", "DE", "Europe/Berlin", "Berlin", [80, 84, 97],
+                                                  asn: "AS64500", organization: "Example Networks")),
+            ProxyListEntry(proxy: ProxySettings(kind: .httpConnect, host: "proxy.example.net", port: 3128),
+                           lastCheck: sampleWorks(.httpConnect, "198.51.100.23", "NL", "Europe/Amsterdam", "Amsterdam", [138, 142, 160])),
+            ProxyListEntry(label: "Tokyo", proxy: ProxySettings(kind: .httpConnect, host: "192.0.2.44", port: 8443, tlsToProxy: true),
+                           lastCheck: sampleWorks(.httpConnect, "192.0.2.44", "JP", "Asia/Tokyo", "Tokyo", [1730])),
+            ProxyListEntry(label: "Whitelisted", proxy: ProxySettings(kind: .httpConnect, host: "198.51.100.40", port: 8000),
+                           lastCheck: sampleFailed(ProxyDiagnosis(verdict: .silent, connectedAddress: "198.51.100.40"))),
+            ProxyListEntry(label: "Old provider", proxy: ProxySettings(kind: .socks5, host: "192.0.2.7", port: 1080,
+                                                                     username: "olduser", password: "expired"),
+                           lastCheck: sampleFailed(ProxyDiagnosis(verdict: .credentialsRejected, kinds: [.socks5],
+                                                                  authentication: .rejected, answer: "SOCKS5 login refused (status 1)",
+                                                                  connectedAddress: "192.0.2.7"))),
+            ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "proxy.example.invalid", port: 1080),
+                           lastCheck: sampleFailed(ProxyDiagnosis(verdict: .hostNotFound))),
+            ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "192.0.2.99", port: 1080),
+                           lastCheck: sampleFailed(ProxyDiagnosis(verdict: .refused))),
+            ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "198.51.100.77", port: 9000),
+                           lastCheck: sampleFailed(ProxyDiagnosis(verdict: .connectTimeout))),
+            ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "gw.example.com", port: 9000, username: "user-country-de",
+                                                password: "sample"),
+                           kindKnown: false),
+        ]
+    }
+
     // MARK: Proxy list
 
     /// The Proxies sheet with proxies as checks left them — working (one of them slow), each way
@@ -198,49 +294,8 @@ enum UISnapshots {
         defer { try? FileManager.default.removeItem(at: root) }
         do {
             let vault = try MasterVault.create(in: root, password: "snapshots", iterations: 10_000)
-            let checked = Date().addingTimeInterval(-12 * 60)
-            func works(_ kind: ProxySettings.Kind, _ ip: String, _ country: String, _ zone: String, _ city: String,
-                       _ latencies: [Int], asn: String? = nil, organization: String? = nil) -> ProxyCheckResult {
-                var result = ProxyCheckResult(checkedAt: checked, exitIP: ip, countryCode: country, timeZoneIdentifier: zone,
-                                              diagnosis: ProxyDiagnosis(verdict: .works, kinds: [kind], authentication: .accepted,
-                                                                        connectedAddress: ip, latencies: latencies,
-                                                                        latencyAttempts: latencies.count),
-                                              city: city, asn: asn, organization: organization)
-                result.latencyMilliseconds = result.diagnosis?.medianLatency
-                return result
-            }
-            func failed(_ diagnosis: ProxyDiagnosis) -> ProxyCheckResult {
-                var result = ProxyCheckResult.dead(diagnosis.verdict == .credentialsNeeded ? .needsCredentials : .noAnswer, at: checked)
-                result.diagnosis = diagnosis
-                return result
-            }
-            let berlin = ProxyListEntry(label: "Berlin 1", proxy: ProxySettings(kind: .socks5, host: "203.0.113.10", port: 1080,
-                                                                              username: "northwind", password: "sample"),
-                                        lastCheck: works(.socks5, "203.0.113.10", "DE", "Europe/Berlin", "Berlin", [80, 84, 97],
-                                                         asn: "AS64500", organization: "Example Networks"))
-            let silent = ProxyListEntry(label: "Whitelisted", proxy: ProxySettings(kind: .httpConnect, host: "198.51.100.40", port: 8000),
-                                        lastCheck: failed(ProxyDiagnosis(verdict: .silent, connectedAddress: "198.51.100.40")))
-            let entries = [
-                berlin,
-                ProxyListEntry(proxy: ProxySettings(kind: .httpConnect, host: "proxy.example.net", port: 3128),
-                               lastCheck: works(.httpConnect, "198.51.100.23", "NL", "Europe/Amsterdam", "Amsterdam", [138, 142, 160])),
-                ProxyListEntry(label: "Tokyo", proxy: ProxySettings(kind: .httpConnect, host: "192.0.2.44", port: 8443, tlsToProxy: true),
-                               lastCheck: works(.httpConnect, "192.0.2.44", "JP", "Asia/Tokyo", "Tokyo", [1730])),
-                silent,
-                ProxyListEntry(label: "Old provider", proxy: ProxySettings(kind: .socks5, host: "192.0.2.7", port: 1080,
-                                                                         username: "olduser", password: "expired"),
-                               lastCheck: failed(ProxyDiagnosis(verdict: .credentialsRejected, kinds: [.socks5], authentication: .rejected,
-                                                                answer: "SOCKS5 login refused (status 1)", connectedAddress: "192.0.2.7"))),
-                ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "proxy.example.invalid", port: 1080),
-                               lastCheck: failed(ProxyDiagnosis(verdict: .hostNotFound))),
-                ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "192.0.2.99", port: 1080),
-                               lastCheck: failed(ProxyDiagnosis(verdict: .refused))),
-                ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "198.51.100.77", port: 9000),
-                               lastCheck: failed(ProxyDiagnosis(verdict: .connectTimeout))),
-                ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "gw.example.com", port: 9000, username: "user-country-de",
-                                                    password: "sample"),
-                               kindKnown: false),
-            ]
+            let entries = sampleProxyEntries()
+            let berlin = entries[0], silent = entries[3]
             try ProxyList(entries: entries).save(to: vault)
             let proxies = ProxyListModel(vault: vault) { print("FAIL sample proxy list: \($0)") }
             let counts = [ProxyList.identity(of: berlin.proxy): 3, ProxyList.identity(of: silent.proxy): 2,
@@ -252,8 +307,21 @@ enum UISnapshots {
             problems += await Shot(name: "sheet-proxies-works", size: CGSize(width: 940, height: 720), titled: false) {
                 ProxyListPanel(proxies: proxies, profileCounts: counts, initialSelection: [berlin.id])
             }.capture(into: folder)
-            problems += await Shot(name: "sheet-proxy-edit", size: CGSize(width: 480, height: 470), titled: false) {
+            problems += await Shot(name: "sheet-proxy-edit", size: CGSize(width: 560, height: 400), titled: false) {
                 ProxyEditView(proxies: proxies, entry: berlin, profileCount: 3)
+            }.capture(into: folder)
+            // Add: a line without a scheme, checked — the type the check found, where it exits.
+            var added = ProxyLine(text: "198.51.100.23:3128:dave:correct-horse")
+            if let proxy = added.checkable {
+                added.check = ProxyLine.Check(proxy: proxy, result: sampleWorks(.httpConnect, "198.51.100.23", "NL", "Europe/Amsterdam",
+                                                                                "Amsterdam", [138, 142, 160]))
+            }
+            let addLine = added
+            problems += await Shot(name: "sheet-proxy-add", size: CGSize(width: 560, height: 470), titled: false) {
+                ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, line: addLine)
+            }.capture(into: folder)
+            problems += await Shot(name: "sheet-proxy-add-unreadable", size: CGSize(width: 560, height: 380), titled: false) {
+                ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, line: ProxyLine(text: "1.2.3.4:1080:alice"))
             }.capture(into: folder)
             problems += await Shot(name: "sheet-proxy-export", size: CGSize(width: 500, height: 360), titled: false) {
                 ProxyExportView(proxies: proxies, selection: [berlin.id, silent.id])
@@ -398,18 +466,14 @@ enum UISnapshots {
     static func sampleDraft() -> ProfileDraft {
         var draft = ProfileDraft()
         draft.name = "Northwind"
-        draft.proxyEnabled = true
-        draft.proxyKind = .socks5
-        draft.proxyHost = "proxy.northwind.example"
-        draft.proxyPort = "1080"
-        draft.proxyUsername = "nw-team"
-        draft.proxyPassword = "correct-horse"
         draft.warnOnProxyIPChange = true
-        if let proxy = try? draft.makeProxy() {
-            draft.lastProxyLocation = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE",
-                                                    proxyEndpoint: ProxyLocation.endpoint(of: proxy),
-                                                    resolvedAt: Date().addingTimeInterval(-120))
-        }
+        let proxy = ProxySettings(kind: .socks5, host: "proxy.northwind.example", port: 1080, username: "nw-team",
+                                  password: "correct-horse")
+        draft.proxyMode = .new
+        draft.proxyLine = ProxyLine(proxy: proxy)
+        draft.lastProxyLocation = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE",
+                                                proxyEndpoint: ProxyLocation.endpoint(of: proxy),
+                                                resolvedAt: Date().addingTimeInterval(-120))
         return draft
     }
 
@@ -532,10 +596,11 @@ private struct EditorPreview: View {
     @State var tab: ProfileEditorForm.Tab
     var isNew = false
     var error: String?
+    var savedProxies: [ProxyListEntry] = []
 
     var body: some View {
         ProfileEditorForm(draft: $draft, tab: $tab, isNew: isNew, avatarID: UISnapshots.sampleRows()[1].id,
-                          error: error, tunnelCarriesWebRTC: false)
+                          error: error, tunnelCarriesWebRTC: false, savedProxies: savedProxies)
     }
 }
 

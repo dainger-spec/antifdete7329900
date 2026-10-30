@@ -171,6 +171,19 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    Changes apply at the next launch. The **Device / version** picker tags the
    profile with a target Apple OS version (macOS 26, iOS 26/27, iPadOS 26); iOS profiles also
    get their device class's navigator/screen values (see note above).
+   The **Network** tab chooses the connection with three buttons — **No Proxy**, **From the
+   List**, **New**. **New** is one field: paste the proxy as the provider gave it —
+   `host:port:user:pass`, `user:pass@host:port`, `socks5://user:pass@host:port` (or `http://`,
+   `https://`) or `host:port`. It is read as a line of Import is (one parser), and what it was
+   read as — or why it is not a proxy, in words — shows under the field as you type; the password
+   shows as dots while the field is not being edited. The type comes from the scheme; without
+   one, from **Check**, which asks the proxy itself step by step (as the list's check) and shows
+   the type it answered as, the exit country with its flag, the latency and the exit IP — or the
+   state that says how it fails and what to do. Save checks a scheme-less proxy itself when Check
+   was not clicked, and saves nothing it could not find a type for; a proxy found but not working
+   is shown before it is saved. **From the List** lists the list's proxies (searchable, working
+   ones first, fastest first) with their last check; Check there checks the chosen one as the
+   list does.
 3. **Launch** opens a window for the profile. Profiles run side by side, and every window
    and tab is labelled with its profile. Closing a profile's last window stops that profile
    and returns you to the Profiles window; the app stays open.
@@ -217,6 +230,9 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    (**⋯ → Edit…** → **Sync cookies with other devices** turns that off for a profile).
 11. **Proxies:** **More → Proxies…** keeps a list of proxies, encrypted in the vault (this Mac
    only, not synced):
+   - **Add** takes one proxy in the same one-line field as the profile editor, with **Check**
+     beside it: what the check found goes into the list with the proxy. A proxy without a
+     scheme whose type was not checked gets it from its first check, as an imported line.
    - **Import…** takes a pasted list or a text file, one proxy per line: `host:port`,
      `host:port:user:pass`, `user:pass@host:port` or `socks5://` / `http://` / `https://user:pass@host:port`
      (` # Berlin 1` after a proxy names it). A line without a scheme gets its type from the first
@@ -233,13 +249,15 @@ CI (`.github/workflows/ci.yml`) runs on every push:
      (an IP whitelist without this Mac's address, or a dead back end), login needed or rejected,
      this Mac refused (403), no way out to the site. A check never goes direct. Checks run only
      when asked.
-   - **Edit…** changes a proxy; the profiles that use it as it is in the list follow (a profile
-     whose own copy was changed since keeps it). **Export…** writes the list for Import, after
+   - **Edit…** changes a proxy — its name, and the proxy as one line with **Check**; the profiles
+     that use it as it is in the list follow (a profile whose own copy was changed since keeps it).
+     A line pasted without a scheme over a proxy of a known type keeps that type while it names
+     the same proxy; another proxy is checked first, never left without a type. **Export…** writes the list for Import, after
      saying that the user names and passwords will be in the file in plaintext (owner-only file).
    - **Assign to Profiles…** gives the selected proxies to the profiles ticked: with one proxy all
      of them get it, with several they get them in turn (round-robin). A running profile uses its
-     new proxy from its next launch. In the profile editor, **Choose from List…** fills the proxy
-     fields from the list. The list shows how many profiles use each proxy.
+     new proxy from its next launch. In the profile editor, **From the List** chooses one of the
+     list's proxies. The list shows how many profiles use each proxy.
    - A profile started with a proxy that does not work says so in the Profiles window — which
      profile, what the same probe found, what to do — with **Check Proxy** and **Show in Proxies**.
 12. **Several profiles at once:** ⌘-click (or ⇧-click for a range) selects rows of the Profiles

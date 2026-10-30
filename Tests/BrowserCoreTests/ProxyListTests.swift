@@ -128,6 +128,88 @@ final class ProxyListImportTests: XCTestCase {
         XCTAssertEqual(report.problems.first?.line, ProxyListImport.maximumProxies + 1)
     }
 
+    func testOneFieldReadsWhatProvidersSellAsOneLineOfAList() {
+        func proxy(_ text: String) -> ProxyListImport.Line? {
+            if case .proxy(let line) = ProxyListImport.readField(text) { return line }
+            return nil
+        }
+        // The four forms, as the editor's field takes them: the same proxy each time.
+        let expected = ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080, username: "alice", password: "s3cret")
+        for text in ["1.2.3.4:1080:alice:s3cret", "alice:s3cret@1.2.3.4:1080", "socks5://alice:s3cret@1.2.3.4:1080",
+                     " socks5://alice:s3cret@1.2.3.4:1080/\n"] {
+            XCTAssertEqual(proxy(text)?.proxy, expected, text)
+        }
+        XCTAssertEqual(proxy("1.2.3.4:1080")?.proxy, ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080))
+        // The type comes from the scheme; without one it is not known (the placeholder is not a guess
+        // the field acts on: `kindGiven` false), whatever the import's default would be.
+        XCTAssertEqual(proxy("socks5://alice:s3cret@1.2.3.4:1080")?.kindGiven, true)
+        XCTAssertEqual(proxy("http://h.example:3128")?.proxy.kind, .httpConnect)
+        XCTAssertEqual(proxy("https://h.example:443")?.proxy.tlsToProxy, true)
+        XCTAssertEqual(proxy("1.2.3.4:1080:alice:s3cret")?.kindGiven, false)
+        XCTAssertEqual(proxy("alice:s3cret@1.2.3.4:1080")?.kindGiven, false)
+        XCTAssertEqual(proxy("1.2.3.4:1080")?.kindGiven, false)
+        // Nothing, a comment, not a proxy (with the import's reasons), and a list.
+        XCTAssertEqual(ProxyListImport.readField(" \n"), .empty)
+        XCTAssertEqual(ProxyListImport.readField("# my provider"), .empty)
+        XCTAssertEqual(ProxyListImport.readField("1.2.3.4"), .problem(.missingPort))
+        XCTAssertEqual(ProxyListImport.readField("h.example:99999"), .problem(.unreadable(.invalidPort("99999"))))
+        XCTAssertEqual(ProxyListImport.readField("ftp://h.example:21"), .problem(.unreadable(.unsupportedScheme("ftp"))))
+        XCTAssertEqual(ProxyListImport.readField("1.2.3.4 1080"), .problem(.unreadable(.containsWhitespace)))
+        XCTAssertEqual(ProxyListImport.readField("1.2.3.4:1080\n5.6.7.8:1080"), .several(2))
+        XCTAssertEqual(ProxyListImport.readField("# provider\n1.2.3.4:1080  # Berlin"),
+                       .proxy(ProxyListImport.Line(line: 2, proxy: ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080),
+                                                   label: "Berlin", kindGiven: false)))
+    }
+
+    func testALineWrittenForAProxyReadsBackAsThatProxy() {
+        let proxies = [
+            ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080),
+            ProxySettings(kind: .socks5, host: "h.example", port: 1080, username: "u:s@r", password: "p#a%ss w:@"),
+            ProxySettings(kind: .httpConnect, host: "h.example", port: 8080, username: "u", password: ""),
+            ProxySettings(kind: .httpConnect, host: "tls.example", port: 443, username: "u", password: "p", tlsToProxy: true),
+            ProxySettings(kind: .socks5, host: "2001:db8::1", port: 1083),
+        ]
+        for proxy in proxies {
+            let line = ProxyListImport.line(for: proxy)
+            guard case .proxy(let read) = ProxyListImport.readField(line) else { return XCTFail(line) }
+            XCTAssertEqual(read.proxy, proxy, line)
+            XCTAssertTrue(read.kindGiven, line)
+        }
+        XCTAssertEqual(ProxyListImport.line(for: proxies[3]), "https://u:p@tls.example:443")
+        XCTAssertEqual(ProxyListImport.line(for: proxies[4]), "socks5://[2001:db8::1]:1083")
+        // Without a known type there is no scheme, and the line reads back as not known.
+        XCTAssertEqual(ProxyListImport.line(for: proxies[0], kindKnown: false), "1.2.3.4:1080")
+        guard case .proxy(let unknown) = ProxyListImport.readField(ProxyListImport.line(for: proxies[1], kindKnown: false)) else {
+            return XCTFail("no proxy")
+        }
+        XCTAssertFalse(unknown.kindGiven)
+        XCTAssertEqual(unknown.proxy.password, "p#a%ss w:@")
+        // The export writes the same lines.
+        XCTAssertEqual(ProxyList.exportText([ProxyListEntry(label: "B", proxy: proxies[3])]),
+                       "# PrivacyBrowser proxies. The user names and passwords below are in plaintext.\nhttps://u:p@tls.example:443  # B\n")
+    }
+
+    func testThePasswordIsFoundWhereItWasWrittenToBeMasked() {
+        func masked(_ text: String) -> String? {
+            guard let range = ProxyListImport.passwordRange(in: text) else { return nil }
+            var shown = text
+            shown.replaceSubrange(range, with: "•••")
+            return shown
+        }
+        XCTAssertEqual(masked("1.2.3.4:1080:alice:s3cret"), "1.2.3.4:1080:alice:•••")
+        XCTAssertEqual(masked("alice:s3cret@1.2.3.4:1080"), "alice:•••@1.2.3.4:1080")
+        XCTAssertEqual(masked("socks5://alice:s3:cr@t@1.2.3.4:1080"), "socks5://alice:•••@1.2.3.4:1080")
+        XCTAssertEqual(masked("socks5://alice:p%40ss@1.2.3.4:1080"), "socks5://alice:•••@1.2.3.4:1080")
+        XCTAssertEqual(masked("  \u{FEFF}h.example:80:u:pa#ss  # Berlin\n"), "  \u{FEFF}h.example:80:u:•••  # Berlin\n")
+        XCTAssertEqual(masked("# provider\r\nu:pw@h.example:80"), "# provider\r\nu:•••@h.example:80")
+        // No password, an empty one, or not one proxy: nothing to mask.
+        XCTAssertNil(ProxyListImport.passwordRange(in: "1.2.3.4:1080"))
+        XCTAssertNil(ProxyListImport.passwordRange(in: "solo@h.example:80"))
+        XCTAssertNil(ProxyListImport.passwordRange(in: "h.example:80:user:"))
+        XCTAssertNil(ProxyListImport.passwordRange(in: "1.2.3.4:1080:a:b\n5.6.7.8:1080:c:d"))
+        XCTAssertNil(ProxyListImport.passwordRange(in: "h.example:99999:u:p"))
+    }
+
     func testTheHostFieldsThrownMessagesAreUnchanged() {
         XCTAssertThrowsError(try ProxyHostField.parse("h.example:99999")) { error in
             XCTAssertEqual(error as? CoreError, .invalidConfiguration("“99999” is not a port number (1–65535)"))

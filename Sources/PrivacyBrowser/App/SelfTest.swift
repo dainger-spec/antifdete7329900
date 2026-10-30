@@ -1988,6 +1988,80 @@ final class SelfTest {
                       .joined(separator: " | "))
         }
 
+        // One proxy, one line (the editor's New, the list's Add): the four forms providers sell name
+        // the same proxy; without a scheme its type is not known until Check finds it; the field
+        // never shows the password while it is not being edited; and a draft makes the profile's
+        // proxy from it with the type found.
+        struct LineCase {
+            let form: String
+            let kind: ProxySettings.Kind
+            let port: Int
+            let user: String
+            let password: String
+        }
+        var lineCases: [LineCase] = []
+        if let socksAuthPort {
+            lineCases += ["127.0.0.1:\(socksAuthPort):pb-user2:pb-pass2", "pb-user2:pb-pass2@127.0.0.1:\(socksAuthPort)",
+                          "socks5://pb-user2:pb-pass2@127.0.0.1:\(socksAuthPort)", " 127.0.0.1:\(socksAuthPort):pb-user2:pb-pass2\n"]
+                .map { LineCase(form: $0, kind: .socks5, port: socksAuthPort, user: "pb-user2", password: "pb-pass2") }
+        }
+        // An HTTP proxy without a scheme: the placeholder (SOCKS5) is not what it gets.
+        if let authPort = port("PB_SELFTEST_HTTP_AUTH_PROXY_PORT") {
+            lineCases += ["127.0.0.1:\(authPort):pb-user:pb-pass", "http://pb-user:pb-pass@127.0.0.1:\(authPort)"]
+                .map { LineCase(form: $0, kind: .httpConnect, port: authPort, user: "pb-user", password: "pb-pass") }
+        }
+        if !lineCases.isEmpty {
+            var outcomes: [String] = []
+            var allRight = true
+            for item in lineCases {
+                var line = ProxyLine(text: item.form)
+                let shown = line.maskedText ?? ""
+                let before = line.reading
+                var draft = ProfileDraft()
+                draft.proxyMode = .new
+                draft.proxyLine = line
+                let saveChecksFirst = draft.needsKindCheck
+                guard let checkable = line.checkable else {
+                    allRight = false
+                    outcomes.append("\(shown): not read")
+                    continue
+                }
+                let result = await ProxyChecker.check(checkable)
+                line.check = ProxyLine.Check(proxy: checkable, result: result)
+                draft.proxyLine = line
+                let made = try? draft.makeProxy()
+                let schemeGiven = item.form.contains("://")
+                let typeBefore: Bool
+                switch before {
+                case .proxy(_, .scheme): typeBefore = schemeGiven
+                case .kindUnknown: typeBefore = !schemeGiven && saveChecksFirst
+                default: typeBefore = false
+                }
+                let right = typeBefore && result.isAlive && made?.kind == item.kind && made?.host == "127.0.0.1"
+                    && made?.port == item.port && made?.username == item.user && made?.password == item.password
+                    && !shown.isEmpty && !shown.contains(item.password)
+                allRight = allRight && right
+                outcomes.append("\(shown) → " + (right ? "\(item.kind.rawValue)"
+                    : "WRONG: type before \(typeBefore), alive \(result.isAlive), made \(made?.kind.rawValue ?? "nothing")"))
+            }
+            check("proxy line: the forms providers sell name the same proxy; without a scheme the type is not known (Save would check first) until Check finds the one that answers, end to end; the password is never shown",
+                  allRight, outcomes.joined(separator: " | "))
+        }
+        if let silentPort {
+            // A proxy that answers neither handshake: its type is never guessed, and no profile gets it.
+            var line = ProxyLine(text: "127.0.0.1:\(silentPort)")
+            if let checkable = line.checkable {
+                line.check = ProxyLine.Check(proxy: checkable, result: await ProxyChecker.check(checkable))
+            }
+            var draft = ProfileDraft()
+            draft.proxyMode = .new
+            draft.proxyLine = line
+            let refused = (try? draft.makeProxy()) == nil
+            check("proxy line: a proxy whose check found no type (silent) is not made into a profile's proxy",
+                  draft.needsKindCheck && refused && line.currentCheck?.result.diagnosis?.verdict == .silent,
+                  String(describing: line.currentCheck?.result.diagnosis?.verdict))
+        }
+
         // Given that checked proxy, a profile has it, and where it exits, before any launch.
         let profile = try repository.create(name: "Proxy from the list", configuration: ProfileConfiguration(ephemeral: true))
         if let entry = stored.entries.first(where: { $0.label == "working" }) {

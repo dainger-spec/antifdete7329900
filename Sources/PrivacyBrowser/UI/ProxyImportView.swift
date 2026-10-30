@@ -155,9 +155,9 @@ struct ProxyImportView: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
-                        Text(Self.describe(problem.reason))
+                        Text(problem.reason.words)
                             .font(.caption)
-                            .foregroundStyle(Self.isNotice(problem.reason) ? Color.secondary : Theme.warning)
+                            .foregroundStyle(problem.reason.isNotice ? Color.secondary : Theme.warning)
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -223,17 +223,15 @@ struct ProxyImportView: View {
             self.error = error.localizedDescription
         }
     }
+}
 
-    // MARK: Wording
+// MARK: - Wording
 
-    /// Not a failure: the proxy was read on an earlier line.
-    static func isNotice(_ reason: ProxyListImport.Reason) -> Bool {
-        if case .duplicate = reason { return true }
-        return false
-    }
-
-    static func describe(_ reason: ProxyListImport.Reason) -> String {
-        switch reason {
+extension ProxyListImport.Reason {
+    /// Why a line is not a proxy, in plain words: the import's report and the one-line field say it
+    /// alike.
+    var words: String {
+        switch self {
         case .missingPort: return L("proxies.reason.missingPort")
         case let .duplicate(line): return String(format: L("proxies.reason.duplicate"), line)
         case let .tooMany(limit): return String(format: L("proxies.reason.tooMany"), limit)
@@ -249,5 +247,11 @@ struct ProxyImportView: View {
             case let .invalidHost(host): return String(format: L("proxies.reason.host"), host)
             }
         }
+    }
+
+    /// Not a failure: the proxy was read on an earlier line.
+    var isNotice: Bool {
+        if case .duplicate = self { return true }
+        return false
     }
 }

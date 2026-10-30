@@ -77,8 +77,9 @@ final class ProxyListModel: ObservableObject {
     }
 
     /// Changes an entry as the Edit sheet asks (`kindKnown` false: its type is left to a check);
-    /// the profiles that used it follow. Nil when done, otherwise what to tell the user.
-    func update(_ id: UUID, label: String, proxy: ProxySettings, kindKnown: Bool = true) -> String? {
+    /// `check`, a check of the proxy as it is now (the sheet's Check), is its last check. The
+    /// profiles that used it follow. Nil when done, otherwise what to tell the user.
+    func update(_ id: UUID, label: String, proxy: ProxySettings, kindKnown: Bool = true, check: ProxyCheckResult? = nil) -> String? {
         var updated = list
         let previous: ProxySettings
         do {
@@ -93,10 +94,34 @@ final class ProxyListModel: ObservableObject {
         } catch {
             return error.localizedDescription
         }
+        if let check { updated.record(check, for: id) }
         // Not saved: the alert says why (`save`); the sheet stays open with the change in it.
         guard save(updated) else { return L("proxies.edit.notSaved") }
         if let entry = list.entry(id), entry.proxy != previous { onEntryChanged?(entry, previous) }
         return nil
+    }
+
+    enum AddOutcome: Equatable {
+        case added(UUID)
+        /// What to tell the user.
+        case failed(String)
+    }
+
+    /// Adds one proxy, as the Add sheet asks (`kindKnown` false: its type is left to its first
+    /// check), with `check` — a check of it from the sheet — as its last check.
+    func addOne(label: String, proxy: ProxySettings, kindKnown: Bool, check: ProxyCheckResult?) -> AddOutcome {
+        if let listed = list.entry(for: proxy) {
+            return .failed(String(format: L("proxies.edit.alreadyListed"), listed.displayName))
+        }
+        var updated = list
+        let result = updated.add([ProxyListImport.Line(line: 1, proxy: proxy, label: label, kindGiven: kindKnown)])
+        guard let id = result.added.first else {
+            return .failed(result.overLimit > 0 ? String(format: L("proxies.add.full"), ProxyList.maximumEntries)
+                                                : L("proxies.edit.notSaved"))
+        }
+        if let check { updated.record(check, for: id) }
+        guard save(updated) else { return .failed(L("proxies.edit.notSaved")) }
+        return .added(id)
     }
 
     /// The entry for `proxy` — a profile's — in the list, added when it is not there (a proxy typed
