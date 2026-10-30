@@ -422,7 +422,7 @@ final class AppUpdater: ObservableObject, Updater {
     private static var system: BuildVersion { BuildVersion(ProcessInfo.processInfo.operatingSystemVersion) }
 
     /// The user's own home: the staging folder is outside every container.
-    static var realHome: URL {
+    nonisolated static var realHome: URL {
         if let directory = getpwuid(getuid())?.pointee.pw_dir {
             return URL(fileURLWithPath: String(cString: directory), isDirectory: true)
         }
