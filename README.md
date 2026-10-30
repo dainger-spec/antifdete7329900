@@ -179,7 +179,9 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    and kept; one that is not where the proxy comes out is warned about); local requests (protected by
    default: a page from the internet cannot reach this Mac or the local network — without a proxy
    by a rule list; with one this Mac is always refused and the rest goes through the proxy); Safe
-   Browsing; history recording and retention, AutoFill,
+   Browsing; cookies to start with (an export pasted as text — JSON or cookies.txt — or a file
+   dropped or chosen, read as Import Cookies reads one and queued, encrypted, for the new profile's
+   first launch); history recording and retention, AutoFill,
    cookie sync. Changes apply at the next launch. Tags and notes are the person's own: the
    Profiles list shows the tags on each row, lists them in its sidebar (a click shows the
    profiles with that tag) and its search finds a profile by its name, a tag or its notes; they

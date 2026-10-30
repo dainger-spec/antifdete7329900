@@ -125,6 +125,9 @@ enum UISnapshots {
         var directAllowed = newProfile
         directAllowed.name = "Local tools"
         directAllowed.localRequests = .allowed
+        var withCookies = newProfile
+        withCookies.cookieText = #"[{"domain":".example.org","name":"session","value":"a1b2c3","path":"/","secure":true,"expirationDate":4102444800},{"domain":"","name":"broken"}]"#
+        withCookies.readCookieText()
         var namedVersion = draft
         namedVersion.safariVersion = SafariVersions.recent.last
         var location = draft
@@ -150,6 +153,7 @@ enum UISnapshots {
             ("editor-privacy", draft, .privacy, false, nil),
             ("editor-privacy-direct-allowed", directAllowed, .privacy, false, nil),
             ("editor-data-ephemeral", ephemeral, .data, false, L("editor.proxy.error.kindUnknown")),
+            ("editor-data-cookies-new", withCookies, .data, true, nil),
         ]
         for (name, sample, topic, isNew, error) in editors {
             problems += await Shot(name: name, size: ProfileEditorForm.size, titled: false) {

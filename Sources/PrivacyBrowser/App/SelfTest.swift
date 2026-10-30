@@ -141,6 +141,7 @@ final class SelfTest {
             try await windowSizes(repository)
             try await namedSafariVersion(repository)
             try await localRequests(repository)
+            try await cookiesAtCreation(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
@@ -2619,6 +2620,32 @@ final class SelfTest {
         check("local requests: allowed, the same page reaches this Mac, as in Safari",
               allowed["loopback"] == "resolved" && (allowedHits ?? 1) > 0, "\(allowed), canary \(allowedHits.map(String.init) ?? "not asked")")
         info("local requests: allowed, the local network answered \(allowed["lan"] ?? "?") (10.255.255.1) and \(allowed["name"] ?? "?") (a .local name)")
+    }
+
+    /// Cookies pasted in the editor of a new profile: read as Import Cookies reads a file, and
+    /// queued for the new profile, encrypted, until its first launch.
+    private func cookiesAtCreation(_ repository: ProfileRepository) async throws {
+        let expiry = Int(Date().addingTimeInterval(30 * 86_400).timeIntervalSince1970)
+        var draft = ProfileDraft()
+        draft.cookieText = "# Netscape HTTP Cookie File\n.example.com\tTRUE\t/\tTRUE\t\(expiry)\tsid\tabc123\n"
+        draft.readCookieText()
+        let netscape: [ImportedCookie] = draft.cookieReport?.cookies ?? []
+        draft.cookieText = #"[{"domain":".example.org","name":"pref","value":"1","path":"/","expirationDate":\#(expiry)}]"#
+        draft.readCookieText()
+        let json: [ImportedCookie] = draft.cookieReport?.cookies ?? []
+        let readNetscape: Bool = netscape.count == 1 && netscape.first?.name == "sid"
+        let readJSON: Bool = json.count == 1 && json.first?.name == "pref"
+        check("editor: cookies pasted for a new profile are read as Import Cookies reads a file (cookies.txt, JSON)",
+              readNetscape && readJSON, "cookies.txt \(netscape.map(\.name)), JSON \(json.map(\.name))")
+
+        let profile = try repository.create(name: "Cookies at creation", configuration: ProfileConfiguration())
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        let outcome = try await manager.importCookies(netscape + json, into: profile.id)
+        var queued = 0
+        if case let .queued(count) = outcome { queued = count }
+        check("editor: a new profile's cookies wait, encrypted, for its first launch (as Import Cookies queues them)",
+              queued == 2, "outcome \(outcome)")
     }
 
     private func appSettings(_ repository: ProfileRepository) async throws {

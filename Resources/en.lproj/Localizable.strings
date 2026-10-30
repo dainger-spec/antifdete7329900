@@ -166,6 +166,12 @@
 "editor.language.thisMac" = "This Mac's languages";
 "editor.locale.randomChosen" = "Picked at random, kept until you pick another:";
 "editor.locale.pickAnother" = "Pick another";
+"editor.cookies" = "Cookies";
+"editor.cookies.placeholder" = "Paste an export here (JSON or cookies.txt), or drop the file";
+"editor.cookies.clear" = "Remove";
+"editor.cookies.note.new" = "Read as Import Cookies reads a file. They are queued, encrypted, when the profile is saved, and its first launch adds them before its first page loads.";
+"editor.cookies.note.existing" = "Read as Import Cookies reads a file, and imported when you save: at once if the profile runs, else at its next launch, before its first page loads.";
+"editor.cookies.error" = "The profile was saved, but its cookies were not imported: %@";
 "editor.locale.mismatch" = "%@ is not where the proxy was last seen to come out (%@): a page that compares the time zone with the IP address's location sees that they differ.";
 "editor.language.note" = "WebKit takes the language once per run: profiles that share the app's process all get the one of the first profile started (Settings → Behavior → each profile its own app gives each its own).";
 "editor.window.size" = "Window size";

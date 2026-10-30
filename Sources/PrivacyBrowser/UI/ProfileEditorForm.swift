@@ -1,5 +1,6 @@
 import BrowserCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The profile editor's body: a header with the profile's glyph and where it exits, one screen of
 /// every setting in parts — an index of them on the left jumps to one — and a footer with Cancel
@@ -58,6 +59,10 @@ struct ProfileEditorForm: View {
     var knownTags: [String] = []
     /// This Mac's screen less its menu bar and Dock: a window size larger than it is said to be.
     var visibleScreen: CGSize?
+    var onChooseCookieFile: () -> Void = {}
+    var onDropCookieFile: (URL) -> Void = { _ in }
+    /// Saved, and its cookies being imported: Save waits.
+    var isSaving = false
 
     static let size = CGSize(width: 760, height: 660)
     static let indexWidth: CGFloat = 172
@@ -226,7 +231,7 @@ struct ProfileEditorForm: View {
                 Button(L("common.save"), action: onSave)
                     .buttonStyle(.lumenPrimary)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(checkingProxy)
+                    .disabled(checkingProxy || isSaving)
             }
             .padding(.horizontal, 24)
             .frame(height: 60)
@@ -670,6 +675,10 @@ struct ProfileEditorForm: View {
 
     private var data: some View {
         VStack(alignment: .leading, spacing: 14) {
+            EditorGroupTitle(L("editor.cookies"))
+            CookiePaste(draft: $draft, onChooseFile: onChooseCookieFile, onDropFile: onDropCookieFile)
+            EditorNote(L(isNew ? "editor.cookies.note.new" : "editor.cookies.note.existing"))
+            EditorDivider()
             EditorGroupTitle(L("editor.section.history"))
             EditorToggle(L("editor.history.record"), isOn: $draft.historyEnabled)
             if draft.historyEnabled {
@@ -795,6 +804,71 @@ private struct TagEditor: View {
         text = ""
         guard !added.isEmpty else { return }
         tags = ProfileTags.normalized(tags + added)
+    }
+}
+
+// MARK: - Cookies
+
+/// Cookies for the profile as the editor saves it: an export pasted as text (JSON or
+/// cookies.txt), a file dropped here, or one chosen — read as Import Cookies reads a file.
+private struct CookiePaste: View {
+    @Binding var draft: ProfileDraft
+    var onChooseFile: () -> Void
+    var onDropFile: (URL) -> Void
+    @State private var targeted = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let name = draft.cookieFileName {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.text").foregroundStyle(Theme.textSecondary)
+                    Text(name)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Button(L("editor.cookies.clear")) { draft.clearCookies() }
+                        .buttonStyle(.lumenGhost)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.field))
+            } else {
+                TextField(L("editor.cookies"), text: $draft.cookieText, prompt: Text(verbatim: ""), axis: .vertical)
+                    .font(.system(size: 11, design: .monospaced))
+                    .lineLimit(3...6)
+                    .lumenField(L("editor.cookies.placeholder"), isEmpty: draft.cookieText.isEmpty, height: nil)
+                    .onChange(of: draft.cookieText) { _, _ in draft.readCookieText() }
+            }
+            HStack(spacing: 10) {
+                Button(action: onChooseFile) {
+                    Label(L("cookies.chooseFile"), systemImage: "doc")
+                }
+                .buttonStyle(.lumenSecondary)
+                if let report = draft.cookieReport {
+                    Text(String(format: L("cookies.summary"), report.cookies.count, report.entriesFound))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(report.cookies.isEmpty ? Theme.warning : Theme.textSecondary)
+                    if !report.failures.isEmpty {
+                        Text(String(format: L("cookies.problemsTitle"), report.failures.count))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.warning)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(4)
+        .background(RoundedRectangle(cornerRadius: Theme.controlRadius + 2, style: .continuous)
+            .strokeBorder(targeted ? Theme.accent : .clear, lineWidth: 2))
+        .onDrop(of: [UTType.fileURL], isTargeted: $targeted) { providers in
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                DispatchQueue.main.async { onDropFile(url) }
+            }
+            return true
+        }
     }
 }
 

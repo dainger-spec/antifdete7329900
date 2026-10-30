@@ -331,10 +331,13 @@ final class AppModel: ObservableObject {
         self.details = details
     }
 
-    func createProfile(name: String, configuration: ProfileConfiguration) throws {
-        guard let repository else { return }
-        try repository.create(name: name, configuration: configuration)
+    /// The new profile's id.
+    @discardableResult
+    func createProfile(name: String, configuration: ProfileConfiguration) throws -> UUID? {
+        guard let repository else { return nil }
+        let summary = try repository.create(name: name, configuration: configuration)
         refresh()
+        return summary.id
     }
 
     func configuration(for id: UUID) throws -> ProfileConfiguration {

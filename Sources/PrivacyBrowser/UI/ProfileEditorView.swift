@@ -76,6 +76,11 @@ struct ProfileDraft {
     /// The Safari version the profile names in its User-Agent; nil: this Mac's (Auto).
     var safariVersion: String?
     var localRequests = LocalRequests.protected
+    /// Cookies to import when the editor saves: pasted as text, or a file read
+    /// (`CookieImporter`), with what reading them found.
+    var cookieText = ""
+    var cookieFileName: String?
+    var cookieReport: CookieImportReport?
 
     /// The window size as the editor holds it (`WindowSize`).
     enum WindowChoice: Hashable {
@@ -180,6 +185,26 @@ struct ProfileDraft {
     }
 
     var hasProxy: Bool { proxyMode != .direct }
+
+    /// Reads what was pasted as a cookie export, as Import Cookies reads a file.
+    mutating func readCookieText() {
+        let text = cookieText.trimmingCharacters(in: .whitespacesAndNewlines)
+        cookieFileName = nil
+        cookieReport = text.isEmpty ? nil : CookieImporter.read(Data(text.utf8))
+    }
+
+    /// A cookie file read instead of pasted text.
+    mutating func takeCookieFile(named name: String, report: CookieImportReport) {
+        cookieText = ""
+        cookieFileName = name
+        cookieReport = report
+    }
+
+    mutating func clearCookies() {
+        cookieText = ""
+        cookieFileName = nil
+        cookieReport = nil
+    }
 
     /// The place a random choice picked, when the time zone and language are one.
     var randomPlace: LocalePlaces.Place? { LocalePlaces.place(timeZone: timeZone, language: language) }
@@ -351,6 +376,9 @@ struct ProfileEditorView: View {
     @State private var topic: ProfileEditorForm.Topic = .profile
     /// A check run from the editor: Check, or Save finding a proxy's type.
     @State private var checking = false
+    @State private var choosingCookieFile = false
+    /// The cookies pasted are being imported after Save: no second Save meanwhile.
+    @State private var savingCookies = false
     @ObservedObject private var tunnel = TunnelManager.shared
 
     /// The glyph colour of a profile not created yet (it has no id).
@@ -367,6 +395,17 @@ struct ProfileEditorView: View {
         }
         .onAppear(perform: load)
         .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
+        .fileImporter(isPresented: $choosingCookieFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in
+            if case let .success(url) = result { readCookieFile(url) }
+        }
+    }
+
+    /// A cookie file chosen or dropped, read as Import Cookies reads one.
+    private func readCookieFile(_ url: URL) {
+        Task {
+            let report = await model.readCookieFile(url)
+            draft.takeCookieFile(named: url.lastPathComponent, report: report)
+        }
     }
 
     private func form(saved: [ProxyListEntry]) -> some View {
@@ -374,7 +413,9 @@ struct ProfileEditorView: View {
                           tunnelCarriesWebRTC: tunnel.canCarryWebRTC,
                           onCancel: { dismiss() }, onSave: save, onTunnelSettings: { showingTunnel = true },
                           savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
-                          knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen)
+                          knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen,
+                          onChooseCookieFile: { choosingCookieFile = true }, onDropCookieFile: readCookieFile,
+                          isSaving: savingCookies)
     }
 
     /// The tags of every profile, each once, for the tag field to offer.
@@ -466,7 +507,7 @@ struct ProfileEditorView: View {
     }
 
     private func save() {
-        guard !checking else { return }
+        guard !checking, !savingCookies else { return }
         error = nil
         // A line without a scheme whose type no check has found: Save checks it first — both
         // handshakes are tried, and the one that answers is the type. A proxy that answers neither
@@ -494,11 +535,27 @@ struct ProfileEditorView: View {
         if draft.proxyMode == .saved { refreshSavedProxy() }
         do {
             let configuration = try draft.makeConfiguration()
+            let id: UUID?
             switch target {
             case .new:
-                try model.createProfile(name: draft.name, configuration: configuration)
+                id = try model.createProfile(name: draft.name, configuration: configuration)
             case .existing(let summary):
                 try model.updateProfile(summary.id, name: draft.name, configuration: configuration)
+                id = summary.id
+            }
+            // The cookies pasted or dropped: into the profile now if it runs, else queued
+            // (encrypted) for its next launch, before its first page loads — as Import Cookies.
+            if let id, let cookies = draft.cookieReport?.cookies, !cookies.isEmpty {
+                savingCookies = true
+                Task {
+                    do {
+                        _ = try await model.importCookies(cookies, into: id)
+                    } catch {
+                        model.showError(String(format: L("editor.cookies.error"), error.localizedDescription))
+                    }
+                    dismiss()
+                }
+                return
             }
             dismiss()
         } catch {
