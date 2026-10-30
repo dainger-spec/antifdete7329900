@@ -130,8 +130,8 @@ final class SiteCapture {
             history: try repository.historyStore(for: summary.id, key: key, policy: configuration.historyPolicy, persistent: false),
             bookmarks: try repository.bookmarkStore(for: summary.id, key: key),
             recordsHistory: false)
-        // As a launch does (ProfileManager.launch): the rules a proxied profile's web views get.
-        if configuration.proxy != nil { await ContentRules.prepare() }
+        // As a launch does (ProfileManager.launch): the rules the profile's web views get.
+        if ContentRules.needed(by: configuration) { await ContentRules.prepare() }
         var relayHost: TURNUDPHost?
         if profileSpec.relay == "harness" {
             relayHost = try startRelayHarness(for: configuration)

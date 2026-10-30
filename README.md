@@ -174,7 +174,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    Pro's screen allows below its menu bar; or a size of its own — a real window, which is what a
    page measures; the screen pages see stays this Mac's, since WebKit on macOS cannot declare
    another without CSS giving it away; one larger than the screen opens as large as it allows,
-   and the editor says so); geolocation and time zone; Safe Browsing; history recording and retention, AutoFill,
+   and the editor says so); geolocation (with Reset) and time zone; local requests (protected by
+   default: a page from the internet cannot reach this Mac or the local network — without a proxy
+   by a rule list; with one this Mac is always refused and the rest goes through the proxy); Safe
+   Browsing; history recording and retention, AutoFill,
    cookie sync. Changes apply at the next launch. Tags and notes are the person's own: the
    Profiles list shows the tags on each row, lists them in its sidebar (a click shows the
    profiles with that tag) and its search finds a profile by its name, a tag or its notes; they
@@ -282,7 +285,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
      again with the pages it left open and the tab that was in front — never an ephemeral profile
      nor one that keeps no history; `tabs.bin`, encrypted with the profile's key, this Mac only);
      confirm quitting (⌘Q lists what it stops and asks first).
-   - **New Profiles:** time zone and language from the connection; a random safe window size (on
+   - **New Profiles:** time zone and language from the connection; block local requests (on by
+     default); a random safe window size (on
      by default: each new profile gets its own window size among those that fit this Mac's screen,
      so that profiles do not all open with the same window); the search engine
      (DuckDuckGo, Google, Bing, Yahoo, Ecosia or Yandex — what a new profile's address bar and

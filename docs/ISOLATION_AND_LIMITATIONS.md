@@ -499,6 +499,27 @@ store when the profile launches.
 `https://ifconfig.me`, and confirm it shows the proxy's IP. Then stop the proxy and
 reload: the page must fail, not show your own IP.
 
+### Local requests (this Mac and the local network)
+
+A page from the internet could load from this Mac and from the local network — `127.0.0.1:<port>`,
+`192.168.1.1`, a printer's `.local` name — and learn from what answers which ports this Mac has
+open and which devices share its network: the same in every profile, so something that tells
+the profiles apart from other people's, or links them. Each profile protects its local requests
+unless the person allows them (editor → Privacy → **Local requests**; Settings → New Profiles →
+**Block local requests**, on by default; a profile from before reads as protected):
+
+| | Protected (default) | Allowed |
+|---|---|---|
+| Without a proxy | the local-network rule list (`LocalNetworkRules`): every load to this Mac (loopback, `0.0.0.0`) or a private network — 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, fc00::/7, fe80::/10, their IPv4-mapped forms, `.local`, `.home.arpa`, `.lan`, `.internal` names — is blocked, unless the page itself is on this Mac or that network | as in Safari |
+| With a proxy | this Mac: always blocked by the proxied list (the system never sends loopback through a proxy); the local network: through the proxy, to its network, not this one | the same — not a choice with a proxy |
+
+Fail-closed: a profile that needs the list does not start without it, and in Safari's chrome the
+list is one of those no "content blockers off" switch turns off. Checked by the self-test in a
+real web view, with a page whose address is a public name: protected, its fetches to the loopback
+canary, to `10.255.255.1` and to a `.local` name are refused and the canary takes no connection;
+allowed, the loopback fetch reaches the canary. The patterns by unit tests (each range, the
+internet next to it, a page on the network keeping its own loads).
+
 ## 4a. A profile in its own process, and Safari's chrome
 
 In the build without the App Sandbox every profile runs in a process of its own (`ProfileProcess`),

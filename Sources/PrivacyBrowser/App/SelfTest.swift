@@ -140,6 +140,7 @@ final class SelfTest {
             try editorLabels()
             try await windowSizes(repository)
             try await namedSafariVersion(repository)
+            try await localRequests(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
@@ -2519,6 +2520,69 @@ final class SelfTest {
               seen == wanted && wanted.contains("Version/\(named) Safari/"), "page \(seen), wanted \(wanted)")
     }
 
+    /// A profile without a proxy that protects its local requests: a page of the internet reaches
+    /// neither this Mac nor the local network; allowed, it reaches this Mac, as in Safari. (A
+    /// profile with a proxy keeps the proxied list's checks: this Mac refused, the local network
+    /// through the proxy — the Safari-chrome check.)
+    private func localRequests(_ repository: ProfileRepository) async throws {
+        let compiled = ContentRules.localNetworkRules != nil
+        check("local requests: the local-network rule list compiled", compiled, ContentRules.compileErrors.joined(separator: " | "))
+        let environment = ProcessInfo.processInfo.environment
+        guard compiled, let canary = environment["PB_SELFTEST_CANARY_PORT"].flatMap(Int.init) else {
+            info("local requests: no canary listener (PB_SELFTEST_CANARY_PORT); the checks in a page skipped")
+            return
+        }
+        func attempt(_ requests: LocalRequests, run: String) async throws -> [String: String] {
+            let profile = try repository.create(name: "Local requests", configuration: ProfileConfiguration(ephemeral: true, localRequests: requests))
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            defer {
+                session.shutDown()
+                try? repository.delete(profile.id)
+            }
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            defer { tab.tearDown() }
+            // A page of the internet: its document's address is a public name (its bytes come from here).
+            tab.webView.loadHTMLString("<!doctype html><title>local</title>", baseURL: URL(string: "http://public-\(run).example/"))
+            _ = await waitUntil(timeout: 10) { tab.webView.title == "local" }
+            let script = """
+            const attempt = async (url) => {
+              const outcome = fetch(url, { mode: 'no-cors', cache: 'no-store' }).then(() => 'resolved', () => 'rejected');
+              const late = new Promise((resolve) => setTimeout(() => resolve('pending'), 2500));
+              return await Promise.race([outcome, late]);
+            };
+            return {
+              loopback: await attempt(`http://127.0.0.1:${port}/pb-local?run=${run}`),
+              lan: await attempt('http://10.255.255.1:8080/pb-local-lan'),
+              name: await attempt(`http://printer-${run}.local/pb-local-name`),
+            };
+            """
+            return (try? await js(tab.webView, script, ["port": canary, "run": run])) as? [String: String] ?? [:]
+        }
+        func canaryHits(_ run: String) async -> Int? {
+            guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else { return nil }
+            let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+            let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            guard let text = try? await loadThroughProxy(repository, proxy, url: url),
+                  let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return nil }
+            return (object["canary"] as? [Any])?.count
+        }
+        func runID() -> String { String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased() }
+
+        let protectedRun = runID()
+        let protected = try await attempt(.protected, run: protectedRun)
+        let protectedHits = await canaryHits(protectedRun)
+        let refused: Bool = protected["loopback"] == "rejected" && protected["lan"] == "rejected" && protected["name"] == "rejected"
+        check("local requests: protected, a page of the internet reaches neither this Mac (127.0.0.1) nor the local network (10.x, a .local name)",
+              refused && (protectedHits ?? 0) == 0, "\(protected), canary \(protectedHits.map(String.init) ?? "not asked")")
+
+        let allowedRun = runID()
+        let allowed = try await attempt(.allowed, run: allowedRun)
+        let allowedHits = await canaryHits(allowedRun)
+        check("local requests: allowed, the same page reaches this Mac, as in Safari",
+              allowed["loopback"] == "resolved" && (allowedHits ?? 1) > 0, "\(allowed), canary \(allowedHits.map(String.init) ?? "not asked")")
+        info("local requests: allowed, the local network answered \(allowed["lan"] ?? "?") (10.255.255.1) and \(allowed["name"] ?? "?") (a .local name)")
+    }
+
     private func appSettings(_ repository: ProfileRepository) async throws {
         defer { BrowsingPreferences.current = BrowsingPreferences() }
         let suite = "pb-selftest-settings-\(UUID().uuidString)"
@@ -2532,8 +2596,8 @@ final class SelfTest {
         let defaultFailure: Bool = fresh.proxyFailure == AppSettings.ProxyFailure.launchAndExplain
         let defaultBrowsing: Bool = fresh.browsing == BrowsingPreferences()
         let defaultSearch: Bool = fresh.newProfileSearchEngine == SearchEngine.standard
-        let defaultWindow: Bool = fresh.newProfileRandomWindowSize
-        check("settings: the defaults — the Profiles window after unlocking, quitting asks, new profiles follow the connection, search with the standard engine and get a random window size, a failing proxy's profile starts and says why, AutoFill on, new tabs next to the current one, closing several tabs asks, 100 %, the Downloads folder, two letters, no tabs restored",
+        let defaultWindow: Bool = fresh.newProfileRandomWindowSize && fresh.newProfileBlocksLocalRequests
+        check("settings: the defaults — the Profiles window after unlocking, quitting asks, new profiles follow the connection, search with the standard engine, get a random window size and block local requests, a failing proxy's profile starts and says why, AutoFill on, new tabs next to the current one, closing several tabs asks, 100 %, the Downloads folder, two letters, no tabs restored",
               defaultStart && fresh.confirmQuit && fresh.newProfileMatchesConnection && defaultSearch && defaultWindow
                 && defaultFailure && defaultBrowsing,
               String(describing: fresh.browsing))
@@ -2542,6 +2606,7 @@ final class SelfTest {
         fresh.newProfileMatchesConnection = false
         fresh.newProfileSearchEngine = .ecosia
         fresh.newProfileRandomWindowSize = false
+        fresh.newProfileBlocksLocalRequests = false
         fresh.proxyFailure = .doNotLaunch
         fresh.browsing.passwordAutoFill = false
         fresh.browsing.newTabsNextToCurrent = false
@@ -2561,7 +2626,7 @@ final class SelfTest {
         let rereadFailure: Bool = reread.proxyFailure == AppSettings.ProxyFailure.doNotLaunch
         let rereadBrowsing: Bool = reread.browsing == expected
         let rereadSearch: Bool = reread.newProfileSearchEngine == SearchEngine.ecosia
-        let rereadWindow: Bool = !reread.newProfileRandomWindowSize
+        let rereadWindow: Bool = !reread.newProfileRandomWindowSize && !reread.newProfileBlocksLocalRequests
         check("settings: every setting is read back as it was set, each from its own key",
               rereadStart && !reread.confirmQuit && !reread.newProfileMatchesConnection && rereadSearch && rereadWindow
                 && rereadFailure && rereadBrowsing,

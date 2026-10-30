@@ -121,6 +121,14 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// (`SafariVersions`); a mobile generation and a typed User-Agent ignore it.
     public var safariVersion: String?
 
+    /// Whether the profile's pages may reach this Mac and the local network (`LocalRequests`);
+    /// protected unless the person allowed it.
+    public var localRequests: LocalRequests
+
+    /// The local-network rule list applies (`LocalNetworkRules`): protected, and no proxy — with
+    /// one, this Mac is blocked by the proxied list, and the rest goes through the proxy.
+    public var blocksLocalNetwork: Bool { proxy == nil && localRequests == .protected }
+
     public static let maximumNotesLength = 4000
 
     public init(startURL: URL? = nil,
@@ -146,7 +154,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 notes: String = "",
                 avatar: ProfileAvatarStyle? = nil,
                 windowSize: WindowSize? = nil,
-                safariVersion: String? = nil) {
+                safariVersion: String? = nil,
+                localRequests: LocalRequests = .protected) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -171,6 +180,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.avatar = avatar?.normalized
         self.windowSize = windowSize
         self.safariVersion = safariVersion
+        self.localRequests = localRequests
     }
 
     /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
@@ -298,7 +308,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
-             syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion
+             syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
+             localRequests
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -340,6 +351,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         // Only what Safari writes after "Version/": anything else is this Mac's own version.
         safariVersion = (try? c.decodeIfPresent(String.self, forKey: .safariVersion))
             .flatMap { DeviceGeneration.isSafariVersion($0) ? $0 : nil }
+        // Fail-closed: anything but an explicit "allowed" is protected.
+        localRequests = (try? c.decodeIfPresent(LocalRequests.self, forKey: .localRequests)) ?? .protected
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -371,6 +384,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encodeIfPresent(avatar, forKey: .avatar)
         try c.encodeIfPresent(windowSize, forKey: .windowSize)
         try c.encodeIfPresent(safariVersion, forKey: .safariVersion)
+        if localRequests != .protected { try c.encode(localRequests, forKey: .localRequests) }
     }
 
     public var historyPolicy: HistoryStore.Policy {

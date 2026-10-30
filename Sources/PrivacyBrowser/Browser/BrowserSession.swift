@@ -51,12 +51,12 @@ final class BrowserSession {
     init(profileID: UUID, profileName: String, configuration: ProfileConfiguration,
          passwordVault: PasswordVault, passwordSettings: ProfilePasswordSettings, library: ProfileLibrary) throws {
         let proxies = try ProxyConfigurationFactory.make(configuration.proxy)
-        // Without the proxied profile's rule list a page's dns-prefetch would be resolved by this Mac: a
-        // profile with a proxy does not start (fail-closed), as with a proxy that cannot be applied.
-        // (`ContentRules.prepare` comes first wherever a profile is launched.)
-        if configuration.proxy != nil, ContentRules.proxiedProfileRules == nil {
-            throw CoreError.invalidConfiguration(ContentRules.failedToCompile
-                ? "the proxied profile's rule list did not compile" : "the proxied profile's rule list is not ready")
+        // Without the proxied profile's rule list a page's dns-prefetch would be resolved by this Mac,
+        // and without the local-network list a page could reach this Mac and its network: a profile
+        // that needs one does not start without it (fail-closed), as with a proxy that cannot be
+        // applied. (`ContentRules.prepare` comes first wherever a profile is launched.)
+        if let missing = ContentRules.missingList(for: configuration) {
+            throw CoreError.invalidConfiguration(missing)
         }
         self.profileID = profileID
         self.profileName = profileName
@@ -86,9 +86,10 @@ final class BrowserSession {
             .notice("Profile \(profileName, privacy: .private): has a proxy=\(configuration.proxy != nil, privacy: .public) store proxies=\(store.proxyConfigurations.count, privacy: .public)")
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
         self.userContentController = BehaviorSets.makeUserContentController(for: configuration)
-        if configuration.proxy != nil, let blocker = ContentRules.proxiedProfileRules {
-            // Loads WebKit would otherwise make outside the proxy (see ContentRules).
-            userContentController.add(blocker)
+        // Loads WebKit would otherwise make outside the proxy, and to this Mac and its network
+        // (see ContentRules).
+        for list in ContentRules.lists(for: configuration) {
+            userContentController.add(list)
         }
         self.profileScripts = userContentController.userScripts
         self.autoFillScript = PasswordAutoFill.script(testHooks: CommandLine.arguments.contains("--self-test"))
@@ -173,8 +174,8 @@ final class BrowserSession {
         for script in profileScripts {
             controller.addUserScript(script)
         }
-        if configuration.proxy != nil, let blocker = ContentRules.proxiedProfileRules {
-            controller.add(blocker)
+        for list in ContentRules.lists(for: configuration) {
+            controller.add(list)
         }
         PasswordAutoFill.install(in: controller, handler: passwordHandler, script: autoFillScript)
         Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
@@ -193,8 +194,8 @@ final class BrowserSession {
             controller.addUserScript(script)
             restored += 1
         }
-        if configuration.proxy != nil, let blocker = ContentRules.proxiedProfileRules {
-            controller.add(blocker)
+        for list in ContentRules.lists(for: configuration) {
+            controller.add(list)
         }
         Self.contentRestorations += 1
         Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")

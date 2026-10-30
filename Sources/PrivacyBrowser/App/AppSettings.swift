@@ -83,6 +83,7 @@ final class AppSettings: ObservableObject {
         static let newProfileMatchesConnection = "PBSettingsNewProfileMatchesConnection"
         static let newProfileSearchEngine = "PBSettingsNewProfileSearchEngine"
         static let newProfileRandomWindowSize = "PBSettingsNewProfileRandomWindowSize"
+        static let newProfileBlocksLocalRequests = "PBSettingsNewProfileBlocksLocalRequests"
         static let proxyFailure = "PBSettingsProxyFailure"
         static let passwordAutoFill = "PBSettingsPasswordAutoFill"
         static let newTabsNextToCurrent = "PBSettingsNewTabsNextToCurrent"
@@ -116,6 +117,11 @@ final class AppSettings: ObservableObject {
     @Published var newProfileRandomWindowSize: Bool {
         didSet { defaults.set(newProfileRandomWindowSize, forKey: Key.newProfileRandomWindowSize) }
     }
+    /// A new profile's pages from the internet cannot reach this Mac or the local network
+    /// (`ProfileConfiguration.localRequests`).
+    @Published var newProfileBlocksLocalRequests: Bool {
+        didSet { defaults.set(newProfileBlocksLocalRequests, forKey: Key.newProfileBlocksLocalRequests) }
+    }
     @Published var proxyFailure: ProxyFailure {
         didSet { defaults.set(proxyFailure.rawValue, forKey: Key.proxyFailure) }
     }
@@ -143,6 +149,7 @@ final class AppSettings: ObservableObject {
         newProfileMatchesConnection = defaults.object(forKey: Key.newProfileMatchesConnection) as? Bool ?? true
         newProfileSearchEngine = defaults.string(forKey: Key.newProfileSearchEngine).flatMap(SearchEngine.init) ?? .standard
         newProfileRandomWindowSize = defaults.object(forKey: Key.newProfileRandomWindowSize) as? Bool ?? true
+        newProfileBlocksLocalRequests = defaults.object(forKey: Key.newProfileBlocksLocalRequests) as? Bool ?? true
         proxyFailure = defaults.string(forKey: Key.proxyFailure).flatMap(ProxyFailure.init) ?? .launchAndExplain
         var browsing = BrowsingPreferences()
         browsing.passwordAutoFill = defaults.object(forKey: Key.passwordAutoFill) as? Bool ?? true

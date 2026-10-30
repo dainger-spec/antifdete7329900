@@ -220,7 +220,7 @@ final class ProfileManager: ObservableObject {
                 return result
             }
         }
-        if stored.proxy != nil { await ContentRules.prepare() }
+        if ContentRules.needed(by: stored) { await ContentRules.prepare() }
         if !stored.ephemeral {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
             try await webDataVault.prepareForLaunch(profileID: id, key: key)

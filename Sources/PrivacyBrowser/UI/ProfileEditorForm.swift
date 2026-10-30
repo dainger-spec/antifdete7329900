@@ -480,11 +480,18 @@ struct ProfileEditorForm: View {
     private var location: some View {
         VStack(alignment: .leading, spacing: 14) {
             EditorRow(L("editor.geo")) {
-                Picker(L("editor.geo"), selection: $draft.geoMode) {
-                    ForEach(ProfileDraft.GeoMode.allCases) { Text(L($0.labelKey)).tag($0) }
+                HStack(spacing: 8) {
+                    if draft.geoMode == .fixed {
+                        Button(L("editor.geo.reset")) { draft.resetGeolocation() }
+                            .buttonStyle(.lumenGhost)
+                            .help(L("editor.geo.reset.help"))
+                    }
+                    Picker(L("editor.geo"), selection: $draft.geoMode) {
+                        ForEach(ProfileDraft.GeoMode.allCases) { Text(L($0.labelKey)).tag($0) }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                .labelsHidden()
-                .fixedSize()
             }
             if draft.geoMode == .fixed {
                 HStack(alignment: .top, spacing: 12) {
@@ -515,6 +522,23 @@ struct ProfileEditorForm: View {
 
     private var privacy: some View {
         VStack(alignment: .leading, spacing: 14) {
+            EditorRow(L("editor.local")) {
+                Picker(L("editor.local"), selection: $draft.localRequests) {
+                    Text(L("editor.local.protected")).tag(LocalRequests.protected)
+                    Text(L("editor.local.allowed")).tag(LocalRequests.allowed)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+            if draft.localRequests == .allowed && !draft.hasProxy {
+                EditorNote(L("editor.local.allowedWarning"), tone: .warning)
+            }
+            EditorNote(L("editor.local.note"))
+            if draft.hasProxy {
+                EditorNote(L("editor.local.proxy"))
+            }
+            EditorDivider()
             EditorToggle(L("editor.safeBrowsing"), isOn: $draft.safeBrowsing)
             EditorNote(L("editor.privacy.footer"))
         }

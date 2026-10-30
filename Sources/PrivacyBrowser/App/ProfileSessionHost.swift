@@ -61,7 +61,8 @@ enum ProfileSessionHost {
                 DispatchQueue.main.async { MainActor.assumeIsolated { ProfileSessionHost.send(.configurationSaved) } }
             }
             stored = try repository.loadConfiguration(profileID)
-            try ProfileNetworkGuard.engage(profileID: profileID, proxy: stored.proxy, safeBrowsing: stored.safeBrowsingEnabled)
+            try ProfileNetworkGuard.engage(profileID: profileID, proxy: stored.proxy, safeBrowsing: stored.safeBrowsingEnabled,
+                                           protectsLocalNetwork: stored.blocksLocalNetwork)
         } catch {
             log.error("Could not open the vault or hold \(profileID.uuidString, privacy: .public) to its proxy: \(String(describing: error), privacy: .private)")
             exit(3)

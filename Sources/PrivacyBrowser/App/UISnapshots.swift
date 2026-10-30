@@ -122,6 +122,9 @@ enum UISnapshots {
         labelled.notes = "Bought 2026-10 from Example Networks, renews monthly. Two-factor on the phone in the drawer."
         labelled.avatarColor = 5
         labelled.avatarLetters = "NW"
+        var directAllowed = newProfile
+        directAllowed.name = "Local tools"
+        directAllowed.localRequests = .allowed
         var namedVersion = draft
         namedVersion.safariVersion = SafariVersions.recent.last
         var location = draft
@@ -139,6 +142,7 @@ enum UISnapshots {
             ("editor-identity-safari-version", namedVersion, .identity, false, nil),
             ("editor-location", location, .location, false, nil),
             ("editor-privacy", draft, .privacy, false, nil),
+            ("editor-privacy-direct-allowed", directAllowed, .privacy, false, nil),
             ("editor-data-ephemeral", ephemeral, .data, false, L("editor.proxy.error.kindUnknown")),
         ]
         for (name, sample, topic, isNew, error) in editors {

@@ -42,6 +42,9 @@ enum ProfileNetworkGuard {
     private(set) static var proxies: [ProxyConfiguration]?
     static var isEngaged: Bool { proxies != nil }
     private static var profileID: UUID?
+    /// The profile protects its local requests without a proxy: the local-network rule list is one
+    /// of the lists no "content blockers off" switch turns off (`theProfilesContentStays`).
+    private static var protectsLocalNetwork = false
 
     /// The profile running in this process. One per process, by construction. Registered as soon
     /// as its session exists — before any window, because a profile may be launched only to be
@@ -77,11 +80,13 @@ enum ProfileNetworkGuard {
 
     /// Holds this process to `proxy` (or, with none, to no proxy but still to the profile's store).
     /// Throws when the proxy cannot be applied: the process must then not run at all.
-    static func engage(profileID: UUID, proxy: ProxySettings?, safeBrowsing: Bool = false) throws {
+    static func engage(profileID: UUID, proxy: ProxySettings?, safeBrowsing: Bool = false,
+                       protectsLocalNetwork: Bool = false) throws {
         guard proxies == nil else { return }
         let proxies = try ProxyConfigurationFactory.make(proxy)
         self.proxies = proxies
         self.profileID = profileID
+        self.protectsLocalNetwork = protectsLocalNetwork && proxies.isEmpty
         let policy = ProfileChallengePolicy(
             hasProxy: !proxies.isEmpty,
             proxyCredential: proxy?.username.map { URLCredential(user: $0, password: proxy?.password ?? "", persistence: .forSession) })
@@ -281,7 +286,8 @@ enum ProfileNetworkGuard {
     ///   * With a proxy, "Reload Without Content Blockers" and a site's "content blockers off"
     ///     switch everything off but the proxied profile's rule list, which is what keeps a page's
     ///     dns-prefetch from being resolved by this Mac (`ContentRules`): the blocker is the
-    ///     exception every such switch keeps on, and the reload without blockers is a reload.
+    ///     exception every such switch keeps on, and the reload without blockers is a reload. The
+    ///     local-network list of a profile that protects its local requests is kept on the same way.
     private static func theProfilesContentStays() -> [String] {
         typealias ObjectSetter = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
         typealias Action = @convention(c) (AnyObject, Selector) -> Void
@@ -323,8 +329,12 @@ enum ProfileNetworkGuard {
             method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
 
-        guard !(proxies ?? []).isEmpty else { return [] }
-        let blocker: Set<String> = [ContentRules.identifier]
+        // The lists every "content blockers off" keeps on: the proxied profile's, and the local
+        // network's of a profile that protects its local requests.
+        var blocker: Set<String> = []
+        if !(proxies ?? []).isEmpty { blocker.insert(ContentRules.identifier) }
+        if protectsLocalNetwork { blocker.insert(ContentRules.localIdentifier) }
+        guard !blocker.isEmpty else { return [] }
         let lists = NSSelectorFromString("_setContentRuleListsEnabled:exceptions:")
         typealias ListsSetter = @convention(c) (AnyObject, Selector, Bool, NSSet?) -> Void
         let listsMethod = class_getInstanceMethod(pagePreferences, lists)
@@ -347,10 +357,10 @@ enum ProfileNetworkGuard {
                 if enabled {
                     original(preferences, blockers, true)
                 } else if let listsOriginal {
-                    log.notice("Content blockers off for a page: every list but the proxied profile's rule list")
+                    log.notice("Content blockers off for a page: every list but the profile's own rule lists")
                     listsOriginal(preferences, lists, false, blocker as NSSet)
                 } else {
-                    log.notice("Content blockers off for a page refused: this WebKit cannot keep the proxied profile's rule list on alone")
+                    log.notice("Content blockers off for a page refused: this WebKit cannot keep the profile's own rule lists on alone")
                     original(preferences, blockers, true)
                 }
             }
@@ -359,7 +369,7 @@ enum ProfileNetworkGuard {
         let reloadWithout = NSSelectorFromString("_reloadWithoutContentBlockers")
         if let method = class_getInstanceMethod(WKWebView.self, reloadWithout) {
             let replacement: @convention(block) (AnyObject) -> WKNavigation? = { webView in
-                log.notice("Reload without content blockers: reloaded with the proxied profile's rule list")
+                log.notice("Reload without content blockers: reloaded with the profile's own rule lists")
                 return (webView as? WKWebView)?.reload()
             }
             method_setImplementation(method, imp_implementationWithBlock(replacement))

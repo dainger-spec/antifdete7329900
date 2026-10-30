@@ -291,6 +291,9 @@ private struct NewProfileSettings: View {
                 .labelsHidden()
                 .fixedSize()
             }
+            SettingRow(L("settings.newProfiles.local"), detail: L("settings.newProfiles.local.detail"), effect: .newProfiles) {
+                SettingSwitch(isOn: $settings.newProfileBlocksLocalRequests, label: L("settings.newProfiles.local"))
+            }
             SettingRow(L("settings.newProfiles.randomWindow"), detail: L("settings.newProfiles.randomWindow.detail"),
                        effect: .newProfiles) {
                 SettingSwitch(isOn: $settings.newProfileRandomWindowSize, label: L("settings.newProfiles.randomWindow"))

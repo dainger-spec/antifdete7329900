@@ -72,6 +72,7 @@ struct ProfileDraft {
 
     /// The Safari version the profile names in its User-Agent; nil: this Mac's (Auto).
     var safariVersion: String?
+    var localRequests = LocalRequests.protected
 
     /// The window size as the editor holds it (`WindowSize`).
     enum WindowChoice: Hashable {
@@ -168,9 +169,18 @@ struct ProfileDraft {
         avatarLetters = c.avatar?.letters ?? ""
         setWindowSize(c.windowSize)
         safariVersion = c.safariVersion
+        localRequests = c.localRequests
     }
 
     var hasProxy: Bool { proxyMode != .direct }
+
+    /// Geolocation back to Deny, its coordinates forgotten.
+    mutating func resetGeolocation() {
+        geoMode = .deny
+        latitude = ""
+        longitude = ""
+        accuracy = "50"
+    }
 
     /// The proxy the profile is to use, when it is chosen and its type is known.
     var chosenProxy: ProxySettings? {
@@ -277,6 +287,7 @@ struct ProfileDraft {
         }
         configuration.windowSize = windowSize
         configuration.safariVersion = safariVersion
+        configuration.localRequests = localRequests
         try configuration.validate()
         return configuration
     }
@@ -365,6 +376,7 @@ struct ProfileEditorView: View {
             // Settings → New Profiles.
             draft.matchProxyLocation = model.settings.newProfileMatchesConnection
             draft.searchEngine = model.settings.newProfileSearchEngine
+            draft.localRequests = model.settings.newProfileBlocksLocalRequests ? .protected : .allowed
             if model.settings.newProfileRandomWindowSize, let visible = WindowSizing.visibleScreen {
                 var generator = SystemRandomNumberGenerator()
                 draft.setWindowSize(WindowSize.randomSafe(fitting: (Int(visible.width), Int(visible.height)), using: &generator))

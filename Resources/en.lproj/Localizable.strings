@@ -148,6 +148,14 @@
 "editor.safari.honest" = "The engine does not change: pages are shown by this Mac's WebKit (Safari %@). Only what the profile calls itself in its User-Agent does.";
 "editor.safari.far" = "Safari %@ is another major version than this Mac's engine (Safari %@): what a page can measure — its features, CSS and JavaScript — is the engine's, so a page that compares them can tell. Risky.";
 "editor.safari.close" = "Safari %@ is close to this Mac's engine (Safari %@): only what changed between the two could tell.";
+"editor.local" = "Local requests";
+"editor.local.protected" = "Protect";
+"editor.local.allowed" = "Allow";
+"editor.local.note" = "Protected, a page from the internet cannot load anything from this Mac (127.0.0.1, localhost) or from your local network (192.168.x.x, 10.x.x.x, 172.16–31.x.x, .local names…): it could otherwise scan them — which ports this Mac has open, which devices share its network — and tell profiles apart or link them. A page you open on this Mac or your network keeps its own loads.";
+"editor.local.proxy" = "With a proxy this holds anyway: this Mac's own addresses are always blocked (the system never sends them through a proxy), and local-network addresses go through the proxy — to its network, not yours.";
+"editor.local.allowedWarning" = "Allowed: pages can reach this Mac and your local network, as in Safari.";
+"editor.geo.reset" = "Reset";
+"editor.geo.reset.help" = "Back to Deny, with the coordinates cleared";
 "editor.window.size" = "Window size";
 "editor.window.app" = "As it is (real device)";
 "editor.window.custom" = "Custom size";
@@ -1003,6 +1011,8 @@
 "settings.newProfiles.quic.value" = "Off with a proxy";
 "settings.newProfiles.search" = "Search engine";
 "settings.newProfiles.search.detail" = "What a new profile's address bar and warm-up search with. Each profile changes it in its editor (Profile).";
+"settings.newProfiles.local" = "Block local requests";
+"settings.newProfiles.local.detail" = "A new profile's pages from the internet cannot reach this Mac or the local network — a page could otherwise scan them. Each profile changes it in its editor (Privacy).";
 "settings.newProfiles.randomWindow" = "Random safe window size";
 "settings.newProfiles.randomWindow.detail" = "A new profile gets a window size of its own, at random among those that fit this Mac's screen (two thirds to nine tenths of it each way), so that profiles do not all open with the same window. A real window: a page measures it.";
 "settings.behavior.subtitle" = "How the app's browser windows behave, in every profile.";
