@@ -54,6 +54,13 @@ MainActor.assumeIsolated {
         Localization.applyProcessLanguage()
         WebContentLanguage.decide(nil)
         SelfTest.whatSitesSeeCheck(arguments: arguments)
+    } else if arguments.contains("--payments-check") {
+        // One side of scripts/payments_check.py: what Apple Pay's, Payment Request's and Web
+        // Push's calls answer in a new profile (PaymentsCheck.swift). A measurement: what it turns
+        // on, it turns on in one web view of this process.
+        Localization.applyProcessLanguage()
+        WebContentLanguage.decide(nil)
+        PaymentsCheck.start(arguments: arguments)
     } else if arguments.contains("--capture-sites") {
         // The app's own start-up, as far as web content can tell: its UI language is set, and the
         // first profile (no proxy) decides the language websites see.

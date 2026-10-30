@@ -359,7 +359,12 @@ What still differs, and why it cannot be changed from the app:
   entitlements to work. Under the rule above (*Parity with Safari*) they could be turned on only
   that way, and only if every call then answers as a real Safari does; what the calls answer in a
   profile, and whether WebKit keeps the interfaces and their calls in a page that has the
-  profile's scripts, is not measured yet. Until it is, they stay off.
+  profile's scripts, is not measured yet. Until it is, they stay off. CI measures it
+  (`scripts/payments_check.py`): one HTTPS page of the runner, whose own script is the only one
+  measuring, in Safari and in new profiles with a proxy — as they ship, in this app's window and
+  in Safari's, and with the two switches on and the profile's scripts in the page's world, in a
+  world of their own, or none — call by call, with the window's own property names that only one
+  side has.
   `Object.getOwnPropertyNames(window).length` follows (1044 in Safari, 1029 in a profile with
   WebRTC on, 1022 with the default policy that removes it).
 - **WebRTC** is switched off by the default policy, and with a proxy unless the packet tunnel

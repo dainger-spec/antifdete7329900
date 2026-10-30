@@ -226,6 +226,35 @@ jobs:
             | sed 's/^/::notice title=What sites see - Safari'"'"'s window without a proxy::/'
           if [ "$code" = "2" ]; then echo "::warning::Safari did not answer the What-sites-see page on this runner"; exit 0; fi
           exit $code
+      - name: Apple Pay, Payment Request and Web Push — what their calls answer in Safari and in a profile (a measurement)
+        # scripts/payments_check.py: one HTTPS page of this Mac (a throwaway authority, trusted for
+        # the run and removed after; its key deleted once it has signed), whose own script is the
+        # only one measuring; in Safari, and in new profiles with a proxy — as they ship, in this
+        # app's window and in Safari's, and with WebKit's own switches for them on and the
+        # profile's scripts in the page's world, in a world of their own, or none
+        # (PaymentsCheck.swift). For the parity rule (ISOLATION §2); it never fails the build.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 25
+        run: |
+          set +e
+          python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --trust system --out build/payments \
+            | tee build/payments.txt
+          code=${PIPESTATUS[0]}
+          grep "^PAYMENTS-SUMMARY" build/payments.txt | head -10 | cut -c1-2000 \
+            | sed 's/^/::notice title=Payments and push - summary::/'
+          if [ "$code" != "0" ]; then echo "::warning::payments_check.py exited $code (2: Safari did not report; 1: a variant did not)"; fi
+          exit 0
+      - name: Apple Pay, Payment Request and Web Push — the answers
+        if: always()
+        run: |
+          grep "^PAYMENTS-CALLS" build/payments.txt 2>/dev/null | head -10 | cut -c1-4000 \
+            | sed 's/^/::notice title=Payments and push - answers::/' || true
+      - name: Apple Pay, Payment Request and Web Push — the window's own properties only one side has
+        if: always()
+        run: |
+          grep "^PAYMENTS-NAMES" build/payments.txt 2>/dev/null | head -10 | cut -c1-4000 \
+            | sed 's/^/::notice title=Payments and push - window names::/' || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -237,6 +266,7 @@ jobs:
             build/live
             build/leaks
             build/egress
+            build/payments
           if-no-files-found: ignore
       - name: App Sandbox container migration (unsandboxed data → sandboxed first launch)
         run: |

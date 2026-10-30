@@ -103,6 +103,10 @@ python3 scripts/safari_reference.py --compare build/surface/surface-macos.json
 python3 scripts/live_compare.py --app build/unsandboxed/PrivacyBrowser.app --out build/live
 # Does QUIC or WebRTC go around a profile's proxy? (forwarding proxies on this Mac; unsandboxed build):
 python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/leaks
+# What Apple Pay's, Payment Request's and Web Push's calls answer in Safari and in profiles (unsandboxed
+# build; --trust user trusts a throwaway certificate authority for the run, asking for the password or
+# Touch ID, and removes it after; CI uses --trust system, with sudo):
+python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --trust user --out build/payments
 # Updates end to end: an old and a new build, a local signed feed, the quit gate, the real installer
 # (it replaces an app, trusts a certificate for the run and captures packets with sudo: CI runners only):
 python3 scripts/update_check.py --variant sandboxed --out build/update-sandboxed
@@ -158,6 +162,14 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   nothing of a profile may leave outside its proxy, or land where the real Safari keeps its data;
 - `--check-safari-chrome`: the private Safari classes and methods the hosted chrome relies on
   (loaded in a temporary home, held to a closed proxy, as in a profile's process);
+- "What sites see" (`--what-sites-see-check`): a new profile's snapshot next to the runner's
+  Safari, as the panel takes it — in this app's window (the sandboxed build), and in Safari's
+  window with an HTTP proxy and without one (the build without the App Sandbox);
+- the payments measurement (`scripts/payments_check.py`, never fails the build): what Apple Pay's,
+  Payment Request's and Web Push's calls answer on one HTTPS page of the runner, in Safari and in
+  new profiles with a proxy — as they ship, in this app's window and in Safari's, and with WebKit's
+  own switches for them on, the profile's scripts in the page's world, in a world of their own, or
+  none (for the parity rule, `docs/ISOLATION_AND_LIMITATIONS.md` §2);
 - `scripts/check_localization.py`: ru and en hold the same keys, and no UI text is written into the code;
 - `scripts/check_log_privacy.py`: nothing of the user's is written to the system log in clear;
 - a container-migration check.
@@ -458,6 +470,7 @@ scripts/                           build-app.sh, release.sh (a release, or a dry
                                    update_public_suffix_list.py,
                                    live_compare.py + live_sites/ (pages measured in Safari and in profiles;
                                    the local pages' scripts are Resources/SiteProbes/, which the app runs too),
-                                   leak_check.py (QUIC/WebRTC around a proxy), update_check.py (updates end to end)
+                                   leak_check.py (QUIC/WebRTC around a proxy), update_check.py (updates end to end),
+                                   payments_check.py (Apple Pay and Web Push calls in Safari and in profiles)
 docs/                              architecture, isolation and limitations, sync format, sync server API
 ```
