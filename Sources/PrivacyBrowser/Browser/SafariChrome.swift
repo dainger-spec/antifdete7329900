@@ -1188,10 +1188,11 @@ private final class DefaultBrowserQuestion: NSObject {
                 return
             }
             // A preferences module is had through its class, as Safari's settings window has it.
+            typealias Shared = @convention(c) (AnyClass, Selector) -> Unmanaged<AnyObject>?
             let shared = NSSelectorFromString("sharedInstance")
-            let pane = (paneClass as AnyObject).responds(to: shared)
-                ? (paneClass as AnyObject).perform(shared)?.takeUnretainedValue() as? NSObject
-                : nil
+            let pane = class_getClassMethod(paneClass, shared).flatMap { method in
+                unsafeBitCast(method_getImplementation(method), to: Shared.self)(paneClass, shared)?.takeUnretainedValue() as? NSObject
+            }
             let asked = pane ?? paneClass.init()
             print("DEFAULT-BROWSER asking \(pane == nil ? "a new" : "the shared") \(String(describing: type(of: asked)))")
             typealias Question = @convention(c) (AnyObject, Selector) -> Void
