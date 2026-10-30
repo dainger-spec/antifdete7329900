@@ -1023,6 +1023,11 @@ final class SelfTest {
 
         info("egress-token \(run)")
         info("egress-window begin \(Date().timeIntervalSince1970)")
+        // The XPC services that start while the profile runs, and what they hold open in the real
+        // Safari's places: the profile's guard does not see a service asked for through libxpc.
+        let xpcWatch = SafariPaths.realHome.map { XPCServiceWatch(realHome: $0) }
+        defer { _ = xpcWatch?.stop() }
+        var profilePIDs: Set<pid_t> = []
         // The per-profile process is off by default; this one check is what it is for.
         setenv("PB_PROFILE_PROCESS", "1", 1)
         // Variables of the manager's own that a profile's process must not inherit: one of the
@@ -1044,7 +1049,7 @@ final class SelfTest {
         setenv("PB_PROFILE_PROCESS", "0", 1)
         unsetenv("PB_INHERIT_CANARY")
         unsetenv("PB_WARM_UP_ONLY")
-        if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+        if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)"); profilePIDs.insert(pid) }
         let started = await waitUntil(timeout: 90) { hostsChrome != nil }
         check("Safari chrome: the profile's own process started and reported its window",
               started, "no 'running' came back (the process may have died; see its own log)")
@@ -1344,7 +1349,7 @@ final class SelfTest {
                 check("Safari chrome, second launch: the profile's process started", false, String(describing: error))
             }
             setenv("PB_PROFILE_PROCESS", "0", 1)
-            if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+            if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)"); profilePIDs.insert(pid) }
             let restarted = await waitUntil(timeout: 90) { hostsChrome != nil }
             var arrived: [Entry] = []
             for _ in 0..<15 {
@@ -1368,8 +1373,28 @@ final class SelfTest {
             try? await manager.stop(profile.id)
         }
         await manager.shutDown()
+        if let xpcWatch { reportXPCServices(xpcWatch.stop(), profilePIDs: profilePIDs) }
         info("egress-window end \(Date().timeIntervalSince1970)")
         check("Safari chrome: nothing went wrong while it ran", messages.isEmpty, messages.joined(separator: " | "))
+    }
+
+    /// What `XPCServiceWatch` saw while the profile ran in Safari's chrome: every XPC service that
+    /// started, and whether this app (the self-test, or the profile's process it started) is the
+    /// one the system holds responsible for it; and each one's files open in the real Safari's
+    /// places. A measurement: which services a profile's process must be closed to is decided from
+    /// it (the owner's Mac showed one, Safari's SafariPlatformSupport helper, in the real container).
+    private func reportXPCServices(_ seen: [(service: XPCServiceWatch.Service, opened: [String])], profilePIDs: Set<pid_t>) {
+        let ours = profilePIDs.union([getpid()])
+        func whose(_ service: XPCServiceWatch.Service) -> String {
+            guard let responsible = service.responsible else { return "responsible process not known" }
+            return ours.contains(responsible) ? "for this app" : "for pid \(responsible)"
+        }
+        info("XPC services started while the profile ran in Safari's chrome: "
+             + (seen.isEmpty ? "none" : seen.map { "\($0.service.bundleName) (pid \($0.service.pid), \(whose($0.service)))" }.joined(separator: ", ")))
+        for entry in seen where !entry.opened.isEmpty {
+            info("XPC service \(entry.service.bundleName) (pid \(entry.service.pid), \(whose(entry.service))) held open in the real Safari's places: "
+                 + entry.opened.prefix(20).joined(separator: ", "))
+        }
     }
 
     // MARK: Exceptions

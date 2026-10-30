@@ -1,6 +1,7 @@
 import AppKit
 import CoreServices
 import os
+import Security
 
 /// `PrivacyBrowser --safari-inventory`: what Safari's chrome brings into a profile's process, as
 /// facts to decide from rather than guesses.
@@ -19,6 +20,9 @@ import os
 ///     ("Blocking", "WaitUntil", "UntilResponse", "Synchronous", "WaitFor").
 ///   * FORMS: every method of Safari's frameworks, in whatever class, whose name says it takes a
 ///     form's submission or saves a password: where Safari's own offer to save one starts.
+///   * XPC: every XPC service bundled in a framework this process has loaded, with what its
+///     entitlements say about files and containers. Such a service starts for whichever process
+///     asks, as a process of its own — outside the profile's home, proxy and sandbox.
 ///   * BOOKMARKS-FILE: what a new profile's Safari keeps as bookmarks.
 ///
 /// In a home of its own and held to a closed proxy (`SafariChrome.prepareForCheck`): nothing here
@@ -57,6 +61,7 @@ enum SafariChromeInventory {
                 menu()
                 classes()
                 resources()
+                xpcServices()
                 bookmarksFile()
                 print("INVENTORY done")
                 SafariChrome.removeCheckHome()
@@ -211,6 +216,45 @@ enum SafariChromeInventory {
 
     /// What Safari's error pages say ("Safari can’t establish a secure connection…").
     private static let errorWords = "(?i)can.t (establish a secure connection|open the page|find the server|connect to the server)"
+
+    // MARK: XPC services of the frameworks loaded
+
+    private static func xpcServices() {
+        inventoryStep = "the frameworks' XPC services"
+        let frameworks = Set((0..<_dyld_image_count()).compactMap { _dyld_get_image_name($0).map { String(cString: $0) } }
+            .compactMap { image in image.range(of: ".framework/").map { String(image[..<image.index(before: $0.upperBound)]) } })
+        var listed: Set<String> = []
+        for framework in frameworks.sorted() {
+            let versions = (try? FileManager.default.contentsOfDirectory(atPath: framework + "/Versions")) ?? []
+            for folder in ["XPCServices"] + versions.map({ "Versions/\($0)/XPCServices" }) {
+                let directory = URL(fileURLWithPath: framework).appendingPathComponent(folder)
+                let services = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+                for service in services.sorted() where service.hasSuffix(".xpc") {
+                    let url = directory.appendingPathComponent(service).resolvingSymlinksInPath()
+                    guard listed.insert(url.path).inserted else { continue }
+                    let identifier = Bundle(url: url)?.bundleIdentifier ?? "?"
+                    print("XPC \((framework as NSString).lastPathComponent) \(identifier) | \(fileEntitlements(of: url))")
+                }
+            }
+        }
+        print("XPC \(listed.count) service(s) in \(frameworks.count) framework(s) loaded")
+    }
+
+    /// The entitlements of the code at `url` that are about files, containers, keychains or
+    /// Safari, as "key=value" pairs; "-" for none.
+    private static func fileEntitlements(of url: URL) -> String {
+        var code: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code else { return "not signed code" }
+        var information: CFDictionary?
+        guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
+              let signing = information as? [String: Any] else { return "no signing information" }
+        let entitlements = signing[kSecCodeInfoEntitlementsDict as String] as? [String: Any] ?? [:]
+        let shown = entitlements.filter { $0.key.range(of: "(?i)sandbox|container|file|home|storage|safari|keychain|group|tcc|exception",
+                                                        options: .regularExpression) != nil }
+        guard !shown.isEmpty else { return "-" }
+        return shown.sorted { $0.key < $1.key }.map { "\($0.key)=\(String(describing: $0.value).replacingOccurrences(of: "\n", with: " ").prefix(200))" }
+            .joined(separator: "; ")
+    }
 
     // MARK: A new profile's bookmarks
 

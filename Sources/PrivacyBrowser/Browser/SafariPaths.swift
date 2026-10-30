@@ -106,6 +106,21 @@ enum SafariPaths {
         redirected.append("\(kind)[\(NSStringFromClass(owner)) \(NSStringFromSelector(selector))]")
     }
 
+    /// Whether `path` is in the real Safari's places — `sandboxFilter`'s, as a test of one path (the
+    /// self-test's `XPCServiceWatch` asks it of the files other processes hold open).
+    static func isRealSafariPlace(_ path: String, realHome: String) -> Bool {
+        let library = realHome + "/Library/"
+        guard path.hasPrefix(library) else { return false }
+        let parts = path.dropFirst(library.count).split(separator: "/", maxSplits: 2, omittingEmptySubsequences: true)
+        guard let first = parts.first else { return false }
+        if ["Safari", "Cookies", "SafariSafeBrowsing"].contains(first) { return true }
+        guard parts.count > 1 else { return false }
+        if ["Containers", "Caches", "WebKit", "HTTPStorages", "Preferences"].contains(first) {
+            return parts[1].hasPrefix("com.apple.Safari")
+        }
+        return first == "Group Containers" && parts[1].lowercased().contains("safari")
+    }
+
     /// The real Safari's places, as a sandbox profile's filter: the folders Safari keeps its data
     /// in, its container, caches, website data, cookies, preferences and group containers.
     static func sandboxFilter(realHome: String) -> String {
