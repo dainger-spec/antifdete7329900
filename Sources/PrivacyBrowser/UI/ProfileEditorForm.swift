@@ -63,6 +63,8 @@ struct ProfileEditorForm: View {
     var onDropCookieFile: (URL) -> Void = { _ in }
     /// Saved, and its cookies being imported: Save waits.
     var isSaving = false
+    /// What sites see of the profile as it is saved (an existing profile; nil for a new one).
+    var onWhatSitesSee: (() -> Void)?
 
     static let size = CGSize(width: 760, height: 660)
     static let indexWidth: CGFloat = 172
@@ -177,6 +179,13 @@ struct ProfileEditorForm: View {
                 subtitle
             }
             Spacer(minLength: 0)
+            if let onWhatSitesSee {
+                Button(action: onWhatSitesSee) {
+                    Label(L("profiles.row.whatSitesSee"), systemImage: "eye")
+                }
+                .buttonStyle(.lumenSecondary)
+                .help(L("editor.whatSitesSee.help"))
+            }
         }
         .padding(.horizontal, 24)
         .padding(.top, 22)

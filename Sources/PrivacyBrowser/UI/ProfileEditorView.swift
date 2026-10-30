@@ -373,6 +373,7 @@ struct ProfileEditorView: View {
     @State private var error: String?
     @State private var loaded = false
     @State private var showingTunnel = false
+    @State private var showingWhatSitesSee = false
     @State private var topic: ProfileEditorForm.Topic = .profile
     /// A check run from the editor: Check, or Save finding a proxy's type.
     @State private var checking = false
@@ -395,6 +396,12 @@ struct ProfileEditorView: View {
         }
         .onAppear(perform: load)
         .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
+        .sheet(isPresented: $showingWhatSitesSee) {
+            if case .existing(let profile) = target {
+                WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
+                                                                            launch: { await model.launch($0) }))
+            }
+        }
         .fileImporter(isPresented: $choosingCookieFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in
             if case let .success(url) = result { readCookieFile(url) }
         }
@@ -415,7 +422,7 @@ struct ProfileEditorView: View {
                           savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
                           knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen,
                           onChooseCookieFile: { choosingCookieFile = true }, onDropCookieFile: readCookieFile,
-                          isSaving: savingCookies)
+                          isSaving: savingCookies, onWhatSitesSee: target.isNew ? nil : { showingWhatSitesSee = true })
     }
 
     /// The tags of every profile, each once, for the tag field to offer.

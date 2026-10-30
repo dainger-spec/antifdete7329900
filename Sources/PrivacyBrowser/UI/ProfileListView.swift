@@ -534,10 +534,9 @@ struct ProfilesScreen: View {
             }
             LumenSearchField(text: $search, prompt: L("profiles.search"))
                 .frame(width: 200)
+            // Only what is done rarely, in groups: the proxies are in the sidebar, Settings is ⌘,
+            // in the app's menu, and warming up several profiles is the selection's (and ⌘K's).
             Menu {
-                Button(L("profiles.menu.warmUpSeveral"), action: actions.warmUpQueue)
-                    .disabled(rows.isEmpty)
-                Divider()
                 Button(L("profiles.menu.import"), action: actions.importProfile)
                 Divider()
                 Button(L("profiles.menu.sync"), action: actions.openSync)
@@ -547,7 +546,6 @@ struct ProfilesScreen: View {
                 Button(L("profiles.menu.tunnel"), action: actions.openTunnel)
                 Button(L("profiles.menu.automation"), action: actions.openAutomation)
                 Divider()
-                Button(L("profiles.menu.settings"), action: actions.openSettings)
                 Button(L("profiles.menu.changePassword"), action: actions.changePassword)
             } label: {
                 Image(systemName: "ellipsis")

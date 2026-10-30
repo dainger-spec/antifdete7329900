@@ -302,6 +302,7 @@
 "paste.typed.notAField" = "Click into a text field of the page first: Paste as Typed types into the page's field that has the keyboard.";
 "paste.typed.interrupted" = "Stopped; characters typed: %ld. A key you press or a click stops the typing, and so does the window or the tab losing the keyboard.";
 "profiles.row.whatSitesSee" = "What Sites See…";
+"editor.whatSitesSee.help" = "A snapshot of the profile as it is saved: changes not saved yet are not in it.";
 "palette.whatSitesSee" = "What Sites See: %@";
 "whatSites.title" = "What Sites See — %@";
 "whatSites.subtitle" = "One page of this Mac opens in a window of the profile and then in Safari, and is measured in each by the scripts CI's comparison runs: navigator, screen, the window, request headers, TLS, APIs. Nothing leaves this Mac: the page, its requests and what it finds stay on 127.0.0.1, which listens only while the snapshot is taken.";
