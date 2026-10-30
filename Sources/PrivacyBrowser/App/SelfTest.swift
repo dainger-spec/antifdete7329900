@@ -1,6 +1,7 @@
 import AppKit
 import BrowserCore
 import CryptoKit
+import Network
 import os
 import WebKit
 
@@ -499,7 +500,8 @@ final class SelfTest {
             check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile", false, String(describing: error))
         }
         do {
-            try await fragmentJumps(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort))
+            try await fragmentJumps(repository, http: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort),
+                                    socks: ProxySettings(kind: .socks5, host: "127.0.0.1", port: socksPort))
         } catch {
             info("fragment jump: not measured — \(error)")
         }
@@ -592,29 +594,51 @@ final class SelfTest {
     private static let readServedPaths = "return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();"
 
     /// A jump to a fragment of the page shown (`location.hash`): does the page keep its document?
-    /// Measured, not checked. WebKit 27 (macOS 27.0.1) made a new document of it for a page loaded
-    /// through the proxy, where a page of this Mac kept its document — in Safari 27, in profiles
-    /// as they ship and in a plain web view alike (CI run 435, `scripts/fragment_check.py`). In a
-    /// profile with the proxy: a page through it by name, one through it by address, and a page
-    /// of this Mac, which goes direct.
-    private func fragmentJumps(_ repository: ProfileRepository, _ proxy: ProxySettings) async throws {
+    /// Measured, not checked. WebKit 27 (macOS 27.0.1) makes a new document of it for a page loaded
+    /// through a proxy — by name and by address alike —, where a page of this Mac, which goes
+    /// direct, keeps its document — in Safari 27, in profiles as they ship and in a plain web view
+    /// alike (CI runs 435 and 436, `scripts/fragment_check.py`). Measured here: in a profile with
+    /// the HTTP proxy, a page through it by name, one by address, and a page of this Mac; the page
+    /// by name through a SOCKS5 profile; and in a plain web view whose non-persistent store has
+    /// only WebKit's own proxy setting — no profile, no script, no rule list.
+    private func fragmentJumps(_ repository: ProfileRepository, http: ProxySettings, socks: ProxySettings) async throws {
         let local = SiteSnapshotServer { _, _ in "<!doctype html><html><head><title>Plain page</title></head><body><p>A page of this Mac.</p></body></html>" }
         guard await local.start() else {
             info("fragment jump: no page of this Mac could be served")
             return
         }
         defer { local.stop() }
-        let profile = try repository.create(name: "Fragment", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
+        let profile = try repository.create(name: "Fragment", configuration: ProfileConfiguration(proxy: http, ephemeral: true))
         let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
         defer { session.shutDown() }
-        let pages: [(label: String, url: URL)] = [
-            ("through the proxy, by name", URL(string: "http://proxied.selftest.invalid/fragment")!),
-            ("through the proxy, by address", URL(string: "http://198.18.0.15/fragment")!),
-            ("a page of this Mac, direct", local.newPage(.profile).url),
+        let socksProfile = try repository.create(name: "Fragment SOCKS5", configuration: ProfileConfiguration(proxy: socks, ephemeral: true))
+        let socksSession = try makeSession(repository, socksProfile.id, key: repository.profileKey(for: socksProfile.id))
+        defer { socksSession.shutDown() }
+        enum Setup { case profile, socksProfile, plainWebView }
+        let byName = URL(string: "http://proxied.selftest.invalid/fragment")!
+        let pages: [(label: String, url: URL, setup: Setup)] = [
+            ("through the proxy, by name", byName, .profile),
+            ("through the proxy, by address", URL(string: "http://198.18.0.15/fragment")!, .profile),
+            ("a page of this Mac, direct", local.newPage(.profile).url, .profile),
+            ("through a SOCKS5 proxy, by name", byName, .socksProfile),
+            ("through the proxy, by name, in a plain web view (WebKit's own proxy setting; no profile, script or rule list)",
+             byName, .plainWebView),
         ]
         let mark = "window.__pbMark = 'marked'; return true;"
         for page in pages {
-            let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
+            let configuration: WKWebViewConfiguration
+            switch page.setup {
+            case .profile:
+                configuration = session.makeWebViewConfiguration()
+            case .socksProfile:
+                configuration = socksSession.makeWebViewConfiguration()
+            case .plainWebView:
+                configuration = WKWebViewConfiguration()
+                let store = WKWebsiteDataStore.nonPersistent()
+                store.proxyConfigurations = try ProxyConfigurationFactory.make(http)
+                configuration.websiteDataStore = store
+            }
+            let webView = WKWebView(frame: .zero, configuration: configuration)
             let counter = NavigationCounter()
             var line = "fragment jump, \(page.label): "
             do {
