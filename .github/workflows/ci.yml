@@ -176,6 +176,32 @@ jobs:
         with:
           name: PrivacyBrowser.app
           path: build/sandboxed/PrivacyBrowser.app
+      - name: Updates end to end (a local feed and a new build; sandboxed and unsandboxed)
+        # scripts/update_check.py: the old build's own updater against a local HTTPS feed — no request
+        # with checks off (packet capture), an older build never offered, a stale and a forged appcast
+        # and a changed archive refused, nothing installed while a profile with a window and a warm-up
+        # without one run — then the quit path, the gate, the real installer: the swap, the new build
+        # started, the old build's data opened by the new one. Its own bundle id (dev.local.PBUpdateCheck).
+        timeout-minutes: 30
+        run: |
+          status=0
+          for variant in sandboxed unsandboxed; do
+            echo "::group::updates, $variant"
+            python3 scripts/update_check.py --variant $variant --out build/update-$variant || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: update-check
+          path: |
+            build/update-*/run.txt
+            build/update-*/verify.txt
+            build/update-*/requests.json
+            build/update-*/capture.txt
+            build/update-*/*.json
+          if-no-files-found: ignore
       - name: UI snapshot checks
         if: always() && steps.ui.outcome == 'failure'
         run: |

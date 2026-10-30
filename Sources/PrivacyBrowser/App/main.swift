@@ -41,6 +41,10 @@ MainActor.assumeIsolated {
             exit(64)
         }
         SafariChrome.startStandalone(arguments: arguments)
+    } else if arguments.contains("--selftest-updates") {
+        // The update scenarios of docs/UPDATES.md §8, driven by scripts/update_check.py on a CI
+        // runner (UpdateSelfTest.swift): they replace this very app with another build.
+        UpdateSelfTest.start(arguments: arguments)
     } else if arguments.contains("--render-ui-snapshots") {
         // The app's screens with sample data, as PNG files for design review (UISnapshots.swift).
         UISnapshots.start(arguments: arguments)

@@ -121,9 +121,10 @@ final class AppUpdater: ObservableObject, Updater {
         static let deferred = "PBUpdateDeferred"
     }
 
-    /// How often automatic checks ask, and how long after a launch the first one waits.
+    /// How often automatic checks ask, and how long after a launch the first one waits (the
+    /// update scenarios of `UpdateSelfTest` shorten the wait).
     static let interval: TimeInterval = 6 * 3600
-    static let firstCheckDelay: TimeInterval = 60
+    static var firstCheckDelay: TimeInterval = 60
     /// The appcast is small; anything larger is not one.
     static let feedLimit = 1 << 20
 
@@ -304,10 +305,24 @@ final class AppUpdater: ObservableObject, Updater {
     func installBlock() -> UpdateBlock? {
         let path = configuration.app.path
         if path.contains("/AppTranslocation/") { return .translocated }
-        guard FileManager.default.isWritableFile(atPath: configuration.app.deletingLastPathComponent().path) else {
-            return .notWritable
-        }
+        guard Self.userCanWrite(configuration.app.deletingLastPathComponent()) else { return .notWritable }
         return nil
+    }
+
+    /// Whether this user may write `folder` — the installer replaces the app as this user, outside
+    /// any sandbox. Told from the folder's owner, group and mode: `access(2)` answers for this
+    /// process, and in the sandboxed build its sandbox refuses every folder outside the container.
+    nonisolated static func userCanWrite(_ folder: URL) -> Bool {
+        var info = stat()
+        guard stat(folder.path, &info) == 0 else { return false }
+        if info.st_uid == getuid() { return info.st_mode & S_IWUSR != 0 }
+        let count = getgroups(0, nil)
+        var groups = [gid_t](repeating: 0, count: Int(max(count, 0)))
+        let found = getgroups(count, &groups)
+        if info.st_gid == getgid() || (found > 0 && groups.prefix(Int(found)).contains(info.st_gid)) {
+            return info.st_mode & S_IWGRP != 0
+        }
+        return info.st_mode & S_IWOTH != 0
     }
 
     // MARK: Staged release

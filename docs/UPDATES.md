@@ -11,7 +11,7 @@ it implements and how it is proven.
 | §3, the installer helper | in every build (`Contents/Helpers/PrivacyBrowser Updater.app`; `UpdateInstaller`, tested on real signed bundles by `UpdateInstallerTests`) |
 | §3 the quit gate, Install Now; §5 the check; §7 the screen | in the app (`AppUpdater`, `UpdateGate`, `UpdatesView`); the gate in the self-test (`updateGate`), the sheet in the UI snapshots; only builds with a feed URL have an updater |
 | §6, `scripts/release.sh` | runs dry in CI on every push (ad hoc, a throwaway key, no notarization); a real release needs the account and the key from the environment |
-| the end-to-end scenarios of §8 | not yet |
+| the end-to-end scenarios of §8 | in CI on every push, sandboxed and unsandboxed builds (`scripts/update_check.py`, `--selftest-updates`) |
 
 Two facts make updates harder here than in most apps:
 
@@ -342,19 +342,35 @@ handed over at the last quit — is said once at the next launch. In the UI snap
 
 - **Unit tests (BrowserCore, Linux and macOS):** the appcast envelope and its items; Ed25519 of the
   appcast and of a zip, a forged or tampered one refused; versions compared component by component;
-  no downgrade; an appcast older than the last accepted refused; R1–R4 for every file in §4.
-- **Self-test (macOS, real app):** the appcast and a "new" bundle (a copy of the app under test with
-  a higher build, re-signed, zipped and signed with a test key) served from a local server, as the
-  proxy checks use `scripts/selftest_proxy.py`:
-  - no update is installed while a profile runs, without confirmation;
-  - when the bundle is replaced, every profile is sealed — the warm-up profile without a window too;
-  - a forged signature is refused;
-  - an older build is refused;
-  - with automatic checks off, not one request: the local server sees none, and the packet capture
-    around it (scripts/egress_check.py) sees nothing of the app;
-  - after the replacement the app starts again and opens its data;
-  - Safari's home archive of a newer version is refused, leaves no home, and nothing is sealed over
-    it (`formatPolicy`).
+  no downgrade; an appcast older than the last accepted refused; R1–R4 for every file in §4
+  (`UpdateTests`, `FormatPolicyTests`).
+- **The installer on real bundles (macOS):** `UpdateInstallerTests` — apps signed ad hoc, zipped,
+  their zips signed; the swap, the swap back, waiting without killing, every refusal.
+- **Self-test (macOS, real app):** the quit gate on the real layout (`updateGate`); Safari's home
+  archive of a newer version refused, no home left, nothing sealed over it (`formatPolicy`).
+- **End to end (CI, sandboxed and unsandboxed builds):** `scripts/update_check.py` makes an
+  Ed25519 key, the old build (0.1.0, build 1) and a new one (0.1.1, build 2) under their own
+  bundle id, the new one zipped and signed, appcasts, and a local HTTPS feed for them — as the proxy
+  checks use `scripts/selftest_proxy.py` — then runs the old build's `--selftest-updates run`
+  (`UpdateSelfTest`) with its own updater, under a packet capture with each packet's process:
+  - with automatic checks off, not one request: the feed counts none in 8 seconds in which one
+    would have been due, and the capture holds not one packet of the app; its control — the first
+    request once checks are on — is in the capture;
+  - an older build is never offered (a feed of build 1 and 0.9 to build 1);
+  - a stale appcast (validly signed, older than one accepted), a forged one (its list changed
+    under the signature) and a changed archive (one byte) are refused, nothing kept;
+  - the release is downloaded and checked; with a profile running in a window and another warming
+    up without one — in the unsandboxed build, each in its own process — the gate does not pass
+    and nothing is handed over: no request written, no installer running;
+  - the quit path stops and seals both; the gate passes, no process had to be killed, and the real
+    installer is started; the script sees the swap, finds no profile data in plaintext at that
+    moment, sees the new build started by the installer and the installer's "installed";
+  - the new build's `--selftest-updates verify` opens the old build's vault, profiles, settings and
+    bookmarks, starts a profile from the website data the old build sealed, and seals it again;
+  - every request the feed got carries the same headers from any Mac — `User-Agent:
+    PrivacyBrowser`, `Accept-Language: en`, no cookie, no credentials, no query string.
+  The feed's certificate is trusted for the run (`security add-trusted-cert`) and removed after: the
+  updater's own code takes no exception for it.
 
 ## 9. Not done
 

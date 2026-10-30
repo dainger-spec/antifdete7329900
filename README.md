@@ -103,6 +103,9 @@ python3 scripts/safari_reference.py --compare build/surface/surface-macos.json
 python3 scripts/live_compare.py --app build/unsandboxed/PrivacyBrowser.app --out build/live
 # Does QUIC or WebRTC go around a profile's proxy? (forwarding proxies on this Mac; unsandboxed build):
 python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/leaks
+# Updates end to end: an old and a new build, a local signed feed, the quit gate, the real installer
+# (it replaces an app, trusts a certificate for the run and captures packets with sudo: CI runners only):
+python3 scripts/update_check.py --variant sandboxed --out build/update-sandboxed
 ```
 
 CI (`.github/workflows/ci.yml`) runs on every push:
@@ -352,6 +355,6 @@ scripts/                           build-app.sh, release.sh (a release, or a dry
                                    selftest_proxy.py, safari_reference.py,
                                    update_public_suffix_list.py,
                                    live_compare.py + live_sites/ (pages measured in Safari and in profiles),
-                                   leak_check.py (QUIC/WebRTC around a proxy)
+                                   leak_check.py (QUIC/WebRTC around a proxy), update_check.py (updates end to end)
 docs/                              architecture, isolation and limitations, sync format, sync server API
 ```
