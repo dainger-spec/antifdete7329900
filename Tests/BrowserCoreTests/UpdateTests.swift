@@ -219,6 +219,41 @@ final class UpdateTests: XCTestCase {
         assertRefused(.unknownKey(foreignItem.keyID)) { try UpdateVerifier.checkArchive(at: foreign, item: foreignItem, keys: self.keys) }
     }
 
+    // MARK: Between the app and its installer
+
+    /// The request and the outcome are the only things the app and the helper hand each other: the
+    /// request names an archive by its file name in the staging folder, nothing else.
+    func testTheRequestAndTheOutcome() throws {
+        let (_, item) = try release(build: "2")
+        let folder = UpdateStaging.folder(bundleIdentifier: "dev.local.PrivacyBrowser", home: URL(fileURLWithPath: "/Users/someone"))
+        XCTAssertEqual(folder.path, "/Users/someone/Library/Caches/dev.local.PrivacyBrowser.update")
+
+        let request = UpdateRequest(appPath: "/Applications/PrivacyBrowser.app", archive: "PrivacyBrowser-2.zip", item: item,
+                                    requestedAt: Date(timeIntervalSince1970: 1_800_000_000))
+        try request.write(to: root)
+        XCTAssertEqual(try UpdateRequest.read(from: root), request)
+
+        for name in ["../PrivacyBrowser-2.zip", "/tmp/a.zip", ".hidden.zip", "a/b.zip", "app.dmg", ""] {
+            XCTAssertFalse(UpdateStaging.isArchiveName(name), name)
+            var other = request
+            other.archive = name
+            try other.write(to: root)
+            XCTAssertThrowsError(try UpdateRequest.read(from: root), name)
+        }
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(request)) as? [String: Any])
+        json["format"] = 2
+        try JSONSerialization.data(withJSONObject: json).write(to: root.appendingPathComponent(UpdateStaging.requestName))
+        XCTAssertThrowsError(try UpdateRequest.read(from: root)) { error in
+            XCTAssertEqual(error as? CoreError, .newerFormat(what: "request.json", found: 2, supported: 1))
+        }
+
+        XCTAssertNil(UpdateOutcome.read(from: root), "no outcome yet")
+        let outcome = UpdateOutcome(result: .rolledBack, detail: "the new app did not start", fromBuild: "1", toBuild: "2",
+                                    version: "0.2", at: Date(timeIntervalSince1970: 1_800_000_100))
+        try outcome.write(to: root)
+        XCTAssertEqual(UpdateOutcome.read(from: root), outcome)
+    }
+
     // MARK: Keys in Info.plist
 
     func testTheKeysAnInfoPlistNames() {

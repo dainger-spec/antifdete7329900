@@ -18,6 +18,10 @@
 //   PrivacyBrowser  macOS app (SwiftUI + AppKit + WebKit). macOS only.
 //   pbupdate        Makes and checks the signed update feed (scripts/release.sh, docs/UPDATES.md)
 //                   with BrowserCore's own checks. macOS and Linux.
+//   UpdateInstaller macOS only: replaces the app with a checked release (code signature, process
+//                   list, the swap), tested on real bundles by UpdateInstallerTests.
+//   PrivacyBrowserUpdater  macOS only: the installer helper, Contents/Helpers/PrivacyBrowser
+//                   Updater.app, which the app starts at the end of a quit (docs/UPDATES.md §3).
 //
 import PackageDescription
 
@@ -81,8 +85,24 @@ targets.append(contentsOf: [
         dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport"],
         path: "Sources/PrivacyBrowser"
     ),
+    .target(
+        name: "UpdateInstaller",
+        dependencies: ["BrowserCore"],
+        path: "Sources/UpdateInstaller"
+    ),
+    .executableTarget(
+        name: "PrivacyBrowserUpdater",
+        dependencies: ["BrowserCore", "UpdateInstaller"],
+        path: "Sources/PrivacyBrowserUpdater"
+    ),
+    .testTarget(
+        name: "UpdateInstallerTests",
+        dependencies: ["BrowserCore", "UpdateInstaller"],
+        path: "Tests/UpdateInstallerTests"
+    ),
 ])
 products.append(.executable(name: "PrivacyBrowser", targets: ["PrivacyBrowser"]))
+products.append(.executable(name: "PrivacyBrowserUpdater", targets: ["PrivacyBrowserUpdater"]))
 products.append(.executable(name: "PacketTunnelExtension", targets: ["PacketTunnelExtension"]))
 #endif
 

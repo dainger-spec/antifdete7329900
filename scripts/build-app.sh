@@ -17,6 +17,11 @@
 #   for testing on a registered Mac; the default, developer-id, is what can be notarized.)
 #   NE=check scripts/build-app.sh   # builds the extension and its bundle unsigned, for CI
 #
+# Versions and updates (docs/UPDATES.md; scripts/release.sh sets these):
+#   APP_VERSION=0.2.0 APP_BUILD=2      CFBundleShortVersionString and CFBundleVersion
+#   UPDATE_FEED_URL=https://…/appcast.json UPDATE_PUBLIC_KEYS="<key id>=<base64>,…" [UPDATE_TEAM_ID=…]
+#                                      the app checks for updates (without a feed URL it has no updater)
+#
 # Requires macOS 14+ and Xcode 15+ (or the matching Command Line Tools).
 set -euo pipefail
 
@@ -49,15 +54,51 @@ if [[ "$SANDBOX" == "1" ]]; then
 else
   ENTITLEMENTS=Resources/PrivacyBrowser-NoSandbox.entitlements
 fi
+# The sandboxed entitlements name the update's staging folder by the bundle id.
+ENTITLEMENTS_BUILT="$(mktemp -t pbentitlements).entitlements"
+sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" "$ENTITLEMENTS" > "$ENTITLEMENTS_BUILT"
+plutil -lint "$ENTITLEMENTS_BUILT" >/dev/null
+ENTITLEMENTS="$ENTITLEMENTS_BUILT"
 
 swift build -c "$CONFIG" --product PrivacyBrowser
+swift build -c "$CONFIG" --product PrivacyBrowserUpdater
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/PrivacyBrowser" "$APP/Contents/MacOS/PrivacyBrowser"
 sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Info.plist > "$APP/Contents/Info.plist"
-plutil -lint "$APP/Contents/Info.plist" >/dev/null
+PLIST="$APP/Contents/Info.plist"
+[[ -z "${APP_VERSION:-}" ]] || /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$PLIST"
+[[ -z "${APP_BUILD:-}" ]] || /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_BUILD" "$PLIST"
+# What the app trusts for updates (docs/UPDATES.md §2): the feed, the keys of its signatures, and
+# the Team ID an update must be signed by. Checked again by the app and its installer.
+if [[ -n "${UPDATE_FEED_URL:-}" ]]; then
+  [[ "$UPDATE_FEED_URL" == https://* ]] || { echo "error: UPDATE_FEED_URL must be https" >&2; exit 1; }
+  [[ -n "${UPDATE_PUBLIC_KEYS:-}" ]] || { echo "error: UPDATE_FEED_URL needs UPDATE_PUBLIC_KEYS" >&2; exit 1; }
+  /usr/libexec/PlistBuddy -c "Add :PBUpdateFeedURL string $UPDATE_FEED_URL" "$PLIST"
+fi
+if [[ -n "${UPDATE_PUBLIC_KEYS:-}" ]]; then
+  /usr/libexec/PlistBuddy -c "Add :PBUpdatePublicKeys dict" "$PLIST"
+  IFS=',' read -ra UPDATE_KEYS <<< "$UPDATE_PUBLIC_KEYS"
+  for entry in "${UPDATE_KEYS[@]}"; do
+    id="${entry%%=*}"
+    key="${entry#*=}"
+    [[ "$id" =~ ^[0-9a-f]{16}$ && -n "$key" && "$key" != "$entry" ]] \
+      || { echo "error: UPDATE_PUBLIC_KEYS: '$entry' is not <key id>=<base64>" >&2; exit 1; }
+    /usr/libexec/PlistBuddy -c "Add :PBUpdatePublicKeys:$id string $key" "$PLIST"
+  done
+fi
+[[ -z "${UPDATE_TEAM_ID:-}" ]] || /usr/libexec/PlistBuddy -c "Add :PBUpdateTeamID string $UPDATE_TEAM_ID" "$PLIST"
+plutil -lint "$PLIST" >/dev/null
+
+# The installer helper (docs/UPDATES.md §3): an app of its own, outside the sandbox, that the app
+# starts through LaunchServices at the end of a quit in which every profile was sealed.
+HELPER="$APP/Contents/Helpers/PrivacyBrowser Updater.app"
+mkdir -p "$HELPER/Contents/MacOS"
+cp "$BIN_DIR/PrivacyBrowserUpdater" "$HELPER/Contents/MacOS/PrivacyBrowserUpdater"
+sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Updater/Info.plist > "$HELPER/Contents/Info.plist"
+plutil -lint "$HELPER/Contents/Info.plist" >/dev/null
 
 # The app icon: the app draws its iconset from the Lumen mark (Sources/PrivacyBrowser/App/AppIcon.swift).
 ICON_DIR="$(mktemp -d -t pbicon)"
@@ -134,14 +175,21 @@ fi
 
 TIMESTAMP="--timestamp=none"
 [[ "$NE" != "1" ]] || TIMESTAMP="--timestamp"   # notarization needs a secure timestamp
+# Inside out: the helper first (no entitlements: no sandbox), then the app, whose signature seals it.
+codesign --force --options runtime "$TIMESTAMP" --sign "$SIGN_IDENTITY" "$HELPER"
 codesign --force --options runtime "$TIMESTAMP" \
   --entitlements "$ENTITLEMENTS" \
   --sign "$SIGN_IDENTITY" "$APP"
-codesign --verify --strict "$APP"
+codesign --verify --strict --deep "$APP"
+if codesign -d --entitlements - --xml "$HELPER" 2>/dev/null | grep -F "com.apple.security.app-sandbox" >/dev/null; then
+  echo "error: the installer helper must not be sandboxed (it replaces the app)" >&2; exit 1
+fi
 
 # Fail loudly if the signature does not carry the expected sandbox state.
 if codesign -d --entitlements - --xml "$APP" 2>/dev/null | grep -q "com.apple.security.app-sandbox"; then
   [[ "$SANDBOX" == "1" ]] || { echo "error: unexpected sandbox entitlement" >&2; exit 1; }
+  codesign -d --entitlements - --xml "$APP" 2>/dev/null | grep -F "/Library/Caches/$BUNDLE_ID.update/" >/dev/null \
+    || { echo "error: the sandbox exception for the update's staging folder is missing" >&2; exit 1; }
   echo "Built $APP (bundle id $BUNDLE_ID, App Sandbox ON)"
 else
   [[ "$SANDBOX" != "1" ]] || { echo "error: sandbox entitlement missing from signature" >&2; exit 1; }

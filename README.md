@@ -58,6 +58,11 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: �
   is sealed.
 - Ad-hoc signing (the default) is enough to run locally. To distribute, sign with a
   Developer ID and notarize.
+- **Versions and updates:** `APP_VERSION` and `APP_BUILD` stamp the bundle;
+  `UPDATE_FEED_URL`, `UPDATE_PUBLIC_KEYS` (`<key id>=<base64>,…`, from `pbupdate keygen`) and
+  `UPDATE_TEAM_ID` make it a build that checks for updates — without a feed URL it has none.
+  Every build carries the installer helper (`Contents/Helpers/PrivacyBrowser Updater.app`,
+  outside the sandbox, signed first); docs/UPDATES.md.
 - Run the `.app`, not `swift run`. WebKit names its storage directories after the bundle
   identifier, and the sandbox needs a signed bundle. For Xcode, run `open Package.swift`
   and select the `PrivacyBrowser` scheme. That scheme runs unsandboxed.
@@ -324,6 +329,8 @@ Sources/
     Updates/                       the signed update feed (Appcast, UpdateVerifier, UpdateSigner), BuildVersion
     Support/                       errors, atomic 0600 writes, encrypted document files, DocumentFormat
   pbupdate/                        makes and checks the update feed: keys, a release's signature, the appcast
+  UpdateInstaller/                 macOS: replaces the app with a checked release (code signature, processes, the swap)
+  PrivacyBrowserUpdater/           macOS: the installer helper the app starts at the end of a quit
   PrivacyBrowser/                  macOS app (SwiftUI + AppKit + WebKit)
     App/                           main.swift, PrivacyBrowserApp, AppModel (+Proxies), ProxyListModel, AppEnvironment,
                                    SelfTest, SiteCapture, WarmUpCoordinator (warm-up queue and schedule)
@@ -337,7 +344,9 @@ Sources/
                                    import, assign, a launch's proxy problem),
                                    profile export/import, cookie export
 Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
-Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist
+Tests/UpdateInstallerTests/        the installer on real signed bundles (macOS)
+Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist,
+                                   Updater/Info.plist (the installer helper)
 scripts/                           build-app.sh, test-shims.mjs, selftest_proxy.py, safari_reference.py,
                                    update_public_suffix_list.py,
                                    live_compare.py + live_sites/ (pages measured in Safari and in profiles),

@@ -8,7 +8,8 @@ it implements and how it is proven.
 |---|---|
 | §4, the formats of the files on disk | in force (`DocumentFormat`; `FormatPolicyTests`, the self-test's `formatPolicy`) |
 | §2, the signed feed and its checks | in BrowserCore (`UpdateVerifier`, `UpdateSigner`, `BuildVersion`; `UpdateTests`) and `pbupdate`; no app uses it yet |
-| §3 quit and install, §5 the check, §6 release, §7 the screen | not yet |
+| §3, the installer helper | in every build (`Contents/Helpers/PrivacyBrowser Updater.app`; `UpdateInstaller`, tested on real signed bundles by `UpdateInstallerTests`); the app does not start it yet |
+| §3 the quit gate, §5 the check, §6 release, §7 the screen | not yet |
 
 Two facts make updates harder here than in most apps:
 
@@ -167,12 +168,43 @@ with windows, in their own processes, warm-ups without a window, launches and se
 only on confirmation does the quit path run. If the gate fails then, the app does not exit: it stays
 locked, says why, and keeps the update.
 
-The helper is the only process that touches the bundle. It is launched by LaunchServices — so it is
-not in the sandbox of the sandboxed build, and not a child that ends with the app — and it trusts
-nothing it is handed but paths: it waits for the app to exit and for every process running from the
-bundle to be gone (no kill; it gives up after 10 minutes), verifies the update again with the keys
-of the installed app's signed `Info.plist`, extracts the zip itself, swaps, verifies in place,
-launches the new app, swaps back if it cannot, and leaves its outcome for the next launch.
+The helper is the only process that touches the bundle: `Contents/Helpers/PrivacyBrowser
+Updater.app` (`<bundle-id>.Updater`, background only, hardened runtime, **no** sandbox
+entitlement — `build-app.sh` signs it first, then the app, and fails if it carries one). It is
+started by LaunchServices — so it is neither in the sandbox of the sandboxed build nor a child that
+ends with the app.
+
+**How it is told what to install.** A sandboxed app cannot give a program it opens any arguments
+(LaunchServices drops them for sandboxed callers), and a helper reading inside the app's container
+would meet macOS's container protection (an "access data from other apps" prompt on macOS 14 and
+later, unless both are signed by the same team). So the app and the helper meet in one folder:
+`~/Library/Caches/<bundle-id>.update/` in the user's real home — the one folder outside its
+container the sandboxed build may write, through a temporary exception for exactly that path
+(docs/ISOLATION_AND_LIMITATIONS.md §9). It holds the archive, `request.json` (the app's path, the
+archive's file name, the release, when it was asked) and, afterwards, `outcome.json`. The helper
+takes no arguments and makes no network request.
+
+**What it does** (`UpdateInstaller.Installer`), trusting nothing it is handed but file names:
+
+1. checks the installed app's own code signature, and only then reads from its `Info.plist` the
+   keys and the Team ID it trusts (a changed `Info.plist` breaks that signature: nothing is
+   trusted, nothing installed);
+2. refuses a request for another app, or one older than 15 minutes (not from this quit);
+3. waits until no process runs from the bundle — the app first of all — and **kills nothing**:
+   after 10 minutes it gives up and keeps the archive for the next quit; a process of the bundle
+   started after the request (the app opened again) ends the request at once, since that quit is
+   over and the next one asks again;
+4. checks the release again: newer than the installed build, for this macOS, the archive's
+   length, SHA-256 and Ed25519 signature with a key the installed app carries;
+5. extracts it with `ditto` next to the app (same volume): exactly one app, the installed app's
+   identifier, the release's versions, a code signature that holds (strict, nested code, every
+   architecture) with the Team ID the installed app names; removes the quarantine flag from it;
+6. swaps the two bundles with one `renamex_np(RENAME_SWAP)`, checks the new one again in place,
+   and starts it; if it does not check or cannot start, swaps back and starts the previous one.
+   Should even swapping back fail, the previous app is kept beside it as `… (previous
+   version).app`, never deleted;
+7. leaves `outcome.json` (installed, rolled back, refused, gave up — and why) for the app's next
+   launch. One helper at a time (a lock in the folder).
 
 ## 4. Data on disk across versions
 

@@ -932,6 +932,7 @@ signature and fails if the sandbox state isn't what was requested.
 | `com.apple.security.files.user-selected.read-write` | `<input type=file>` uploads; choosing the sync folder (Powerbox) |
 | `com.apple.security.files.downloads.read-write` | saving downloads to `~/Downloads` |
 | `com.apple.security.files.bookmarks.app-scope` | remembering the sync folder across launches (security-scoped bookmark) |
+| `com.apple.security.temporary-exception.files.home-relative-path.read-write`: `/Library/Caches/<bundle-id>.update/` | the one folder outside the container the app writes: where it stages a checked update for the installer helper, which runs outside the sandbox and so never reads the container (docs/UPDATES.md §3) |
 
 Not requested: `network.server` (the app never listens), location, contacts, calendars,
 printing, Apple Events, JIT (WebKit's JIT runs in Apple's own WebContent process).

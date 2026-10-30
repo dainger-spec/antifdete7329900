@@ -23,5 +23,12 @@
 	<!-- Remember the chosen sync folder across launches (security-scoped bookmark). -->
 	<key>com.apple.security.files.bookmarks.app-scope</key>
 	<true/>
+	<!-- Updates (docs/UPDATES.md §3): the one folder outside the container the app may write,
+	     where it stages a checked update for the installer helper. The helper runs outside the
+	     sandbox; this way it never reads inside the app's container. -->
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+	<array>
+		<string>/Library/Caches/$(BUNDLE_ID).update/</string>
+	</array>
 </dict>
 </plist>
