@@ -103,6 +103,17 @@ jobs:
         run: |
           grep '^INFO js results' build/egress27/selftest.txt 2>/dev/null | sed -n '11,20p' | cut -c1-2000 \
             | sed 's/^/::notice title=macOS 27 - JavaScript results::/' || true
+      - name: A jump to a fragment — the same document, in Safari 27 and in a profile? (a measurement)
+        # scripts/fragment_check.py: one page of this Mac sets location.hash and says whether its
+        # document survived, in this Mac's Safari and in a profile (this app's window, Safari's).
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 12
+        run: |
+          set +e
+          python3 scripts/fragment_check.py --app build/unsandboxed/PrivacyBrowser.app | tee build/egress27/fragment.txt
+          grep '^FRAGMENT' build/egress27/fragment.txt | head -9 | cut -c1-600 | sed 's/^/::notice title=macOS 27 - fragment jump::/'
+          exit 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -297,6 +308,17 @@ jobs:
             | sed 's/^/::notice title=What sites see - Safari'"'"'s window without a proxy::/'
           if [ "$code" = "2" ]; then echo "::warning::Safari did not answer the What-sites-see page on this runner"; exit 0; fi
           exit $code
+      - name: A jump to a fragment — the same document, in Safari and in a profile? (a measurement)
+        # scripts/fragment_check.py; next to the macOS 27 job's same step (WebKit 27 made a new
+        # document of such a jump in the self-test's web views).
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 12
+        run: |
+          set +e
+          python3 scripts/fragment_check.py --app build/unsandboxed/PrivacyBrowser.app | tee build/fragment.txt
+          grep '^FRAGMENT' build/fragment.txt | head -9 | cut -c1-600 | sed 's/^/::notice title=fragment jump::/'
+          exit 0
       - name: Apple Pay, Payment Request and Web Push — what their calls answer in Safari and in a profile (a measurement)
         # scripts/payments_check.py: one HTTPS page of this Mac (a throwaway authority, trusted for
         # the run and removed after; its key deleted once it has signed), whose own script is the

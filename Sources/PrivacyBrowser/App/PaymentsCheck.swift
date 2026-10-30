@@ -11,7 +11,9 @@ import WebKit
 /// setting of the app or reaches a profile anywhere else.
 ///
 /// A new profile, in a vault of its own that is removed at the end, opens the script's page
-/// (HTTPS, on this Mac), and the process ends once the script has the page's report:
+/// (HTTPS, on this Mac; or HTTP on 127.0.0.1, for `scripts/fragment_check.py`, whose page jumps to
+/// a fragment and says whether it was still the same document), and the process ends once the
+/// script has the page's report:
 ///   * `shipped`: the profile as it ships, in this app's window;
 ///   * `shipped-safari-window`: the profile as it ships, in Safari's window (a process of its own;
 ///     refused when the window would not be Safari's);
@@ -36,9 +38,11 @@ enum PaymentsCheck {
             guard let index = arguments.firstIndex(of: name), arguments.indices.contains(index + 1) else { return nil }
             return arguments[index + 1]
         }
-        guard let page = value("--url").flatMap(URL.init(string:)), page.scheme == "https",
+        // HTTPS, or a page of this Mac (scripts/fragment_check.py serves its page over HTTP).
+        guard let page = value("--url").flatMap(URL.init(string:)),
+              page.scheme == "https" || (page.scheme == "http" && ["127.0.0.1", "localhost"].contains(page.host ?? "")),
               let variant = value("--variant").flatMap(Variant.init(rawValue:)) else {
-            print("PAYMENTS-CHECK wants --url https://… and --variant \(Variant.allCases.map(\.rawValue).joined(separator: "|"))")
+            print("PAYMENTS-CHECK wants --url https://… (or http://127.0.0.1:…) and --variant \(Variant.allCases.map(\.rawValue).joined(separator: "|"))")
             exit(64)
         }
         let proxy: ProxySettings?
@@ -146,6 +150,8 @@ enum PaymentsCheck {
     }
 
     /// Asks the script whether the page's report has come (`/reported`, the page's own query).
+    /// A page of this Mac over HTTP is asked on a socket of its own: App Transport Security lets
+    /// this app's own requests use HTTP only to the self-test's names.
     private static func waitForReport(of page: URL, timeout: TimeInterval) async -> Bool {
         guard var components = URLComponents(url: page, resolvingAgainstBaseURL: false) else { return false }
         components.path = "/reported"
@@ -154,7 +160,12 @@ enum PaymentsCheck {
         defer { session.invalidateAndCancel() }
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if let answer = try? await session.data(from: url), String(decoding: answer.0, as: UTF8.self) == "yes" {
+            if url.scheme == "http", let port = url.port {
+                let target = (url.path) + (url.query.map { "?" + $0 } ?? "")
+                let request = Data("GET \(target) HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nConnection: close\r\n\r\n".utf8)
+                let answer = await Task.detached { SelfTest.rawHTTP(port: port, request) }.value
+                if let answer, String(decoding: answer, as: UTF8.self).hasSuffix("\r\n\r\nyes") { return true }
+            } else if let answer = try? await session.data(from: url), String(decoding: answer.0, as: UTF8.self) == "yes" {
                 return true
             }
             try? await Task.sleep(nanoseconds: 500_000_000)

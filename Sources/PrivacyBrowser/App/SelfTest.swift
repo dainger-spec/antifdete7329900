@@ -562,7 +562,7 @@ final class SelfTest {
         do {
             return try await js(webView, Self.pingScript + Self.readServedPaths) as? [String] ?? []
         } catch {
-            await explainJavaScriptResultFailure(session, page: page, failure: error)
+            await explainJavaScriptResultFailure(repository, session, page: page, failure: error)
             throw error
         }
     }
@@ -582,67 +582,66 @@ final class SelfTest {
     private static let readServedPaths = "return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();"
 
     /// When WebKit could not hand back what the ping page's script returned (WebKit 27 on macOS
-    /// 27.0.1: WKErrorDomain 5, "unsupported type", whatever the value — a literal array, a string):
-    /// the script taken apart, each part on a fresh page of the same profile. Each variant first
-    /// marks the document (a global, and a count of its `hashchange` events), runs, and is then asked
-    /// whether its document is still the one it marked; the web view's navigation callbacks are
-    /// counted meanwhile. Whether a jump to a fragment replaced the document is what tells the cause.
-    private func explainJavaScriptResultFailure(_ session: BrowserSession, page: URL, failure: Error) async {
+    /// 27.0.1: WKErrorDomain 5, whatever the value). Measured (CI runs 432, 433): there, every jump
+    /// to a fragment — an anchor clicked, `location.hash`, the app loading `page#jump` — made a new
+    /// document (navigation started, committed and finished; the page's globals gone), with or
+    /// without the user gesture and the profile's scripts and rules, and a script that waits
+    /// across the jump has lost its document. This asks where that comes from: the ping page as
+    /// the profile shows it, and a plain page of this Mac in a plain web view (WebKit's default
+    /// configuration, and a non-persistent store), in a profile without a proxy and in one with it.
+    /// Each variant marks its document, jumps with `location.hash`, and is asked afterwards
+    /// whether its document is still the one it marked; navigation callbacks are counted.
+    private func explainJavaScriptResultFailure(_ repository: ProfileRepository, _ session: BrowserSession, page: URL,
+                                                failure: Error) async {
         info("js results: the ping page's script failed: \(Self.javaScriptError(failure))")
+        let local = SiteSnapshotServer { _, _ in "<!doctype html><html><head><title>Plain page</title></head><body><p>A page of this Mac.</p></body></html>" }
+        guard await local.start() else {
+            info("js results: no page of this Mac could be served")
+            return
+        }
+        defer { local.stop() }
+        let plainPage = local.newPage(.profile).url
+        let direct = try? repository.create(name: "Fragment", configuration: ProfileConfiguration(ephemeral: true))
+        let directSession = direct.flatMap { try? makeSession(repository, $0.id, key: repository.profileKey(for: $0.id)) }
+        defer {
+            directSession?.shutDown()
+            if let direct { try? repository.delete(direct.id) }
+        }
+        let defaultConfiguration = WKWebViewConfiguration()
+        let nonPersistent = WKWebViewConfiguration()
+        nonPersistent.websiteDataStore = .nonPersistent()
+        typealias Variant = (label: String, configuration: WKWebViewConfiguration?, page: URL)
+        let variants: [Variant] = [
+            ("the ping page, the profile with its proxy", session.makeWebViewConfiguration(), page),
+            ("a page of this Mac, a plain web view (WebKit's default configuration)", defaultConfiguration, plainPage),
+            ("a page of this Mac, a plain web view with a non-persistent store", nonPersistent, plainPage),
+            ("a page of this Mac, a profile without a proxy", directSession?.makeWebViewConfiguration(), plainPage),
+            ("a page of this Mac, the profile with its proxy", session.makeWebViewConfiguration(), plainPage),
+        ]
         let mark = "window.__pbMark = 'marked'; window.__pbHash = 0; addEventListener('hashchange', () => { window.__pbHash += 1; }); return true;"
-        let anchor = "const a = document.createElement('a'); a.href = '#clicked'; a.textContent = 'ping'; document.body.appendChild(a);"
-        let withPing = "const a = document.createElement('a'); a.href = '#clicked'; a.ping = '/ping-blocked'; a.textContent = 'ping'; document.body.appendChild(a);"
-        let pause = "await new Promise((resolve) => setTimeout(resolve, 1500));"
-        typealias Variant = (label: String, body: String, profileContent: Bool, gesture: Bool, apiJump: Bool)
-        var variants: [Variant] = []
-        variants.append(("the original script", Self.pingScript + Self.readServedPaths, true, true, false))
-        variants.append(("click with ping, answer at once", withPing + " a.click(); return ['x'];", true, true, false))
-        variants.append(("click with ping, pause, answer", withPing + " a.click(); " + pause + " return ['x'];", true, true, false))
-        variants.append(("click without ping, pause, answer", anchor + " a.click(); " + pause + " return ['x'];", true, true, false))
-        variants.append(("location.hash, pause, answer", "location.hash = 'clicked'; " + pause + " return ['x'];", true, true, false))
-        variants.append(("history.pushState, pause, answer", "history.pushState(null, '', '#clicked'); " + pause + " return ['x'];", true, true, false))
-        variants.append(("beacon and fetch, no jump, pause, answer",
-                         "navigator.sendBeacon('/beacon', 'x'); await fetch('/fetch-allowed'); " + pause + " return ['x'];", true, true, false))
-        variants.append(("click with ping, pause, answer — no user gesture", withPing + " a.click(); " + pause + " return ['x'];", true, false, false))
-        variants.append(("click with ping, pause, answer — no profile scripts or rules", withPing + " a.click(); " + pause + " return ['x'];", false, true, false))
-        variants.append(("the app loads page#jump (as the warm-up robot does), pause, answer", pause + " return ['x'];", true, true, true))
         for (index, variant) in variants.enumerated() {
-            let configuration = session.makeWebViewConfiguration()
-            if !variant.profileContent { configuration.userContentController = WKUserContentController() }
+            guard let configuration = variant.configuration else {
+                info("js results: k\(index + 1) \(variant.label): no configuration")
+                continue
+            }
             let webView = WKWebView(frame: .zero, configuration: configuration)
             let counter = NavigationCounter()
-            var answer = ""
-            var after = ""
+            var line = "js results: k\(index + 1) \(variant.label): "
             do {
-                try await PageLoader.load(webView, url: page)
+                try await PageLoader.load(webView, url: variant.page)
                 webView.navigationDelegate = counter
                 _ = try await js(webView, mark)
-                if variant.apiJump {
-                    webView.load(URLRequest(url: URL(string: page.absoluteString + "#jump")!))
-                }
-                do {
-                    let value: Any?
-                    if variant.gesture {
-                        value = try await js(webView, variant.body)
-                    } else {
-                        value = try await jsWithoutUserGesture(webView, variant.body, world: .page)
-                    }
-                    answer = "answered " + String(describing: value ?? "nil")
-                } catch {
-                    answer = Self.javaScriptError(error)
-                }
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                do {
-                    let state = try await js(webView, "return [String(window.__pbMark), String(window.__pbHash), location.href, String(history.length), document.readyState];")
-                    after = "document afterwards: " + String(describing: state ?? "nil")
-                } catch {
-                    after = "document afterwards: " + Self.javaScriptError(error)
-                }
+                _ = try await js(webView, "location.hash = 'jump'; return true;")
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                let state = try await js(webView, "return [String(window.__pbMark), String(window.__pbHash), location.href, String(history.length)];")
+                let values = (state as? [String]) ?? []
+                let same = values.first == "marked"
+                line += (same ? "the same document" : "a new document") + "; navigation \(counter.summary); "
+                    + "afterwards " + values.joined(separator: " ")
             } catch {
-                answer = "the page did not load: " + Self.javaScriptError(error)
+                line += Self.javaScriptError(error) + "; navigation \(counter.summary)"
             }
-            let line = "js results: r\(index + 1) \(variant.label): \(answer); navigation \(counter.summary); \(after)"
-            info(line.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "  ", with: " "))
+            info(line)
         }
     }
 
@@ -666,22 +665,6 @@ final class SelfTest {
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { failed += 1 }
         @objc(_webView:navigation:didSameDocumentNavigation:)
         func sameDocumentNavigation(_ webView: WKWebView, navigation: WKNavigation?, type: Int) { sameDocument.append(type) }
-    }
-
-    /// `callAsyncJavaScript` without the user gesture WebKit forces on it (`_callAsyncJavaScript:…withUserGesture:`).
-    private func jsWithoutUserGesture(_ webView: WKWebView, _ body: String, world: WKContentWorld) async throws -> Any? {
-        let selector = NSSelectorFromString("_callAsyncJavaScript:arguments:inFrame:inContentWorld:withUserGesture:completionHandler:")
-        guard let method = class_getInstanceMethod(WKWebView.self, selector) else {
-            throw CoreError.invalidConfiguration("this WebKit has no _callAsyncJavaScript:…withUserGesture:")
-        }
-        typealias Call = @convention(c) (WKWebView, Selector, NSString, NSDictionary, WKFrameInfo?, WKContentWorld, Bool,
-                                         @escaping @convention(block) (Any?, Error?) -> Void) -> Void
-        let call = unsafeBitCast(method_getImplementation(method), to: Call.self)
-        return try await withCheckedThrowingContinuation { continuation in
-            call(webView, selector, body as NSString, NSDictionary(), nil, world, false) { value, error in
-                if let error { continuation.resume(throwing: error) } else { continuation.resume(returning: value) }
-            }
-        }
     }
 
     private static func javaScriptError(_ error: Error) -> String {
@@ -945,7 +928,7 @@ final class SelfTest {
 
     /// One request on a plain socket to 127.0.0.1:`port`, and everything that comes back until the
     /// other side closes; nil when no connection could be made.
-    nonisolated private static func rawHTTP(port: Int, _ request: Data) -> Data? {
+    nonisolated static func rawHTTP(port: Int, _ request: Data) -> Data? {
         let descriptor = socket(AF_INET, SOCK_STREAM, 0)
         guard descriptor >= 0 else { return nil }
         defer { close(descriptor) }
