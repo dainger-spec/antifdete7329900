@@ -306,6 +306,15 @@ CI (`.github/workflows/ci.yml`) runs on every push:
      way nothing goes around the proxy.
    - **Downloads:** the folder (the Downloads folder by default; another one is reached through a
      bookmark in the App Sandbox) and whether to ask each time.
+   - **Diagnostics:** **Collect Diagnostics…** saves a ZIP where you choose — the short report,
+     the settings, the profiles by number (running or not, the kind of connection, what their
+     settings are), this run's log and, in a build without the App Sandbox, the system's log of the
+     last 30 minutes (the app's, its profiles' processes' and WebKit's) and the Safari-chrome check.
+     Never in it: profiles' names, tags and notes, proxies' addresses and credentials, passwords,
+     cookies, history, addresses visited, request bodies — in the logs, what is the user's is
+     `<private>` as it was written, and the self-test searches a bundle's bytes for a profile's
+     name, notes and proxy credentials. **Copy Short Report** puts the version, macOS, this Mac's
+     Safari and WebKit and the app's checks of itself on the clipboard. Nothing is sent.
    - **Updates**, **Keyboard Shortcuts** (the app's own, as its menus define them) and **About**
      (version, macOS, this Mac's Safari and WebKit, the build; links when the release sets
      `WEBSITE_URL` / `SUPPORT_URL`).

@@ -1003,6 +1003,15 @@
 "settings.section.downloads" = "Загрузки";
 "settings.section.updates" = "Обновления";
 "settings.section.shortcuts" = "Горячие клавиши";
+"settings.section.diagnostics" = "Диагностика";
+"settings.diagnostics.subtitle" = "То, что нужно поддержке, без того, что принадлежит вам.";
+"settings.diagnostics.collect" = "Собрать диагностику…";
+"settings.diagnostics.copy" = "Скопировать краткий отчёт";
+"settings.diagnostics.copied" = "Скопировано";
+"settings.diagnostics.report" = "Краткий отчёт";
+"settings.diagnostics.saved" = "Сохранено: %@. Отправьте файл в поддержку сами — ничего не отправлялось.";
+"settings.diagnostics.failed" = "Не сохранено: %@";
+"settings.diagnostics.contents" = "В ZIP — этот отчёт, настройки, профили по номерам (запущен или нет, вид соединения, какие у них настройки), журнал этого запуска и — в сборке без App Sandbox — системный журнал за последние 30 минут. В нём никогда нет имён, тегов и заметок профилей, адресов и учётных данных прокси, паролей, cookies, истории, посещённых адресов и тел запросов; в журналах ваше выглядит как <private>.";
 "settings.section.about" = "О приложении";
 "settings.effect.now" = "Применяется сразу";
 "settings.effect.newTabs" = "Для вкладок, открытых после этого";

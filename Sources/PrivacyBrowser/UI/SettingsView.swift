@@ -1,6 +1,7 @@
 import AppKit
 import BrowserCore
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 /// The app's settings, in one window (⌘, or ⋯ → Settings…): a section per subject, and every
@@ -70,13 +71,14 @@ struct SettingsView: View {
         case .downloads: DownloadSettings(settings: model.settings)
         case .updates: UpdateSettings(previewUpdater: previewUpdater)
         case .shortcuts: ShortcutSettings()
+        case .diagnostics: DiagnosticsSettings()
         case .about: AboutSettings()
         }
     }
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case startup, newProfiles, behavior, proxies, downloads, updates, shortcuts, about
+    case startup, newProfiles, behavior, proxies, downloads, updates, shortcuts, diagnostics, about
     var id: String { rawValue }
 
     var titleKey: String {
@@ -88,6 +90,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .downloads: return "settings.section.downloads"
         case .updates: return "settings.section.updates"
         case .shortcuts: return "settings.section.shortcuts"
+        case .diagnostics: return "settings.section.diagnostics"
         case .about: return "settings.section.about"
         }
     }
@@ -101,6 +104,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .downloads: return "arrow.down.circle"
         case .updates: return "arrow.triangle.2.circlepath"
         case .shortcuts: return "keyboard"
+        case .diagnostics: return "stethoscope"
         case .about: return "info.circle"
         }
     }
@@ -245,6 +249,90 @@ struct SettingsNote: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.raisedInset))
             .padding(.top, 12)
+    }
+}
+
+// MARK: - Diagnostics
+
+/// What support needs, without what is the user's: a ZIP saved where the person chooses, and a
+/// short report to paste (`Diagnostics`). Nothing is sent.
+private struct DiagnosticsSettings: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var report = ""
+    @State private var collecting = false
+    @State private var outcome: String?
+    @State private var copied = false
+
+    var body: some View {
+        SettingsPage(title: L("settings.section.diagnostics"), subtitle: L("settings.diagnostics.subtitle")) {
+            HStack(spacing: 8) {
+                Button {
+                    collect()
+                } label: {
+                    Label(L("settings.diagnostics.collect"), systemImage: "archivebox")
+                }
+                .buttonStyle(.lumenPrimary)
+                .disabled(collecting)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(report, forType: .string)
+                    copied = true
+                } label: {
+                    Label(L(copied ? "settings.diagnostics.copied" : "settings.diagnostics.copy"), systemImage: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.lumenSecondary)
+                .disabled(report.isEmpty)
+                if collecting { ProgressView().controlSize(.small) }
+            }
+            .padding(.top, 12)
+            if let outcome {
+                Text(outcome)
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+                    .padding(.top, 8)
+            }
+            Text(L("settings.diagnostics.report"))
+                .font(.lumenSection)
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.top, 16)
+            ScrollView {
+                Text(verbatim: report.isEmpty ? "…" : report) // l10n: the report is for support, in English
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            .frame(height: 190)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.raisedInset))
+            .padding(.top, 6)
+            SettingsNote(text: L("settings.diagnostics.contents"))
+        }
+        .task {
+            let snapshot = Diagnostics.snapshot(model: model)
+            report = Diagnostics.shortReport(snapshot, checks: await Diagnostics.checks(snapshot))
+        }
+    }
+
+    /// The ZIP, saved where the person chooses.
+    private func collect() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = Diagnostics.suggestedFileName()
+        panel.allowedContentTypes = [.zip]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        collecting = true
+        outcome = nil
+        Task {
+            let data = await Diagnostics.bundle(Diagnostics.snapshot(model: model))
+            do {
+                try data.write(to: url, options: .atomic)
+                outcome = String(format: L("settings.diagnostics.saved"), url.lastPathComponent)
+            } catch {
+                outcome = String(format: L("settings.diagnostics.failed"), error.localizedDescription)
+            }
+            collecting = false
+        }
     }
 }
 

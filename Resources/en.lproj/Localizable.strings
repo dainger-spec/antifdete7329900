@@ -1003,6 +1003,15 @@
 "settings.section.downloads" = "Downloads";
 "settings.section.updates" = "Updates";
 "settings.section.shortcuts" = "Keyboard Shortcuts";
+"settings.section.diagnostics" = "Diagnostics";
+"settings.diagnostics.subtitle" = "What support needs to help, without what is yours.";
+"settings.diagnostics.collect" = "Collect Diagnostics…";
+"settings.diagnostics.copy" = "Copy Short Report";
+"settings.diagnostics.copied" = "Copied";
+"settings.diagnostics.report" = "Short report";
+"settings.diagnostics.saved" = "Saved: %@. Send it to support yourself; nothing was sent.";
+"settings.diagnostics.failed" = "Not saved: %@";
+"settings.diagnostics.contents" = "The ZIP holds this report, the settings, the profiles by number (running or not, the kind of connection, what their settings are), this run's log and — in a build without the App Sandbox — the system's log of the last 30 minutes. It never holds profiles' names, tags or notes, proxies' addresses or credentials, passwords, cookies, history, addresses visited or request bodies; in the logs, what is yours appears as <private>.";
 "settings.section.about" = "About";
 "settings.effect.now" = "Takes effect at once";
 "settings.effect.newTabs" = "For tabs opened from now on";

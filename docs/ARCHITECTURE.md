@@ -473,7 +473,14 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
    │                 and PB_BROWSING (JSON) as it starts → BrowsingPreferences.current there, DockIcon
    │  Proxies        proxyFailure → ProfileManager.refusesFailingProxy: the launch probe first,
    │                 onProxyLaunchRefused → ProxyProblem(notStarted: true)
-   └  Updates        UpdatesPane (AppUpdater)
+   │  Updates        UpdatesPane (AppUpdater)
+   └  Diagnostics    Diagnostics.snapshot(model:) → checks (ContentRules compiled, vault, proxies,
+                     tunnel, updates, processes, language) → shortReport (clipboard) and bundle:
+                     StoredZip (BrowserCore: stored, no compression, CRC-32) of report.txt,
+                     state.json (profiles by number, no names, hosts or credentials),
+                     logs/this-run.txt (OSLogStore, this process), logs/system-last-N-minutes.txt
+                     (`log show`, unsandboxed only), safari-chrome.txt (--check-safari-chrome in a
+                     process of its own, unsandboxed only), README.txt → NSSavePanel; nothing sent
 ```
 
 ## Concurrency

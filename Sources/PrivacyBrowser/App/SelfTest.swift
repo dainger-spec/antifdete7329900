@@ -1,6 +1,7 @@
 import AppKit
 import BrowserCore
 import CryptoKit
+import os
 import WebKit
 
 /// `PrivacyBrowser --self-test`: headless end-to-end checks against the real WebKit of the
@@ -142,6 +143,7 @@ final class SelfTest {
             try await namedSafariVersion(repository)
             try await localRequests(repository)
             try await cookiesAtCreation(repository)
+            try await diagnosticsBundle(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
@@ -2646,6 +2648,38 @@ final class SelfTest {
         if case let .queued(count) = outcome { queued = count }
         check("editor: a new profile's cookies wait, encrypted, for its first launch (as Import Cookies queues them)",
               queued == 2, "outcome \(outcome)")
+    }
+
+    /// Settings → Diagnostics: the ZIP holds the report, the state and the logs, and nothing of
+    /// the user's — searched for in its bytes (stored, not compressed, so the bytes are the files).
+    private func diagnosticsBundle(_ repository: ProfileRepository) async throws {
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        let secrets = ["Diag-\(run)", "tag-\(run)", "note-\(run)", "proxy-\(run).example", "user-\(run)", "pw-\(run)", run]
+        let proxy = ProxySettings(kind: .socks5, host: "proxy-\(run).example", port: 1080, username: "user-\(run)", password: "pw-\(run)")
+        let profile = try repository.create(name: "Diag-\(run)", configuration: ProfileConfiguration(
+            proxy: proxy, ephemeral: true, tags: ["tag-\(run)"], notes: "note-\(run)"))
+        defer { try? repository.delete(profile.id) }
+        // A value of the user's in the log, as the app writes one: the bundle must show it as <private>.
+        Logger(subsystem: "PrivacyBrowser", category: "Diagnostics").notice("Self-test diagnostics marker \(run, privacy: .private)")
+
+        let data = await Diagnostics.bundle(Diagnostics.snapshot(repository: repository), logMinutes: 5)
+        let entries = StoredZip.entries(of: data) ?? []
+        let paths = Set(entries.map(\.path))
+        let wanted: Set<String> = ["report.txt", "state.json", "logs/this-run.txt", "README.txt"]
+        check("diagnostics: the ZIP holds the report, the state and the logs, and reads back", wanted.isSubset(of: paths),
+              "\(paths.sorted())")
+        let leaked = secrets.filter { data.range(of: Data($0.utf8)) != nil }
+        let log = String(decoding: entries.first { $0.path == "logs/this-run.txt" }?.data ?? Data(), as: UTF8.self)
+        let markerSeen: Bool = log.contains("Self-test diagnostics marker")
+        check("diagnostics: nothing of the user's is in it — a profile's name, tag and notes, its proxy's address, user and password, a private log value",
+              leaked.isEmpty, "found: \(leaked)")
+        check("diagnostics: this run's log is in it, with the user's values as <private>",
+              markerSeen, String(log.suffix(400)))
+        let report = String(decoding: entries.first { $0.path == "report.txt" }?.data ?? Data(), as: UTF8.self)
+        let named: Bool = report.contains("PrivacyBrowser ") && report.contains("macOS ") && report.contains("Safari \(HostSafari.version)")
+        check("diagnostics: the short report names the version, macOS, Safari and WebKit, and the checks made",
+              named && report.contains("✓"), report)
+        info("diagnostics: the short report reads\n\(report)")
     }
 
     private func appSettings(_ repository: ProfileRepository) async throws {
