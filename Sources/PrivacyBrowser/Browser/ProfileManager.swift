@@ -400,7 +400,14 @@ final class ProfileManager: ObservableObject {
             }
         }
         child.onExit = { [weak self] status in
-            guard let self, self.children[id] === child else { return }
+            guard let self else { return }
+            guard self.children[id] === child else {
+                // The manager no longer holds this process for the profile: nothing below runs for
+                // it (its home is sealed by whatever took it out, or at the next launch). Said, so
+                // that such an exit is not silent.
+                self.log.notice("Profile \(id.uuidString, privacy: .public)'s process \(child.processIdentifier, privacy: .public) ended with status \(status, privacy: .public) after the manager had let it go")
+                return
+            }
             self.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.children[id] = nil

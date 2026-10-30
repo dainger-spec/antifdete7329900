@@ -138,13 +138,23 @@ final class ProfileProcess {
             child?.onEvent?(event)
         }
         // Called on one of Foundation's queues, not the main one.
+        let pid = process.processIdentifier
         process.terminationHandler = { finished in
             let status = finished.terminationStatus
+            let signaled = finished.terminationReason == .uncaughtSignal
+            // Every end of a profile's process in the log, however it ended and whoever notices it
+            // after this: an exit nothing else wrote down (the owner's Mac, 2026-10-30) is then
+            // still in the log, with its pid.
+            Logger(subsystem: "PrivacyBrowser", category: "ProfileProcess")
+                .notice("Profile \(profileID.uuidString, privacy: .public)'s process \(pid, privacy: .public) ended: \(signaled ? "signal" : "exit status", privacy: .public) \(status, privacy: .public)")
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { child.onExit?(status) }
             }
         }
-        child.log.info("Profile \(profileID.uuidString, privacy: .public) runs as pid \(process.processIdentifier, privacy: .public), home \(home.path, privacy: .private), languages \(languages.joined(separator: ","), privacy: .private), TZ \(timeZone ?? "(system)", privacy: .private)")
+        // Notice, not info: info lines are not kept, and which pid was which profile is the first
+        // thing a log is read for.
+        child.log.notice("Profile \(profileID.uuidString, privacy: .public) runs as pid \(pid, privacy: .public)")
+        child.log.info("Profile \(profileID.uuidString, privacy: .public): home \(home.path, privacy: .private), languages \(languages.joined(separator: ","), privacy: .private), TZ \(timeZone ?? "(system)", privacy: .private)")
         return child
     }
 

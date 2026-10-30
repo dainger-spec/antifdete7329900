@@ -77,6 +77,9 @@ ALLOWED_IN_FILE = {
     ("ContentRules.swift", "identifier"): "the rule list's identifier, a constant of the code",
     ("ExceptionLog.swift", "when"): "where an exception was seen: a fixed text of that file",
     ("ProfileManager.swift", "report.forced"): "a yes/no: whether a seal was forced",
+    ("ProfileProcess.swift", "pid"): "a profile's process id",
+    ("ProfileProcess.swift", "signaled ? \"signal\" : \"exit status\""): "a fixed text",
+    ("ProfileProcess.swift", "status"): "a process's exit status or signal number",
     ("ProfileManager.swift", "report.attempts"): "a count of seal attempts",
     ("ProfileManager.swift", "report.pagesClosed"): "a count of pages closed",
     ("ExceptionLog.swift", "redactedReason"):
