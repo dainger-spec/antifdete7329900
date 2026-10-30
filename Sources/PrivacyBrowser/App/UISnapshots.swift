@@ -740,9 +740,11 @@ private struct EditorPreview: View {
     var visibleScreen: CGSize? = CGSize(width: 1728, height: 1024)
 
     var body: some View {
+        // A saved profile's editor has its What Sites See button, as ProfileEditorView gives it.
         ProfileEditorForm(draft: $draft, topic: $topic, isNew: isNew, avatarID: UISnapshots.sampleRows()[1].id,
                           error: error, tunnelCarriesWebRTC: false, savedProxies: savedProxies,
-                          knownTags: ["ads", "DE", "US", "warm-up", "Q4 campaign"], visibleScreen: visibleScreen)
+                          knownTags: ["ads", "DE", "US", "warm-up", "Q4 campaign"], visibleScreen: visibleScreen,
+                          onWhatSitesSee: isNew ? nil : {})
     }
 }
 
