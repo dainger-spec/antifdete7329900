@@ -98,6 +98,39 @@ That is genuine, not emulated. What a profile can change is the small set of att
 the profile *declares*. What it cannot change is what the engine and the hardware *measure*.
 This project does not make a Mac look like an iPhone, and doesn't claim to.
 
+### Parity with Safari: the project's rule
+
+How a profile is brought closer to this Mac's Safari — which interfaces a page finds in it, and
+what they answer — is decided by one rule, for every change, not case by case:
+
+1. **WebKit's own code, never JavaScript objects.** A difference is closed only by turning on
+   what WebKit itself implements: a WebKit preference or feature, as Safari sets it. Nothing is
+   written in JavaScript to stand in for an interface a profile lacks — no `ApplePaySession`,
+   `PaymentRequest`, `PushManager` or `RTCPeerConnection` made by a script, however faithful its
+   shape.
+2. **Only when its answers are a real Safari's.** What is turned on must answer as Safari answers
+   in some real state of a real Mac: every call a page can make, its result, the type and text of
+   its error, in the page, in frames and in workers. An interface that is there and answers what
+   no Safari answers is not turned on — a page that calls it finds it as easily as one that finds
+   it missing. What cannot be measured stays off.
+3. **Nothing changes from profile to profile by chance.** What is turned on for parity is the
+   same in every profile and on every run; none of it is drawn at random. Profiles differ in what
+   the user sets for them (the table below), not in what parity turns on.
+4. **Counts and property lists are never edited.** `Object.getOwnPropertyNames(window)` and its
+   length, the properties of a prototype or of `navigator`, the keys of any object: none is
+   hidden, added to or reordered. They follow from what WebKit has turned on, and from nothing
+   else.
+
+A difference that cannot be closed this way stays, and is listed (*What still differs*, below).
+The rule is about parity — what a profile has of Safari's. It does not cover the attributes a
+profile declares (time zone, geolocation, a mobile generation's `navigator` and `screen` values,
+relay-only WebRTC: the table below), whose wrappers are described where they are, and it lets no
+wrapper of that kind be added for parity's sake. Noise — values made to change, in canvas, WebGL,
+audio or anything else — is not parity and is not added (*What remains impossible with public
+APIs*). A change under this rule is described against it and decided before it is written, and
+CI measures it against the runner's real Safari (*What sites see*, *Measured against this Mac's
+Safari*).
+
 ### What the public WKWebView / WebKit APIs let a profile control
 
 | Attribute | Mechanism | Reach |
@@ -310,8 +343,11 @@ What still differs, and why it cannot be changed from the app:
 
 - **Apple Pay and Web Push.** `ApplePaySession`, `ApplePaySetup`, `MerchantValidationEvent`,
   `PaymentRequest` and `PushManager` exist only in Safari. WebKit enables them for an embedder only
-  through private preferences, and they need Safari's entitlements to work; exposing objects that
-  cannot work (and that WebKit disables anyway once a page has user scripts) would be worse.
+  through private preferences (`ApplePayEnabled`, `PushAPIEnabled`), and they need Safari's
+  entitlements to work. Under the rule above (*Parity with Safari*) they could be turned on only
+  that way, and only if every call then answers as a real Safari does; what the calls answer in a
+  profile, and whether WebKit keeps the interfaces and their calls in a page that has the
+  profile's scripts, is not measured yet. Until it is, they stay off.
   `Object.getOwnPropertyNames(window).length` follows (1044 in Safari, 1029 in a profile with
   WebRTC on, 1022 with the default policy that removes it).
 - **WebRTC** is switched off by the default policy, and with a proxy unless the packet tunnel
@@ -729,6 +765,17 @@ Mac's own address:
 
 The editor shows the setting as off (or "through the network extension") while a proxy is set,
 and keeps the stored choice for when the proxy is removed.
+
+**Decided (October 2026): WebRTC stays off in a profile with a proxy.** The deciding reason: a
+page that reaches WebRTC learns an address from it, and that address has to be the one its HTTP
+requests come from — the proxy's exit. Through a SOCKS5 proxy's UDP association it need not be: a
+proxy can relay UDP from another address than its TCP connections leave from, or relay none, and a
+WebRTC address that differs from the HTTP address tells a site more than WebRTC being off, as it
+is in Lockdown Mode. So the packet tunnel carries a profile's WebRTC only when the user chooses it
+for that profile (a WebRTC setting other than Disabled, with the tunnel enabled), never by
+default, and not before the extension has passed the hardware checklist on a real Mac
+([TUNNEL.md](TUNNEL.md)). Until then no release has the extension: `scripts/release.sh` builds
+without it (`NE` unset), so a released app's proxied profiles run with WebRTC off.
 
 The profile setting:
 

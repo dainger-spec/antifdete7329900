@@ -18,6 +18,11 @@ address.
 
 A page cannot send other UDP: WebRTC is the only UDP a web page can start.
 
+**Status (decided October 2026).** Not in a release. The tunnel is offered only after the
+extension has passed the hardware checklist below on a real Mac, and then only by the user's
+own choice for a profile; WebRTC in a proxied profile stays off by default
+(ISOLATION_AND_LIMITATIONS §5 says why). `scripts/release.sh` builds without the extension.
+
 ## Architecture
 
 ```
