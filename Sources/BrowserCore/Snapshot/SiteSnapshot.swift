@@ -216,9 +216,11 @@ public enum SiteSnapshotPage {
         func escaped(_ text: String) -> String {
             text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
         }
+        // A JavaScript string; "<" escaped too, so that no text can end the script element.
         func literal(_ text: String) -> String {
             let data = (try? JSONSerialization.data(withJSONObject: [text])) ?? Data("[\"\"]".utf8)
             return String(String(decoding: data, as: UTF8.self).dropFirst().dropLast())
+                .replacingOccurrences(of: "<", with: "\\u003c")
         }
         return """
         <!doctype html><html><head><meta charset="utf-8"><title>\(escaped(title))</title>
