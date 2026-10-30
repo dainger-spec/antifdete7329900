@@ -492,6 +492,18 @@ tunnel ([TUNNEL.md](TUNNEL.md)), below.
 **App Transport Security:** `NSAllowsArbitraryLoadsInWebContent` lets the browser load
 `http://` pages. The app's own URLSession traffic (HTTP sync) remains HTTPS-only.
 
+**macOS 27: a jump to a fragment reloads a proxied page.** WebKit 27 (macOS 27.0.1, WebKit
+22625) makes a new document of a navigation to a fragment of the page shown — `location.hash`, an
+in-page anchor, a load of `page#x` — whenever the data store has a proxy: the same-document
+navigation runs, then WebKit loads the same address again; the page's state is gone and the proxy
+is asked for the page a second time. Measured in CI (runs 435–437, the self-test's `fragment
+jump` lines on every push): in profiles with an HTTP CONNECT or a SOCKS5 proxy, by name and by
+address, and in a plain web view with nothing but the data store's proxy setting (no profile,
+script or rule list). A page loaded directly keeps its document, as in Safari 27; macOS 26 keeps
+it with a proxy too. It is WebKit's own behaviour and nothing in the app changes it: sites that
+route by the fragment (single-page apps) lose their state at each route change in a proxied
+profile on macOS 27. To be reported to Apple.
+
 **Not covered:**
 
 | Path | Status | Mitigation |
@@ -966,8 +978,8 @@ encrypted with the profile's key, and put into its store at its next launch, bef
 loads (they then show in the start page's request); the queue is removed. Session cookies live
 until the profile stops, as in the browser they came from: the stop deletes them from the store.
 WebKit's network process, which the profiles in this app's windows share, handed them back at the
-profile's next launch while it kept running for another profile (CI run 436, macOS 27; with no
-other profile running they went with it). For an ephemeral profile all imported cookies last for
+profile's next launch while it kept running for another profile (CI run 436, macOS 26 and 27
+alike; with no other profile running they went with it). For an ephemeral profile all imported cookies last for
 that run only.
 
 **Limits.** Domains in Unicode (IDN) are refused rather than converted; a value in a legacy encoding
