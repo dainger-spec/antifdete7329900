@@ -198,7 +198,7 @@ enum SafariMenuWalk {
                     }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: watchdog)
-                entry.menu.performActionForItem(at: position)
+                Chooser.choose { entry.menu.performActionForItem(at: position) }
                 chosen = true
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 watchdog.cancel()
@@ -231,7 +231,8 @@ enum SafariMenuWalk {
         let path = "(sent to the first responder) \(name)"
         emit(["event": "begin", "index": index, "path": path, "action": name, "keys": "-",
               "time": Date().timeIntervalSince1970])
-        let taken = NSApp.sendAction(NSSelectorFromString(name), to: nil, from: nil)
+        var taken = false
+        Chooser.choose { taken = NSApp.sendAction(NSSelectorFromString(name), to: nil, from: nil) }
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         let after = look()
         var seen = WalkRecorder.take()
@@ -287,6 +288,29 @@ enum SafariMenuWalk {
             window.close()
         }
         try? await Task.sleep(nanoseconds: leftFullScreen ? 2_000_000_000 : 300_000_000)
+    }
+
+    /// Runs an item's action from the run loop, as a click does, never from inside the walk's
+    /// task. An exception the action throws then unwinds through AppKit's frames only, and AppKit
+    /// catches it; through the task's it would leave the Swift runtime's record of the running job
+    /// pointing into a stack that is gone. Run 460: Bookmarks › Add Bookmark… threw on a page, the
+    /// exception went through the walk's task, and the process crashed in the runtime as the
+    /// exception was being written down (`MainActor.assumeIsolated` in `ExceptionLog`).
+    private final class Chooser: NSObject {
+        private let action: @MainActor () -> Void
+
+        private init(_ action: @escaping @MainActor () -> Void) {
+            self.action = action
+        }
+
+        static func choose(_ action: @escaping @MainActor () -> Void) {
+            let chooser = Chooser(action)
+            chooser.perform(#selector(Chooser.run), with: nil, afterDelay: 0)
+        }
+
+        @MainActor @objc private func run() {
+            action()
+        }
     }
 
     // MARK: Looking
