@@ -1,0 +1,168 @@
+/* Home scene "proxy" (tools/templates/pages/home/proxy.mjs). Scoped to .sc-proxy; the engine and the shared type
+   (.h-xl, .dim, .scene, .scene-pin) are in site.css, the camera in proxy.js.
+
+   Without the scenes the section is its last picture: the headline, the window with Safari's error (the site and
+   its light gone), the two captions. With them, every part reads its --t (0 before its range, 1 after it). */
+
+.sc-proxy { --px-w: 960px; --px-h: 440px; }
+.sc-proxy .px { display: flex; flex-direction: column; align-items: center; }
+.sc-proxy .px-top { display: grid; justify-items: center; align-items: center; text-align: center; width: 100%; }
+.sc-proxy .px-top > * { grid-area: 1 / 1; }
+.sc-proxy .px-head { max-width: 900px; }
+/* The quiet line in the headline's place before the headline: the proxy at work, then the moment it stops */
+.sc-proxy .px-status { display: none; margin: 0; max-width: 760px; font: 400 21px/30px var(--font); letter-spacing: -0.01em; color: var(--text-tertiary); text-wrap: balance; }
+.sc-proxy .px-status strong { font-weight: 600; color: var(--text-primary); }
+.sc-proxy .px-stage { position: relative; width: 100%; max-width: var(--px-w); margin-top: 44px; }
+.sc-proxy .px-cam { position: relative; transform-origin: 50% 0; }
+
+/* The light of a white page in a dark room: it falls round the window (a 9-slice image, so nothing is blurred
+   while the camera moves) and goes out with the page. */
+.sc-proxy .px-light {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0; --light: 0.17;
+  border: 0 solid transparent; border-image: url("proxy/glow.png") 100 fill / 150px 230px 300px 230px / 150px 230px 300px 230px stretch;
+}
+
+/* MARK: The Safari window — macOS 26, dark appearance */
+.sc-proxy .pxw {
+  position: relative; z-index: 1; height: var(--px-h); display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 18px; background: #1E1E20; color: #E6E6E9; font-family: var(--font); text-align: left;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.sc-proxy .pxw::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 3; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13); }
+.sc-proxy .pxw-bar {
+  position: relative; z-index: 2; flex: none; height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 18px;
+  background: #29292C; border-bottom: 1px solid rgba(0, 0, 0, 0.6); color: #C9C9CE;
+}
+.sc-proxy .pxw-lights { display: flex; gap: 8px; margin-right: 8px; flex: none; }
+.sc-proxy .pxw-lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.25); }
+.sc-proxy .pxw-lights i:nth-child(1) { background: #FF5F57; }
+.sc-proxy .pxw-lights i:nth-child(2) { background: #FEBC2E; }
+.sc-proxy .pxw-lights i:nth-child(3) { background: #28C840; }
+.sc-proxy .pxw-cap, .sc-proxy .pxw-addr { height: 32px; border-radius: 16px; background: rgba(255, 255, 255, 0.075); box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.4); }
+.sc-proxy .pxw-cap { flex: none; display: inline-flex; align-items: center; gap: 10px; padding: 0 11px; }
+.sc-proxy .pxw-cap svg { display: block; flex: none; }
+.sc-proxy .pxw-side { gap: 3px; }
+.sc-proxy .pxw-hist { gap: 12px; }
+.sc-proxy .pxw-hist svg:last-child { opacity: 0.4; }
+.sc-proxy .pxw-prof { gap: 7px; padding: 0 13px 0 9px; font: 500 13px/1 var(--font); color: #E9E9EC; }
+.sc-proxy .pxw-prof .flag { flex: none; }
+.sc-proxy .pxw-addr { position: relative; flex: 1 1 auto; min-width: 0; max-width: 430px; margin: 0 auto; overflow: hidden; display: flex; align-items: center; justify-content: center; padding: 0 36px; }
+.sc-proxy .pxw-pg { position: absolute; left: 11px; top: 8px; color: #9C9CA2; display: block; }
+.sc-proxy .pxw-pg svg { display: block; }
+.sc-proxy .pxw-url { font: 500 13px/1 var(--font); color: #EDEDF0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.003em; }
+/* Safari's progress bar along the bottom of the address field */
+.sc-proxy .pxw-load { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; opacity: 0; }
+.sc-proxy .pxw-load i { display: block; height: 100%; width: 0; background: #3B7EF6; border-radius: 0 2px 2px 0; }
+.sc-proxy .pxw-tools { gap: 15px; padding: 0 13px; }
+
+.sc-proxy .pxw-page { position: relative; flex: 1 1 auto; min-height: 0; background: #1E1E20; container-type: size; }
+
+/* Safari's own error page (dark appearance) */
+.sc-proxy .pxw-err { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 0 48px 9%; text-align: center; }
+.sc-proxy .pxw-err b { font: 600 25px/31px var(--font-display); letter-spacing: -0.012em; color: #D8D8DC; max-width: 640px; text-wrap: balance; }
+.sc-proxy .pxw-err span { font: 400 14px/21px var(--font); color: #8E8E94; max-width: 470px; text-wrap: balance; }
+.sc-proxy .pxw-err i { font-style: normal; white-space: nowrap; }
+
+/* The site: a store's sign-in page (sample data), white — the light of the scene until it goes out */
+.sc-proxy .pxw-site { position: absolute; inset: 0; background: #FFFFFF; color: #1D1D1F; opacity: 0; visibility: hidden; }
+.sc-proxy .pxs { height: 100%; display: flex; flex-direction: column; }
+.sc-proxy .pxs-top { flex: none; height: 58px; display: flex; align-items: center; gap: 30px; padding: 0 30px; border-bottom: 1px solid #EDEDF0; }
+.sc-proxy .pxs-logo { font: 600 13px/1 var(--font); letter-spacing: 0.24em; text-transform: uppercase; color: #1D1D1F; white-space: nowrap; }
+.sc-proxy .pxs-right { margin-left: auto; display: flex; align-items: center; gap: 30px; }
+.sc-proxy .pxs-nav { display: flex; gap: 26px; font: 400 13px/1 var(--font); color: #48484C; }
+.sc-proxy .pxs-bag { color: #1D1D1F; display: block; }
+.sc-proxy .pxs-bag svg { display: block; width: 17px; height: 17px; }
+.sc-proxy .pxs-main { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 12px 24px 20px; }
+.sc-proxy .pxs-form { width: min(320px, 100%); display: flex; flex-direction: column; }
+.sc-proxy .pxs-h { font: 600 28px/34px var(--font-display); letter-spacing: -0.022em; color: #1D1D1F; }
+.sc-proxy .pxs-sub { margin-top: 6px; font: 400 14px/20px var(--font); color: #6E6E73; }
+.sc-proxy .pxs-label { margin-top: 24px; font: 500 12px/16px var(--font); color: #6E6E73; }
+.sc-proxy .pxs-field { margin-top: 7px; height: 44px; display: flex; align-items: center; padding: 0 14px; border: 1px solid #D2D2D7; border-radius: 11px; font: 400 15px/1 var(--font); color: #1D1D1F; white-space: nowrap; overflow: hidden; }
+.sc-proxy .pxs-btn { position: relative; overflow: hidden; margin-top: 14px; height: 44px; border-radius: 22px; background: #1D1D1F; color: #FFFFFF; display: grid; place-items: center; font: 500 15px/1 var(--font); }
+.sc-proxy .pxs-btn::after { content: ""; position: absolute; inset: 0; background: rgba(255, 255, 255, 0.2); opacity: var(--t, 0); }
+.sc-proxy .pxs-btn span { position: relative; }
+.sc-proxy .pxs-alt { margin-top: 18px; font: 400 13px/18px var(--font); color: #6E6E73; text-align: center; }
+.sc-proxy .pxs-alt u { text-decoration: none; color: #0066CC; }
+
+/* A short window: the sign-in page tightens, as a real one would at that height */
+@container (max-height: 330px) {
+  .sc-proxy .pxs-top { height: 46px; }
+  .sc-proxy .pxs-main { padding-top: 6px; padding-bottom: 10px; }
+  .sc-proxy .pxs-h { font-size: 22px; line-height: 28px; }
+  .sc-proxy .pxs-sub { display: none; }
+  .sc-proxy .pxs-label { margin-top: 12px; }
+  .sc-proxy .pxs-field, .sc-proxy .pxs-btn { height: 38px; }
+  .sc-proxy .pxs-btn { margin-top: 10px; }
+  .sc-proxy .pxs-alt { margin-top: 12px; }
+}
+@container (max-height: 270px) { .sc-proxy .pxs-alt { display: none; } }
+
+/* MARK: The captions under the window: a bold start, then grey */
+.sc-proxy .px-notes { width: 100%; max-width: var(--px-w); margin-top: 34px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; }
+.sc-proxy .px-note { margin: 0; max-width: 440px; font: 400 19px/28px var(--font); letter-spacing: -0.006em; color: var(--text-tertiary); text-wrap: pretty; }
+.sc-proxy .px-note strong { font-weight: 600; color: var(--text-primary); }
+.sc-proxy .px-nb { white-space: nowrap; }
+
+/* MARK: Playing (JavaScript, no Reduce Motion, not a shot): every part follows its --t */
+.js-scenes .sc-proxy { --px-h: clamp(320px, calc(100svh - 460px), 430px); }
+.js-scenes .sc-proxy .px { padding-top: var(--header-h); }
+.js-scenes .sc-proxy .px-head { opacity: var(--t, 0); transform: translateY(calc((1 - var(--t, 0)) * 18px)); }
+.js-scenes .sc-proxy .px-light { opacity: calc((1 - var(--t, 0)) * var(--light)); }
+.js-scenes .sc-proxy .pxw-site { visibility: visible; opacity: calc(1 - var(--t, 0)); }
+.js-scenes .sc-proxy .pxw-err { opacity: var(--t, 0); transform: translateY(calc((1 - var(--t, 0)) * 8px)); }
+.js-scenes .sc-proxy .pxw-load { opacity: calc(1 - var(--t, 0)); }
+/* Safari's bar runs fast at first and slows as it goes — here it slows to a stop: the proxy has gone quiet */
+.js-scenes .sc-proxy .pxw-load i { width: calc((1 - (1 - var(--t, 0)) * (1 - var(--t, 0))) * 71%); }
+.js-scenes .sc-proxy .px-status { display: block; opacity: var(--t, 0); }
+.js-scenes .sc-proxy .px-status > span { display: block; opacity: calc(1 - var(--t, 0)); }
+.js-scenes .sc-proxy .px-drop > span { transform: translateY(calc(var(--t, 0) * -16px)); }
+.js-scenes .sc-proxy .px-closed,
+.js-scenes .sc-proxy .px-proof { opacity: var(--t, 0); transform: translateY(calc((1 - var(--t, 0)) * 14px)); }
+.js-scenes .sc-proxy .px-note > span { display: block; }
+
+/* MARK: Tablets */
+@media (max-width: 1099px) {
+  .sc-proxy { --px-w: 860px; --px-h: 440px; }
+  .sc-proxy .pxs-nav { display: none; }
+  .sc-proxy .px-notes { gap: 36px; }
+  .sc-proxy .px-note { font-size: 17px; line-height: 26px; }
+}
+
+/* MARK: Phones: a narrow window, the captions one under the other */
+@media (max-width: 599px) {
+  .sc-proxy { --px-h: 380px; }
+  .sc-proxy .px-head { max-width: 340px; }
+  .sc-proxy .px-stage { margin-top: 28px; }
+  .sc-proxy .pxw { border-radius: 14px; }
+  .sc-proxy .px-light { --light: 0.2; border-image-width: 80px 100px 150px 100px; border-image-outset: 80px 100px 150px 100px; }
+  .sc-proxy .pxw-bar { height: 46px; gap: 7px; padding: 0 9px 0 13px; }
+  .sc-proxy .pxw-lights { gap: 6px; margin-right: 4px; }
+  .sc-proxy .pxw-lights i { width: 10px; height: 10px; }
+  .sc-proxy .pxw-side, .sc-proxy .pxw-hist, .sc-proxy .pxw-tools { display: none; }
+  .sc-proxy .pxw-cap, .sc-proxy .pxw-addr { height: 30px; border-radius: 15px; }
+  .sc-proxy .pxw-prof { padding: 0 8px; }
+  .sc-proxy .pxw-prof span { display: none; }
+  .sc-proxy .pxw-addr { padding: 0 12px 0 32px; justify-content: flex-start; }
+  .sc-proxy .pxw-pg { left: 9px; top: 7px; }
+  .sc-proxy .pxw-url { font-size: 13px; }
+  .sc-proxy .pxw-err { padding: 0 22px 8%; gap: 12px; }
+  .sc-proxy .px-status { font-size: 17px; line-height: 25px; max-width: 340px; }
+  .sc-proxy .pxw-err b { font-size: 20px; line-height: 25px; }
+  .sc-proxy .pxw-err span { font-size: 15px; line-height: 21px; }
+  .sc-proxy .pxs-top { height: 48px; padding: 0 18px; }
+  .sc-proxy .pxs-logo { font-size: 12px; letter-spacing: 0.2em; }
+  .sc-proxy .pxs-main { padding: 8px 22px 16px; }
+  .sc-proxy .pxs-h { font-size: 24px; line-height: 30px; }
+  .sc-proxy .pxs-label { margin-top: 18px; }
+  .sc-proxy .pxs-field { height: 42px; font-size: 14px; }
+  .sc-proxy .pxs-btn { height: 42px; }
+  .sc-proxy .px-notes { grid-template-columns: minmax(0, 1fr); gap: 18px; margin-top: 26px; }
+  .sc-proxy .px-note { font-size: 17px; line-height: 25px; }
+  /* Playing on a phone: a taller window, and one caption at a time under it — "never around it", then the proof */
+  .js-scenes .sc-proxy { --px-h: clamp(270px, calc(100svh - 400px), 440px); }
+  .js-scenes .sc-proxy .px-notes { gap: 0; }
+  .js-scenes .sc-proxy .px-notes > * { grid-area: 1 / 1; }
+  .js-scenes .sc-proxy .px-closed > span { opacity: calc(1 - var(--t, 0)); transform: translateY(calc(var(--t, 0) * -12px)); }
+  .js-scenes .sc-proxy .px-proof { opacity: 1; transform: none; }
+  .js-scenes .sc-proxy .px-proof > span { opacity: var(--t, 0); transform: translateY(calc((1 - var(--t, 0)) * 12px)); }
+}

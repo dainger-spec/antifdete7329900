@@ -1,0 +1,69 @@
+/* Home scene "hero" (tools/templates/pages/home/hero.mjs): the first screen. The MacBook is a rendered image
+   sequence (tools/hero/render.mjs) that assets/scenes/hero.js scrubs on a canvas with the scroll. Without
+   scenes the words come first and the last frame stands under them, still. Scoped to .sc-hero. */
+
+.sc-hero { margin-top: calc(-1 * var(--header-stack)); background: var(--backdrop); }
+.sc-hero .scene-pin { display: flex; flex-direction: column; align-items: center; text-align: center; padding: calc(var(--header-stack) + 72px) 0 112px; }
+
+/* Words */
+.hr-copy { order: 1; position: relative; padding: 0 24px; display: flex; flex-direction: column; align-items: center; }
+.hr-title { font: 600 80px/1.04 var(--font-display); letter-spacing: -0.045em; color: #F5F6F8; text-wrap: balance; max-width: 1000px; }
+.hr-title span { display: block; }
+.hr-title .dim { color: #8A93A3; }
+.hr-lead { font: 400 21px/32px var(--font); color: var(--text-secondary); max-width: 620px; margin-top: 22px; text-wrap: pretty; }
+.hr-cta { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 14px 30px; margin-top: 32px; }
+.sc-hero .btn.primary { background: #2F6BEF; color: #FFFFFF; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+.sc-hero .btn.primary:hover { background: #3D77F5; }
+.hr-more { display: inline-flex; align-items: center; gap: 4px; font: 400 19px/24px var(--font); color: #8FB2FF; }
+.hr-more svg { width: 14px; height: 14px; transition: transform var(--d-fast) var(--ease-out); }
+.hr-more:hover { text-decoration: underline; text-underline-offset: 4px; }
+.hr-more:hover svg { transform: translateX(2px); }
+
+/* The picture (still): the last frame, cropped to the Mac and the half beside it */
+.hr-stage { order: 2; width: 100%; margin-top: 24px; }
+.hr-still img {
+  display: block; width: 100%; max-width: 1440px; height: auto; margin: 0 auto; aspect-ratio: 16 / 7.2; object-fit: cover; object-position: 50% 86%;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 8%, #000 88%, transparent); mask-image: linear-gradient(180deg, transparent, #000 8%, #000 88%, transparent);
+}
+.hr-film { display: none; }
+
+/* The closing line */
+.hr-caption { order: 3; margin-top: 8px; padding: 0 24px; font: 600 48px/1.08 var(--font-display); letter-spacing: -0.035em; color: #F5F6F8; text-wrap: balance; }
+.hr-caption span { display: block; }
+
+/* Playing: the film fills the pinned screen; the words sit over its empty top and leave as you scroll */
+.js-scenes .sc-hero .scene-pin { padding: 0; justify-content: flex-start; }
+.js-scenes .hr-stage { position: absolute; inset: 0; margin: 0; }
+.js-scenes .hr-still { display: none; }
+.js-scenes .hr-film { display: block; width: 100%; height: 100%; }
+.js-scenes .hr-copy {
+  position: absolute; left: 0; right: 0; top: calc(var(--header-stack) + 4.6vh);
+  opacity: calc(1 - var(--t, 0) * 1.15); transform: translateY(calc(var(--t, 0) * -56px));
+  pointer-events: var(--copy-pe, auto);
+}
+.js-scenes .hr-title { font-size: min(80px, 8.7vh); }
+.js-scenes .hr-lead { margin-top: min(22px, 2.4vh); }
+.js-scenes .hr-cta { margin-top: min(32px, 3.4vh); }
+.js-scenes .hr-caption {
+  position: absolute; left: 0; right: 0; top: calc(var(--header-stack) + 5.5vh); margin: 0;
+  font-size: min(56px, 6.2vh); opacity: var(--t, 0); transform: translateY(calc((1 - var(--t, 0)) * 28px));
+}
+
+@media (max-width: 599px) {
+  .sc-hero .scene-pin { padding: calc(var(--header-stack) + 40px) 0 88px; }
+  .hr-copy { padding: 0 20px; }
+  .hr-title { font-size: 44px; line-height: 48px; letter-spacing: -0.04em; }
+  .hr-title span { display: inline; }
+  .hr-lead { font-size: 17px; line-height: 25px; margin-top: 14px; max-width: 340px; }
+  .hr-cta { margin-top: 22px; gap: 12px 22px; }
+  .sc-hero .btn.lg { height: 46px; padding: 0 20px; font-size: 16px; }
+  .hr-more { font-size: 17px; }
+  .hr-stage { margin-top: 28px; }
+  .hr-still img { aspect-ratio: 0.84; object-position: 50% 53%; }
+  .hr-caption { font-size: 30px; line-height: 35px; letter-spacing: -0.03em; padding: 0 20px; }
+  .js-scenes .hr-copy { top: calc(var(--header-stack) + 3.2vh); }
+  .js-scenes .hr-title { font-size: min(44px, 5.4vh); line-height: 1.09; }
+  .js-scenes .hr-lead { margin-top: min(14px, 1.7vh); }
+  .js-scenes .hr-cta { margin-top: min(22px, 2.6vh); }
+  .js-scenes .hr-caption { top: calc(var(--header-stack) + 2.2vh); font-size: min(30px, 3.7vh); line-height: 1.13; }
+}

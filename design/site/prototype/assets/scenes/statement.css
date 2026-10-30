@@ -1,11 +1,31 @@
-/* Home scene "statement" (tools/templates/pages/home/statement.mjs). Scoped to the scene; the engine and the shared
-   type (.h-xl, .h-xxl, .dim, .scene, .scene-pin) are in site.css. */
+/* Home scene "statement" (tools/templates/pages/home/statement.mjs): one paragraph whose words light up
+   as you scroll. Scoped to .sc-statement; the engine and the shared type are in site.css.
+   The light: --t of the paragraph (0…1 over its data-r) moves a cursor through the words; each word
+   comes up over a ramp of three words, so the light reads as a soft front rather than a switch. The
+   accent phrases are the brand blue, nothing else. Without scenes every word is simply lit. */
 
-.statement .scene-pin { display: flex; align-items: center; }
-.manifest { max-width: 1080px; font: 600 56px/68px var(--font-display); letter-spacing: -0.03em; color: #F3F5F9; text-wrap: pretty; }
-.manifest .acc { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.js-scenes .manifest .w { opacity: calc(0.13 + 0.87 * clamp(0, (var(--p, 0) * 1.3 - 0.08) * var(--n) - var(--i), 1)); }
+.sc-statement .scene-pin { display: flex; align-items: center; }
+.sc-statement .container { width: 100%; }
+.sc-statement .st-text {
+  max-width: 1060px; margin: 0;
+  font: 600 56px/66px var(--font-display); letter-spacing: -0.028em;
+  color: #F5F6F8; font-kerning: normal; hanging-punctuation: first;
+}
+.sc-statement .acc {
+  background: linear-gradient(180deg, #B9CCFF 8%, #7C9EF2 92%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.js-scenes .sc-statement .w {
+  opacity: calc(0.2 + 0.8 * clamp(0, (var(--t, 0) * (var(--n) + 3) - var(--i)) / 3, 1));
+}
 
+@media (max-width: 1099px) {
+  .sc-statement .st-text { font-size: 46px; line-height: 55px; }
+}
 @media (max-width: 599px) {
-  .manifest { font-size: 32px; line-height: 40px; }
+  .sc-statement .st-text { font-size: 31px; line-height: 39px; letter-spacing: -0.022em; }
+  .js-scenes .sc-statement .w { opacity: calc(0.22 + 0.78 * clamp(0, (var(--t, 0) * (var(--n) + 3) - var(--i)) / 3, 1)); }
+}
+@media (max-width: 359px) {
+  .sc-statement .st-text { font-size: 28px; line-height: 35px; }
 }

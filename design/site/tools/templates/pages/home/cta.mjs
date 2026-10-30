@@ -1,15 +1,25 @@
-// Scene "cta": the last call — the mark drawn in code, small, comes up once (site.js, "Code art").
+// Scene "cta": the last call. The Lumen mark, drawn in characters of code (site.js "Code art"), large:
+// its two halves — two profiles, each with its own values — come together from apart as the section
+// rises up the screen, and the seam of light between them comes on when they meet (cta.js; scroll-tied,
+// nothing moves on its own). Then the offer and the two buttons. Without scenes: the mark whole, lit.
+// Without JavaScript: the plain mark (.art-fallback).
 import { inline } from '../../../lib/html.mjs';
 import { glyph } from '../../../lib/kit.mjs';
 import { btn } from '../../components.mjs';
 
-export const assets = {};
+export const assets = { styles: ['scenes/cta.css'], scripts: ['scenes/cta.js'] };
 
 export default function cta(ct, { lang }) {
-  return `<section class="final"><div class="container center-text">
-    <div class="final-art"><canvas data-codeart="mark" aria-hidden="true"></canvas><div class="art-fallback">${glyph(96, '#2A2F3A')}</div></div>
-    <h2 class="h-xxl" style="margin-top:28px">${inline(ct.title, lang)}</h2>
-    <p class="lead" style="margin:18px auto 0;max-width:560px">${inline(ct.lead, lang)}</p>
-    <div class="btn-row center" style="margin-top:34px">${btn('download.html', ct.primary, 'primary', { size: 'lg', iconName: 'download', lang })}${btn('pricing.html', ct.secondary, 'secondary', { size: 'lg', lang })}</div>
-  </div></section>`;
+  return `<section class="sc-cta" data-scene="cta">
+  <div class="container ct-wrap">
+    <div class="ct-art" aria-hidden="true">
+      <i class="ct-glow"></i>
+      <canvas class="ct-half ct-l"></canvas><canvas class="ct-half ct-r"></canvas><canvas class="ct-seam"></canvas>
+      <div class="art-fallback">${glyph(150, '#4A5263')}</div>
+    </div>
+    <h2 class="h-xxl ct-title">${inline(ct.title, lang)}</h2>
+    <p class="lead ct-lead">${inline(ct.lead, lang)}</p>
+    <div class="btn-row center ct-btns">${btn('download.html', ct.primary, 'primary', { size: 'lg', iconName: 'download', lang })}${btn('pricing.html', ct.secondary, 'secondary', { size: 'lg', lang })}</div>
+  </div>
+</section>`;
 }

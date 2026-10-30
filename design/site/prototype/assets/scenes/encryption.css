@@ -1,0 +1,141 @@
+/* Home scene "encryption" (tools/templates/pages/home/encryption.mjs, assets/scenes/encryption.js). Scoped to
+   .sc-encryption; the engine and the shared type (.h-xl, .dim, .scene, .scene-pin, .lead) are in site.css.
+
+   The card is two copies of one face stacked: the readable one (.enc-plain) and the sealed one (.enc-sealed),
+   clipped on either side of a line at the angle of the mark's seam (1 : 3). --s moves the line across the
+   card (0 = it touches the top left corner, 1 = it leaves at the bottom right); --k is how far the line
+   leans over half the card's height (height / 6), so the clip and the beam meet exactly. */
+
+.sc-encryption { --enc-ink: #ECEEF2; --enc-sealed: 132, 156, 214; }
+.sc-encryption .enc { position: relative; }
+.sc-encryption .enc-head { text-align: center; }
+.sc-encryption .enc-head .lead { max-width: 640px; margin-inline: auto; }
+.sc-encryption .enc-key { margin-top: 10px; }
+.sc-encryption .enc-say .lead { text-wrap: balance; }
+
+/* MARK: The card */
+
+.sc-encryption .enc-card {
+  --k: 60px;
+  --tt: var(--t, 0.6);
+  --s: calc(var(--tt) * var(--tt) * (3 - 2 * var(--tt)));
+  --x: calc(var(--s) * (100% + 2 * var(--k)) - var(--k));
+  position: relative; width: min(620px, 100%); height: 360px; flex: none;
+  border-radius: 22px;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.42);
+  text-align: left;
+}
+.sc-encryption .enc-face {
+  position: absolute; inset: 0; overflow: hidden; border-radius: inherit;
+  background: linear-gradient(180deg, #13151A, #0D0E12 70%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.085), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+.sc-encryption .enc-plain { clip-path: polygon(calc(var(--x) + var(--k)) 0, 100% 0, 100% 100%, calc(var(--x) - var(--k)) 100%); }
+.sc-encryption .enc-sealed { clip-path: polygon(0 0, calc(var(--x) + var(--k)) 0, calc(var(--x) - var(--k)) 100%, 0 100%); }
+
+.sc-encryption .enc-bar { display: flex; align-items: center; gap: 12px; height: 60px; padding: 0 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+.sc-encryption .enc-bar .avatar { border-radius: 8px !important; font-weight: 600; }
+.sc-encryption .enc-name { font: 600 16px/20px var(--font); color: var(--enc-ink); letter-spacing: -0.01em; }
+.sc-encryption .enc-meta { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font: 400 13px/18px var(--font); color: var(--text-tertiary); white-space: nowrap; }
+.sc-encryption .enc-rows { list-style: none; padding: 0; }
+.sc-encryption .enc-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; column-gap: 14px; height: 59px; padding: 0 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.055); }
+.sc-encryption .enc-row:last-child { border-bottom: 0; }
+.sc-encryption .enc-tile { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: rgba(255, 255, 255, 0.075); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); font: 600 15px/1 var(--font); color: #DADDE4; }
+.sc-encryption .enc-txt { display: grid; gap: 2px; min-width: 0; }
+.sc-encryption .enc-t, .sc-encryption .enc-s { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-encryption .enc-t { font: 500 15px/20px var(--font); color: var(--enc-ink); letter-spacing: -0.005em; }
+.sc-encryption .enc-s { font: 400 13px/18px var(--font); color: var(--text-secondary); }
+.sc-encryption .enc-dots { margin-left: 10px; letter-spacing: 0.06em; color: var(--text-tertiary); }
+.sc-encryption .enc-kind { font: 400 13px/18px var(--font); color: var(--text-tertiary); white-space: nowrap; padding-left: 12px; }
+
+/* The sealed copy: the same rows, every field ciphertext (base64, like AES-GCM output written out) */
+.sc-encryption .ct { text-overflow: clip; font-family: var(--font-mono); color: rgba(var(--enc-sealed), 0.62); letter-spacing: 0.01em; -webkit-mask-image: linear-gradient(90deg, #000 78%, transparent); mask-image: linear-gradient(90deg, #000 78%, transparent); }
+.sc-encryption .enc-t.ct { font: 400 14px/20px var(--font-mono); color: rgba(var(--enc-sealed), 0.78); }
+.sc-encryption .enc-s.ct { font: 400 12px/18px var(--font-mono); color: rgba(var(--enc-sealed), 0.46); }
+.sc-encryption .enc-tile.ct { font: 500 11px/1 var(--font-mono); color: rgba(var(--enc-sealed), 0.7); background: rgba(111, 143, 234, 0.07); box-shadow: inset 0 0 0 1px rgba(111, 143, 234, 0.14); -webkit-mask-image: none; mask-image: none; letter-spacing: 0; }
+.sc-encryption .enc-sealed .enc-kind { color: #737B8A; }
+
+/* The light: a hairline core and a soft glow, leaning like the seam; a sheen trails it over the sealed side */
+.sc-encryption .enc-beam {
+  --on: clamp(0, min(var(--tt) * 16, (1 - var(--tt)) * 16), 1);
+  position: absolute; top: -11%; bottom: -11%; left: var(--x); width: 2px; margin-left: -1px; pointer-events: none;
+  transform: rotate(18.435deg); opacity: var(--on);
+  background: linear-gradient(180deg, transparent, rgba(178, 198, 255, 0.85) 20%, #FFFFFF 50%, rgba(178, 198, 255, 0.85) 80%, transparent);
+}
+.sc-encryption .enc-beam::before { content: ""; position: absolute; top: 4%; bottom: 4%; left: -46px; right: -46px; background: radial-gradient(closest-side, rgba(111, 143, 234, 0.42), rgba(47, 107, 239, 0.12) 55%, transparent); }
+.sc-encryption .enc-beam::after { content: ""; position: absolute; top: 16%; bottom: 16%; left: -5px; right: -5px; border-radius: 6px; background: radial-gradient(closest-side, rgba(220, 230, 255, 0.55), transparent); }
+.sc-encryption .enc-sheen {
+  position: absolute; top: -20%; height: 140%; width: 220px; left: calc(var(--x) - 220px); pointer-events: none;
+  transform-origin: 100% 50%; transform: rotate(18.435deg);
+  background: linear-gradient(90deg, transparent, rgba(111, 143, 234, 0.06) 55%, rgba(143, 178, 255, 0.30));
+  mix-blend-mode: screen; opacity: clamp(0, min(var(--tt) * 16, (1 - var(--tt)) * 16), 1);
+}
+
+/* MARK: The end: the two names, set large (the key line takes the lead's place above, html:not(.js-scenes): under it) */
+
+.sc-encryption .enc-foot { text-align: center; }
+.sc-encryption .enc-specs { display: grid; grid-template-columns: repeat(2, minmax(0, 380px)); justify-content: center; column-gap: 0; margin: 0; }
+.sc-encryption .enc-specs > div { padding: 0 40px; }
+.sc-encryption .enc-specs > div + div { box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.1); }
+.sc-encryption .enc-specs dt { font: 600 40px/44px var(--font-display); letter-spacing: -0.03em; color: #F5F6F8; white-space: nowrap; }
+.sc-encryption .enc-specs dd { margin: 10px 0 0; font: 400 16px/23px var(--font); color: var(--text-secondary); text-wrap: balance; }
+
+.sc-encryption .enc-cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+
+/* MARK: Without scenes: one still — the card half sealed, the lock beside it, the names under them */
+
+html:not(.js-scenes) .sc-encryption .enc-stage { position: relative; display: grid; grid-template-columns: minmax(0, 620px) 300px; justify-content: center; align-items: center; column-gap: 64px; margin-top: 64px; }
+html:not(.js-scenes) .sc-encryption .enc-lockbox { width: 300px; height: 320px; }
+html:not(.js-scenes) .sc-encryption .enc-foot { margin-top: 64px; }
+.no-js .sc-encryption .enc-stage { grid-template-columns: minmax(0, 620px); }
+.no-js .sc-encryption .enc-lockbox { display: none; }
+
+/* MARK: Playing: the stage pins; the card, then the lock, then the names in the same place */
+
+.js-scenes .sc-encryption .enc { display: grid; grid-template-columns: minmax(0, 1fr); padding-top: var(--header-h); }
+.js-scenes .sc-encryption .enc-stage { --f: var(--t, 0); position: relative; grid-row: 2; grid-column: 1; height: clamp(400px, calc(100vh - 390px), 580px); margin-top: 36px; }
+.js-scenes .sc-encryption .enc-say { display: grid; margin-top: 22px; }
+.js-scenes .sc-encryption .enc-say > .lead { grid-area: 1 / 1; margin-top: 0; }
+.js-scenes .sc-encryption .enc-lead { opacity: calc(1 - clamp(0, var(--t, 0) * 2.2, 1)); transform: translateY(calc(clamp(0, var(--t, 0) * 2.2, 1) * -8px)); }
+.js-scenes .sc-encryption .enc-key { opacity: clamp(0, var(--t, 0) * 2.2 - 1.2, 1); transform: translateY(calc((1 - clamp(0, var(--t, 0) * 2.2 - 1.2, 1)) * 10px)); color: var(--text-primary); }
+.js-scenes .sc-encryption .enc-card { position: absolute; left: 50%; top: 24px; transform: translateX(-50%); opacity: calc(1 - clamp(0, (var(--f) - 0.03) * 2.6, 1)); }
+.js-scenes .sc-encryption .enc-sealed .ct { opacity: calc(1 - clamp(0, var(--f) * 30, 1)); }
+.js-scenes .sc-encryption .enc-lockbox { display: none; }
+.js-scenes .sc-encryption .enc-cv { left: 50%; width: min(700px, 100%); transform: translateX(-50%); }
+.js-scenes .sc-encryption .enc-foot { grid-row: 2; grid-column: 1; align-self: end; position: relative; z-index: 1; opacity: var(--t, 0); transform: translateY(calc((1 - var(--t, 0)) * 28px)); }
+
+/* MARK: Tablets */
+
+@media (max-width: 899px) {
+  html:not(.js-scenes) .sc-encryption .enc-stage { grid-template-columns: minmax(0, 620px); row-gap: 40px; }
+  html:not(.js-scenes) .sc-encryption .enc-lockbox { justify-self: center; }
+}
+
+/* MARK: Phones: a portrait composition — the card full width, the lock above the names */
+
+@media (max-width: 599px) {
+  .sc-encryption .enc-card { --k: 57px; width: 100%; height: 342px; border-radius: 20px; }
+  .sc-encryption .enc-bar { height: 56px; padding: 0 16px; gap: 10px; }
+  .sc-encryption .enc-name { font-size: 16px; }
+  .sc-encryption .enc-meta { font-size: 13px; gap: 6px; }
+  .sc-encryption .enc-row { grid-template-columns: 30px minmax(0, 1fr) auto; column-gap: 12px; height: 57px; padding: 0 16px; }
+  .sc-encryption .enc-tile { width: 30px; height: 30px; border-radius: 8px; }
+  .sc-encryption .enc-t { font-size: 16px; }
+  .sc-encryption .enc-s { font-size: 14px; }
+  .sc-encryption .enc-t.ct { font-size: 14px; }
+  .sc-encryption .enc-s.ct { font-size: 12px; }
+  .sc-encryption .enc-kind { font-size: 13px; padding-left: 8px; }
+  .sc-encryption .enc-dots { margin-left: 6px; }
+  .sc-encryption .enc-specs { grid-template-columns: minmax(0, 1fr); row-gap: 22px; }
+  .sc-encryption .enc-specs > div { padding: 0; }
+  .sc-encryption .enc-specs > div + div { box-shadow: none; }
+  .sc-encryption .enc-specs dt { font-size: 28px; line-height: 32px; letter-spacing: -0.025em; }
+  .sc-encryption .enc-specs dd { margin-top: 6px; font-size: 15px; line-height: 21px; max-width: 300px; margin-inline: auto; }
+  html:not(.js-scenes) .sc-encryption .enc-stage { margin-top: 40px; }
+  html:not(.js-scenes) .sc-encryption .enc-lockbox { width: 240px; height: 260px; }
+  html:not(.js-scenes) .sc-encryption .enc-foot { margin-top: 40px; }
+  .js-scenes .sc-encryption .enc-stage { height: clamp(400px, calc(100svh - 362px), 520px); margin-top: 22px; }
+  .js-scenes .sc-encryption .enc-say { margin-top: 14px; }
+  .js-scenes .sc-encryption .enc-card { left: 0; top: 50%; margin: -171px 0 0; transform: none; }
+  .js-scenes .sc-encryption .enc-cv { left: 0; width: 100%; transform: none; }
+}
