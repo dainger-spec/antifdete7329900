@@ -8,191 +8,95 @@ Search description: Lumen is a multi-account browser for Mac. Every account gets
 
 ---
 
-A multi-account browser for Mac
-
 # Every account gets its own Safari.
 
-Its own cookies, IP, language and time zone for every profile. No signing in and out, and no leaks.
+Its own cookies, IP, language and time zone for every profile. Every account open at once, and nothing leaks.
 
-[Try it free]
-
-[Features]
-
-⟦q3: 7 days free⟧ No card needed macOS 14 or later
-
-Ads
-
-en-US · America/New_York
-
-Store
-
-de-DE · Europe/Berlin
-
-Ads
-
-en-US · America/New_York
-
-A MacBook whose display shows half of the Lumen mark drawn in code; the other half has come out of the screen towards us. Two halves, two profiles, each with its own language and time zone
+[Try it free] Features
 
 One Mac, many Safaris. And they never mix.
 
-Scroll
+A Space Black MacBook Pro. Its display shows the Lumen mark set in code characters: a split disc. The left half has come out of the display and floats in front of it; the right half stays on the screen. Two halves, two profiles that never mix.
 
 Lumen opens every account in a Safari of its own. Its own cookies, passwords and history. Its own proxy, language and time zone. Sites see an ordinary Safari — and you see every account at once.
 
-## One Mac, many Safaris. Each from a country of its own.
+## Every profile at once. Each in its own window.
 
-shop.example
+No signing out of one account to get into another: the windows sit side by side and can’t see each other.
 
-Store
+Safari windows open side by side, each with a profile and a site of its own: “Store” from Germany, “Ads” from the United States, “Support” from the United Kingdom, “QA” from Japan, “Sales” from the Netherlands and “Blog” from France.
 
-Ads
+## Every profile, its own country.
 
-QA
+A Safari window with the same news site in three profiles: for “Store” it is in German and shows Berlin time, for “Ads” in English with New York time, for “QA” in Japanese with Tokyo time.
 
-shop
+What the site sees
 
-Neu
+1. Store Germany 14:32 `de-DE · Europe/Berlin`
+2. Ads USA 9:32 AM `en-US · America/New_York`
+3. QA Japan 22:32 `ja-JP · Asia/Tokyo`
 
-Damen
+Each profile takes its language and time zone from its proxy’s country — so sites open in the local language, on local time.
 
-Herren
+## Isolated at every level.
 
-Kollektion
+Under every window: its own process, its own data, its own network and its own key.
 
-### Neue Kollektion
-
-Leicht, warm, für jeden Tag.
-
-Jetzt entdecken
-
-Jacken
-
-Schuhe
-
-Taschen
-
-shop
-
-Neu
-
-Damen
-
-Herren
-
-Kollektion
-
-### Neue Kollektion
-
-Leicht, warm, für jeden Tag.
-
-Jetzt entdecken
-
-Jacken
-
-Schuhe
-
-Taschen
-
-shop
-
-New
-
-Women
-
-Men
-
-Collection
-
-### The new collection
-
-Light, warm, for every day.
-
-Shop now
-
-Jackets
-
-Shoes
-
-Bags
-
-shop
-
-新着
-
-レディース
-
-メンズ
-
-コレクション
-
-### 新しいコレクション
-
-軽くて暖かい、毎日のために。
-
-今すぐ見る
-
-ジャケット
-
-シューズ
-
-バッグ
-
-The page is drawn by the real WebKit.Exactly as in Safari.
-
-The site sees: Germany · `de-DE`The site sees: USA · `en-US` The site sees: Japan · `ja-JP`
-
-## A profile is apart at every level.
-
-Window, process, data, network and key — every profile has its own.
-
-1. **A Safari window**Its own tabs, history and bookmarks
-2. **A process of its own**Its own WebKit, folder and temporary files
-3. **Its own data**Cookies and passwords other profiles cannot see
-4. **Its own network**Only through its proxy; direct is closed
-5. **Its own key**Everything on disk under AES-256-GCM
-
-A Safari window
-
-WebKit
-
-~/profile
-
-A process of its own
-
-Its own data
-
-Its own network
-
-AES-256-GCM
-
-Its own key
+1. **A Safari window**Its own tabs, history and bookmarks.
+2. **A process of its own**Its own WebKit, folder and temporary files.
+3. **Its own data**Cookies and passwords other profiles cannot see.
+4. **Its own network**Only through its proxy. Direct is closed.
+5. **Its own key**Everything on disk under AES-256-GCM.
 
 ## The proxy is down. No connection.
 
-A profile with a proxy goes online only through it. Your IP stays hidden.
+The Safari window of the Store profile. A sign-in page is open through the proxy; during the next load the proxy stops responding: loading stops, and instead of the page Safari shows its own error, “Can’t Connect to the Server”. The profile never goes online directly.
 
-Ads
+**No way around it.** A profile with a proxy goes online only through it. If the proxy doesn’t respond, the page doesn’t open, and the site never learns your real IP.
 
-Proxy
+**0 packets past the proxy.** Every build checks it: the tests record all of a profile’s traffic and look for a single packet that got past it.
 
-down
+## Not even we can read it.
 
-Site
+Passwords, cookies, history, bookmarks and site data of every profile are encrypted on disk.
 
-## Strength in numbers.
+The key comes from your master password, and only you know it. Without it, a stopped profile can’t be opened.
+
+In the picture a line of light passes over the data of the profile “Store” — a saved password, cookies, history, a bookmark and site data — and turns it into ciphertext, which then gathers into a lock.
+
+- **AES-256-GCM Encrypts each profile’s data with a key of its own.** — Argon2id Derives the key from your master password: 64 MiB of memory, 3 passes, 4 lanes.
+
+## Warm-up runs while you work.
+
+A profile browses the sites of its proxy’s country and collects cookies — in a hidden window. Nothing opens in front of you.
+
+Example: the profile “Client”, with a proxy in Sweden, warms up on Swedish sites — google.se, aftonbladet.se, svt.se, dn.se. It is on page 4 of 12, with 84 cookies collected.
+
+A profile browses the sites of its proxy’s country and collects cookies — in a hidden window. Nothing opens in front of you.
+
+**26 countries.** A ready-made list of local sites for each, in its own language. The app takes the country from the proxy.
+
+**Like a reader.** Normally 10–35 seconds a page, scrolling. In Quick mode 4–12 s, in Deep 25–90 s.
+
+**Only looks.** It types nothing, submits nothing, buys nothing. It can also start by itself, on a schedule.
+
+## Lumen, by the numbers.
 
 448
 
 signals compared with real Safari on every build
 
-31 / 31
+31
 
-headers, the same set and order as Safari’s
+/31
 
-15 / 15
+request headers, the same set and order as Safari’s
 
-TLS and HTTP/2 values match
+15
+
+/15
+
+TLS and HTTP/2 values that match Safari
 
 0
 
@@ -202,7 +106,7 @@ packets around the proxy
 
 countries with ready-made warm-up site lists
 
-`AES-256-GCM`
+AES-256-GCM
 
 encryption of everything a profile keeps on disk
 
@@ -210,41 +114,27 @@ How we verify
 
 ## And everything you expect from Safari.
 
-shop.example
+### Passwords.
 
-••••••••••
+AutoFill, just like Safari: save, update, fill.
 
-Save password
-
-### Passwords
-
-AutoFill as in Safari: save, update, fill.
-
-Orders
-
-Seller dashboard
-
-Support
-
-### History and bookmarks
+### History and bookmarks.
 
 Every profile has its own.
 
-cookies.txt
+### Cookie import.
 
-### Cookie import
+Bring a sign-in over from another browser: JSON or cookies.txt.
 
-JSON and cookies.txt from extensions, Puppeteer, Playwright and Selenium.
-
-### Sync
+### Sync.
 
 Your profiles on all your Macs. Only ciphertext goes to the server.
 
-### Profile export
+### Profile export.
 
 A whole profile in one file under a password.
 
-### Ephemeral profiles
+### Ephemeral profiles.
 
 Close it, and nothing is left.
 

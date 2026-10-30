@@ -49,7 +49,7 @@ function toMarkdown(selector) {
       if (n.nodeType === 3) { const t = clean(n.data); if (t) lines.push(t, ''); return; }
       if (n.nodeType !== 1) return;
       const el = n;
-      if (el.matches('svg, script, style, [data-proto], .indicator, .chipnav, .skip-link, .avatar, .traffic')) return;
+      if (el.matches('svg, script, style, [data-proto], .indicator, .chipnav, .skip-link, .avatar, .traffic, [data-scene] [aria-hidden="true"]')) return;
       const t = el.tagName;
       // Drawn UI: one line per row, node or chip; meta lines joined with a middle dot.
       if (el.matches('.cols')) { const s = Array.from(el.children).map((c) => clean(inline(c))).filter(Boolean).join(' — '); if (s) lines.push(`- ${s}`); return; }

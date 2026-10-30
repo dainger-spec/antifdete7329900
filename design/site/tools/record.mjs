@@ -113,15 +113,11 @@ const SCENES = {
     await pause(page, 1000);
   } },
   'hero-1440': { w: 1440, h: 900, async run(page, base) {
-    // The opening alone: the words rise, then the scroll opens the Mac and brings the half out of its screen.
+    // The opening alone: the camera comes closer and round the Mac, and the half comes out of its screen.
     await page.goto(`${base}/ru/index.html?rec=1`);
-    await pause(page, 2000);
-    const end = await page.evaluate(() => { const el = document.querySelector('[data-scene="intro"]'); return el.offsetHeight - innerHeight; });
+    await pause(page, 1600);
+    const end = await page.evaluate(() => { const el = document.querySelector('[data-scene="hero"]'); return el.offsetHeight - innerHeight; });
     await smoothScroll(page, end, 7000);
-    await pause(page, 600);
-    await page.mouse.move(380, 700, { steps: 1 });
-    await page.mouse.move(470, 430, { steps: 40 });
-    await page.mouse.move(560, 380, { steps: 30 });
     await pause(page, 1400);
   } },
   'hero-reduced-1440': { w: 1440, h: 900, reduced: true, async run(page, base) {

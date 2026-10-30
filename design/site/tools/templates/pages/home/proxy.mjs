@@ -10,7 +10,7 @@
 //
 // Timeline (scene progress, 300vh): 0–0.05 the line "through proxy Berlin 1" · 0.07–0.125 Continue pressed and
 // let go · 0.10–0.34 the progress bar runs and slows to a dead stop (the field's Reload is Stop meanwhile) ·
-// 0.33–0.375 the line turns to "isn't responding" · 0.43–0.465 the room light dims, 0.435–0.46 the page drops dark,
+// 0.32–0.38 the line turns to "isn't responding" (out, then in) · 0.43–0.465 the room light dims, 0.435–0.46 the page drops dark,
 // Reload is back · 0.46–0.49 a dark beat · from 0.49 Safari's error (later where, close up, it would not fit the
 // screen; proxy.js sets --px-err) · 0.48–0.66 the camera draws back (proxy.js) · 0.55–0.575 the line goes ·
 // 0.575–0.665 the headline · 0.67–0.75 and 0.76–0.86 the captions (on a phone one at a time: 0.67–0.75 "no way
@@ -93,8 +93,8 @@ export default function scene(c, { lang }) {
   <div class="scene-pin">
     <div class="container px">
       <div class="px-top">
-        <p class="px-status px-live" data-r="0 0.05" aria-hidden="true"><span data-r="0.33 0.355">${note(c.live, lang, proxyName)}</span></p>
-        <p class="px-status px-drop" data-r="0.345 0.375" aria-hidden="true"><span data-r="0.55 0.575">${note(c.drop, lang, proxyName)}</span></p>
+        <p class="px-status px-live" data-r="0 0.05" aria-hidden="true"><span data-r="0.32 0.342">${note(c.live, lang, proxyName)}</span></p>
+        <p class="px-status px-drop" data-r="0.35 0.38" aria-hidden="true"><span data-r="0.55 0.575">${note(c.drop, lang, proxyName)}</span></p>
         <h2 class="h-xl px-head" data-r="0.575 0.665">${twoTone(c.head, lang)}</h2>
       </div>
       <div class="px-stage">
