@@ -124,54 +124,68 @@ final class SelfTest {
         defer { try? FileManager.default.removeItem(at: root) }
         // scripts/disk_check.py: what is written in here is the self-test's own.
         info("vault \(root.path)")
+        let repository: ProfileRepository
         do {
-            let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
+            repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
             try await firstWebKitUse(repository) // must run before anything else touches WebKit
-            // A profile with a proxy does not start without the proxied profile's rule list (ContentRules).
-            await ContentRules.prepare()
-            info("WebKit \(WebKitBuild.version)")
-            debugSwitchesStayDebugSwitches()
-            try await storageIsolationAndShims(repository)
-            try await deviceGenerations(repository)
-            try await fingerprintSurface(repository)
-            try await recoverySealing(repository)
-            try formatPolicy(repository)
-            try updateGate(repository)
-            try await appSettings(repository)
-            try editorLabels()
-            try await windowSizes(repository)
-            try await namedSafariVersion(repository)
-            try await localRequests(repository)
-            try await cookiesAtCreation(repository)
-            try await diagnosticsBundle(repository)
-            try await pasteAsTyped(repository)
-            try await whatSitesSee(repository)
-            try await deleteProfiles(repository)
-            try await proxies(repository)
-            try await certificatesWithoutFetching(repository)
-            try await handOffsInOurWindows(repository)
-            try await workersInOurWindows(repository)
-            try await proxyLocationAtLaunch(repository)
-            try await socksProfilesSideBySide(repository)
-            try await proxyLookupAndExitIP(repository)
-            try await proxyChecker(repository)
-            try await tabsAndLibrary(repository)
-            try await restoreTabs(repository)
-            try await windowLifecycle(repository)
-            try await dialogTeardown(repository)
-            try await passwordAutoFill(repository)
-            try await cookieImport(repository)
-            try await profileTransfer(repository)
-            try await automationAPI(repository)
-            try await profileSync(repository)
-            try await warmUp(repository)
-            try await warmUpQueue(repository)
-            try await safariChromeThroughTheProxy(repository)
-            try await lockDuringLaunch(repository)
-            try await quitFromFocusedPage(repository)
-            try await forcedSealAtQuit(repository)
         } catch {
             check("self-test ran without unexpected errors", false, String(describing: error))
+            return
+        }
+        // A profile with a proxy does not start without the proxied profile's rule list (ContentRules).
+        await ContentRules.prepare()
+        info("WebKit \(WebKitBuild.version)")
+        debugSwitchesStayDebugSwitches()
+        // Each group on its own: an error one did not expect fails that group, by name, and the
+        // run goes on with the next, so that one error never hides the checks after it.
+        await group("storage isolation and shims") { try await storageIsolationAndShims(repository) }
+        await group("device generations") { try await deviceGenerations(repository) }
+        await group("fingerprint surface") { try await fingerprintSurface(repository) }
+        await group("recovery sealing") { try await recoverySealing(repository) }
+        await group("format policy") { try formatPolicy(repository) }
+        await group("update gate") { try updateGate(repository) }
+        await group("settings") { try await appSettings(repository) }
+        await group("editor labels") { try editorLabels() }
+        await group("window sizes") { try await windowSizes(repository) }
+        await group("named Safari version") { try await namedSafariVersion(repository) }
+        await group("local requests") { try await localRequests(repository) }
+        await group("cookies at creation") { try await cookiesAtCreation(repository) }
+        await group("diagnostics") { try await diagnosticsBundle(repository) }
+        await group("paste as typed") { try await pasteAsTyped(repository) }
+        await group("what sites see") { try await whatSitesSee(repository) }
+        await group("deleting profiles") { try await deleteProfiles(repository) }
+        await group("proxies") { try await proxies(repository) }
+        await group("certificates") { try await certificatesWithoutFetching(repository) }
+        await group("hand-offs") { try await handOffsInOurWindows(repository) }
+        await group("workers") { try await workersInOurWindows(repository) }
+        await group("proxy location at launch") { try await proxyLocationAtLaunch(repository) }
+        await group("SOCKS5 profiles side by side") { try await socksProfilesSideBySide(repository) }
+        await group("proxy lookup and exit IP") { try await proxyLookupAndExitIP(repository) }
+        await group("proxy checker") { try await proxyChecker(repository) }
+        await group("tabs and library") { try await tabsAndLibrary(repository) }
+        await group("restoring tabs") { try await restoreTabs(repository) }
+        await group("window lifecycle") { try await windowLifecycle(repository) }
+        await group("dialogs") { try await dialogTeardown(repository) }
+        await group("password AutoFill") { try await passwordAutoFill(repository) }
+        await group("cookie import") { try await cookieImport(repository) }
+        await group("profile transfer") { try await profileTransfer(repository) }
+        await group("automation API") { try await automationAPI(repository) }
+        await group("profile sync") { try await profileSync(repository) }
+        await group("warm-up") { try await warmUp(repository) }
+        await group("warm-up queue") { try await warmUpQueue(repository) }
+        await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
+        await group("lock during launch") { try await lockDuringLaunch(repository) }
+        await group("quit") { try await quitFromFocusedPage(repository) }
+        await group("forced seal") { try await forcedSealAtQuit(repository) }
+    }
+
+    /// One group of checks: an error it throws, which none of its checks expected, fails the group
+    /// by name with the error, and the self-test goes on.
+    private func group(_ name: String, _ body: () async throws -> Void) async {
+        do {
+            try await body()
+        } catch {
+            check("\(name): ran without unexpected errors", false, String(describing: error))
         }
     }
 
@@ -475,10 +489,14 @@ final class SelfTest {
 
         // What WebKit would send outside the proxy is blocked by the proxied profile's rule list: an
         // <a ping> (the same load type as a dns-prefetch) never reaches the proxy, a fetch does.
-        let served = try await servedPathsAfterPing(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort))
-        check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
-              served.contains("/fetch-allowed") && !served.contains("/ping-blocked"), served.joined(separator: ","))
-        info("proxy: a beacon \(served.contains("/beacon") ? "still reaches" : "does not reach") the proxy (beacons are fetches, not pings)")
+        do {
+            let served = try await servedPathsAfterPing(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort))
+            check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
+                  served.contains("/fetch-allowed") && !served.contains("/ping-blocked"), served.joined(separator: ","))
+            info("proxy: a beacon \(served.contains("/beacon") ? "still reaches" : "does not reach") the proxy (beacons are fetches, not pings)")
+        } catch {
+            check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile", false, String(describing: error))
+        }
 
         // A proxy that answers 407: the profile's credentials are sent, wrong ones fail closed.
         // Loaded in a BrowserTab, whose navigation delegate answers the proxy's challenge.
@@ -539,18 +557,111 @@ final class SelfTest {
         let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
         defer { session.shutDown() }
         let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
-        try await PageLoader.load(webView, url: URL(string: "http://proxied.selftest.invalid/ping-page")!)
-        let served = try await js(webView, """
+        let page = URL(string: "http://proxied.selftest.invalid/ping-page")!
+        try await PageLoader.load(webView, url: page)
+        do {
+            return try await js(webView, Self.pingScript + Self.readServedPaths) as? [String] ?? []
+        } catch {
+            await explainJavaScriptResultFailure(session, page: page, failure: error)
+            throw error
+        }
+    }
+
+    /// The page's actions: an `<a ping>` clicked, a beacon, a fetch, a pause for the ping.
+    private static let pingScript = """
+        const a = document.createElement('a');
+        a.href = '#clicked'; a.ping = '/ping-blocked'; a.textContent = 'ping';
+        document.body.appendChild(a);
+        a.click();
+        navigator.sendBeacon('/beacon', 'x');
+        await fetch('/fetch-allowed');
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
+        """
+    /// What the proxy has served, as it lists it.
+    private static let readServedPaths = "return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();"
+
+    /// When WebKit could not hand back what the ping page's script returned (WebKit 27 on
+    /// macOS 27.0.1: WKErrorDomain 5, "unsupported type"): the script taken apart, each part on a
+    /// fresh page of the same profile, each answer printed — which part makes the answer one WebKit
+    /// cannot hand back, and what the page's value was.
+    private func explainJavaScriptResultFailure(_ session: BrowserSession, page: URL, failure: Error) async {
+        info("js results: the ping page's script failed: \(Self.javaScriptError(failure))")
+        let describeServed = """
+            const v = await (await fetch('/pb-served.json', { cache: 'no-store' })).json();
+            return [typeof v, String(Array.isArray(v)), Object.prototype.toString.call(v),
+                    String(Object.getPrototypeOf(v) === Array.prototype), String(v && v.length), typeof (v && v[0]),
+                    JSON.stringify(v).slice(0, 300), location.href, document.readyState, String(history.length)];
+            """
+        let original: String = Self.pingScript + Self.readServedPaths
+        let asText: String = Self.pingScript
+            + "return JSON.stringify(await (await fetch('/pb-served.json', { cache: 'no-store' })).json());"
+        let parsed: String = Self.pingScript
+            + "return JSON.parse(await (await fetch('/pb-served.json', { cache: 'no-store' })).text());"
+        let actionsThenLiteral: String = Self.pingScript + "return ['x'];"
+        let clickThenLiteral = """
             const a = document.createElement('a');
             a.href = '#clicked'; a.ping = '/ping-blocked'; a.textContent = 'ping';
             document.body.appendChild(a);
             a.click();
-            navigator.sendBeacon('/beacon', 'x');
-            await fetch('/fetch-allowed');
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();
-            """) as? [String] ?? []
-        return served
+            return ['x'];
+            """
+        let actionsThenDescription: String = Self.pingScript + describeServed
+        typealias Variant = (label: String, body: String, world: WKContentWorld, profileContent: Bool, gesture: Bool)
+        var variants: [Variant] = []
+        variants.append(("the same script again", original, .page, true, true))
+        variants.append(("the same, answered as JSON text", asText, .page, true, true))
+        variants.append(("the same, parsed with JSON.parse", parsed, .page, true, true))
+        variants.append(("only the read", Self.readServedPaths, .page, true, true))
+        variants.append(("the actions, then a literal array", actionsThenLiteral, .page, true, true))
+        variants.append(("the click, then a literal array", clickThenLiteral, .page, true, true))
+        variants.append(("the beacon, then a literal array", "navigator.sendBeacon('/beacon', 'x'); return ['x'];", .page, true, true))
+        variants.append(("the actions, then what the read returned", actionsThenDescription, .page, true, true))
+        variants.append(("the same script in the client's world", original, .defaultClient, true, true))
+        variants.append(("the same script without the profile's scripts and rules", original, .page, false, true))
+        variants.append(("the same script without a user gesture", original, .page, true, false))
+        variants.append(("the actions without a user gesture, then what the read returned", actionsThenDescription, .page, true, false))
+        for (index, variant) in variants.enumerated() {
+            let configuration = session.makeWebViewConfiguration()
+            if !variant.profileContent { configuration.userContentController = WKUserContentController() }
+            let webView = WKWebView(frame: .zero, configuration: configuration)
+            let answer: String
+            do {
+                try await PageLoader.load(webView, url: page)
+                let value: Any?
+                if variant.gesture {
+                    value = try await js(webView, variant.body, world: variant.world)
+                } else {
+                    value = try await jsWithoutUserGesture(webView, variant.body, world: variant.world)
+                }
+                answer = "answered " + String(String(describing: value ?? "nil").prefix(300))
+            } catch {
+                answer = Self.javaScriptError(error)
+            }
+            info("js results: v\(index + 1) \(variant.label): \(answer)")
+        }
+    }
+
+    /// `callAsyncJavaScript` without the user gesture WebKit forces on it (`_callAsyncJavaScript:…withUserGesture:`).
+    private func jsWithoutUserGesture(_ webView: WKWebView, _ body: String, world: WKContentWorld) async throws -> Any? {
+        let selector = NSSelectorFromString("_callAsyncJavaScript:arguments:inFrame:inContentWorld:withUserGesture:completionHandler:")
+        guard let method = class_getInstanceMethod(WKWebView.self, selector) else {
+            throw CoreError.invalidConfiguration("this WebKit has no _callAsyncJavaScript:…withUserGesture:")
+        }
+        typealias Call = @convention(c) (WKWebView, Selector, NSString, NSDictionary, WKFrameInfo?, WKContentWorld, Bool,
+                                         @escaping @convention(block) (Any?, Error?) -> Void) -> Void
+        let call = unsafeBitCast(method_getImplementation(method), to: Call.self)
+        return try await withCheckedThrowingContinuation { continuation in
+            call(webView, selector, body as NSString, NSDictionary(), nil, world, false) { value, error in
+                if let error { continuation.resume(throwing: error) } else { continuation.resume(returning: value) }
+            }
+        }
+    }
+
+    private static func javaScriptError(_ error: Error) -> String {
+        let error = error as NSError
+        let message = error.userInfo["WKJavaScriptExceptionMessage"] as? String
+        return "\(error.domain) \(error.code) \(error.localizedDescription)" + (message.map { " — \($0)" } ?? "")
     }
 
     /// Loads `url` in an ephemeral profile using `proxy`. Returns the page text, or nil if the load failed.
