@@ -137,6 +137,7 @@ final class SelfTest {
             try formatPolicy(repository)
             try updateGate(repository)
             try await appSettings(repository)
+            try editorLabels()
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
@@ -2414,6 +2415,41 @@ final class SelfTest {
     /// several tabs, AutoFill's switch over the profile's own, where a download goes, the letters
     /// on a profile's Dock icon, which profiles a quit keeps to reopen, and the settings as a
     /// profile's own process gets them.
+    /// A profile's glyph, tags and notes: through the editor as written and held to their limits,
+    /// and the Profiles list finding profiles by them.
+    private func editorLabels() throws {
+        var labelled = ProfileDraft(name: "Labelled", configuration: ProfileConfiguration())
+        labelled.tags = [" ads ", "ADS", "US"]
+        labelled.notes = "  renews monthly \n"
+        labelled.avatarColor = 6
+        labelled.avatarLetters = "N W"
+        let labels = try labelled.makeConfiguration()
+        let reopened = ProfileDraft(name: "Labelled", configuration: labels)
+        let keptTags: Bool = labels.tags == ["ads", "US"]
+        let keptNotes: Bool = labels.notes == "renews monthly"
+        let keptGlyph: Bool = labels.avatar == ProfileAvatarStyle(color: 6, letters: "NW")
+        let shownAgain: Bool = reopened.tags == labels.tags && reopened.notes == labels.notes
+        let glyphAgain: Bool = reopened.avatarStyle == labels.avatar
+        check("editor: tags, notes and the glyph are kept as written (each tag once, trimmed) and shown again as kept",
+              keptTags && keptNotes && keptGlyph && shownAgain && glyphAgain,
+              "tags \(labels.tags), notes \(labels.notes), glyph \(String(describing: labels.avatar))")
+        let plain = ProfileDraft(name: "Plain", configuration: ProfileConfiguration())
+        let plainConfiguration = try plain.makeConfiguration()
+        let plainKept: Bool = plainConfiguration.tags.isEmpty && plainConfiguration.notes.isEmpty && plainConfiguration.avatar == nil
+        check("editor: a profile without them is saved without them", plainKept)
+
+        let row = ProfileRowItem(id: UUID(), name: "Northwind", activity: .stopped, exit: .direct, ephemeral: false,
+                                 appearsAs: "", lastUsed: nil, tags: ["ads", "US"], notes: "Renews monthly")
+        let other = ProfileRowItem(id: UUID(), name: "Research", activity: .stopped, exit: .direct, ephemeral: false,
+                                   appearsAs: "", lastUsed: nil, tags: ["mobile", "ads"])
+        let byTag: Bool = ProfileFilter.tag("ADS").includes(row) && !ProfileFilter.tag("mobile").includes(row)
+        let bySearch: Bool = ProfilesScreen.matches(row, "renews") && ProfilesScreen.matches(row, "us")
+            && !ProfilesScreen.matches(row, "mobile")
+        let sidebarTags: [String] = ProfileFilter.tags(of: [row, other])
+        check("profiles: a tag in the sidebar shows the profiles with it, whatever its case; the search finds a profile by a tag or its notes",
+              byTag && bySearch && sidebarTags == ["ads", "mobile", "US"], "sidebar tags \(sidebarTags)")
+    }
+
     private func appSettings(_ repository: ProfileRepository) async throws {
         defer { BrowsingPreferences.current = BrowsingPreferences() }
         let suite = "pb-selftest-settings-\(UUID().uuidString)"

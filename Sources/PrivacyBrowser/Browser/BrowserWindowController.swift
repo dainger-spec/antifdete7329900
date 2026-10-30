@@ -59,7 +59,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         self.profileName = session.profileName
         self.library = session.library
         self.chrome = BrowserChromeModel(profileName: session.profileName, profileID: session.profileID,
-                                         exit: BrowserWindowController.profileExit(of: session))
+                                         exit: BrowserWindowController.profileExit(of: session),
+                                         avatar: session.configuration.avatar)
 
         // A mobile generation's window is the declared device's screen: its web content can never
         // be wider or taller than the screen the page is told about (see PrivacyScripts).

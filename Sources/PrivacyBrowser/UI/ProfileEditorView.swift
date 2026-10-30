@@ -59,6 +59,16 @@ struct ProfileDraft {
     var passwordAutoFill = true
     var syncCookies = true
     var searchEngine = SearchEngine.standard
+    /// The person's own labels and notes, and the glyph's colour and letters (nil, empty: the defaults).
+    var tags: [String] = []
+    var notes = ""
+    var avatarColor: Int?
+    var avatarLetters = ""
+
+    /// The glyph as these choices make it; nil: the default look.
+    var avatarStyle: ProfileAvatarStyle? {
+        ProfileAvatarStyle(color: avatarColor, letters: avatarLetters).normalized
+    }
 
     struct RetentionChoice: Hashable {
         var days: Int
@@ -112,6 +122,10 @@ struct ProfileDraft {
         passwordAutoFill = c.passwordAutoFill
         syncCookies = c.syncCookies
         searchEngine = c.searchEngine ?? .standard
+        tags = c.tags
+        notes = c.notes
+        avatarColor = c.avatar?.color
+        avatarLetters = c.avatar?.letters ?? ""
     }
 
     var hasProxy: Bool { proxyMode != .direct }
@@ -212,6 +226,9 @@ struct ProfileDraft {
         // The standard engine is stored as none, as every profile from before the choice has it:
         // saving such a profile unchanged is no edit.
         configuration.searchEngine = searchEngine == .standard ? nil : searchEngine
+        configuration.tags = ProfileTags.normalized(tags)
+        configuration.notes = String(notes.trimmingCharacters(in: .whitespacesAndNewlines).prefix(ProfileConfiguration.maximumNotesLength))
+        configuration.avatar = avatarStyle
         try configuration.validate()
         return configuration
     }
@@ -243,7 +260,7 @@ struct ProfileEditorView: View {
     @State private var error: String?
     @State private var loaded = false
     @State private var showingTunnel = false
-    @State private var tab: ProfileEditorForm.Tab = .general
+    @State private var topic: ProfileEditorForm.Topic = .profile
     /// A check run from the editor: Check, or Save finding a proxy's type.
     @State private var checking = false
     @ObservedObject private var tunnel = TunnelManager.shared
@@ -265,10 +282,19 @@ struct ProfileEditorView: View {
     }
 
     private func form(saved: [ProxyListEntry]) -> some View {
-        ProfileEditorForm(draft: $draft, tab: $tab, isNew: target.isNew, avatarID: avatarID, error: error,
+        ProfileEditorForm(draft: $draft, topic: $topic, isNew: target.isNew, avatarID: avatarID, error: error,
                           tunnelCarriesWebRTC: tunnel.canCarryWebRTC,
                           onCancel: { dismiss() }, onSave: save, onTunnelSettings: { showingTunnel = true },
-                          savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy)
+                          savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
+                          knownTags: knownTags)
+    }
+
+    /// The tags of every profile, each once, for the tag field to offer.
+    private var knownTags: [String] {
+        var seen = Set<String>()
+        return model.details.values.flatMap(\.tags)
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            .filter { seen.insert($0.lowercased()).inserted }
     }
 
     private var avatarID: UUID {

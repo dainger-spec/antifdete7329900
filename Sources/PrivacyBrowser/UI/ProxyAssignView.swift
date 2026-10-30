@@ -63,7 +63,8 @@ private struct ProxyAssignPanel: View {
                     ForEach(model.profiles) { profile in
                         Toggle(isOn: member(profile.id, of: $chosenProfiles)) {
                             HStack(spacing: 8) {
-                                ProfileAvatar(name: profile.name, id: profile.id, size: 20)
+                                ProfileAvatar(name: profile.name, id: profile.id, size: 20,
+                                              style: model.details[profile.id]?.avatar)
                                 Text(profile.name)
                                     .font(.lumenBody)
                                     .foregroundStyle(Theme.textPrimary)

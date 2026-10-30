@@ -99,33 +99,48 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-proxied", size: CGSize(width: 1180, height: 560)) {
             ProfilesPreview(rows: rows, filter: .proxied, sync: .failed)
         }.capture(into: folder)
+        // A tag chosen in the sidebar; the search also finds a profile by its tags and notes.
+        problems += await Shot(name: "profiles-tag", size: CGSize(width: 1180, height: 560)) {
+            ProfilesPreview(rows: rows, filter: .tag("ads"), sync: .off)
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-search-notes", size: CGSize(width: 1180, height: 520)) {
+            ProfilesPreview(rows: rows, search: "renews", sync: .off)
+        }.capture(into: folder)
         problems += await Shot(name: "profiles-empty", size: CGSize(width: 1180, height: 640)) {
             ProfilesPreview(rows: [], sync: .notYet)
         }.capture(into: folder)
         problems += await Shot(name: "profiles-no-matches", size: CGSize(width: 1180, height: 520)) {
             ProfilesPreview(rows: rows, search: "zzz", sync: .syncing)
         }.capture(into: folder)
-        // The profile editor, one picture per tab (sheets have no title bar).
+        // The profile editor: one screen, a picture opened on each of its parts (sheets have no
+        // title bar).
         let draft = sampleDraft()
         var newProfile = ProfileDraft()
         newProfile.name = String(format: L("editor.defaultName"), 8)
-        var privacy = draft
-        privacy.geoMode = .fixed
-        privacy.latitude = "52.52"
-        privacy.longitude = "13.405"
-        privacy.overrideTimeZone = true
-        privacy.timeZone = "Europe/Berlin"
+        var labelled = draft
+        labelled.tags = ["ads", "US", "warm-up"]
+        labelled.notes = "Bought 2026-10 from Example Networks, renews monthly. Two-factor on the phone in the drawer."
+        labelled.avatarColor = 5
+        labelled.avatarLetters = "NW"
+        var location = draft
+        location.geoMode = .fixed
+        location.latitude = "52.52"
+        location.longitude = "13.405"
+        location.overrideTimeZone = true
+        location.timeZone = "Europe/Berlin"
         var ephemeral = draft
         ephemeral.ephemeral = true
-        let editors: [(String, ProfileDraft, ProfileEditorForm.Tab, Bool, String?)] = [
-            ("editor-general-new", newProfile, .general, true, nil),
+        let editors: [(String, ProfileDraft, ProfileEditorForm.Topic, Bool, String?)] = [
+            ("editor-profile-new", newProfile, .profile, true, nil),
+            ("editor-profile-labelled", labelled, .profile, false, nil),
             ("editor-identity", draft, .identity, false, nil),
-            ("editor-privacy", privacy, .privacy, false, nil),
+            ("editor-location", location, .location, false, nil),
+            ("editor-privacy", draft, .privacy, false, nil),
             ("editor-data-ephemeral", ephemeral, .data, false, L("editor.proxy.error.kindUnknown")),
         ]
-        for (name, sample, tab, isNew, error) in editors {
+        for (name, sample, topic, isNew, error) in editors {
             problems += await Shot(name: name, size: ProfileEditorForm.size, titled: false) {
-                EditorPreview(draft: sample, tab: tab, isNew: isNew, error: error)
+                EditorPreview(draft: sample, topic: topic, isNew: isNew, error: error)
             }.capture(into: folder)
         }
         problems += await proxyFieldInEditor(into: folder, draft: draft)
@@ -228,7 +243,7 @@ enum UISnapshots {
         ]
         for (name, sample) in shots {
             problems += await Shot(name: name, size: ProfileEditorForm.size, titled: false) {
-                EditorPreview(draft: sample, tab: .network, savedProxies: entries)
+                EditorPreview(draft: sample, topic: .connection, savedProxies: entries)
             }.capture(into: folder)
         }
         return problems
@@ -506,13 +521,15 @@ enum UISnapshots {
                            appearsAs: mac, lastUsed: now),
             ProfileRowItem(id: id(2), name: "Northwind", activity: .running,
                            exit: .proxy(endpoint: "proxy.northwind.example:1080", countryCode: "DE"), ephemeral: false,
-                           appearsAs: mac, lastUsed: now, warmUp: WarmUpStatus(phase: .running, visited: 3, total: 12, cookies: 84)),
+                           appearsAs: mac, lastUsed: now, warmUp: WarmUpStatus(phase: .running, visited: 3, total: 12, cookies: 84),
+                           tags: ["ads", "DE"], notes: "Renews monthly", avatar: ProfileAvatarStyle(color: 5, letters: "NW")),
             ProfileRowItem(id: id(3), name: "Launch Review", activity: .starting,
                            exit: .proxy(endpoint: "us-east.gateway.example:8080", countryCode: "US"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-3_600)),
             ProfileRowItem(id: id(4), name: "Research", activity: .stopped,
                            exit: .proxy(endpoint: "nl.gateway.example:1080", countryCode: "NL"), ephemeral: false,
-                           appearsAs: iPhone, lastUsed: now.addingTimeInterval(-86_400)),
+                           appearsAs: iPhone, lastUsed: now.addingTimeInterval(-86_400),
+                           tags: ["warm-up", "Q4 campaign", "NL", "mobile"]),
             ProfileRowItem(id: id(5), name: "Travel", activity: .sealing,
                            exit: .proxy(endpoint: "lisbon.example:1080", countryCode: "PT"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-60)),
@@ -520,7 +537,7 @@ enum UISnapshots {
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-3 * 86_400)),
             ProfileRowItem(id: id(7), name: "Banking", activity: .stopped,
                            exit: .proxy(endpoint: "10.20.0.2:3128", countryCode: nil), ephemeral: false,
-                           appearsAs: mac, lastUsed: nil),
+                           appearsAs: mac, lastUsed: nil, tags: ["ads"]),
         ]
     }
 }
@@ -596,17 +613,18 @@ private struct Shot {
     }
 }
 
-/// The editor's form with its draft and tab held in state, as the sheet holds them.
+/// The editor's form with its draft and part held in state, as the sheet holds them.
 private struct EditorPreview: View {
     @State var draft: ProfileDraft
-    @State var tab: ProfileEditorForm.Tab
+    @State var topic: ProfileEditorForm.Topic
     var isNew = false
     var error: String?
     var savedProxies: [ProxyListEntry] = []
 
     var body: some View {
-        ProfileEditorForm(draft: $draft, tab: $tab, isNew: isNew, avatarID: UISnapshots.sampleRows()[1].id,
-                          error: error, tunnelCarriesWebRTC: false, savedProxies: savedProxies)
+        ProfileEditorForm(draft: $draft, topic: $topic, isNew: isNew, avatarID: UISnapshots.sampleRows()[1].id,
+                          error: error, tunnelCarriesWebRTC: false, savedProxies: savedProxies,
+                          knownTags: ["ads", "DE", "US", "warm-up", "Q4 campaign"])
     }
 }
 

@@ -127,7 +127,9 @@ Application Support/PrivacyBrowser/      (0700)
   proxies.bin                     AES-GCM(proxy-list key, ProxyList JSON)             [after the first proxy is added; this Mac only]
   sync-state.bin                  AES-GCM(sync key, per-object revision + hash)        [only after sync]
   profiles/<uuid>/
-    config.bin                    AES-GCM(profile key, ProfileConfiguration JSON)
+    config.bin                    AES-GCM(profile key, ProfileConfiguration JSON) — also the person's own tags,
+                                  notes and glyph (written only when set; the Profiles list reads them into
+                                  ProfileDetails at each refresh)
     passwords.bin                 AES-GCM(password key, [PasswordEntry] JSON: origin, user name, password, note, dates)
     cookies-import.bin            AES-GCM(cookie-import key, [ImportedCookie] JSON)   [only while imported cookies wait for the next launch]
     cookies.bin                   AES-GCM(cookies key, CookieJarDocument JSON)        [persistent cookies, synced; with cookie sync on]

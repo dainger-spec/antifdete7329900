@@ -136,7 +136,7 @@ private struct WarmUpQueuePanel: View {
                 Image(systemName: isOn ? "checkmark.square.fill" : "square")
                     .font(.system(size: 13))
                     .foregroundStyle(isOn ? Theme.accent : Theme.textTertiary)
-                ProfileAvatar(name: profile.name, id: profile.id, size: 20)
+                ProfileAvatar(name: profile.name, id: profile.id, size: 20, style: model.details[profile.id]?.avatar)
                 Text(profile.name).font(.lumenBody).foregroundStyle(Theme.textPrimary).lineLimit(1)
                 Spacer(minLength: 6)
                 if queued {
@@ -259,7 +259,8 @@ private struct WarmUpQueuePanel: View {
     private func entryRow(_ entry: WarmUpQueue.Entry) -> some View {
         HStack(spacing: 8) {
             entryIcon(entry.state).frame(width: 16)
-            ProfileAvatar(name: name(of: entry.profileID), id: entry.profileID, size: 20)
+            ProfileAvatar(name: name(of: entry.profileID), id: entry.profileID, size: 20,
+                          style: model.details[entry.profileID]?.avatar)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     Text(name(of: entry.profileID)).font(.lumenLabel).foregroundStyle(Theme.textPrimary).lineLimit(1)

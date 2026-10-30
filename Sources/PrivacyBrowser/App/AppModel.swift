@@ -769,6 +769,10 @@ struct ProfileDetails: Equatable {
     var exitCountryCode: String?
     var ephemeral: Bool
     var deviceGeneration: DeviceGeneration
+    /// The person's own tags and notes, and how the glyph looks.
+    var tags: [String]
+    var notes: String
+    var avatar: ProfileAvatarStyle?
 
     init(_ configuration: ProfileConfiguration) {
         proxyEndpoint = configuration.proxy.map { "\($0.host):\($0.port)" }
@@ -776,5 +780,8 @@ struct ProfileDetails: Equatable {
         exitCountryCode = configuration.rememberedProxyLocation?.countryCode
         ephemeral = configuration.ephemeral
         deviceGeneration = configuration.deviceGeneration
+        tags = configuration.tags
+        notes = configuration.notes
+        avatar = configuration.avatar
     }
 }

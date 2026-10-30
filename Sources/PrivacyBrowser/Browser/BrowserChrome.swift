@@ -19,14 +19,17 @@ final class BrowserChromeModel: ObservableObject {
 
     let profileName: String
     let profileID: UUID
+    /// How the profile's glyph looks (`ProfileConfiguration.avatar`).
+    let avatar: ProfileAvatarStyle?
     @Published var exit: ProfileExit
     @Published var favorites: [Site] = []
     @Published var recents: [Site] = []
 
-    init(profileName: String, profileID: UUID, exit: ProfileExit) {
+    init(profileName: String, profileID: UUID, exit: ProfileExit, avatar: ProfileAvatarStyle? = nil) {
         self.profileName = profileName
         self.profileID = profileID
         self.exit = exit
+        self.avatar = avatar
     }
 
     /// Top-level bookmarks (the favourites bar's) and the latest web pages from history.
@@ -60,7 +63,7 @@ struct ProfileChipView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            ProfileAvatar(name: model.profileName, id: model.profileID, size: 16)
+            ProfileAvatar(name: model.profileName, id: model.profileID, size: 16, style: model.avatar)
             Text(model.profileName)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.textPrimary)

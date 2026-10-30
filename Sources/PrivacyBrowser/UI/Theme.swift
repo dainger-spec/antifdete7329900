@@ -1,4 +1,5 @@
 import AppKit
+import BrowserCore
 import SwiftUI
 
 /// Lumen's design tokens: a dark, flat interface — near-black surfaces one tone apart, hairline
@@ -410,38 +411,141 @@ struct ProfileAvatar: View {
     let name: String
     let id: UUID
     var size: CGFloat = 28
+    /// The colour and letters the person chose (`ProfileConfiguration.avatar`); nil: the defaults.
+    var style: ProfileAvatarStyle?
 
-    private static let palette: [(fill: UInt32, text: UInt32)] = [
+    /// `ProfileAvatarStyle.colorCount` colours; a profile's id picks among the first five (as
+    /// before there was a choice), a choice among them all.
+    static let palette: [(fill: UInt32, text: UInt32)] = [
         (0x273553, 0xB9C8F0), // blue
         (0x243A33, 0x9FD4BB), // green
         (0x3B332A, 0xE0CDB3), // sand
         (0x312C45, 0xC9BCEB), // lavender
         (0x2A2F3A, 0xC3C9D4), // gray
+        (0x1F3A3D, 0x9ED8DB), // teal
+        (0x3D2630, 0xEAB8C8), // rose
+        (0x34361F, 0xD6D9A0), // olive
     ]
+    private static let idColors = 5
 
     static func colors(for id: UUID) -> (fill: UInt32, text: UInt32) {
         // A stable index from the UUID's bytes (hashValue is seeded per launch).
         let sum = withUnsafeBytes(of: id.uuid) { $0.reduce(0) { $0 &+ Int($1) } }
-        return palette[sum % palette.count]
+        return palette[sum % idColors]
+    }
+
+    static func colors(for id: UUID, style: ProfileAvatarStyle?) -> (fill: UInt32, text: UInt32) {
+        guard let index = style?.color, palette.indices.contains(index) else { return colors(for: id) }
+        return palette[index]
     }
 
     /// The same palette for anything named by a string (a site's host).
     static func colors(forKey key: String) -> (fill: UInt32, text: UInt32) {
-        palette[key.utf8.reduce(0) { $0 &+ Int($1) } % palette.count]
+        palette[key.utf8.reduce(0) { $0 &+ Int($1) } % idColors]
     }
 
     var body: some View {
-        let colors = Self.colors(for: id)
-        Text(initial)
-            .font(.system(size: size * 0.43, weight: .semibold))
+        let colors = Self.colors(for: id, style: style)
+        Text(glyph)
+            .font(.system(size: size * (glyph.count > 1 ? 0.36 : 0.43), weight: .semibold))
             .foregroundStyle(Color(hex: colors.text))
             .frame(width: size, height: size)
             .background(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous).fill(Color(hex: colors.fill)))
             .accessibilityHidden(true)
     }
 
-    private var initial: String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines).first.map { String($0).uppercased() } ?? "·"
+    /// The letters chosen, else the first letter of the name.
+    private var glyph: String {
+        if let letters = style?.letters, !letters.isEmpty { return letters }
+        return name.trimmingCharacters(in: .whitespacesAndNewlines).first.map { String($0).uppercased() } ?? "·"
+    }
+}
+
+/// A profile's tags as small chips, at most `limit` and "+N" for the rest.
+struct TagChips: View {
+    let tags: [String]
+    var limit = Int.max
+
+    var body: some View {
+        if !tags.isEmpty {
+            HStack(spacing: 4) {
+                ForEach(tags.prefix(limit), id: \.self) { tag in
+                    TagChip(text: tag)
+                }
+                if tags.count > limit {
+                    Text(verbatim: "+\(tags.count - limit)")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+}
+
+/// One tag; with `onRemove`, a button that removes it.
+struct TagChip: View {
+    let text: String
+    var onRemove: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(text)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+            if let onRemove {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(String(format: L("editor.tags.remove"), text))
+            }
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 18)
+        .background(Capsule().fill(Color.white.opacity(0.08)))
+        .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 1))
+    }
+}
+
+/// Views in rows, as many as fit in each, wrapping to the next (tags).
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, line: CGFloat = 0, widest: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > width {
+                y += line + lineSpacing
+                x = 0
+                line = 0
+            }
+            widest = max(widest, x + size.width)
+            x += size.width + spacing
+            line = max(line, size.height)
+        }
+        return CGSize(width: proposal.width ?? widest, height: y + line)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, line: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + size.width > bounds.maxX {
+                y += line + lineSpacing
+                x = bounds.minX
+                line = 0
+            }
+            view.place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            line = max(line, size.height)
+        }
     }
 }
 

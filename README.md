@@ -165,13 +165,20 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 ## Using it
 
 1. On first launch, create a master password. It cannot be recovered.
-2. Use **＋** to create a profile and set its device/version, start URL, proxy (optionally
-   with a warning when the proxy's exit IP changes between launches), user agent, time zone,
-   geolocation, WebRTC policy, history recording and retention, and whether it is ephemeral.
-   Changes apply at the next launch. The **Device / version** picker tags the
+2. Use **＋** to create a profile. Its editor is one screen in parts — **Profile**,
+   **Connection**, **Identity**, **Location and Language**, **Privacy**, **Data** — with an index
+   on the left that jumps to each: name, glyph (a colour of the palette and up to two letters of
+   its own), **tags** and **notes**, start URL, search engine, ephemeral; proxy (optionally with a
+   warning when the proxy's exit IP changes between launches) and WebRTC; device/version and user
+   agent; geolocation and time zone; Safe Browsing; history recording and retention, AutoFill,
+   cookie sync. Changes apply at the next launch. Tags and notes are the person's own: the
+   Profiles list shows the tags on each row, lists them in its sidebar (a click shows the
+   profiles with that tag) and its search finds a profile by its name, a tag or its notes; they
+   are kept encrypted in the profile's settings, synced and exported with it, and no page sees
+   them. The **Device / version** picker tags the
    profile with a target Apple OS version (macOS 26, iOS 26/27, iPadOS 26); iOS profiles also
    get their device class's navigator/screen values (see note above).
-   The **Network** tab chooses the connection with three buttons — **No Proxy**, **From the
+   **Connection** chooses the proxy with three buttons — **No Proxy**, **From the
    List**, **New**. **New** is one field: paste the proxy as the provider gave it —
    `host:port:user:pass`, `user:pass@host:port`, `socks5://user:pass@host:port` (or `http://`,
    `https://`) or `host:port`. It is read as a line of Import is (one parser), and what it was
@@ -273,7 +280,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
      confirm quitting (⌘Q lists what it stops and asks first).
    - **New Profiles:** time zone and language from the connection; the search engine
      (DuckDuckGo, Google, Bing, Yahoo, Ecosia or Yandex — what a new profile's address bar and
-     warm-up search with; each profile changes it in its editor, **General**); QUIC — off with a
+     warm-up search with; each profile changes it in its editor, **Profile**); QUIC — off with a
      proxy, always (it goes around proxies), not a switch.
    - **Behavior:** AutoFill passwords (the app's switch over each profile's own); new tabs next to
      the current one or after the last; ask before closing a window of several tabs; page zoom of

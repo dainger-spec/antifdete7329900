@@ -145,7 +145,8 @@ struct ProfileListView: View {
                 appearsAs: ProfileRowItem.appearsAs(details?.deviceGeneration ?? DeviceGenerations.resolved(id: nil)),
                 lastUsed: profile.lastLaunchedAt,
                 warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
-                warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false)
+                warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false,
+                tags: details?.tags ?? [], notes: details?.notes ?? "", avatar: details?.avatar)
         }
     }
 
@@ -224,6 +225,10 @@ struct ProfileRowItem: Identifiable {
     var warmUp: WarmUpStatus?
     /// Waiting in the warm-up queue for its turn (`WarmUpCoordinator`).
     var warmUpQueued = false
+    /// The person's own tags and notes for the profile, and how its glyph looks.
+    var tags: [String] = []
+    var notes = ""
+    var avatar: ProfileAvatarStyle?
 
     var isRunning: Bool { activity == .running }
     var isBusy: Bool { activity == .starting || activity == .sealing }
@@ -250,15 +255,18 @@ enum ProfileExit: Equatable {
     case proxy(endpoint: String, countryCode: String?)
 }
 
-enum ProfileFilter: Hashable, CaseIterable {
+enum ProfileFilter: Hashable {
     case all, running, proxied, ephemeral
+    /// The profiles with this tag, whatever its case.
+    case tag(String)
 
-    var titleKey: String {
+    var title: String {
         switch self {
-        case .all: return "profiles.filter.all"
-        case .running: return "profiles.filter.running"
-        case .proxied: return "profiles.filter.proxied"
-        case .ephemeral: return "profiles.filter.ephemeral"
+        case .all: return L("profiles.filter.all")
+        case .running: return L("profiles.filter.running")
+        case .proxied: return L("profiles.filter.proxied")
+        case .ephemeral: return L("profiles.filter.ephemeral")
+        case .tag(let tag): return tag
         }
     }
 
@@ -268,6 +276,7 @@ enum ProfileFilter: Hashable, CaseIterable {
         case .running: return "play.circle"
         case .proxied: return "network"
         case .ephemeral: return "hourglass"
+        case .tag: return "tag"
         }
     }
 
@@ -277,7 +286,16 @@ enum ProfileFilter: Hashable, CaseIterable {
         case .running: return row.isActive
         case .proxied: return row.usesProxy
         case .ephemeral: return row.ephemeral
+        case .tag(let tag): return ProfileTags.contains(row.tags, tag)
         }
+    }
+
+    /// The tags of `rows`, each once whatever its case, in alphabetical order.
+    static func tags(of rows: [ProfileRowItem]) -> [String] {
+        var seen = Set<String>()
+        return rows.flatMap(\.tags)
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            .filter { seen.insert($0.lowercased()).inserted }
     }
 }
 
@@ -383,8 +401,15 @@ struct ProfilesScreen: View {
     private var visibleRows: [ProfileRowItem] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         return rows.filter { row in
-            filter.includes(row) && (query.isEmpty || row.name.localizedCaseInsensitiveContains(query))
+            filter.includes(row) && (query.isEmpty || Self.matches(row, query))
         }
+    }
+
+    /// The search finds a profile by its name, one of its tags or its notes.
+    static func matches(_ row: ProfileRowItem, _ query: String) -> Bool {
+        row.name.localizedCaseInsensitiveContains(query)
+            || row.tags.contains { $0.localizedCaseInsensitiveContains(query) }
+            || row.notes.localizedCaseInsensitiveContains(query)
     }
 
     private var header: some View {
@@ -595,6 +620,24 @@ private struct ProfilesSidebar: View {
                 .accessibilityAddTraits(.isHeader)
             item(.proxied)
             item(.ephemeral)
+            let tags = ProfileFilter.tags(of: rows)
+            if !tags.isEmpty {
+                Text(L("profiles.tags"))
+                    .font(.lumenColumn)
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.leading, 10)
+                    .padding(.top, 18)
+                    .padding(.bottom, 6)
+                    .accessibilityAddTraits(.isHeader)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(tags, id: \.self) { tag in item(.tag(tag)) }
+                    }
+                }
+                .scrollIndicators(.automatic)
+                // Eight rows, then the rest scrolls.
+                .frame(height: CGFloat(min(tags.count, 8)) * 28)
+            }
             Spacer(minLength: 16)
             SyncStatusButton(sync: sync, action: actions.openSync)
                 .padding(.bottom, 8)
@@ -621,7 +664,7 @@ private struct ProfilesSidebar: View {
                     .font(.system(size: 13))
                     .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
                     .frame(width: 18)
-                Text(L(value.titleKey))
+                Text(value.title)
                     .font(.system(size: 13, weight: selected ? .medium : .regular))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
@@ -745,17 +788,28 @@ private struct ProfileRow: View {
             }
             .frame(width: 7)
             .padding(.trailing, 8)
-            ProfileAvatar(name: row.name, id: row.id, size: 28)
+            ProfileAvatar(name: row.name, id: row.id, size: 28, style: row.avatar)
                 .padding(.trailing, 10)
             VStack(alignment: .leading, spacing: 2) {
-                Text(row.name)
-                    .font(.lumenLabel)
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                HStack(spacing: 6) {
+                    Text(row.name)
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(1)
+                    if !row.notes.isEmpty {
+                        Image(systemName: "note.text")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.textTertiary)
+                            .accessibilityLabel(L("profiles.row.hasNotes"))
+                    }
+                    TagChips(tags: row.tags, limit: 3)
+                }
                 subtitle
             }
         }
+        .help(row.notes)
         .animation(Theme.hoverAnimation, value: row.activity)
     }
 

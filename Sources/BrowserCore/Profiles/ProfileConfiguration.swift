@@ -99,6 +99,21 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// one does not know.
     public var searchEngine: SearchEngine?
 
+    /// The person's own labels for the profile, which the Profiles list shows and filters by
+    /// (`ProfileTags.normalized`). Kept, synced and exported with the profile's settings, and
+    /// nowhere else: no page ever sees them.
+    public var tags: [String]
+
+    /// The person's own notes about the profile, at most `maximumNotesLength` characters; kept
+    /// like the tags.
+    public var notes: String
+
+    /// How the profile's glyph looks in the app; nil: the colour its id gives and the first
+    /// letter of its name.
+    public var avatar: ProfileAvatarStyle?
+
+    public static let maximumNotesLength = 4000
+
     public init(startURL: URL? = nil,
                 userAgent: String? = nil,
                 proxy: ProxySettings? = nil,
@@ -117,7 +132,10 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 passwordNeverSaveSites: [String] = [],
                 syncCookies: Bool = true,
                 settingsModifiedAt: Date? = nil,
-                searchEngine: SearchEngine? = nil) {
+                searchEngine: SearchEngine? = nil,
+                tags: [String] = [],
+                notes: String = "",
+                avatar: ProfileAvatarStyle? = nil) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -137,6 +155,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.syncCookies = syncCookies
         self.settingsModifiedAt = settingsModifiedAt
         self.searchEngine = searchEngine
+        self.tags = ProfileTags.normalized(tags)
+        self.notes = String(notes.prefix(Self.maximumNotesLength))
+        self.avatar = avatar?.normalized
     }
 
     /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
@@ -263,7 +284,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
-             syncCookies, settingsModifiedAt, searchEngine
+             syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -294,6 +315,11 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         settingsModifiedAt = try? c.decodeIfPresent(Date.self, forKey: .settingsModifiedAt)
         // One a later build knows and this one does not is the standard one here, not a failure.
         searchEngine = try? c.decodeIfPresent(SearchEngine.self, forKey: .searchEngine)
+        // The person's own words: what does not read is dropped, never a reason to fail the
+        // profile, and what reads is held to the limits a build of this version writes.
+        tags = ProfileTags.normalized((try? c.decodeIfPresent([String].self, forKey: .tags)) ?? [])
+        notes = String(((try? c.decodeIfPresent(String.self, forKey: .notes)) ?? "").prefix(Self.maximumNotesLength))
+        avatar = (try? c.decodeIfPresent(ProfileAvatarStyle.self, forKey: .avatar))?.normalized
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -319,6 +345,10 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(syncCookies, forKey: .syncCookies)
         try c.encodeIfPresent(settingsModifiedAt, forKey: .settingsModifiedAt)
         try c.encodeIfPresent(searchEngine, forKey: .searchEngine)
+        // Written only when there is something: a profile without them is written as before.
+        if !tags.isEmpty { try c.encode(tags, forKey: .tags) }
+        if !notes.isEmpty { try c.encode(notes, forKey: .notes) }
+        try c.encodeIfPresent(avatar, forKey: .avatar)
     }
 
     public var historyPolicy: HistoryStore.Policy {
