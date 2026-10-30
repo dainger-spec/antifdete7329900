@@ -44,7 +44,7 @@ struct TunnelSettingsView: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .frame(width: 560)
+        .sheetFrame(width: 560)
         .background(Theme.raised)
         .onAppear { tunnel.refresh() }
     }

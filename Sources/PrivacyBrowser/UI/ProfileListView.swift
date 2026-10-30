@@ -5,6 +5,8 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
 
+    static let minimumHeight: CGFloat = 560
+
     var body: some View {
         ZStack {
             switch model.phase {
@@ -14,8 +16,10 @@ struct RootView: View {
             }
         }
         .animation(Theme.appearAnimation, value: model.phase)
-        .frame(minWidth: ProfilesScreen.minimumWindowWidth, minHeight: 560)
+        .frame(minWidth: ProfilesScreen.minimumWindowWidth, minHeight: Self.minimumHeight)
         .background(Theme.surface)
+        // Every sheet of the window takes the size it asks for, but never more than this room.
+        .providesSheetRoom()
         .tint(Theme.accentFill)
         .alert(L("common.error"), isPresented: Binding(get: { model.errorMessage != nil },
                                                        set: { if !$0 { model.errorMessage = nil } })) {

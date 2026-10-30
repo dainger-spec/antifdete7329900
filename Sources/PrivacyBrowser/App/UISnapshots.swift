@@ -71,6 +71,13 @@ enum UISnapshots {
         return problems
     }
 
+    /// The room a sheet has in the narrowest Profiles window (`sheetFrame`), and a sheet's size there.
+    static let narrowRoom = SheetRoomProvider.room(in: CGSize(width: ProfilesScreen.minimumWindowWidth, height: RootView.minimumHeight))
+
+    static func narrow(_ size: CGSize) -> CGSize {
+        CGSize(width: min(size.width, narrowRoom.width), height: min(size.height, narrowRoom.height))
+    }
+
     private static func run(into folder: URL) async -> Int {
         var problems = 0
         do {
@@ -127,6 +134,23 @@ enum UISnapshots {
         problems += await Shot(name: "what-sites-see-no-safari", size: WhatSitesSeeView.size, titled: false) {
             WhatSitesSeeView(name: "Northwind", snapshot: seen(comparedWithSafari: false), onlyDifferences: false)
         }.capture(into: folder)
+        problems += await Shot(name: "narrow-what-sites-see", size: narrow(WhatSitesSeeView.size), titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen()).environment(\.sheetRoom, narrowRoom)
+        }.capture(into: folder)
+        // The same sheet shown for real, by a window of the narrowest Profiles window's size that
+        // gives its sheets their room as RootView does: the sheet lies within the window. The
+        // control, a window that does not, shows the sheet at the size it asks for, cut by the
+        // window: the check can tell the two apart.
+        for givesRoom in [true, false] {
+            let name = givesRoom ? "narrow-window-sheet" : "narrow-window-sheet-control"
+            problems += await Shot(name: name, size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: RootView.minimumHeight)) {
+                SheetHost(givesRoom: givesRoom) {
+                    WhatSitesSeeView(name: "Northwind", snapshot: seen())
+                }
+            }.capture(into: folder) { window in
+                await sheetFitTest(window, name: name, givesRoom: givesRoom, into: folder)
+            }
+        }
         // A tag chosen in the sidebar; the search also finds a profile by its tags and notes.
         problems += await Shot(name: "profiles-tag", size: CGSize(width: 1180, height: 560)) {
             ProfilesPreview(rows: rows, filter: .tag("ads"), sync: .off)
@@ -188,6 +212,10 @@ enum UISnapshots {
                 EditorPreview(draft: sample, topic: topic, isNew: isNew, error: error)
             }.capture(into: folder)
         }
+        // The editor in the narrowest Profiles window: no taller than the window has room for.
+        problems += await Shot(name: "narrow-editor-location", size: narrow(ProfileEditorForm.size), titled: false) {
+            EditorPreview(draft: location, topic: .location, isNew: false, error: nil).environment(\.sheetRoom, narrowRoom)
+        }.capture(into: folder)
         // The window size, against a sample screen (a 16-inch MacBook Pro's, less menu bar and
         // Dock; a 13-inch's for the one that does not fit).
         var preset = draft
@@ -214,6 +242,9 @@ enum UISnapshots {
             problems += await Shot(name: "sheet-passwords-locked", size: CGSize(width: 780, height: 560), titled: false) {
                 PasswordListView(profile: northwind).environmentObject(model)
             }.capture(into: folder)
+            problems += await Shot(name: "narrow-sheet-passwords-locked", size: narrow(CGSize(width: 780, height: 560)), titled: false) {
+                PasswordListView(profile: northwind).environmentObject(model).environment(\.sheetRoom, narrowRoom)
+            }.capture(into: folder)
             problems += await Shot(name: "sheet-cookie-import", size: CGSize(width: 680, height: 560), titled: false) {
                 CookieImportView(profile: northwind).environmentObject(model)
             }.capture(into: folder)
@@ -235,6 +266,9 @@ enum UISnapshots {
         }.capture(into: folder)
         problems += await Shot(name: "sheet-automation", size: CGSize(width: 560, height: 620), titled: false) {
             AutomationSettingsView().environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "narrow-sheet-automation", size: narrow(CGSize(width: 560, height: 620)), titled: false) {
+            AutomationSettingsView().environmentObject(model).environment(\.sheetRoom, narrowRoom)
         }.capture(into: folder)
         problems += await Shot(name: "sheet-change-password", size: CGSize(width: 420, height: 330), titled: false) {
             ChangePasswordView().environmentObject(model)
@@ -429,6 +463,10 @@ enum UISnapshots {
             problems += await Shot(name: "sheet-proxy-problem", size: CGSize(width: 580, height: 600), titled: false) {
                 ProxyProblemPanel(problem: problem, more: 1, check: { nil }, close: {}, showInList: {})
             }.capture(into: folder)
+            problems += await Shot(name: "narrow-sheet-proxy-problem", size: narrow(CGSize(width: 580, height: 600)), titled: false) {
+                ProxyProblemPanel(problem: problem, more: 1, check: { nil }, close: {}, showInList: {})
+                    .environment(\.sheetRoom, narrowRoom)
+            }.capture(into: folder)
             return problems
         } catch {
             print("FAIL could not make the sample proxy list: \(error)")
@@ -460,6 +498,50 @@ enum UISnapshots {
                 problems += 1
             }
         }
+        return problems
+    }
+
+    /// The sheet a window shows lies within the window, not cut by it: for the window that gives
+    /// its sheets their room. For the control, which does not, the sheet is expected cut; one that
+    /// fits there too means the check cannot tell, which is said. Writes `<name>-sheet.png`.
+    private static func sheetFitTest(_ window: NSWindow, name: String, givesRoom: Bool, into folder: URL) async -> Int {
+        var attached: NSWindow?
+        for _ in 0..<50 where attached == nil {
+            attached = window.attachedSheet
+            if attached == nil { try? await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        guard let sheet = attached else {
+            print("FAIL \(name): no sheet appeared on the window")
+            return 1
+        }
+        // The sheet slides out of the title bar: its frame is final once that is over.
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        let fits = window.frame.insetBy(dx: -0.5, dy: -0.5).contains(sheet.frame)
+        let sizes = "window \(Int(window.frame.width))×\(Int(window.frame.height)), "
+            + "sheet \(Int(sheet.frame.width))×\(Int(sheet.frame.height)) "
+            + "at \(Int(sheet.frame.minX - window.frame.minX)), \(Int(window.frame.maxY - sheet.frame.maxY)) from the window's top left"
+        var problems = 0
+        if let frameView = sheet.contentView?.superview ?? sheet.contentView,
+           let rep = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) {
+            frameView.cacheDisplay(in: frameView.bounds, to: rep)
+            if let data = rep.representation(using: .png, properties: [:]),
+               (try? data.write(to: folder.appendingPathComponent("\(name)-sheet.png"))) != nil {
+                print("WROTE \(name)-sheet.png (\(rep.pixelsWide)×\(rep.pixelsHigh))")
+            } else {
+                print("FAIL could not write \(name)-sheet.png")
+                problems += 1
+            }
+        }
+        if givesRoom {
+            print("\(fits ? "PASS" : "FAIL") a sheet of the narrowest window lies within it: \(sizes)")
+            problems += fits ? 0 : 1
+        } else if fits {
+            print("WARN \(name): the sheet fits without the room too, so the check cannot tell: \(sizes)")
+        } else {
+            print("PASS the control's sheet, at the size it asks for, is cut by the window: \(sizes)")
+        }
+        window.endSheet(sheet)
+        sheet.orderOut(nil)
         return problems
     }
 
@@ -734,6 +816,29 @@ private struct Shot {
         } catch {
             print("FAIL could not write \(url.path): \(error)")
             return 1
+        }
+    }
+}
+
+/// A window's content that shows one sheet as the Profiles window shows its own: giving it its
+/// room (`providesSheetRoom`, RootView's) or, as the control, not.
+private struct SheetHost<Sheet: View>: View {
+    let givesRoom: Bool
+    @ViewBuilder let sheet: () -> Sheet
+    @State private var showing = false
+
+    var body: some View {
+        let host = Color.clear
+            .sheet(isPresented: $showing) { sheet() }
+            // Shown once the window is on screen, as a sheet opened from it would be.
+            .task {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                showing = true
+            }
+        if givesRoom {
+            host.providesSheetRoom()
+        } else {
+            host
         }
     }
 }

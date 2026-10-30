@@ -104,7 +104,7 @@ struct ProxyProblemPanel: View {
                     .disabled(checking)
             })
         }
-        .frame(width: 580, height: 600)
+        .sheetFrame(width: 580, height: 600)
         .background(Theme.raised)
     }
 

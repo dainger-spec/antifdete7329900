@@ -95,7 +95,7 @@ struct CommandPaletteView: View {
                 .padding(.horizontal, 16)
                 .frame(height: 30)
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .sheetFrame(width: Self.size.width, height: Self.size.height)
         .background(Theme.raised)
         .onChange(of: query) { _, _ in selected = 0 }
         .onAppear { searching = true }

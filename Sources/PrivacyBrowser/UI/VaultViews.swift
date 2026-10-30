@@ -207,7 +207,7 @@ struct ChangePasswordView: View {
                 .disabled(current.isEmpty || new.count < 10 || new != confirmation)
             }
         }
-        .frame(width: 420)
+        .sheetFrame(width: 420)
         .background(Theme.raised)
     }
 }

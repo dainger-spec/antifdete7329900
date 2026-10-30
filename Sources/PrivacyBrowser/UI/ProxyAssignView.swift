@@ -135,7 +135,7 @@ private struct ProxyAssignPanel: View {
                     .disabled(plan.isEmpty)
             })
         }
-        .frame(width: 820, height: 640)
+        .sheetFrame(width: 820, height: 640)
         .background(Theme.raised)
         .onAppear {
             if startsWithAliveProxies && chosenProxies.isEmpty { chosenProxies = aliveProxies }

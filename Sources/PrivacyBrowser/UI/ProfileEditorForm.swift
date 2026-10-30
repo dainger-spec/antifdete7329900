@@ -96,7 +96,7 @@ struct ProfileEditorForm: View {
             }
             footer
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .sheetFrame(width: Self.size.width, height: Self.size.height)
         .background(Theme.raised)
         .tint(Theme.accentFill)
     }

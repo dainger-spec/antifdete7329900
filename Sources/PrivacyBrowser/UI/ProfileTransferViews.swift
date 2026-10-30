@@ -76,7 +76,7 @@ struct ProfileExportView: View {
                 }
             })
         }
-        .frame(width: 480)
+        .sheetFrame(width: 480)
         .background(Theme.raised)
     }
 
@@ -169,7 +169,7 @@ struct ProfileImportView: View {
                 }
             })
         }
-        .frame(width: 480)
+        .sheetFrame(width: 480)
         .background(Theme.raised)
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.privacyBrowserProfile, .data]) { result in
             switch result {
@@ -286,7 +286,7 @@ struct CookieExportView: View {
                 }
             })
         }
-        .frame(width: 480)
+        .sheetFrame(width: 480)
         .background(Theme.raised)
     }
 

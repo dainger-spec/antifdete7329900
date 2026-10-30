@@ -84,7 +84,7 @@ private struct WarmUpPanel: View {
                 }
             })
         }
-        .frame(width: 880, height: 640)
+        .sheetFrame(width: 880, height: 640)
         .background(Theme.raised)
         .onAppear {
             guard !loaded else { return }

@@ -75,7 +75,9 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: â€
   the system's light/dark setting, as in Safari, so pages see the `prefers-color-scheme`
   Safari would give them.
 - **Design review:** `PrivacyBrowser --render-ui-snapshots <folder>` renders the screens with
-  sample data into PNG files (CI uploads them as the `ui-snapshots` artifact).
+  sample data into PNG files (CI uploads them as the `ui-snapshots` artifact). In real windows it
+  also checks that clicks reach the buttons under the transparent title bar and that a real sheet
+  fits in the narrowest Profiles window; exit code 1 otherwise.
 - **App icon:** `build-app.sh` has the app draw its icon from the Lumen mark
   (`--render-app-icon <folder>.iconset`) and packs it with `iconutil` into
   `Contents/Resources/AppIcon.icns`. A bare `swift run` sets the same icon in the Dock at launch.

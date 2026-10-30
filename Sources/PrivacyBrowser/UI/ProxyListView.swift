@@ -630,7 +630,7 @@ struct ProxyEditView: View {
                     .disabled(checking || proxies.loadError != nil)
             }
         }
-        .frame(width: 560)
+        .sheetFrame(width: 560)
         .background(Theme.raised)
     }
 
@@ -776,7 +776,7 @@ struct ProxyExportView: View {
                 }
             }
         }
-        .frame(width: 500)
+        .sheetFrame(width: 500)
         .background(Theme.raised)
     }
 

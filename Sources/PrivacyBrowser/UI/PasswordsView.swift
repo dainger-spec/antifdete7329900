@@ -65,7 +65,7 @@ struct PasswordListView: View {
                     .keyboardShortcut(.cancelAction)
             })
         }
-        .frame(width: 780, height: 560)
+        .sheetFrame(width: 780, height: 560)
         .background(Theme.raised)
         .onReceive(NotificationCenter.default.publisher(for: PasswordVault.didChangeNotification)) { note in
             if unlocked, note.userInfo?["profileID"] as? UUID == profile.id { reload() }

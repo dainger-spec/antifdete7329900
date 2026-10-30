@@ -265,15 +265,22 @@ jobs:
           if-no-files-found: ignore
       - name: UI snapshots for design review, and clicks through the transparent title bar
         # The app's screens rendered with sample data (UISnapshots.swift) in both UI languages, uploaded
-        # as the ui-snapshots artifact. A click that does not reach its button fails the job at the end.
+        # as the ui-snapshots artifact. A click that does not reach its button, or a real sheet that
+        # does not fit in the narrowest Profiles window, fails the job at the end.
         id: ui
         continue-on-error: true
         timeout-minutes: 8
         run: |
+          set -o pipefail
           status=0
+          mkdir -p build/ui-snapshots
           for lang in en ru; do
-            PRIVACYBROWSER_LANG=$lang build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --render-ui-snapshots "$PWD/build/ui-snapshots/$lang" || status=1
+            PRIVACYBROWSER_LANG=$lang build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --render-ui-snapshots "$PWD/build/ui-snapshots/$lang" \
+              | tee "build/ui-snapshots/$lang.log" || status=1
           done
+          # The sheet in the narrowest window, and its control, as notices on the job.
+          grep -hE '^(PASS|FAIL|WARN) .*(sheet|window)' build/ui-snapshots/en.log | grep -v 'click' | head -4 | cut -c1-400 \
+            | sed 's/^/::notice title=UI snapshots - a sheet in the narrowest window::/' || true
           exit $status
       - uses: actions/upload-artifact@v4
         if: always()
@@ -616,7 +623,7 @@ jobs:
       - name: UI snapshot checks
         if: always() && steps.ui.outcome == 'failure'
         run: |
-          echo "::error::the UI snapshot step failed (a capture was not written or a click did not reach its button); see its log"
+          echo "::error::the UI snapshot step failed (a capture was not written, a click did not reach its button or a sheet did not fit its window); see its log"
           exit 1
       - name: The self-test's notes (what it measured, skipped, or could not show on this runner)
         # Its INFO lines, last in the log, so that they can be read without the whole log.

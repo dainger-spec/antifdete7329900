@@ -76,7 +76,7 @@ struct SyncSettingsView: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .frame(width: 540)
+        .sheetFrame(width: 540)
         .background(Theme.raised)
         .onAppear(perform: load)
     }

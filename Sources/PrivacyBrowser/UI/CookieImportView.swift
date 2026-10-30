@@ -57,7 +57,7 @@ struct CookieImportView: View {
                 }
             }
         }
-        .frame(width: 680, height: 560)
+        .sheetFrame(width: 680, height: 560)
         .background(Theme.raised)
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in
             switch result {
