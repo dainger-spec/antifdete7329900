@@ -227,6 +227,43 @@ enum SafariChrome {
         return missing.isEmpty ? 0 : 1
     }
 
+    /// `--nib-check`: in a process like a profile's (`prepareForCheck`), the nibs Safari's chrome
+    /// makes itself (`checkedNibs`), made as it makes them — `NSNib(nibNamed:bundle:)` with the main
+    /// bundle, which here is this app — each from a timer of AppKit's run loop, where an exception
+    /// is lived through and counted (`ExceptionLog`) rather than fatal. A line a nib, then how many
+    /// were made from Safari's files and how many exceptions there were.
+    static func runNibCheck(arguments: [String]) -> Never {
+        setvbuf(stdout, nil, _IOLBF, 0)
+        guard prepareForCheck(arguments: arguments) else {
+            print("NIB-CHECK Safari's chrome cannot be hosted in this build")
+            exit(2)
+        }
+        let application = NSApplication.shared
+        application.setActivationPolicy(.prohibited)
+        let loader = NibLoader()
+        for (index, name) in checkedNibs.enumerated() {
+            loader.perform(#selector(NibLoader.load(_:)), with: name as NSString, afterDelay: 0.3 + 0.2 * Double(index))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            MainActor.assumeIsolated {
+                print("NIB-CHECK made from Safari's files: \(nibsBridged); exceptions: \(ExceptionLog.reported)")
+                removeCheckHome()
+                exit(0)
+            }
+        }
+        application.run()
+        exit(0)
+    }
+
+    /// The nibs of Safari's Bookmarks sidebar, which its controller makes itself.
+    static let checkedNibs = ["AnnotatedBookmarksSidebarViewController", "AnnotatedBookmarksSidebarExpandedTableCellView",
+                              "AnnotatedBookmarksSidebarExpandedTableCellViewV2"]
+
+    /// Whether one of Safari's bundles holds `name.nib`.
+    static func safariHolds(nib name: String) -> Bool {
+        nibURL(named: name) != nil
+    }
+
     // MARK: Preparing
 
     /// What Safari's app delegate does for its own chrome before any window exists. Each step is
@@ -612,54 +649,78 @@ enum SafariChrome {
         method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
 
-    /// Safari's controllers also build nibs themselves — through AppKit's
-    /// `-[NSNib _initWithNibNamed:bundle:options:]`, which `-initWithNibNamed:bundle:` reaches too —
-    /// with a bundle that in this process is not the one the nib is in (the main bundle is this
-    /// app, not Safari.app), and `bridgeNibLookups` only sees the nibs a view controller loads.
-    /// AppKit then throws NSInternalInconsistencyException where Safari would have found its nib:
-    /// the Bookmarks sidebar (`-[AnnotatedBookmarksSidebarViewController _addTableView]`) took a
-    /// profile's process down that way. When the bundle given does not hold the nib and one of
+    /// Safari's controllers also build nibs themselves, with `-[NSNib initWithNibNamed:bundle:]` —
+    /// the Bookmarks sidebar's cells, in `-[AnnotatedBookmarksSidebarViewController _addTableView]`
+    /// — and with the bundle Safari would mean: the main bundle, which in this process is this
+    /// app, not Safari.app. `bridgeNibLookups` only sees the nibs a view controller loads. AppKit
+    /// then throws NSInternalInconsistencyException where Safari would have found its nib: it took
+    /// a profile's process down, and once exceptions were lived through, made the sidebar do
+    /// nothing (the owner's Mac, macOS 27). When the bundle given does not hold the nib and one of
     /// Safari's does (`nibURL(named:)`), the nib is made from that file, on the same instance.
     ///
-    /// Raw pointers throughout: this stands in for an initializer, which takes its receiver and
-    /// returns its result owned, and Swift must not retain or release either on the way.
+    /// Both the public initializer and AppKit's `-_initWithNibNamed:bundle:options:` behind it are
+    /// bridged, so that neither way in depends on how the other is built in this macOS; a nib the
+    /// given bundle holds goes to AppKit untouched, and so does one nobody holds (said in the log).
+    ///
+    /// Raw pointers throughout: this stands in for initializers, which take their receiver and
+    /// return their result owned, and Swift must not retain or release either on the way.
     private static func bridgeNibInitializers() {
-        typealias InitNamed = @convention(c) (UnsafeMutableRawPointer, Selector, UnsafeRawPointer?, UnsafeRawPointer?,
-                                              UnsafeRawPointer?) -> UnsafeMutableRawPointer?
-        typealias InitData = @convention(c) (UnsafeMutableRawPointer, Selector, UnsafeRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
-        let named = NSSelectorFromString("_initWithNibNamed:bundle:options:")
+        typealias InitNamedOptions = @convention(c) (UnsafeMutableRawPointer, Selector, UnsafeRawPointer?, UnsafeRawPointer?,
+                                                     UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        typealias InitTwo = @convention(c) (UnsafeMutableRawPointer, Selector, UnsafeRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        let namedOptions = NSSelectorFromString("_initWithNibNamed:bundle:options:")
+        let named = NSSelectorFromString("initWithNibNamed:bundle:")
         let fromData = NSSelectorFromString("initWithNibData:bundle:")
-        guard let method = class_getInstanceMethod(NSNib.self, named),
-              let dataMethod = class_getInstanceMethod(NSNib.self, fromData) else {
-            log.notice("No -[NSNib _initWithNibNamed:bundle:options:]: a nib Safari builds itself is looked for by AppKit alone")
+        guard let dataMethod = class_getInstanceMethod(NSNib.self, fromData) else {
+            log.notice("No -[NSNib initWithNibData:bundle:]: a nib Safari builds itself is looked for by AppKit alone")
             return
         }
-        let original = unsafeBitCast(method_getImplementation(method), to: InitNamed.self)
-        let initWithData = unsafeBitCast(method_getImplementation(dataMethod), to: InitData.self)
-        let replacement: @convention(block) (UnsafeMutableRawPointer, UnsafeRawPointer?, UnsafeRawPointer?,
-                                             UnsafeRawPointer?) -> UnsafeMutableRawPointer? = { nib, name, bundle, options in
-            if let name {
-                var nibName = Unmanaged<NSString>.fromOpaque(name).takeUnretainedValue() as String
-                if nibName.hasSuffix(".nib") { nibName = String(nibName.dropLast(4)) }
-                let given = bundle.map { Unmanaged<Bundle>.fromOpaque($0).takeUnretainedValue() } ?? Bundle.main
-                let inGiven = given.url(forResource: nibName, withExtension: "nib") != nil
-                if !inGiven, nibURL(named: nibName) == nil {
-                    log.error("\(nibName, privacy: .public).nib is neither in \(given.bundlePath, privacy: .public) nor in any of Safari's bundles: AppKit will refuse it")
-                }
-                if !inGiven, let url = nibURL(named: nibName), let data = try? Data(contentsOf: url) {
-                    let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
-                    log.notice("\(nibName, privacy: .public).nib, asked of \(given.bundlePath, privacy: .public), from \(url.path, privacy: .public)")
-                    let contents = data as NSData
-                    return withExtendedLifetime((contents, owner)) {
-                        initWithData(nib, fromData, UnsafeRawPointer(Unmanaged.passUnretained(contents).toOpaque()),
-                                     owner.map { UnsafeRawPointer(Unmanaged.passUnretained($0).toOpaque()) })
-                    }
-                }
+        let initWithData = unsafeBitCast(method_getImplementation(dataMethod), to: InitTwo.self)
+        // The nib made on `nib` from Safari's file, or nil for AppKit to look as it would.
+        let fromSafari: (UnsafeMutableRawPointer, UnsafeRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?? = { nib, name, bundle in
+            guard let name else { return nil }
+            var nibName = Unmanaged<NSString>.fromOpaque(name).takeUnretainedValue() as String
+            if nibName.hasSuffix(".nib") { nibName = String(nibName.dropLast(4)) }
+            let given = bundle.map { Unmanaged<Bundle>.fromOpaque($0).takeUnretainedValue() } ?? Bundle.main
+            guard given.url(forResource: nibName, withExtension: "nib") == nil else { return nil }
+            guard let url = nibURL(named: nibName), let data = try? Data(contentsOf: url) else {
+                log.error("\(nibName, privacy: .public).nib is neither in \(given.bundlePath, privacy: .public) nor in any of Safari's bundles: AppKit will refuse it")
+                return nil
             }
-            return original(nib, named, name, bundle, options)
+            let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
+            log.notice("\(nibName, privacy: .public).nib, asked of \(given.bundlePath, privacy: .public), from \(url.path, privacy: .public)")
+            nibsBridged += 1
+            let contents = data as NSData
+            return .some(withExtendedLifetime((contents, owner)) {
+                initWithData(nib, fromData, UnsafeRawPointer(Unmanaged.passUnretained(contents).toOpaque()),
+                             owner.map { UnsafeRawPointer(Unmanaged.passUnretained($0).toOpaque()) })
+            })
         }
-        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        if let method = class_getInstanceMethod(NSNib.self, namedOptions) {
+            let original = unsafeBitCast(method_getImplementation(method), to: InitNamedOptions.self)
+            let replacement: @convention(block) (UnsafeMutableRawPointer, UnsafeRawPointer?, UnsafeRawPointer?,
+                                                 UnsafeRawPointer?) -> UnsafeMutableRawPointer? = { nib, name, bundle, options in
+                if let made = fromSafari(nib, name, bundle) { return made }
+                return original(nib, namedOptions, name, bundle, options)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        } else {
+            log.notice("No -[NSNib _initWithNibNamed:bundle:options:] in this macOS: the public initializer is bridged alone")
+        }
+        if let method = class_getInstanceMethod(NSNib.self, named) {
+            let original = unsafeBitCast(method_getImplementation(method), to: InitTwo.self)
+            let replacement: @convention(block) (UnsafeMutableRawPointer, UnsafeRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer? = { nib, name, bundle in
+                if let made = fromSafari(nib, name, bundle) { return made }
+                return original(nib, named, name, bundle)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        } else {
+            log.notice("No -[NSNib initWithNibNamed:bundle:] in this macOS: a nib Safari builds itself is looked for by AppKit alone")
+        }
     }
+
+    /// How many nibs `bridgeNibInitializers` made from Safari's files (`--nib-check` says).
+    private static var nibsBridged = 0
 
     /// Every bundle Safari's chrome keeps nibs and assets in, under both the ordinary path and the
     /// cryptex one, since a Safari update moves the frameworks between them.
@@ -1047,4 +1108,20 @@ private final class PasteAsTypedItem: NSObject {
     static let shared = PasteAsTypedItem()
 
     @objc func pasteAsTyped(_ sender: Any?) { HumanPaste.pasteIntoKeyWindow() }
+}
+
+/// Makes one of `--nib-check`'s nibs, from a timer of AppKit's run loop.
+private final class NibLoader: NSObject {
+    @objc func load(_ name: NSString) {
+        MainActor.assumeIsolated {
+            let name = name as String
+            guard SafariChrome.safariHolds(nib: name) else {
+                print("NIB-CHECK \(name): not in this Safari")
+                return
+            }
+            print("NIB-CHECK \(name): asked of the main bundle")
+            let nib = NSNib(nibNamed: name, bundle: .main)
+            print("NIB-CHECK \(name): \(nib == nil ? "not made" : "made")")
+        }
+    }
 }

@@ -140,6 +140,7 @@ final class SelfTest {
         // Each group on its own: an error one did not expect fails that group, by name, and the
         // run goes on with the next, so that one error never hides the checks after it.
         await group("exceptions") { try await exceptionChecks() }
+        await group("Safari's nibs") { try await safariNibChecks() }
         await group("storage isolation and shims") { try await storageIsolationAndShims(repository) }
         await group("device generations") { try await deviceGenerations(repository) }
         await group("fingerprint surface") { try await fingerprintSurface(repository) }
@@ -1410,6 +1411,36 @@ final class SelfTest {
         let first = control.output.split(separator: "\n").first.map(String.init) ?? ""
         info("exceptions, the control (the earlier hook, CoreFoundation's preprocessor replaced): "
              + (control.signaled ? "died by signal \(control.status)" : "lived, exit \(control.status)") + " — \(first)")
+    }
+
+    /// Safari's Bookmarks sidebar makes its nibs itself, with this app as their bundle, and they are
+    /// Safari's: in a process like a profile's, made the same way, each must come from Safari's file
+    /// (`SafariChrome.bridgeNibInitializers`), with nothing thrown. A nib this Safari does not have
+    /// is said, not failed on.
+    private func safariNibChecks() async throws {
+        guard let executable = Bundle.main.executableURL else {
+            check("Safari's nibs: this build's executable is there to run the check", false)
+            return
+        }
+        let run = await runOwnExecutable(executable, ["--nib-check"], timeout: 60)
+        if run.status == 2, run.output.contains("cannot be hosted") {
+            info("Safari's nibs: not in this build (\(AppEnvironment.isSandboxed ? "sandboxed" : "frameworks did not load"))")
+            return
+        }
+        let lines = run.output.split(separator: "\n").map(String.init).filter { $0.hasPrefix("NIB-CHECK") }
+        let detail = lines.joined(separator: " | ")
+        let held = SafariChrome.checkedNibs.filter { !lines.contains("NIB-CHECK \($0): not in this Safari") }
+        guard !held.isEmpty else {
+            info("Safari's nibs: none of \(SafariChrome.checkedNibs.joined(separator: ", ")) is in this Safari — \(detail)")
+            return
+        }
+        let made = held.filter { lines.contains("NIB-CHECK \($0): made") }
+        let bridged = run.output.range(of: #"made from Safari's files: (\d+)"#, options: .regularExpression)
+            .flatMap { Int(run.output[$0].split(separator: " ").last ?? "") } ?? 0
+        check("Safari's chrome: the Bookmarks sidebar's nibs, asked of this app as Safari's code asks, are made from Safari's files, and nothing throws",
+              !run.signaled && run.status == 0 && made.count == held.count && bridged >= held.count
+                  && run.output.contains("; exceptions: 0"),
+              detail.isEmpty ? run.output.trimmingCharacters(in: .whitespacesAndNewlines) : detail)
     }
 
     /// This build's executable with `arguments`, in a process of its own: what it printed, and how it

@@ -627,7 +627,18 @@ on. The hook now lives in `ExceptionLog` (every process, from `main`): it calls 
 replaced first, writes each exception's name, its reason with addresses, paths and quoted text cut
 out (in clear; the full reason privately) and its frames, and also hooks `reportException:` and the
 uncaught-exception handler. `PrivacyBrowser --exception-check` throws one in the run loop with these
-hooks and, with `--replacing`, the earlier way; the self-test runs both.
+hooks and, with `--replacing`, the earlier way; the self-test runs both. The name of a nib AppKit
+could not load, and the bundle it looked in, stay in clear: they are the system's and the app's
+files (a bundle outside `/System` and `/Applications` keeps only its own name).
+
+Nibs Safari's controllers make themselves: the Bookmarks sidebar
+(`-[AnnotatedBookmarksSidebarViewController _addTableView]`) makes its cells with
+`-[NSNib initWithNibNamed:bundle:]` and the main bundle — this app, not Safari.app — and AppKit
+threw where Safari finds them (on the owner's Mac, macOS 27: the process went down, and once
+exceptions were lived through, the sidebar did nothing). Both that initializer and AppKit's
+`-_initWithNibNamed:bundle:options:` behind it make a nib the given bundle lacks from Safari's own
+file. `PrivacyBrowser --nib-check` makes the sidebar's nibs the same way in a process like a
+profile's, and the self-test fails unless each comes from Safari's file with nothing thrown.
 
 What the hosted chrome does once all of that is in place, measured by hand: the window with Safari's
 toolbar, tab bar and address bar; our `WKWebView` rendering in its tab; the sidebar, built from

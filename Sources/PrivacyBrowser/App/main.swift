@@ -44,6 +44,10 @@ MainActor.assumeIsolated {
         // the classes around AutoFill, history and export, the methods that wait — printed for CI
         // (SafariChromeInventory.swift). In a temporary home, held to a closed proxy.
         SafariChromeInventory.start(arguments: arguments)
+    } else if arguments.contains("--nib-check") {
+        // The nibs Safari's Bookmarks sidebar makes itself, made as it makes them, in a process
+        // like a profile's; the self-test reads what it prints (SafariChrome.runNibCheck).
+        SafariChrome.runNibCheck(arguments: arguments)
     } else if arguments.contains("--safari-chrome") {
         // Safari's own window hosted in this process, with one of our web views in its tab
         // (SafariChrome.swift). Needs a build without the App Sandbox and with library validation
