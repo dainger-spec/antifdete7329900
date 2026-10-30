@@ -160,6 +160,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 - around the unsandboxed self-test, a capture of every packet leaving the runner with its process
   (`scripts/egress_check.py`) and of every file the app and WebKit write (`scripts/disk_check.py`):
   nothing of a profile may leave outside its proxy, or land where the real Safari keeps its data;
+- the self-test of the unsandboxed build once more on macOS 27 (GitHub's `xcode-27` image: macOS
+  27.0.1, Safari 27.0.1), inside the egress capture: it fails nothing, and says what fails on the
+  next macOS before users meet it. In every run each group of the self-test stands on its own: an
+  error a group did not expect fails that group by name, and the run goes on;
 - `--check-safari-chrome`: the private Safari classes and methods the hosted chrome relies on
   (loaded in a temporary home, held to a closed proxy, as in a profile's process);
 - "What sites see" (`--what-sites-see-check`): a new profile's snapshot next to the runner's

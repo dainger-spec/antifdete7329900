@@ -39,6 +39,72 @@ jobs:
       - name: Log lines keep the user's data private
         run: python3 scripts/check_log_privacy.py
 
+  macos-27:
+    name: macOS 27 — the self-test on the newest macOS (preview image, never fails the build)
+    # GitHub's xcode-27 image runs macOS 27.0.1 with Safari 27.0.1 and Xcode 27 (its SDK): what a
+    # user who updated has. The macOS job below (macos-26) is the one that gates the build; this one
+    # reports what changes on the next macOS before users meet it, and fails nothing.
+    runs-on: xcode-27
+    continue-on-error: true
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+      - name: Build the app without the App Sandbox (the build that runs profiles in Safari's window)
+        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Self-test against WebKit 27 (unsandboxed), inside a capture of every packet leaving the machine
+        id: selftest27
+        run: |
+          set -o pipefail
+          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
+            --tls-control 18086 --canary 18087 --silent 18088 &
+          PROXY_PID=$!
+          for attempt in $(seq 1 40); do nc -z 127.0.0.1 18081 && break; sleep 0.5; done
+          export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
+          export PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
+          export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088
+          mkdir -p build/egress27
+          sudo tcpdump -i pktap,all -k NP -n -tt -l 'not host 127.0.0.1 and not host ::1' \
+            > build/egress27/capture.txt 2> build/egress27/tcpdump.err &
+          sleep 2
+          status=0
+          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test | tee build/egress27/selftest.txt || status=1
+          sudo pkill -INT -f "tcpdump -i pktap" || true
+          sleep 2
+          kill $PROXY_PID || true
+          echo "::group::egress capture"
+          python3 scripts/egress_check.py --capture build/egress27/capture.txt \
+            --selftest-log build/egress27/selftest.txt --tcpdump-errors build/egress27/tcpdump.err || status=1
+          echo "::endgroup::"
+          exit $status
+      - name: What failed on macOS 27, and the certificate checks
+        if: always()
+        run: |
+          log=build/egress27/selftest.txt
+          grep -E '^(SELFTEST|INFO macOS|INFO WebKit [0-9])' $log 2>/dev/null | head -3 | sed 's/^/::notice title=macOS 27 self-test::/' || true
+          grep '^FAIL' $log 2>/dev/null | head -7 | cut -c1-1500 | sed 's/^/::notice title=macOS 27 self-test - failed::/' || true
+      - name: The certificate checks on macOS 27
+        if: always()
+        run: |
+          grep -E '^(PASS|FAIL) certificates' build/egress27/selftest.txt 2>/dev/null | head -10 | cut -c1-1000 \
+            | sed 's/^/::notice title=macOS 27 - certificates::/' || true
+      - name: What WebKit 27 hands back of a page's script (only when a script's answer could not be read)
+        if: always()
+        run: |
+          grep '^INFO js results' build/egress27/selftest.txt 2>/dev/null | head -10 | cut -c1-1500 \
+            | sed 's/^/::notice title=macOS 27 - JavaScript results::/' || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-27-selftest
+          path: build/egress27
+          if-no-files-found: ignore
+
   macos:
     name: macOS build, core tests, WebKit self-test
     # The newest macOS and Xcode: WebKit enables several features only for apps linked against
