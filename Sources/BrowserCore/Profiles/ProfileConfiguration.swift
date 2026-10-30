@@ -116,6 +116,11 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// only told to pages). Nil: as the app opens windows.
     public var windowSize: WindowSize?
 
+    /// The Safari version a macOS profile names in its User-Agent ("26.0"); nil: this Mac's own
+    /// (`userAgent(hostSafariVersion:)`). Only the name changes, never the engine
+    /// (`SafariVersions`); a mobile generation and a typed User-Agent ignore it.
+    public var safariVersion: String?
+
     public static let maximumNotesLength = 4000
 
     public init(startURL: URL? = nil,
@@ -140,7 +145,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 tags: [String] = [],
                 notes: String = "",
                 avatar: ProfileAvatarStyle? = nil,
-                windowSize: WindowSize? = nil) {
+                windowSize: WindowSize? = nil,
+                safariVersion: String? = nil) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -164,6 +170,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.notes = String(notes.prefix(Self.maximumNotesLength))
         self.avatar = avatar?.normalized
         self.windowSize = windowSize
+        self.safariVersion = safariVersion
     }
 
     /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
@@ -188,11 +195,12 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     }
 
     /// The User-Agent applied: an explicit `userAgent` override wins; otherwise the generation's
-    /// (the default generation when none is stored), the macOS one naming the host's Safari
-    /// version. Never WebKit's bare default, which lacks the "Version/… Safari/…" every Safari sends.
+    /// (the default generation when none is stored), the macOS one naming the profile's Safari
+    /// version (`safariVersion`), else the host's. Never WebKit's bare default, which lacks the
+    /// "Version/… Safari/…" every Safari sends.
     public func userAgent(hostSafariVersion: String?) -> String {
         if let userAgent, !userAgent.isEmpty { return userAgent }
-        return deviceGeneration.userAgent(hostSafariVersion: hostSafariVersion)
+        return deviceGeneration.userAgent(hostSafariVersion: safariVersion ?? hostSafariVersion)
     }
 
     /// How this launch's pages do WebRTC. WebKit opens WebRTC's sockets (STUN, TURN over UDP or
@@ -290,7 +298,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
-             syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize
+             syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -329,6 +337,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         // A size a later build knows and this one does not, or one out of bounds: as the app
         // opens windows.
         windowSize = (try? c.decodeIfPresent(WindowSize.self, forKey: .windowSize)).flatMap { $0.isValid ? $0 : nil }
+        // Only what Safari writes after "Version/": anything else is this Mac's own version.
+        safariVersion = (try? c.decodeIfPresent(String.self, forKey: .safariVersion))
+            .flatMap { DeviceGeneration.isSafariVersion($0) ? $0 : nil }
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -359,6 +370,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         if !notes.isEmpty { try c.encode(notes, forKey: .notes) }
         try c.encodeIfPresent(avatar, forKey: .avatar)
         try c.encodeIfPresent(windowSize, forKey: .windowSize)
+        try c.encodeIfPresent(safariVersion, forKey: .safariVersion)
     }
 
     public var historyPolicy: HistoryStore.Policy {
@@ -387,6 +399,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         }
         try proxy?.validate()
         try geolocation.validate()
+        if let safariVersion, !DeviceGeneration.isSafariVersion(safariVersion) {
+            throw CoreError.invalidConfiguration("a Safari version is written like 26.0 or 26.0.1")
+        }
         if let windowSize, !windowSize.isValid {
             throw CoreError.invalidConfiguration("window size must be \(WindowSize.minimumWidth)–\(WindowSize.maximumWidth) × \(WindowSize.minimumHeight)–\(WindowSize.maximumHeight) points")
         }

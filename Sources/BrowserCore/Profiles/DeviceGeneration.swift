@@ -80,6 +80,33 @@ public struct DeviceGeneration: Identifiable, Equatable, Sendable {
     }
 }
 
+/// The Safari versions a macOS profile can name in its User-Agent instead of this Mac's own
+/// (`ProfileConfiguration.safariVersion`). Naming one changes only what the profile calls itself:
+/// the engine is still this Mac's WebKit, and what a page measures of it — its features, its
+/// CSS and JavaScript — is still that Safari's.
+public enum SafariVersions {
+    /// Recent releases, newest first.
+    public static let recent = ["27.0", "26.6", "26.5", "26.4", "26.3", "26.2", "26.1", "26.0", "18.6", "18.5", "18.4"]
+
+    /// How far a named version is from the engine.
+    public enum Distance: Equatable, Sendable {
+        /// The same release (major and minor) as this Mac's Safari.
+        case same
+        /// Another release of the same major version: what changed between them is small.
+        case close
+        /// Another major version: what a page measures says the engine is not that version.
+        case far
+    }
+
+    /// How far `version` is from `host` (this Mac's Safari, e.g. "26.0.1").
+    public static func distance(of version: String, fromHost host: String) -> Distance {
+        func parts(_ text: String) -> [Int] { text.split(separator: ".").compactMap { Int($0) } }
+        let named = parts(version), real = parts(host)
+        guard let namedMajor = named.first, let realMajor = real.first, namedMajor == realMajor else { return .far }
+        return (named.dropFirst().first ?? 0) == (real.dropFirst().first ?? 0) ? .same : .close
+    }
+}
+
 /// Catalog of selectable generations. Desktop first (recommended), then mobile UA-only ones.
 public enum DeviceGenerations {
     /// The generation picked for a new profile and used when a stored id is unknown.

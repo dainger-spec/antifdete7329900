@@ -70,6 +70,9 @@ struct ProfileDraft {
         ProfileAvatarStyle(color: avatarColor, letters: avatarLetters).normalized
     }
 
+    /// The Safari version the profile names in its User-Agent; nil: this Mac's (Auto).
+    var safariVersion: String?
+
     /// The window size as the editor holds it (`WindowSize`).
     enum WindowChoice: Hashable {
         /// As the app opens windows: this Mac as it is.
@@ -164,6 +167,7 @@ struct ProfileDraft {
         avatarColor = c.avatar?.color
         avatarLetters = c.avatar?.letters ?? ""
         setWindowSize(c.windowSize)
+        safariVersion = c.safariVersion
     }
 
     var hasProxy: Bool { proxyMode != .direct }
@@ -272,6 +276,7 @@ struct ProfileDraft {
                                                         WindowSize.maximumWidth, WindowSize.minimumHeight, WindowSize.maximumHeight))
         }
         configuration.windowSize = windowSize
+        configuration.safariVersion = safariVersion
         try configuration.validate()
         return configuration
     }

@@ -122,6 +122,8 @@ enum UISnapshots {
         labelled.notes = "Bought 2026-10 from Example Networks, renews monthly. Two-factor on the phone in the drawer."
         labelled.avatarColor = 5
         labelled.avatarLetters = "NW"
+        var namedVersion = draft
+        namedVersion.safariVersion = SafariVersions.recent.last
         var location = draft
         location.geoMode = .fixed
         location.latitude = "52.52"
@@ -134,6 +136,7 @@ enum UISnapshots {
             ("editor-profile-new", newProfile, .profile, true, nil),
             ("editor-profile-labelled", labelled, .profile, false, nil),
             ("editor-identity", draft, .identity, false, nil),
+            ("editor-identity-safari-version", namedVersion, .identity, false, nil),
             ("editor-location", location, .location, false, nil),
             ("editor-privacy", draft, .privacy, false, nil),
             ("editor-data-ephemeral", ephemeral, .data, false, L("editor.proxy.error.kindUnknown")),

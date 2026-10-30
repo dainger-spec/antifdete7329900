@@ -219,8 +219,9 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
   change made in the editor, by "Never for This Website" and by removing a site from that list
   (not by what the browser stores itself, such as the proxy location). Saving the editor with
   nothing changed is no change. An older build drops the field (and `syncCookies`, which then
-  reads as on, `searchEngine`, which then reads as DuckDuckGo, and the profile's `tags`, `notes`
-  and `avatar`) when it rewrites a configuration, so its edit loses to one made by this build;
+  reads as on, `searchEngine`, which then reads as DuckDuckGo, the profile's `tags`, `notes`
+  and `avatar`, its `windowSize` and the `safariVersion` it names) when it rewrites a
+  configuration, so its edit loses to one made by this build;
   two versions without the time, and edits within the same second, fall back to the resolver
   (`keepRemote`, local copy as `config.bin.conflict`).
 - An older build skips the `cookies` object entirely: it neither uploads nor applies cookies,

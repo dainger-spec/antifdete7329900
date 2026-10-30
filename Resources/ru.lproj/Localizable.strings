@@ -142,6 +142,12 @@
 "editor.topic.connection" = "Соединение";
 "editor.topic.identity" = "Идентичность";
 "editor.topic.window" = "Окно";
+"editor.safari.version" = "Версия Safari в User-Agent";
+"editor.safari.auto" = "Авто — как Safari на этом Mac (%@)";
+"editor.safari.risky" = "%@ — далеко от движка, рискованно";
+"editor.safari.honest" = "Движок не меняется: страницы показывает WebKit этого Mac (Safari %@). Меняется только то, как профиль называет себя в User-Agent.";
+"editor.safari.far" = "Safari %@ — другая основная версия, чем движок этого Mac (Safari %@): то, что страница может измерить, — возможности, CSS и JavaScript — от движка, и страница, которая их сравнит, это увидит. Рискованно.";
+"editor.safari.close" = "Safari %@ близка к движку этого Mac (Safari %@): выдать может только то, что изменилось между ними.";
 "editor.window.size" = "Размер окна";
 "editor.window.app" = "Как есть (реальное устройство)";
 "editor.window.custom" = "Свой размер";

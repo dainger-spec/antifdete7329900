@@ -139,6 +139,7 @@ final class SelfTest {
             try await appSettings(repository)
             try editorLabels()
             try await windowSizes(repository)
+            try await namedSafariVersion(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
@@ -2495,6 +2496,27 @@ final class SelfTest {
                 || visible.width < CGFloat(WindowSize.minimumWidth) || visible.height < CGFloat(WindowSize.minimumHeight)
         }
         check("window size: a new profile's random size always fits this Mac's screen", fits, "screen \(visible)")
+    }
+
+    /// A macOS profile that names another Safari version: the page's navigator.userAgent says
+    /// that version, as the request headers do (the same string, WebKit's customUserAgent).
+    private func namedSafariVersion(_ repository: ProfileRepository) async throws {
+        let named = SafariVersions.recent.first { SafariVersions.distance(of: $0, fromHost: HostSafari.version) == .far } ?? "18.6"
+        let configuration = ProfileConfiguration(ephemeral: true, safariVersion: named)
+        let wanted = configuration.userAgent(hostSafariVersion: HostSafari.version)
+        let profile = try repository.create(name: "Safari version", configuration: configuration)
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer {
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+        defer { tab.tearDown() }
+        tab.webView.loadHTMLString("<!doctype html><title>agent</title>", baseURL: nil)
+        _ = await waitUntil(timeout: 10) { tab.webView.title == "agent" }
+        let seen = (try? await js(tab.webView, "return navigator.userAgent")) as? String ?? ""
+        check("identity: a named Safari version is what the profile calls itself — the page's User-Agent says Version/\(named), the engine stays Safari \(HostSafari.version)",
+              seen == wanted && wanted.contains("Version/\(named) Safari/"), "page \(seen), wanted \(wanted)")
     }
 
     private func appSettings(_ repository: ProfileRepository) async throws {

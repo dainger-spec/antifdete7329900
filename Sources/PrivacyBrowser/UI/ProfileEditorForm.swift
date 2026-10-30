@@ -285,6 +285,9 @@ struct ProfileEditorForm: View {
             if !generation.matchesEngine {
                 EditorNote(L("editor.generation.inconsistent"), tone: .warning)
             }
+            if generation.matchesEngine && !draft.customUserAgent {
+                safariVersionChoice
+            }
             EditorDivider()
             EditorToggle(L("editor.ua.useCustom"), isOn: $draft.customUserAgent)
             if draft.customUserAgent {
@@ -295,7 +298,7 @@ struct ProfileEditorForm: View {
                 }
             } else {
                 EditorField(L("editor.ua.effective")) {
-                    Text(generation.userAgent(hostSafariVersion: HostSafari.version))
+                    Text(generation.userAgent(hostSafariVersion: draft.safariVersion ?? HostSafari.version))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(Theme.textSecondary)
                         .textSelection(.enabled)
@@ -307,6 +310,38 @@ struct ProfileEditorForm: View {
             }
             EditorNote(L("editor.generation.footer"))
         }
+    }
+
+    /// The Safari version the profile names: Auto (this Mac's), or one of the recent ones, marked
+    /// by how far it is from the engine — which does not change.
+    @ViewBuilder
+    private var safariVersionChoice: some View {
+        let versions = SafariVersions.recent
+            + (draft.safariVersion.map { SafariVersions.recent.contains($0) ? [] : [$0] } ?? [])
+        EditorRow(L("editor.safari.version")) {
+            Picker(L("editor.safari.version"), selection: $draft.safariVersion) {
+                Text(String(format: L("editor.safari.auto"), HostSafari.version)).tag(String?.none)
+                ForEach(versions, id: \.self) { version in
+                    Text(Self.versionName(version)).tag(String?.some(version))
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+        EditorNote(String(format: L("editor.safari.honest"), HostSafari.version))
+        if let named = draft.safariVersion {
+            switch SafariVersions.distance(of: named, fromHost: HostSafari.version) {
+            case .far: EditorNote(String(format: L("editor.safari.far"), named, HostSafari.version), tone: .warning)
+            case .close: EditorNote(String(format: L("editor.safari.close"), named, HostSafari.version))
+            case .same: EmptyView()
+            }
+        }
+    }
+
+    /// "26.4", or "26.4 — far from the engine, risky".
+    static func versionName(_ version: String) -> String {
+        SafariVersions.distance(of: version, fromHost: HostSafari.version) == .far
+            ? String(format: L("editor.safari.risky"), version) : version
     }
 
     /// With a proxy, WebRTC can only be on through the network extension's relay, and only for

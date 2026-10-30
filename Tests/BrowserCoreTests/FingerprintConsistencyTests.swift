@@ -41,6 +41,29 @@ final class SafariUserAgentTests: XCTestCase {
         let ios = ProfileConfiguration(deviceGenerationID: "ios-27")
         XCTAssertEqual(ios.userAgent(hostSafariVersion: "26.1"), DeviceGenerations.generation(id: "ios-27")?.userAgent)
     }
+
+    /// A macOS profile may name another Safari version: only "Version/" changes; a typed
+    /// User-Agent and a mobile generation ignore it; how far it is from the engine is said.
+    func testANamedSafariVersionChangesOnlyTheName() throws {
+        let named = ProfileConfiguration(safariVersion: "18.6").userAgent(hostSafariVersion: "27.0.1")
+        XCTAssertEqual(named, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15")
+        XCTAssertTrue(ProfileConfiguration().userAgent(hostSafariVersion: "27.0.1").contains("Version/27.0.1 Safari/"),
+                      "none named: this Mac's Safari")
+        XCTAssertEqual(ProfileConfiguration(userAgent: "Custom/1", safariVersion: "18.6").userAgent(hostSafariVersion: "27.0"), "Custom/1")
+        let iPhone = ProfileConfiguration(deviceGenerationID: "ios-26", safariVersion: "18.6")
+        XCTAssertEqual(iPhone.userAgent(hostSafariVersion: "27.0"), DeviceGenerations.generation(id: "ios-26")?.userAgent)
+
+        XCTAssertEqual(SafariVersions.distance(of: "27.0", fromHost: "27.0.1"), .same)
+        XCTAssertEqual(SafariVersions.distance(of: "27.1", fromHost: "27.0"), .close)
+        XCTAssertEqual(SafariVersions.distance(of: "26.6", fromHost: "27.0"), .far)
+        XCTAssertTrue(SafariVersions.recent.allSatisfy(DeviceGeneration.isSafariVersion))
+
+        XCTAssertThrowsError(try ProfileConfiguration(safariVersion: "26.0 beta").validate())
+        let stored = try ProfileRepository.decodeConfiguration(Data(#"{"safariVersion":"Version/1"}"#.utf8))
+        XCTAssertNil(stored.safariVersion, "what is not a version is this Mac's own")
+        let kept = try ProfileRepository.decodeConfiguration(try JSONCoding.encoder.encode(ProfileConfiguration(safariVersion: "26.4")))
+        XCTAssertEqual(kept.safariVersion, "26.4")
+    }
 }
 
 final class ProxyLocationTests: XCTestCase {

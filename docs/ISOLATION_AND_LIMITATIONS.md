@@ -145,6 +145,12 @@ What it does **not** do, and cannot:
   its real version.
 - Only the macOS generation is engine-consistent, and only when its version equals the Mac's
   real Safari version (the editor still shows the string, which may differ from the host's).
+  A macOS profile may name another Safari version in its User-Agent (editor → Identity →
+  **Safari version in the User-Agent**: Auto, which follows this Mac's Safari, or a recent
+  release, `ProfileConfiguration.safariVersion`): only "Version/…" in the header and in
+  `navigator.userAgent` changes (checked by the self-test in a page), never the engine. The
+  editor says so beside the choice, and marks a version of another major release than this
+  Mac's as risky — what a page measures (features, CSS, JavaScript) is still the engine's.
   The iOS/iPadOS generations change the UA string while every measured signal in the table
   below still says "desktop Mac" — the editor flags this.
 
