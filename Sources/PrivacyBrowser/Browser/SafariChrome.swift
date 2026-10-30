@@ -1075,6 +1075,7 @@ enum SafariChrome {
         removePrivateWindowItems(from: menu)
         removeAutoFillInsertItems(from: menu)
         addPasteAsTyped(to: menu)
+        retargetNewWindow(in: menu)
         NSApplication.shared.mainMenu = menu
         keepAutoFillInsertItemsOut()
         log.notice("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
@@ -1102,6 +1103,21 @@ enum SafariChrome {
         item.target = PasteAsTypedItem.shared
         edit.insertItem(item, at: lastPaste + 1)
         pasteAsTypedInMenu = true
+    }
+
+    /// File › New Window (⌘N) opens another window of the profile. Safari's own action
+    /// (`_newWindowWithDefaultProfile:`) opens one for Safari's own profiles, which this process
+    /// does not have, and its menu kept it disabled: no ⌘N in a profile's window (the menu walk, CI
+    /// run 452, macOS 26 and 27). The item keeps its place and its key.
+    private static func retargetNewWindow(in menu: NSMenu) {
+        for item in menu.items {
+            if let submenu = item.submenu {
+                retargetNewWindow(in: submenu)
+            } else if let action = item.action, NSStringFromSelector(action) == "_newWindowWithDefaultProfile:" {
+                item.target = NewWindowItem.shared
+                item.action = #selector(NewWindowItem.newWindow(_:))
+            }
+        }
     }
 
     /// "New Private Window" goes: a private window of Safari's would be built, like every web view
@@ -1326,6 +1342,18 @@ private final class PasteAsTypedItem: NSObject {
     static let shared = PasteAsTypedItem()
 
     @objc func pasteAsTyped(_ sender: Any?) { HumanPaste.pasteIntoKeyWindow() }
+}
+
+/// What File › New Window calls in a profile's process (`SafariChrome.retargetNewWindow`): a window
+/// of Safari's for the profile, on its start page, as one the manager asks for.
+@MainActor
+private final class NewWindowItem: NSObject {
+    static let shared = NewWindowItem()
+
+    @objc func newWindow(_ sender: Any?) {
+        guard let session = ProfileNetworkGuard.session else { return }
+        _ = SafariChromeHost.open(session: session, url: nil)
+    }
 }
 
 /// Makes one of `--nib-check`'s nibs, from a timer of AppKit's run loop.
