@@ -146,12 +146,16 @@ jobs:
         timeout-minutes: 3
         run: |
           set +e
+          # A run that dies leaves a crash report: which one is new since here, and its summary.
+          since="$(mktemp)"
           build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --history-check > build/egress27/history-check.txt 2>/dev/null
           echo "exit $?"; cat build/egress27/history-check.txt
           grep '^HISTORY-CHECK' build/egress27/history-check.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - history in a profile process::/'
           build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --history-check --in-process-fallback > build/egress27/history-check-fallback.txt 2>/dev/null
           echo "exit $?"; cat build/egress27/history-check-fallback.txt
           grep '^HISTORY-CHECK' build/egress27/history-check-fallback.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - history in a profile process (fallback)::/'
+          find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -name 'PrivacyBrowser*.ips' -newer "$since" 2>/dev/null \
+            | while read -r report; do python3 scripts/crash_summary.py "$report" | head -60; done
           exit 0
       - name: What follows the SDK on macOS 27 — the build as made, and a copy that declares Xcode 27's SDK (a measurement)
         if: always()
@@ -349,12 +353,16 @@ jobs:
         timeout-minutes: 3
         run: |
           set +e
+          # A run that dies leaves a crash report: which one is new since here, and its summary.
+          since="$(mktemp)"
           build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --history-check > build/history-check.txt 2>/dev/null
           echo "exit $?"; cat build/history-check.txt
           grep '^HISTORY-CHECK' build/history-check.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=history in a profile process::/'
           build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --history-check --in-process-fallback > build/history-check-fallback.txt 2>/dev/null
           echo "exit $?"; cat build/history-check-fallback.txt
           grep '^HISTORY-CHECK' build/history-check-fallback.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=history in a profile process (fallback)::/'
+          find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -name 'PrivacyBrowser*.ips' -newer "$since" 2>/dev/null \
+            | while read -r report; do python3 scripts/crash_summary.py "$report" | head -60; done
           exit 0
       - name: What follows the SDK — the build as made, and a copy that declares this Xcode's SDK (a measurement)
         # Whether window.trustedTypes and the window's other interfaces, the screen's visible frame
