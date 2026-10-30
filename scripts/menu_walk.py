@@ -85,13 +85,22 @@ def behaviour(item):
     return sorted(words) or ["nothing seen"]
 
 
+# Written by macOS itself for any application, not by the profile: Biome's record of which menu
+# items an application's user chose (App.MenuItem), and the like. Shown, not counted as the item's.
+SYSTEM_RECORDS = ("~/Library/Biome/",)
+
+
+def outside(item):
+    return [path for path in item.get("outside", []) if not path.startswith(SYSTEM_RECORDS)]
+
+
 def writes(item):
     places = []
     if item.get("home"):
         places.append("profile's home")
     if item.get("realSafari"):
         places.append("REAL SAFARI")
-    if item.get("outside"):
+    if outside(item):
         places.append("outside")
     return places
 
@@ -101,7 +110,23 @@ def reduce(item):
 
 
 def key(item):
-    return f"{item.get('path', '?')} | {item.get('action', '-')}"
+    """The item's name in the record: its path, action and keys. A window of the profile listed
+    in the Window menu is named by what it is, not by its title (which is the page's)."""
+    path = item.get("path", "?")
+    if item.get("action") == "makeKeyAndOrderFront:" and path.startswith("Window ›"):
+        path = "Window › (a window of the profile)"
+    return f"{path} | {item.get('action', '-')} | {item.get('keys', '-')}"
+
+
+def keyed(items):
+    """The items by key; an item whose key repeats (Safari has a few items twice, one hidden) gets
+    its place among them after it."""
+    named, seen = {}, {}
+    for item in items:
+        name = key(item)
+        seen[name] = seen.get(name, 0) + 1
+        named[name if seen[name] == 1 else f"{name} #{seen[name]}"] = item
+    return named
 
 
 def crash_reports(since, out):
@@ -196,11 +221,11 @@ def main():
         flagged = [word for word in reduced["behaviour"] if word in ("crash", "hang") or word.startswith("exception")]
         if flagged or "REAL SAFARI" in reduced["writes"] or "outside" in reduced["writes"]:
             detail = "; ".join(reduced["behaviour"]) + (f" — wrote {', '.join(reduced['writes'])}" if reduced["writes"] else "")
-            extra = (item.get("exceptions") or [])[:1] + (item.get("realSafari") or [])[:3] + (item.get("outside") or [])[:3] \
+            extra = (item.get("exceptions") or [])[:1] + (item.get("realSafari") or [])[:3] + outside(item)[:3] \
                 + (item.get("crashReport") or [])[:6]
             notice("warning", args.title, f"{key(item)}: {detail}. " + " · ".join(extra))
 
-    current = {key(item): reduce(item) for item in items}
+    current = {name: reduce(item) for name, item in keyed(items).items()}
     if args.write_record or not args.record or not os.path.exists(args.record or ""):
         target = args.write_record or os.path.join(out, "record.json")
         with open(target, "w") as handle:

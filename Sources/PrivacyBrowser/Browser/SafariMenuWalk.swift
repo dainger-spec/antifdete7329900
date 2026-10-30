@@ -61,6 +61,17 @@ enum SafariMenuWalk {
         Self.send = send
         Self.session = session
         WalkRecorder.install()
+        // What an item brings up in another application (the Passwords app, a picker of the
+        // system's) is not a window of this process: the system tells it.
+        let center = NSWorkspace.shared.notificationCenter
+        for (name, said) in [(NSWorkspace.didLaunchApplicationNotification, "another application started"),
+                             (NSWorkspace.didActivateApplicationNotification, "another application came to the front")] {
+            _ = center.addObserver(forName: name, object: nil, queue: .main) { note in
+                guard let application = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                      application.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+                WalkRecorder.note("\(said): \(application.bundleIdentifier ?? application.localizedName ?? "?")")
+            }
+        }
         Task { @MainActor in
             let list = entries()
             emit(["event": "list", "count": list.count, "from": from])

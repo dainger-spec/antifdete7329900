@@ -88,10 +88,15 @@ enum SafariMenuWalkCheck {
               + (port == nil ? "a proxy that goes nowhere" : "the self-test proxy on port \(port ?? 0)"))
 
         let realHome = SafariPaths.realHome ?? NSHomeDirectory()
-        let ours = [root.path, root.resolvingSymlinksInPath().path]
+        // FSEvents names /var/folders as /private/var/folders.
+        let ours = [root.path, root.resolvingSymlinksInPath().path, "/private" + root.path]
         let ignored = [FileManager.default.currentDirectoryPath]
             + (environment["PB_MENU_WALK_IGNORE"] ?? "").split(separator: ":").map(String.init).filter { !$0.isEmpty }
         let files = FileChangeWatch(paths: [realHome] + ours)
+        // This app's own preferences in the account's home: which keys a walk adds, by name (a
+        // profile's process keeps its preferences in its own home; the manager's are here).
+        let preferencesDomain = Bundle.main.bundleIdentifier ?? "dev.local.PrivacyBrowser"
+        let keysBefore = Set(UserDefaults.standard.persistentDomain(forName: preferencesDomain)?.keys.map { $0 } ?? [])
 
         let walk = Walk()
         let manager = ProfileManager(repository: repository)
@@ -200,6 +205,7 @@ enum SafariMenuWalkCheck {
                     outside.insert(path)
                 }
             }
+            item.fields["event"] = nil
             item.fields["home"] = home.sorted()
             item.fields["realSafari"] = realSafari.sorted()
             item.fields["outside"] = outside.sorted()
@@ -208,6 +214,9 @@ enum SafariMenuWalkCheck {
             guard let data = try? JSONSerialization.data(withJSONObject: item.fields, options: [.sortedKeys]) else { continue }
             print("MENUWALK " + String(decoding: data, as: UTF8.self))
         }
+        let keysAfter = Set(UserDefaults.standard.persistentDomain(forName: preferencesDomain)?.keys.map { $0 } ?? [])
+        print("MENUWALK-INFO the app's own preferences (\(preferencesDomain)) in the account's home: keys added during the walk "
+              + "\(keysAfter.subtracting(keysBefore).sorted())")
         print("MENUWALK-INFO walked \(walk.items.count) of \(walk.count ?? 0) items in \(launches) launch(es); "
               + (walk.done ? "the walk got to the end" : "the walk did NOT get to the end"))
         return walk.done ? 0 : 1
