@@ -10,8 +10,9 @@
 # https schemes and the web's document types, as a browser's Info.plist does — signed ad hoc with
 # the app's own entitlements and registered with LaunchServices. The copy's Info.plist is edited
 # with Python's plistlib (PlistBuddy aborted on macOS 27 and left it as built), and the declared run
-# is said to count only when LaunchServices lists the copy among http's handlers. A measurement: it
-# never fails.
+# is said to count only when LaunchServices lists the copy among http's handlers. The copy lives in a
+# folder of its own in ~/Applications: in a temporary folder (run 447, macOS 27) LaunchServices
+# registered it and still did not list it. A measurement: it never fails.
 set -u
 app="$1"
 out="$2"
@@ -22,10 +23,12 @@ mkdir -p "$out"
 "$app/Contents/MacOS/PrivacyBrowser" --default-browser-check > "$out/as-built.txt" 2>/dev/null
 echo "exit $?" >> "$out/as-built.txt"
 
-# The copy goes in a temporary folder of its own, not with the results (which CI keeps).
-scratch="$(mktemp -d)"
+# The copy goes in a folder of its own in ~/Applications, where LaunchServices looks for apps, not
+# with the results (which CI keeps).
+mkdir -p "$HOME/Applications"
+scratch="$(mktemp -d "$HOME/Applications/pb-default-browser-check.XXXXXX")"
 if [ -z "$scratch" ] || [ ! -d "$scratch" ]; then
-  echo "::warning title=$title::no temporary folder for the copy declared a browser"
+  echo "::warning title=$title::no folder in ~/Applications for the copy declared a browser"
   exit 0
 fi
 copy="$scratch/PrivacyBrowser.app"
@@ -57,7 +60,8 @@ PY
 then
   codesign --force --options runtime --timestamp=none --entitlements "$out/entitlements.plist" --sign - "$copy" > "$out/codesign.txt" 2>&1 \
     || echo "::warning title=$title::the copy declared a browser could not be signed: $(tail -1 "$out/codesign.txt")"
-  "$lsregister" -f "$copy"
+  "$lsregister" -f "$copy" > "$out/lsregister.txt" 2>&1
+  echo "lsregister -f: exit $?" >> "$out/lsregister.txt"
   "$copy/Contents/MacOS/PrivacyBrowser" --default-browser-check > "$out/declared.txt" 2>/dev/null
   echo "exit $?" >> "$out/declared.txt"
   "$lsregister" -u "$copy" 2>/dev/null
@@ -69,6 +73,8 @@ rm -rf "$scratch"
 
 echo "--- the copy's Info.plist"
 cat "$out/declared-plist.txt"
+echo "--- its registration"
+cat "$out/lsregister.txt" 2>/dev/null
 for variant in as-built declared; do
   echo "--- $variant"
   cat "$out/$variant.txt"
