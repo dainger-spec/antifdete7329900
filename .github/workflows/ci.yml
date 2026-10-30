@@ -93,16 +93,11 @@ jobs:
         run: |
           grep -E '^(PASS|FAIL) certificates' build/egress27/selftest.txt 2>/dev/null | head -10 | cut -c1-1000 \
             | sed 's/^/::notice title=macOS 27 - certificates::/' || true
-      - name: What WebKit 27 hands back of a page's script (only when a script's answer could not be read)
+      - name: A jump to a fragment in a profile with a proxy, and session cookies after a stop (measurements)
         if: always()
         run: |
-          grep '^INFO js results' build/egress27/selftest.txt 2>/dev/null | head -10 | cut -c1-2000 \
-            | sed 's/^/::notice title=macOS 27 - JavaScript results::/' || true
-      - name: What WebKit 27 hands back of a page's script, continued
-        if: always()
-        run: |
-          grep '^INFO js results' build/egress27/selftest.txt 2>/dev/null | sed -n '11,20p' | cut -c1-2000 \
-            | sed 's/^/::notice title=macOS 27 - JavaScript results::/' || true
+          grep -E '^INFO (fragment jump|session cookie)' build/egress27/selftest.txt 2>/dev/null | head -8 | cut -c1-1000 \
+            | sed 's/^/::notice title=macOS 27 - measured::/' || true
       - name: A jump to a fragment — the same document, in Safari 27 and in a profile? (a measurement)
         # scripts/fragment_check.py: one page of this Mac sets location.hash and says whether its
         # document survived, in this Mac's Safari and in a profile (this app's window, Safari's).
@@ -410,3 +405,6 @@ jobs:
           # What real input reached on this runner, as notices on the job (readable without the log).
           grep -h "^INFO \(paste as typed\|what sites see\|password AutoFill\)" build/egress/selftest-unsandboxed.txt \
             | head -8 | cut -c1-300 | sed 's/^/::notice title=self-test::/' || true
+          # Measured next to the macOS 27 job's same lines.
+          grep -h "^INFO \(fragment jump\|session cookie\)" build/egress/selftest-unsandboxed.txt \
+            | head -8 | cut -c1-1000 | sed 's/^/::notice title=self-test - measured::/' || true

@@ -222,8 +222,12 @@ def warmup_page(name: str, run: str) -> bytes:
         " addEventListener('wheel', (e) => report(e.isTrusted ? 'wheel' : 'wheel-untrusted'), {passive: true});"
         " document.addEventListener('click', (e) => { report(e.isTrusted ? 'click' : 'click-untrusted');"
         " try { localStorage.setItem('pbwarm-click', name + '-' + probe()); } catch (e) {} }, true);"
-        " addEventListener('hashchange', () => { if (location.hash && !location.hash.startsWith('#/'))"
-        " history.replaceState(history.state, '', '#/' + location.hash.slice(1)); });"
+        # A router that writes `#part` as `#/part`, at load and when the fragment changes, as a
+        # single-page app's might: WebKit 27 makes a new document of a jump to a fragment of a page
+        # loaded through a proxy, where WebKit 26 keeps the page and sends it a hashchange.
+        " const route = () => { if (location.hash && !location.hash.startsWith('#/'))"
+        " history.replaceState(history.state, '', '#/' + location.hash.slice(1)); };"
+        " addEventListener('hashchange', route); route();"
         + (" setTimeout(() => alert('PB warm-up'), 300);" if name == "alert" else "")
         + " })();</script>"
     )

@@ -168,6 +168,7 @@ final class SelfTest {
         await group("dialogs") { try await dialogTeardown(repository) }
         await group("password AutoFill") { try await passwordAutoFill(repository) }
         await group("cookie import") { try await cookieImport(repository) }
+        await group("session cookies after a stop") { try await sessionCookieAfterStop(repository) }
         await group("profile transfer") { try await profileTransfer(repository) }
         await group("automation API") { try await automationAPI(repository) }
         await group("profile sync") { try await profileSync(repository) }
@@ -497,6 +498,11 @@ final class SelfTest {
         } catch {
             check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile", false, String(describing: error))
         }
+        do {
+            try await fragmentJumps(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort))
+        } catch {
+            info("fragment jump: not measured — \(error)")
+        }
 
         // A proxy that answers 407: the profile's credentials are sent, wrong ones fail closed.
         // Loaded in a BrowserTab, whose navigation delegate answers the proxy's challenge.
@@ -550,96 +556,78 @@ final class SelfTest {
         return tab.webView.title
     }
 
-    /// In a page served by the proxy: clicks an `<a ping>`, sends a beacon and a fetch to the
-    /// proxy, then reads back which paths the proxy served (`/pb-served.json`).
+    /// In a page served by the proxy: sends a beacon and a fetch to the proxy and clicks an
+    /// `<a ping>`, then reads back which paths the proxy served (`/pb-served.json`).
+    ///
+    /// The click is the page script's last act, and the script answers right after it. The link
+    /// goes to a fragment of the page, and WebKit 27 (macOS 27.0.1) makes a new document of such a
+    /// jump for a page loaded through the proxy (CI runs 432–435; a page of this Mac keeps its
+    /// document, in Safari 27 and in profiles alike — `fragmentJumps`): a script that waited across
+    /// the click lost the document it ran in, and WebKit answered WKErrorDomain 5. The pause for
+    /// the ping is waited out here, and the served paths are read afterwards, in whichever
+    /// document the page then is.
     private func servedPathsAfterPing(_ repository: ProfileRepository, _ proxy: ProxySettings) async throws -> [String] {
         let profile = try repository.create(name: "Ping", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
         let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
         defer { session.shutDown() }
         let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
-        let page = URL(string: "http://proxied.selftest.invalid/ping-page")!
-        try await PageLoader.load(webView, url: page)
-        do {
-            return try await js(webView, Self.pingScript + Self.readServedPaths) as? [String] ?? []
-        } catch {
-            await explainJavaScriptResultFailure(repository, session, page: page, failure: error)
-            throw error
-        }
+        try await PageLoader.load(webView, url: URL(string: "http://proxied.selftest.invalid/ping-page")!)
+        _ = try await js(webView, Self.pingScript)
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        _ = await waitUntil(timeout: 10) { !webView.isLoading }
+        return try await js(webView, Self.readServedPaths) as? [String] ?? []
     }
 
-    /// The page's actions: an `<a ping>` clicked, a beacon, a fetch, a pause for the ping.
+    /// The page's actions: a beacon, a fetch, and last an `<a ping>` clicked.
     private static let pingScript = """
+        navigator.sendBeacon('/beacon', 'x');
+        await fetch('/fetch-allowed');
         const a = document.createElement('a');
         a.href = '#clicked'; a.ping = '/ping-blocked'; a.textContent = 'ping';
         document.body.appendChild(a);
         a.click();
-        navigator.sendBeacon('/beacon', 'x');
-        await fetch('/fetch-allowed');
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-
+        return true;
         """
     /// What the proxy has served, as it lists it.
     private static let readServedPaths = "return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();"
 
-    /// When WebKit could not hand back what the ping page's script returned (WebKit 27 on macOS
-    /// 27.0.1: WKErrorDomain 5, whatever the value). Measured (CI runs 432, 433): there, every jump
-    /// to a fragment — an anchor clicked, `location.hash`, the app loading `page#jump` — made a new
-    /// document (navigation started, committed and finished; the page's globals gone), with or
-    /// without the user gesture and the profile's scripts and rules, and a script that waits
-    /// across the jump has lost its document. This asks where that comes from: the ping page as
-    /// the profile shows it, and a plain page of this Mac in a plain web view (WebKit's default
-    /// configuration, and a non-persistent store), in a profile without a proxy and in one with it.
-    /// Each variant marks its document, jumps with `location.hash`, and is asked afterwards
-    /// whether its document is still the one it marked; navigation callbacks are counted.
-    private func explainJavaScriptResultFailure(_ repository: ProfileRepository, _ session: BrowserSession, page: URL,
-                                                failure: Error) async {
-        info("js results: the ping page's script failed: \(Self.javaScriptError(failure))")
+    /// A jump to a fragment of the page shown (`location.hash`): does the page keep its document?
+    /// Measured, not checked. WebKit 27 (macOS 27.0.1) made a new document of it for a page loaded
+    /// through the proxy, where a page of this Mac kept its document — in Safari 27, in profiles
+    /// as they ship and in a plain web view alike (CI run 435, `scripts/fragment_check.py`). In a
+    /// profile with the proxy: a page through it by name, one through it by address, and a page
+    /// of this Mac, which goes direct.
+    private func fragmentJumps(_ repository: ProfileRepository, _ proxy: ProxySettings) async throws {
         let local = SiteSnapshotServer { _, _ in "<!doctype html><html><head><title>Plain page</title></head><body><p>A page of this Mac.</p></body></html>" }
         guard await local.start() else {
-            info("js results: no page of this Mac could be served")
+            info("fragment jump: no page of this Mac could be served")
             return
         }
         defer { local.stop() }
-        let plainPage = local.newPage(.profile).url
-        let direct = try? repository.create(name: "Fragment", configuration: ProfileConfiguration(ephemeral: true))
-        let directSession = direct.flatMap { try? makeSession(repository, $0.id, key: repository.profileKey(for: $0.id)) }
-        defer {
-            directSession?.shutDown()
-            if let direct { try? repository.delete(direct.id) }
-        }
-        let defaultConfiguration = WKWebViewConfiguration()
-        let nonPersistent = WKWebViewConfiguration()
-        nonPersistent.websiteDataStore = .nonPersistent()
-        typealias Variant = (label: String, configuration: WKWebViewConfiguration?, page: URL)
-        let variants: [Variant] = [
-            ("the ping page, the profile with its proxy", session.makeWebViewConfiguration(), page),
-            ("a page of this Mac, a plain web view (WebKit's default configuration)", defaultConfiguration, plainPage),
-            ("a page of this Mac, a plain web view with a non-persistent store", nonPersistent, plainPage),
-            ("a page of this Mac, a profile without a proxy", directSession?.makeWebViewConfiguration(), plainPage),
-            ("a page of this Mac, the profile with its proxy", session.makeWebViewConfiguration(), plainPage),
+        let profile = try repository.create(name: "Fragment", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let pages: [(label: String, url: URL)] = [
+            ("through the proxy, by name", URL(string: "http://proxied.selftest.invalid/fragment")!),
+            ("through the proxy, by address", URL(string: "http://198.18.0.15/fragment")!),
+            ("a page of this Mac, direct", local.newPage(.profile).url),
         ]
-        let mark = "window.__pbMark = 'marked'; window.__pbHash = 0; addEventListener('hashchange', () => { window.__pbHash += 1; }); return true;"
-        for (index, variant) in variants.enumerated() {
-            guard let configuration = variant.configuration else {
-                info("js results: k\(index + 1) \(variant.label): no configuration")
-                continue
-            }
-            let webView = WKWebView(frame: .zero, configuration: configuration)
+        let mark = "window.__pbMark = 'marked'; return true;"
+        for page in pages {
+            let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
             let counter = NavigationCounter()
-            var line = "js results: k\(index + 1) \(variant.label): "
+            var line = "fragment jump, \(page.label): "
             do {
-                try await PageLoader.load(webView, url: variant.page)
+                try await PageLoader.load(webView, url: page.url)
                 webView.navigationDelegate = counter
                 _ = try await js(webView, mark)
                 _ = try await js(webView, "location.hash = 'jump'; return true;")
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
-                let state = try await js(webView, "return [String(window.__pbMark), String(window.__pbHash), location.href, String(history.length)];")
-                let values = (state as? [String]) ?? []
-                let same = values.first == "marked"
-                line += (same ? "the same document" : "a new document") + "; navigation \(counter.summary); "
-                    + "afterwards " + values.joined(separator: " ")
+                _ = await waitUntil(timeout: 10) { !webView.isLoading }
+                let same = try await js(webView, "return String(window.__pbMark);") as? String == "marked"
+                line += (same ? "the same document" : "a new document") + " (navigation \(counter.summary))"
             } catch {
-                line += Self.javaScriptError(error) + "; navigation \(counter.summary)"
+                line += Self.javaScriptError(error) + " (navigation \(counter.summary))"
             }
             info(line)
         }
@@ -3740,6 +3728,38 @@ final class SelfTest {
         try await manager.delete(profile.id)
     }
 
+    // MARK: Session cookies after a stop
+
+    /// Measured, not checked: does a stopped profile's session cookie come back at its next
+    /// launch — with no other profile running, and while another profile of this process keeps
+    /// running? In this app's windows every profile shares WebKit's one network process. CI run
+    /// 435 (macOS 27) saw session cookies come back after a stop in the cookie checks, in a run
+    /// whose diagnostics had made a web view of WebKit's default store in this process; run 434,
+    /// without it, did not.
+    private func sessionCookieAfterStop(_ repository: ProfileRepository) async throws {
+        let manager = ProfileManager(repository: repository)
+        let cookies = CookieImporter.read(Data("session.selftest.invalid\tFALSE\t/\tFALSE\t0\tpbsession\tsession-value".utf8)).cookies
+        for withAnother in [false, true] {
+            let measured = try repository.create(name: "Session cookie", configuration: ProfileConfiguration())
+            var other: ProfileSummary?
+            if withAnother { other = try repository.create(name: "Keeps running", configuration: ProfileConfiguration()) }
+            try await manager.launch(measured.id, openingWindow: false)
+            if let other { try await manager.launch(other.id, openingWindow: false) }
+            let imported = try await manager.importCookies(cookies, into: measured.id)
+            weak var store = manager.session(for: measured.id)?.dataStore
+            try await manager.stop(measured.id)
+            let released = await waitUntil(timeout: 10) { store == nil }
+            try await manager.launch(measured.id, openingWindow: false)
+            let after = (try? await manager.exportCookies(of: measured.id)) ?? []
+            let kept = after.contains { $0.name == "pbsession" }
+            let situation = withAnother ? "another profile running meanwhile" : "no other profile running"
+            info("session cookie after a stop and a launch, \(situation): \(kept ? "still there" : "gone") "
+                 + "(import \(imported); the store \(released ? "let go" : "still alive 10 s after the stop"))")
+            try await manager.delete(measured.id)
+            if let other { try await manager.delete(other.id) }
+        }
+    }
+
     // MARK: Profile export and import
 
     /// A profile carried in a `.pbprofile` file arrives with its website data: a cookie the
@@ -4020,10 +4040,12 @@ final class SelfTest {
                   && ["pbwarm_a", "pbwarm_b", "pbwarm_c", "pbwarm_a_next"].allSatisfy(stored.contains),
               "history=\(history) cookies=\(stored.sorted())")
 
-        // An address that only jumps within the page shown (the same page with a fragment): WebKit
-        // makes no new page for it, so nothing commits; the robot takes it as visited once the tab
-        // shows that page instead of waiting out its load time. The page then rewrites `#part` to
-        // `#/part`, as a single-page app's router might.
+        // An address that only jumps within the page shown (the same page with a fragment). WebKit
+        // 26 makes no new page for it, so nothing commits, and the robot takes it as visited once
+        // the tab shows that page instead of waiting out its load time; WebKit 27 makes a new page
+        // of it for a page loaded through the proxy (`fragmentJumps`), which the robot waits for as
+        // for any load. Either way the page rewrites `#part` to `#/part`, as a single-page app's
+        // router might.
         let jump = WarmUpPlan(addresses: [page("f"), page("f") + "#part"].joined(separator: "\n"), scroll: false, followLinks: false)
         robot.limits.dwellOverride = 1...1
         robot.limits.pauseOverride = 0.2...0.2
@@ -4037,7 +4059,7 @@ final class SelfTest {
             return robot.state != .running
         }
         let jumpTime = Date().timeIntervalSince(jumpStarted)
-        check("warm-up: an address that only jumps within the page shown counts as visited at once (no new page comes for it), also when the page rewrites the fragment",
+        check("warm-up: an address that only jumps within the page shown counts as visited without waiting out a load time (whether or not WebKit makes a new page of it), also when the page rewrites the fragment",
               jumped && robot.state == .finished && robot.visits.map(\.outcome) == [.loaded, .loaded] && jumpTime < 10
                   && jumpShown?.fragment == "/part",
               "state=\(robot.state) \(robot.visits.map(\.outcome)) in \(String(format: "%.1f", jumpTime)) s shown=\(jumpShown?.absoluteString ?? "nil")")
