@@ -461,24 +461,34 @@ struct ProfileAvatar: View {
     }
 }
 
-/// A profile's tags as small chips, at most `limit` and "+N" for the rest.
+/// A profile's tags as small chips, at most `limit` and "+N" for the rest — and only as many whole
+/// chips as there is room for: a chip squeezed to "…" or to one letter says nothing.
 struct TagChips: View {
     let tags: [String]
     var limit = Int.max
 
     var body: some View {
         if !tags.isEmpty {
-            HStack(spacing: 4) {
-                ForEach(tags.prefix(limit), id: \.self) { tag in
-                    TagChip(text: tag)
-                }
-                if tags.count > limit {
-                    Text(verbatim: "+\(tags.count - limit)")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(Theme.textTertiary)
+            ViewThatFits(in: .horizontal) {
+                ForEach(Array(stride(from: min(tags.count, limit), through: 0, by: -1)), id: \.self) { shown in
+                    chips(shown)
                 }
             }
             .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func chips(_ shown: Int) -> some View {
+        HStack(spacing: 4) {
+            ForEach(tags.prefix(shown), id: \.self) { tag in
+                TagChip(text: tag).fixedSize()
+            }
+            if tags.count > shown {
+                Text(verbatim: "+\(tags.count - shown)")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize()
+            }
         }
     }
 }

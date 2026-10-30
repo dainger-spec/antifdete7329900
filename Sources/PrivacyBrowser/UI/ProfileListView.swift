@@ -1021,24 +1021,41 @@ private struct WarmUpLine: View {
     let status: WarmUpStatus
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(String(format: L("profiles.row.warmUpShort"), status.currentPage, status.total))
+        // As much as the name column has room for, never more: a line wider than the column
+        // pushed the row's other columns out of line and its buttons past the window's edge. The
+        // bar goes first, then the cookie count.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { pages; bar; cookies }
+            HStack(spacing: 8) { pages; cookies }
+            HStack(spacing: 8) { pages; bar }
+            pages
+        }
+        .help(String(format: L("profiles.row.warmingUp"), status.currentPage, status.total))
+    }
+
+    private var pages: some View {
+        Text(String(format: L("profiles.row.warmUpShort"), status.currentPage, status.total))
+            .font(.lumenSecondary)
+            .foregroundStyle(Theme.accent)
+            .lineLimit(1)
+            .monospacedDigit()
+            .fixedSize()
+    }
+
+    private var bar: some View {
+        LumenProgressBar(fraction: status.fraction, width: 48)
+    }
+
+    @ViewBuilder
+    private var cookies: some View {
+        if status.cookies > 0 {
+            Text(String(format: L("profiles.row.warmUpCookies"), status.cookies))
                 .font(.lumenSecondary)
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
                 .monospacedDigit()
                 .fixedSize()
-            LumenProgressBar(fraction: status.fraction, width: 48)
-            if status.cookies > 0 {
-                Text(String(format: L("profiles.row.warmUpCookies"), status.cookies))
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1)
-                    .monospacedDigit()
-                    .fixedSize()
-            }
         }
-        .help(String(format: L("profiles.row.warmingUp"), status.currentPage, status.total))
     }
 }
 
