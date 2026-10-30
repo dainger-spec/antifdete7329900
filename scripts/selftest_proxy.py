@@ -814,9 +814,9 @@ def _safe(handler, conn) -> None:
 
 def aia_tag(value: str) -> str:
     """A tag for the certificates' names (`--aia-tag`): lowercase letters and digits, as a DNS label
-    takes them."""
-    if not re.fullmatch(r"[a-z0-9]{1,24}", value):
-        raise argparse.ArgumentTypeError("1 to 24 lowercase letters and digits")
+    takes them, or none (argparse passes the empty default through this too)."""
+    if not re.fullmatch(r"[a-z0-9]{0,24}", value):
+        raise argparse.ArgumentTypeError("up to 24 lowercase letters and digits")
     return value
 
 
