@@ -31,6 +31,8 @@ enum SafariMenuWalkCheck {
         var begin: Double
         var end: Double?
         var xpc: [String] = []
+        /// What the manager was asked for meanwhile (its Settings).
+        var asked: [String] = []
         init(fields: [String: Any], begin: Double) {
             self.fields = fields
             self.begin = begin
@@ -102,7 +104,7 @@ enum SafariMenuWalkCheck {
         let manager = ProfileManager(repository: repository)
         manager.onProfileRunning = { _, hosts in walk.hostsChrome = hosts }
         manager.onError = { message in print("MENUWALK-INFO the manager was told: \(message)") }
-        manager.onShowSettings = { walk.current?.xpc.append("(the manager was asked for its Settings)") }
+        manager.onShowSettings = { walk.current?.asked.append("the manager was asked for its Settings") }
         manager.onChildExited = { _, status in walk.exited = status }
         manager.onMenuWalk = { _, line in
             guard let data = line.data(using: .utf8),
@@ -210,6 +212,7 @@ enum SafariMenuWalkCheck {
             item.fields["realSafari"] = realSafari.sorted()
             item.fields["outside"] = outside.sorted()
             item.fields["xpc"] = item.xpc
+            item.fields["effects"] = (item.fields["effects"] as? [String] ?? []) + item.asked
             item.fields["begin"] = item.begin
             guard let data = try? JSONSerialization.data(withJSONObject: item.fields, options: [.sortedKeys]) else { continue }
             print("MENUWALK " + String(decoding: data, as: UTF8.self))
