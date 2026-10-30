@@ -145,6 +145,7 @@ final class SelfTest {
             try await cookiesAtCreation(repository)
             try await diagnosticsBundle(repository)
             try await pasteAsTyped(repository)
+            try await whatSitesSee(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
             try await certificatesWithoutFetching(repository)
@@ -2795,6 +2796,138 @@ final class SelfTest {
         check("paste as typed: the page sees trusted key events — a key down per character, on its own key (H on KeyH, М on KeyV), Shift around a capital",
               trusted && characterDowns.count == text.count && shift && codes,
               "\(events.prefix(16).map { $0.map { "\($0)" }.joined(separator: " ") })")
+    }
+
+    /// What sites see, in this process: the snapshot's listener answers only its own pages and
+    /// only to this Mac's loopback address; a profile's window (no proxy, its local requests
+    /// protected) measures every part — navigator, screen, the window, request headers in their
+    /// order, TLS (a ClientHello read: JA3, JA4), APIs — and the page is neither in its history
+    /// nor left open. Safari's side is stood in for by a plain WebKit view: this run is inside the
+    /// egress capture, where Safari's own traffic would count. The real Safari is CI's step
+    /// "What sites see" (`--what-sites-see-check`).
+    private func whatSitesSee(_ repository: ProfileRepository) async throws {
+        let listener = SiteSnapshotServer { token, _ in "page of \(token)" }
+        guard await listener.start() else {
+            check("what sites see: the snapshot listens on 127.0.0.1", false)
+            return
+        }
+        let page = listener.newPage(.profile)
+        let port = Int(listener.httpPort)
+        func get(_ target: String, host: String) async -> (status: Int, body: String) {
+            let request = Data("GET \(target) HTTP/1.1\r\nHost: \(host)\r\nContent-Length: 0\r\n\r\n".utf8)
+            let answer = await Task.detached { Self.rawHTTP(port: port, request) }.value
+            guard let answer, let text = String(data: answer, encoding: .utf8),
+                  let status = text.split(separator: " ", maxSplits: 2).dropFirst().first.flatMap({ Int($0) }) else { return (0, "") }
+            return (status, text.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n"))
+        }
+        let own = await get("/headers.html?token=\(page.token)", host: "127.0.0.1:\(port)")
+        let rebound = await get("/headers.html?token=\(page.token)", host: "rebind.example:\(port)")
+        let stranger = await get("/headers.html?token=\(SiteSnapshotPage.token(.profile))", host: "127.0.0.1:\(port)")
+        listener.stop()
+        check("what sites see: the listener serves its own page, and refuses another token and a name that is not this Mac's",
+              own.status == 200 && own.body == "page of \(page.token)" && rebound.status == 404 && stranger.status == 404,
+              "own \(own.status), rebound \(rebound.status), stranger \(stranger.status)")
+
+        let profile = try repository.create(name: "What sites see", configuration: ProfileConfiguration(ephemeral: true))
+        let manager = ProfileManager(repository: repository)
+        final class StandIn {
+            var window: NSWindow?
+            var launchError = ""
+        }
+        let standIn = StandIn()
+        let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
+            do { try await manager.launch(id) } catch { standIn.launchError = String(describing: error) }
+        })
+        snapshot.openInSafari = { url in
+            let configuration = WKWebViewConfiguration()
+            configuration.websiteDataStore = .nonPersistent()
+            let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 1000, height: 700), configuration: configuration)
+            let window = NSWindow(contentRect: view.frame, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = view
+            window.orderFront(nil)
+            view.load(URLRequest(url: url))
+            standIn.window = window
+            return true
+        }
+        snapshot.safariTimeout = 60
+        defer {
+            standIn.window?.close()
+            try? repository.delete(profile.id)
+        }
+        await snapshot.take()
+        let measured = snapshot.profileSnapshot?.values ?? [:]
+        let parts = ["probe.ua", "probe.screen", "geometry.chrome", "apis.quota", "headers.navigation.order", "tls.ja4", "tls.cipherSuites"]
+        let missing = parts.filter { measured[$0] == nil }
+        check("what sites see: a profile's window measured every part — navigator, screen, the window, request headers in order, TLS (a ClientHello read), APIs",
+              snapshot.step == WhatSitesSee.Step.done && missing.isEmpty && (measured["headers.navigation.order"] ?? "").contains("User-Agent"),
+              "step \(snapshot.step), missing \(missing), launch \(standIn.launchError)")
+        let ja4 = snapshot.signals.first { $0.key == "tls.ja4" }
+        check("what sites see: compared with the other side; the profile's ClientHello is a plain WebKit view's (one network stack)",
+              snapshot.comparedWithSafari && ja4?.verdict == .same,
+              "compared \(snapshot.comparedWithSafari), ja4 \(ja4?.profile ?? "nil") / \(ja4?.safari ?? "nil")")
+        info("what sites see: the profile next to a plain WebKit view — " + SiteSignalCategory.allCases.map { category in
+            "\(category.rawValue) \(WhatSitesSeeView.summary(snapshot.signals.filter { $0.category == category }))"
+        }.joined(separator: "; "))
+        let session = manager.session(for: profile.id)
+        let inHistory = session?.library.historyEntries(matching: "127.0.0.1") ?? []
+        let leftOpen = session?.windowControllers.contains { controller in
+            controller.tabs.contains { $0.url.map(SiteSnapshotPage.isMeasuringPage) == true }
+        } ?? true
+        check("what sites see: the measuring page is not in the profile's history, and its window is closed",
+              session != nil && inHistory.isEmpty && !leftOpen, "history \(inHistory.map(\.url)), left open \(leftOpen)")
+        try? await manager.stop(profile.id)
+    }
+
+    /// `--what-sites-see-check`: a new profile's snapshot next to this Mac's real Safari, taken as
+    /// the panel takes it, printed signal by signal — CI's step after the egress capture. Exit 0
+    /// when both were measured, 2 when Safari did not answer (CI warns), 1 when the profile's side
+    /// could not be taken.
+    static func whatSitesSeeCheck() {
+        setvbuf(stdout, nil, _IOLBF, 0)
+        // The profile in this process, as in the self-test.
+        setenv("PB_PROFILE_PROCESS", "0", 1)
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
+            print("WHAT-SITES-SEE TIMEOUT after 300 s")
+            exit(1)
+        }
+        Task { @MainActor in exit(await runWhatSitesSeeCheck()) }
+        app.run()
+    }
+
+    private static func runWhatSitesSeeCheck() async -> Int32 {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-what-sites-see-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository: ProfileRepository
+        let profile: ProfileSummary
+        do {
+            repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "what-sites-see", iterations: 10_000))
+            profile = try repository.create(name: "What sites see", configuration: ProfileConfiguration(ephemeral: true))
+        } catch {
+            print("WHAT-SITES-SEE could not make a profile: \(error)")
+            return 1
+        }
+        let manager = ProfileManager(repository: repository)
+        let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
+            do { try await manager.launch(id) } catch { print("INFO the profile's launch failed: \(error)") }
+        })
+        await snapshot.take()
+        guard snapshot.step == .done else {
+            print("WHAT-SITES-SEE the profile's side was not taken: \(snapshot.step)")
+            return 1
+        }
+        for category in SiteSignalCategory.allCases {
+            let signals = snapshot.signals.filter { $0.category == category }
+            print("WHAT-SITES-SEE \(category.rawValue): \(WhatSitesSeeView.summary(signals))")
+            for signal in signals where signal.verdict != .same {
+                print("  \(signal.verdict) \(signal.key): profile=\(String((signal.profile ?? "-").prefix(160))) safari=\(String((signal.safari ?? "-").prefix(160)))")
+            }
+        }
+        try? await manager.stop(profile.id)
+        print("WHAT-SITES-SEE compared with this Mac's Safari: \(snapshot.comparedWithSafari)")
+        return snapshot.comparedWithSafari ? 0 : 2
     }
 
     private func appSettings(_ repository: ProfileRepository) async throws {

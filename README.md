@@ -337,6 +337,16 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    characters (more would take many minutes). It types only while the page has the keyboard: a
    key or a click of yours stops it, and so does another window or tab; a word says how far it
    got. What a page can still tell: [ISOLATION_AND_LIMITATIONS.md §8d](docs/ISOLATION_AND_LIMITATIONS.md).
+16. **What Sites See** (a profile's **⋯** menu, or ⌘K): **Take Snapshot** opens one page of this Mac
+   in a new window of the profile (starting it if it is stopped), then in Safari, and measures it in
+   each with the scripts CI's live comparison runs — navigator, screen, the window, request headers
+   in their order, TLS (the ClientHello: versions, suites, extensions, groups, ALPN, JA3, JA4), APIs,
+   rendering. The list says, signal by signal, **same** or **differs** with both values and, for
+   known differences, what they mean; the window's own size and place are shown, not compared
+   (each browser's window has its own). Nothing leaves this Mac: the page reports to a listener on
+   127.0.0.1 that is open only while the snapshot is taken, and nothing is kept. Not measured
+   here: HTTP/2 settings and the TCP SYN. How it works and what it cannot see:
+   [ISOLATION_AND_LIMITATIONS.md §2](docs/ISOLATION_AND_LIMITATIONS.md).
 
 ## What is implemented, and how
 
@@ -446,7 +456,8 @@ Resources/                         Info.plist, entitlements (sandboxed / not), c
 scripts/                           build-app.sh, release.sh (a release, or a dry run of one), test-shims.mjs,
                                    selftest_proxy.py, safari_reference.py,
                                    update_public_suffix_list.py,
-                                   live_compare.py + live_sites/ (pages measured in Safari and in profiles),
+                                   live_compare.py + live_sites/ (pages measured in Safari and in profiles;
+                                   the local pages' scripts are Resources/SiteProbes/, which the app runs too),
                                    leak_check.py (QUIC/WebRTC around a proxy), update_check.py (updates end to end)
 docs/                              architecture, isolation and limitations, sync format, sync server API
 ```

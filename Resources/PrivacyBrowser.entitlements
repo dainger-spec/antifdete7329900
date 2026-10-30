@@ -9,6 +9,10 @@
 	<!-- WKWebView networking (WebKit's network process acts on the app's behalf) and sync. -->
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- "What sites see" (SiteSnapshotServer): a listener on 127.0.0.1 only, only while a snapshot
+	     is taken, that the measuring page in the profile's window and in Safari reports to. -->
+	<key>com.apple.security.network.server</key>
+	<true/>
 	<!-- getUserMedia, only after the per-request in-app prompt. -->
 	<key>com.apple.security.device.camera</key>
 	<true/>

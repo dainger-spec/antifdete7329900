@@ -180,6 +180,18 @@ jobs:
         continue-on-error: true
         timeout-minutes: 25
         run: python3 scripts/live_compare.py --app build/unsandboxed/PrivacyBrowser.app --out build/live
+      - name: What sites see — a new profile's snapshot next to this Mac's Safari, as the panel takes it
+        # The sandboxed build: its snapshot's listener (127.0.0.1, network.server) is the one under
+        # test. Safari is asked to open the page as for a user; one that does not answer is a
+        # warning. After the egress capture, where Safari's own traffic would count.
+        if: always()
+        timeout-minutes: 8
+        run: |
+          set +e
+          build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --what-sites-see-check
+          code=$?
+          if [ "$code" = "2" ]; then echo "::warning::Safari did not answer the What-sites-see page on this runner"; exit 0; fi
+          exit $code
       - uses: actions/upload-artifact@v4
         if: always()
         with:

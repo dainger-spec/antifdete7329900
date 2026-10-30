@@ -30,6 +30,8 @@ from safari_reference import WebDriver, flat, free_port, text, wait_for_port  # 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 SITES = os.path.join(ROOT, "scripts", "live_sites")
 PROBE = os.path.join(ROOT, "Resources", "fingerprint_probe.js")
+# The local pages' scripts, which the app's "What sites see" runs too (bundled with the app).
+SITE_PROBES = os.path.join(ROOT, "Resources", "SiteProbes")
 
 
 def profiles(zone):
@@ -79,16 +81,16 @@ def read(path):
 def pages(base, browser):
     """The page list; `browser` names the run so the header recorder keeps the two apart."""
     token = f"{browser}-{int(time.time() * 1000)}"
-    geometry = read(os.path.join(SITES, "geometry.js"))
+    geometry = read(os.path.join(SITE_PROBES, "geometry.js"))
     result = [
         {"name": "probe", "url": f"{base}/probe.html", "script": read(PROBE)},
         {"name": "geometry", "url": f"{base}/geometry.html", "script": geometry},
         {"name": "geometry-2tabs", "url": f"{base}/geometry.html", "script": geometry, "extraTabs": 1, "settleMs": 800},
-        {"name": "headers", "url": f"{base}/headers.html?token={token}", "script": read(os.path.join(SITES, "headers.js"))},
-        {"name": "apis", "url": f"{base}/apis.html", "script": read(os.path.join(SITES, "apis.js"))},
+        {"name": "headers", "url": f"{base}/headers.html?token={token}", "script": read(os.path.join(SITE_PROBES, "headers.js"))},
+        {"name": "apis", "url": f"{base}/apis.html", "script": read(os.path.join(SITE_PROBES, "apis.js"))},
     ]
     for name in sorted(os.listdir(SITES)):
-        if not name.endswith(".js") or name in ("geometry.js", "headers.js", "apis.js"):
+        if not name.endswith(".js"):
             continue
         source = read(os.path.join(SITES, name))
         # First line: // url: https://… [settle=ms] [timeout=ms]

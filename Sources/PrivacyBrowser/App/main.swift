@@ -48,6 +48,12 @@ MainActor.assumeIsolated {
     } else if arguments.contains("--render-ui-snapshots") {
         // The app's screens with sample data, as PNG files for design review (UISnapshots.swift).
         UISnapshots.start(arguments: arguments)
+    } else if arguments.contains("--what-sites-see-check") {
+        // A new profile's "What sites see" snapshot next to this Mac's real Safari, printed (CI;
+        // SelfTest.whatSitesSeeCheck).
+        Localization.applyProcessLanguage()
+        WebContentLanguage.decide(nil)
+        SelfTest.whatSitesSeeCheck()
     } else if arguments.contains("--capture-sites") {
         // The app's own start-up, as far as web content can tell: its UI language is set, and the
         // first profile (no proxy) decides the language websites see.

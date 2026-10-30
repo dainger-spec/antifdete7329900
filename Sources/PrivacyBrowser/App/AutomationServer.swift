@@ -6,7 +6,8 @@ import os
 /// The local automation API (`AutomationHTTP`) on 127.0.0.1, for as long as the vault is
 /// unlocked and the API is on. Every connection is one request and one answer, and no request is
 /// acted on before `AutomationGate` lets it through. Only the build without the App Sandbox
-/// listens: the sandboxed one has no entitlement to accept connections.
+/// offers it: the sandboxed one listens for nothing but a "What sites see" snapshot, on
+/// 127.0.0.1 while one is taken (`SiteSnapshotServer`), and never for scripts.
 @MainActor
 final class AutomationServer {
     enum State: Equatable {

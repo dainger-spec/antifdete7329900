@@ -426,7 +426,8 @@ configs read as the default generation).
 | JS shims (logic, CreepJS-style shape checks) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages) | Linux, every push |
 | App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 26 runner, every push |
 | Measured surface of a macOS profile vs. the runner's real Safari | `scripts/safari_reference.py` (safaridriver) with `Resources/fingerprint_probe.js` | macOS 26 runner, every push |
-| The same pages in Safari and in on-screen profile windows of the same size: probe, window geometry (1 and 2 tabs), request header order, permissions/quota/devices, TLS + HTTP/2 (tls.peet.ws) | `scripts/live_compare.py` + `PrivacyBrowser --capture-sites` (`SiteCapture.swift`, pages in `scripts/live_sites/`) | macOS 26 runner, every push (report only: third-party sites change) |
+| The same pages in Safari and in on-screen profile windows of the same size: probe, window geometry (1 and 2 tabs), request header order, permissions/quota/devices, TLS + HTTP/2 (tls.peet.ws) | `scripts/live_compare.py` + `PrivacyBrowser --capture-sites` (`SiteCapture.swift`; the local pages' scripts in `Resources/SiteProbes/`, the sites' in `scripts/live_sites/`) | macOS 26 runner, every push (report only: third-party sites change) |
+| What sites see, as the panel takes it: a new profile's snapshot next to the runner's Safari, the sandboxed build's listener | `PrivacyBrowser --what-sites-see-check` (`SelfTest.whatSitesSeeCheck`) | macOS 26 runner, every push (Safari not answering is a warning) |
 | Nothing goes around a profile's proxy: QUIC/HTTP/3 (cloudflare-quic.com) and WebRTC (public STUN) behind real HTTP CONNECT and SOCKS5 forwarding proxies, a profile without a proxy as the control; WebRTC through the tunnel's TURN server and SOCKS5 relay (run on a UDP socket of the runner) to a proxy with UDP ASSOCIATE: relay candidates at the proxy's address, a data channel delivered through it, no relay address shown to the page | `scripts/leak_check.py` + `--capture-sites` | macOS 26 runner, every push (fails on a request seen going around a proxy, or the relay's address shown to a page) |
 | App Sandbox container migration | `--selftest-write-vault` / `--selftest-read-vault` | macOS 26 runner, every push |
 | Interactive UI (tab strip drawing, menus, sheets) | manual | — |
@@ -502,6 +503,21 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
          NSEvent keyDown → hold → keyUp → Shift up, through NSWindow.sendEvent; a character without
          a key → insertText; a local event monitor stops it on the user's key or click (the typed
          keys bypass NSApp), and so does losing the keyboard → HumanPaste.explain (a sheet)
+```
+
+## What sites see
+
+```
+⋯ → What Sites See… / ⌘K ── WhatSitesSeeView (sheet) ── WhatSitesSee (one per sheet, @MainActor)
+   take():  the profile started if stopped (AppModel.launch)
+            SiteSnapshotServer: NWListener × 2 on 127.0.0.1:any — HTTP (AutomationHTTP.parse, header
+              lines in order) and TLS (TLSClientHello.parse, then closed); tokens per side, Host checked
+            SiteSnapshotPage.html: fingerprint_probe.js + SiteProbes/{geometry,apis,headers}.js, an
+              https request to the TLS port, the report POSTed back
+            profile side: ProfileManager.openWindow(id, url:) → report → its window closed (this process)
+            Safari side:  NSWorkspace.open(url, Safari) → report (90 s) → NSApp.activate
+            SiteSnapshot(report:clientHello:) × 2 → SiteComparison.compare → [SiteSignal]
+   ProfileLibrary.recordVisit skips SiteSnapshotPage.isMeasuringPage
 ```
 
 ## Concurrency

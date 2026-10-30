@@ -35,6 +35,7 @@ struct ProfileListView: View {
     @State private var passwordsFor: ProfileSummary?
     @State private var importingCookiesFor: ProfileSummary?
     @State private var warmingUp: ProfileSummary?
+    @State private var whatSitesSeeFor: ProfileSummary?
     @State private var warmingUpSeveral = false
     /// The profiles the warm-up queue opens with ticked (the selection's bar).
     @State private var queuePreselection: Set<UUID> = []
@@ -62,6 +63,10 @@ struct ProfileListView: View {
             .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
             .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
             .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
+            .sheet(item: $whatSitesSeeFor) { profile in
+                WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
+                                                                            launch: { await model.launch($0) }))
+            }
             .sheet(isPresented: $warmingUpSeveral) { WarmUpQueueView(preselected: queuePreselection) }
             .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }
             .sheet(item: $exportingCookies) { profile in CookieExportView(profile: profile) }
@@ -141,6 +146,8 @@ struct ProfileListView: View {
                                     detail: detail, symbol: "slider.horizontal.3", run: { actions.edit(row.id) }))
             commands.append(Command(id: "warm-\(row.id)", title: String(format: L("palette.warmUp"), row.name),
                                     detail: detail, symbol: "flame", run: { actions.warmUp(row.id) }))
+            commands.append(Command(id: "see-\(row.id)", title: String(format: L("palette.whatSitesSee"), row.name),
+                                    detail: detail, symbol: "eye", run: { actions.whatSitesSee(row.id) }))
         }
         commands.append(Command(id: "proxies", title: L("palette.proxies"), symbol: "network", run: actions.openProxies))
         commands.append(Command(id: "warmQueue", title: L("profiles.menu.warmUpSeveral"), symbol: "flame", run: actions.warmUpQueue))
@@ -226,6 +233,7 @@ struct ProfileListView: View {
             importCookies: { id in importingCookiesFor = summary(id) },
             exportCookies: { id in exportingCookies = summary(id) },
             warmUp: { id in warmingUp = summary(id) },
+            whatSitesSee: { id in whatSitesSeeFor = summary(id) },
             exportProfile: { id in exporting = summary(id) },
             importProfile: { importingProfile = true },
             delete: { id in pendingDelete = summary(id) },
@@ -376,6 +384,8 @@ struct ProfileActions {
     var importCookies: (UUID) -> Void = { _ in }
     var exportCookies: (UUID) -> Void = { _ in }
     var warmUp: (UUID) -> Void = { _ in }
+    /// What a page measures in the profile next to Safari (`WhatSitesSeeView`).
+    var whatSitesSee: (UUID) -> Void = { _ in }
     var exportProfile: (UUID) -> Void = { _ in }
     var importProfile: () -> Void = {}
     var delete: (UUID) -> Void = { _ in }
@@ -958,6 +968,7 @@ private struct ProfileMenuItems: View {
         Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
         Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
         Button(L("profiles.row.warmUp")) { actions.warmUp(row.id) }
+        Button(L("profiles.row.whatSitesSee")) { actions.whatSitesSee(row.id) }
         Divider()
         Button(L("profiles.row.export")) { actions.exportProfile(row.id) }
         Divider()

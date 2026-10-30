@@ -117,6 +117,8 @@ rm -rf "$ICON_DIR"
 
 # The fingerprint probe the self-test and scripts/safari_reference.py share.
 cp Resources/fingerprint_probe.js "$APP/Contents/Resources/fingerprint_probe.js"
+# "What sites see" runs the probe and these, the scripts of CI's live comparison (scripts/live_compare.py).
+cp -R Resources/SiteProbes "$APP/Contents/Resources/SiteProbes"
 
 # Localized strings into Bundle.main, where the app looks them up (see Localization.swift).
 for lang in en ru; do

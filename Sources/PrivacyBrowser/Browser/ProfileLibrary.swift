@@ -38,7 +38,8 @@ final class ProfileLibrary: ObservableObject {
     // MARK: History
 
     func recordVisit(url: URL, title: String?) {
-        guard recordsHistory, history.recordVisit(url: url, title: title) else { return }
+        // "What sites see" measures in a window of the profile: its page is not the person's visit.
+        guard recordsHistory, !SiteSnapshotPage.isMeasuringPage(url), history.recordVisit(url: url, title: title) else { return }
         historyChanged()
     }
 

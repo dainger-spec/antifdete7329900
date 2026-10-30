@@ -107,6 +107,26 @@ enum UISnapshots {
         problems += await Shot(name: "palette-search", size: CommandPaletteView.size, titled: false) {
             CommandPaletteView(commands: paletteCommands, query: "north")
         }.capture(into: folder)
+        // What sites see: before a snapshot, its differences, every signal, and Safari silent.
+        func seen(comparedWithSafari: Bool = true) -> WhatSitesSee {
+            let snapshot = WhatSitesSee(profileID: UUID(), manager: { nil }, launch: { _ in })
+            let sample = whatSitesSeeSample()
+            snapshot.show(SiteComparison.compare(profile: sample.profile, safari: comparedWithSafari ? sample.safari : nil),
+                          comparedWithSafari: comparedWithSafari, takenAt: Date(timeIntervalSince1970: 1_793_000_000))
+            return snapshot
+        }
+        problems += await Shot(name: "what-sites-see-empty", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: WhatSitesSee(profileID: UUID(), manager: { nil }, launch: { _ in }))
+        }.capture(into: folder)
+        problems += await Shot(name: "what-sites-see", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen())
+        }.capture(into: folder)
+        problems += await Shot(name: "what-sites-see-all", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(), onlyDifferences: false)
+        }.capture(into: folder)
+        problems += await Shot(name: "what-sites-see-no-safari", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(comparedWithSafari: false), onlyDifferences: false)
+        }.capture(into: folder)
         // A tag chosen in the sidebar; the search also finds a profile by its tags and notes.
         problems += await Shot(name: "profiles-tag", size: CGSize(width: 1180, height: 560)) {
             ProfilesPreview(rows: rows, filter: .tag("ads"), sync: .off)
@@ -554,6 +574,36 @@ enum UISnapshots {
     }
 
     // MARK: Sample data
+
+    /// A profile in this app's window and Safari, as a snapshot of each might read: the same
+    /// engine, Safari's own interfaces missing, the window's bars of another height.
+    static func whatSitesSeeSample() -> (profile: SiteSnapshot, safari: SiteSnapshot) {
+        let ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15"
+        let shared: [String: String] = [
+            "probe.ua": ua, "probe.platform": "MacIntel", "probe.language": "de-DE", "probe.languages": "de-DE",
+            "probe.hardwareConcurrency": "8", "probe.timeZone": "Europe/Berlin", "probe.tzOffset": "-60",
+            "probe.screen": "1512x982", "probe.colorDepth": "30", "geometry.devicePixelRatio": "2",
+            "geometry.screen": "1512x982x1512x944x0x38", "probe.webgl.renderer": "Apple GPU", "probe.fonts": "13",
+            "headers.navigation.order": "Host,Upgrade-Insecure-Requests,Accept,User-Agent,Accept-Language,Priority,Accept-Encoding,Connection",
+            "headers.navigation.user-agent": ua, "headers.navigation.accept-language": "de-DE,de;q=0.9",
+            "tls.ja4": "t13d2014h2_a09f3c656075_e42f34c56612", "tls.alpn": "h2,http/1.1",
+            "tls.supportedGroups": "0x11ec,0x001d,0x0017,0x0018,0x0019", "apis.quota": "1006632960",
+            "apis.permission.geolocation": "prompt",
+        ]
+        var profile = shared, safari = shared
+        profile["probe.safari"] = "undefined"
+        safari["probe.safari"] = "[object SafariRemoteNotification]|pushNotification"
+        profile["probe.features.window.ApplePaySetup"] = "undefined"
+        safari["probe.features.window.ApplePaySetup"] = "function"
+        profile["probe.windowOwnCount"] = "1029"
+        safari["probe.windowOwnCount"] = "1044"
+        profile["geometry.chrome"] = "0x80"
+        safari["geometry.chrome"] = "0x87"
+        profile["geometry.outer"] = "1470x919"
+        safari["geometry.outer"] = "1280x800"
+        safari["apis.voices"] = "184"
+        return (SiteSnapshot(values: profile), SiteSnapshot(values: safari))
+    }
 
     /// The palette's commands for the sample rows, as the Profiles window builds them.
     static func paletteSample(_ rows: [ProfileRowItem]) -> [CommandPaletteView.Command] {

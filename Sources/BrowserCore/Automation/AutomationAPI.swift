@@ -28,13 +28,18 @@ public enum AutomationHTTP {
         /// Header names in lower case.
         public var headers: [String: String]
         public var body: Data
+        /// The header lines as they came, in order: the name as the client wrote it, the value
+        /// ("What sites see" compares the order a browser sends them in).
+        public var headerLines: [[String]]
 
-        public init(method: String, path: String, query: [String: String] = [:], headers: [String: String] = [:], body: Data = Data()) {
+        public init(method: String, path: String, query: [String: String] = [:], headers: [String: String] = [:], body: Data = Data(),
+                    headerLines: [[String]] = []) {
             self.method = method
             self.path = path
             self.query = query
             self.headers = headers
             self.body = body
+            self.headerLines = headerLines
         }
     }
 
@@ -122,12 +127,15 @@ public enum AutomationHTTP {
             return .invalid(.error(400, "bad_request", "Not an HTTP/1.1 request."))
         }
         var headers: [String: String] = [:]
+        var headerLines: [[String]] = []
         for line in lines.dropFirst() {
             guard let colon = line.firstIndex(of: ":") else {
                 return .invalid(.error(400, "bad_request", "A header line has no name."))
             }
-            let name = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            let written = line[..<colon].trimmingCharacters(in: .whitespaces)
+            let name = written.lowercased()
             let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            headerLines.append([written, value])
             guard !name.isEmpty, !name.contains(" ") else {
                 return .invalid(.error(400, "bad_request", "A header name is not valid."))
             }
@@ -171,7 +179,7 @@ public enum AutomationHTTP {
             query[name] = value
         }
         return .request(Request(method: String(requestLine[0]).uppercased(), path: path, query: query,
-                                headers: headers, body: Data(body)))
+                                headers: headers, body: Data(body), headerLines: headerLines))
     }
 }
 

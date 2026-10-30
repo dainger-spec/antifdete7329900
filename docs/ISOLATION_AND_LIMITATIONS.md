@@ -52,6 +52,7 @@ since):
 | Session warm-up robot | through the app's launch path behind the self-test proxy, with short waits: a plan of three pages, a `javascript:` line (skipped) and a page the proxy closes unanswered (reported, the robot goes on) is visited in order in a new tab of the profile, each page taken as visited only once it has come (never before the proxy was asked for it), and an address that only jumps within the page shown at once (also when the page then rewrites the fragment); the requests carry the profile's User-Agent and the cookies the pages before set; at the proxy, each page's followed link comes at least the plan's time after the page, and the next page at least half that after the followed one; each page is scrolled (the pages see trusted scroll events); from each page only the plain same-site link is followed, with the page as Referer — never the sign-out, other-site, file or new-window links next to it; while the robot scrolls and clicks, each page's own world sees no `window.webkit` and no robot global; history and the pages' cookies are kept; Stop during a page ends the run before its next page is requested; closing its tab and a page's alert stop it; stopping the profile stops it first (while its store is still there), and the profile's data then seals as usual. Whether wheel and mouse events reached the page or the script fallback was used is reported |
 | Warm-up queue and report | two stopped profiles queued with one plan through `WarmUpCoordinator` behind the self-test proxy: they run one after the other and never both at once, each without a window of its own, and each is stopped and sealed before the next starts; the report of each run counts the profile's cookies per site (registrable domain) — two sites with one new cookie each for the first, and for the second, which already held a cookie of the site it visits, two cookies there of which one is new; a run from the queue counts as the profile's last run for its schedule, stored encrypted |
 | Paste as Typed | in a profile window, with a page's field focused: the palette's search finds what is typed; a page with no field focused gets nothing and is told so; a window without the keyboard gets nothing. Where this machine delivers synthesized key events to a page — a control key, sent as the password checks send theirs, arrives — the text arrives as typed: a trusted `keydown` per character on its own key (`H` on `KeyH`, `М` on `KeyV`), `Shift` down and up around capitals, `input` and `keyup`. Where the control does not arrive (the password row above: not on the CI runner), the typing is not shown, and the self-test says which in its notes, printed at the end of the CI job's log. In Safari's own window (a profile's process) the item is checked to be in Safari's Edit menu |
+| What sites see | the snapshot's listener on 127.0.0.1 serves its own page and refuses another token and a name that is not this Mac's; a profile's window (no proxy, its local requests protected) measures navigator, screen, the window, the request headers in their order, a ClientHello (JA3, JA4) and the APIs, and its ClientHello is a plain WebKit view's; the page is not in the profile's history and its window closes. A separate CI step takes a new profile's snapshot next to the runner's real Safari with the sandboxed build (§2, *What sites see*) |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
@@ -158,6 +159,51 @@ What it does **not** do, and cannot:
 Compared with a deeply integrated product that ships and switches genuine per-version WebKit
 cores, this is version *labelling*, not version *emulation*. It is honest about being
 Safari on this Mac.
+
+### What sites see (a profile next to this Mac's Safari)
+
+A profile's ⋯ menu (and the command palette) has **What Sites See…**: on its button, one page of
+this Mac opens in a new window of the profile and then in Safari, and in each runs the scripts
+CI's live comparison runs (`scripts/live_compare.py`): the fingerprint probe
+(`Resources/fingerprint_probe.js`), the window's geometry, the request headers in the order the
+listener received them, and the APIs a WebKit app may answer differently
+(`Resources/SiteProbes/`, bundled with the app and read by CI from there). The page then makes an
+https request to a second port of the listener, which reads the ClientHello — versions, cipher
+suites, extensions in their order, groups, signature algorithms, ALPN, server name, JA3 and JA4,
+GREASE left out (`TLSClientHello`) — and closes the connection: a ClientHello is what any https
+server sees before anything is encrypted, and reading it takes no certificate. The page posts its
+report to the listener, and the two reports are listed signal by signal, grouped as navigator,
+screen, window, request headers, TLS, APIs and rendering: **same**, or **differs** with both
+values and, for known differences, what they mean (`window.safari` and the Apple Pay interfaces
+only Safari has, the height of the window's bars, a built-in function that a profile's wrapper
+changes). The window's own size and place are shown and not compared — each browser's window has
+its own; what the bars take of it ("chrome") is compared.
+
+**Local, on the button only.** The listener (`SiteSnapshotServer`) is on 127.0.0.1 only, on two
+ports the system picks, for as long as the snapshot takes; it answers only the snapshot's own
+tokens and only requests that name this Mac by its loopback address (a page's name that resolves
+here — DNS rebinding — is refused). The page, its scripts, its requests and the reports never
+leave this Mac, and nothing is kept: the comparison is shown and gone with the sheet. In the
+sandboxed build this needs `network.server` (§9). The page is not written to the profile's
+history; a profile of this process closes the page's window when it has reported, a profile in
+Safari's own window leaves it to the user (the page says it is done). Safari opens the page in a
+tab of its own, as any page, and keeps it in its history.
+
+**What it does not measure.** HTTP/2 settings and the TCP SYN (they take a site's own server; CI's
+live comparison reads them on tls.peet.ws), and anything a third-party fingerprinting site adds on
+its own. Safari is the user's Safari as it is — its window, its extensions, its settings — so a
+difference can be Safari's (a window of another size changes nothing compared; its bars do). A
+Safari that does not answer within 90 seconds leaves the profile's values listed alone.
+
+**Checked by** unit tests (a ClientHello parsed as a server reads it, also across two records;
+JA3 and JA4 against values computed apart from the code; what is not a ClientHello; the report
+flattened; the comparison and its groups; the page's escaping), the self-test (the listener
+answers its own page and refuses another token and another name; a profile's window, its local
+requests protected, measures every part — navigator, screen, window, headers in order, a
+ClientHello, APIs; its ClientHello is a plain WebKit view's; the page is neither in its history
+nor left open; all of it inside the egress capture), and CI's step "What sites see", which takes a
+new profile's snapshot next to the runner's real Safari with the sandboxed build after the
+capture (a Safari that does not answer is a warning).
 
 ### What remains impossible with public APIs
 
@@ -1011,14 +1057,15 @@ signature and fails if the sandbox state isn't what was requested.
 |---|---|
 | `com.apple.security.app-sandbox` | the sandbox itself |
 | `com.apple.security.network.client` | all WKWebView networking (WebKit's network process acts on the app's behalf), proxies, HTTP sync |
+| `com.apple.security.network.server` | "What sites see" only: a listener on 127.0.0.1 (two ports the system picks), open while a snapshot is taken, that the measuring page in the profile's window and in Safari reports to (§2, *What sites see*). Nothing else listens: the automation API stays in the build without the sandbox |
 | `com.apple.security.device.camera`, `…device.audio-input` | `getUserMedia`, after the in-app prompt (also required under the hardened runtime) |
 | `com.apple.security.files.user-selected.read-write` | `<input type=file>` uploads; choosing the sync folder (Powerbox) |
 | `com.apple.security.files.downloads.read-write` | saving downloads to `~/Downloads` |
 | `com.apple.security.files.bookmarks.app-scope` | remembering the sync folder across launches (security-scoped bookmark) |
 | `com.apple.security.temporary-exception.files.home-relative-path.read-write`: `/Library/Caches/<bundle-id>.update/` | the one folder outside the container the app writes: where it stages a checked update for the installer helper, which runs outside the sandbox and so never reads the container (docs/UPDATES.md §3) |
 
-Not requested: `network.server` (the app never listens), location, contacts, calendars,
-printing, Apple Events, JIT (WebKit's JIT runs in Apple's own WebContent process).
+Not requested: location, contacts, calendars, printing, Apple Events, JIT (WebKit's JIT runs
+in Apple's own WebContent process).
 
 **What changes inside the sandbox:**
 
