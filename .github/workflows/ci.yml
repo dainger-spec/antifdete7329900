@@ -558,7 +558,9 @@ jobs:
           code=${PIPESTATUS[0]}
           grep "^PAYMENTS-SUMMARY" build/payments.txt | head -10 | cut -c1-2000 \
             | sed 's/^/::notice title=Payments and push - summary::/'
-          if [ "$code" != "0" ]; then echo "::warning::payments_check.py exited $code (2: Safari did not report; 1: a variant did not)"; fi
+          if [ "$code" != "0" ]; then echo "::warning::payments_check.py exited $code (1: a variant did not report; 2: Safari did not; 3: every side reported, but the throwaway authority was not removed)"; fi
+          grep "^PAYMENTS the throwaway authority" build/payments.txt | head -2 | cut -c1-600 \
+            | sed 's/^/::notice title=Payments and push - the throwaway authority::/' || true
           exit 0
       - name: Apple Pay, Payment Request and Web Push — the answers
         if: always()

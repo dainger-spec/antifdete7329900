@@ -38,7 +38,8 @@ Prints a PAYMENTS line per call and side; then, per side, a PAYMENTS-SUMMARY lin
 PAYMENTS-CALLS line (Safari's every answer, a variant's where Safari answers otherwise) and a
 PAYMENTS-NAMES line (the window's own property names only one side has); and writes every report
 to --out/payments.json. Exit 0 when Safari and every variant reported, 2 when Safari did not
-(nothing to compare with), 1 when a variant did not.
+(nothing to compare with), 1 when a variant did not; 3 when every side reported but the throwaway
+authority could not be removed again (a line says so, and what to remove by hand).
 """
 
 import argparse
@@ -208,6 +209,8 @@ class Trust:
     sudo (`system`, CI), or in the user's login keychain (`user`: macOS asks for the user's
     password or Touch ID, to add and to remove it)."""
 
+    TIMEOUT = 120
+
     def __init__(self, ca, where):
         self.ca = ca
         self.where = where
@@ -216,7 +219,7 @@ class Trust:
 
     def security(self, *arguments):
         prefix = ["sudo", "-n"] if self.where == "system" else []
-        return run(prefix + ["security", *arguments], timeout=120)
+        return run(prefix + ["security", *arguments], timeout=self.TIMEOUT)
 
     def keychain(self):
         if self.where == "system":
@@ -238,15 +241,31 @@ class Trust:
             run(["sudo", "-n", "-v"])
 
     def remove(self):
+        """Takes the authority's trust back and deletes it from the keychain. False, with what was
+        left and what to do about it said, when the certificate is still there: a `security` that
+        does not return (it waits for an authorization no one answers, as on a CI runner) is said
+        as such, not taken for a side that did not report."""
         if not self.added:
-            return
+            return True
         self.added = False
         domain = ["-d"] if self.where == "system" else []
-        self.security("remove-trusted-cert", *domain, self.ca)
-        result = self.security("delete-certificate", "-c", CA_NAME, self.keychain())
+        outcomes = []
+        for step in (["remove-trusted-cert", *domain, self.ca], ["delete-certificate", "-c", CA_NAME, self.keychain()]):
+            try:
+                result = self.security(*step)
+                outcomes.append((step[0], result.returncode == 0,
+                                 f"exit {result.returncode}" + (f" {result.stderr.strip()[:200]}" if result.returncode else "")))
+            except subprocess.TimeoutExpired:
+                outcomes.append((step[0], False, f"did not return within {self.TIMEOUT} s"))
         self.keeping.set()
-        log(f"PAYMENTS the throwaway authority removed: exit {result.returncode}"
-            + ("" if result.returncode == 0 else f" — remove \"{CA_NAME}\" from {self.keychain()} by hand"))
+        said = "; ".join(f"{name}: {detail}" for name, _, detail in outcomes)
+        deleted = outcomes[-1][1]
+        if deleted:
+            log(f"PAYMENTS the throwaway authority removed ({said})")
+        else:
+            log(f"PAYMENTS the throwaway authority NOT removed ({said}): remove \"{CA_NAME}\" from {self.keychain()} "
+                "by hand. Its key was deleted before it was trusted, so nothing can be signed with it.")
+        return deleted
 
 
 class Pages:
@@ -396,65 +415,72 @@ def main():
         return 64
     os.makedirs(options.out, exist_ok=True)
     work = tempfile.mkdtemp(prefix="pb-payments-")
-    trust = None
+    trusted = []
     try:
-        made = None if options.http else make_certificates(work)
-        push_key = application_server_key(work)
-        if (made is None and not options.http) or push_key is None:
-            log("PAYMENTS could not make the certificates or the push key")
-            return 1
-        ca, leaf, key = made if made else (None, None, None)
-        if options.trust and not options.http:
-            trust = Trust(ca, options.trust)
-            signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
-            if not trust.add():
-                log("PAYMENTS the authority could not be trusted: neither browser would load the page")
-                return 1
-        pages = Pages(leaf, key, push_key)
-        log(f"PAYMENTS the page is served at {pages.scheme}://127.0.0.1:{pages.port}/pay")
-
-        safari = None
-        if not options.no_safari:
-            subprocess.run(["open", "-b", "com.apple.Safari", pages.url("safari")])
-            safari = pages.wait("safari", 90)
-            log("PAYMENTS Safari " + ("reported" if safari else "did not report within 90 s"))
-
-        missing = []
-        for variant in variants:
-            command = [executable, "--payments-check", "--url", pages.url(variant), "--variant", variant]
-            if options.proxy != "none":
-                command += ["--proxy", options.proxy]
-            try:
-                result = subprocess.run(command, capture_output=True, text=True, timeout=300)
-                for line in result.stdout.splitlines():
-                    if line.startswith("PAYMENTS-CHECK"):
-                        log(line)
-            except subprocess.TimeoutExpired:
-                log(f"PAYMENTS {variant}: the app did not finish within 300 s")
-            if pages.wait(variant, 1) is None:
-                missing.append(variant)
-
-        lines = []
-        if safari:
-            lines.append(compare("safari", safari, safari))
-        for variant in variants:
-            report = pages.reports.get(variant)
-            lines.append(compare(variant, report, safari) if report else (f"{variant}: no report", None, None))
-        with open(os.path.join(options.out, "payments.json"), "w") as handle:
-            json.dump(pages.reports, handle, indent=1, ensure_ascii=False)
-        # Last, one kind to a line, so that CI can turn each kind into notices of its own.
-        for prefix, index in (("PAYMENTS-SUMMARY", 0), ("PAYMENTS-CALLS", 1), ("PAYMENTS-NAMES", 2)):
-            for line in lines:
-                if line[index]:
-                    log(f"{prefix} {line[index]}")
-        if missing:
-            log(f"PAYMENTS no report from: {', '.join(missing)}")
-            return 1
-        return 0 if safari or options.no_safari else 2
+        code = measure(options, executable, variants, work, trusted)
     finally:
-        if trust:
-            trust.remove()
+        removed = all([trust.remove() for trust in trusted])
         shutil.rmtree(work, ignore_errors=True)
+    return code if code or removed else 3
+
+
+def measure(options, executable, variants, work, trusted):
+    """Serves the page, has Safari and every variant report, prints the comparison. The authority it
+    trusts goes into `trusted`, for main to remove whatever happens here."""
+    made = None if options.http else make_certificates(work)
+    push_key = application_server_key(work)
+    if (made is None and not options.http) or push_key is None:
+        log("PAYMENTS could not make the certificates or the push key")
+        return 1
+    ca, leaf, key = made if made else (None, None, None)
+    if options.trust and not options.http:
+        trust = Trust(ca, options.trust)
+        trusted.append(trust)
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
+        if not trust.add():
+            log("PAYMENTS the authority could not be trusted: neither browser would load the page")
+            return 1
+    pages = Pages(leaf, key, push_key)
+    log(f"PAYMENTS the page is served at {pages.scheme}://127.0.0.1:{pages.port}/pay")
+
+    safari = None
+    if not options.no_safari:
+        subprocess.run(["open", "-b", "com.apple.Safari", pages.url("safari")])
+        safari = pages.wait("safari", 90)
+        log("PAYMENTS Safari " + ("reported" if safari else "did not report within 90 s"))
+
+    missing = []
+    for variant in variants:
+        command = [executable, "--payments-check", "--url", pages.url(variant), "--variant", variant]
+        if options.proxy != "none":
+            command += ["--proxy", options.proxy]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+            for line in result.stdout.splitlines():
+                if line.startswith("PAYMENTS-CHECK"):
+                    log(line)
+        except subprocess.TimeoutExpired:
+            log(f"PAYMENTS {variant}: the app did not finish within 300 s")
+        if pages.wait(variant, 1) is None:
+            missing.append(variant)
+
+    lines = []
+    if safari:
+        lines.append(compare("safari", safari, safari))
+    for variant in variants:
+        report = pages.reports.get(variant)
+        lines.append(compare(variant, report, safari) if report else (f"{variant}: no report", None, None))
+    with open(os.path.join(options.out, "payments.json"), "w") as handle:
+        json.dump(pages.reports, handle, indent=1, ensure_ascii=False)
+    # Last, one kind to a line, so that CI can turn each kind into notices of its own.
+    for prefix, index in (("PAYMENTS-SUMMARY", 0), ("PAYMENTS-CALLS", 1), ("PAYMENTS-NAMES", 2)):
+        for line in lines:
+            if line[index]:
+                log(f"{prefix} {line[index]}")
+    if missing:
+        log(f"PAYMENTS no report from: {', '.join(missing)}")
+        return 1
+    return 0 if safari or options.no_safari else 2
 
 
 if __name__ == "__main__":
