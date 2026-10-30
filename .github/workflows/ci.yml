@@ -55,6 +55,11 @@ jobs:
         # The extension needs a provisioned team to be signed and loaded (NE=1); CI compiles it
         # against this SDK and lays out its bundle so its plists are checked.
         run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Release, dry run (no Apple account, a throwaway update key)
+        # scripts/release.sh end to end: the app built with an update feed and keys, signed (ad hoc),
+        # zipped, the zip signed with Ed25519, the appcast made and signed, both checked with the
+        # app's own code (pbupdate verify). Notarization and stapling are skipped and said so.
+        run: VERSION=0.1.1 BUILD=2 OUT=build/release scripts/release.sh
       - name: UI snapshots for design review, and clicks through the transparent title bar
         # The app's screens rendered with sample data (UISnapshots.swift) in both UI languages, uploaded
         # as the ui-snapshots artifact. A click that does not reach its button fails the job at the end.

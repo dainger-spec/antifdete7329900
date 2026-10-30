@@ -174,7 +174,8 @@ if [[ "${DEBUGGABLE:-0}" == "1" ]]; then
 fi
 
 TIMESTAMP="--timestamp=none"
-[[ "$NE" != "1" ]] || TIMESTAMP="--timestamp"   # notarization needs a secure timestamp
+# A Developer ID signature is notarized, and notarization needs a secure timestamp.
+[[ "$NE" != "1" && "$SIGN_IDENTITY" == "-" ]] || TIMESTAMP="--timestamp"
 # Inside out: the helper first (no entitlements: no sandbox), then the app, whose signature seals it.
 codesign --force --options runtime "$TIMESTAMP" --sign "$SIGN_IDENTITY" "$HELPER"
 codesign --force --options runtime "$TIMESTAMP" \

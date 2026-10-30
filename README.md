@@ -348,7 +348,8 @@ Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
 Tests/UpdateInstallerTests/        the installer on real signed bundles (macOS)
 Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist,
                                    Updater/Info.plist (the installer helper)
-scripts/                           build-app.sh, test-shims.mjs, selftest_proxy.py, safari_reference.py,
+scripts/                           build-app.sh, release.sh (a release, or a dry run of one), test-shims.mjs,
+                                   selftest_proxy.py, safari_reference.py,
                                    update_public_suffix_list.py,
                                    live_compare.py + live_sites/ (pages measured in Safari and in profiles),
                                    leak_check.py (QUIC/WebRTC around a proxy)
