@@ -95,6 +95,7 @@ final class ProfileProcess {
                       locale: String?,
                       timeZone: String?,
                       forWarmUpOnly: Bool = false,
+                      proxyLocationFound: Bool = false,
                       preferences: BrowsingPreferences = BrowsingPreferences()) throws -> ProfileProcess {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
@@ -110,6 +111,7 @@ final class ProfileProcess {
 
         process.environment = try childEnvironment(inheriting: ProcessInfo.processInfo.environment, home: home,
                                                    vaultRoot: vaultRoot, timeZone: timeZone, forWarmUpOnly: forWarmUpOnly,
+                                                   proxyLocationFound: proxyLocationFound,
                                                    preferences: preferences)
 
         let keyPipe = Pipe()
@@ -178,9 +180,14 @@ final class ProfileProcess {
     /// window opens by them — its tabs restored, its zoom — before anything arrives on its channel.
     static let browsingPreferencesVariable = "PB_BROWSING"
 
+    /// Set when the manager found where the profile's proxy exits for this very launch, moments
+    /// before it started the process: the location is in the profile's settings already, and the
+    /// process does not ask the geolocation services a second time (`ProfileManager.launch`).
+    static let proxyLocationFoundVariable = "PB_PROXY_LOCATION_FOUND"
+
     /// The environment of a profile's process, built from `inheritedEnvironment` and the profile.
     static func childEnvironment(inheriting parent: [String: String], home: URL, vaultRoot: URL,
-                                 timeZone: String?, forWarmUpOnly: Bool,
+                                 timeZone: String?, forWarmUpOnly: Bool, proxyLocationFound: Bool = false,
                                  preferences: BrowsingPreferences = BrowsingPreferences()) throws -> [String: String] {
         var environment = parent.filter { inheritedEnvironment.contains($0.key) }
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -205,6 +212,7 @@ final class ProfileProcess {
         // Started to warm the profile up and nothing else: it opens no window of its own and
         // quits when the run ends, which is what seals what the run collected.
         if forWarmUpOnly { environment["PB_WARM_UP_ONLY"] = "1" }
+        if proxyLocationFound { environment[proxyLocationFoundVariable] = "1" }
         if let json = try? JSONEncoder().encode(preferences) {
             environment[browsingPreferencesVariable] = String(decoding: json, as: UTF8.self)
         }

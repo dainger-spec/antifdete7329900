@@ -196,14 +196,16 @@ final class ProfileManager: ObservableObject {
             // remembered for the proxy yet — a first launch, or a new proxy — they are looked up
             // here first, as briefly as a launch in this process waits, rather than the process
             // starting with this Mac's own languages and learning the proxy's only for next time.
+            var foundNow = false
             if stored.needsProxyLocation, stored.rememberedProxyLocation == nil, (try? stored.proxy?.validate()) != nil {
                 let lookup = Task { await self.lookUpProxyLocation(stored) }
                 if let result = await Self.value(of: lookup, within: Self.firstLookupWait), result.location != nil {
                     proxyLookupFinished(result, for: id, name: summary.name, stored: stored)
                     stored = (try? repository.loadConfiguration(id, key: key)) ?? stored
+                    foundNow = true
                 }
             }
-            try startInOwnProcess(id, summary: summary, stored: stored, forWarmUpOnly: !openingWindow)
+            try startInOwnProcess(id, summary: summary, stored: stored, forWarmUpOnly: !openingWindow, proxyLocationFound: foundNow)
             return
         }
         // Refuse a proxy that cannot be applied before decrypting anything: the profile must not
@@ -227,7 +229,7 @@ final class ProfileManager: ObservableObject {
         let token = UUID()
         latestLaunch[id] = token
         var lookupTask: Task<ProxyGeoLookup.Result, Never>?
-        if stored.needsProxyLookup {
+        if stored.needsProxyLookup, !locationFoundByManager {
             lookupsInFlight.insert(token)
             lookupTask = Task {
                 let result = await self.lookUpProxyLocation(stored)
@@ -340,7 +342,7 @@ final class ProfileManager: ObservableObject {
     /// answer applies at its next launch. For a profile that does not follow its proxy, the user's
     /// own languages, as Safari uses them.
     private func startInOwnProcess(_ id: UUID, summary: ProfileSummary, stored: ProfileConfiguration,
-                                   forWarmUpOnly: Bool = false) throws {
+                                   forWarmUpOnly: Bool = false, proxyLocationFound: Bool = false) throws {
         guard let executable = Bundle.main.executableURL else { throw CoreError.corruptData("no executable path") }
         let location = stored.needsProxyLocation ? stored.rememberedProxyLocation : nil
         let languages = location.map { [$0.webLanguage] } ?? WebContentLanguage.systemLanguages
@@ -358,6 +360,7 @@ final class ProfileManager: ObservableObject {
             locale: languages.first.map { $0.replacingOccurrences(of: "-", with: "_") },
             timeZone: stored.timeZoneIdentifier ?? location?.timeZoneIdentifier,
             forWarmUpOnly: forWarmUpOnly,
+            proxyLocationFound: proxyLocationFound,
             preferences: BrowsingPreferences.current.forProfileProcess)
         child.onEvent = { [weak self] event in
             guard let self else { return }
@@ -534,6 +537,14 @@ final class ProfileManager: ObservableObject {
             defer { claimed = true }
             return !claimed
         }
+    }
+
+    /// In a profile's own process: the manager found where the proxy exits for this very launch,
+    /// moments before it started the process, and stored it in the profile's settings — which is
+    /// what this launch runs by. Asking the services again would be a second request for one
+    /// launch, and one that fails here would say the location is unknown when it was just found.
+    private var locationFoundByManager: Bool {
+        runsInProfileProcess && ProcessInfo.processInfo.environment[ProfileProcess.proxyLocationFoundVariable] == "1"
     }
 
     private func lookUpProxyLocation(_ configuration: ProfileConfiguration) async -> ProxyGeoLookup.Result {

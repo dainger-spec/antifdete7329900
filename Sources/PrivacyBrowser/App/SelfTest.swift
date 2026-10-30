@@ -1856,8 +1856,9 @@ final class SelfTest {
               manager.proxyLocationUnknown.contains(profile.id))
 
         // A first service the proxy holds open (it answers only after 20 s) leaves time for the next
-        // one: each service is waited for at most `perServiceTimeout`. It used to have the whole
-        // lookup's time, and the services after it were never asked.
+        // one: it is waited for alone at most `nextServiceAfter`, then the next is asked as well. It
+        // used to have the whole lookup's time, and the services after it were never asked. (A slow
+        // service that is the only one is still waited for: the launch checks above, 4 and 8 s.)
         ProxyGeoLookup.services = [
             .init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json?delay=20&tz=Asia/Tokyo")!,
                   timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
@@ -1868,7 +1869,7 @@ final class SelfTest {
                                                      userAgent: "PrivacyBrowser self-test")
         let heldFor = Date().timeIntervalSince(held)
         check("proxy location: a service the proxy holds open does not use up the lookup, the next one answers",
-              behindHeld.location?.timeZoneIdentifier == "Europe/Berlin" && heldFor < ProxyGeoLookup.perServiceTimeout + 4,
+              behindHeld.location?.timeZoneIdentifier == "Europe/Berlin" && heldFor < ProxyGeoLookup.nextServiceAfter + 4,
               "\(behindHeld.location?.timeZoneIdentifier ?? "nil") after \(Int(heldFor)) s")
 
         var explicit = stored

@@ -25,9 +25,9 @@ enum ProxyGeoLookup {
         var organizationKeyPath: [String]? = nil
     }
 
-    /// HTTPS services that need no API key, tried in order until one answers, each for at most
-    /// `perServiceTimeout`: a proxy that cuts one of them (they are blocked often) must leave time
-    /// for the others. Replaced by the self-test with endpoints of its local proxy.
+    /// HTTPS services that need no API key, asked in order until one answers (`nextServiceAfter`):
+    /// a proxy that cuts or holds one of them (they are blocked often) must leave time for the
+    /// others. Replaced by the self-test with endpoints of its local proxy.
     static var services: [Service] = [
         Service(url: URL(string: "https://ipinfo.io/json")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"],
                 cityKeyPath: ["city"], asnKeyPath: ["org"], organizationKeyPath: ["org"]),
@@ -39,11 +39,15 @@ enum ProxyGeoLookup {
                 cityKeyPath: ["city"], asnKeyPath: ["asn"], organizationKeyPath: ["org"]),
     ]
 
-    /// The longest one service is waited for. Before this, the first service had the whole
-    /// lookup's time: a proxy that held ipinfo.io's connection open used it all, and the services
-    /// after it were never asked (the owner's Mac, 2026-10-30: "ipinfo.io through the proxy failed"
-    /// at every launch, and no location).
-    static var perServiceTimeout: TimeInterval = 3.5
+    /// How long a service is waited for alone: after that the next one is asked as well, and the
+    /// first answer with a location wins. One that fails is followed by the next at once. The first
+    /// service used to have the whole lookup's time: a proxy that held ipinfo.io's connection open
+    /// used it all, and the services after it were never asked (the owner's Mac, 2026-10-30:
+    /// "ipinfo.io through the proxy failed" at every launch, and no location). A hard limit per
+    /// service would cut off one that is slow through a slow proxy, and is the only one that
+    /// answers: none here, a service keeps going until the lookup's own time is up. When the first
+    /// answers in time, it is the only one asked, as before.
+    static var nextServiceAfter: TimeInterval = 3
 
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "ProxyGeoLookup")
 
@@ -91,37 +95,110 @@ enum ProxyGeoLookup {
         var result = Result()
         let deadline = Date().addingTimeInterval(timeout)
         let endpoint = ProxyLocation.endpoint(of: proxy)
-        lookup: for service in services {
-            let remaining = deadline.timeIntervalSinceNow
-            guard remaining > 0.5 else { break }
-            var request = URLRequest(url: service.url)
-            request.timeoutInterval = min(remaining, perServiceTimeout)
-            let asked = Date()
-            do {
-                let (data, response) = try await session.data(for: request)
-                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                if response is HTTPURLResponse, !result.answered {
-                    result.answered = true
-                    result.latency = Date().timeIntervalSince(asked)
-                }
-                if status == 200, let location = ProxyLocation.parse(data, timeZoneKeyPath: service.timeZoneKeyPath,
-                                                                     countryKeyPath: service.countryKeyPath,
-                                                                     ipKeyPath: service.ipKeyPath, proxyEndpoint: endpoint) {
-                    log.info("Proxy \(endpoint, privacy: .private) exits in \(location.timeZoneIdentifier, privacy: .private) (\(location.countryCode ?? "?", privacy: .private)) per \(service.url.host ?? "?", privacy: .public)")
-                    result.location = location
-                    result.details = ProxyExitDetails.parse(data, cityKeyPath: service.cityKeyPath, asnKeyPath: service.asnKeyPath,
-                                                            organizationKeyPath: service.organizationKeyPath)
-                    break lookup
-                }
-                log.notice("\(service.url.host ?? "?", privacy: .public) gave no location (HTTP \(status))")
-            } catch {
-                log.notice("\(service.url.host ?? "?", privacy: .public) through the proxy failed: \(error.localizedDescription, privacy: .private)")
+        let services = Self.services
+        let stagger = UInt64(max(0.1, nextServiceAfter) * 1_000_000_000)
+        let untilDeadline = UInt64(max(0, timeout) * 1_000_000_000)
+        await withTaskGroup(of: Event.self) { group in
+            var next = 0
+            var asking = 0
+            group.addTask {
+                try? await Task.sleep(nanoseconds: untilDeadline)
+                return .deadline
             }
-            if challenges.proxyRequiredCredentials { break }
+            var askNext = !services.isEmpty
+            while true {
+                if askNext, next < services.count {
+                    let service = services[next]
+                    next += 1
+                    asking += 1
+                    group.addTask { .answer(await ask(service, session: session, endpoint: endpoint, deadline: deadline)) }
+                    if next < services.count {
+                        group.addTask {
+                            try? await Task.sleep(nanoseconds: stagger)
+                            return .nextDue
+                        }
+                    }
+                }
+                askNext = false
+                if asking == 0 {
+                    break // every service asked has failed, and there is none left
+                }
+                guard let event = await group.next() else { break }
+                switch event {
+                case .deadline:
+                    group.cancelAll()
+                    return
+                case .nextDue:
+                    askNext = true
+                case .answer(let answer):
+                    asking -= 1
+                    if let latency = answer.answeredAfter, !result.answered {
+                        result.answered = true
+                        result.latency = latency
+                    }
+                    if let location = answer.location {
+                        result.location = location
+                        result.details = answer.details
+                        group.cancelAll()
+                        return
+                    }
+                    // A proxy that wants a login it has not got answers no service: no use asking more.
+                    if challenges.proxyRequiredCredentials {
+                        group.cancelAll()
+                        return
+                    }
+                    askNext = true // this one failed: the next at once
+                }
+            }
+            group.cancelAll()
         }
         result.proxyRequiresCredentials = challenges.proxyRequiredCredentials
         result.connections = challenges.connections
         return result
+    }
+
+    private enum Event: Sendable {
+        case answer(Answer)
+        /// The service asked last has been waited for alone long enough (`nextServiceAfter`).
+        case nextDue
+        /// The lookup's own time is up.
+        case deadline
+    }
+
+    private struct Answer: Sendable {
+        var location: ProxyLocation?
+        var details = ProxyExitDetails()
+        /// How long the service took to answer at all (any HTTP answer); nil when it did not.
+        var answeredAfter: TimeInterval?
+    }
+
+    /// One service, asked through the lookup's session, until the lookup's deadline.
+    private static func ask(_ service: Service, session: URLSession, endpoint: String, deadline: Date) async -> Answer {
+        var request = URLRequest(url: service.url)
+        request.timeoutInterval = max(0.5, deadline.timeIntervalSinceNow)
+        let asked = Date()
+        do {
+            let (data, response) = try await session.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let answeredAfter = response is HTTPURLResponse ? Date().timeIntervalSince(asked) : nil
+            if status == 200, let location = ProxyLocation.parse(data, timeZoneKeyPath: service.timeZoneKeyPath,
+                                                                 countryKeyPath: service.countryKeyPath,
+                                                                 ipKeyPath: service.ipKeyPath, proxyEndpoint: endpoint) {
+                log.info("Proxy \(endpoint, privacy: .private) exits in \(location.timeZoneIdentifier, privacy: .private) (\(location.countryCode ?? "?", privacy: .private)) per \(service.url.host ?? "?", privacy: .public)")
+                return Answer(location: location,
+                              details: ProxyExitDetails.parse(data, cityKeyPath: service.cityKeyPath, asnKeyPath: service.asnKeyPath,
+                                                              organizationKeyPath: service.organizationKeyPath),
+                              answeredAfter: answeredAfter)
+            }
+            log.notice("\(service.url.host ?? "?", privacy: .public) gave no location (HTTP \(status))")
+            return Answer(answeredAfter: answeredAfter)
+        } catch {
+            // One the lookup no longer waits for (another answered, or its time is up) says nothing.
+            if !Task.isCancelled {
+                log.notice("\(service.url.host ?? "?", privacy: .public) through the proxy failed: \(error.localizedDescription, privacy: .private)")
+            }
+            return Answer()
+        }
     }
 }
 
