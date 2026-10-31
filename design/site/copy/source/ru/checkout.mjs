@@ -1,16 +1,34 @@
 // Оплата — своя страница, не страница процессинга (решение владельца, вопрос 8): сервер получает адрес через API
 // процессинга, страница показывает адрес, QR-код, сумму, таймер и статус; человек не уходит с сайта; название
-// процессинга здесь не выводится. Минимально: одна колонка — сумма, месяц или год, и карточка перевода. Какие монеты
-// и сети — ещё решение владельца (вопрос 13). Адрес, количество монеты, таймер и даты — пример для макета.
+// процессинга здесь не выводится. Минимально: одна колонка — сумма, месяц или год, и карточка перевода. Монета
+// выбирается из списка с поиском: монет и сетей будет много. Какие именно — ещё решение владельца (вопрос 13);
+// список, количество монеты, адреса, таймер и даты — пример для макета.
 export default {
   title: 'Оплата',
   description: 'Оплата {{name}} криптовалютой: адрес, QR-код, сумма, таймер и статус платежа — на нашей странице.',
   back: 'Тариф и оплата',
   plan: 'Тариф Профессиональный',
-  periods: [['Месяц', '$59', 'Период продлится до 29 декабря 2026', '59.00 USDT'], ['Год', '$590', 'Цена десяти месяцев · период продлится до 29 ноября 2027', '590.00 USDT']],
-  coins: ['USDT', 'BTC', 'ETH'],
-  network: 'Сеть Tron (TRC-20)',
-  address: 'TLumenExampLeAddr3ssQ7nS4yE9wq2Xb8u',
+  periods: [['Месяц', '$59', 'Период продлится до 29 декабря 2026'], ['Год', '$590', 'Цена десяти месяцев · период продлится до 29 ноября 2027']],
+  coinLabel: 'Монета и сеть',
+  coinSearch: 'Монета или сеть',
+  coinEmpty: 'Ничего не нашлось',
+  network: 'Сеть {net}',
+  coins: [
+    { t: 'USDT', n: 'Tether', net: 'Tron (TRC-20)', m: '59.00', y: '590.00', a: 'TLumenExampLeAddr3ssQ7nS4yE9wq2Xb8u' },
+    { t: 'USDT', n: 'Tether', net: 'Ethereum (ERC-20)', m: '59.00', y: '590.00', a: '0x4c7e9a1f2b3d5e6f7081a2b3c4d5e6f708192a3b' },
+    { t: 'USDT', n: 'Tether', net: 'TON', m: '59.00', y: '590.00', a: 'UQLumenExample_9kVz2fQ7xR4mW8pB3nT6yH1cJ5dG0' },
+    { t: 'USDC', n: 'USD Coin', net: 'Ethereum (ERC-20)', m: '59.00', y: '590.00', a: '0x91b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9' },
+    { t: 'USDC', n: 'USD Coin', net: 'Solana', m: '59.00', y: '590.00', a: '7xKLumenExample3Pq9wZ5rT2nV8bY4mJ6cH1dF0gS' },
+    { t: 'BTC', n: 'Bitcoin', net: 'Bitcoin', m: '0.00061', y: '0.0061', a: 'bc1qexample0lumen7x9k2m4p6r8t0v2w4y6z8a0c2e4' },
+    { t: 'ETH', n: 'Ethereum', net: 'Ethereum', m: '0.0172', y: '0.172', a: '0x2e8f0a4c6b8d0f2a4c6e8a0c2e4f6a8c0e2a4c6e' },
+    { t: 'SOL', n: 'Solana', net: 'Solana', m: '0.33', y: '3.3', a: '9mLumenExample5Rq2wZ8rT4nV1bY7mJ3cH6dF2gK' },
+    { t: 'TON', n: 'Toncoin', net: 'TON', m: '11.8', y: '118', a: 'UQLumenExample_4hTq8nR2xW6mZ9pC5vB1yK3dF7gJ' },
+    { t: 'LTC', n: 'Litecoin', net: 'Litecoin', m: '0.71', y: '7.1', a: 'ltc1qexample0lumen5v8k2m4p6r8t0v2w4y6z8a0c' },
+    { t: 'TRX', n: 'TRON', net: 'Tron', m: '245.6', y: '2456', a: 'TLumenExampLeTrx7q9wZ5rT2nV8bY4mJ6cH1' },
+    { t: 'BNB', n: 'BNB', net: 'BNB Smart Chain (BEP-20)', m: '0.098', y: '0.98', a: '0x6a0c2e4f6a8c0e2a4c6e8a0c2e4f6a8c0e2a4c6e' },
+    { t: 'DOGE', n: 'Dogecoin', net: 'Dogecoin', m: '352.4', y: '3524', a: 'DLumenExampLe7q9wZ5rT2nV8bY4mJ6cH1d' },
+    { t: 'POL', n: 'Polygon', net: 'Polygon', m: '141.2', y: '1412', a: '0x3b5d7f9a1c3e5a7c9e1a3c5e7a9c1e3a5c7e9a1c' },
+  ],
   copy: 'Скопировать адрес',
   qr: 'QR-код: адрес и сумма',
   status: 'Ждём перевод',
