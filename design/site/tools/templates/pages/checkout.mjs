@@ -1,5 +1,5 @@
 import { inline, esc } from '../../lib/html.mjs';
-import { icon, mark, wordmark } from '../../lib/kit.mjs';
+import { icon, glyph } from '../../lib/kit.mjs';
 
 // The payment page: our own, not the processor's (q8). The server gets an address from the processor's API; the
 // page shows it with a QR code, the amount, a timer and the status, and the person never leaves the site. The
@@ -45,10 +45,10 @@ export default function checkout(c, { lang }) {
     #pay-month:focus-visible ~ .container .pay label[for="pay-month"], #pay-year:focus-visible ~ .container .pay label[for="pay-year"] { outline: 2px solid var(--accent); outline-offset: 1px; }
     .pay-back { display: inline-flex; align-items: center; gap: 6px; font: var(--t-small); color: var(--text-tertiary); }
     .pay-back:hover { color: var(--text-primary); text-decoration: none; }
-    /* Lumen Pay: the mark, LUMEN and «Pay» — our own payment page, never the processor's name */
-    .pay-brand { display: inline-flex; align-items: center; gap: 10px; margin-top: 36px; color: var(--text-primary); }
-    .pay-brand .pay-wm svg { display: block; }
-    .pay-brand .pay-pay { font: 600 23px/1 var(--font-display); letter-spacing: -0.01em; margin-left: -1px; }
+    /* Lumen Pay: the round mark alone (no tile behind it) and «Pay» — our own payment page, never the processor's name */
+    .pay-brand { display: inline-flex; align-items: center; gap: 2px; margin-top: 36px; color: var(--text-primary); }
+    .pay-brand svg { display: block; flex: none; }
+    .pay-brand .pay-pay { font: 600 27px/1 var(--font-display); letter-spacing: -0.015em; }
     .pay-head { margin-top: 26px; display: grid; justify-items: center; gap: 6px; }
     .pay-plan { font: var(--t-small); color: var(--text-secondary); }
     .pay-sum { font: 600 56px/60px var(--font-display); letter-spacing: -0.025em; color: var(--text-primary); font-variant-numeric: tabular-nums; }
@@ -110,7 +110,7 @@ export default function checkout(c, { lang }) {
   <div class="container"><div class="pay" data-pay>
     <a class="pay-back" href="account.html">${icon('arrowLeft', 13)}${inline(c.back, lang)}</a>
     <h1 class="visually-hidden">${inline(c.title, lang)}</h1>
-    <div><span class="pay-brand" aria-label="Lumen Pay">${mark(30)}<span class="pay-wm">${wordmark(16, 'currentColor')}</span><span class="pay-pay">${esc(c.brand)}</span></span></div>
+    <div><span class="pay-brand" role="img" aria-label="Lumen Pay">${glyph(40)}<span class="pay-pay" aria-hidden="true">${esc(c.brand)}</span></span></div>
     <div class="pay-head">
       <p class="pay-plan">${inline(c.plan, lang)}</p>
       <div class="pay-sum">${both(inline(m[1], lang), inline(y[1], lang))}</div>
