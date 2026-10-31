@@ -1,7 +1,8 @@
 // Payment: our own page, not the processor's (the owner's decision, question 8). The server gets an address from
 // the processor's API; the page shows the address, a QR code, the amount, a timer and the status; nobody leaves the
-// site; the processor's name isn't shown. Minimal: one column — the amount, a month or a year, and the transfer card.
-// The coin is picked from a searchable list: there will be many coins and networks. Which ones is still the owner's
+// site; the processor's name isn't shown. Like an ordinary checkout: «Order» (the plan, month or year, the total, the
+// period) and «Transfer» (the coin, the QR code, the amount and the address with copy buttons, the network, the
+// status). The coin is picked from a searchable list: there will be many coins and networks. Which ones is still the owner's
 // call (question 13); the list, coin amounts, addresses, timer and dates are sample data.
 export default {
   title: 'Payment',
@@ -10,10 +11,17 @@ export default {
   brand: 'Pay',
   plan: 'Professional plan',
   periods: [['Month', '$59', 'Your period runs until 29 December 2026'], ['Year', '$590', 'The price of ten months · your period runs until 29 November 2027']],
+  order: 'Order',
+  transfer: 'Transfer',
+  period: 'Period',
+  total: 'Total',
+  amount: 'Amount',
+  networkLabel: 'Network',
+  address: 'Address',
+  copyAmount: 'Copy the amount',
   coinLabel: 'Coin and network',
   coinSearch: 'Coin or network',
   coinEmpty: 'Nothing found',
-  network: 'On {net}',
   coins: [
     { t: 'USDT', n: 'Tether', net: 'Tron (TRC-20)', m: '59.00', y: '590.00', a: 'TLumenExampLeAddr3ssQ7nS4yE9wq2Xb8u' },
     { t: 'USDT', n: 'Tether', net: 'Ethereum (ERC-20)', m: '59.00', y: '590.00', a: '0x4c7e9a1f2b3d5e6f7081a2b3c4d5e6f708192a3b' },
