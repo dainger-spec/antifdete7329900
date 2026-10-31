@@ -830,6 +830,13 @@ enum SafariChrome {
             // The start page's onboarding section: Swift code that traps when it cannot reach
             // Safari's own services, and it takes every new tab down with it.
             ("StartPageOnboardingSectionProvider", "reloadData"),
+            // Tab groups sync through iCloud by an agent of Safari's, which a profile's process is
+            // refused (`ProfileNetworkGuard`: "SyncAgent"). When a tab of a tab group changed, the
+            // manager asked the agent to sync through its refused connection, and the process
+            // ended there (`_objc_fatal` in `objc_storeWeak` under -[NSXPCConnection
+            // _sendInvocation:…]): the menu walk, CI run 461, macOS 26, a page loaded in a window
+            // with a tab group. A profile's tab groups are its own and stay in its home.
+            ("WBTabGroupSyncAgentProxy", "scheduleSyncIfNeeded"),
         ]
         for (className, selectorName) in nothing {
             replaceWithConstant(className, selectorName) { nil }
