@@ -74,13 +74,17 @@ extension AppModel {
 
     // MARK: Several profiles at once
 
-    /// Launches each of `ids` that is stopped, one after the other (each opens its window), as
-    /// Launch on each row would.
+    /// Launches each of `ids` that is stopped, as Launch on each row would, at most four starting
+    /// at a time: each next one when one of those has its window up (`LaunchQueue`; two minutes at
+    /// most for one that does not), so that a large selection does not run the Mac's processors and
+    /// window server out (docs/SCALE.md).
     func launchProfiles(_ ids: [UUID]) async {
-        for id in ids where !isRunning(id) && !isBusy(id) {
-            guard phase == .unlocked else { return }
-            await launch(id)
-        }
+        await LaunchQueue.run(ids, goesOn: { [weak self] in self?.phase == .unlocked }, start: { [weak self] id in
+            guard let self, !self.isRunning(id), !self.isBusy(id) else { return }
+            await self.launch(id)
+        }, windowUp: { [weak self] id in
+            _ = await self?.manager?.waitForWindow(id, seconds: 120)
+        })
     }
 
     /// Stops and seals each of `ids` that runs, all at once (as Lock does).
