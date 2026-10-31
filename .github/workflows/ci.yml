@@ -152,8 +152,8 @@ jobs:
           python3 scripts/crash_summary.py build/egress27/crashes/*.ips | tee build/egress27/crashes/summary.txt
           grep -E '^(CRASH|FAULT)' build/egress27/crashes/summary.txt | grep -v '^CRASH none' | head -16 | cut -c1-300 | sed 's/^/::warning title=macOS 27 - crash::/' || true
           # A message WebKit's UI side refused from one of its processes, as the log names it.
-          sudo log show --style compact --last 3h --predicate 'eventMessage CONTAINS[c] "invalid message"' 2>/dev/null \
-            | grep -iv '^timestamp' | head -40 | tee build/egress27/crashes/invalid-messages.txt || true
+          sudo log show --style compact --last 3h --predicate 'eventMessage CONTAINS[c] "invalid message" AND process != "log"' 2>/dev/null \
+            | grep -iv '^timestamp' | grep -v ' log\[[0-9]' | head -40 | tee build/egress27/crashes/invalid-messages.txt || true
           cut -c1-400 build/egress27/crashes/invalid-messages.txt | head -8 | sed 's/^/::warning title=macOS 27 - WebKit refused a message::/' || true
           if [ -s build/egress27/crashes/invalid-messages.txt ]; then
             { echo "### macOS 27 - WebKit refused a message"; cut -c1-400 build/egress27/crashes/invalid-messages.txt | head -20 | sed 's/^/    /'; } >> "$GITHUB_STEP_SUMMARY"
@@ -428,8 +428,8 @@ jobs:
           python3 scripts/crash_summary.py build/crashes/*.ips | tee build/crashes/summary.txt
           grep -E '^(CRASH|FAULT)' build/crashes/summary.txt | grep -v '^CRASH none' | head -16 | cut -c1-300 | sed 's/^/::warning title=crash::/' || true
           # A message WebKit's UI side refused from one of its processes, as the log names it.
-          sudo log show --style compact --last 3h --predicate 'eventMessage CONTAINS[c] "invalid message"' 2>/dev/null \
-            | grep -iv '^timestamp' | head -40 | tee build/crashes/invalid-messages.txt || true
+          sudo log show --style compact --last 3h --predicate 'eventMessage CONTAINS[c] "invalid message" AND process != "log"' 2>/dev/null \
+            | grep -iv '^timestamp' | grep -v ' log\[[0-9]' | head -40 | tee build/crashes/invalid-messages.txt || true
           cut -c1-400 build/crashes/invalid-messages.txt | head -8 | sed 's/^/::warning title=WebKit refused a message::/' || true
           if [ -s build/crashes/invalid-messages.txt ]; then
             { echo "### WebKit refused a message"; cut -c1-400 build/crashes/invalid-messages.txt | head -20 | sed 's/^/    /'; } >> "$GITHUB_STEP_SUMMARY"
