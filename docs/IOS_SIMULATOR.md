@@ -1,9 +1,20 @@
 # iPhone profiles on Apple's iOS Simulator — reconnaissance
 
-Status, 2026-10-29: **not in the product, not decided.** One question decides it, and
-`scripts/ios_simulator_spike.sh` answers it by measurement on a Mac with Xcode (the CI runner of
-this repository is not asked to: see [Running it](#running-it)). Until that run, everything below
-that the script does not measure is marked **assumption**.
+Status, 2026-10-31: **not in the product, shelved** (the owner's decision: a customer would need
+Xcode, some 10 GB, and an iOS runtime, 8–9 GB, on their Mac — twenty gigabytes of developer tools,
+which a product can hardly ask of a buyer). The one question below was measured once, and that is as
+far as it goes for now. Everything below the script does not measure is marked **assumption**.
+
+**The answer, measured (CI run 513, measurement branch `claude/measure-ios-spike`; GitHub's
+xcode-27 image: macOS 27.0.1, Xcode 27.1, iOS 27.1 simulator, device type iPhone Duo): yes.** Two
+devices booted at once, each MobileSafari with the injected library of [option B](#b-a-library-injected-into-mobilesafari):
+device A's pages reached the HTTP CONNECT side of the proxy only, device B's the SOCKS5 side only.
+Environment variables (option A) did not reach Safari's networking at all. A device's connection is
+carried by a process of that device (its `com.apple.WebKit.Networking`, under the device's
+`launchd_sim`), so a system network extension could tell one device's flows from another's. Not
+covered: the device's own iOS services — App Store accounts, push, Siri, `nsurlsessiond`,
+`parsecd` and others — reached past loopback directly while it ran. Memory: some 2.5 GB a device
+with Safari and one page (about 4 devices on a 16 GB Mac, none on an 8 GB one).
 
 ## The question
 
@@ -11,9 +22,9 @@ Can the traffic of **one** simulated device be sent into the proxy of **its** pr
 device goes through another proxy? If not, the feature is not built at all: an iPhone profile
 without its own proxy has no place in this product.
 
-Why the simulator: today an iPhone or iPad profile is our WKWebView on the Mac with an iPhone's
-User-Agent, navigator and screen values (README, "iOS fidelity remains UA-level": TLS, GPU, fonts and
-touch are the Mac's). The simulator runs Apple's iOS user space on the Mac — MobileSafari, iOS's
+Why the simulator: today an iPhone or iPad profile is a *mobile view* — Safari on this Mac under an
+iPhone's User-Agent, in a window of its size, and nothing more (the owner's decision of 31 October:
+touch, the screen, TLS, GPU and fonts are the Mac's). The simulator runs Apple's iOS user space on the Mac — MobileSafari, iOS's
 WebKit, iOS's fonts, touch input — which is much closer to an iPhone. What stays the Mac's in a
 simulator (assumption, to be measured separately if the feature goes ahead): the kernel and its
 TCP/IP stack, the GPU behind Metal, the CPU's core count and timing.
