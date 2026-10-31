@@ -1,16 +1,22 @@
 name: CI
 
-# A measurement branch only: every WebKit feature's default on macOS 27, as built and with every
-# behavior on (PrivacyBrowser --loader-inventory --all-features): the ones the SDK's behaviors turn
-# on or off. Never merged.
+# A measurement branch only: the four WebKit features the SDK's behaviors change on macOS 27 (run 495)
+# set one by one on the app as built, as every behavior has them — what a page then sees, against the
+# real Safari and against every behavior on (scripts/page_probe.py), and on macOS 27 whether the AIA
+# canary stays unasked for (scripts/aia_variants.py) — and every feature's default both ways on each
+# macOS. Never merged.
 on:
   push:
 
 jobs:
-  features-27:
-    name: WebKit's features as built and with every behavior on, macOS 27
-    runs-on: xcode-27
-    timeout-minutes: 30
+  features:
+    name: The four features on ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Build the app without the App Sandbox
@@ -18,16 +24,29 @@ jobs:
       - name: The features, both ways
         continue-on-error: true
         run: |
-          mkdir -p build/inventory
+          mkdir -p build/measure/inventory
           app=build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
-          "$app" --loader-inventory --all-features | grep '^LOADER feature' | sort > build/inventory/as-built.txt
-          "$app" --loader-inventory --all-features --sdk-everything | grep '^LOADER feature' | sort > build/inventory/everything.txt
-          wc -l build/inventory/*.txt
+          "$app" --loader-inventory --all-features | grep '^LOADER feature' | sort > build/measure/inventory/as-built.txt
+          "$app" --loader-inventory --all-features --sdk-everything | grep '^LOADER feature' | sort > build/measure/inventory/everything.txt
+          wc -l build/measure/inventory/*.txt
           echo "== the features whose default the SDK's behaviors change"
-          diff build/inventory/as-built.txt build/inventory/everything.txt || true
+          diff build/measure/inventory/as-built.txt build/measure/inventory/everything.txt || true
+      - name: What a page sees — the real Safari, the app as built, with the four features, with every behavior on
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          python3 scripts/page_probe.py --app build/unsandboxed/PrivacyBrowser.app --out build/measure/page \
+            --features "TrustedTypesEnabled=on,MutationEventsEnabled=off,FontFaceSetConstructorEnabled=off,ShouldTakeNearSuspendedAssertions=off"
+      - name: The AIA canary with the four features
+        if: matrix.runner == 'xcode-27'
+        continue-on-error: true
+        timeout-minutes: 25
+        run: |
+          python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app --sdk "" \
+            --out build/measure/aia --title "The AIA canary with the four features"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: features-27
-          path: build/inventory
+          name: features-${{ matrix.runner }}
+          path: build/measure
           if-no-files-found: ignore

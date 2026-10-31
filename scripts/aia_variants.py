@@ -143,13 +143,16 @@ def main():
     time.sleep(2)
 
     built_minos, built_sdk = declared_sdk(os.path.join(args.app, BINARY))
-    # The measurement branch's variants: WebKit's network loader set explicitly, as built and
-    # with every behavior on (BrowserSession.applyMeasuredFeatures).
+    # The measurement branch's variants: the four features the SDK's behaviors change on macOS 27
+    # (run 495) set as every behavior has them, on the app as built (BrowserSession.applyMeasuredFeatures),
+    # between the app as built and every behavior on.
     times = "--measure-times"
+    four = ["--measure-feature=TrustedTypesEnabled=on", "--measure-feature=MutationEventsEnabled=off",
+            "--measure-feature=FontFaceSetConstructorEnabled=off", "--measure-feature=ShouldTakeNearSuspendedAssertions=off"]
     variants = [("as built", None, [times]),
-                ("every behavior on", None, ["--sdk-everything", times]),
-                ("every behavior on, the error not read", None, ["--sdk-everything", times, "--measure-no-error-read"]),
-                ("every behavior on, again", None, ["--sdk-everything", times])]
+                ("as built, the four features as every behavior has them", None, [times, *four]),
+                ("as built, the four features as every behavior has them, again", None, [times, *four]),
+                ("every behavior on", None, ["--sdk-everything", times])]
     variants += [(f"declaring SDK {sdk}", sdk, []) for sdk in
                  [value.strip() for value in args.sdk.split(",") if value.strip()]]
     results = []

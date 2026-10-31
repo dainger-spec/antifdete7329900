@@ -87,12 +87,21 @@ enum SDKCheck {
                   + "from y \(visible.minY); the menu bar's thickness \(NSStatusBar.system.thickness); safe area top \(screen.safeAreaInsets.top)")
         }
         let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 800, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
-        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: WKWebViewConfiguration())
+        // The measurement branch: WebKit's features set as `--measure-feature=<key>=on|off` says,
+        // and with `--url=<address>` the page loaded from there (it reports itself to its server).
+        let configuration = WKWebViewConfiguration()
+        BrowserSession.applyMeasuredFeatures(to: configuration.preferences)
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
         window.contentView = webView
         window.orderFrontRegardless()
         let loaded = SDKCheckPage()
         webView.navigationDelegate = loaded
-        webView.loadHTMLString("<!doctype html><title>SDK check</title><p id=p>x</p>", baseURL: URL(string: "https://example.com/"))
+        if let address = arguments.first(where: { $0.hasPrefix("--url=") }).flatMap({ URL(string: String($0.dropFirst("--url=".count))) }) {
+            loaded.secondsBeforeAsking = 6
+            webView.load(URLRequest(url: address))
+        } else {
+            webView.loadHTMLString("<!doctype html><title>SDK check</title><p id=p>x</p>", baseURL: URL(string: "https://example.com/"))
+        }
         withExtendedLifetime((window, loaded)) { application.run() }
         exit(0)
     }
@@ -117,13 +126,17 @@ private final class SDKCheckPage: NSObject, WKNavigationDelegate {
         """
     /// The window's own properties by name, for scripts/sdk_check.sh to tell the builds apart.
     private let names = "Object.getOwnPropertyNames(window).sort().join(',')"
+    /// A page loaded from a server reports itself first (the measurement branch's page probe).
+    var secondsBeforeAsking: Double = 0
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        webView.evaluateJavaScript(script) { [names] result, error in
-            print("SDK-CHECK the page: \((result as? String) ?? "no answer: \(error.map { String(describing: $0) } ?? "nil")")")
-            webView.evaluateJavaScript(names) { result, _ in
-                print("SDK-CHECK window names: \((result as? String) ?? "")")
-                exit(0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + secondsBeforeAsking) { [script, names] in
+            webView.evaluateJavaScript(script) { result, error in
+                print("SDK-CHECK the page: \((result as? String) ?? "no answer: \(error.map { String(describing: $0) } ?? "nil")")")
+                webView.evaluateJavaScript(names) { result, _ in
+                    print("SDK-CHECK window names: \((result as? String) ?? "")")
+                    exit(0)
+                }
             }
         }
     }
