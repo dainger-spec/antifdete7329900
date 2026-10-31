@@ -71,6 +71,8 @@ enum ProfileSessionHost {
         // of the one that started this) must not seal it from under it.
         if let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] {
             SafariHomeVault.holdWhileRunning(home: URL(fileURLWithPath: home, isDirectory: true))
+            // What Safari's chrome saves through the standard defaults is the profile's, in its home.
+            SafariUIState.keepInProfileHome(home)
         }
         // A web view that turns out not to be on the profile's data loads nothing (the guard's
         // second lock); the user is told why the page did not open.

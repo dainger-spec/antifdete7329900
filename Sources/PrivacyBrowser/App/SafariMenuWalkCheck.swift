@@ -195,12 +195,14 @@ enum SafariMenuWalkCheck {
             }
         }
         // Where the profile's process keeps preferences: every property list under a Preferences
-        // folder of its home, read while it still runs (its home is sealed when it stops).
+        // folder of its home, and Safari's window state (SafariUIState), read while it still runs
+        // (its home is sealed when it stops).
         let profileHomes = (try? FileManager.default.contentsOfDirectory(atPath: root.path + "/profiles")) ?? []
         for name in profileHomes {
             let home = root.path + "/profiles/" + name + "/home.noindex"
             let found = FileManager.default.enumerator(atPath: home)?.compactMap { $0 as? String }
-                .filter { $0.contains("Preferences/") && $0.hasSuffix(".plist") }.sorted() ?? []
+                .filter { ($0.contains("Preferences/") || $0.hasPrefix("Library/PrivacyBrowser/")) && $0.hasSuffix(".plist") }
+                .sorted() ?? []
             var described: [String] = []
             for path in found {
                 let keys = PreferencesFile(path: home + "/" + path)?.keys.sorted() ?? []

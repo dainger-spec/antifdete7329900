@@ -1063,6 +1063,8 @@ enum ProfileNetworkGuard {
         report.environmentNames = environment.keys.sorted()
         for name in ["HOME", "TMPDIR", "CFFIXED_USER_HOME"] { report.places[name] = environment[name] ?? "" }
         report.places["temporaryDirectory"] = FileManager.default.temporaryDirectory.path
+        report.standardDefaultsDomain = SafariUIState.domain ?? ""
+        report.standardDefaultsSavedKeys = SafariUIState.savedKeys
         report.webViewsCaughtByNet = webViewsCaughtByNet
         report.defaultStoreClosed = realDefaultStore.map { !$0.proxyConfigurations.isEmpty } ?? false
         report.processProxy = !report.hasProxy
@@ -1244,6 +1246,11 @@ struct ProfileNetworkReport: Codable, Equatable {
     /// temporary directory, by those names.
     var environmentNames: [String] = []
     var places: [String: String] = [:]
+    /// The domain the process's standard defaults are, by its path (`SafariUIState`: in the
+    /// profile's home), and the keys its file held as the process started — what Safari's chrome
+    /// saved in the profile's earlier runs, restored with its home.
+    var standardDefaultsDomain = ""
+    var standardDefaultsSavedKeys: [String] = []
 
     /// Nothing in the process is outside the profile's data or proxy, as far as it can tell.
     var isClean: Bool {
