@@ -43,7 +43,10 @@ enum ServerTrust {
             return
         }
         let host = space.host
-        tally.noteArrival(trust)
+        // Nothing reads the trust before `evaluate` has turned its fetching off: reading whether
+        // it was evaluated (`SecTrustGetTrustResult`, `SecTrustGetNetworkFetchAllowed`) had it
+        // evaluated as it came, fetching allowed (CI run 458, macOS 27: the AIA canary resolved by
+        // this Mac in every variant, 14.0 included, where runs 451 and 454 had 14.x clean).
         let box = TrustBox(trust)
         DispatchQueue.global(qos: .userInitiated).async {
             let trusted = evaluate(box.trust, host: host)
@@ -94,9 +97,6 @@ enum ServerTrust {
         private var evaluated = 0
         private var refused = 0
         private var allowedToFetch = 0
-        private var arrived = 0
-        private var arrivedEvaluated = 0
-        private var arrivedFetchAllowed = 0
         func count(refused wasRefused: Bool) {
             lock.withLock {
                 evaluated += 1
@@ -109,25 +109,6 @@ enum ServerTrust {
         }
         var counts: (evaluated: Int, refused: Int) { lock.withLock { (evaluated, refused) } }
         var fetchAllowed: Int { lock.withLock { allowedToFetch } }
-
-        /// How a trust came to this process, before anything here touched it: whether it had been
-        /// evaluated already (a result is there: something before this process's answer evaluated
-        /// it — with what settings this cannot tell) and whether it still allowed fetching. Read
-        /// without evaluating (`SecTrustGetTrustResult` only reads); the self-test prints them.
-        func noteArrival(_ trust: SecTrust) {
-            var result = SecTrustResultType.invalid
-            let read = SecTrustGetTrustResult(trust, &result) == errSecSuccess
-            let allowed = ServerTrust.fetchAllowed(trust)
-            lock.withLock {
-                arrived += 1
-                if read, result != .invalid { arrivedEvaluated += 1 }
-                if allowed { arrivedFetchAllowed += 1 }
-            }
-        }
-
-        var arrivals: (arrived: Int, evaluated: Int, fetchAllowed: Int) {
-            lock.withLock { (arrived, arrivedEvaluated, arrivedFetchAllowed) }
-        }
     }
 }
 

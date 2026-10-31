@@ -172,8 +172,12 @@ a build that declares 15.0 or newer. Of what WebKit turns on at 15.0 (WTF's
 `computeSDKAlignedBehaviors`), one thing is about the network: its network loader
 (`UseCFNetworkNetworkLoader`, `_usesNWLoader`); the capture names this app, not WebKit's network
 process, as the one the fetch was made for. How the loader comes to fetch, and so how to close it,
-is measured next (the certificate check now says whether a certificate's question reached this app
-already evaluated, and what the failed load carried). Until then, a page of a profile on macOS 27
+is not known yet. A first try at telling it from inside this process — reading, as a certificate's
+question came, whether its trust had been evaluated and whether it might fetch — had the trust
+evaluated by that reading itself, fetching allowed: in run 458 every variant leaked, 14.0 included,
+and the self-test's capture caught the canary; the reading was taken out (runs 451 and 454, without
+it, had 14.x clean). Nothing reads a trust before its fetching is off (`ServerTrust`). Until then,
+a page of a profile on macOS 27
 lacks `trustedTypes` and Safari 27's other SDK-gated names. The first version of that measurement
 reused one name for every variant and read clean where the full self-test leaked (run 450): in its
 variants not even the control was asked for. On macOS 26 the capture has not seen the system fetch

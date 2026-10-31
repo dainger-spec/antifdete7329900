@@ -2,7 +2,6 @@ import AppKit
 import BrowserCore
 import CryptoKit
 import Network
-import Security
 import os
 import WebKit
 
@@ -749,18 +748,13 @@ final class SelfTest {
         let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
         let before = ServerTrust.tally.counts
         let allowedBefore = ServerTrust.tally.fetchAllowed
-        let arrivalsBefore = ServerTrust.tally.arrivals
         let failure = try await load(URL(string: "https://aia-\(run).leak.example.com/pb-leak/aia?run=\(run)")!,
                                      in: ProfileConfiguration(proxy: proxy, ephemeral: true))
         let after = ServerTrust.tally.counts
         let allowedAfter = ServerTrust.tally.fetchAllowed
-        let arrivalsAfter = ServerTrust.tally.arrivals
-        // How the certificate's question came to this process and how the load ended: whether
-        // something before this process's answer had evaluated the trust, and what the error
-        // carried (CI compares the SDKs WebKit's behaviors follow, scripts/aia_variants.py).
-        info("certificates: through the proxy, \(arrivalsAfter.arrived - arrivalsBefore.arrived) trust(s) reached this process, "
-             + "\(arrivalsAfter.evaluated - arrivalsBefore.evaluated) already evaluated, "
-             + "\(arrivalsAfter.fetchAllowed - arrivalsBefore.fetchAllowed) still allowed to fetch; the load ended with: \(failure)")
+        // How the load ended: what its error carried (CI compares the SDKs WebKit's behaviors
+        // follow, scripts/aia_variants.py).
+        info("certificates: through the proxy, the load ended with: \(failure)")
         let log = try await loadThroughProxy(repository, proxy, url: URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!) ?? ""
         guard log.contains("(tls handshake)") else {
             check("certificates: the self-test proxy answers HTTPS with its certificate", false,
@@ -777,19 +771,11 @@ final class SelfTest {
               log.contains("tls refused by the client"), String(log.prefix(400)))
     }
 
-    /// The error a load ended with: its domain and code, the keys it carried, and of the server
-    /// trust among them whether it was evaluated and may fetch — read without evaluating it.
+    /// The error a load ended with: its domain and code and the keys it carried. A server trust
+    /// among them is not read: reading one can have it evaluated, fetching allowed (`ServerTrust`).
     private func describeFailure(_ error: NSError?) -> String {
         guard let error else { return "no failure" }
         var parts = ["\(error.domain) \(error.code)", "keys [\(error.userInfo.keys.sorted().joined(separator: ", "))]"]
-        if let value = error.userInfo[NSURLErrorFailingURLPeerTrustErrorKey],
-           CFGetTypeID(value as CFTypeRef) == SecTrustGetTypeID() {
-            let trust = value as! SecTrust
-            var result = SecTrustResultType.invalid
-            _ = SecTrustGetTrustResult(trust, &result)
-            parts.append("its peer trust " + (result == .invalid ? "not evaluated" : "evaluated (result \(result.rawValue))")
-                         + ", fetching " + (ServerTrust.fetchAllowed(trust) ? "allowed" : "off"))
-        }
         if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
             parts.append("underlying \(underlying.domain) \(underlying.code) keys [\(underlying.userInfo.keys.sorted().joined(separator: ", "))]")
         }
