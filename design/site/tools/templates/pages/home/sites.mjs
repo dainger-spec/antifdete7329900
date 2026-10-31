@@ -21,7 +21,7 @@ const LANGS = ['de', 'en', 'ja'];
 
 /// The site, one edition per profile (same order as the profiles in copy). "\n" in a title is a line break
 /// on wide windows (Japanese breaks between phrases, not anywhere).
-const SITE = [
+export const SITE = [
   {
     edition: 'Ausgabe Deutschland', signin: 'Anmelden', subscribe: 'Abonnieren',
     date: 'Donnerstag, 29. Oktober 2026', time: '14:32 Uhr', city: 'Berlin', temp: '9 °C', sky: 'Bewölkt',
@@ -84,7 +84,7 @@ const G = {
 };
 
 /// The Safari window with the site (decorative: aria-hidden; its meaning is in the list and a sentence).
-function safari(profiles) {
+export function safari(profiles) {
   return `<div class="sw" aria-hidden="true" data-sample>
       <div class="sw-bar">
         <span class="sw-lights"><i></i><i></i><i></i></span>

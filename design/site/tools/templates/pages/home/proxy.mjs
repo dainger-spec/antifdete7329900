@@ -62,7 +62,7 @@ const site = `<div class="pxs">
       </div>`;
 
 /// The Safari window (decorative: aria-hidden; its meaning is in the headline, the captions and a sentence).
-function safari(c) {
+export function safari(c) {
   const body = esc(c.errorBody).replace(/\{host\}/g, `<i>${HOST}</i>`);
   return `<div class="pxw" aria-hidden="true" data-sample>
       <div class="pxw-bar">

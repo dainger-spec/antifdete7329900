@@ -1,392 +1,428 @@
-// The promo film (tools/film): 30 seconds in which every frame is a function of the film's clock. The stage
-// (video/stage/<lang>.html) holds every shot; FILM.seek(t) puts it at moment t — which shots are seen, where
-// their camera is, how they are turned in 3D, how far each home-page scene has played (site.js drives a scene by
-// the progress it is given here instead of by the scroll), the titles, the transitions. Nothing depends on the
-// frame before, so any frame can be filmed on its own (capture.mjs films ranges of frames in parallel).
+// The promo film v2 («Графит»): the stage's clock. Every frame is a pure function of the film's time: FILM.seek(t)
+// shows the one shot that owns t and sets it to t (which window, where the camera is, which builds have cut in);
+// FILM.plan(f) says how frame f is filmed (its shutter subframes, its capture layers) and what post.py puts under
+// and over it (the plate and its frame, the 2D push, black, the glass reflection, the reeded glass, the depth
+// of field plane, grain). Nothing depends on the frame before, so any frame can be filmed on its own.
 //
-// Look at it in a browser: ?t=12.3 opens at that moment; ← → step a frame, with Shift a second; Space plays.
+// Per spec v2: type never animates (builds are hard cut-ins on their beat); cuts are hard; the only kinetic
+// type is the S07 clock; motion blur only from shutter subframes, which never cross a cut or a build.
+//
+// Look at it in a browser: ?t=12.3 opens at that moment; ← → step a frame, with Shift a second.
 (function () {
   'use strict';
-  const TL = window.FILM_TIMELINE, FPS = TL.fps, DUR = TL.duration, CUE = TL.cues;
+  const TL = window.FILM_TIMELINE, PL = window.FILM_PLATES || {}, FPS = TL.fps, DUR = TL.duration, SH = TL.shot;
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
   const clamp01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x);
   const lerp = (a, b, u) => a + (b - a) * u;
   const span = (t, a, b) => clamp01((t - a) / (b - a));
-  const E = {
-    lin: (x) => x,
-    out: (x) => 1 - Math.pow(1 - x, 3),
-    in: (x) => x * x * x,
-    inOut: (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2),
-    expo: (x) => (x >= 1 ? 1 : 1 - Math.pow(2, -10 * x)),
-    expoIn: (x) => (x <= 0 ? 0 : Math.pow(2, 10 * x - 10)),
-    smooth: (x) => x * x * (3 - 2 * x),
-    sine: (x) => 0.5 - 0.5 * Math.cos(Math.PI * x),
+  const sine = (x) => 0.5 - 0.5 * Math.cos(Math.PI * clamp01(x));
+  const smooth = (x) => { x = clamp01(x); return x * x * (3 - 2 * x); };
+  const outQuint = (x) => 1 - Math.pow(1 - clamp01(x), 5);
+  const outCubic = (x) => 1 - Math.pow(1 - clamp01(x), 3);
+  /// CSS cubic-bezier(x1, y1, x2, y2) as a function of x in 0…1.
+  function bezier(x1, y1, x2, y2) {
+    const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+    const X = (s) => ((ax * s + bx) * s + cx) * s, Y = (s) => ((ay * s + by) * s + cy) * s, dX = (s) => (3 * ax * s + 2 * bx) * s + cx;
+    return (x) => {
+      x = clamp01(x);
+      let s = x;
+      for (let i = 0; i < 8; i++) { const e = X(s) - x, d = dX(s); if (Math.abs(e) < 1e-7 || !d) break; s -= e / d; }
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 30 && Math.abs(X(s) - x) > 1e-7; i++) { s = (lo + hi) / 2; if (X(s) < x) lo = s; else hi = s; }
+      return Y(s);
+    };
+  }
+  const ROLL = bezier(0.2, 0, 0, 1), CLOSE = bezier(0.65, 0, 0.25, 1);
+
+  // MARK: Shots
+  const SHOTS = TL.shots.map((s) => ({ ...s }));
+  const byId = Object.fromEntries(SHOTS.map((s) => [s.id, s]));
+  const shotAt = (t) => SHOTS.find((s) => t >= s.from - 1e-9 && t < s.to - 1e-9) || SHOTS[SHOTS.length - 1];
+  const SEC = { S12: 'S11' };   // S12 is the S11 window under another camera
+  const secOf = (id) => $(`[data-shot="${SEC[id] || id}"]`);
+  const camOf = (id) => $('.cam', secOf(id));
+  function cam(id, s = 1, ox = 960, oy = 540, x = 0, y = 0) {
+    const tx = x + ox - ox * s, ty = y + oy - oy * s;
+    camOf(id).style.transform = s === 1 && !x && !y ? '' : `translate(${tx.toFixed(3)}px, ${ty.toFixed(3)}px) scale(${s.toFixed(6)})`;
+  }
+  function cutins(id, t) { for (const e of $$('[data-on]', secOf(id))) e.classList.toggle('in', t >= +e.dataset.on - 1e-9); }
+  let shown = null;
+  function show(id) {
+    const sec = SEC[id] || id;
+    if (shown === sec) return;
+    $$('.shot').forEach((el) => el.classList.toggle('on', el.dataset.shot === sec));
+    shown = sec;
+  }
+  /// Every moment inside a shot where something swaps at once: subframes never straddle one.
+  const EDGES = {
+    S03: [SH.S03.line2], S04: SH.S04.cuts, S06: [SH.S06.line2], S07: SH.S07.changes, S08: [SH.S08.seam], S10: [...SH.S10.columns, SH.S10.footer],
+    S11: [SH.S11.click, SH.S11.click + SH.S11.press / FPS, SH.S12.progress[0][0]], S13: [SH.S13.switch], S14: [SH.S14.line2, SH.S14.foot],
+    S15: SH.S15.flips, S16: [SH.S16.spec], S17: [...SH.S17.pages, ...SH.S17.pages.map((p) => p + SH.S17.cookieLag)], S20: [SH.S20.lines],
   };
-  /// Keys [[t, v, ease?], …]: v at t, eased between keys by the later key's ease (default inOut).
-  function keys(k, t) {
-    if (t <= k[0][0]) return k[0][1];
-    for (let i = 1; i < k.length; i++) {
-      if (t <= k[i][0]) return lerp(k[i - 1][1], k[i][1], (k[i][2] || E.inOut)(span(t, k[i - 1][0], k[i][0])));
-    }
-    return k[k.length - 1][1];
-  }
-  const shotEl = (n) => $(`[data-shot="${n}"]`);
-  const camEl = (n) => $(`[data-shot="${n}"] > .cam`);
-  const drive = (name, p) => window.LumenFilm && window.LumenFilm.play(name, p);
-  const css = (el, props) => { for (const k in props) el.style.setProperty(k, props[k]); };
-
-  /// A shot seen or not, and how much (its opacity).
-  function show(n, on, opacity = 1) {
-    const el = shotEl(n);
-    const seen = !!on && opacity > 0.001;
-    el.classList.toggle('on', seen);
-    el.style.opacity = seen && opacity < 0.999 ? opacity.toFixed(4) : '';
+  function segment(shot, t) {
+    let a = shot.from, b = shot.to;
+    for (const e of EDGES[shot.id] || []) { if (e <= t + 1e-9 && e > a) a = e; if (e > t + 1e-9 && e < b) b = e; }
+    return [a, b];
   }
 
-  // MARK: Cameras
-  /// A camera: a stage point P is seen at (tx, ty) + k·P (a uniform scale, then a move; frame px).
-  const Cam = (k = 1, tx = 0, ty = 0) => ({ k, tx, ty });
-  /// Scale s about the stage point (ox, oy), then move by (x, y).
-  const about = (s, ox = 960, oy = 540, x = 0, y = 0) => Cam(s, x + ox - ox * s, y + oy - oy * s);
-  /// B, then A.
-  const then = (A, B) => Cam(A.k * B.k, A.tx + A.k * B.tx, A.ty + A.k * B.ty);
-  /// Where rect r (stage px: centre, width, height) is seen through camera A.
-  const seen = (A, r) => ({ cx: A.tx + A.k * r.cx, cy: A.ty + A.k * r.cy, w: A.k * r.w, h: A.k * r.h });
-  function cam(n, A) { camEl(n).style.transform = `translate(${A.tx.toFixed(2)}px, ${A.ty.toFixed(2)}px) scale(${A.k.toFixed(5)})`; }
-  /// A dive through a window, u 0 → 1: the leaving shot (its camera `base`) zooms into rect `from` until it
-  /// covers rect `to` as the arriving shot frames it (camera `base2`); the arriving shot starts with `to` seen
-  /// exactly where `from` is seen, so one window turns into the other. The zoom is geometric: an even speed.
-  function dive(u, base, from, base2, to) {
-    const f = seen(base, from), g = seen(base2, to);
-    const Z = Math.pow(g.w / f.w, u);
-    const cx = lerp(f.cx, g.cx, u), cy = lerp(f.cy, g.cy, u);
-    const leave = then(Cam(Z, cx - Z * f.cx, cy - Z * f.cy), base);
-    const k = (Z * f.w) / to.w;
-    return { leave, enter: Cam(k, cx - k * to.cx, cy - k * to.cy) };
-  }
-  /// A scene turned in 3D inside its shot (the shot's camera gives the perspective): degrees about its point (ox, oy).
-  function tilt(n, { rx = 0, ry = 0, rz = 0, ox = 960, oy = 540, z = 0 } = {}) {
-    const el = $(`[data-shot="${n}"] .scene`);
-    el.style.transformOrigin = `${ox}px ${oy}px`;
-    el.style.transform = rx || ry || rz || z ? `translateZ(${z.toFixed(1)}px) rotateX(${rx.toFixed(3)}deg) rotateY(${ry.toFixed(3)}deg) rotateZ(${rz.toFixed(3)}deg)` : '';
-  }
-
-  // MARK: Light: the seam that wipes (the mark's own line, leaning 1 : 3), flashes, black
-  const seam = $('.fx-seam'), flash = $('.fx-flash'), black = $('.fx-black');
-  const LEAN = Math.atan(1 / 3) * 180 / Math.PI;
-  /// The polygon of the frame left of the seam when its middle is at x = xc.
-  const leftOf = (xc) => `polygon(-10px -10px, ${(xc + 540 / 3).toFixed(1)}px -10px, ${(xc - 540 / 3).toFixed(1)}px 1090px, -10px 1090px)`;
-  function wipe(t, a, b) {
-    const u = E.inOut(span(t, a, b));
-    return { u, xc: lerp(-420, 2340, u), glow: Math.sin(Math.PI * span(t, a, b)), on: t >= a && t <= b };
-  }
-  function clipShot(n, w) { shotEl(n).style.clipPath = w && w.u < 1 ? leftOf(w.xc) : ''; }
-
-  // MARK: Titles — big; each word rises into its line from below, and on out of it at the end
-  const TITLES = Object.fromEntries($$('.ttl').map((el) => [el.dataset.title, { el, words: $$('.w', el).map((w) => ({ w, l3: !!w.closest('.ln3') })) }]));
-  function title(name, t, a, b, { l3 = a + 0.35, stagger = 0.06 } = {}) {
-    const T = TITLES[name];
-    const on = t >= a - 0.02 && t < b + 0.6;
-    T.el.classList.toggle('on', on);
-    if (!on) return;
-    let i = 0;
-    T.words.forEach((x, k) => {
-      const start = x.l3 ? l3 : a + (i++) * stagger;
-      const u = E.expo(span(t, start, start + 0.75));
-      const v = E.in(span(t, b + k * 0.025, b + k * 0.025 + 0.34));
-      const y = (1 - u) * 118 - v * 118;
-      const blur = (1 - u) * 7 + v * 9;
-      x.w.style.transform = `translateY(${y.toFixed(2)}%)`;
-      x.w.style.opacity = (Math.min(1, u * 1.4) * (1 - v)).toFixed(3);
-      x.w.style.filter = blur > 0.05 ? `blur(${blur.toFixed(2)}px)` : 'none';
-    });
-  }
-
-  // MARK: The opening: the MacBook's frames (tools/film/hero.mjs, 60 a second from t = 0) under the name
-  const HERO_N = Math.round(4.4 * FPS) + 1;
-  const heroCv = $('.hero-cv'), hctx = heroCv.getContext('2d');
-  let heroShown = -1;
-  async function heroFrame(i) {
-    i = Math.max(0, Math.min(HERO_N - 1, i));
-    if (i === heroShown) return;
-    const img = new Image();
-    img.src = `../.cache/hero/${String(i).padStart(3, '0')}.png`;
-    try { await img.decode(); hctx.drawImage(img, 0, 0, heroCv.width, heroCv.height); }
-    catch (e) { hctx.fillStyle = '#101216'; hctx.fillRect(0, 0, heroCv.width, heroCv.height); hctx.fillStyle = '#556'; hctx.font = '48px sans-serif'; hctx.fillText(`hero frame ${i} not rendered yet`, 120, 1000); }
-    heroShown = i;
-  }
-  // Where the display is in the last frames of the opening (frame px): the dive goes into it.
-  const DISPLAY = { cx: 1229, cy: 609, w: 638, h: 414 };
-  const brand = $('.brand'), brandIn = $('.brand-in');
-
-  // MARK: Measured once (cameras at rest, flat): where a window is in a scene, so a shot can dive into the next
+  // MARK: Measured once, with every part laid out: baselines, hanging punctuation, where the chips and buttons are
   const M = {};
   function measure() {
-    const rect = (sel) => { const r = $(sel).getBoundingClientRect(); return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: r.width, h: r.height, x: r.left, y: r.top }; };
-    const shots = ['mission', 'sites', 'features', 'numbers', 'encryption', 'layers'];
-    shots.forEach((n) => { shotEl(n).classList.add('on'); shotEl(n).style.opacity = '0'; camEl(n).style.transform = ''; });
-    drive('mission', 0); M.store0 = rect('.shot-mission .mi-win.focus');
-    drive('mission', 1); M.store1 = rect('.shot-mission .mi-win.focus');
-    drive('sites', 0.2); M.sites = rect('.shot-sites .sw');
-    M.grid = rect('.shot-features .bx-grid');
-    M.tiles = $$('.shot-features .bx');
-    M.fig = rect('.shot-numbers .nm-hero .nm-fig');
-    drive('encryption', 0.05); M.card = rect('.shot-encryption .enc-card');
-    drive('layers', 0.7); M.stack = rect('.shot-layers .ly-2');
-    shots.forEach((n) => { shotEl(n).classList.remove('on'); shotEl(n).style.opacity = ''; });
-  }
-  // The shots' cameras at rest (the dives are laid over them)
-  // after the name the Mac settles a little lower, under the title
-  const heroBase = (t) => about(1 + 0.02 * E.sine(span(t, 1.6, CUE.dive[0])) - 0.03 * E.inOut(span(t, 1.7, 2.6)), 960, 1000, 0, 34 * E.inOut(span(t, 1.7, 2.6)));
-  const missionBase = (t) => about(keys([[4.55, 1], [5.0, 0.78], [6.3, 0.86], [6.7, 0.96]], t), 960, 1000, keys([[4.55, 0], [5.0, 170], [6.3, 120], [6.7, 0]], t), keys([[4.55, 0], [5.0, 70], [6.3, 40], [6.7, 0]], t));
-  const sitesBase = (t) => about(keys([[7.04, 1], [7.6, 0.9], [9.5, 0.95, E.lin]], t), 640, 600, keys([[7.04, 0], [7.6, -70], [9.5, -60, E.lin]], t), 0);
-
-  // MARK: The end card's mark, drawn once with the site's code art
-  let codeart = null;
-  (window.LumenScenes = window.LumenScenes || []).push((api) => { codeart = api.codeart; });
-  const endMark = $('.end-mark');
-  function drawEnd() {
-    if (!codeart) return;
-    const { surface, paintHalves, paintSeam, tokenMaps } = codeart;
-    const cvs = ['.end-l', '.end-r', '.end-seam'].map((s) => $(s, endMark));
-    const surfaces = cvs.map((c) => surface(c, 3, 12));
-    const S0 = surfaces[0];
-    if (!S0.W) return;
-    const L = { cx: S0.W / 2, cy: S0.H / 2, R: Math.min(S0.W, S0.H) / 2 / 1.22, LH: 15 };
-    const tokens = tokenMaps(L, S0.cw);
-    surfaces.forEach((S) => S.ctx.clearRect(0, 0, S.W, S.H));
-    paintHalves(surfaces[0], L, { which: [0], tokens });
-    paintHalves(surfaces[1], L, { which: [1], tokens });
-    paintSeam(surfaces[2], L, 1, 1);
-  }
-  /// A part that comes in: up out of a blur.
-  function rise(el, t, a, { dy = 40, dur = 0.7, blur = 12, scale = 0, x = '' } = {}) {
-    const v = span(t, a, a + dur), u = E.expo(v);
-    el.style.opacity = E.out(clamp01(v * 1.6)).toFixed(3);
-    el.style.filter = v < 1 ? `blur(${((1 - E.out(v)) * blur).toFixed(2)}px)` : 'none';
-    el.style.transform = `${x}translateY(${((1 - u) * dy).toFixed(2)}px)${scale ? ` scale(${(1 - scale * (1 - u)).toFixed(4)})` : ''}`;
+    const root = document.documentElement;
+    root.classList.add('measure');
+    $$('.shot').forEach((el) => el.classList.add('on'));
+    $$('.cut, .swap, .mpg').forEach((el) => el.classList.add('cur', 'on'));
+    // hanging punctuation: a negative right margin equal to the mark's own advance
+    for (const h of $$('.hang')) h.style.marginRight = `${(-h.getBoundingClientRect().width).toFixed(3)}px`;
+    // every line by its baseline
+    for (const el of $$('.tx[data-base]')) {
+      el.style.top = '0px';
+      const off = $('.bl', el).getBoundingClientRect().top - el.getBoundingClientRect().top;
+      el.style.top = `${(+el.dataset.base - off).toFixed(3)}px`;
+    }
+    // S04: each window's chip centre in its own (unscaled) coordinates
+    M.chips = $$('[data-shot="S04"] .cut').map((cut) => {
+      const w = $('.mi-win', cut); w.style.transform = 'none';
+      const r = w.getBoundingClientRect(), c = $('.mi-prof', w).getBoundingClientRect();
+      return [c.left + c.width / 2 - r.left, c.top + c.height / 2 - r.top];
+    });
+    // S11/S12: «Weiter», the chip, the address field, in the window's own coordinates
+    const kw = $('.kwin'); const K = 1.35;
+    const kr = kw.getBoundingClientRect();
+    const local = (el) => { const r = el.getBoundingClientRect(); return { x: (r.left - kr.left) / K, y: (r.top - kr.top) / K, w: r.width / K, h: r.height / K, cx: (r.left + r.width / 2 - kr.left) / K, cy: (r.top + r.height / 2 - kr.top) / K }; };
+    M.kwin = { left: parseFloat(getComputedStyle(kw).left), top: parseFloat(getComputedStyle(kw).top), k: K };
+    M.weiter = local($('.kwin .pxs-btn'));
+    M.chip = local($('.kwin .pxw-prof'));
+    M.addr = local($('.kwin .pxw-addr'));
+    M.rl = local($('.kwin .pxw-rl'));
+    M.head = local($('.kwin .pxs-h'));
+    $$('.cut, .swap, .mpg').forEach((el) => el.classList.remove('cur', 'on'));
+    $$('.shot').forEach((el) => el.classList.remove('on'));
+    $$('[data-shot="S04"] .mi-win').forEach((w) => { w.style.transform = ''; });
+    root.classList.remove('measure');
+    shown = null;
   }
 
-  // MARK: The shots
-  const SHOTS = [
-    { name: 'hero', from: 0, to: 4.56, async frame(t) {
-      await heroFrame(Math.round(t * FPS));
-      const ud = E.in(span(t, CUE.dive[0], CUE.dive[1]));
-      cam('hero', ud > 0 ? dive(ud, heroBase(t), DISPLAY, missionBase(4.55), M.store0).leave : heroBase(t));
-      show('hero', true, 1 - E.smooth(span(t, CUE.dive[1] - 0.2, CUE.dive[1])));
-      // the name: revealed by the seam of light, held, then it flies at the camera as the lid opens
-      const w = wipe(t, CUE.brand[0], CUE.brand[1]);
-      const out = span(t, CUE.brandOut[0], CUE.brandOut[1]);
-      brand.style.visibility = t < CUE.brandOut[1] ? 'visible' : 'hidden';
-      brand.style.clipPath = w.u < 1 ? leftOf(w.xc) : '';
-      const grow = 1 + 0.035 * span(t, CUE.brand[1], CUE.brandOut[0]) + 1.1 * E.expoIn(out);
-      brandIn.style.transform = `scale(${grow.toFixed(4)})`;
-      brandIn.style.opacity = (1 - E.in(out)).toFixed(3);
-      brandIn.style.filter = out > 0 ? `blur(${(16 * E.in(out)).toFixed(2)}px)` : 'none';
-      title('hero', t, 2.15, 3.92);
-    } },
-    { name: 'mission', from: 4.3, to: 7.1, frame(t) {
-      drive('mission', keys([[4.55, 0], [4.75, 0.03], [6.35, 0.97], [6.6, 1, E.out]], t));
-      const ud = E.in(span(t, CUE.dive[0], CUE.dive[1])), uo = E.in(span(t, CUE.through[0], CUE.through[1]));
-      if (t < CUE.dive[1]) cam('mission', dive(ud, heroBase(t), DISPLAY, missionBase(4.55), M.store0).enter);
-      else if (uo > 0) cam('mission', dive(uo, missionBase(t), M.store1, sitesBase(CUE.through[1]), M.sites).leave);
-      else cam('mission', missionBase(t));
-      // the wall of windows turns away to the right as it spreads, and faces us again for the dive
-      tilt('mission', { ry: keys([[4.55, 0], [5.2, 24], [6.0, 18], [6.6, 0]], t), rx: keys([[4.55, 0], [5.2, 9], [6.0, 7], [6.6, 0]], t), ox: 960, oy: 600 });
-      show('mission', true, Math.min(E.smooth(span(t, CUE.dive[0] + 0.12, CUE.dive[1] - 0.05)), 1 - E.smooth(span(t, CUE.through[1] - 0.1, CUE.through[1] + 0.02))));
-      title('mission', t, 4.72, 6.55);
-    } },
-    { name: 'sites', from: 6.86, to: 9.56, frame(t) {
-      drive('sites', keys([[7.0, 0.2], [7.55, 0.29, E.lin], [7.85, 0.405, E.lin], [8.3, 0.59, E.lin], [8.6, 0.705, E.lin], [9.0, 0.8, E.lin], [9.45, 0.9, E.out]], t));
-      const uo = E.in(span(t, CUE.through[0], CUE.through[1]));
-      const out = E.in(span(t, 9.34, 9.54));
-      cam('sites', t < CUE.through[1] ? dive(uo, missionBase(t), M.store1, sitesBase(CUE.through[1]), M.sites).enter : then(about(1 + 0.25 * out, 960, 560), sitesBase(t)));
-      tilt('sites', { ry: keys([[7.04, 0], [7.7, 16], [9.5, 11, E.lin]], t), rx: keys([[7.04, 0], [7.7, 5], [9.5, 3, E.lin]], t), ox: M.sites.cx, oy: M.sites.cy });
-      show('sites', true, Math.min(E.smooth(span(t, 6.86, 7.0)), 1 - out));
-      // the country and its time roll past like a slot, a country a change
-      const at = CUE.countries;
-      const cur = keys([[at[1] - 0.16, 0], [at[1] + 0.14, 1], [at[2] - 0.16, 1], [at[2] + 0.14, 2]], t);
-      const vel = Math.abs(keys([[at[1] - 0.16, 0], [at[1] + 0.14, 1], [at[2] - 0.16, 1], [at[2] + 0.14, 2]], t + 0.01) - cur) * 100;
-      const enter = E.expo(span(t, 7.1, 7.6));
-      $$('.shot-sites .cty-i').forEach((el, i) => {
-        el.style.transform = `translateY(${((i - cur) * 420 + (1 - enter) * 160).toFixed(2)}px)`;
-        el.style.filter = vel > 0.02 || enter < 1 ? `blur(${Math.min(14, vel * 6 + (1 - enter) * 12).toFixed(2)}px)` : 'none';
-        el.style.opacity = (i === 0 ? Math.min(1, enter * 1.4) : 1).toFixed(3);
-      });
-      rise($('.shot-sites .cty-k'), t, 7.1, { dy: 30 });
-    } },
-    { name: 'safari', from: 9.36, to: 11.8, frame(t) {
-      // an open book swings in from the edge; the same fingerprint is read on both pages, row by row
-      const open = E.out(span(t, CUE.vsIn[0] - 0.12, CUE.vsIn[1]));
-      const ry = lerp(80, 26, open) - 8 * span(t, CUE.vsIn[1], CUE.fly[0]);
-      $('.vs-l').style.transform = `rotateY(${ry.toFixed(3)}deg)`;
-      $('.vs-r').style.transform = `rotateY(${(-ry).toFixed(3)}deg)`;
-      CUE.rows.forEach((r, i) => {
-        const sl = span(t, r, r + 0.18), sr = span(t, r + 0.16, r + 0.34);
-        $$(`.vs-l .vs-row[data-i="${i}"], .vs-r .vs-row[data-i="${i}"]`).forEach((row, side) => {
-          const s = side ? sr : sl;
-          css(row, { '--s': E.inOut(s).toFixed(3) });
-          $('.vs-scan', row).style.opacity = (Math.sin(Math.PI * s) * 0.9).toFixed(3);
-        });
-        const eq = $(`.vs-eq[data-i="${i}"]`);
-        rise(eq, t, r + 0.3, { dy: 0, dur: 0.45, blur: 10, scale: 0.35, x: 'translateX(-50%) ' });
-      });
-      $('.vs-spine').style.opacity = (0.35 * open + 0.65 * span(t, CUE.rows[0], CUE.rows[2] + 0.4)).toFixed(3);
-      // then into the spine: through the book to the number
-      const fly = E.expoIn(span(t, CUE.fly[0], CUE.fly[1]));
-      cam('safari', about(1 + 0.04 * span(t, 9.5, CUE.fly[0]) + 3.2 * fly, 960, 640));
-      show('safari', true, 1 - E.smooth(span(t, CUE.fly[1] - 0.12, CUE.fly[1] + 0.04)));
-      title('safari', t, 9.56, 11.1);
-    } },
-    { name: 'numbers', from: 11.6, to: 13.68, frame(t) {
-      const img = $('.shot-numbers .nm-macro img');
-      css(img, { '--on': E.out(span(t, 11.62, 12.0)).toFixed(3), '--k': lerp(0.12, 0.6, span(t, 11.6, 13.7)).toFixed(4) });
-      $$('.shot-numbers .nm-hero .nm-fig').forEach((f) => css(f, { '--v': E.out(span(t, CUE.slam - 0.04, CUE.slam + 0.25)).toFixed(3) }));
-      const slam = E.expo(span(t, CUE.slam - 0.05, CUE.slam + 0.55));
-      cam('numbers', about(lerp(1.75, 1.22, slam) + 0.05 * span(t, 12.3, 13.7), M.fig.cx, M.fig.cy, 960 - M.fig.cx, 430 - M.fig.cy));
-      show('numbers', true, E.smooth(span(t, 11.62, 11.76)));
-      title('probe', t, 11.98, 12.98, { stagger: 0.04 });
-    } },
-    { name: 'layers', from: 13.34, to: 15.5, frame(t) {
-      drive('layers', keys([[13.34, 0], [13.5, 0.04], [14.0, 0.27], [15.2, 0.62, E.lin], [15.5, 0.66, E.out]], t));
-      // the camera comes round the stack as it parts
-      tilt('layers', { ry: keys([[13.34, -16], [15.5, 10, E.lin]], t), rx: keys([[13.34, 4], [15.5, -2, E.lin]], t), ox: M.stack.cx, oy: M.stack.cy });
-      cam('layers', about(1.28 + 0.06 * span(t, 13.34, 15.5), M.stack.cx, M.stack.cy, 760 - M.stack.cx, 700 - M.stack.cy));
-      clipShot('layers', wipe(t, CUE.wipe1[0], CUE.wipe1[1]));
-      show('layers', true);
-      title('layers', t, 13.62, 15.3);
-      $$('.shot-layers .lw li').forEach((li, i) => {
-        const a = CUE.words[i];
-        rise(li, t, a, { dy: 50, dur: 0.5, blur: 10 });
-        li.style.color = t < (CUE.words[i + 1] ?? 99) + 0.05 ? '#F6F7F9' : '#9099A8';
-      });
-    } },
-    { name: 'proxy', from: 15.5, to: 18.62, frame(t) {
-      drive('proxy', keys([[15.5, 0], [15.6, 0.05, E.lin], [15.84, 0.125, E.lin], [16.25, 0.34, E.out], [16.5, 0.4, E.lin], [16.8, 0.43, E.lin], [16.95, 0.468, E.lin], [17.25, 0.5, E.lin], [17.8, 0.665, E.inOut], [18.6, 0.74, E.lin]], t));
-      tilt('proxy', { rx: keys([[17.3, 0], [18.6, 13, E.out]], t), ry: keys([[17.3, 0], [18.6, -8, E.out]], t), ox: 960, oy: 640 });
-      cam('proxy', about(1 + 0.03 * E.sine(span(t, 15.5, 17.0)) - 0.06 * span(t, 17.3, 18.6), 960, 600, 0, 46 * E.inOut(span(t, 17.25, 17.9))));
-      show('proxy', true, 1 - E.smooth(span(t, 18.36, 18.52)));
-      title('proxy', t, 17.3, 18.3, { l3: 17.72 });
-    } },
-    { name: 'encryption', from: 18.5, to: 21.16, frame(t) {
-      drive('encryption', keys([[18.5, 0.03], [19.45, 0.36, E.lin], [20.3, 0.72, E.lin], [20.8, 0.86, E.out], [21.16, 0.9, E.lin]], t));
-      // close on the window, tipped back, while the light seals it; then up to the lock and its two names
-      const k = keys([[18.5, 1.55], [19.4, 1.45, E.out], [20.1, 1.1], [21.16, 1.05, E.out]], t);
-      const oy = keys([[18.5, M.card.cy], [19.4, M.card.cy], [20.1, 650], [21.16, 650]], t);
-      const y = keys([[18.5, 110], [19.4, 100], [20.1, -40], [21.16, -46]], t);
-      cam('encryption', about(k, 960, oy, 0, y));
-      tilt('encryption', { rx: keys([[18.5, 22], [19.5, 12], [20.1, 0]], t), ry: keys([[18.5, -10], [19.5, -6], [20.1, 0]], t), ox: M.card.cx, oy: M.card.cy });
-      show('encryption', true, E.smooth(span(t, 18.5, 18.68)));
-      title('encryption', t, 18.62, 20.5);
-      rise($('.shot-encryption .cn'), t, 20.3, { dy: 40 });
-    } },
-    { name: 'warmup', from: 20.84, to: 23.0, frame(t) {
-      drive('warmup', keys([[20.84, 0], [21.0, 0.02, E.lin], [22.95, 0.74, E.lin]], t));
-      tilt('warmup', { ry: keys([[20.84, 14], [23, 6, E.lin]], t), rx: keys([[20.84, 7], [23, 3, E.lin]], t), ox: 960, oy: 680 });
-      cam('warmup', about(0.95 + 0.04 * span(t, 20.84, 23), 960, 680, 70, 20));
-      clipShot('warmup', wipe(t, CUE.wipe2[0], CUE.wipe2[1]));
-      show('warmup', true);
-      title('warmup', t, 21.12, 22.5);
-    } },
-    { name: 'features', from: 23.0, to: 25.56, frame(t) {
-      // the grid of tiles as a plane tilted back, gliding up and away under the title
-      const u = span(t, 23.0, 25.6), g = M.grid;
-      const rx = lerp(40, 30, E.out(u)), rz = lerp(-13, -8, E.out(u)), yc = lerp(800, 560, E.out(u));
-      camEl('features').style.transform = `translate(960px, ${yc.toFixed(2)}px) rotateX(${rx.toFixed(3)}deg) rotateZ(${rz.toFixed(3)}deg) scale(0.98) translate(${(-g.cx).toFixed(1)}px, ${(-g.cy).toFixed(1)}px)`;
-      M.tiles.forEach((el, i) => {
-        // a head start, so the plane is there on the cut; each tile lands on its note
-        const a = CUE.tiles[Math.min(i, CUE.tiles.length - 1)] - 0.16;
-        const v = span(t, a, a + 0.55);
-        el.style.opacity = E.out(clamp01(v * 1.5)).toFixed(3);
-        el.style.transform = `translateY(${((1 - E.expo(v)) * 110).toFixed(2)}px)`;
-        el.style.filter = v < 1 ? `blur(${((1 - E.out(v)) * 10).toFixed(2)}px)` : 'none';
-      });
-      const ep = $('.shot-features .ep-win');
-      if (ep) ep.style.setProperty('--x', E.inOut(span(t, 23.9, 24.6)).toFixed(3));
-      show('features', true, 1 - E.smooth(span(t, 25.36, 25.52)));
-      title('features', t, 23.0, 25.2);
-    } },
-    { name: 'end', from: 25.5, to: 30.01, frame(t) {
-      const q = E.inOut(span(t, 25.62, CUE.meet));
-      endMark.style.setProperty('--q', q.toFixed(4));
-      const hv = (0.12 + 0.88 * E.out(span(t, 25.55, 26.1))).toFixed(3);
-      $('.end-l').style.opacity = hv; $('.end-r').style.opacity = hv;
-      $('.end-seam').style.opacity = E.out(span(t, CUE.meet - 0.08, CUE.meet + 0.2)).toFixed(3);
-      $('.end-glow').style.opacity = (0.25 + 0.75 * E.out(span(t, CUE.meet - 0.1, CUE.meet + 0.5)) - 0.25 * E.sine(span(t, CUE.meet + 0.5, 30))).toFixed(3);
-      rise($('.end-name'), t, CUE.name, { dy: 36 });
-      rise($('.end-line'), t, CUE.name + 0.3, { dy: 30 });
-      rise($('.end-btn'), t, CUE.name + 0.6, { dy: 24, x: 'translateX(-50%) ' });
-      // the mark rises a little as the words come in under it
-      endMark.style.transform = `translateY(${(-36 * E.inOut(span(t, CUE.name - 0.2, CUE.name + 0.8))).toFixed(2)}px)`;
-      cam('end', about(1 + 0.035 * E.sine(span(t, 25.5, 30)), 960, 520));
-      show('end', true, E.smooth(span(t, 25.5, 25.66)));
-    } },
-  ];
-
-  // MARK: Over everything: the seam, the flashes, black
-  function fx(t) {
-    const ws = [wipe(t, CUE.brand[0], CUE.brand[1]), wipe(t, CUE.wipe1[0], CUE.wipe1[1]), wipe(t, CUE.wipe2[0], CUE.wipe2[1])];
-    const w = ws.find((x) => x.on);
-    seam.style.opacity = w ? w.glow.toFixed(3) : '0';
-    seam.style.transform = `translate(${((w ? w.xc : -200) - 3).toFixed(1)}px, 0) rotate(${LEAN.toFixed(3)}deg)`;
-    const pulse = (a, k, len = 0.5) => (t < a - 0.06 ? 0 : t < a ? k * span(t, a - 0.06, a) : k * Math.pow(1 - span(t, a, a + len), 2));
-    flash.style.opacity = Math.max(pulse(CUE.brand[1] - 0.1, 0.3, 0.7), pulse(CUE.dive[1], 0.35), pulse(CUE.slam, 0.6, 0.6), pulse(CUE.meet, 0.6, 0.9)).toFixed(3);
-    const dip = (a, b) => Math.sin(Math.PI * span(t, a, b));
-    black.style.opacity = Math.max(dip(18.34, 18.7) * 0.97, dip(25.34, 25.7)).toFixed(3);
+  // MARK: The display on the rendered Mac: corners per frame from the plate's sidecar (video/.cache/plates/<ID>.json,
+  // plate px), or — until the renderer has made it — a stand-in path, so the stage can be filmed and judged.
+  const DESK = [1920, 1247];
+  const START = [[0, -83.5], [1920, -83.5], [1920, 1163.5], [0, 1163.5]];
+  const STAND_IN = {
+    R2: [[934, 304], [1430, 318], [1416, 650], [925, 615]],      // a rough 3/4 front-left end pose
+    'PL-W': [[452, 92], [1488, 150], [1472, 760], [470, 712]],  // a rough low, close front-right camera
+  };
+  function plateGeom(id, fi) {
+    const P = PL[id];
+    if (P && P.frames && P.frames.length) {
+      const k = 1920 / P.w;
+      const i = Math.max(0, Math.min(P.frames.length - 1, fi));
+      const a = P.frames[Math.floor(i)], b = P.frames[Math.min(P.frames.length - 1, Math.floor(i) + 1)], u = i - Math.floor(i);
+      const mix = (p, q) => (p && q ? p.map((pt, j) => [lerp(pt[0], q[j][0], u) * k, lerp(pt[1], q[j][1], u) * k]) : p ? p.map((pt) => [pt[0] * k, pt[1] * k]) : null);
+      if (a.display) return { quad: mix(a.display, b.display), notch: a.notch ? mix(a.notch, b.notch && b.notch.length === a.notch.length ? b.notch : a.notch) : null, radius: lerp(a.radius || 0, b.radius || 0, u) * k, real: true };
+    }
+    return null;
+  }
+  /// The stand-in notch: 13% of the display's width, 3.3% of its height, in the page's own coordinates.
+  const NOTCH = [[836, 0], [1084, 0], [1084, 41], [836, 41]];
+  function displayAt(id, t) {
+    if (id === 'R2') {
+      const fi = t * FPS - (PL.R2 ? PL.R2.filmFrom : 420);
+      const g = plateGeom('R2', fi);
+      if (g) return g;
+      const u = sine(span(t, byId.S05.from, SH.S05.land));
+      return { quad: START.map((p, j) => [lerp(p[0], STAND_IN.R2[j][0], u), lerp(p[1], STAND_IN.R2[j][1], u)]), notch: null, radius: lerp(0, 8, u), real: false };
+    }
+    const g = plateGeom(id, 0);
+    return g || { quad: STAND_IN['PL-W'], notch: null, radius: 10, real: false };
+  }
+  /// The homography that maps the page rectangle (0,0)–(w,h) onto quad q (TL, TR, BR, BL).
+  function homography(w, h, q) {
+    const src = [[0, 0], [w, 0], [w, h], [0, h]];
+    const A = [], B = [];
+    for (let i = 0; i < 4; i++) {
+      const [x, y] = src[i], [X, Y] = q[i];
+      A.push([x, y, 1, 0, 0, 0, -x * X, -y * X]); B.push(X);
+      A.push([0, 0, 0, x, y, 1, -x * Y, -y * Y]); B.push(Y);
+    }
+    for (let c = 0; c < 8; c++) {        // Gaussian elimination with partial pivoting
+      let p = c; for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+      [A[c], A[p]] = [A[p], A[c]]; [B[c], B[p]] = [B[p], B[c]];
+      for (let r = 0; r < 8; r++) {
+        if (r === c) continue;
+        const k = A[r][c] / A[c][c];
+        for (let k2 = c; k2 < 8; k2++) A[r][k2] -= k * A[c][k2];
+        B[r] -= k * B[c];
+      }
+    }
+    const [a, b, c, d, e, f, g, hh] = B.map((v, i) => v / A[i][i]);
+    return { css: `matrix3d(${[a, d, 0, g, b, e, 0, hh, 0, 0, 1, 0, c, f, 0, 1].map((v) => +v.toPrecision(10)).join(',')})`, map: (x, y) => { const W = g * x + hh * y + 1; return [(a * x + b * y + c) / W, (d * x + e * y + f) / W]; } };
+  }
+  const unit = (p, q) => { const dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy) || 1; return [dx / l, dy / l]; };
+  const pt = (p) => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`;
+  function putScreen(sec, D) {
+    const H = homography(DESK[0], DESK[1], D.quad);
+    $('.screen', sec).style.transform = H.css;
+    const [TLp, TRp, BRp, BLp] = D.quad, r = D.radius || 0;
+    const ut = unit(TLp, TRp), ul = unit(TLp, BLp), ur = unit(TRp, BRp);
+    const path = r > 0.5
+      ? `M ${pt([TLp[0] + ul[0] * r, TLp[1] + ul[1] * r])} Q ${pt(TLp)} ${pt([TLp[0] + ut[0] * r, TLp[1] + ut[1] * r])} L ${pt([TRp[0] - ut[0] * r, TRp[1] - ut[1] * r])} Q ${pt(TRp)} ${pt([TRp[0] + ur[0] * r, TRp[1] + ur[1] * r])} L ${pt(BRp)} L ${pt(BLp)} Z`
+      : `M ${pt(TLp)} L ${pt(TRp)} L ${pt(BRp)} L ${pt(BLp)} Z`;
+    $('.dclip', sec).style.clipPath = `path("${path}")`;
+    const notch = D.notch || NOTCH.map(([x, y]) => H.map(x, y));
+    $('.dnotch', sec).style.clipPath = `path(evenodd, "M -400 -400 L 2320 -400 L 2320 1480 L -400 1480 Z M ${notch.map(pt).join(' L ')} Z")`;
+    return { quad: D.quad, notch, radius: r, real: D.real };
   }
 
-  // MARK: Seek
+  // MARK: The shots — each sets its DOM for time t and returns what post.py needs for the frame
+  const CARD = { id: 'PL-CARD', frame: 0, defocus: 48 };
+  const plateFrame = (id, t, from) => Math.round(t * FPS) - (PL[id] ? PL[id].filmFrom : Math.round(from * FPS));
+  const DO = {
+    S01(t) { cutins('S01', t); return { plate: CARD }; },
+    S02(t) { return { plate: { id: 'R1', frame: plateFrame('R1', t, byId.S02.from) }, layers: [] }; },
+    S03(t) { cutins('S03', t); return { plate: CARD }; },
+    S04(t) {
+      const cuts = SH.S04.cuts, k = Math.max(0, cuts.findLastIndex((c) => t >= c - 1e-9));
+      const len = (cuts[k + 1] ?? byId.S04.to) - cuts[k];
+      $$('[data-shot="S04"] .cut').forEach((c, i) => c.classList.toggle('on', i === k));
+      const [cx, cy] = M.chips[k], S = SH.S04.scale, [X, Y] = SH.S04.chip;
+      const dx = SH.S04.drift * clamp01((t - cuts[k]) / len);
+      $(`[data-shot="S04"] .cut[data-k="${k}"] .mi-win`).style.transform = `translate(${(X - S * cx + dx).toFixed(3)}px, ${(Y - S * cy).toFixed(3)}px) scale(${S})`;
+      return { plate: CARD, cut: k };
+    },
+    S05(t) {
+      const g = putScreen(secOf('S05'), displayAt('R2', t));
+      const k = sine(span(t, SH.S05.reflect[0], SH.S05.reflect[1]));
+      return { plate: { id: 'R2', frame: plateFrame('R2', t, byId.S05.from) }, reflect: +k.toFixed(4), display: g };
+    },
+    S06(t) { cutins('S06', t); return { plate: CARD }; },
+    S07(t) {
+      const ch = SH.S07.changes, c = Math.max(0, ch.findLastIndex((x) => t >= x - 1e-9));
+      const sec = secOf('S07');
+      $('.sw', sec).style.setProperty('--x', String(c));
+      $$('.swap', sec).forEach((el) => el.classList.toggle('cur', +el.dataset.c === c));
+      const LH = 257.6, u = c > 0 ? ROLL(span(t, ch[c], ch[c] + SH.S07.roll / FPS)) : 1;
+      for (const dg of $$('.dg', sec)) {
+        const spans = $$('.dg-in > span', dg).map((s) => s.textContent);
+        const moving = c > 0 && spans[c] !== spans[c - 1];
+        const y = moving ? (c - 1 + u) * LH : c * LH;
+        $('.dg-in', dg).style.transform = y ? `translateY(${(-y).toFixed(3)}px)` : '';
+      }
+      return { plate: CARD, country: c };
+    },
+    S08(t) {
+      const S = SH.S08, u = CLOSE(span(t, S.close[0], S.close[1])), d = (S.gap / 2) * (1 - u);
+      const nx = 3 / Math.sqrt(10), ny = 1 / Math.sqrt(10);
+      const sec = secOf('S08');
+      $('.half-l', sec).style.transform = d ? `translate(${(-d * nx).toFixed(3)}px, ${(-d * ny).toFixed(3)}px)` : '';
+      $('.half-r', sec).style.transform = d ? `translate(${(d * nx).toFixed(3)}px, ${(d * ny).toFixed(3)}px)` : '';
+      $('.seam', sec).classList.toggle('in', t >= S.seam - 1e-9);
+      $$('.sw', sec).forEach((w) => w.style.setProperty('--x', '1'));
+      const s = 1 + (S.push[2] - 1) * sine(span(t, S.push[0], S.push[1]));
+      cam('S08', s, 960, 540);
+      return { plate: CARD, push: [s, 960, 540] };
+    },
+    S09(t) { cutins('S09', t); return { plate: CARD }; },
+    S10(t) { cutins('S10', t); return { plate: CARD }; },
+    S11(t) { return kontorShot(t, 'S11'); },
+    S12(t) { return kontorShot(t, 'S12'); },
+    S13(t) {
+      const sec = secOf('S13'), dark = t >= SH.S13.switch - 1e-9;
+      const w = $('.pxw', sec);
+      w.classList.toggle('err', dark);
+      w.classList.toggle('loading', !dark);
+      $('.pxw-load', sec).style.setProperty('--l', dark ? '0' : String(SH.S12.progress[2][1]));
+      const id = dark ? 'PL-D' : 'PL-W';
+      const g = putScreen(sec, displayAt('PL-W', t));
+      const c = [(g.quad[0][0] + g.quad[1][0] + g.quad[2][0] + g.quad[3][0]) / 4, (g.quad[0][1] + g.quad[1][1] + g.quad[2][1] + g.quad[3][1]) / 4];
+      const s = 1 + (SH.S13.push - 1) * sine(span(t, byId.S13.from, byId.S13.to));
+      cam('S13', s, c[0], c[1]);
+      return { plate: { id, frame: 0 }, push: [s, c[0], c[1]], reflect: 1, display: g };
+    },
+    S14(t) { cutins('S14', t); return { ground: 'black', vignette: false }; },
+    S15(t) {
+      SH.S15.flips.forEach((a, i) => $(`[data-shot="S15"] .er[data-i="${i}"]`).classList.toggle('sealed', t >= a - 1e-9));
+      const s = 1 + (SH.S15.push - 1) * sine(span(t, byId.S15.from, byId.S15.to));
+      cam('S15', s, 960, 540);
+      return { plate: CARD, push: [s, 960, 540] };
+    },
+    S16(t) { cutins('S16', t); return { plate: CARD }; },
+    S17(t) {
+      const S = SH.S17, p = Math.max(0, S.pages.findLastIndex((x) => t >= x - 1e-9));
+      const c = Math.max(0, S.pages.findLastIndex((x) => t >= x + S.cookieLag - 1e-9));
+      const sec = secOf('S17');
+      $$('.mpg', sec).forEach((el, i) => {
+        el.classList.toggle('cur', i === p);
+        if (i === p) el.style.transform = `translateY(${(-(S.scroll / 1.5) * (t - S.pages[p])).toFixed(3)}px)`;
+      });
+      $$('.wst-l', sec).forEach((el, i) => el.classList.toggle('cur', i === p));
+      $$('.wst-r', sec).forEach((el, i) => el.classList.toggle('cur', i === c));
+      return { plate: CARD, layers: ['behind', 'front'], glass: { y0: 96 + 52 * 1.5, y1: 96 + (509.33 - 34) * 1.5 } };
+    },
+    S18(t) {
+      const S = SH.S18, sec = secOf('S18'), plane = $('.plane', sec);
+      const dolly = lerp(S.dolly[0], S.dolly[1], sine(span(t, byId.S18.from, byId.S18.to)));
+      const tf = `rotateX(32deg) rotateZ(-6deg) translateX(${dolly.toFixed(3)}px)`;
+      plane.style.transform = tf;
+      // the plane's matrix: plane px (u, v, 0) → the perspective box's px (x, y, z toward the viewer)
+      const o = [784, 544], pos = [176, -4];
+      const m = new DOMMatrix().translate(pos[0] + o[0], pos[1] + o[1]).multiply(new DOMMatrix(tf)).translate(-o[0], -o[1]);
+      const P = 2600, depth = (u, v) => P - m.transformPoint(new DOMPoint(u, v, 0, 1)).z;
+      const centres = [[380, 260], [1188, 260], [380, 828], [1188, 828]];
+      const k = Math.max(0, S.focus.findLastIndex((x) => t >= x - 1e-9));
+      const r = k > 0 ? smooth(span(t, S.focus[k], S.focus[k] + S.rack / FPS)) : 1;
+      const zf = lerp(depth(...centres[Math.max(0, k - 1)]), depth(...centres[k]), r);
+      const zs = [[0, 0], [1568, 0], [1568, 1088], [0, 1088]].map(([u, v]) => depth(u, v));
+      return { plate: { id: 'PL-FLOOR', frame: 0 }, dof: { m: Array.from(m.toFloat64Array()), P, o: [960, 540], zf: +zf.toFixed(3), zfar: +Math.max(...zs).toFixed(3), znear: +Math.min(...zs).toFixed(3), coc: 12, bins: 8, focus: k } };
+    },
+    S19(t) { return { plate: { id: 'R3', frame: plateFrame('R3', t, byId.S19.from) }, layers: [] }; },
+    S20(t) { cutins('S20', t); return { plate: CARD }; },
+    S21() { return { ground: 'black', vignette: false, grain: 0.5, layers: [] }; },
+  };
+  /// S11 and S12: the Store window at 1.35× (S11, push on «Weiter») and the toolbar macro at 2.4× (S12).
+  function kontorShot(t, id) {
+    const sec = secOf('S11'), S = SH.S11, P = SH.S12.progress;
+    const w = $('.pxw', sec);
+    const l = t < P[0][0] ? 0 : t < P[1][0] ? P[1][1] * outCubic(span(t, P[0][0], P[1][0])) : lerp(P[1][1], P[2][1], outCubic(span(t, P[1][0], P[2][0])));
+    $('.pxw-load', sec).style.setProperty('--l', l.toFixed(5));
+    w.classList.toggle('loading', t >= P[0][0] - 1e-9);
+    $('.pxs-btn', sec).classList.toggle('down', t >= S.click - 1e-9 && t < S.click + S.press / FPS - 1e-9);
+    // the pointer, in the window's own px: from (1500, 900) on the frame to «Weiter», ease-out quint
+    const K = M.kwin.k, from = [(S.from[0] - M.kwin.left) / K, (S.from[1] - M.kwin.top) / K];
+    const u = outQuint(span(t, S.pointer[0], S.pointer[1]));
+    const x = lerp(from[0], M.weiter.cx, u), y = lerp(from[1], M.weiter.cy, u);
+    $('.ptr', sec).style.transform = `translate(${(x - 1.5).toFixed(3)}px, ${(y - 1.5).toFixed(3)}px)`;
+    const frame = (p) => [M.kwin.left + K * p[0], M.kwin.top + K * p[1]];
+    if (id === 'S11') {
+      const [ox, oy] = frame([M.weiter.cx, M.weiter.cy]);
+      const s = 1 + (S.push - 1) * sine(span(t, byId.S11.from, byId.S11.to));
+      cam('S11', s, ox, oy);
+      return { plate: CARD, push: [s, ox, oy] };
+    }
+    // S12: 2.4× overall, framed from the chip to Safari's stop «×»; the toolbar's middle at y = 300 (as S04's
+    // chip) or lower, so that the sign-in heading under it is wholly out of frame, never sliced by the edge
+    const Z = 2.4 / K;
+    const a = frame([(M.chip.x + M.rl.x + M.rl.w) / 2, M.chip.cy]);
+    const head = frame([0, M.head.y])[1];
+    const yc = Math.max(300, 1080 + 6 - Z * (head - a[1]));
+    const s = 1 + (SH.S12.push - 1) * sine(span(t, byId.S12.from, byId.S12.to));
+    const tx = 960 - Z * a[0], ty = yc - Z * a[1];
+    camOf('S12').style.transform = `translate(${(960 - s * (960 - tx)).toFixed(3)}px, ${(yc - s * (yc - ty)).toFixed(3)}px) scale(${(Z * s).toFixed(6)})`;
+    return { plate: CARD, push: [s, 960, yc] };
+  }
+
+  // MARK: Seek, plan
   let ready = null;
-  async function seek(t) {
-    await ready;
-    for (const s of SHOTS) {
-      if (t >= s.from && t < s.to) await s.frame(t);
-      else { show(s.name, false); shotEl(s.name).style.clipPath = ''; }
-    }
-    for (const n of Object.keys(TITLES)) {
-      const owner = { probe: 'numbers' }[n] || n;
-      if (!SHOTS.some((s) => s.name === owner && t >= s.from && t < s.to)) TITLES[n].el.classList.remove('on');
-    }
-    fx(t);
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    return t;
+  let layer = null;
+  function setLayer(name) {
+    if (name === layer) return;
+    const root = document.documentElement;
+    root.classList.remove('layer-behind', 'layer-front');
+    if (name === 'behind' || name === 'front') root.classList.add(`layer-${name}`);
+    layer = name;
   }
-  /// How many moments of the shutter (180°) a frame at t averages: more where things move fast.
-  function blurAt(t) {
-    const near = (a, b) => t >= a && t <= b;
-    if (near(CUE.dive[0], CUE.dive[1] + 0.05) || near(CUE.through[0], CUE.through[1] + 0.02) || near(CUE.fly[0], CUE.fly[1] + 0.05)) return 6;
-    if (near(CUE.brandOut[0], CUE.brandOut[1]) || near(9.34, 9.95) || near(CUE.slam, CUE.slam + 0.3) || near(CUE.wipe1[0], CUE.wipe1[1]) || near(CUE.wipe2[0], CUE.wipe2[1]) || near(25.6, CUE.meet + 0.05)) return 4;
-    if (near(7.65, 7.95) || near(8.4, 8.7) || near(23.02, 24.0)) return 3;   // never across a hard cut
+  const settle = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  /// Put the stage at time t. opt.f: the frame being filmed (its shot owns t even at the shutter's edges);
+  /// opt.layer: 'behind' / 'front' for the shots filmed in two layers (S17).
+  async function seek(t, opt = {}) {
+    await ready;
+    const shot = opt.f != null ? shotAt(opt.f / FPS) : shotAt(t);
+    setLayer(opt.layer || null);
+    show(shot.id);
+    const rec = DO[shot.id](t) || {};
+    await settle();
+    return rec;
+  }
+  /// How many 180° shutter subframes frame f averages (more only where something moves fast).
+  function subframes(f) {
+    const t = f / FPS, s = shotAt(t);
+    if (s.id === 'S04' || s.id === 'S05') return SH[s.id].sub;
+    if (s.id === 'S07') return SH.S07.changes.slice(1).some((c) => t >= c - 1e-9 && t < c + SH.S07.roll / FPS - 1e-9) ? SH.S07.sub : 1;
+    if (s.id === 'S08') return t < SH.S08.close[1] - 1e-9 ? SH.S08.sub : 1;
+    if (s.id === 'S11') return t >= SH.S11.pointer[0] && t < SH.S11.pointer[1] + 1 / FPS ? SH.S11.sub : 1;
+    if (s.id === 'S18') return 4;
     return 1;
+  }
+  /// The plan of frame f: the subframe times (inside its shot and its segment), the capture layers, and the
+  /// record post.py reads (the frame's own moment).
+  async function plan(f) {
+    const t = f / FPS, shot = shotAt(t), [a, b] = segment(shot, t);
+    const n = subframes(f);
+    const times = Array.from({ length: n }, (_, i) => {
+      const ts = n === 1 ? t : t + ((i + 0.5) / n - 0.5) * (0.5 / FPS);
+      return Math.min(b - 1e-6, Math.max(a, ts));
+    });
+    const r = await seek(t, { f });
+    const rec = {
+      f, t: +t.toFixed(6), shot: shot.id, ground: 'plate', plate: null, push: [1, 960, 540], reflect: 0, layers: ['dom'], sub: n,
+      grain: 1, vignette: true, ...r,
+    };
+    if (rec.plate) rec.plate.file = `video/.cache/plates/${rec.plate.id}/${String(Math.max(0, rec.plate.frame)).padStart(4, '0')}.png`;
+    rec.masks = masks(rec.shot);
+    return { rec, times };
+  }
+  /// The chips' flags and the traffic lights in frame (1920 px boxes): the palette gate lets their colour be.
+  function masks(id) {
+    const sec = secOf(id), out = [];
+    for (const el of $$('svg.flag, .mi-lights i, .sw-lights i, .pxw-lights i, .lights i', sec)) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 0.5 || r.height < 0.5 || r.right < 0 || r.bottom < 0 || r.left > 1920 || r.top > 1080) continue;
+      if (getComputedStyle(el).visibility !== 'visible') continue;
+      out.push([r.left, r.top, r.width, r.height].map((v) => +v.toFixed(2)));
+    }
+    return out;
+  }
+  /// The screen pictures the renderer lights the scene with (capture.mjs --screens): the page alone, 1:1.
+  async function screen(name) {
+    await ready;
+    const id = name === 'desktop6' ? 'S05' : 'S13';
+    show(id);
+    document.documentElement.classList.add('screens');
+    const sec = secOf(id);
+    camOf(id).style.transform = '';
+    $('.screen', sec).style.transform = 'none';
+    $('.dclip', sec).style.clipPath = 'none';
+    $('.dnotch', sec).style.clipPath = 'none';
+    if (id === 'S13') {
+      const w = $('.pxw', sec), dark = name === 'error';
+      w.classList.toggle('err', dark); w.classList.toggle('loading', !dark);
+      $('.pxw-load', sec).style.setProperty('--l', dark ? '0' : String(SH.S12.progress[2][1]));
+    }
+    await settle();
+  }
+  /// QA states for the gates: S08 with one half alone and unclipped, no seam.
+  async function qa(name, side) {
+    await seek(12.75);
+    const sec = secOf('S08');
+    $('.seam', sec).classList.remove('in');
+    camOf('S08').style.transform = '';
+    for (const s of ['l', 'r']) {
+      const h = $(`.half-${s}`, sec);
+      h.style.transform = '';
+      h.style.visibility = s === side ? 'visible' : 'hidden';
+      h.style.clipPath = s === side ? 'none' : '';
+    }
+    await settle();
   }
 
   ready = (async () => {
     await new Promise((r) => (document.readyState === 'complete' ? r() : window.addEventListener('load', r, { once: true })));
     if (document.fonts) await document.fonts.ready;
-    await Promise.all($$('img').map((img) => (img.complete ? Promise.resolve() : new Promise((r) => { img.onload = img.onerror = r; }))));
     await Promise.all($$('img').map((img) => img.decode().catch(() => {})));
     measure();
-    drawEnd();
-    Object.values(TITLES).forEach((T) => T.el.classList.remove('on'));
   })();
-  window.FILM = { seek, blurAt, ready, fps: FPS, duration: DUR, measured: M };
+  window.FILM = { seek, plan, subframes, screen, qa, ready, fps: FPS, duration: DUR, measured: M, shots: SHOTS };
 
   // MARK: Looking at it in a browser
-  const q = new URLSearchParams(location.search);
   if (!navigator.webdriver) {
-    let now = +(q.get('t') || 0), playing = false;
+    document.documentElement.classList.add('look');
+    const q = new URLSearchParams(location.search);
+    let now = +(q.get('t') || 0);
     const go = (t) => { now = Math.max(0, Math.min(DUR - 1 / FPS, t)); return seek(now); };
     ready.then(() => go(now));
     window.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowRight') go(now + (e.shiftKey ? 1 : 1 / FPS));
       if (e.key === 'ArrowLeft') go(now - (e.shiftKey ? 1 : 1 / FPS));
-      if (e.key === ' ') {
-        playing = !playing;
-        const t0 = performance.now() - now * 1000;
-        const tick = async () => { if (!playing) return; await go((performance.now() - t0) / 1000); if (now >= DUR - 1 / FPS) playing = false; requestAnimationFrame(tick); };
-        tick();
-      }
     });
   }
 })();

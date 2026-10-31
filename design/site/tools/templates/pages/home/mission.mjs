@@ -229,7 +229,7 @@ function blog() {
 
 // MARK: The windows: profile, site, Safari window size, look; their place in the room and in the deck.
 // Order = the deck from the front (0) to the back. `row`/`col`: Mission Control on a wide screen.
-const SITES = [
+export const SITES = [
   { site: store, url: 'roestwerk.example', w: 960, h: 600, dark: 0, row: 1, col: 1, s: 0.44 },
   { site: ads, url: 'reach.example', w: 900, h: 580, dark: 1, row: 0, col: 0, s: 0.4 },
   { site: support, url: 'desk.example', w: 940, h: 580, dark: 0, row: 0, col: 1, s: 0.4 },
@@ -261,7 +261,7 @@ function layout() {
 }
 
 // The Safari bar (macOS 26, compact: one tab), with the profile in it: flag and name.
-function bar(p, url) {
+export function bar(p, url) {
   return `<div class="mi-bar">
         <span class="mi-lights"><i></i><i></i><i></i></span>
         <span class="mi-cap mi-side">${IC.sidebar}${IC.chev}</span>

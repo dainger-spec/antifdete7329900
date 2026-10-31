@@ -19,7 +19,7 @@ export const assets = { styles: ['scenes/encryption.css'], scripts: ['scenes/enc
 // Ciphertext that looks like the real thing (base64 of AES-GCM output) and is the same on every build:
 // a small seeded generator, one stream per field. (The script uses the same one for the block's new rows.)
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-function cipher(seed, n) {
+export function cipher(seed, n) {
   let s = seed >>> 0;
   let out = '';
   for (let i = 0; i < n; i++) {

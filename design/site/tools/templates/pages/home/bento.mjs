@@ -15,7 +15,7 @@ export const assets = { styles: ['scenes/bento.css'], scripts: ['scenes/bento.js
 const MAG = '<svg class="icon" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.4 10.4L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 const tl = '<span class="mw-tl"><i></i><i></i><i></i></span>';
 
-function passwords(P) {
+export function passwords(P) {
   // The prompt hangs from the toolbar's key button: it sits in the window's own box, so its arrow stays
   // under the key at every width.
   return `<div class="pw-wrap">
@@ -49,7 +49,7 @@ function history(H) {
     </div>`;
 }
 
-function cookies(C) {
+export function cookies(C) {
   return `<div class="ck-sheet">
       <b class="sh-title">${esc(C.window)}</b>
       <span class="ck-file"><span class="ck-doc">${icon('doc', 18)}</span><span><b>${esc(C.file)}</b><em>${esc(C.format)}</em></span></span>
@@ -61,7 +61,7 @@ function cookies(C) {
     </div>`;
 }
 
-function sync(S) {
+export function sync(S) {
   const mac = (name, ic) => `<div class="sy-mac">
       <span class="sy-head">${icon(ic, 18)}<span><b>${esc(name)}</b><em>${icon('check', 10)}${esc(S.synced)}</em></span></span>
       ${S.profiles.map((p, i) => `<span class="sy-row">${avatar(p, i, 22)}<b>${esc(p)}</b>${icon('check', 12)}</span>`).join('')}
@@ -88,7 +88,7 @@ function exporting(E) {
     </div>`;
 }
 
-function ephemeral(E) {
+export function ephemeral(E) {
   // The guest's own History window as it closes: its visits go, the window fades, and the app's notice
   // stays (bento.js ties this to the scroll; without scenes, the closed state). In front, the profile's
   // row in the list, as the app labels it.
