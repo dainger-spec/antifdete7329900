@@ -1494,6 +1494,13 @@ final class SelfTest {
                   inSafari.output.contains("EXCEPTION-CHECK the user is told:") && inSafari.output.contains("PB check item"),
                   inSafari.output.split(separator: "\n").filter { $0.contains("told") }.joined(separator: " | "))
         }
+        // Thrown by Objective-C code called from a Swift task — as Safari's code is when a profile's
+        // window opens — and caught where it is called (PBCatchException, the ObjCExceptions target).
+        let inTask = await runOwnExecutable(executable, ["--exception-check", "--in-task"], timeout: 30)
+        check("exceptions: one thrown by Objective-C code called from a Swift task is caught where it is called, and the task goes on",
+              !inTask.signaled && inTask.status == 0 && inTask.output.contains("EXCEPTION-CHECK caught in a Swift task: PBExceptionCheck")
+                  && inTask.output.contains("EXCEPTION-CHECK the task went on"),
+              inTask.output.trimmingCharacters(in: .whitespacesAndNewlines))
         let control = await runOwnExecutable(executable, ["--exception-check", "--replacing"], timeout: 30)
         let first = control.output.split(separator: "\n").first.map(String.init) ?? ""
         info("exceptions, the control (the earlier hook, CoreFoundation's preprocessor replaced): "
