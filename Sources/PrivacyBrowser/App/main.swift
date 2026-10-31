@@ -49,6 +49,10 @@ MainActor.assumeIsolated {
         // temporary home of its own and held to a closed proxy, as a profile's process is.
         setvbuf(stdout, nil, _IOLBF, 0)
         exit(SafariChrome.checkPieces(arguments: arguments))
+    } else if arguments.contains("--loader-inventory") {
+        // A measurement branch only: what WebKit and CFNetwork offer about the network loader and
+        // the check of a server's certificate (LoaderInventory.swift).
+        LoaderInventory.run(arguments: arguments)
     } else if arguments.contains("--safari-inventory") {
         // What Safari's chrome brings into a profile's process — its menu, LaunchServices' answers,
         // the classes around AutoFill, history and export, the methods that wait — printed for CI
