@@ -59,9 +59,10 @@ final class SelfTest {
     // MARK: Vault migration checks (two processes, two builds)
 
     /// `--selftest-write-vault` (an unsandboxed build, CI only) creates a small vault at the default
-    /// location: a profile "Migrated" with website data of its own — a cookie, localStorage and
-    /// IndexedDB that hold the token `PB_SELFTEST_MIGRATION_TOKEN` — sealed as a profile's stop
-    /// seals it. `--selftest-read-vault` (another build, the same token) opens the vault where that
+    /// location: a profile "Migrated" with website data of its own — localStorage and IndexedDB that
+    /// hold the token `PB_SELFTEST_MIGRATION_TOKEN`, a cookie that holds it with "-cookie" — sealed
+    /// as a profile's stop seals it: its cookies written to disk first (CFNetwork keeps a new one in
+    /// memory a while; CI run 530 sealed one second after setting it, and the cookie was not there). `--selftest-read-vault` (another build, the same token) opens the vault where that
     /// build finds it and reads the website data back through WebKit:
     ///   - the sandboxed build of the same bundle ID at its first launch: inside its container, where
     ///     macOS moved it (container-migration.plist), the website data restored in the container's
@@ -116,9 +117,15 @@ final class SelfTest {
                 guard try await js(web!, Self.writeLocalStorageAndIndexedDB, ["token": token]) as? Bool == true else {
                     throw CoreError.corruptData("the page could not write localStorage and IndexedDB")
                 }
-                let cookie = HTTPCookie(properties: [.domain: "selftest.invalid", .path: "/", .name: "pb", .value: token,
+                let cookie = HTTPCookie(properties: [.domain: "selftest.invalid", .path: "/", .name: "pb", .value: token + "-cookie",
                                                      .secure: "TRUE", .expires: Date().addingTimeInterval(30 * 86_400)])!
                 await setCookie(cookie, in: session!.dataStore!)
+                // As ProfileManager's stop does, before anything else: the cookies to disk.
+                let flushed = await CookieStoreImport.flush(session!.dataStore!.httpCookieStore)
+                guard await waitUntil(timeout: 10, { self.webKitData(of: profile.id, contains: token + "-cookie") }) else {
+                    throw CoreError.corruptData("the cookie, written to disk as a profile's stop writes it (flushed: \(flushed)), is not in the "
+                                                + "profile's WebKit directories (\(layout.discoverDirectories(for: profile.id).map(\.path))): a seal would not carry it")
+                }
                 web = nil
                 session?.shutDown()
                 session = nil
@@ -160,7 +167,7 @@ final class SelfTest {
                 session?.shutDown()
                 session = nil
                 _ = try await vault.seal(profileID: profile.id, key: key)
-                guard local == token, indexed == token, cookie == token else {
+                guard local == token, indexed == token, cookie == token + "-cookie" else {
                     throw CoreError.corruptData("the website data read back: localStorage \(local ?? "nil"), IndexedDB \(indexed ?? "nil"), cookie \(cookie ?? "nil")")
                 }
                 print("PASS vault at \(root.path) opened by bundle ID \(bundleID)"
