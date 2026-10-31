@@ -550,12 +550,29 @@
     const LH = R / (o.rows || 13);
     return { cx: SCR.w * (o.cx ?? 0.5), cy: SCR.h * (o.cy ?? 0.49), R, LH, fs: LH * 0.8 };
   }
+  // An image on the display instead of the mark (HERO.setScreen): what the film shows on the Mac.
+  let screenImg = null;
+  function setScreen(url) {
+    if (!url) { screenImg = null; return Promise.resolve(); }
+    const img = new Image();
+    img.src = url;
+    return img.decode().then(() => { screenImg = img; });
+  }
   function paintScreen(o) {
     const { paintHalves, paintSeam, tokenMaps, MONO } = window.CodeArt;
     const ctx = scrCanvas.getContext('2d');
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, SCR.w, SCR.h);
     if (o.on <= 0) return;
+    if (o.image && screenImg) {
+      // cover the active area, centred; `on` dims it (a display waking)
+      const k = Math.max(SCR.w / screenImg.width, SCR.h / screenImg.height);
+      const w = screenImg.width * k, h = screenImg.height * k;
+      ctx.globalAlpha = Math.min(1, o.on);
+      ctx.drawImage(screenImg, (SCR.w - w) / 2, (SCR.h - h) / 2, w, h);
+      ctx.globalAlpha = 1;
+      return null;
+    }
     const L = markLayout(o);
     // a deep, quiet glow behind the mark, so the panel reads as lit
     const bk = (o.bg ?? 1) * o.on;
@@ -704,7 +721,7 @@
       half.gu = M.xv(hm0, [1, 0, 0]); half.gv = M.xv(hm0, [0, 1, 0]); half.gsz = gi.size;
     }
     const Ls = lights(o);
-    const bgLin = BG_LIN;
+    const bgLin = o.bg ? o.bg.map(s2l) : BG_LIN;   // the studio's backdrop (sRGB 0–255); the page's black by default
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, rtAcc.fb); gl.viewport(0, 0, W, H);
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
@@ -786,8 +803,11 @@
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     let hbox = null;
     if (half) { const hp = []; for (const a of [-1, 1]) for (const b of [-1, 1]) hp.push(toPx([half.c[0] + half.u[0] * a + half.v[0] * b, half.c[1] + half.u[1] * a + half.v[1] * b, half.c[2] + half.u[2] * a + half.v[2] * b])); hbox = [Math.min(...hp.map((q) => q[0])), Math.min(...hp.map((q) => q[1])), Math.max(...hp.map((q) => q[0])), Math.max(...hp.map((q) => q[1]))].map(Math.round); }
-    return { ms: Math.round(performance.now() - t0), box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)].map(Math.round), half: half ? toPx(half.c).map(Math.round) : null, hbox };
+    // the display's active area, corner by corner (top left, top right, bottom right, bottom left), for laying a
+    // picture onto it afterwards
+    const display = [[-DISP.w / 2, DISP.top], [DISP.w / 2, DISP.top], [DISP.w / 2, DISP.top - DISP.h], [-DISP.w / 2, DISP.top - DISP.h]].map(([x, z]) => toPx(M.xf(lid, [x, 0, z])).map((v) => +v.toFixed(2)));
+    return { display, ms: Math.round(performance.now() - t0), box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)].map(Math.round), half: half ? toPx(half.c).map(Math.round) : null, hbox };
   }
 
-  window.HERO = { init, frame, image: (type = 'image/png', q) => canvas.toDataURL(type, q) };
+  window.HERO = { init, frame, setScreen, image: (type = 'image/png', q) => canvas.toDataURL(type, q) };
 })();
