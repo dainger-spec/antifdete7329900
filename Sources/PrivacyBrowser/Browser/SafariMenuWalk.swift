@@ -79,9 +79,10 @@ enum SafariMenuWalk {
         }
         Task { @MainActor in
             let list = entries()
-            // The AutoFill items' actions, sent as a key or a context menu sends them: whether
-            // anything still acts on them once their items are out of the menu (SafariChrome).
-            let direct = SafariChrome.autoFillInsertActions
+            // The actions of the items taken out of the menu — AutoFill's, and those whose work is
+            // done outside the profile — sent as a key or another menu sends them: whether anything
+            // still acts on them (SafariChrome).
+            let direct = SafariChrome.autoFillInsertActions + SafariChrome.outsideTheProfileActions
             emit(["event": "list", "count": list.count + direct.count, "from": from])
             var index = max(0, from)
             while index < list.count {
