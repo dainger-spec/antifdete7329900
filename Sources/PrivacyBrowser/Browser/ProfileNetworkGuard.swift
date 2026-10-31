@@ -805,7 +805,12 @@ enum ProfileNetworkGuard {
         // CI's inventory), and it reaches the network itself. The kernel refuses them by name
         // (WebKit's own services are com.apple.WebKit.*, and stay).
         let services = "(deny mach-lookup (xpc-service-name-prefix \"com.apple.Safari\"))"
-        for attempt in [rules + [services], rules] where !attempt.isEmpty {
+        // Measurement only (never merged): every Mach service this process looks up, reported by the
+        // kernel, with the same refusals after it.
+        let measuring = ProcessInfo.processInfo.environment["PB_TRACE_FILE"] != nil
+        let report = "(allow mach-lookup (with report))"
+        let attempts = measuring ? [[report] + rules + [services], rules + [services], rules] : [rules + [services], rules]
+        for attempt in attempts where !attempt.isEmpty {
             let profile = "(version 1)(allow default)" + attempt.joined()
             var error: UnsafeMutablePointer<CChar>?
             if sandboxInit(profile, 0, &error) == 0 {
@@ -813,6 +818,7 @@ enum ProfileNetworkGuard {
                 if udp { closures.insert("udp") }
                 if placesClosed { closures.insert("safari-places") }
                 logger.notice("The kernel closes to this process: \(closures.sorted.joined(separator: ", "), privacy: .public)")
+                if measuring { logger.notice("PBMEASURE the sandbox reports Mach lookups: \(attempt.contains(report) ? "yes" : "no", privacy: .public)") }
                 return missing
             }
             let reason = error.map { String(cString: $0) } ?? "unknown"

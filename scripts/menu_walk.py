@@ -331,6 +331,9 @@ def main():
                              stdout=open(os.path.join(out, "proxy.txt"), "w"), stderr=subprocess.STDOUT)
     proxied = wait_for_port(PROXY_PORT)
     environment = dict(os.environ, PRIVACYBROWSER_LANG="en", PB_MENU_WALK_IGNORE=args.ignore)
+    if os.environ.get("PB_TRACE_DYLIB"):
+        # Measurement only (never merged): the trace library in the app's processes, not in this one's.
+        environment["DYLD_INSERT_LIBRARIES"] = os.environ["PB_TRACE_DYLIB"]
     if proxied:
         environment["PB_SELFTEST_HTTP_PROXY_PORT"] = str(PROXY_PORT)
     if args.safari_sentinels:
