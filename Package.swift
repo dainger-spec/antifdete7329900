@@ -15,6 +15,8 @@
 //                   a UDP host for the TURN server outside the tunnel (CI harness).
 //   PacketTunnelExtension  macOS only: the NEPacketTunnelProvider system extension's executable.
 //                   Packaged and signed into the app only by `NE=1 scripts/build-app.sh`.
+//   ObjCExceptions  macOS only: an Objective-C `@try` around a call, for Safari's code called
+//                   from Swift tasks (PBCatchException).
 //   PrivacyBrowser  macOS app (SwiftUI + AppKit + WebKit). macOS only.
 //   pbupdate        Makes and checks the signed update feed (scripts/release.sh, docs/UPDATES.md)
 //                   with BrowserCore's own checks. macOS and Linux.
@@ -80,9 +82,13 @@ targets.append(contentsOf: [
         dependencies: ["TunnelCore", "TunnelTransport"],
         path: "Sources/PacketTunnelExtension"
     ),
+    .target(
+        name: "ObjCExceptions",
+        path: "Sources/ObjCExceptions"
+    ),
     .executableTarget(
         name: "PrivacyBrowser",
-        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport"],
+        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "ObjCExceptions"],
         path: "Sources/PrivacyBrowser"
     ),
     .target(

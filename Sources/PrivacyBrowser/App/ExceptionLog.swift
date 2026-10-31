@@ -1,5 +1,6 @@
 import AppKit
 import BrowserCore
+import ObjCExceptions
 import os
 import OSLog
 
@@ -189,6 +190,19 @@ enum ExceptionLog {
         }
         print("EXCEPTION-CHECK preprocessor: \(replacing ? "replacing the one before it" : "chained"); "
               + "an exception passed through it keeps its call stack: \(preprocessorKeepsCallStacks())")
+        // `--in-task`: thrown by Objective-C code called from a Swift task, as Safari's code is when
+        // a profile's window opens, and caught where it is called (PBCatchException).
+        if arguments.contains("--in-task") {
+            Task { @MainActor in
+                let caught = PBCatchException { Thrower().throwOne() }
+                print("EXCEPTION-CHECK caught in a Swift task: \(caught?.name.rawValue ?? "nothing")")
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                print("EXCEPTION-CHECK the task went on")
+                exit(0)
+            }
+            NSApplication.shared.setActivationPolicy(.prohibited)
+            NSApplication.shared.run()
+        }
         let application = NSApplication.shared
         application.setActivationPolicy(.prohibited)
         let thrower = Thrower()
