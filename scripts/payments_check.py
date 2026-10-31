@@ -58,19 +58,20 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CA_NAME = "PrivacyBrowser payments check CA (throwaway)"
-VARIANTS = ["shipped", "shipped-safari-window", "on-page", "on-isolated", "on-none"]
+VARIANTS = ["shipped", "shipped-safari-window", "on-page", "on-isolated", "on-none", "parity"]
 
 INTERFACES = [
     "ApplePaySession", "ApplePaySetup", "ApplePaySetupFeature", "ApplePayError", "MerchantValidationEvent",
     "PaymentRequest", "PaymentResponse", "PaymentAddress", "PaymentMethodChangeEvent",
     "PaymentRequestUpdateEvent", "PushManager", "PushSubscription", "PushSubscriptionOptions",
     "Notification", "ServiceWorkerRegistration", "safari", "RTCPeerConnection", "PublicKeyCredential",
-    "WebTransport",
+    "WebTransport", "DigitalCredential", "MediaSessionCoordinator", "CredentialsContainer",
 ]
 
 PAGE = r"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Apple Pay and Web Push</title></head>
 <body><p id="state">Measuring…</p>
+<button id="gesture" style="position:fixed;left:0;top:0;width:100%;height:100%;opacity:0.01">Go</button>
 <script>
 (async function () {
   const INTERFACES = __INTERFACES__;
@@ -101,6 +102,48 @@ PAGE = r"""<!doctype html>
       clearTimeout(timer);
     }
   }
+  // ---- The owner's measurements (31 October): WebTransport, Web Authentication, Digital
+  // Credentials and the MediaSession coordinator. Each answer carries how long it took.
+  const since = (started) => Math.round(performance.now() - started) + ' ms';
+  const timed = (run) => async () => {
+    const started = performance.now();
+    try {
+      const value = await run();
+      return (value === undefined ? 'undefined' : value === null ? 'null' : String(value)) + ' (after ' + since(started) + ')';
+    } catch (error) {
+      throw { name: String(error && error.name), message: String(error && error.message) + ' (after ' + since(started) + ')' };
+    }
+  };
+  // WebTransport to a documentation address no one answers: how and when \`ready\` fails (a QUIC
+  // timeout, or at once); the capture around this run says whether UDP left for it.
+  const webTransport = (async () => {
+    const started = performance.now();
+    let transport;
+    try { transport = new WebTransport('https://192.0.2.1:4433/pb-parity'); }
+    catch (error) { return { ok: false, name: String(error && error.name), message: String(error && error.message) + ' (at once)' }; }
+    const late = new Promise((resolve) => setTimeout(() => resolve('late'), 60000));
+    const outcome = await Promise.race([transport.ready.then(() => 'ready', (error) => error), late]);
+    if (outcome === 'late') return { ok: false, name: 'no answer', message: 'within 60 s' };
+    if (outcome === 'ready') return { ok: true, value: 'ready after ' + since(started) };
+    return { ok: false, name: String(outcome && outcome.name), message: String(outcome && outcome.message) + ' (after ' + since(started) + ')' };
+  })();
+  const createOptions = () => ({ publicKey: { rp: { name: 'Parity check' },
+    user: { id: new Uint8Array(16), name: 'check', displayName: 'Check' },
+    challenge: crypto.getRandomValues(new Uint8Array(32)), pubKeyCredParams: [{ type: 'public-key', alg: -7 }], timeout: 8000 } });
+  // A user gesture: the button covers the page; the app's parity variant clicks it, Safari's side
+  // has no click.
+  const onClick = new Promise((resolve) => {
+    document.getElementById('gesture').addEventListener('click', async () => {
+      const started = performance.now();
+      try {
+        const made = await navigator.credentials.create(createOptions());
+        resolve({ ok: true, value: (made ? 'a credential' : String(made)) + ' (after ' + since(started) + ')' });
+      } catch (error) {
+        resolve({ ok: false, name: String(error && error.name), message: String(error && error.message) + ' (after ' + since(started) + ')' });
+      }
+    }, { once: true });
+    setTimeout(() => resolve({ ok: false, name: 'no click', message: 'within 45 s' }), 45000);
+  });
   const key = Uint8Array.from(atob(KEY), (c) => c.charCodeAt(0));
   const applePay = { supportedMethods: 'https://apple.com/apple-pay', data: { version: 3,
     merchantIdentifier: 'merchant.com.example.check', merchantCapabilities: ['supports3DS'],
@@ -142,6 +185,21 @@ PAGE = r"""<!doctype html>
   await call('window.pushManager.subscribe() without a user gesture',
     async () => ((await window.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })) ? 'a subscription' : null));
   if (registration) { try { await registration.unregister(); } catch (e) {} }
+  await call('PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()',
+    timed(() => PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()));
+  await call('PublicKeyCredential.isConditionalMediationAvailable()', timed(() => PublicKeyCredential.isConditionalMediationAvailable()));
+  await call('navigator.credentials.create(publicKey) without a user gesture', timed(() => navigator.credentials.create(createOptions())));
+  await call('DigitalCredential.userAgentAllowsProtocol(openid4vp)', timed(() => DigitalCredential.userAgentAllowsProtocol('openid4vp')));
+  await call('navigator.credentials.get(digital) without a user gesture',
+    timed(() => navigator.credentials.get({ digital: { requests: [{ protocol: 'openid4vp', data: {} }] } })));
+  await call('navigator.mediaSession.coordinator', () => {
+    const coordinator = navigator.mediaSession ? navigator.mediaSession.coordinator : 'no mediaSession';
+    return coordinator === undefined ? 'undefined' : coordinator === null ? 'null' : Object.prototype.toString.call(coordinator);
+  });
+  await call('MediaSessionCoordinator.prototype own names',
+    () => typeof MediaSessionCoordinator === 'function' ? Object.getOwnPropertyNames(MediaSessionCoordinator.prototype).sort().join(',') : 'absent');
+  report.calls['navigator.credentials.create(publicKey) on a click'] = await onClick;
+  report.calls['new WebTransport(https://192.0.2.1:4433).ready'] = await webTransport;
   await fetch('/report?side=' + encodeURIComponent(side), { method: 'POST',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report) });
   document.getElementById('state').textContent = 'Done. This page can be closed.';
@@ -446,8 +504,8 @@ def measure(options, executable, variants, work, trusted):
     safari = None
     if not options.no_safari:
         subprocess.run(["open", "-b", "com.apple.Safari", pages.url("safari")])
-        safari = pages.wait("safari", 90)
-        log("PAYMENTS Safari " + ("reported" if safari else "did not report within 90 s"))
+        safari = pages.wait("safari", 240)
+        log("PAYMENTS Safari " + ("reported" if safari else "did not report within 240 s"))
 
     missing = []
     for variant in variants:
@@ -455,12 +513,12 @@ def measure(options, executable, variants, work, trusted):
         if options.proxy != "none":
             command += ["--proxy", options.proxy]
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=420)
             for line in result.stdout.splitlines():
                 if line.startswith("PAYMENTS-CHECK"):
                     log(line)
         except subprocess.TimeoutExpired:
-            log(f"PAYMENTS {variant}: the app did not finish within 300 s")
+            log(f"PAYMENTS {variant}: the app did not finish within 420 s")
         if pages.wait(variant, 1) is None:
             missing.append(variant)
 

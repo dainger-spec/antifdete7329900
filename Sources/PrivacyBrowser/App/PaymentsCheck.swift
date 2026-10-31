@@ -30,6 +30,12 @@ enum PaymentsCheck {
         case onPage = "on-page"
         case onIsolated = "on-isolated"
         case onNone = "on-none"
+        /// Measurement only (the owner's questions of 31 October): WebKit's own switches for
+        /// WebTransport, Web Authentication, Digital Credentials and the MediaSession coordinator
+        /// on, the profile's proxy kept; the window's UI delegate says whether WebKit asks the app to
+        /// run a web authentication panel, and cancels it through WebKit's own panel; the app clicks
+        /// the page every second, a user gesture for its button.
+        case parity
     }
 
     static func start(arguments: [String]) {
@@ -59,8 +65,8 @@ enum PaymentsCheck {
         setenv("PB_PROFILE_PROCESS", variant == .shippedSafariWindow ? "1" : "0", 1)
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 280) {
-            print("PAYMENTS-CHECK TIMEOUT after 280 s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 400) {
+            print("PAYMENTS-CHECK TIMEOUT after 400 s")
             exit(1)
         }
         Task { @MainActor in exit(await run(page: page, variant: variant, proxy: proxy)) }
@@ -99,6 +105,35 @@ enum PaymentsCheck {
                     return 1
                 }
                 manager.openWindow(profile.id, url: page)
+            case .parity:
+                try await manager.launch(profile.id, openingWindow: false)
+                guard let session = manager.session(for: profile.id) else {
+                    print("PAYMENTS-CHECK the profile has no session in this process")
+                    return 1
+                }
+                let configuration = session.makeWebViewConfiguration()
+                let keys = ["WebTransportEnabled", "WebAuthenticationEnabled", "DigitalCredentialsEnabled", "MediaSessionCoordinatorEnabled"]
+                for key in keys { WebKitFeatures.set(configuration.preferences, key, true) }
+                let states = keys.map { key in
+                    "\(key) " + (WebKitFeatures.isEnabled(configuration.preferences, key).map { $0 ? "on" : "off" } ?? "unknown")
+                }
+                print("PAYMENTS-CHECK parity: \(states.joined(separator: ", "))")
+                let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 1000, height: 700), configuration: configuration)
+                view.uiDelegate = ParityPanelDelegate.shared
+                let made = NSWindow(contentRect: view.frame, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+                made.isReleasedWhenClosed = false
+                made.contentView = view
+                made.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                view.load(URLRequest(url: page))
+                window = made
+                // A user gesture for the page's button, which covers the page.
+                Task { @MainActor in
+                    for _ in 0..<40 {
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        Self.click(view)
+                    }
+                }
             case .onPage, .onIsolated, .onNone:
                 try await manager.launch(profile.id, openingWindow: false)
                 guard let session = manager.session(for: profile.id) else {
@@ -141,12 +176,24 @@ enum PaymentsCheck {
             print("PAYMENTS-CHECK the profile did not start: \(error)")
             return 1
         }
-        let reported = await waitForReport(of: page, timeout: 120)
-        print("PAYMENTS-CHECK \(variant.rawValue): the page \(reported ? "reported" : "did not report within 120 s")")
+        let reported = await waitForReport(of: page, timeout: 240)
+        print("PAYMENTS-CHECK \(variant.rawValue): the page \(reported ? "reported" : "did not report within 240 s")")
         window?.close()
         window = nil
         try? await manager.stop(profile.id)
         return reported ? 0 : 1
+    }
+
+    /// A click in the middle of `view`, as the window would get it from the mouse.
+    private static func click(_ view: WKWebView) {
+        guard let window = view.window else { return }
+        let point = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                                                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                                 context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { continue }
+            window.sendEvent(event)
+        }
     }
 
     /// Asks the script whether the page's report has come (`/reported`, the page's own query).
@@ -171,5 +218,31 @@ enum PaymentsCheck {
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
         return false
+    }
+}
+
+/// Measurement only: whether WebKit asks the app to run a web authentication panel — the one place
+/// an app could take the ceremony before the system shows its sheet — and what the page gets when
+/// the app cancels it through WebKit's own panel.
+final class ParityPanelDelegate: NSObject, WKUIDelegate {
+    static let shared = ParityPanelDelegate()
+
+    @objc(_webView:runWebAuthenticationPanel:initiatedByFrame:completionHandler:)
+    func runWebAuthenticationPanel(_ webView: WKWebView, panel: NSObject, frame: WKFrameInfo,
+                                   completionHandler: @escaping (Int) -> Void) {
+        let type = panel.responds(to: NSSelectorFromString("type")) ? "\(panel.value(forKey: "type") ?? "?")" : "?"
+        print("PAYMENTS-CHECK parity: WebKit asked the app to run a web authentication panel (type \(type)), "
+              + "at \(String(format: "%.3f", Date().timeIntervalSince1970))")
+        completionHandler(1) // _WKWebAuthenticationPanelResultPresented
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let cancel = NSSelectorFromString("cancel")
+            if panel.responds(to: cancel) {
+                _ = panel.perform(cancel)
+                print("PAYMENTS-CHECK parity: the app cancelled the panel through WebKit's own cancel, "
+                      + "at \(String(format: "%.3f", Date().timeIntervalSince1970))")
+            } else {
+                print("PAYMENTS-CHECK parity: the panel has no cancel")
+            }
+        }
     }
 }
