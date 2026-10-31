@@ -83,8 +83,10 @@ final class SafariHomeVault {
             try excludeFromCopies(home)
             return
         }
-        // A newer version's archive is the one refusal that leaves no directory behind: an empty
-        // one would be sealed over that archive at the next stop or unlock (docs/UPDATES.md §4).
+        // A restore that fails leaves no directory behind: an empty one would be sealed over the
+        // archive at the next stop or unlock — the profile's Safari state replaced by nothing for a
+        // restore that did not happen (a full disk, a damaged chunk, a newer version's archive:
+        // docs/UPDATES.md §4).
         var leavesHome = true
         defer {
             if leavesHome {
@@ -99,19 +101,16 @@ final class SafariHomeVault {
         }
         let archive = archiveURL(for: profileID)
         guard FileManager.default.fileExists(atPath: archive.path) else { return }
+        leavesHome = false
         // The archive restores the directory itself and refuses to write over one that is there,
         // so an empty leftover (the child creates the directory before it runs, and a profile that
         // never wrote anything leaves it behind) is removed first.
         if contents != nil { try FileManager.default.removeItem(at: home) }
-        do {
-            try EncryptedDirectoryArchive.unseal(from: archive, key: key) { label in
-                guard label == Self.label else { throw CoreError.corruptData("unexpected label \(label) in Safari's home archive") }
-                return home
-            }
-        } catch let error as CoreError {
-            if case .newerFormat = error { leavesHome = false }
-            throw error
+        try EncryptedDirectoryArchive.unseal(from: archive, key: key) { label in
+            guard label == Self.label else { throw CoreError.corruptData("unexpected label \(label) in Safari's home archive") }
+            return home
         }
+        leavesHome = true
     }
 
     /// Archives the directory and removes the plaintext. Call once the profile's process has
@@ -126,9 +125,29 @@ final class SafariHomeVault {
         }
         // Temporary files are the run's: they are not kept for the next one.
         try? FileManager.default.removeItem(at: Self.temporaryDirectory(inHome: home))
-        let stats = try EncryptedDirectoryArchive.seal(roots: [Self.label: home], to: archiveURL(for: profileID), key: key)
+        // A home without a single file is not Safari's state of the profile — Safari writes its
+        // history, tabs and settings there as it runs — but a directory a launch left that did not
+        // get to restore the archive. Sealed over the archive, it would put nothing in place of the
+        // profile's Safari state: it is removed instead, and the archive kept as it is.
+        let archive = archiveURL(for: profileID)
+        if FileManager.default.fileExists(atPath: archive.path), !Self.holdsAnyFile(home) {
+            try FileManager.default.removeItem(at: home)
+            log.notice("Safari's home of \(profileID.uuidString, privacy: .public) held no file: removed, its archive kept")
+            return
+        }
+        let stats = try EncryptedDirectoryArchive.seal(roots: [Self.label: home], to: archive, key: key)
         try FileManager.default.removeItem(at: home)
         log.notice("Sealed Safari's home for \(profileID.uuidString, privacy: .public): \(stats.files, privacy: .public) files, \(stats.bytes, privacy: .public) bytes")
+    }
+
+    /// Whether `directory` holds a file anywhere beneath it (directories alone do not count; a
+    /// directory that cannot be walked is taken to hold some).
+    nonisolated static func holdsAnyFile(_ directory: URL) -> Bool {
+        guard let walk = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.isDirectoryKey]) else { return true }
+        for case let url as URL in walk where (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true {
+            return true
+        }
+        return false
     }
 
     /// The lock a profile's process holds on its home for as long as it runs (`holdWhileRunning`).

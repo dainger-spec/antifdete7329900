@@ -315,6 +315,7 @@ final class SelfTest {
         await group("fingerprint surface") { try await fingerprintSurface(repository) }
         await group("recovery sealing") { try await recoverySealing(repository) }
         await group("format policy") { try formatPolicy(repository) }
+        await group("Safari's home: a restore that fails") { try safariHomeRestoreFailure(repository) }
         await group("earlier versions' Safari keys") { earlierVersionsSafariKeys() }
         await group("update gate") { try updateGate(repository) }
         await group("settings") { try await appSettings(repository) }
@@ -3386,14 +3387,71 @@ final class SelfTest {
             try? homes.seal(profileID: profile.id, key: key) // what a stop, or the recovery at unlock, does next
             check("format policy: the newer version's archive is as it was, \(when)", (try? Data(contentsOf: archive)) == newer)
         }
-        // Even with a home there, nothing is sealed over the archive.
+        // Even with a home there, nothing is sealed over the archive. (A home with a file in it: one
+        // without a file is never sealed over an archive at all, `safariHomeRestoreFailure`.)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try Data("history".utf8).write(to: home.appendingPathComponent("History.db"))
         var sealRefusal: Error?
         do { try homes.seal(profileID: profile.id, key: key) } catch { sealRefusal = error }
         var sealRefusedAsNewer = false
         if case .newerFormat? = sealRefusal as? CoreError { sealRefusedAsNewer = true }
         check("format policy: a home is not sealed over a newer version's archive",
               sealRefusedAsNewer && (try? Data(contentsOf: archive)) == newer, String(describing: sealRefusal))
+        try? FileManager.default.removeItem(at: home)
+    }
+
+    /// Safari's home archive that cannot be restored — damaged, not a newer version's: the launch
+    /// fails and leaves no home, and the seals that follow (a stop, the recovery at unlock) keep the
+    /// archive as it was. Before, the failed restore left an empty home and the next unlock sealed
+    /// it over the archive. A home without a file is never sealed over an archive either.
+    private func safariHomeRestoreFailure(_ repository: ProfileRepository) throws {
+        let profile = try repository.create(name: "Damaged archive", configuration: ProfileConfiguration())
+        defer { try? repository.delete(profile.id) }
+        let key = try repository.profileKey(for: profile.id)
+        let homes = SafariHomeVault(repository: repository)
+        let home = homes.homeDirectory(for: profile.id)
+        let history = home.appendingPathComponent("Library/Safari/History.db")
+        let staging = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-home-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try FileManager.default.createDirectory(at: staging.appendingPathComponent("Library/Safari"), withIntermediateDirectories: true)
+        try Data("history".utf8).write(to: staging.appendingPathComponent("Library/Safari/History.db"))
+        let archive = repository.safariHomeArchiveURL(for: profile.id)
+        try EncryptedDirectoryArchive.seal(roots: [ProfileTransfer.safariHomeLabel: staging], to: archive, key: key)
+        let good = try Data(contentsOf: archive)
+        var damaged = good
+        damaged[damaged.count - 1] ^= 0x01 // the last chunk's tag: the archive no longer authenticates
+        try damaged.write(to: archive)
+
+        // A first launch, and one after a run that left an empty home (as a profile that wrote nothing does).
+        for leftover in [false, true] {
+            if leftover { try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true) }
+            var refusal: Error?
+            do { try homes.prepareForLaunch(profileID: profile.id, key: key) } catch { refusal = error }
+            let when = leftover ? "after an empty home was left" : "at a first launch"
+            check("Safari's home: an archive that cannot be restored fails the launch, \(when)", refusal != nil)
+            check("Safari's home: a restore that failed leaves no home to be sealed over the archive, \(when)",
+                  !FileManager.default.fileExists(atPath: home.path))
+            try? homes.seal(profileID: profile.id, key: key) // what a stop, or the recovery at unlock, does next
+            check("Safari's home: the archive is as it was after the seal that follows, \(when)",
+                  (try? Data(contentsOf: archive)) == damaged)
+        }
+
+        // A home of empty folders is not sealed over a good archive: removed, the archive kept, and
+        // it restores whole.
+        try good.write(to: archive)
+        try FileManager.default.createDirectory(at: history.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try homes.seal(profileID: profile.id, key: key)
+        check("Safari's home: a home without a file is not sealed over the archive",
+              (try? Data(contentsOf: archive)) == good && !FileManager.default.fileExists(atPath: home.path))
+        try homes.prepareForLaunch(profileID: profile.id, key: key)
+        check("Safari's home: the archive kept restores whole", (try? Data(contentsOf: history)) == Data("history".utf8))
+        // A home with files in it is sealed as before.
+        try Data("history 2".utf8).write(to: history)
+        try homes.seal(profileID: profile.id, key: key)
+        check("Safari's home: a home with files is sealed as before",
+              (try? Data(contentsOf: archive)) != good && !FileManager.default.fileExists(atPath: home.path))
+        try homes.prepareForLaunch(profileID: profile.id, key: key)
+        check("Safari's home: and restored as before", (try? Data(contentsOf: history)) == Data("history 2".utf8))
         try? FileManager.default.removeItem(at: home)
     }
 
