@@ -222,7 +222,15 @@ a build made with Xcode 26 declares: such a build leaks on macOS 27. Builds made
 declare 14.0 (its SwiftPM writes the deployment target), and `scripts/release.sh` refuses to release
 a build that declares 15.0 or newer. CI's macOS 27 job fails the build when this Mac asks for the
 self-test's certificate canaries (`scripts/certificate_leak_check.py`), the one thing that job fails
-on: a change that had every build fetch (run 458, below) went through while it failed nothing. The
+on: a change that had every build fetch (run 458, below) went through while it failed nothing. CI's
+macOS 26 job builds with Xcode 26, whose executables declare 26.5: it runs the self-test of the
+build without the App Sandbox — the one inside its capture and file trace — as a copy declaring
+14.0, as a release does, and measures the build as made in a step of its own (which reports the
+fetch every run). Up to run 524 its self-test ran the 26.5 build, and its capture, which until then
+could not see such a fetch on macOS 26 (§0: the sandboxed build had fetched the intermediate first,
+and this Mac kept it), passed; run 524, with names of its own for each build, saw the 26.5 build's
+fetch and failed. The sandboxed build's self-test there still runs as made (26.5): a re-signed copy
+would be another app to its container. The
 capture names this app, not WebKit's network process, as the one the fetch was made for. How it
 comes about was measured in runs 491 and 492 (measurement branch `claude/measure-sdk-trust`): not
 WebKit's network loader — its switch, `CFNetworkNetworkLoaderEnabled`, set either way, changed

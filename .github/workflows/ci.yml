@@ -363,6 +363,28 @@ jobs:
           export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088
           mkdir -p build/egress
           status=0
+          # What a release declares: Xcode 26 writes SDK 26.5 into the executables, and with 15.0 or
+          # newer this Mac fetches a certificate's missing intermediate outside a profile's proxy
+          # (docs/ISOLATION_AND_LIMITATIONS.md §2; the step "From which declared SDK…" below measures
+          # the build as made). Releases declare 14.0 (Xcode 27's SwiftPM; scripts/release.sh refuses
+          # 15 and newer), so the build without the App Sandbox — the one inside the capture and the
+          # file trace — runs as a copy declaring 14.0. Up to run 524 it ran as made, 26.5, whose fetch
+          # the capture never saw (the cache above); run 524 saw it. The sandboxed build still runs as
+          # made: a re-signed copy is another app to its container, which already holds the build's data.
+          python3 - <<'PY'
+          import os, subprocess, sys
+          sys.path.insert(0, "scripts")
+          from aia_variants import BINARY, copy_declaring, declared_sdk
+          app, folder = "build/unsandboxed/PrivacyBrowser.app", "build/release-sdk/unsandboxed"
+          os.makedirs(folder, exist_ok=True)
+          entitlements = os.path.join(folder, "entitlements.plist")
+          with open(entitlements, "wb") as handle:
+              handle.write(subprocess.run(["codesign", "-d", "--entitlements", "-", "--xml", app], capture_output=True).stdout)
+          copy = copy_declaring(app, "14.0", folder, entitlements)
+          if not copy or declared_sdk(os.path.join(copy, BINARY))[1] != "14.0":
+              sys.exit(f"::error::no copy of {app} declaring SDK 14.0 could be made")
+          print(f"unsandboxed: as built {declared_sdk(os.path.join(app, BINARY))}, the self-test's copy {declared_sdk(os.path.join(copy, BINARY))}")
+          PY
           for variant in sandboxed unsandboxed; do
             # A proxy of its own for each build, its certificates naming addresses no earlier run
             # asked for (--aia-tag): the intermediate this Mac fetched for the sandboxed build's
@@ -392,7 +414,9 @@ jobs:
               mkdir -p "$PWD/build/egress/trace-canary"
               defaults write "$PWD/build/egress/trace-canary/PBTraceCanary" Canary -string "$(date +%s)"
             fi
-            build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test | tee "build/egress/selftest-$variant.txt" || status=1
+            app="build/$variant/PrivacyBrowser.app"
+            if [ "$variant" = unsandboxed ]; then app="build/release-sdk/unsandboxed/PrivacyBrowser.app"; fi
+            "$app/Contents/MacOS/PrivacyBrowser" --self-test | tee "build/egress/selftest-$variant.txt" || status=1
             echo "::endgroup::"
             kill $PROXY_PID || true
             wait $PROXY_PID 2>/dev/null || true
