@@ -843,6 +843,13 @@ enum SafariChrome {
             // addSyncObserver:]'s block on its _syncObserverQueue).
             ("WBTabGroupSyncAgentProxy", "addSyncObserver:"),
             ("WBTabGroupSyncAgentProxy", "removeSyncObserver:"),
+            // SafariPlatformSupport's completion list is a view of a service of Safari's, which the
+            // kernel refuses a profile's process (com.apple.Safari*): each time its view service
+            // ended, -[SPSafariPlatformSupport viewServiceDidTerminateWithError:] asked for the
+            // view again (_setUpCompletionListViewController…), on the main thread, without end
+            // (measurement runs 468 to 473: "…endpoint for listener 'com.apple.view-bridge':
+            // Connection invalid", hundreds of thousands of times a walk; a sample, run 473).
+            ("SPSafariPlatformSupport", "viewServiceDidTerminateWithError:"),
         ]
         for (className, selectorName) in nothing {
             replaceWithConstant(className, selectorName) { nil }
