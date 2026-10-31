@@ -88,7 +88,8 @@
   const VSHOT = {
     // the Mac: whole while it is closed and wide, closer as it opens (a slow push in), followed as it turns
     hero: (t) => fitV(keys([[0, 0.86], [2.2, 1.0], [4.05, 1.08]], t), keys([[1.0, 960], [2.6, 985], [4.05, 1100]], t), 640, 540, 1130),
-    mission: () => fitV(1.08, 1086, 766, 540, 1100),
+    // out of the dive the shop's window is centred, then the wall of windows is framed as it spreads
+    mission: (t) => fitV(keys([[4.5, 0.85], [5.3, 1.08]], t), keys([[4.5, 960], [5.3, 1086]], t), keys([[4.5, 570], [5.3, 766]], t), 540, keys([[4.5, 1000], [5.3, 1100]], t)),
     sites: () => fitV(0.95, 644, 608, 540, 740),
     safari: () => fitV(0.6, 960, 632, 540, 1120),
     numbers: () => fitV(1.0, 960, 430, 540, 820),
@@ -421,6 +422,9 @@
     const near = (a, b) => t >= a && t <= b;
     const cuts = [9.36, 11.6, 15.5, 23.0, 25.5];
     if (cuts.some((c) => Math.abs(t - c) < 0.5 / FPS)) return 1;
+    // the light's seam is a thin line crossing the frame in half a second: averaged moments would show it two or
+    // three times over, so the wipes are filmed sharp
+    if (near(CUE.brand[0] - 0.02, CUE.brand[1] + 0.02) || near(CUE.wipe1[0] - 0.02, CUE.wipe1[1] + 0.02) || near(CUE.wipe2[0] - 0.02, CUE.wipe2[1] + 0.02)) return 1;
     if (near(CUE.dive[0], CUE.dive[1] + 0.05) || near(CUE.through[0], CUE.through[1] + 0.02) || near(CUE.fly[0], CUE.fly[1] + 0.05)) return 6;
     if (near(CUE.brandOut[0], CUE.brandOut[1]) || near(9.34, 9.95) || near(CUE.slam, CUE.slam + 0.3) || near(CUE.wipe1[0], CUE.wipe1[1]) || near(CUE.wipe2[0], CUE.wipe2[1]) || near(25.6, CUE.meet + 0.05)) return 5;
     if (near(7.6, 8.0) || near(8.35, 8.75) || near(23.02, 24.0)) return 5;
