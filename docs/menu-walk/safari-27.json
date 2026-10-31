@@ -17,6 +17,30 @@
   ],
   "xpc": []
  },
+ "(sent to the first responder) _importFromFile: | _importFromFile: | -": {
+  "behaviour": [
+   "our notice"
+  ],
+  "xpc": []
+ },
+ "(sent to the first responder) generateWebAppForCurrentPage: | generateWebAppForCurrentPage: | -": {
+  "behaviour": [
+   "our notice"
+  ],
+  "xpc": []
+ },
+ "(sent to the first responder) runExportDataPanel: | runExportDataPanel: | -": {
+  "behaviour": [
+   "our notice"
+  ],
+  "xpc": []
+ },
+ "(sent to the first responder) toggleSharedWithYou: | toggleSharedWithYou: | -": {
+  "behaviour": [
+   "our notice"
+  ],
+  "xpc": []
+ },
  "Bookmarks › Add Bookmark Folder | addBookmarkFolder: | -": {
   "behaviour": [
    "-"
@@ -337,12 +361,6 @@
   ],
   "xpc": []
  },
- "File › Add to Dock… | generateWebAppForCurrentPage: | -": {
-  "behaviour": [
-   "sheet NSWindow"
-  ],
-  "xpc": []
- },
  "File › Close All Windows | closeAllWindows: | ⌥⇧⌘W": {
   "behaviour": [
    "alert"
@@ -633,31 +651,31 @@
  },
  "View › Make Text Bigger | makeTextBigger: | ⌥⌘+": {
   "behaviour": [
-   "-"
+   "disabled"
   ],
   "xpc": []
  },
  "View › Make Text Smaller | makeTextSmaller: | ⌥⌘-": {
   "behaviour": [
-   "-"
+   "disabled"
   ],
   "xpc": []
  },
  "View › Reload Page From Origin | reloadFromOrigin: | ⌥⌘R": {
   "behaviour": [
-   "-"
+   "disabled"
   ],
   "xpc": []
  },
  "View › Reload Page | reloadObeyingUnifiedField: | ⌘R": {
   "behaviour": [
-   "-"
+   "disabled"
   ],
   "xpc": []
  },
  "View › Reload With Content Blockers | reloadWithInvertedContentBlockersEnabledSetting: | -": {
   "behaviour": [
-   "-"
+   "disabled"
   ],
   "xpc": []
  },
@@ -681,17 +699,11 @@
  },
  "View › Show Reader | toggleReader: | ⇧⌘R": {
   "behaviour": [
-   "disabled"
-  ],
-  "xpc": []
- },
- "View › Show Reading List Sidebar | toggleReadingListSidebar: | ⌃⌘2": {
-  "behaviour": [
    "-"
   ],
   "xpc": []
  },
- "View › Show Shared with You | toggleSharedWithYou: | -": {
+ "View › Show Reading List Sidebar | toggleReadingListSidebar: | ⌃⌘2": {
   "behaviour": [
    "-"
   ],
@@ -711,7 +723,7 @@
  },
  "View › Show Tab Overview | toggleVisualTabPickerFromMenu: | ⇧⌘\\": {
   "behaviour": [
-   "disabled"
+   "-"
   ],
   "xpc": []
  },
@@ -723,19 +735,19 @@
  },
  "View › Text Encoding › Default | changeTextEncoding: | -": {
   "behaviour": [
-   "-"
+   "disabled"
   ],
   "xpc": []
  },
  "View › Zoom In | zoomIn: | ⌘+": {
   "behaviour": [
-   "-"
+   "disabled"
   ],
   "xpc": []
  },
  "View › Zoom Out | zoomOut: | ⌘-": {
   "behaviour": [
-   "-"
+   "disabled"
   ],
   "xpc": []
  },
