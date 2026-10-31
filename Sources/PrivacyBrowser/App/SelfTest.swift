@@ -302,6 +302,7 @@ final class SelfTest {
         await group("Safari's nibs") { try await safariNibChecks() }
         await group("nested Safari homes") { try nestedSafariHomes() }
         await group("saved window frame") { savedWindowFrame() }
+        await group("the home --safari-chrome left") { try standaloneSafariHomeRemoved() }
         await group("storage isolation and shims") { try await storageIsolationAndShims(repository) }
         await group("device generations") { try await deviceGenerations(repository) }
         await group("fingerprint surface") { try await fingerprintSurface(repository) }
@@ -1965,6 +1966,28 @@ final class SelfTest {
                   && SafariPaths.moved(profileHome + "/Library/Safari/History.db", realHome: realHome, home: profileHome) == nil
                   && SafariPaths.moved(profileHome, realHome: realHome, home: profileHome) == nil
                   && SafariPaths.moved("/tmp/elsewhere", realHome: realHome, home: profileHome) == nil)
+    }
+
+    /// `<vault>/SafariChromeHome`, the home `--safari-chrome` gave itself up to 1 November — Safari's
+    /// chrome and WebKit's data of whatever was browsed in it, in plaintext, in no profile — goes at
+    /// the app's launch, whatever is in it, and nothing else of the vault's folder with it
+    /// (`AppEnvironment.removeStandaloneSafariHome`, on a folder made for the purpose).
+    private func standaloneSafariHomeRemoved() throws {
+        let vault = FileManager.default.temporaryDirectory.appendingPathComponent("pb-standalone-home-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let safari = vault.appendingPathComponent("SafariChromeHome/Library/Safari", isDirectory: true)
+        try FileManager.default.createDirectory(at: safari, withIntermediateDirectories: true)
+        try Data("plaintext".utf8).write(to: safari.appendingPathComponent("History.db"))
+        let kept = [vault.appendingPathComponent("vault.json"), vault.appendingPathComponent("profiles/ID/home.noindex/Library/Safari/History.db")]
+        for file in kept {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: file)
+        }
+        AppEnvironment.removeStandaloneSafariHome(in: vault)
+        let gone = !FileManager.default.fileExists(atPath: vault.appendingPathComponent("SafariChromeHome").path)
+        let left = kept.filter { !FileManager.default.fileExists(atPath: $0.path) }
+        check("the plaintext home --safari-chrome left in the vault's folder goes at launch, and nothing else of the folder",
+              gone && left.isEmpty, "SafariChromeHome \(gone ? "gone" : "still there"); gone with it: \(left.map(\.lastPathComponent))")
     }
 
     /// Where a profile's first window opens (`SavedWindowFrame`): the frame the user left, kept with
