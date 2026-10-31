@@ -1051,6 +1051,17 @@ enum ProfileNetworkGuard {
         report.trustRefused = trust.refused
         report.trustFetchAllowed = ServerTrust.tally.fetchAllowed
         report.pasteAsTypedInMenu = SafariChrome.pasteAsTypedInMenu
+        if let menu = NSApp?.mainMenu {
+            let pdf = NSSelectorFromString("saveDocumentToPDF:")
+            // The File menu's submenus filled first, as AppKit fills one before it shows it.
+            if let file = menu.items.compactMap(\.submenu).first(where: { $0.items.contains { $0.action == pdf } }) {
+                for submenu in file.items.compactMap(\.submenu) { submenu.delegate?.menuNeedsUpdate?(submenu) }
+            }
+            report.bookmarksImportExportInMenu = SafariChrome.bookmarksActions.map(NSSelectorFromString).allSatisfy { action in
+                SafariChrome.menuContains(menu, where: { $0.action == action })
+            }
+        }
+        report.bookmarksItemsPutBack = SafariChrome.bookmarksItemsPutBack
         report.safariFormSubmissionsKept = SafariChrome.formSubmissionsKept
         report.safariSaveOffersReached = SafariChrome.saveOffersReached
         report.udpClosed = closures.sorted.contains("udp")
@@ -1207,6 +1218,11 @@ struct ProfileNetworkReport: Codable, Equatable {
     var trustFetchAllowed = 0
     /// Safari's Edit menu has Paste as Typed (`SafariChrome.addPasteAsTyped`).
     var pasteAsTypedInMenu = false
+    /// Safari's File menu has Safari's own import and export of the profile's bookmarks, whichever
+    /// File menu Safari built, and whether they were put back where the Browsing Data items were
+    /// (`SafariChrome.keepBookmarksImportAndExport`).
+    var bookmarksImportExportInMenu = false
+    var bookmarksItemsPutBack = false
     /// Forms submitted in Safari's window that went on without Safari's own AutoFill seeing them,
     /// and times one of its offers to save a password or a card was reached all the same (none is
     /// right; `SafariChrome.closeSafarisAutoFill`).

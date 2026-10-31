@@ -394,10 +394,20 @@ enum SafariChrome {
         for (key, value) in servicePreferenceValues(for: configuration) {
             arguments[key] = value
         }
-        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         servicePreferenceKeys = servicePreferenceValues(for: configuration).map(\.0)
+        // History › Home (⇧⌘H) goes to the profile's start page: Safari's own home page setting,
+        // which its own action reads (the owner's decision; Safari's default, apple.com/startpage,
+        // for a profile without one). Run 488 has Safari taking it from the argument domain.
+        if let start = configuration.startURL {
+            arguments[homePageKey] = start.absoluteString
+            servicePreferenceKeys.append(homePageKey)
+        }
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         log.notice("Safari's own services are set for this profile (\(servicePreferenceKeys.count, privacy: .public) keys)")
     }
+
+    /// Safari's home page, which History › Home opens.
+    static let homePageKey = "HomePage"
 
     private static var servicePreferenceKeys: [String] = []
 
@@ -987,6 +997,12 @@ enum SafariChrome {
     static let autoFillInsertActions = ["_handleInsertFromContactsCommand:", "_handleInsertFromPasswordsCommand:",
                                         "_handleInsertFromCreditCardsCommand:"]
 
+    /// The actions of the items whose work is done outside the profile (`removeItemsOutsideTheProfile`):
+    /// File › Add to Dock…, Import Browsing Data from File or Folder…, Export Browsing Data to File…,
+    /// View › Show Shared with You.
+    static let outsideTheProfileActions = ["generateWebAppForCurrentPage:", "_importFromFile:", "runExportDataPanel:",
+                                           "toggleSharedWithYou:"]
+
     /// Those actions say they are off, however they are sent — the Edit menu (whose items are taken
     /// out as well), a context menu, a key. On macOS 26, Passwords… in a profile's window had
     /// Safari's helper (SafariPlatformSupport) write into the real Safari's container and
@@ -1009,8 +1025,11 @@ enum SafariChrome {
                 method_setImplementation(method, imp_implementationWithBlock(notice))
             }
         }
+        // So are the actions of the items whose work is done outside the profile, whichever menu
+        // sends them: Safari's Share menu has an Add to Dock… of its own.
         let sendAction = #selector(NSApplication.sendAction(_:to:from:))
         let closed = Set(autoFillInsertActions)
+        let outside = Set(outsideTheProfileActions)
         for owner in [NSClassFromString("BrowserApplication"), NSApplication.self].compactMap({ $0 }) {
             guard let method = class_getInstanceMethod(owner, sendAction),
                   replaced.insert(UInt(bitPattern: method)).inserted else { continue }
@@ -1019,6 +1038,10 @@ enum SafariChrome {
             let replacement: @convention(block) (AnyObject, Selector?, AnyObject?, AnyObject?) -> Bool = { application, action, target, sender in
                 if let action, closed.contains(NSStringFromSelector(action)) {
                     MainActor.assumeIsolated { SafariChrome.presentNotice(L("safari.autofill.closed.title"), L("safari.autofill.closed.text")) }
+                    return true
+                }
+                if let action, outside.contains(NSStringFromSelector(action)) {
+                    MainActor.assumeIsolated { SafariChrome.presentNotice(L("safari.outside.title"), L("safari.outside.text")) }
                     return true
                 }
                 return original(application, sendAction, action, target, sender)
@@ -1148,6 +1171,8 @@ enum SafariChrome {
         }
         removePrivateWindowItems(from: menu)
         removeAutoFillInsertItems(from: menu)
+        removeItemsOutsideTheProfile(from: menu)
+        keepBookmarksImportAndExport(in: menu)
         addPasteAsTyped(to: menu)
         retargetNewWindow(in: menu)
         NSApplication.shared.mainMenu = menu
@@ -1232,10 +1257,108 @@ enum SafariChrome {
         return removed
     }
 
+    /// Items whose work is done outside the profile, gone from its menu (the owner's decisions on
+    /// the menu walk's findings, docs/SAFARI_MENU.md): File › Add to Dock… makes a web app that
+    /// runs in Safari's own web-app container, outside the profile and its proxy; File › Import
+    /// Browsing Data from File or Folder… and Export Browsing Data to File… put passwords and cards
+    /// into this Mac's keychain and take them from there; View › Show Shared with You shows what
+    /// was shared with this Mac's Messages account. The import and export of the profile's own
+    /// bookmarks stay. A submenu left with nothing goes with them, and so does a separator left
+    /// next to another. True when an item was removed.
+    @discardableResult
+    private static func removeItemsOutsideTheProfile(from menu: NSMenu) -> Bool {
+        let outside = Set(outsideTheProfileActions)
+        var removed = false
+        for item in menu.items {
+            if let submenu = item.submenu {
+                if removeItemsOutsideTheProfile(from: submenu) {
+                    removed = true
+                    if submenu.items.allSatisfy(\.isSeparatorItem) { menu.removeItem(item) }
+                }
+                continue
+            }
+            if let action = item.action, outside.contains(NSStringFromSelector(action)) {
+                if browsingDataActions.contains(NSStringFromSelector(action)) { removedBrowsingData = true }
+                menu.removeItem(item)
+                removed = true
+            }
+        }
+        if removed {
+            // No separator first, last, or right after another.
+            var previousWasSeparator = true
+            for item in menu.items {
+                if item.isSeparatorItem, previousWasSeparator {
+                    menu.removeItem(item)
+                } else {
+                    previousWasSeparator = item.isSeparatorItem
+                }
+            }
+            if let last = menu.items.last, last.isSeparatorItem { menu.removeItem(last) }
+        }
+        return removed
+    }
+
+    /// Safari's own actions for the profile's bookmarks: File › Import From › Bookmarks HTML File…
+    /// and File › Export › Bookmarks….
+    static let bookmarksActions = ["importBookmarks:", "exportBookmarks:"]
+
+    /// The Browsing Data items' actions: a File menu that has them has no bookmarks items of its own.
+    private static let browsingDataActions: Set<String> = ["_importFromFile:", "runExportDataPanel:"]
+
+    /// `removeItemsOutsideTheProfile` took a Browsing Data item out.
+    private static var removedBrowsingData = false
+
+    /// The tag of the items `keepBookmarksImportAndExport` puts in.
+    private static let bookmarksItemTag = 0x5042_424B
+
+    /// Safari's File menu has its bookmarks' import and export put back after Export as PDF….
+    private(set) static var bookmarksItemsPutBack = false
+
+    /// The import and export of the profile's own bookmarks stay, whichever File menu Safari builds
+    /// (the owner's answer to the morning's question 4: the browsing data's go, the bookmarks'
+    /// stay). One of Safari's File menus has Import From › Bookmarks HTML File… and Export ›
+    /// Bookmarks…; the other has the two Browsing Data items in their place (some runs, on either
+    /// Safari: run 463 on Safari 27, run 468's second attempt on both), which go
+    /// (`removeItemsOutsideTheProfile`) and leave nothing for the bookmarks alone. Only there are
+    /// Safari's own two actions put back, after Export as PDF…, under the other menu's titles — and
+    /// once: Safari fills its menus again, and a submenu of its own may be filled only as it opens.
+    static func keepBookmarksImportAndExport(in menu: NSMenu) {
+        guard removedBrowsingData, !menuContains(menu, where: { $0.tag == bookmarksItemTag }) else { return }
+        let missing = bookmarksActions.map(NSSelectorFromString).filter { action in !menuContains(menu, where: { $0.action == action }) }
+        guard !missing.isEmpty else { return }
+        let pdf = NSSelectorFromString("saveDocumentToPDF:")
+        guard let file = menu.items.compactMap(\.submenu).first(where: { $0.items.contains { $0.action == pdf } }),
+              var index = file.items.firstIndex(where: { $0.action == pdf }).map({ $0 + 1 }) else {
+            log.error("Safari's menu has no Export as PDF…: its bookmarks' import and export are not put back")
+            return
+        }
+        for action in missing {
+            let (title, itemTitle) = NSStringFromSelector(action) == "importBookmarks:"
+                ? (L("menu.importFrom"), L("menu.importBookmarksFile")) : (L("menu.export"), L("menu.exportBookmarks"))
+            let submenu = NSMenu(title: title)
+            let inner = NSMenuItem(title: itemTitle, action: action, keyEquivalent: "")
+            inner.tag = bookmarksItemTag
+            submenu.addItem(inner)
+            let item = NSMenuItem(title: submenu.title, action: nil, keyEquivalent: "")
+            item.tag = bookmarksItemTag
+            item.submenu = submenu
+            file.insertItem(item, at: index)
+            index += 1
+        }
+        bookmarksItemsPutBack = true
+        log.notice("Safari's File menu: the bookmarks' import and export put back where the Browsing Data items were")
+    }
+
+    /// Whether `menu`, or a submenu of it, has an item for which `test` holds.
+    static func menuContains(_ menu: NSMenu, where test: (NSMenuItem) -> Bool) -> Bool {
+        menu.items.contains { test($0) || ($0.submenu.map { menuContains($0, where: test) } ?? false) }
+    }
+
     /// AppKit adds the Edit menu's system items itself once the menu bar is up — AutoFill among
     /// them — so the items taken out above came back: the menu walk found Edit › AutoFill ›
     /// Contact… and Passwords… there, enabled, in a profile's window (CI run 452). They are taken
-    /// out again whenever a menu gets an item, and as a menu opens.
+    /// out again whenever a menu gets an item, and as a menu opens; so are the items whose work is
+    /// done outside the profile, which Safari puts in its File menu as it fills it.
     private static func keepAutoFillInsertItemsOut() {
         guard !isKeepingAutoFillOut else { return }
         isKeepingAutoFillOut = true
@@ -1244,11 +1367,19 @@ enum SafariChrome {
                 guard let menu = note.object as? NSMenu else { return }
                 // Not while AppKit is still adding to the menu: once it is done.
                 DispatchQueue.main.async {
-                    MainActor.assumeIsolated { _ = SafariChrome.removeAutoFillInsertItems(from: menu) }
+                    MainActor.assumeIsolated {
+                        _ = SafariChrome.removeAutoFillInsertItems(from: menu)
+                        _ = SafariChrome.removeItemsOutsideTheProfile(from: menu)
+                        if let main = NSApplication.shared.mainMenu { SafariChrome.keepBookmarksImportAndExport(in: main) }
+                    }
                 }
             }
         }
-        if let menu = NSApplication.shared.mainMenu { removeAutoFillInsertItems(from: menu) }
+        if let menu = NSApplication.shared.mainMenu {
+            removeAutoFillInsertItems(from: menu)
+            removeItemsOutsideTheProfile(from: menu)
+            keepBookmarksImportAndExport(in: menu)
+        }
     }
 
     private static var isKeepingAutoFillOut = false

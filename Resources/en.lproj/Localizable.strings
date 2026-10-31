@@ -289,6 +289,10 @@
 "menu.newTab" = "New Tab";
 "menu.commandPalette" = "Command Palette…";
 "menu.pasteAsTyped" = "Paste as Typed";
+"menu.importFrom" = "Import From";
+"menu.importBookmarksFile" = "Bookmarks HTML File…";
+"menu.export" = "Export";
+"menu.exportBookmarks" = "Bookmarks…";
 "palette.search" = "Profiles, proxies, settings, actions";
 "palette.nothing" = "Nothing matches";
 "palette.hint" = "↑ ↓ to choose · Return to run · Esc to close";
@@ -932,6 +936,8 @@
 "safari.unavailable.action" = "This relies on services of the real Safari that a profile does not have, so it did not work. The profile keeps running; the details are in the log.";
 "safari.autofill.closed.title" = "AutoFill from this Mac is off in profiles";
 "safari.autofill.closed.text" = "This Mac's passwords, cards and contact card are yours, not the profile's: a profile does not fill its pages from them. The profile's own passwords are in its Passwords window.";
+"safari.outside.title" = "Not available in a profile";
+"safari.outside.text" = "This works outside the profile — through Safari's own web apps, this Mac's keychain or its Messages account — so a profile does not offer it.";
 
 /* Profile export and import; crash recovery */
 "profiles.row.export" = "Export Profile…";

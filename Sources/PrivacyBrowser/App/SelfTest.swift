@@ -1234,6 +1234,9 @@ final class SelfTest {
                   report.safariPreferences["UniversalSearchEnabled"] == "0"
                     && report.safariPreferences["AutoFillPasswords"] == "0",
                   "\(report.safariPreferences)")
+            check("Safari chrome: Safari's home page, which History › Home opens, is the profile's start page",
+                  report.safariPreferences[SafariChrome.homePageKey] == "http://start-\(run).\(domain)\(startPath)",
+                  "\(report.safariPreferences[SafariChrome.homePageKey] ?? "unset")")
             let accountSafariAfter = accountSafariPreferences.map(Self.preferencesFileState)
             check("Safari chrome: the profile's settings for Safari's services stay in its process — the account's ~/Library/Preferences/com.apple.Safari.plist is not written",
                   accountSafariAfter == accountSafariBefore,
@@ -1280,6 +1283,11 @@ final class SelfTest {
                   report.trustEvaluated > 0 && report.trustRefused > 0 && report.trustFetchAllowed == 0,
                   "evaluated \(report.trustEvaluated), refused \(report.trustRefused), still allowed to fetch \(report.trustFetchAllowed)")
             check("Safari chrome: Safari's Edit menu has Paste as Typed (⌃⌘V)", report.pasteAsTypedInMenu)
+            check("Safari chrome: the profile's File menu imports and exports its own bookmarks (Safari's two actions), whichever File menu Safari built",
+                  report.bookmarksImportExportInMenu,
+                  report.bookmarksItemsPutBack ? "put back where the Browsing Data items were" : "Safari's own items")
+            info("Safari chrome: the File menu's bookmarks items are "
+                 + (report.bookmarksItemsPutBack ? "put back where Safari had its Browsing Data items" : "Safari's own"))
         } else {
             check("Safari chrome: the profile's process reported where its traffic goes", false, "no report in 40 s")
         }
