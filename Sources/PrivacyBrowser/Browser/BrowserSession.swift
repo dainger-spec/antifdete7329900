@@ -220,7 +220,10 @@ final class BrowserSession {
     ///     at all (`featuresOffWithAProxy`). A Safari user can have them off as well (Private Click
     ///     Measurement in Safari's Advanced settings, the rest as Lockdown Mode does).
     ///   * As Safari: pages see the system's fonts only, not the ones the user installed.
+    ///   * As Safari: the WebKit features whose default follows the SDK the executable declares
+    ///     (`SafariEngineFeatures`).
     func applyPrivacyPreferences(to preferences: WKPreferences) {
+        SafariEngineFeatures.apply(to: preferences)
         preferences.isFraudulentWebsiteWarningEnabled = configuration.safeBrowsingEnabled
         // There is no public switch for installed fonts; this is the WKPreferences property Safari
         // turns off, set only when this WebKit has it.
@@ -510,6 +513,19 @@ enum WebKitFeatures {
         }
         applied[key] = false
         return false
+    }
+
+    /// Every feature this WebKit lists, by key, with its default in this process — which follows
+    /// the SDK the executable declares, or every behavior once they are all on (`SDKBehaviors`).
+    static func defaults() -> [String: Bool] {
+        var byKey: [String: Bool] = [:]
+        let selector = NSSelectorFromString("defaultValue")
+        for (key, feature) in features {
+            guard let object = feature as? NSObject, object.responds(to: selector),
+                  let value = object.value(forKey: "defaultValue") as? NSNumber else { continue }
+            byKey[key] = value.boolValue
+        }
+        return byKey
     }
 
     /// Whether `key` is on in `preferences`, or nil when this WebKit cannot say.

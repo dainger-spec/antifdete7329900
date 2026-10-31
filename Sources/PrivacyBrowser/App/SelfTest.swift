@@ -1722,9 +1722,11 @@ final class SelfTest {
         }
         let plainConfiguration = WKWebViewConfiguration()
         plainConfiguration.websiteDataStore = .nonPersistent()
-        // The one engine preference a profile sets (as Safari has it), so the engine is compared
-        // like for like.
+        // The engine preferences a profile sets as Safari has them, so the engine is compared like
+        // for like: the Fullscreen API, and the features the SDK's behaviors change
+        // (SafariEngineFeatures).
         plainConfiguration.preferences.isElementFullscreenEnabled = true
+        SafariEngineFeatures.apply(to: plainConfiguration.preferences)
         let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
         try await PageLoader.load(plain, html: page, baseURL: origin)
         let reference = Self.flatten(try await js(plain, probe) as? [String: Any] ?? [:])
@@ -1768,6 +1770,18 @@ final class SelfTest {
             let tab = BrowserTab(configuration: tabConfiguration, context: session.tabContext)
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
             let probed = Self.flatten(try await js(tab.webView, probe) as? [String: Any] ?? [:])
+            // The features the SDK's behaviors change, as Safari has them: in the profile's
+            // preferences, and as its page sees them (scripts/engine_features_check.py compares the
+            // page with one with every behavior on).
+            if SafariEngineFeatures.appliesHere {
+                let otherwise = SafariEngineFeatures.asSafari
+                    .filter { WebKitFeatures.isEnabled(tabConfiguration.preferences, $0.key) != $0.enabled }.map { $0.key }
+                let seen = try await js(tab.webView, "return [typeof trustedTypes, typeof MutationEvent].join(' ');") as? String
+                check("surface (\(generationID)): WebKit's features the SDK's behaviors change are as Safari has them",
+                      otherwise.isEmpty && seen == "object undefined",
+                      "not as Safari: \(otherwise.isEmpty ? "none" : otherwise.joined(separator: ", ")); "
+                          + "typeof trustedTypes, MutationEvent: \(seen ?? "nil")")
+            }
             // Safari's quota (82 463 372 084 on any Mac), not the 1000 MiB WebKit gives an app that is not a browser.
             let quota = try await js(tab.webView, "return (await navigator.storage.estimate()).quota;") as? NSNumber
             let safariQuota = PrivacyScripts.safariStorageQuota(for: DeviceGenerations.resolved(id: generationID).platform).rounded(.up)
