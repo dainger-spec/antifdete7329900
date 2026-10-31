@@ -276,6 +276,15 @@ the logout). If WebKit still holds a store after every attempt, the quit forces 
 leaves a `webdata.forced` marker so that whatever WebKit writes before the exit is discarded at
 the next launch or unlock instead of being taken for newer data.
 
+Every seal does the same before it deletes what it sealed: once the archive holds the data, the
+marker (`webdata.forced` for the WebKit data, `home.sealed` for Safari's home) is written first and
+removed only when all of the plaintext is gone. A deletion that stops part-way (a file that cannot
+be deleted) leaves part of what the archive holds whole; the marker has it discarded at the next
+launch, stop or unlock — never sealed again over the archive (the next attempt of a seal used to,
+putting part of the profile in place of all of it) nor taken at a launch for newer data. Without
+the marker (it could not be written), nothing is deleted, and the next unlock seals the whole
+plaintext again, as after a crash. The self-test checks both with a file made immutable.
+
 ## Session warm-up
 
 ```

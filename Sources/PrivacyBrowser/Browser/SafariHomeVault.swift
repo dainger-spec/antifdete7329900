@@ -65,6 +65,29 @@ final class SafariHomeVault {
     func discard(profileID: UUID) {
         try? FileManager.default.removeItem(at: homeDirectory(for: profileID))
         try? FileManager.default.removeItem(at: archiveURL(for: profileID))
+        try? FileManager.default.removeItem(at: sealedMarkerURL(for: profileID))
+    }
+
+    /// Written by a seal before it deletes the home it sealed, removed once the home is gone: a home
+    /// found with it is what a deletion that stopped part-way left of a state the archive holds
+    /// whole — discarded at the next launch or seal, never sealed over the archive nor used as the
+    /// profile's state (as `webdata.forced` for the WebKit data).
+    func sealedMarkerURL(for profileID: UUID) -> URL {
+        repository.directory(for: profileID).appendingPathComponent("home.sealed")
+    }
+
+    /// What a seal's deletion left of the home (`sealedMarkerURL`): removed, with the marker. True
+    /// when there was such a marker. Throws when it cannot be removed — never then used.
+    private func discardResidueOfASeal(profileID: UUID) throws -> Bool {
+        let marker = sealedMarkerURL(for: profileID)
+        guard FileManager.default.fileExists(atPath: marker.path) else { return false }
+        let home = homeDirectory(for: profileID)
+        if FileManager.default.fileExists(atPath: home.path) {
+            log.notice("Discarding what a deletion left of Safari's sealed home of \(profileID.uuidString, privacy: .public)")
+            try FileManager.default.removeItem(at: home)
+        }
+        try FileManager.default.removeItem(at: marker)
+        return true
     }
 
     private func archiveURL(for profileID: UUID) -> URL {
@@ -83,6 +106,8 @@ final class SafariHomeVault {
             try excludeFromCopies(home)
             return
         }
+        // What a seal's deletion left part of is not the profile's state: gone first.
+        _ = try discardResidueOfASeal(profileID: profileID)
         // A restore that fails leaves no directory behind: an empty one would be sealed over the
         // archive at the next stop or unlock — the profile's Safari state replaced by nothing for a
         // restore that did not happen (a full disk, a damaged chunk, a newer version's archive:
@@ -117,6 +142,8 @@ final class SafariHomeVault {
     /// exited: while it runs, Safari's frameworks are writing in there.
     func seal(profileID: UUID, key: SymmetricKey) throws {
         let home = homeDirectory(for: profileID)
+        // What a seal's deletion left part of is already in the archive: discarded, not sealed.
+        if try discardResidueOfASeal(profileID: profileID) { return }
         guard FileManager.default.fileExists(atPath: home.path) else { return }
         if isEphemeral(profileID, key: key) {
             discard(profileID: profileID)
@@ -136,7 +163,18 @@ final class SafariHomeVault {
             return
         }
         let stats = try EncryptedDirectoryArchive.seal(roots: [Self.label: home], to: archive, key: key)
+        // The archive holds the state now: a deletion that stops part-way leaves part of it, which
+        // the marker, written first, keeps from being sealed over the archive or used. Without the
+        // marker nothing is deleted: the whole home is sealed again by the next stop or unlock.
+        let marker = sealedMarkerURL(for: profileID)
+        do {
+            try Data().write(to: marker, options: .atomic)
+        } catch {
+            log.error("Sealed Safari's home for \(profileID.uuidString, privacy: .public), but its marker could not be written (\(error.logKind, privacy: .public)): the home is kept whole until the next seal")
+            return
+        }
         try FileManager.default.removeItem(at: home)
+        try? FileManager.default.removeItem(at: marker)
         log.notice("Sealed Safari's home for \(profileID.uuidString, privacy: .public): \(stats.files, privacy: .public) files, \(stats.bytes, privacy: .public) bytes")
     }
 

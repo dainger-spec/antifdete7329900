@@ -60,8 +60,10 @@ final class WebDataStoreVault {
         var forced = false
     }
 
-    /// Written by `forceSeal`: the archive is the profile's data, and WebKit directories found
-    /// later were written after that seal (see `discardResidueAfterForcedSeal`).
+    /// Written by `forceSeal`, and by every seal before it deletes what it sealed (removed once all
+    /// of it is gone): the archive is the profile's data, and WebKit directories found later are
+    /// residue — written after a forced seal, or left by a deletion that stopped part-way — to be
+    /// discarded, never sealed over the archive (see `discardResidueAfterForcedSeal`).
     func forcedSealMarkerURL(for profileID: UUID) -> URL {
         repository.directory(for: profileID).appendingPathComponent("webdata.forced")
     }
@@ -275,19 +277,39 @@ final class WebDataStoreVault {
                 if activeStore {
                     try await Self.removeStore(for: profileID)
                 }
-                // Sweep the directories. `remove(forIdentifier:)` usually clears them for a live
-                // store; recovered data is simply deleted here.
-                for directory in layout.discoverDirectories(for: profileID) {
-                    try FileManager.default.removeItem(at: directory)
-                }
-                // The archive is current again; nothing found later is post-forced-seal residue.
-                try? FileManager.default.removeItem(at: forcedSealMarkerURL(for: profileID))
-                log.info("Sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes (activeStore=\(activeStore))")
-                return result
             } catch {
                 lastError = error
                 log.notice("Seal attempt \(result.attempts) for \(profileID.uuidString, privacy: .public) failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
+                continue
             }
+            // The archive holds the profile's data now. Whatever the sweep leaves, should it stop
+            // part-way, is part of that data: never sealed again over the archive — the next attempt
+            // used to, putting part of the profile in place of all of it — nor taken at the next
+            // launch for newer data. The marker says so, as after a forced seal, before anything is
+            // deleted; the next launch or unlock discards what is left. Without the marker nothing
+            // is deleted: whole plaintext is sealed again at the next unlock, as after a crash.
+            let marker = forcedSealMarkerURL(for: profileID)
+            do {
+                try Data().write(to: marker, options: .atomic)
+            } catch {
+                log.error("Sealed profile \(profileID.uuidString, privacy: .public), but its marker could not be written (\(error.logKind, privacy: .public)): its WebKit data is kept whole until the next unlock seals it")
+                return result
+            }
+            // Sweep the directories. `remove(forIdentifier:)` usually clears them for a live
+            // store; recovered data is simply deleted here.
+            var swept = true
+            for directory in layout.discoverDirectories(for: profileID) {
+                do {
+                    try FileManager.default.removeItem(at: directory)
+                } catch {
+                    swept = false
+                    log.error("Sealed profile \(profileID.uuidString, privacy: .public), but could not delete \(directory.path, privacy: .private) (\(error.logKind, privacy: .public)): what is left is discarded at the next launch or unlock, never sealed")
+                }
+            }
+            // All of it gone: the archive is current, and nothing found later is residue.
+            if swept { try? FileManager.default.removeItem(at: marker) }
+            log.info("Sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes (activeStore=\(activeStore))")
+            return result
         }
         if activeStore && forceSealWhenStoreStaysInUse {
             log.error("WebKit kept the data store of \(profileID.uuidString, privacy: .public) in use through \(result.attempts) attempts (\(lastError.map { $0.logKind } ?? "no error", privacy: .public) \(String(describing: lastError), privacy: .private)); forcing the seal before quitting")

@@ -316,6 +316,7 @@ final class SelfTest {
         await group("recovery sealing") { try await recoverySealing(repository) }
         await group("format policy") { try formatPolicy(repository) }
         await group("Safari's home: a restore that fails") { try safariHomeRestoreFailure(repository) }
+        await group("a seal whose deletion stops part-way") { try await sealWithAFailedDeletion(repository) }
         await group("earlier versions' Safari keys") { earlierVersionsSafariKeys() }
         await group("update gate") { try updateGate(repository) }
         await group("settings") { try await appSettings(repository) }
@@ -3453,6 +3454,73 @@ final class SelfTest {
         try homes.prepareForLaunch(profileID: profile.id, key: key)
         check("Safari's home: and restored as before", (try? Data(contentsOf: history)) == Data("history 2".utf8))
         try? FileManager.default.removeItem(at: home)
+    }
+
+    /// A seal whose deletion of what it sealed stops part-way — a file it cannot delete, made
+    /// immutable here: what is left is part of what the archive holds whole, and is discarded at the
+    /// next launch or seal — never sealed again over the archive, nor used as the profile's data.
+    /// Before, the next attempt (the WebKit data) or the next unlock (Safari's home) sealed the
+    /// remains over the archive, and a launch took them for newer data. The WebKit data and
+    /// Safari's home alike (`webdata.forced`, `home.sealed`).
+    private func sealWithAFailedDeletion(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Failed deletion", configuration: ProfileConfiguration())
+        defer { try? repository.delete(profile.id) }
+        let key = try repository.profileKey(for: profile.id)
+        func immutable(_ url: URL, _ on: Bool) throws {
+            var values = URLResourceValues()
+            values.isUserImmutable = on
+            var url = url
+            try url.setResourceValues(values)
+        }
+
+        // Safari's home.
+        let homes = SafariHomeVault(repository: repository)
+        let home = homes.homeDirectory(for: profile.id)
+        let history = home.appendingPathComponent("Library/Safari/History.db")
+        let stuck = home.appendingPathComponent("Library/Safari/Stuck.plist")
+        try FileManager.default.createDirectory(at: history.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("history".utf8).write(to: history)
+        try Data("stuck".utf8).write(to: stuck)
+        try immutable(stuck, true)
+        var homeError: Error?
+        do { try homes.seal(profileID: profile.id, key: key) } catch { homeError = error }
+        try immutable(stuck, false)
+        let homeArchive = repository.safariHomeArchiveURL(for: profile.id)
+        let homeSealed = try? Data(contentsOf: homeArchive)
+        check("a seal's deletion stopped part-way: Safari's home was sealed whole first, and marked so",
+              homeSealed != nil && FileManager.default.fileExists(atPath: homes.sealedMarkerURL(for: profile.id).path),
+              String(describing: homeError))
+        try homes.seal(profileID: profile.id, key: key) // what the next stop, or the recovery at unlock, does
+        check("a seal's deletion stopped part-way: what was left of Safari's home is discarded, not sealed over the archive",
+              (try? Data(contentsOf: homeArchive)) == homeSealed && !FileManager.default.fileExists(atPath: home.path))
+        try homes.prepareForLaunch(profileID: profile.id, key: key)
+        check("a seal's deletion stopped part-way: Safari's home restores whole",
+              (try? Data(contentsOf: history)) == Data("history".utf8) && (try? Data(contentsOf: stuck)) == Data("stuck".utf8))
+        try? FileManager.default.removeItem(at: home)
+
+        // The WebKit data.
+        let vault = WebDataStoreVault(repository: repository)
+        let store = WebDataStoreVault.layout.searchRoots[0]
+            .appendingPathComponent("WebsiteDataStore/\(profile.id.uuidString.lowercased())", isDirectory: true)
+        let local = store.appendingPathComponent("LocalStorage/local.sqlite3")
+        let held = store.appendingPathComponent("LocalStorage/held.sqlite3")
+        try FileManager.default.createDirectory(at: local.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("local".utf8).write(to: local)
+        try Data("held".utf8).write(to: held)
+        try immutable(held, true)
+        var dataError: Error?
+        do { _ = try await vault.seal(profileID: profile.id, key: key, activeStore: false) } catch { dataError = error }
+        try immutable(held, false)
+        let dataArchive = repository.webDataArchiveURL(for: profile.id)
+        let dataSealed = try? Data(contentsOf: dataArchive)
+        check("a seal's deletion stopped part-way: the WebKit data was sealed whole first, and marked so",
+              dataSealed != nil && FileManager.default.fileExists(atPath: vault.forcedSealMarkerURL(for: profile.id).path),
+              String(describing: dataError))
+        try await vault.prepareForLaunch(profileID: profile.id, key: key) // the next launch
+        check("a seal's deletion stopped part-way: the next launch restores the WebKit data whole, not what was left",
+              (try? Data(contentsOf: local)) == Data("local".utf8) && (try? Data(contentsOf: held)) == Data("held".utf8)
+                  && (try? Data(contentsOf: dataArchive)) == dataSealed)
+        for directory in WebDataStoreVault.discoverDirectories(for: profile.id) { try? FileManager.default.removeItem(at: directory) }
     }
 
     // MARK: Update gate (docs/UPDATES.md §3)
