@@ -14,8 +14,10 @@ import Foundation
 ///     frameworks, or bundling and running a separate engine.
 ///   * Only the macOS desktop generation (`matchesEngine == true`) is actually consistent with
 ///     the engine, and even then only when its version equals the host's real Safari version.
-///     iOS/iPadOS generations change the UA string while every measured signal (rendering,
-///     feature set, touch behaviour, TLS) still says "desktop Mac" — detectable, not emulation.
+///     An iOS/iPadOS generation is a *mobile view*: Safari on this Mac under that device's UA, in
+///     a window of its screen's size (the app's), and nothing else — every measured signal
+///     (rendering, feature set, touch, the screen, TLS) says "desktop Mac", as in Safari's own
+///     Develop › User Agent.
 ///   * The macOS generation declares the host's own Safari version at runtime
 ///     (`userAgent(hostSafariVersion:)`); its catalog string below is only the fallback. Mobile
 ///     UA strings are the ones Safari sends on that OS: from iOS 26.1 on, Safari freezes the OS

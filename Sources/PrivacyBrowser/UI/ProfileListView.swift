@@ -71,7 +71,8 @@ struct ProfileListView: View {
             .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
             .sheet(item: $whatSitesSeeFor) { profile in
                 WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
-                                                                            launch: { await model.launch($0) }))
+                                                                            launch: { await model.launch($0) }),
+                                 mobileView: (model.details[profile.id]?.deviceGeneration.platform ?? .macOS) != .macOS)
             }
             .sheet(isPresented: $warmingUpSeveral) { WarmUpQueueView(preselected: queuePreselection) }
             .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }

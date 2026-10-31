@@ -100,9 +100,10 @@
 "editor.error.decrypt" = "Could not decrypt profile: %@";
 "editor.error.startURL" = "Start URL is not a valid URL";
 "editor.footer.note" = "Changes apply at the next launch.";
-"editor.generation" = "Device / version";
-"editor.generation.footer" = "Tags the profile with a target Apple OS version: it sets the self-declared User-Agent and some defaults. It does not switch the real WebKit core (not possible with public APIs) and does not make a Mac look like an iPhone — see docs/ISOLATION_AND_LIMITATIONS.md §2.";
-"editor.generation.inconsistent" = "This generation's engine signals don't match a real device of that version; only the User-Agent changes, the engine stays macOS WebKit. Detectable, not emulation.";
+"editor.generation" = "View for websites";
+"editor.generation.footer" = "Mac is Safari on this Mac as it is. A mobile view changes only what the profile calls itself to websites (the User-Agent) and the size of its window; the engine, touch, the screen, fonts and hardware stay this Mac's — see docs/ISOLATION_AND_LIMITATIONS.md §2.";
+"editor.generation.inconsistent" = "An iPhone in a window on a Mac is Safari on the Mac calling itself an iPhone: there is no touch, and the fonts, graphics and audio are this Mac's; a site that checks for touch will see it.";
+"editor.generation.ipad" = "An iPad view in a window on a Mac is Safari on the Mac in an iPad-sized window (an iPad calls itself a Mac anyway): there is no touch, and the fonts, graphics and audio are this Mac's; a site that checks for touch will see it.";
 "editor.geo" = "Geolocation";
 "editor.geo.accuracy" = "Accuracy (m)";
 "editor.geo.deny" = "Deny";
@@ -229,9 +230,9 @@
 "errorpage.proxy.noCredentials" = "The profile’s proxy requires a user name and password. Add them in the profile settings.";
 "errorpage.proxy.rejected" = "The proxy rejected the profile’s user name and password.";
 "errorpage.title" = "Page could not be loaded";
-"gen.ios26" = "Safari on iOS 26 (UA only)";
-"gen.ios27" = "Safari on iOS 27 (UA only)";
-"gen.ipados26" = "Safari on iPadOS 26 (UA only)";
+"gen.ios26" = "Mobile view: iPhone, Safari 26 (User-Agent only)";
+"gen.ios27" = "Mobile view: iPhone, Safari 27 (User-Agent only)";
+"gen.ipados26" = "iPad view: Safari 26, an iPad-sized window";
 "gen.macos26" = "Safari on macOS 26 (matches this engine)";
 "history.clear" = "Clear";
 "history.clear.all" = "All History…";
@@ -324,6 +325,8 @@
 "whatSites.doneWithoutSafari" = "Taken at %@. Safari did not answer within 90 seconds: the profile's values are listed alone.";
 "whatSites.onlyDifferences" = "Only differences";
 "whatSites.allSame" = "Everything here is the same as in Safari.";
+"whatSites.allSame.mobile" = "The same as Safari on this Mac — there is nothing to compare with a real iPhone.";
+"whatSites.mobileView" = "There is no reference here: the panel compares the profile with Safari on this Mac, and the profile calls itself an iPhone or an iPad. It also differs from the real device in what this panel cannot see: touch, fonts, graphics (WebGL), audio, motion sensors, the screen.";
 "whatSites.summary" = "%ld same · %ld differ · %ld each window's own";
 "whatSites.same" = "same";
 "whatSites.differs" = "differs";
@@ -411,8 +414,8 @@
 "profiles.delete.confirm" = "Delete Profile and All Its Data";
 "profiles.delete.message" = "Cookies, site data, cache, settings, history, bookmarks and saved passwords of this profile are deleted.";
 "profiles.delete.title" = "Delete profile “%@”?";
-"profiles.device.ipad" = "iPad";
-"profiles.device.iphone" = "iPhone";
+"profiles.device.ipad" = "iPad view";
+"profiles.device.iphone" = "Mobile view";
 "profiles.device.mac" = "Mac";
 "profiles.empty.subtitle" = "Create your first isolated profile to start browsing.";
 "profiles.empty.title" = "No profiles yet";

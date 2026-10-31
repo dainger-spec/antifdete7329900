@@ -1167,7 +1167,7 @@ final class SelfTest {
         let wantedAgent = ProfileConfiguration(proxy: proxy).userAgent(hostSafariVersion: HostSafari.version)
         check("Safari chrome: the start page goes out with the profile's User-Agent",
               startAgent == wantedAgent, "sent \(startAgent), wanted \(wantedAgent)")
-        check("Safari chrome: an iPhone or iPad profile gets our own window, not Safari's desktop chrome",
+        check("Safari chrome: an iPhone or iPad view gets our own window, of that device's size, not Safari's desktop chrome",
               !SafariChromeHost.canHost(ProfileConfiguration(deviceGenerationID: "ios-26"))
                 && SafariChromeHost.canHost(ProfileConfiguration()))
         let page = log.reports.first(where: isPage) ?? [:]
@@ -1777,10 +1777,9 @@ final class SelfTest {
 
     // MARK: Fingerprint surface (what deviceinfo.me-style pages test)
 
-    /// A macOS profile must look exactly like a plain WKWebView of this Mac (no own properties,
-    /// native navigator and screen values, untouched rendering), an iPhone profile like an
-    /// iPhone's Safari where the shim can say so, and neither may add noise or Chromium-only
-    /// properties. Compared against a web view without any profile script. The probe is
+    /// Every profile must look exactly like a plain WKWebView of this Mac (no own properties,
+    /// native navigator and screen values, untouched rendering) — an iPhone view too, which differs
+    /// in its User-Agent only — and none may add noise or Chromium-only properties. Compared against a web view without any profile script. The probe is
     /// Resources/fingerprint_probe.js, the one scripts/safari_reference.py runs in real Safari;
     /// with PB_SELFTEST_SURFACE_OUT set, every result is written there as JSON for that comparison.
     private func fingerprintSurface(_ repository: ProfileRepository) async throws {
@@ -1852,15 +1851,15 @@ final class SelfTest {
             }
             // Safari's quota (82 463 372 084 on any Mac), not the 1000 MiB WebKit gives an app that is not a browser.
             let quota = try await js(tab.webView, "return (await navigator.storage.estimate()).quota;") as? NSNumber
-            let safariQuota = PrivacyScripts.safariStorageQuota(for: DeviceGenerations.resolved(id: generationID).platform).rounded(.up)
+            let safariQuota = PrivacyScripts.safariStorageQuota.rounded(.up)
             check("surface (\(generationID)): storage quota is Safari's",
                   quota?.doubleValue == safariQuota, "\(quota?.stringValue ?? "nil") vs \(String(format: "%.0f", safariQuota))")
             tab.tearDown()
             session.shutDown()
             try repository.delete(profile.id)
 
-            let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone"
-            writeSurface(probed, name: name.lowercased())
+            let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone view"
+            writeSurface(probed, name: generationID == DeviceGenerations.defaultID ? "macos" : "iphone")
             let differing = engineKeys.filter { string(probed, $0) != string(reference, $0) }
             check("surface (\(name)): engine and hardware signals as in a plain web view (\(engineKeys.count) keys)",
                   differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
@@ -1872,22 +1871,24 @@ final class SelfTest {
                   !renderingNatives.isEmpty && renderingNatives.values.allSatisfy { $0.hasPrefix("native-text") || $0 == "absent" },
                   renderingNatives.map { "\($0.key)=\($0.value)" }.joined(separator: "; "))
             check("surface (\(name)): one language, as WebKit exposes", string(probed, "languages") == string(probed, "language"))
-            // Safari the app exposes window.safari on the Mac and not on iOS.
-            check("surface (\(name)): window.safari \(name == "macOS" ? "present, as in Safari" : "absent, as on iOS")",
-                  string(probed, "features.safari") == (name == "macOS" ? "object" : "undefined"), string(probed, "safariShape"))
+            // Safari the app exposes window.safari on the Mac — in an iPhone view too, which is
+            // Safari on this Mac under an iPhone's User-Agent (the owner's decision, 31 October).
+            check("surface (\(name)): window.safari present, as in Safari on the Mac",
+                  string(probed, "features.safari") == "object", string(probed, "safariShape"))
+            // No generation changes what a page measures of this Mac: the touch points, the
+            // platform and the screen of a phone, said without touch, broke sites and gave the
+            // profile away all the same.
+            for key in ["platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
+                        "timeZone", "tzOffset", "dateString"] {
+                check("surface (\(name)): native \(key)", string(probed, key) == string(reference, key),
+                      "\(string(probed, key)) vs \(string(reference, key))")
+            }
             if name == "macOS" {
-                for key in ["ua", "platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
-                            "timeZone", "tzOffset", "dateString"] where key != "ua" {
-                    check("surface (macOS): native \(key)", string(probed, key) == string(reference, key),
-                          "\(string(probed, key)) vs \(string(reference, key))")
-                }
                 check("surface (macOS): the UA is this Mac's Safari",
                       string(probed, "ua").hasSuffix("Version/\(HostSafari.version) Safari/605.1.15"), string(probed, "ua"))
             } else {
-                check("surface (iPhone): navigator", string(probed, "platform") == "iPhone" && string(probed, "maxTouchPoints") == "5"
-                      && string(probed, "hardwareConcurrency") == "4" && string(probed, "standalone") == "false",
-                      "\(string(probed, "platform")) \(string(probed, "maxTouchPoints")) \(string(probed, "hardwareConcurrency")) \(string(probed, "standalone"))")
-                check("surface (iPhone): screen", string(probed, "screen") == "390x844x390x844x3", string(probed, "screen"))
+                check("surface (iPhone view): the UA is an iPhone's Safari, the one thing that says iPhone",
+                      string(probed, "ua") == DeviceGenerations.resolved(id: generationID).userAgent, string(probed, "ua"))
             }
         }
 
@@ -1903,7 +1904,7 @@ final class SelfTest {
         let quotaTab = BrowserTab(configuration: quotaSession.makeWebViewConfiguration(), context: quotaSession.tabContext)
         try await PageLoader.load(quotaTab.webView, html: page, baseURL: origin)
         let nativeQuota = try await js(quotaTab.webView, "return (await navigator.storage.estimate()).quota;", world: .defaultClient) as? NSNumber
-        let macQuota = PrivacyScripts.safariStorageQuota(for: .macOS).rounded(.up)
+        let macQuota = PrivacyScripts.safariStorageQuota.rounded(.up)
         check("storage quota: a persistent profile's store gives a site Safari's share itself (WebKit's own answer, no script)",
               madeWithRatios && nativeQuota?.doubleValue == macQuota,
               "made with a browser's ratios: \(madeWithRatios), quota \(nativeQuota?.stringValue ?? "nil") vs \(String(format: "%.0f", macQuota))")

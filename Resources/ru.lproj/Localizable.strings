@@ -100,9 +100,10 @@
 "editor.error.decrypt" = "Не удалось расшифровать профиль: %@";
 "editor.error.startURL" = "Начальный адрес не является корректным URL";
 "editor.footer.note" = "Изменения вступят в силу при следующем запуске.";
-"editor.generation" = "Устройство / версия";
-"editor.generation.footer" = "Помечает профиль целевой версией ОС Apple: задаёт заявляемый User-Agent и часть настроек по умолчанию. Не переключает реальный движок WebKit (невозможно через публичные API) и не превращает Mac в iPhone — см. docs/ISOLATION_AND_LIMITATIONS.md §2.";
-"editor.generation.inconsistent" = "Сигналы движка для этого поколения не совпадают с настоящим устройством этой версии; меняется только User-Agent, движок остаётся macOS WebKit. Обнаруживается, это не эмуляция.";
+"editor.generation" = "Вид для сайтов";
+"editor.generation.footer" = "Mac — это Safari на этом Mac как есть. Мобильный вид меняет только то, как профиль называет себя сайтам (User-Agent), и размер его окна; движок, касания, экран, шрифты и железо остаются этого Mac — см. docs/ISOLATION_AND_LIMITATIONS.md §2.";
+"editor.generation.inconsistent" = "iPhone в окне на Маке — это Safari на Маке, который называет себя iPhone: касаний нет, шрифты, видеокарта и звук — этого Мака; сайт, который проверяет касание, это увидит.";
+"editor.generation.ipad" = "Вид iPad в окне на Маке — это Safari на Маке в окне размером с iPad (iPad и сам называет себя Mac): касаний нет, шрифты, видеокарта и звук — этого Мака; сайт, который проверяет касание, это увидит.";
 "editor.geo" = "Геолокация";
 "editor.geo.accuracy" = "Точность (м)";
 "editor.geo.deny" = "Запретить";
@@ -229,9 +230,9 @@
 "errorpage.proxy.noCredentials" = "Прокси этого профиля требует имя пользователя и пароль. Укажите их в настройках профиля.";
 "errorpage.proxy.rejected" = "Прокси отклонил имя пользователя и пароль профиля.";
 "errorpage.title" = "Не удалось загрузить страницу";
-"gen.ios26" = "Safari на iOS 26 (только UA)";
-"gen.ios27" = "Safari на iOS 27 (только UA)";
-"gen.ipados26" = "Safari на iPadOS 26 (только UA)";
+"gen.ios26" = "Мобильный вид: iPhone, Safari 26 (только User-Agent)";
+"gen.ios27" = "Мобильный вид: iPhone, Safari 27 (только User-Agent)";
+"gen.ipados26" = "Вид iPad: Safari 26, окно размером с iPad";
 "gen.macos26" = "Safari на macOS 26 (соответствует движку)";
 "history.clear" = "Очистить";
 "history.clear.all" = "Всю историю…";
@@ -324,6 +325,8 @@
 "whatSites.doneWithoutSafari" = "Снято в %@. Safari не ответила за 90 секунд: значения профиля показаны отдельно.";
 "whatSites.onlyDifferences" = "Только различия";
 "whatSites.allSame" = "Здесь всё совпадает с Safari.";
+"whatSites.allSame.mobile" = "Совпадает с Safari на этом Mac — с настоящим iPhone сравнить не с чем.";
+"whatSites.mobileView" = "Эталона здесь нет: панель сравнивает профиль с Safari на этом Mac, а профиль называет себя iPhone или iPad. От настоящего устройства он отличается и тем, чего здесь не видно: касание, шрифты, видеокарта (WebGL), звук, датчики движения, экран.";
 "whatSites.summary" = "совпадает: %ld · отличается: %ld · у каждого окна своё: %ld";
 "whatSites.same" = "совпадает";
 "whatSites.differs" = "отличается";
@@ -411,8 +414,8 @@
 "profiles.delete.confirm" = "Удалить профиль и все его данные";
 "profiles.delete.message" = "Будут удалены cookie, данные сайтов, кэш, настройки, история, закладки и сохранённые пароли этого профиля.";
 "profiles.delete.title" = "Удалить профиль «%@»?";
-"profiles.device.ipad" = "iPad";
-"profiles.device.iphone" = "iPhone";
+"profiles.device.ipad" = "Вид iPad";
+"profiles.device.iphone" = "Мобильный вид";
 "profiles.device.mac" = "Mac";
 "profiles.empty.subtitle" = "Создайте первый изолированный профиль, чтобы начать работу.";
 "profiles.empty.title" = "Пока нет профилей";

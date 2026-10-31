@@ -403,7 +403,8 @@ struct ProfileEditorView: View {
         .sheet(isPresented: $showingWhatSitesSee) {
             if case .existing(let profile) = target {
                 WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
-                                                                            launch: { await model.launch($0) }))
+                                                                            launch: { await model.launch($0) }),
+                                 mobileView: DeviceGenerations.resolved(id: draft.deviceGenerationID).platform != .macOS)
             }
         }
         .fileImporter(isPresented: $choosingCookieFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in

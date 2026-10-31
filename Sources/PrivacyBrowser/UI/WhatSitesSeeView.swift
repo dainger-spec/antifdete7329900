@@ -2,17 +2,22 @@ import BrowserCore
 import SwiftUI
 
 /// "What sites see" (a profile's ⋯ menu, the command palette): the profile's snapshot next to
-/// this Mac's Safari's, signal by signal — same, or how it differs (`WhatSitesSee`).
+/// this Mac's Safari's, signal by signal — same, or how it differs (`WhatSitesSee`). For an
+/// iPhone or iPad view this Mac's Safari is the wrong reference, and the panel says so, with what
+/// it cannot see of the real device, rather than "the same" (the owner's decision).
 struct WhatSitesSeeView: View {
     let name: String
+    /// The profile is an iPhone or iPad view: Safari on this Mac under another device's name.
+    let mobileView: Bool
     @StateObject private var snapshot: WhatSitesSee
     @State private var onlyDifferences: Bool
     @Environment(\.dismiss) private var dismiss
 
     static let size = CGSize(width: 880, height: 660)
 
-    init(name: String, snapshot: @autoclosure @escaping () -> WhatSitesSee, onlyDifferences: Bool = true) {
+    init(name: String, snapshot: @autoclosure @escaping () -> WhatSitesSee, onlyDifferences: Bool = true, mobileView: Bool = false) {
         self.name = name
+        self.mobileView = mobileView
         _snapshot = StateObject(wrappedValue: snapshot())
         _onlyDifferences = State(initialValue: onlyDifferences)
     }
@@ -42,6 +47,14 @@ struct WhatSitesSeeView: View {
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 12)
+            if mobileView {
+                Text(L("whatSites.mobileView"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 12)
+            }
             Rectangle().fill(Theme.divider).frame(height: 1)
             if snapshot.signals.isEmpty {
                 LumenEmptyHint(symbol: "eye", text: L("whatSites.empty"))
@@ -101,7 +114,7 @@ struct WhatSitesSeeView: View {
                             }
                             ForEach(shown) { signal in SignalRow(signal: signal, comparedWithSafari: snapshot.comparedWithSafari) }
                             if shown.isEmpty {
-                                Text(L("whatSites.allSame"))
+                                Text(mobileView ? L("whatSites.allSame.mobile") : L("whatSites.allSame"))
                                     .font(.lumenSecondary)
                                     .foregroundStyle(Theme.running)
                             }

@@ -29,7 +29,7 @@ since):
 | Crash-recovery sealing | leftover website data from a crashed run is archived and deleted WITHOUT `WKWebsiteDataStore.remove(forIdentifier:)` (which aborted on an unknown id), then restores cleanly |
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
-| Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks; an iPhone profile reports its device class's navigator and screen values; user-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
+| Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks; an iPhone or iPad view measures the same, under its device's User-Agent; user-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
 | Shims in workers and frames | a worker made from a blob runs in the profile's zone, stays strict and keeps its line numbers; a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
 | Proxy: IPv6, unresolvable host | an HTTP proxy on `[::1]` tunnels the load; a proxy whose host does not resolve fails closed |
 | Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the packet tunnel cannot carry it (§5) |
@@ -123,8 +123,7 @@ what they answer — is decided by one rule, for every change, not case by case:
 
 A difference that cannot be closed this way stays, and is listed (*What still differs*, below).
 The rule is about parity — what a profile has of Safari's. It does not cover the attributes a
-profile declares (time zone, geolocation, a mobile generation's `navigator` and `screen` values,
-relay-only WebRTC: the table below), whose wrappers are described where they are, and it lets no
+profile declares (time zone, geolocation, relay-only WebRTC: the table below), whose wrappers are described where they are, and it lets no
 wrapper of that kind be added for parity's sake. Noise — values made to change, in canvas, WebGL,
 audio or anything else — is not parity and is not added (*What remains impossible with public
 APIs*). A change under this rule is described against it and decided before it is written, and
@@ -246,7 +245,7 @@ Projects like iStealth tie a profile to a specific OS version and swap the brows
 when Apple ships a new one. With public APIs we can do the version *tagging* but not the
 core swap. A profile carries a **device generation** (`DeviceGeneration` /
 `DeviceGenerations` in `BrowserCore`): a target Apple OS version — currently macOS 26,
-iOS 26, iOS 27, iPadOS 26 — chosen with the **Device / version** picker in the editor and
+iOS 26, iOS 27, iPadOS 26 — chosen with the **View for websites** picker in the editor and
 stored in the profile (`deviceGenerationID`, encrypted like the rest).
 
 What a generation actually does, and only this:
@@ -256,8 +255,17 @@ What a generation actually does, and only this:
   macOS Safari freezes `10_15_7`; WebKit bug 298260), so an iPhone profile sends
   `iPhone OS 18_7 … Version/26.6` (iOS 26) or `Version/27.0` (iOS 27); `iPhone OS 26_0`
   is a string no Safari sends. iPadOS Safari shows desktop websites by default, so the
-  iPadOS profile sends the Mac's UA and `navigator.platform` "MacIntel", with the iPad's
-  touch points and screen (which is how a page tells such an iPad from a Mac);
+  iPad view sends the Mac's UA;
+- for the iPhone and iPad views, sizes the window to that device's screen — and nothing else.
+  A **mobile view** (as the editor names it) is Safari on this Mac under that device's
+  User-Agent, which is a real state, Safari's own Develop › User Agent: `navigator.platform`,
+  the touch points, the screen and every other value a page measures stay this Mac's (the
+  owner's decision, 31 October). Until then an iPhone profile was also told `platform`
+  "iPhone", five touch points and a phone's screen: a page told it was on a phone without
+  touch events registered its handlers on `touchstart` and never got one, and the mix matched
+  no device at all. The editor says what a mobile view is next to the choice, and What Sites See
+  says it has no reference for one, with what it cannot see of the real device (touch, fonts,
+  graphics, audio, motion sensors, the screen) instead of "the same";
 - seeds per-profile defaults (e.g. WebRTC policy) when a new profile picks it;
 - names a **behaviour set** (`behaviorSetID`) — the injected-script bundle. This is an
   extension point (`BehaviorSets` in the app layer). Today every generation resolves to the
@@ -280,8 +288,8 @@ What it does **not** do, and cannot:
   `navigator.userAgent` changes (checked by the self-test in a page), never the engine. The
   editor says so beside the choice, and marks a version of another major release than this
   Mac's as risky — what a page measures (features, CSS, JavaScript) is still the engine's.
-  The iOS/iPadOS generations change the UA string while every measured signal in the table
-  below still says "desktop Mac" — the editor flags this.
+  The iPhone and iPad views change the UA string while every measured signal in the table
+  below says "desktop Mac" — the editor says so in as many words.
 
 Compared with a deeply integrated product that ships and switches genuine per-version WebKit
 cores, this is version *labelling*, not version *emulation*. It is honest about being
@@ -367,7 +375,7 @@ modified WebKit, or different hardware. None is attempted:
 | AudioContext output | the Mac's audio stack |
 | Fonts (measured via text metrics) | macOS system fonts; iOS has a different font set. As in Safari, fonts the user installed are hidden from pages (the WebKit preference Safari sets, `_shouldAllowUserInstalledFonts`; it has no public API, so it is applied only when this WebKit has it, which the self-test checks) |
 | Screen size, colour depth, device pixel ratio, `matchMedia` results | the real display; no per-view override. WebKit's screen-size override exists only on iOS (`WebPageCreationParameters.overrideScreenSize`, iOS-only in WebKit's source); on macOS `screen.*` and CSS `device-width` both come from the window's real `NSScreen`. So a profile's **window size** (editor → Window: a MacBook's screen, a size of its own, or a random size for a new profile) is a real window — a page measures it (`outerWidth`, `innerWidth`, its viewport), checked by the self-test against the window's frame — and the screen stays this Mac's: a declared screen would be given away by CSS `device-width` and by full screen. A size larger than the screen opens as large as the screen allows, and the editor says so |
-| `navigator.platform`, `vendor`, `hardwareConcurrency`, `maxTouchPoints` | engine and hardware; `customUserAgent` changes only the UA string. macOS profiles keep the native values; iPhone/iPad profiles get their device class's values from the shim (detectable, not in workers) |
+| `navigator.platform`, `vendor`, `hardwareConcurrency`, `maxTouchPoints` | engine and hardware; `customUserAgent` changes only the UA string. Every profile keeps the native values — an iPhone or iPad view too, which is Safari on this Mac under that device's User-Agent |
 | Touch and pointer behaviour, `ontouchstart`, orientation and motion events | macOS WebKit is a desktop engine; there is no touch-input emulation API |
 | `navigator.languages`, `Accept-Language` | one list per app run: WebKit reads it once, when its first process starts. The first profile launched picks it (its proxy's country, else the app's language); the shim never overrides `navigator.language(s)`, so header and script agree |
 | Supported JS/CSS features, media codecs, WebKit version quirks | the installed macOS WebKit, which differs from iOS WebKit |
@@ -378,8 +386,7 @@ WebGL, audio or fonts are unreliable. They don't reach workers, don't change ser
 or HTTP signals, and leave measurable inconsistencies — fingerprinting pages flag the noise
 itself ("Canvas: Spoofed", "Fingerprinting Resistance: Detected"). They also mainly serve
 to defeat fraud and abuse detection, which is not a goal here. What the shims *do* replace
-(time zone, geolocation, WebRTC, and the navigator/screen values of a mobile generation) is
-replaced the way the engine defines it — accessors on the prototypes, strict methods with
+(time zone, geolocation, WebRTC) is replaced the way the engine defines it — accessors on the prototypes, strict methods with
 only `length` and `name`, the native receiver errors, and a `Function.prototype.toString`
 that prints them as native code even from a fresh iframe — so the replacement itself is not
 the thing a page notices; the inconsistencies listed above still are. CI compares a macOS
@@ -1004,11 +1011,10 @@ the function-shape checks CreepJS runs (toString from the window and from a fram
 keys, receiver errors). The key cases are also checked under JavaScriptCore by the self-test,
 whose surface checks compare a macOS profile with a plain WKWebView key by key.
 
-**Mobile generations (iPhone, iPad):** the browser window is the declared device's screen
-(content size and maximum size), `outerWidth`/`outerHeight` report it, and the
-navigator/screen values are accessors on the prototypes. CSS media queries
-(`device-width`), touch events, fonts, GPU and TLS still say "Mac"; CreepJS also compares
-the page's `navigator` with a worker's, which a user script cannot reach.
+**Mobile views (iPhone, iPad):** the browser window is the declared device's screen (content
+size and maximum size); nothing else is the device's. `navigator`, `screen`, the touch points,
+CSS media queries, fonts, GPU and TLS say "Mac", as they do in Safari on a Mac told to send an
+iPhone's User-Agent — the state this is.
 
 ## 7. History and bookmarks
 

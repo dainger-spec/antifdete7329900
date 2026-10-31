@@ -308,19 +308,11 @@ const probeLies = `
   try { Reflect.setPrototypeOf(apiFunction, Object.create(apiFunction)); ('x' in apiFunction); throw new TypeError(); } catch (e) { if (!(e instanceof TypeError)) lies.push('failed at reflect set proto'); }
   return lies;
 })`;
-const iPhone = { platform: 'iPhone', maxTouchPoints: 5, hardwareConcurrency: 4, screenWidth: 390, screenHeight: 844, devicePixelRatio: 3 };
-const everything = { geolocation: { mode: 'fixed', latitude: 1, longitude: 2, accuracy: 3 }, webRTC: 'relayOnly', timeZone: 'Europe/Berlin', device: iPhone, storageQuota: 0.6 * 128 * 2 ** 30 };
+const everything = { geolocation: { mode: 'fixed', latitude: 1, longitude: 2, accuracy: 3 }, webRTC: 'relayOnly', timeZone: 'Europe/Berlin', safariObject: true, storageQuota: 0.6 * 128 * 2 ** 30 };
 const wrappers = [
   ['Function.prototype.toString'], ['Date.prototype.getTimezoneOffset', 'Date'], ['Date.prototype.getHours', 'Date'],
   ['Date.prototype.setHours', 'Date'], ['Date.prototype.setFullYear', 'Date'], ['Date.prototype.toString', 'Date'],
   ['Date.prototype.toDateString', 'Date'], ['Date.prototype.toLocaleString', 'Date'], ['Date.prototype.getYear', 'Date'], ['Date.parse'],
-  ['Object.getOwnPropertyDescriptor(Navigator.prototype, "platform").get', 'Navigator', 'platform'],
-  ['Object.getOwnPropertyDescriptor(Navigator.prototype, "hardwareConcurrency").get', 'Navigator', 'hardwareConcurrency'],
-  ['Object.getOwnPropertyDescriptor(Navigator.prototype, "maxTouchPoints").get', 'Navigator', 'maxTouchPoints'],
-  ['Object.getOwnPropertyDescriptor(Navigator.prototype, "standalone").get', 'Navigator', 'standalone'],
-  ['Object.getOwnPropertyDescriptor(Screen.prototype, "width").get', 'Screen', 'width'],
-  ['Object.getOwnPropertyDescriptor(Screen.prototype, "availHeight").get', 'Screen', 'availHeight'],
-  ['Object.getOwnPropertyDescriptor(window, "devicePixelRatio").get'], ['Object.getOwnPropertyDescriptor(window, "outerHeight").get'],
   ['Object.getPrototypeOf(navigator.geolocation).getCurrentPosition', 'Geolocation'],
   ['Object.getPrototypeOf(navigator.geolocation).watchPosition', 'Geolocation'],
   ['Object.getPrototypeOf(navigator.permissions).query', 'Permissions'],
@@ -396,27 +388,16 @@ test('macOS profile: navigator, screen and window keep their native values', () 
   assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.toString().includes("illegal(this, Navigator)")`), true);
 });
 
-test('iPhone profile: device values, as getters on the prototypes', () => {
-  const w = makeWindow({ ...base, device: iPhone });
-  assert.equal(run(w, surface), JSON.stringify(['iPhone', 5, 4, 'en-US', ['en-US'], 'undefined', 390, 844, 390, 844, 3, 390, 844]));
-  assert.equal(run(w, `navigator.standalone`), false);
-  // Printed as JavaScriptCore prints a DOM accessor: without the "get " prefix.
-  assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.toString()`), nativeText('platform'));
-  assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.name`), 'get platform');
-  assert.throws(() => run(w, `Navigator.prototype.standalone`), (e) => e.name === 'TypeError');
-  assert.throws(() => run(w, `Screen.prototype.width`), (e) => e.name === 'TypeError');
-});
-
-test('iPad profile: the Mac platform (desktop websites), the iPad touch points and screen', () => {
-  const iPad = { maxTouchPoints: 5, hardwareConcurrency: 8, screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2 };
-  const w = makeWindow({ ...base, device: iPad });
-  assert.equal(run(w, surface), JSON.stringify(['MacIntel', 5, 8, 'en-US', ['en-US'], 'undefined', 820, 1180, 820, 1180, 2, 820, 1180]));
-  // navigator.platform is not replaced at all: still the harness's own getter.
-  assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.toString().includes("illegal(this, Navigator)")`), true);
+test('an iPhone or iPad view replaces no navigator, screen or window value: it is Safari on the Mac', () => {
+  // Only the User-Agent (WebKit's own) and the window's size (the app's) differ; the script has no
+  // device values to give, and nothing in it touches the touch points, the platform or the screen.
+  const w = makeWindow(everything);
+  assert.equal(run(w, surface), JSON.stringify(['MacIntel', 0, 8, 'en-US', ['en-US'], 'undefined', 1728, 1117, 1728, 1079, 2, 1200, 820]));
+  assert.doesNotMatch(body, /maxTouchPoints|standalone|availWidth|devicePixelRatio/);
 });
 
 test('no rendering patches: canvas, audio and fonts stay native', () => {
-  for (const config of [base, { ...base, device: iPhone }]) {
+  for (const config of [base, everything]) {
     const w = makeWindow(config);
     assert.equal(run(w, `HTMLCanvasElement.prototype.getContext.toString().includes('return null')`), true);
     assert.equal(run(w, `AudioContext.prototype.createAnalyser.toString().includes('return {}')`), true);
@@ -424,14 +405,14 @@ test('no rendering patches: canvas, audio and fonts stay native', () => {
   assert.doesNotMatch(body, /getImageData|createAnalyser|document\.fonts|deviceMemory/);
 });
 
-test('window.safari for the macOS generation only', () => {
+test('window.safari, as Safari on the Mac exposes it', () => {
   const w = makeWindow({ ...base, safariObject: true });
   assert.equal(run(w, `typeof safari + '|' + Object.prototype.toString.call(safari) + '|' + Object.getOwnPropertyNames(safari).join()`), 'object|[object Object]|pushNotification');
   assert.equal(run(w, `String(safari.pushNotification)`), '[object SafariRemoteNotification]');
   assert.equal(run(w, `safari.pushNotification.permission('web.example').permission`), 'default');
   assert.equal(run(w, `safari.pushNotification.permission.toString()`), nativeText('permission'));
-  const mobile = makeWindow({ ...base, device: iPhone });
-  assert.equal(run(mobile, `'safari' in window`), false);
+  // Without the setting (a configuration from before it was always on), none.
+  assert.equal(run(makeWindow(base), `'safari' in window`), false);
 });
 
 // ---- Geolocation, WebRTC ---------------------------------------------------------------------

@@ -318,7 +318,8 @@ struct ProfileEditorForm: View {
                 .fixedSize()
             }
             if !generation.matchesEngine {
-                EditorNote(L("editor.generation.inconsistent"), tone: .warning)
+                EditorNote(generation.platform == .iPadOS ? L("editor.generation.ipad") : L("editor.generation.inconsistent"),
+                           tone: .warning)
             }
             if generation.matchesEngine && !draft.customUserAgent {
                 safariVersionChoice
