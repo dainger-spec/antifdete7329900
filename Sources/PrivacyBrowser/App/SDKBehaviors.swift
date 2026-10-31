@@ -9,17 +9,19 @@ import WebKit
 /// default, `MutationEvent` off, `user-select` superseding `-webkit-user-select`, and more), and for
 /// Safari always: WTF's `computeSDKAlignedBehaviors` returns every behavior when the process is Safari.
 /// Xcode 27's SwiftPM writes the deployment target into the executable as its SDK ("sdk 14.0" on the
-/// owner's build), Xcode 26's its SDK (26.5); on macOS 27 a page of a build declaring 14.0 lacks
-/// `window.trustedTypes`, which Safari 27 has.
+/// owner's build), Xcode 26's its SDK (26.5); on macOS 26 and 27 a page of a build declaring 14.0
+/// lacked `window.trustedTypes`, which Safari has — a profile's web views now have the features the
+/// SDK's behaviors change set as Safari has them, one by one (`SafariEngineFeatures`).
 ///
 /// The executables declare what SwiftPM writes, and `+[WKProcessPool _setLinkedOnOrAfterEverything]`
 /// (WebKit's own switch for every behavior at once, made for Safari) is not used: on macOS 27, from
 /// macOS 15's SDK on, a profile with a proxy has the self-test's AIA canary — the address a
 /// certificate names for its missing intermediate — resolved by this Mac, outside the proxy (CI run
 /// 451, scripts/aia_variants.py: clean with 14.0 to 14.4, fetched with every SDK from 15.0 to 27.0,
-/// 26.5 among them, and with the switch). Of what WebKit turns on at 15.0, its network loader is
-/// the one about the network. Only `--sdk-everything` (CI's measurements) and `--sdk-check
-/// --everything` call the switch.
+/// 26.5 among them, and with the switch) — some 3 ms after the profile's own answer cancels the
+/// server-trust challenge, on behalf of this process, as the failed load's error comes to carry the
+/// certificate chain (runs 491 and 492). Only `--sdk-everything` (CI's measurements) and
+/// `--sdk-check --everything` call the switch.
 enum SDKBehaviors {
     /// Whether `matchSafari` turned every behavior on in this process (the self-test says so).
     private(set) static var matched = false
@@ -58,13 +60,17 @@ enum SDKBehaviors {
     }
 }
 
-/// `PrivacyBrowser --sdk-check [--everything]`: what a page sees, and what the screen is, in a
-/// process of this build — with WebKit's behaviors as the SDK this executable declares gives them,
-/// or, with `--everything`, as Safari has them (`SDKBehaviors.matchSafari`). CI runs it on the app
-/// as built and on a copy whose executable declares another SDK (scripts/sdk_check.sh), so that what
-/// follows the SDK shows: `window.trustedTypes` and the window's other interfaces, by name, and the
-/// screen's visible frame, which AppKit gives WebKit for `screen.availHeight`. A measurement: a plain
-/// web view on a page given as a string, nothing loaded from the network.
+/// `PrivacyBrowser --sdk-check [--everything] [--as-profile] [--features]`: what a page sees, and
+/// what the screen is, in a process of this build — with WebKit's behaviors as the SDK this
+/// executable declares gives them, or, with `--everything`, as Safari has them
+/// (`SDKBehaviors.matchSafari`). CI runs it on the app as built and on a copy whose executable
+/// declares another SDK (scripts/sdk_check.sh), so that what follows the SDK shows:
+/// `window.trustedTypes` and the window's other interfaces, by name, `MutationEvent` and a
+/// DOMNodeInserted listener, `new FontFaceSet([])`, and the screen's visible frame, which AppKit
+/// gives WebKit for `screen.availHeight`. `--as-profile` sets WebKit's features as a profile's web
+/// views have them (`SafariEngineFeatures`), and `--features` lists every feature's default in this
+/// process and its value in the page's web view (scripts/engine_features_check.py compares the
+/// three). A plain web view on a page given as a string, nothing loaded from the network.
 @MainActor
 enum SDKCheck {
     static func run(arguments: [String]) -> Never {
@@ -87,7 +93,23 @@ enum SDKCheck {
                   + "from y \(visible.minY); the menu bar's thickness \(NSStatusBar.system.thickness); safe area top \(screen.safeAreaInsets.top)")
         }
         let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 800, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
-        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: WKWebViewConfiguration())
+        let configuration = WKWebViewConfiguration()
+        if arguments.contains("--as-profile") {
+            SafariEngineFeatures.apply(to: configuration.preferences)
+            print("SDK-CHECK as a profile: WebKit's features set as Safari has them: "
+                  + (SafariEngineFeatures.appliesHere ? "yes" : "no, this macOS is not one they were measured on")
+                  + " (measured on macOS \(SafariEngineFeatures.measured.sorted().map { String($0) }.joined(separator: ", ")))")
+            for (key, enabled) in SafariEngineFeatures.asSafari {
+                print("SDK-CHECK as Safari: \(key) \(enabled)")
+            }
+        }
+        if arguments.contains("--features") {
+            for (key, byDefault) in WebKitFeatures.defaults().sorted(by: { $0.key < $1.key }) {
+                let here = WebKitFeatures.isEnabled(configuration.preferences, key).map { $0 ? "true" : "false" } ?? "?"
+                print("SDK-CHECK feature \(key) default \(byDefault) here \(here)")
+            }
+        }
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
         window.contentView = webView
         window.orderFrontRegardless()
         let loaded = SDKCheckPage()
@@ -105,8 +127,16 @@ private final class SDKCheckPage: NSObject, WKNavigationDelegate {
           const p = document.getElementById('p');
           p.style.webkitUserSelect = 'none';
           const style = getComputedStyle(p);
+          let inserted = 0;
+          p.addEventListener('DOMNodeInserted', () => { inserted++; });
+          p.appendChild(document.createElement('span'));
+          let fontFaceSet;
+          try { new FontFaceSet([]); fontFaceSet = 'constructs'; } catch (e) { fontFaceSet = e.name; }
           return JSON.stringify({
             trustedTypes: typeof trustedTypes,
+            MutationEvent: typeof MutationEvent,
+            mutationEventsFired: inserted,
+            fontFaceSetConstructor: fontFaceSet,
             DigitalCredential: typeof DigitalCredential,
             MediaSessionCoordinator: typeof MediaSessionCoordinator,
             windowOwnProperties: Object.getOwnPropertyNames(window).length,

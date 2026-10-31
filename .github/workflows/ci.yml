@@ -200,6 +200,15 @@ jobs:
         run: |
           scripts/sdk_check.sh build/unsandboxed/PrivacyBrowser.app build/egress27/sdk-check "macOS 27 - SDK behaviors" \
             "$(xcrun --show-sdk-version)" build/egress27/sdk-check/ui
+      - name: WebKit's features in a profile's web views as Safari has them, on macOS 27 (reported)
+        # As on macOS 26, where it fails the build (scripts/engine_features_check.py); this job fails
+        # the build only on a certificate fetched outside a profile's proxy.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          python3 scripts/engine_features_check.py --app build/unsandboxed/PrivacyBrowser.app \
+            --out build/egress27/engine-features --title "macOS 27 - WebKit's features as Safari's"
       - name: From which declared SDK this Mac fetches a certificate's address outside a profile's proxy, on macOS 27 (a measurement)
         # Run 451: clean with 14.0 to 14.4, the AIA canary fetched with every SDK from 15.0 to 27.0
         # (26.5, what an Xcode 26 build declares, among them) and with WebKit's switch. Kept on the
@@ -454,6 +463,17 @@ jobs:
           # Xcode 26 builds declare their SDK (26.5); the copy declares what an Xcode 27 build does (14.0).
           scripts/sdk_check.sh build/unsandboxed/PrivacyBrowser.app build/sdk-check "SDK behaviors" \
             14.0 build/sdk-check/ui
+      - name: WebKit's features in a profile's web views as Safari has them — as built, and declaring 14.0 (fails the build)
+        # The features the SDK's behaviors change, set one by one as Safari has them
+        # (SafariEngineFeatures; runs 495, 497, 500). Fails when a feature the behaviors change is
+        # not set as Safari has it, or a page in a profile's web view differs from one with every
+        # behavior on (scripts/engine_features_check.py): for this build (Xcode 26 declares 26.5)
+        # and a copy declaring what an Xcode 27 build does, 14.0 — the releases' SDK.
+        if: always()
+        timeout-minutes: 8
+        run: |
+          python3 scripts/engine_features_check.py --app build/unsandboxed/PrivacyBrowser.app --copy-sdk 14.0 \
+            --out build/engine-features --title "WebKit's features as Safari's"
       - name: From which declared SDK this Mac fetches a certificate's address outside a profile's proxy (a measurement)
         # As on macOS 27 (scripts/aia_variants.py): as built (this Xcode's SDK), every behavior on,
         # and a copy declaring 14.0. On macOS 26 the capture has not yet seen the control's fetch, so
