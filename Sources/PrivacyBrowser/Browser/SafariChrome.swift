@@ -837,6 +837,12 @@ enum SafariChrome {
             // _sendInvocation:…]): the menu walk, CI run 461, macOS 26, a page loaded in a window
             // with a tab group. A profile's tab groups are its own and stay in its home.
             ("WBTabGroupSyncAgentProxy", "scheduleSyncIfNeeded"),
+            // The same proxy's observers (measurement branch, scale run 468, macOS 26: one profile
+            // of 20 launched at once ended at its start with SIGSEGV in objc_retain under
+            // -[NSXPCConnection remoteObjectProxy], from -[WBTabGroupSyncAgentProxy
+            // addSyncObserver:]'s block on its _syncObserverQueue).
+            ("WBTabGroupSyncAgentProxy", "addSyncObserver:"),
+            ("WBTabGroupSyncAgentProxy", "removeSyncObserver:"),
         ]
         for (className, selectorName) in nothing {
             replaceWithConstant(className, selectorName) { nil }

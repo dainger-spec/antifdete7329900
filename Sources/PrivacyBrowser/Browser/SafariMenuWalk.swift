@@ -132,6 +132,20 @@ enum SafariMenuWalk {
             answers.append("\(key): CF \(core), suite \(suiteValue), standard \(standardValue)")
         }
         emit(["event": "info", "text": "Safari's service settings as read here: " + answers.joined(separator: "; ")])
+        // What Safari's tab group sync proxy does with its agent's connection (measurement branch).
+        if let proxy = NSClassFromString("WBTabGroupSyncAgentProxy") {
+            var count: UInt32 = 0
+            var names: [String] = []
+            if let methods = class_copyMethodList(proxy, &count) {
+                for index in 0..<Int(count) { names.append("-" + NSStringFromSelector(method_getName(methods[index]))) }
+                free(methods)
+            }
+            if let meta = object_getClass(proxy), let methods = class_copyMethodList(meta, &count) {
+                for index in 0..<Int(count) { names.append("+" + NSStringFromSelector(method_getName(methods[index]))) }
+                free(methods)
+            }
+            emit(["event": "info", "text": "WBTabGroupSyncAgentProxy's methods: " + names.sorted().joined(separator: " ")])
+        }
         emit(["event": "info", "text": "preferences: a suite named by a path in the profile's home "
               + "(synchronize \(synchronized), read back \(suite?.string(forKey: "PBWalkProbe") ?? "nothing")) is written to "
               + (found.isEmpty ? "no file found" : found.map { $0.hasPrefix(home) ? "the profile's home" : $0 }.joined(separator: ", "))
