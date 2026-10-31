@@ -75,7 +75,8 @@ on every run, in both macOS jobs, and with `--check`:
   window's state and, on Safari 27, the runner — and what FSEvents saw written in the real Safari's
   places by any process (macOS's own daemons and Safari's agents write there on their own).
 
-On macOS 26 a failure fails the build; macOS 27's job fails nothing, as for everything in it. A
+On macOS 26 a failure fails the build; on macOS 27 it is reported (that job fails the build only on
+a certificate fetched for outside a profile's proxy). A
 Safari with no record (a new major version) is walked and its record written into the run's
 `menu-walk` artifact, to be looked at and committed. A change that is meant is recorded again
 (`--write-record`), with the reason in the commit.
