@@ -203,6 +203,40 @@ def start_trace(out):
     return trace
 
 
+def start_log(out):
+    """The unified log while the walk runs (a measurement): launchd's lines about Safari's services
+    and agents — which started, and on whose request — and the keychain's, into out/log.ndjson."""
+    predicate = ('(process == "launchd" AND eventMessage CONTAINS[c] "safari") OR '
+                 '(subsystem == "com.apple.securityd" AND eventMessage CONTAINS[c] "keychain")')
+    sudo = ["sudo", "-n"] if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0 else []
+    return subprocess.Popen(sudo + ["log", "stream", "--style", "ndjson", "--level", "info", "--predicate", predicate],
+                            stdout=open(os.path.join(out, "log.ndjson"), "w"), stderr=subprocess.STDOUT)
+
+
+def logged(out):
+    """What the log said: launchd's distinct lines about Safari's services, and who the keychain's
+    lines were for, by process."""
+    services, keychain = {}, {}
+    try:
+        lines = open(os.path.join(out, "log.ndjson"), encoding="utf-8", errors="replace").read().splitlines()
+    except OSError:
+        return [], {}
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        message = entry.get("eventMessage", "")
+        if entry.get("processImagePath", "").endswith("/launchd"):
+            # Addresses and pids vary from run to run; the line's words do not.
+            words = re.sub(r"\b0x[0-9a-f]+\b|\[\d+\]|\b\d{3,}\b", "#", message)[:240]
+            services[words] = services.get(words, 0) + 1
+        else:
+            who = os.path.basename(entry.get("processImagePath", "?"))
+            keychain[who] = keychain.get(who, 0) + 1
+    return sorted(services.items(), key=lambda item: -item[1]), keychain
+
+
 def traced_writes(out):
     """The writes in the real Safari's places in out/fs.txt, as "process: path", and what the
     trace was (lines read, or why it is none)."""
@@ -298,6 +332,7 @@ def main():
     if proxied:
         environment["PB_SELFTEST_HTTP_PROXY_PORT"] = str(PROXY_PORT)
     trace = start_trace(out)
+    log_stream = start_log(out)
     started = time.time()
     with open(os.path.join(out, "walk.txt"), "w") as log:
         try:
@@ -308,12 +343,25 @@ def main():
             output, status = (expired.stdout or b"").decode(errors="replace") if isinstance(expired.stdout, bytes) else (expired.stdout or ""), -1
         log.write(output)
     proxy.kill()
+    subprocess.run(["sudo", "-n", "kill", "-INT", str(log_stream.pid)], capture_output=True)
+    try:
+        log_stream.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            log_stream.terminate()
+        except OSError:
+            pass
     if trace:
         subprocess.run(["sudo", "-n", "pkill", "-INT", "-f", "fs_usage -w"], capture_output=True)
         time.sleep(2)
     by_profile, traced = traced_writes(out)
     print(f"MENU-WALK file trace: {traced}; writes in the real Safari's places by the app's, WebKit's or cfprefsd's "
           f"processes: {len(by_profile)}", flush=True)
+    services, keychain = logged(out)
+    print(f"MENU-WALK launchd on Safari's services and agents during the walk: {len(services)} distinct lines", flush=True)
+    for words, count in services[:40]:
+        print(f"MENU-WALK   launchd x{count}: {words}", flush=True)
+    print(f"MENU-WALK the keychain's lines during the walk, by process: {keychain or 'none'}", flush=True)
 
     items = []
     for line in output.splitlines():

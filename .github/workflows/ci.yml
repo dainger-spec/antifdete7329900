@@ -1,38 +1,56 @@
 name: CI
 
-# A measurement branch only: the menu walk, compared with its records, with Safari's window state
-# kept in the profile's home (SafariUIState) on top of the local queue (the menu's items outside the
-# profile gone, Home the start page). Never merged.
+# A measurement branch only: two menu walks on the same runner, each compared with its records —
+# A, the local queue as it is; B, with Safari's window state in the profile's home (SafariUIState,
+# PB_MEASURE_UI_STATE=1), which says where each key Safari writes went — with this app's domain
+# deleted between them, and the unified log's launchd and keychain lines during each. Never merged.
 on:
   push:
 
 jobs:
   walk:
-    name: The menu walk on ${{ matrix.runner }}
+    name: Walks A and B on ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         runner: [macos-26, xcode-27]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 75
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
       - name: Build the app without the App Sandbox
         run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
-      - name: Menu walk
+      - name: Walk A, the queue as it is
         continue-on-error: true
-        timeout-minutes: 45
+        timeout-minutes: 40
         run: |
           major="$(defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString | cut -d. -f1)"
-          python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/measure/menu-walk \
-            --title "${{ matrix.runner }} - menu walk" --record "docs/menu-walk/safari-$major.json" --check \
+          python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/measure/a \
+            --title "${{ matrix.runner }} - walk A" --record "docs/menu-walk/safari-$major.json" --check \
             --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners"
-      - name: Where Safari's window state went
+      - name: This app's domain deleted
         if: always()
-        run: grep -h "MENUWALK-INFO .*preferences" build/measure/menu-walk/*.txt 2>/dev/null | cut -c1-1500 || true
+        run: defaults delete dev.local.PrivacyBrowser 2>&1 || true
+      - name: Walk B, Safari's window state in the profile's home
+        continue-on-error: true
+        timeout-minutes: 40
+        env:
+          PB_MEASURE_UI_STATE: "1"
+        run: |
+          major="$(defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString | cut -d. -f1)"
+          python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/measure/b \
+            --title "${{ matrix.runner }} - walk B" --record "docs/menu-walk/safari-$major.json" --check \
+            --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners"
+      - name: What the walks said of preferences
+        if: always()
+        run: |
+          for walk in a b; do
+            echo "== walk $walk"
+            grep -h "MENUWALK-INFO .*preferences\|UISTATE" "build/measure/$walk/walk.txt" 2>/dev/null | cut -c1-1500 || true
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: walk-${{ matrix.runner }}
+          name: walks-${{ matrix.runner }}
           path: build/measure
           if-no-files-found: ignore
