@@ -537,7 +537,10 @@ public final class ProfileRepository: @unchecked Sendable {
             return try codec.encode(BookmarkStore.merge(codec.decode(local), codec.decode(remote)))
         case .history:
             let codec = HistoryStore.file(url: nil, profileID: id, profileKey: key)
-            let policy = (try? loadConfiguration(id, key: key))?.historyPolicy ?? .init()
+            // The profile's own retention; with its settings unreadable, none: a merge never cuts
+            // the history to a default the person did not choose (90 days, when they kept it for
+            // a year or for ever). The number of entries is no one's choice and stays the limit.
+            let policy = (try? loadConfiguration(id, key: key))?.historyPolicy ?? HistoryStore.Policy(retentionDays: nil)
             return try codec.encode(HistoryStore.merge(codec.decode(local), codec.decode(remote), policy: policy))
         case .cookies:
             let codec = Self.cookieJarFile(url: nil, profileID: id, profileKey: key)
