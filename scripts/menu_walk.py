@@ -22,8 +22,8 @@ exception, our "unavailable" notice, a panel, an alert, a modal window, a window
 a request to open something outside, quitting, our Settings asked for, a change in the window, or
 nothing seen), where it wrote (the profile's home, the real Safari's places, elsewhere) and the
 XPC services it started. With --record, the record for this Safari is compared item by item:
-every item whose reduction changed, every item gone and every new one is listed; with --check a
-difference fails (exit 1). Without a record, or with --write-record, the reduction is written
+every item whose reduction changed fails with --check (exit 1); every item gone and every new one
+is listed. Without a record, or with --write-record, the reduction is written
 for the record. A walk that did not get to the end fails with --check too, and so does a write in
 the real Safari's places that the trace puts on the profile.
 """
@@ -122,13 +122,44 @@ def writes(item):
     return places
 
 
+def steady(words):
+    """Of an item's behaviour, what does not follow timing: runs 463 and 468 read the same items
+    once as "changes the window", once as "nothing seen"; AppKit's own layout exception
+    (NSGenericException) came and went; and windows AppKit makes for a moment (a full-screen
+    transition's) or that a later item already took back are seen or not. Sheets and panels stay,
+    and every other word."""
+    kept = []
+    for word in words:
+        if word in ("changes the window", "nothing seen"):
+            continue
+        if word.startswith("window ") and not word.startswith("window NSPanel"):
+            continue
+        if word.startswith("exception "):
+            names = [name for name in word[len("exception "):].split(", ") if name != "NSGenericException"]
+            if not names:
+                continue
+            word = "exception " + ", ".join(names)
+        kept.append(word)
+    return kept or ["-"]
+
+
+# Items enabled or not by the system's state rather than by the build: Stop Speaking while the
+# speech Start Speaking began goes on (run 470, macOS 26: it had ended), Start Dictation… while the
+# system's dictation is there (runs 471 and 474, macOS 27: once enabled, once not). Whether they
+# were disabled is not compared; what they did when chosen is.
+ENABLED_BY_THE_SYSTEM = {"stopSpeaking:", "startDictation:"}
+
+
 def reduce(item):
-    """What the record keeps of an item: what it did and the services it started. Where it wrote
-    is in the table but not in the record: a file is written a moment after the item that caused
-    it, often during the next one, and the system's daemons write in the home all the time, so
-    which item a write belongs to is a guess. What is checked of writes is the walk's as a whole
-    (`walk_writes`): nothing in the real Safari's places, ever."""
-    return {"behaviour": behaviour(item), "xpc": sorted(set(item.get("xpc", [])))}
+    """What the record keeps of an item: what it did (`steady`) and the services it started. Where
+    it wrote is in the table but not in the record: a file is written a moment after the item that
+    caused it, often during the next one, and the system's daemons write in the home all the time,
+    so which item a write belongs to is a guess. What is checked of writes is the walk's as a whole
+    (`traced_writes`): nothing in the real Safari's places by the profile, ever."""
+    words = steady(behaviour(item))
+    if item.get("action") in ENABLED_BY_THE_SYSTEM:
+        words = [word for word in words if word != "disabled"] or ["-"]
+    return {"behaviour": words, "xpc": sorted(set(item.get("xpc", [])))}
 
 
 def walk_writes(items):
@@ -338,18 +369,24 @@ def main():
     if args.record and os.path.exists(args.record):
         with open(args.record) as handle:
             recorded = json.load(handle)
-        differences = []
+        # An item whose steady behaviour changed fails the check; an item that came or went is
+        # said: which items a menu has follows the window's state and, on Safari 27, the runner
+        # (Import Browsing Data in some runs, Import From › Bookmarks HTML File in others, either Safari).
+        differences, comings = [], []
         for name in sorted(set(recorded) | set(current)):
             if name not in current:
-                differences.append(f"gone: {name}")
+                comings.append(f"gone: {name}")
             elif name not in recorded:
-                differences.append(f"new: {name} — {'; '.join(current[name]['behaviour'])}")
+                comings.append(f"new: {name} — {'; '.join(current[name]['behaviour'])}")
             elif recorded[name] != current[name]:
                 was, now = recorded[name], current[name]
                 differences.append(f"changed: {name} — was {was}, now {now}")
         for difference in differences[:60]:
             notice("error" if args.check else "warning", args.title, difference)
-        print(f"MENU-WALK {len(differences)} difference(s) from the record {args.record}", flush=True)
+        for coming in comings[:30]:
+            notice("warning", args.title, coming)
+        print(f"MENU-WALK {len(differences)} item(s) that changed, {len(comings)} that came or went, "
+              f"from the record {args.record}", flush=True)
         if differences and args.check:
             failed = True
     return 1 if failed else 0

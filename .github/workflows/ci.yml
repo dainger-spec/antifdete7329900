@@ -138,7 +138,8 @@ jobs:
       - name: Safari 27's menu, every item chosen in a profile's own process (docs/SAFARI_MENU.md)
         # What each item of the menu bar does there: a crash, an exception, a window, a panel, a
         # request to open something outside, a service started, a write in the real Safari's places
-        # (scripts/menu_walk.py, compared with docs/menu-walk/safari-<major>.json when there is one).
+        # (scripts/menu_walk.py), compared with docs/menu-walk/safari-<major>.json: an item that does
+        # something else, or a write in the real Safari's places by the profile, fails the step.
         # This job fails nothing.
         if: always()
         continue-on-error: true
@@ -146,7 +147,7 @@ jobs:
         run: |
           major="$(defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString | cut -d. -f1)"
           python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/egress27/menu-walk \
-            --title "macOS 27 - Safari's menu" --record "docs/menu-walk/safari-$major.json" \
+            --title "macOS 27 - Safari's menu" --record "docs/menu-walk/safari-$major.json" --check \
             --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners"
       - name: Safari 27's question about the default browser — as built, and declared a browser (a measurement)
         if: always()
@@ -366,14 +367,16 @@ jobs:
       - name: Safari's menu, every item chosen in a profile's own process (docs/SAFARI_MENU.md)
         # What each item of the menu bar does there: a crash, an exception, a window, a panel, a
         # request to open something outside, a service started, a write in the real Safari's places
-        # (scripts/menu_walk.py, compared with docs/menu-walk/safari-<major>.json when there is one).
+        # (scripts/menu_walk.py), compared with docs/menu-walk/safari-<major>.json: a walk that does
+        # not get to the end, an item that does something else, or a write in the real Safari's
+        # places by the profile fails the build. A Safari with no record yet (a new major version)
+        # only writes one, into the run's artifact.
         if: always()
-        continue-on-error: true
         timeout-minutes: 30
         run: |
           major="$(defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString | cut -d. -f1)"
           python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/menu-walk \
-            --title "Safari's menu" --record "docs/menu-walk/safari-$major.json" \
+            --title "Safari's menu" --record "docs/menu-walk/safari-$major.json" --check \
             --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners"
       - uses: actions/upload-artifact@v4
         if: always()

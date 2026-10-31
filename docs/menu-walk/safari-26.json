@@ -1,0 +1,874 @@
+{
+ "(sent to the first responder) _handleInsertFromContactsCommand: | _handleInsertFromContactsCommand: | -": {
+  "behaviour": [
+   "our notice"
+  ],
+  "xpc": []
+ },
+ "(sent to the first responder) _handleInsertFromCreditCardsCommand: | _handleInsertFromCreditCardsCommand: | -": {
+  "behaviour": [
+   "our notice"
+  ],
+  "xpc": []
+ },
+ "(sent to the first responder) _handleInsertFromPasswordsCommand: | _handleInsertFromPasswordsCommand: | -": {
+  "behaviour": [
+   "our notice"
+  ],
+  "xpc": []
+ },
+ "Bookmarks › Add Bookmark Folder | addBookmarkFolder: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Bookmarks › Add Bookmarks for Open Tabs… | addBookmarksForTabs: | -": {
+  "behaviour": [
+   "exception NSInternalInconsistencyException",
+   "our notice"
+  ],
+  "xpc": []
+ },
+ "Bookmarks › Add Bookmark… | addBookmark: | ⌘D": {
+  "behaviour": [
+   "exception NSInternalInconsistencyException",
+   "our notice"
+  ],
+  "xpc": []
+ },
+ "Bookmarks › Add Open Tabs to Reading List | addReadingListItemsForTabs: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Bookmarks › Add to Reading List | addReadingListItem: | ⇧⌘D": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Bookmarks › Edit Bookmarks | toggleBookmarksEditView: | ⌥⌘B": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Bookmarks › Select Next Item in Reading List | nextReadingListItem: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Bookmarks › Select Previous Item in Reading List | previousReadingListItem: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Bookmarks › Show Bookmarks | toggleBookmarks: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Bookmarks › Show Start Page | showStartPage: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › AutoFill Form | autoFill: | ⇧⌘A": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Copy Search Terms | copySearchTerms: | ⌃⌘C": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Copy | copy: | ⌘C": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Cut | cut: | ⌘X": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Delete | delete: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Distraction Control › Hide Distracting Items... | startScribbling: | -": {
+  "behaviour": [
+   "alert"
+  ],
+  "xpc": []
+ },
+ "Edit › Distraction Control › Report Issues... | reportScribbleIssues: | -": {
+  "behaviour": [
+   "alert"
+  ],
+  "xpc": []
+ },
+ "Edit › Distraction Control › Show Hidden Items | clearScribbleEdits: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Emoji & Symbols | orderFrontCharacterPalette: | E": {
+  "behaviour": [
+   "character viewer"
+  ],
+  "xpc": []
+ },
+ "Edit › Emoji & Symbols | orderFrontCharacterPalette: | ⌃⌘ ": {
+  "behaviour": [
+   "character viewer"
+  ],
+  "xpc": []
+ },
+ "Edit › Emoji & Symbols | orderFrontCharacterPalette: | ⌘ ": {
+  "behaviour": [
+   "character viewer"
+  ],
+  "xpc": []
+ },
+ "Edit › Find › Find Next | findNext: | ⌘G": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Find › Find Previous | findPrevious: | ⇧⌘G": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Find › Find… | focusContentSearchField: | ⌘F": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Find › Google Search… | searchWeb: | ⌥⌘F": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Find › Hide Find Banner | hideFindBanner: | ⇧⌘F": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Find › Jump to Selection | centerSelectionInVisibleArea: | ⌘J": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Find › Use Selection for Find | takeFindStringFromSelection: | ⌘E": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Paste and Match Style | pasteAsPlainText: | ⌥⇧⌘V": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Paste as Typed | pasteAsTyped: | ⌃⌘V": {
+  "behaviour": [
+   "alert"
+  ],
+  "xpc": []
+ },
+ "Edit › Paste | paste: | ⌘V": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Redo | redo: | ⇧⌘Z": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Save Webpage With Metadata | saveWebpageWithMetadata: | ⌃⌘S": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Select All | selectAll: | ⌘A": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Speech › Start Speaking | startSpeaking: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Speech › Stop Speaking | stopSpeaking: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Spelling and Grammar › Check Document Now | checkSpelling: | ⌘;": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Spelling and Grammar › Check Grammar With Spelling | toggleGrammarChecking: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Spelling and Grammar › Check Spelling While Typing | toggleContinuousSpellChecking: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Spelling and Grammar › Correct Spelling Automatically | toggleAutomaticSpellingCorrection: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Spelling and Grammar › Show Spelling and Grammar | showGuessPanel: | ⌘:": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Start Dictation… | startDictation: | D": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Start Dictation… | startDictation: | D #2": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Edit › Substitutions › Show Substitutions | orderFrontSubstitutionsPanel: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Substitutions › Smart Copy/Paste | toggleSmartInsertDelete: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Substitutions › Smart Dashes | toggleAutomaticDashSubstitution: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Substitutions › Smart Links | toggleAutomaticLinkDetection: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Substitutions › Smart Quotes | toggleAutomaticQuoteSubstitution: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Substitutions › Text Replacement | toggleAutomaticTextReplacement: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Transformations › Capitalize | capitalizeWord: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Transformations › Make Lower Case | lowercaseWord: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Transformations › Make Upper Case | uppercaseWord: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Edit › Undo | undo: | ⌘Z": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › Add to Dock… | generateWebAppForCurrentPage: | -": {
+  "behaviour": [
+   "sheet NSWindow"
+  ],
+  "xpc": []
+ },
+ "File › Close All Windows | closeAllWindows: | ⌥⇧⌘W": {
+  "behaviour": [
+   "alert"
+  ],
+  "xpc": []
+ },
+ "File › Close All Windows | closeAllWindows: | ⌥⇧⌘W #2": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › Close Other Tabs | closeInactiveTabs: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "File › Close Tab | closeCurrentTab: | ⌘W": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › Close Window | performClose: | ⇧⌘W": {
+  "behaviour": [
+   "alert"
+  ],
+  "xpc": []
+ },
+ "File › Close Window | performClose: | ⇧⌘W #2": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › Delete Tab Group | closeSelectedTabGroup: | ⌃⌘W": {
+  "behaviour": [
+   "alert"
+  ],
+  "xpc": []
+ },
+ "File › Export as PDF… | saveDocumentToPDF: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › Export › Bookmarks… | exportBookmarks: | -": {
+  "behaviour": [
+   "save panel"
+  ],
+  "xpc": []
+ },
+ "File › Import From › Bookmarks HTML File… | importBookmarks: | -": {
+  "behaviour": [
+   "open panel"
+  ],
+  "xpc": []
+ },
+ "File › New Empty Tab Group | newTabGroupFromFileMenu: | ⌃⌘N": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › New Tab Group with This Tab | createTabGroupWithCurrentTabsFromFileMenu: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "File › New Tab at End | newTabAtEndFromFileMenu: | ⌥⌘T": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › New Tab | newTabFromFileMenu: | ⌘T": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › New Window | newWindow: | ⌘N": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › Open File… | openDocument: | ⌘O": {
+  "behaviour": [
+   "open panel"
+  ],
+  "xpc": []
+ },
+ "File › Open Location… | openLocation: | ⌘L": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › Print… | safari_printDocument: | ⌘P": {
+  "behaviour": [
+   "sheet NSPanel"
+  ],
+  "xpc": []
+ },
+ "File › Save As… | saveDocumentTo: | ⇧⌘S": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › Save As… | saveDocumentTo: | ⌘S": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "File › Share… | _shareMenuItemSelected: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Help › Acknowledgments | showAcknowledgments: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Help › Safari Help | showHelp: | ⌘?": {
+  "behaviour": [
+   "Help"
+  ],
+  "xpc": []
+ },
+ "History › Back | goBackInWindow: | ⌘[": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "History › Forward | goForwardInWindow: | ⌘]": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "History › Home | goHome: | ⇧⌘H": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "History › Reopen All Windows from Last Session | reopenLastSession: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "History › Reopen Last Closed Window or Tab | reopenLastClosedTabOrWindow: | ⇧⌘T": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "History › Return to Search Results | snapBackToSearchResults: | ⌥⌘S": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "History › Show All History | toggleHistoryInBookmarksView: | ⌘Y": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Safari › About Safari | orderFrontStandardAboutPanel: | -": {
+  "behaviour": [
+   "window NSPanel"
+  ],
+  "xpc": []
+ },
+ "Safari › Clear History and Keep Website Data… | clearHistoryAndKeepWebsiteData: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Safari › Clear History… | clearHistoryAndWebsiteData: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Safari › Connection Security Details… | showCertificateInformation: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Safari › Hide Others | hideOtherApplications: | ⌥⌘H": {
+  "behaviour": [
+   "hides other apps"
+  ],
+  "xpc": []
+ },
+ "Safari › Hide Safari | hide: | ⌘H": {
+  "behaviour": [
+   "another app in front"
+  ],
+  "xpc": []
+ },
+ "Safari › Quit Safari | terminate: | ⌘Q": {
+  "behaviour": [
+   "quit"
+  ],
+  "xpc": []
+ },
+ "Safari › Safari Extensions… | showExtensionsSettings: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Safari › Services | submenuAction: | -": {
+  "behaviour": [
+   "not chosen: services"
+  ],
+  "xpc": []
+ },
+ "Safari › Settings for This Website… | togglePerSitePreferencesPopoverFromMenuItem: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Safari › Settings… | showPreferences: | ⌘,": {
+  "behaviour": [
+   "our Settings"
+  ],
+  "xpc": []
+ },
+ "Safari › Show All | unhideAllApplications: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "View › Actual Size | zoomToStandardSize: | ⌘0": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "View › Always Show Tab Bar | toggleAlwaysShowTabBar: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Always Show Toolbar in Full Screen | toggleLocationBar: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "View › Customize Toolbar… | runToolbarCustomizationPalette: | -": {
+  "behaviour": [
+   "sheet NSToolbarConfigPanel"
+  ],
+  "xpc": []
+ },
+ "View › Enter Full Screen | toggleFullScreen: | F": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Enter Full Screen | toggleFullScreen: | ⌃⌘F": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Make Text Bigger | makeTextBigger: | ⌥⌘+": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Make Text Smaller | makeTextSmaller: | ⌥⌘-": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Reload Page From Origin | reloadFromOrigin: | ⌥⌘R": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Reload Page | reloadObeyingUnifiedField: | ⌘R": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Reload With Content Blockers | reloadWithInvertedContentBlockersEnabledSetting: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Show Bookmarks Sidebar | toggleBookmarksSidebar: | ⌃⌘1": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Show Downloads | showDownloads: | ⌥⌘L": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "View › Show Favorites Bar | toggleFavoritesBar: | ⇧⌘B": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Show Reader | toggleReader: | ⇧⌘R": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "View › Show Reading List Sidebar | toggleReadingListSidebar: | ⌃⌘2": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Show Shared with You | toggleSharedWithYou: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Show Sidebar | safari_toggleSidebar: | ⇧⌘L": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Show Status Bar | toggleStatusBar: | ⌘/": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "View › Show Tab Overview | toggleVisualTabPickerFromMenu: | ⇧⌘\\": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "View › Stop | stopLoading: | ⌘.": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "View › Text Encoding › Default | changeTextEncoding: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Zoom In | zoomIn: | ⌘+": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "View › Zoom Out | zoomOut: | ⌘-": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › (a window of the profile) | makeKeyAndOrderFront: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › (untitled) | lockBrowsing: | ⌃⌘L": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Window › Arrange Tabs By › Title | sortTabsByTitle: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › Arrange Tabs By › Website | sortTabsByWebsite: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › Bring All to Front | arrangeInFront: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › Duplicate Tab | duplicateTab: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › Go To Next Tab Group | goToNextTabGroup: | ⇧⌘": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Window › Go To Next Tab Group | goToNextTabGroup: | ⌃⌘]": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Window › Go To Next Tab Group | goToNextTabGroup: | ⌥⌘]": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Window › Go To Previous Tab Group | goToPreviousTabGroup: | ⇧⌘": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Window › Go To Previous Tab Group | goToPreviousTabGroup: | ⌃⌘[": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Window › Go To Previous Tab Group | goToPreviousTabGroup: | ⌥⌘[": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Window › Merge All Windows | consolidateTabsAndWindows: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Window › Minimize All | miniaturizeAll: | ⌥⌘M": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › Minimize | performMiniaturize: | ⌘M": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › Move Tab to New Window | moveCurrentTabToNewWindow: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › Mute Other Tabs | toggleMuteOtherTabs: | -": {
+  "behaviour": [
+   "disabled"
+  ],
+  "xpc": []
+ },
+ "Window › Mute This Tab | toggleMuteCurrentTab: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › Pin Tab | togglePinTabFromMenu: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › Show Next Tab | selectNextTab: | ⌃\t": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › Show Previous Tab | selectPreviousTab: | ⌃⇧\t": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ },
+ "Window › Zoom | performZoom: | -": {
+  "behaviour": [
+   "-"
+  ],
+  "xpc": []
+ }
+}

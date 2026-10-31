@@ -52,16 +52,30 @@ keeps them from pages) and items that are views rather than commands.
 
 ## The record, and the check
 
-Each item is reduced to what is compared: its behaviour (the words of the table's columns) and
-the XPC services it started. CI walks the menu on every run, in both macOS jobs, and writes that
-reduction (`record.json` in the run's `menu-walk` artifact). Once two runs read the same,
-`docs/menu-walk/safari-<major>.json` keeps it for each Safari, and the walk compares with it: an
-item whose reduction changed, an item gone, a new item. Writes are checked for the walk as a whole,
-not per item (a file is often written while the next item runs): `fs_usage` traces the app's,
-WebKit's and cfprefsd's file-system calls meanwhile, and a write in the real Safari's places by one
-of them is the profile's; what FSEvents saw written there by any process is listed, since macOS's
-own daemons and Safari's agents write there on their own schedule. With `--check` a difference or
-such a write fails the step; it is then looked at, and either fixed or recorded again
+Each item is reduced to what is compared: what it did, without what follows timing (whether the
+window changed or nothing was seen in the moment after it, a window AppKit makes for a moment,
+AppKit's own layout exception: runs 463 and 468 read those differently for the same items; and
+whether Stop Speaking and Start Dictation… were enabled, which follows the system's state — the
+speech an item before started, the system's dictation: runs 470, 471 and 474), and the XPC services
+it started. `docs/menu-walk/safari-<major>.json` keeps that
+reduction for each Safari, from the walk CI made where it checks it (run 471, the commit that
+brought the walk: its jobs walk after the self-test and the other checks). The measurement branch's
+walks, each on a fresh runner, read the same for every item but one, in all four of them (runs 468
+and 470, twice each): there File › Print… brought another application forward (the system's
+notification center). CI walks the menu
+on every run, in both macOS jobs, and with `--check`:
+
+- **fails** when the walk does not get to the end, when an item does something else than its
+  record says (a crash or a hang, a new exception, a panel, an alert or a request to open
+  something that was not there, our notice gone), or when `fs_usage` puts a write in the real
+  Safari's places on the profile (the app's, WebKit's and cfprefsd's processes);
+- **says**, without failing, which items came or went — which items a menu has follows the
+  window's state and, on Safari 27, the runner — and what FSEvents saw written in the real Safari's
+  places by any process (macOS's own daemons and Safari's agents write there on their own).
+
+On macOS 26 a failure fails the build; macOS 27's job fails nothing, as for everything in it. A
+Safari with no record (a new major version) is walked and its record written into the run's
+`menu-walk` artifact, to be looked at and committed. A change that is meant is recorded again
 (`--write-record`), with the reason in the commit.
 
 ## What the walk found, and what was done
