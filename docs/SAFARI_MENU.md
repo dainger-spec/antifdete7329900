@@ -40,8 +40,9 @@ Bookmarks, Window — are filled first):
 8. then back to where it began: what it opened is closed, the app shown, nothing minimized or
    full screen. Toggles an item made (a hidden toolbar, a zoom) stay for the items after it.
 
-After the menu, the actions of the AutoFill items that are kept out of it are sent straight to
-the first responder, as a key or a context menu would send them.
+After the menu, the actions of the items that are kept out of it — AutoFill's, and those whose work
+is done outside the profile — are sent straight to the first responder, as a key or another menu
+would send them.
 
 An item that ends the process is a crash: its crash report is attached, the profile is started
 again (its home sealed and opened as at any launch), and the walk goes on from the next item. An
@@ -123,22 +124,24 @@ runs as named).
   once SafariPlatformSupport is loaded — replacing it with the others did nothing, since that
   framework loads later (run 475): twenty times a walk since (run 476), and the walk fails above a
   thousand.
+- **Items whose work is done outside the profile** (the owner's decisions on this walk): File › Add
+  to Dock… made a web app that runs in Safari's own web-app container, outside the profile and its
+  proxy (docs/SAFARI_PROCESS.md); File › Import Browsing Data from File or Folder… and Export
+  Browsing Data to File… put passwords and cards into this Mac's keychain and take them from there;
+  View › Show Shared with You showed what was shared with this Mac's Messages account. They are out
+  of a profile's menu, kept out as Safari fills its menus, and their actions show our notice however
+  they are sent — Safari's Share menu has an Add to Dock… of its own (not walked: the walk takes the
+  menu bar). The walk sends the four actions to the first responder after the menu, as with
+  AutoFill's. The import and export of the profile's own bookmarks stay (Import From › Bookmarks HTML
+  File… and Export › Bookmarks…, which some runs have in place of the two Browsing Data items, on
+  either Safari: run 463 on Safari 27, run 468's second attempt on both).
+- **History › Home (⇧⌘H)** went to Safari's default home page, apple.com/startpage. It goes to the
+  profile's start page (the owner's decision): Safari's own home page setting, in the process's
+  argument domain, which Safari's action reads; a profile without a start page has Safari's default.
+  Checked by the self-test.
 
 **Found, and for the owner to decide** (the table's "the owner decides"):
 
-- **File › Add to Dock…** opens Safari's sheet for a web app made from the page: such an app runs in
-  Safari's own web-app container, outside the profile and its proxy (docs/SAFARI_PROCESS.md).
-  Proposed: removed from a profile's menu.
-- **File › Import Browsing Data from File or Folder… / Export Browsing Data to File…**: Safari's
-  import puts passwords and cards into this Mac's keychain, its export takes them from there; neither
-  is the profile's. Proposed: removed. (Some runs have, in their place, on either Safari, Import From
-  › Bookmarks HTML File… and Export › Bookmarks…: the profile's own bookmarks, kept. Which of the two
-  a menu has follows the runner, not the build: run 463 on Safari 27, run 468's second attempt on
-  both.)
-- **View › Show Shared with You** shows, in a profile's window, what was shared with this Mac's
-  Messages account. Proposed: removed.
-- **History › Home (⇧⌘H)** goes to Safari's default home page, apple.com/startpage, through the
-  proxy. Proposed: the profile's start page.
 - **What Safari's chrome saves through the standard defaults** — its window's frame, toolbar,
   sidebar, favorites bar, start page sections, some WebKit preferences — goes to this app's own
   preferences domain in the account's real home, shared by every profile and outside the vault
@@ -231,9 +234,9 @@ an exception by name; *nothing seen*; *—* where that Safari has no such item.
 | File › Save As… | ⇧⌘S | nothing seen | nothing seen | **keep** |
 | File › Share… | - | window _NSPopoverWindow | window _NSPopoverWindow | **keep**: the system's share picker (a popover): what is shared goes where the user sends it, with this Mac's accounts |
 | File › Export as PDF… | - | nothing seen | nothing seen | **keep** |
-| File › Add to Dock… | - | changes the window; sheet NSWindow | changes the window; sheet NSWindow | **remove**: a web app made from the page runs in Safari's own web-app container, outside the profile and its proxy — **the owner decides** |
-| File › Import Browsing Data from File or Folder… | - | alert | alert | **remove**: imports passwords and cards into this Mac's keychain, not into the profile — **the owner decides** |
-| File › Export Browsing Data to File… | - | changes the window; window NSPanel | changes the window; window NSPanel | **remove**: Safari's export of browsing data: its passwords and cards are this Mac's keychain's, not the profile's — **the owner decides** |
+| File › Add to Dock… | - | changes the window; sheet NSWindow | changes the window; sheet NSWindow | **removed** (the owner's decision): a web app made from the page runs in Safari's own web-app container, outside the profile and its proxy; its action shows our notice |
+| File › Import Browsing Data from File or Folder… | - | alert | alert | **removed** (the owner's decision): imports passwords and cards into this Mac's keychain, not into the profile; its action shows our notice |
+| File › Export Browsing Data to File… | - | changes the window; window NSPanel | changes the window; window NSPanel | **removed** (the owner's decision): its passwords and cards are this Mac's keychain's, not the profile's; its action shows our notice |
 | File › Print… | ⌘P | another app in front; changes the window; sheet NSPanel | another app in front; changes the window; sheet NSPanel | **keep**: the print panel (answered Cancel); the system's notification center came forward |
 | Edit › Undo | ⌘Z | nothing seen | nothing seen | **keep** |
 | Edit › Redo | ⇧⌘Z | nothing seen | nothing seen | **keep** |
@@ -286,7 +289,7 @@ an exception by name; *nothing seen*; *—* where that Safari has no such item.
 | View › Show Sidebar | ⇧⌘L | nothing seen | nothing seen | **keep** |
 | View › Show Bookmarks Sidebar | ⌃⌘1 | nothing seen | nothing seen | **keep** |
 | View › Show Reading List Sidebar | ⌃⌘2 | nothing seen | nothing seen | **keep** |
-| View › Show Shared with You | - | changes the window | changes the window | **remove**: shows what was shared with this Mac's Messages account, in a profile's window — **the owner decides** |
+| View › Show Shared with You | - | changes the window | changes the window | **removed** (the owner's decision): it showed what was shared with this Mac's Messages account; its action shows our notice |
 | View › Show Reader | ⇧⌘R | disabled | disabled | **keep** |
 | View › Show Tab Overview | ⇧⌘\ | disabled | disabled | **keep** |
 | View › Show Downloads | ⌥⌘L | disabled | disabled | **keep** |
@@ -305,7 +308,7 @@ an exception by name; *nothing seen*; *—* where that Safari has no such item.
 | History › Show All History | ⌘Y | changes the window | changes the window | **keep** |
 | History › Back | ⌘[ | changes the window | changes the window | **keep** |
 | History › Forward | ⌘] | disabled | disabled | **keep** |
-| History › Home | ⇧⌘H | changes the window | changes the window | **fix**: Safari's default home page (apple.com/startpage), through the proxy; proposed: the profile's start page — **the owner decides** |
+| History › Home | ⇧⌘H | changes the window | changes the window | **fixed** (the owner's decision): the profile's start page, Safari's own home page setting in the process's argument domain; Safari's default (apple.com/startpage) for a profile without one |
 | History › Return to Search Results | ⌥⌘S | disabled | disabled | **keep** |
 | History › Reopen Last Closed Window or Tab | ⇧⌘T | nothing seen | nothing seen | **keep** |
 | History › Reopen All Windows from Last Session | - | disabled | disabled | **keep** |

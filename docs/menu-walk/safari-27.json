@@ -17,6 +17,30 @@
   ],
   "xpc": []
  },
+ "(sent to the first responder) _importFromFile: | _importFromFile: | -": {
+  "behaviour": [
+   "our notice"
+  ],
+  "xpc": []
+ },
+ "(sent to the first responder) generateWebAppForCurrentPage: | generateWebAppForCurrentPage: | -": {
+  "behaviour": [
+   "our notice"
+  ],
+  "xpc": []
+ },
+ "(sent to the first responder) runExportDataPanel: | runExportDataPanel: | -": {
+  "behaviour": [
+   "our notice"
+  ],
+  "xpc": []
+ },
+ "(sent to the first responder) toggleSharedWithYou: | toggleSharedWithYou: | -": {
+  "behaviour": [
+   "our notice"
+  ],
+  "xpc": []
+ },
  "Bookmarks › Add Bookmark Folder | addBookmarkFolder: | -": {
   "behaviour": [
    "-"
@@ -334,12 +358,6 @@
  "Edit › Undo | undo: | ⌘Z": {
   "behaviour": [
    "-"
-  ],
-  "xpc": []
- },
- "File › Add to Dock… | generateWebAppForCurrentPage: | -": {
-  "behaviour": [
-   "sheet NSWindow"
   ],
   "xpc": []
  },
@@ -686,12 +704,6 @@
   "xpc": []
  },
  "View › Show Reading List Sidebar | toggleReadingListSidebar: | ⌃⌘2": {
-  "behaviour": [
-   "-"
-  ],
-  "xpc": []
- },
- "View › Show Shared with You | toggleSharedWithYou: | -": {
   "behaviour": [
    "-"
   ],

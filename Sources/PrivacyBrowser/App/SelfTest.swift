@@ -1207,6 +1207,9 @@ final class SelfTest {
                   report.safariPreferences["UniversalSearchEnabled"] == "0"
                     && report.safariPreferences["AutoFillPasswords"] == "0",
                   "\(report.safariPreferences)")
+            check("Safari chrome: Safari's home page, which History › Home opens, is the profile's start page",
+                  report.safariPreferences[SafariChrome.homePageKey] == "http://start-\(run).\(domain)\(startPath)",
+                  "\(report.safariPreferences[SafariChrome.homePageKey] ?? "unset")")
             let accountSafariAfter = accountSafariPreferences.map(Self.preferencesFileState)
             check("Safari chrome: the profile's settings for Safari's services stay in its process — the account's ~/Library/Preferences/com.apple.Safari.plist is not written",
                   accountSafariAfter == accountSafariBefore,
