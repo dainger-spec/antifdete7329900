@@ -325,7 +325,9 @@ def leak_page(run: str) -> bytes:
   }
   // A login form, submitted as a person would, into a hidden frame: Safari's own AutoFill must not
   // see it in a profile (SafariChrome.closeSafarisAutoFill), and the profile's process says so.
-  try {
+  // Twice, a second and a half apart: once in three runs on macOS 27 (run 479) the first went by
+  // before Safari's window had its form handler, and nothing was there to keep it from.
+  const submitLogin = () => {
     const target = document.createElement('iframe');
     target.name = 'pbform'; target.style.display = 'none';
     document.body.appendChild(target);
@@ -335,7 +337,12 @@ def leak_page(run: str) -> bytes:
       + '<input type="password" name="password" autocomplete="current-password" value="pb-leak-password-RUN">';
     document.body.appendChild(form);
     form.requestSubmit();
-    result.formSubmitted = true;
+  };
+  try {
+    submitLogin();
+    await timeout(1500);
+    submitLogin();
+    result.formSubmitted = 2;
   } catch (e) { result.formSubmitted = 'error'; }
   await timeout(800);
   await fetch('/pb-leak/report?run=RUN&data=' + encodeURIComponent(JSON.stringify(result)), { cache: 'no-store' });
