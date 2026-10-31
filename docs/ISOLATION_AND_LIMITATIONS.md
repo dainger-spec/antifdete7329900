@@ -483,6 +483,40 @@ and equally in Safari 26 on the same Mac: its canvas test accepts only PNG data 
 row sets the resistance verdict (`me()` in its script). Nothing in the profile causes it, and
 nothing a profile could do short of rewriting `toDataURL` (which would be a real lie) changes it.
 
+**The ceiling for a profile with a proxy, in this architecture.** Full parity with Safari is not
+reachable for a profile with an HTTP or SOCKS5 proxy, and this says why, so that nobody has to work
+out again why the count is not Safari's. In Safari's window, a page of such a profile sees 1005 of
+the window's own properties where Safari has 1044 (macOS 26.6.2; CI runs 430 and 501, by name):
+
+- **WebRTC, 23** — off with a proxy, decided; they can come back only through the packet tunnel,
+  which carries WebRTC itself (relay candidates over SOCKS5, [TUNNEL.md](TUNNEL.md)).
+- **WebTransport, 8** — HTTP/3, that is QUIC over UDP, which no HTTP CONNECT or SOCKS5 proxy
+  carries, and which WebKit's network process — not the profile's process, whose UDP the kernel
+  refuses — would open from this Mac's address. They can come back only if a measurement shows a
+  profile's WebKit sends no UDP for them and `ready` fails the way Safari's does where UDP is
+  closed (the timing of a QUIC timeout, not an immediate refusal); being measured.
+- **DigitalCredential and MediaSessionCoordinator, 2** — absent without a proxy too, and absent
+  from a plain web view of this app even with every SDK behavior on: Safari turns them on, with
+  settings or entitlements not yet named. They come back only once that is known and their
+  answers are Safari's; being measured.
+- **WebAuthn and Credential Management, 6** — `PublicKeyCredential`, the three
+  `Authenticator…Response`s, `Credential`, `CredentialsContainer` (and `navigator.credentials`).
+  Their ceremonies are run by the system, not by the page or the profile: iCloud Keychain passkeys
+  are the same for every profile and for Safari, so one sign-in ties a profile to the person's real
+  Apple ID; Touch ID; a phone's hybrid sign-in, over Bluetooth and Apple's tunnel server, opened
+  by the system from this Mac's address, outside the profile's proxy; attestation, which names the
+  authenticator's model. A call failed at once where Safari shows its sheet is no state of
+  Safari's, and a JavaScript wrapper is ruled out by the rule above. They stay off with a proxy
+  unless a measurement finds that WebKit lets the app take the ceremony before the system shows
+  its sheet — then the profile would show its own question ("this will tie the profile to your
+  real Apple ID") and cancel through WebKit's own path, the rejection Safari gives when the person
+  cancels (the owner's proposal; being measured).
+
+So, with WebRTC carried by the tunnel and every measurement above in favour, a profile with a proxy
+reaches 1038 of 1044 at most — the six of WebAuthn are the ceiling's floor unless the ceremony can
+be taken natively. Until then it is 1005. A profile without a proxy has 1019: WebRTC's 23 by the
+default policy (`relayOnly` and `unrestricted` keep them) and the two Safari turns on itself.
+
 So a page that fingerprints *feature support* can still tell "Safari" from "a WKWebView app on the
 same Mac" by Apple Pay and Web Push, the same way it tells Safari from a Safari View Controller or
 a Mail or Slack preview. It cannot tell two profiles of this app apart by any of this: they are the
