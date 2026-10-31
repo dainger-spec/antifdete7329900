@@ -94,6 +94,7 @@ enum SafariMenuWalk {
                 index += 1
             }
             WalkRecorder.uninstall()
+            emit(["event": "info", "text": "replaced once loaded: " + SafariChrome.lateStubsMade.sorted().joined(separator: ", ")])
             emit(["event": "info", "text": "XPC services this process connected to (NSXPCConnection): "
                   + ProfileNetworkGuard.connectedServices.joined(separator: ", ")])
             emit(["event": "done", "count": list.count + direct.count])

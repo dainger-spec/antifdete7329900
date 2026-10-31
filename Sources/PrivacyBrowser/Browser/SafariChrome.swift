@@ -843,16 +843,15 @@ enum SafariChrome {
             // addSyncObserver:]'s block on its _syncObserverQueue).
             ("WBTabGroupSyncAgentProxy", "addSyncObserver:"),
             ("WBTabGroupSyncAgentProxy", "removeSyncObserver:"),
-            // SafariPlatformSupport's completion list is a view of a service of Safari's, which the
-            // kernel refuses a profile's process (com.apple.Safari*): each time its view service
-            // ended, -[SPSafariPlatformSupport viewServiceDidTerminateWithError:] asked for the
-            // view again (_setUpCompletionListViewController…), on the main thread, without end
-            // (measurement runs 468 to 473: "…endpoint for listener 'com.apple.view-bridge':
-            // Connection invalid", hundreds of thousands of times a walk; a sample, run 473).
-            ("SPSafariPlatformSupport", "viewServiceDidTerminateWithError:"),
         ]
         for (className, selectorName) in nothing {
             replaceWithConstant(className, selectorName) { nil }
+        }
+        // Classes whose framework loads after this runs (SafariPlatformSupport's): replaced as soon
+        // as their image is there (measurement run 475: replaced here, nothing was).
+        stubLateFeatures()
+        _dyld_register_func_for_add_image { _, _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { SafariChrome.stubLateFeatures() } }
         }
         replaceWithConstant("UnifiedField", "_assistantButtonIconForContentOption:withSparkle:") {
             NSImage(size: NSSize(width: 1, height: 1))
@@ -877,6 +876,24 @@ enum SafariChrome {
         // pane any more, and nothing needs to know which browser is the default.
         // Its own implementation is kept for `--default-browser-check`, which calls it to see why.
         defaultBrowserQuestion = replaceWithConstant("GeneralPreferences", "_defaultWebBrowserMayHaveChanged") { nil }
+    }
+
+    /// Methods of classes that load late, replaced with nothing once they are there
+    /// (`stubChromeFeatures`). SafariPlatformSupport's completion list is the view of a service of
+    /// Safari's, which the kernel refuses a profile's process (com.apple.Safari*): each time that
+    /// view's service ended, -[SPSafariPlatformSupport viewServiceDidTerminateWithError:] asked for
+    /// it again, and it ended at once, on the main thread, without end (measurement run 473).
+    private static let lateStubs: [(String, String)] = [
+        ("SPSafariPlatformSupport", "viewServiceDidTerminateWithError:"),
+    ]
+    private(set) static var lateStubsMade: Set<String> = []
+
+    static func stubLateFeatures() {
+        for (className, selectorName) in lateStubs where !lateStubsMade.contains("-[\(className) \(selectorName)]") {
+            guard NSClassFromString(className) != nil else { continue }
+            replaceWithConstant(className, selectorName) { nil }
+            lateStubsMade.insert("-[\(className) \(selectorName)]")
+        }
     }
 
     /// Safari's own `-[GeneralPreferences _defaultWebBrowserMayHaveChanged]`, before
