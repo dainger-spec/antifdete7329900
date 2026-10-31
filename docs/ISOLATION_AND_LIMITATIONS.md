@@ -150,10 +150,30 @@ Safari always (WTF's `computeSDKAlignedBehaviors` returns every one when the pro
 AppKit and the other frameworks follow the declared SDK too. Xcode 27's SwiftPM gives the linker the
 deployment target as the SDK (`-platform_version macos 14.0.0 14.0.0`; Xcode 26's gives its SDK,
 26.5), so a build made with Xcode 27 declares "sdk 14.0" — measured on the owner's build with Xcode
-27.1 — and on macOS 27 its pages lack what Safari 27's have: by the window's own properties,
-`trustedTypes` and the five Trusted Types interfaces, and they have `MutationEvent`, which Safari 27
-no longer has (CI run 448, `scripts/sdk_check.sh`); a copy declaring macOS 27's SDK has Safari's
-names.
+27.1 — and its pages lacked what Safari's have, on macOS 27 (CI run 448, `scripts/sdk_check.sh`)
+and on macOS 26 alike (run 500, a copy declaring 14.0): by the window's own properties,
+`trustedTypes` and the five Trusted Types interfaces; and they had `MutationEvent`, which Safari no
+longer has, mutation events fired, and `new FontFaceSet([])` constructed where Safari's throws.
+
+**A profile's web views have the features the SDK's behaviors change as Safari has them.** Of
+WebKit's 600-odd features, the behaviors change four for a build declaring 14.0, on macOS 26 and
+27 alike (runs 495, 497 and 500: every feature's default as built and with every behavior on):
+Trusted Types, on in Safari; DOM mutation events, the legacy `FontFaceSet` constructor and the
+near-suspended assertions on background web content processes, off in Safari. `SafariEngineFeatures`
+sets the four one by one with WebKit's own switches, in every web view of a profile — ours, those
+Safari's chrome builds and the service workers' (`applyPrivacyPreferences`). Measured against the
+real Safari 26.6.2 and 27.0.1 with one page from a local server (runs 497 and 500): with the four set,
+a page sees what it sees with every behavior on — the same window names, Trusted Types policies that
+make a `TrustedHTML`, no `MutationEvent` and no mutation event fired, an illegal `FontFaceSet`
+constructor — and differs from Safari's only by the names Safari's entitlements and Safari itself
+bring (Apple Pay and payment requests, push, `DigitalCredential`, `MediaSessionCoordinator`,
+`browser`, `safari`). And this Mac asked for no certificate outside the proxy: in run 497 the AIA
+canary went unasked for twice with the four set, its control seen, and was asked for with every
+behavior on. Only on the macOS versions measured (26 and 27); on another WebKit's defaults are left
+as they are. CI fails the macOS 26 build when a feature the behaviors change is not set as Safari
+has it, or a page in a profile's web view differs from one with every behavior on — for the build
+as made and for a copy declaring 14.0, the releases' SDK (`scripts/engine_features_check.py`) — and
+reports the same on macOS 27.
 
 **The executables declare the SDK SwiftPM writes, not macOS 27's, and the app does not use
 `+[WKProcessPool _setLinkedOnOrAfterEverything]`** (WebKit's own switch for every behavior, made for
@@ -170,18 +190,26 @@ a build made with Xcode 26 declares: such a build leaks on macOS 27. Builds made
 declare 14.0 (its SwiftPM writes the deployment target), and `scripts/release.sh` refuses to release
 a build that declares 15.0 or newer. CI's macOS 27 job fails the build when this Mac asks for the
 self-test's certificate canaries (`scripts/certificate_leak_check.py`), the one thing that job fails
-on: a change that had every build fetch (run 458, below) went through while it failed nothing. Of
-what WebKit turns on at 15.0 (WTF's
-`computeSDKAlignedBehaviors`), one thing is about the network: its network loader
-(`UseCFNetworkNetworkLoader`, `_usesNWLoader`); the capture names this app, not WebKit's network
-process, as the one the fetch was made for. How the loader comes to fetch, and so how to close it,
-is not known yet. A first try at telling it from inside this process — reading, as a certificate's
-question came, whether its trust had been evaluated and whether it might fetch — had the trust
-evaluated by that reading itself, fetching allowed: in run 458 every variant leaked, 14.0 included,
-and the self-test's capture caught the canary; the reading was taken out (runs 451 and 454, without
-it, had 14.x clean). Nothing reads a trust before its fetching is off (`ServerTrust`). Until then,
-a page of a profile on macOS 27
-lacks `trustedTypes` and Safari 27's other SDK-gated names. The first version of that measurement
+on: a change that had every build fetch (run 458, below) went through while it failed nothing. The
+capture names this app, not WebKit's network process, as the one the fetch was made for. How it
+comes about was measured in runs 491 and 492 (measurement branch `claude/measure-sdk-trust`): not
+WebKit's network loader — its switch, `CFNetworkNetworkLoaderEnabled`, set either way, changed
+nothing — and not past the profile's own answer: with every behavior on, the server-trust
+challenge still reaches the profile, which answers it (cancel, the trust evaluated without
+fetching, `ServerTrust`), and some 3 ms after that answer this Mac asks for the canary on behalf of
+this app's process, about 25 ms before the load's provisional failure, whether or not anything
+reads the error. With every behavior on, that error carries the server's trust and its certificate
+chain (as built it carries neither), which points to WebKit building the chain in this process from
+a trust allowed to fetch — the timing and the error say so; the call itself was not traced. No
+setting of the session or of the data store forbids that fetch
+(`_WKWebsiteDataStoreConfiguration` has none; this app's own `NSURLSessionConfiguration` has
+`_usesNWLoader` and `_alwaysPerformDefaultTrustEvaluation` off). So the executables keep declaring
+14.0, and the page-visible features are set one by one (above). A first try at telling it from
+inside this process — reading, as a certificate's question came, whether its trust had been
+evaluated and whether it might fetch — had the trust evaluated by that reading itself, fetching
+allowed: in run 458 every variant leaked, 14.0 included, and the self-test's capture caught the
+canary; the reading was taken out (runs 451 and 454, without it, had 14.x clean). Nothing reads a
+trust before its fetching is off (`ServerTrust`). The first version of that measurement
 reused one name for every variant and read clean where the full self-test leaked (run 450): in its
 variants not even the control was asked for. On macOS 26 the capture has not seen the system fetch
 for the control in any of the eight runs read, so there the check cannot tell: whether a build
