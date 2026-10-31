@@ -141,6 +141,15 @@ for (const lang of LANGS) {
   }
 }
 await browser.close();
+// The review hub is published with the site (the artifact opens on it): the word the owner banned everywhere stays
+// out of its source too (its decision records may still name Team ID or the old example domain they retired)
+{
+  const hub = fs.readFileSync(path.join(proto, 'index.html'), 'utf8');
+  for (const rx of FORBIDDEN_SOURCE.slice(0, 2)) {
+    const m = hub.match(rx);
+    if (m) fail('wording', `index.html (the hub, source): «${m[0]}»`);
+  }
+}
 
 if (process.argv.includes('--numbers')) {
   for (const [n, where] of [...numbersSeen].sort((a, b) => a[0].localeCompare(b[0], 'en', { numeric: true }))) console.log(`${n}\t${[...where].slice(0, 6).join(', ')}`);
