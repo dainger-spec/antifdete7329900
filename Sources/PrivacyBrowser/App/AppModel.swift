@@ -68,6 +68,7 @@ final class AppModel: ObservableObject {
         // container is this build's to use (an unsandboxed build hosts Safari's chrome).
         AppEnvironment.adoptSandboxedDataIfNeeded()
         root = AppEnvironment.vaultDirectory
+        AppEnvironment.removeStandaloneSafariHome(in: root)
         phase = MasterVault.exists(in: root) ? .locked : .setup
         // No profile's page is handed to Quick Look, Services or another app (`HandOffs`).
         HandOffs.closeForWebViews()

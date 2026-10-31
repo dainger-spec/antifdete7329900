@@ -946,6 +946,13 @@ own files are in the home's `Library/Safari` and no home is nested in it (skippe
 the home is not under ~/Library or Safari wrote nothing of its own); the flattening and the moving
 on a home made for the purpose.
 
+**No home outside a profile.** `--safari-chrome`, a developer's way to try Safari's chrome without
+a profile, gave itself the home `<vault>/SafariChromeHome` up to 1 November, kept from run to run
+in plaintext, in no profile, never sealed (the owner's Mac: 868 files of 29 October — WebKit's
+caches, local storage and databases of the sites browsed in it). It now runs in a temporary home of
+its own, removed when it ends, and the app removes a `SafariChromeHome` left in the vault folder
+when it starts.
+
 **Preferences.** `CFFIXED_USER_HOME` moves what asks the process for its home; it does not move
 where cfprefsd keeps a preferences domain, which stays the account's real `~/Library/Preferences`
 (measured by the menu walk, CI run 457, macOS 26 and 27: no preferences file in a profile's home).

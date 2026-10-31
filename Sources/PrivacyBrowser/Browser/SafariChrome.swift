@@ -1522,6 +1522,15 @@ extension SafariChrome {
         exit(3)
     }
 
+    nonisolated private static let standaloneHomePrefix = "pb-safari-chrome-standalone-"
+
+    /// `--safari-chrome`'s temporary home, at the end of the process.
+    nonisolated static func removeStandaloneHome() {
+        guard let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"],
+              URL(fileURLWithPath: home).lastPathComponent.hasPrefix(standaloneHomePrefix) else { return }
+        try? FileManager.default.removeItem(atPath: home)
+    }
+
     static func removeCheckHome() {
         guard let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"],
               URL(fileURLWithPath: home).lastPathComponent.hasPrefix(checkHomePrefix) else { return }
@@ -1534,11 +1543,22 @@ extension SafariChrome {
     /// autofill store cannot be opened. The variable is only read when the process starts, so the
     /// process replaces itself with one that has it set. This is also the shape the per-profile
     /// child process will take, with the profile's own directory in place of this one.
+    ///
+    /// The home is a temporary folder of this run's, removed when the process ends normally (and by
+    /// the system's cleaning of temporary folders otherwise). Up to 1 November it was
+    /// `<vault>/SafariChromeHome`, kept from run to run in plaintext, in no profile, never sealed;
+    /// the app removes that one at start (`AppEnvironment.removeStandaloneSafariHome`).
     private static func relaunchWithProfileHomeIfNeeded(arguments: [String]) {
-        guard ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] == nil else { return }
+        if let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] {
+            // The relaunched process: its home goes when it ends.
+            if URL(fileURLWithPath: home).lastPathComponent.hasPrefix(standaloneHomePrefix) {
+                atexit { SafariChrome.removeStandaloneHome() }
+            }
+            return
+        }
         // Read before the home moves: our own vault must stay where it is.
         let vault = AppEnvironment.vaultDirectory
-        let home = vault.appendingPathComponent("SafariChromeHome", isDirectory: true)
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(standaloneHomePrefix + UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         setenv("CFFIXED_USER_HOME", home.path, 1)
         setenv("PRIVACYBROWSER_VAULT_DIR", vault.path, 1)
