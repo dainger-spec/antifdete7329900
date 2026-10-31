@@ -348,6 +348,10 @@ jobs:
               # "ktrace_start: Resource busy" and sees nothing).
               sudo fs_usage -w -f filesys PrivacyBrowser com.apple.WebKit cfprefsd > build/egress/fs.txt 2>&1 &
               sleep 2
+              # A preferences file cfprefsd writes through a directory descriptor, as it writes every
+              # one: disk_check.py must name it, or the trace is blind to cfprefsd again.
+              mkdir -p "$PWD/build/egress/trace-canary"
+              defaults write "$PWD/build/egress/trace-canary/PBTraceCanary" Canary -string "$(date +%s)"
             fi
             build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test | tee "build/egress/selftest-$variant.txt" || status=1
             echo "::endgroup::"
@@ -362,7 +366,7 @@ jobs:
           echo "::endgroup::"
           echo "::group::files written while a profile ran in Safari's chrome"
           python3 scripts/disk_check.py --trace build/egress/fs.txt \
-            --selftest-log build/egress/selftest-unsandboxed.txt || status=1
+            --selftest-log build/egress/selftest-unsandboxed.txt --canary "$PWD/build/egress/trace-canary/PBTraceCanary.plist" || status=1
           echo "::endgroup::"
           exit $status
       - name: What crashed, if a process of the app or WebKit's crashed (crash reports)

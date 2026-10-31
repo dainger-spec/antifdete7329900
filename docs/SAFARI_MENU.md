@@ -39,7 +39,8 @@ Bookmarks, Window — are filled first):
    macOS's own records of what any application does, such as Biome's record of menu use);
    and, for the walk as a whole, the real Safari's own preferences read before and after
    (`defaults export com.apple.Safari`, with sentinels set first on CI's runners): cfprefsd writes
-   them through a directory descriptor, which the file trace does not name;
+   them for whichever process asks, which the file trace cannot say (it names what cfprefsd
+   writes, through the directory descriptors it follows, since 1 November);
 8. then back to where it began: what it opened is closed, the app shown, nothing minimized or
    full screen. Toggles an item made (a hidden toolbar, a zoom) stay for the items after it.
 
@@ -55,6 +56,15 @@ Not chosen: the system's Services (they hand the selection to other applications
 keeps them from pages) and items that are views rather than commands.
 
 ## The record, and the check
+
+The walk's items are paired with the record's by what they do, never by their titles: Safari builds
+its menus in the system's language, and on the owner's Mac, in Russian, 90 items came or went by
+title while 144 of 147 did the same as their record (1 November). An item is paired by its action and
+keys; what is left, by an action only one item has on each side (or one item Safari lists twice).
+An item paired by its action alone has keys of this Mac's — Start Dictation…'s second key is a
+MacBook's dictation key, Close Other Tabs has ⌥⌘W on some Macs and runners and no keys on others —
+and is said, not failed on. The summary line says how many recorded items did the same, how many under
+this Mac's keys and how many under other titles.
 
 Each item is reduced to what is compared: what it did, without what follows timing (whether the
 window changed or nothing was seen in the moment after it, a window AppKit makes for a moment,
@@ -72,12 +82,15 @@ on every run, in both macOS jobs, and with `--check`:
 - **fails** when the walk does not get to the end, when an item does something else than its
   record says (a crash or a hang, a new exception, a panel, an alert or a request to open
   something that was not there, our notice gone), when `fs_usage` puts a write in the real
-  Safari's places on the profile (the app's, WebKit's and cfprefsd's processes), or when the
-  profile's process asked more than a thousand times for a view whose service it is refused (the
-  loop below);
+  Safari's places on the profile (the app's and WebKit's processes), when the trace does not name
+  cfprefsd's write of a canary preferences file made as the walk begins (the trace would be blind
+  to cfprefsd again), or when the profile's process asked more than a thousand times for a view
+  whose service it is refused (the loop below);
 - **says**, without failing, which items came or went — which items a menu has follows the
-  window's state and, on Safari 27, the runner — and what FSEvents saw written in the real Safari's
-  places by any process (macOS's own daemons and Safari's agents write there on their own).
+  window's state and, on Safari 27, the runner — which were paired by their action under this
+  Mac's keys, what cfprefsd wrote in the real Safari's places (for a process the trace cannot
+  name), and what FSEvents saw written there by any process (macOS's own daemons and Safari's
+  agents write there on their own).
 
 On macOS 26 a failure fails the build; on macOS 27 it is reported (that job fails the build only on
 a certificate fetched for outside a profile's proxy). A
@@ -90,7 +103,8 @@ Safari with no record (a new major version) is walked and its record written int
 Measured on GitHub's runners, Safari 26.6.2 (macOS 26.6.2) and Safari 27.0.1 (macOS 27.0.1): 148
 items walked on each, every one chosen on the page, in one launch each (CI run 468, on the
 measurement branch: this walk, which there also chose Window › Full Screen Tile's two items; earlier
-runs as named).
+runs as named). Since the items whose work is done outside the profile were taken out, 147 on each
+(the table: run 520).
 
 **Fixed** (each with the walk as its proof):
 
@@ -152,21 +166,23 @@ runs as named).
   argument domain, which Safari's action reads; a profile without a start page has Safari's default.
   Checked by the self-test.
 
-**Found, and for the owner to decide** (the table's "the owner decides"):
-
-- **What Safari's chrome saves through the standard defaults** — its window's frame, toolbar,
-  sidebar, favorites bar, start page sections, some WebKit preferences — goes to this app's own
-  preferences domain in the account's real home, shared by every profile and outside the vault
-  (runs 456 and 468: 52 to 58 keys added during a walk). Proposed: kept per profile; it would start
-  every existing profile from Safari's defaults for these.
+- **What Safari's chrome saves as its preferences** — its window's frame, toolbar, sidebar, favorites
+  bar, start page sections, some WebKit preferences — went to this app's own preferences domain in
+  the account's real home, shared by every profile and outside the vault (runs 456 and 468: 52 to 58
+  keys added during a walk). It is each profile's own, in its home and its vault (81e8c24, the
+  owner's decision; docs/ISOLATION_AND_LIMITATIONS.md), but for one key of the toolbar AppKit still
+  writes there on macOS 26; the walk lists what this app's domain got (run 520: nothing on 27, that
+  key on 26).
 
 **Found, open:**
 
-- **Bookmarks › Add Bookmark… (⌘D) and Add Bookmarks for Open Tabs…** threw — a bookmark folder with
-  no title in the sheet's location menu (`-[NSMenu(WebBookmarkNSMenuExtras)
-  safari_addMenuItemForBookmarkFolder:]` from `-[BookmarkEditSheetController _populateLocationPopUp]`)
-  — after the walk had made an empty tab group; our notice comes instead of the sheet, and no
-  bookmark is added that way. In a profile without tab groups it is not measured yet.
+- **Bookmarks › Add Bookmark… (⌘D) and Add Bookmarks for Open Tabs… do not work** (**broken** in the
+  table). Each throws — a bookmark folder with no title in the sheet's location menu
+  (`-[NSMenu(WebBookmarkNSMenuExtras) safari_addMenuItemForBookmarkFolder:]` from
+  `-[BookmarkEditSheetController _populateLocationPopUp]`) — and our notice comes instead of the
+  sheet: no bookmark is added that way. So in every walk since run 468: CI's on both macOS (run 520)
+  and the owner's (1 November). Each walk makes an empty tab group before these items; in a profile
+  without tab groups it is not measured. Not fixed in the owner's week: no change to the product.
 - **Safari's browsing assistant worker** (`com.apple.parsec.SafariBrowsingAssistantWorker`, outside
   the profile) started in three of the eight walks on macOS 26 read — runs 457, 461 and 468, each
   time during another item (Hide Safari, View › Zoom Out, History › Show All History) — and in none
@@ -208,15 +224,23 @@ History… and Clear History and Keep Website Data… (Safari's history is not b
 
 ## Item by item
 
-Every item of the menu bar, in menu order, with what it did on each Safari (CI run 468) and what is
-decided about it: **keep** (it works in the profile, or does nothing harmful), **ours** (answered by
-this app instead of Safari's code), **remove** (proposed to be taken out of a profile's menu),
-**fix** (it should work and does not). "the owner decides" marks a decision that is not made yet.
+Every item of the menu bar, in menu order, with what it did on each Safari in CI run 520 (the commit
+fea9a3f, Safari 26.6.2 and 27.0.1) and what is decided about it:
+
+- **keep**: it works in the profile, or does nothing harmful;
+- **ours**: answered by this app instead of Safari's code;
+- **fixed**: it did harm or did not work, and now does what is meant — the walk is the proof;
+- **removed**: taken out of a profile's menu (the owner's decisions);
+- **broken**: it should work and does not. Open: the row says what happens instead, and "Found,
+  open" above says what is known.
+
 What an item did is the walk's words: *disabled*; *changes the window* (the key window, its first
 responder, its page or zoom, a window or sheet closed); a window, sheet or panel by class; *alert*,
 *open panel*, *save panel* (answered with their cancel button); *our notice*, *our Settings*;
 *another app in front*; *hides other apps*, *quit*, *Help*, *character viewer* (asked for, not done);
-an exception by name; *nothing seen*; *—* where that Safari has no such item.
+an exception by name; *nothing seen*; *—* where that Safari has no such item. Whether a window
+changed or nothing was seen follows timing, and whether Start Dictation… is enabled the system: those
+differ from walk to walk (the record leaves them out).
 
 | Item | Keys | Safari 26 | Safari 27 | Decision |
 |---|---|---|---|---|
@@ -225,14 +249,14 @@ an exception by name; *nothing seen*; *—* where that Safari has no such item.
 | Safari › Settings… | ⌘, | our Settings | our Settings | **ours**: the manager's Settings (Safari's own have no place in a profile) |
 | Safari › Settings for This Website… | - | changes the window; window _NSPopoverWindow | changes the window; window _NSPopoverWindow | **keep**: per-site settings, kept in the profile's home |
 | Safari › Connection Security Details… | - | disabled | disabled | **keep**: the page's certificate |
-| Safari › Clear History… | - | disabled | disabled | **fix**: disabled: Safari's history is not built in a profile (H1) |
-| Safari › Clear History and Keep Website Data… | - | disabled | disabled | **fix**: disabled: Safari's history is not built in a profile (H1) |
+| Safari › Clear History… | - | disabled | disabled | **broken**: disabled: Safari's history is not built in a profile (open: H1) |
+| Safari › Clear History and Keep Website Data… | - | disabled | disabled | **broken**: disabled: Safari's history is not built in a profile (open: H1) |
 | Safari › Services | - | not chosen: services | not chosen: services | **keep**: not chosen: the system's Services hand the selection to other applications |
 | Safari › Hide Safari | ⌘H | another app in front; changes the window | another app in front; changes the window | **keep** |
 | Safari › Hide Others | ⌥⌘H | hides other apps | hides other apps | **keep** |
 | Safari › Show All | - | disabled | disabled | **keep** |
 | Safari › Quit Safari | ⌘Q | quit | quit | **keep**: quits the profile's process: the profile closes and is sealed, the app stays |
-| File › New Window | ⌘N | changes the window; window BrowserWindow | changes the window; window BrowserWindow | **ours**: a new window of the profile (Safari's own action stayed disabled) |
+| File › New Window | ⌘N | changes the window; window BrowserWindow | changes the window; window BrowserWindow | **fixed**: a new window of the profile (Safari's own action stayed disabled) |
 | File › New Tab | ⌘T | changes the window | changes the window | **keep** |
 | File › New Tab at End | ⌥⌘T | changes the window | changes the window | **keep** |
 | File › New Empty Tab Group | ⌃⌘N | changes the window | changes the window | **keep** |
@@ -244,22 +268,21 @@ an exception by name; *nothing seen*; *—* where that Safari has no such item.
 | File › Close All Windows | ⌥⇧⌘W | alert; changes the window | alert; changes the window | **keep** |
 | File › Close All Windows | ⌥⇧⌘W | nothing seen | nothing seen | **keep** |
 | File › Close Tab | ⌘W | changes the window | changes the window | **keep** |
-| File › Close Other Tabs | ⌥⌘W | disabled | — | **keep** |
+| File › Close Other Tabs | - | disabled | disabled | **keep**: its keys follow the Mac: ⌥⌘W on the owner's and in one CI walk of four, none in the others |
 | File › Delete Tab Group | ⌃⌘W | alert | alert | **keep** |
 | File › Save As… | ⌘S | nothing seen | nothing seen | **keep** |
 | File › Save As… | ⇧⌘S | nothing seen | nothing seen | **keep** |
-| File › Share… | - | window _NSPopoverWindow | window _NSPopoverWindow | **keep**: the system's share picker (a popover): what is shared goes where the user sends it, with this Mac's accounts |
+| File › Share… | - | window _NSPopoverWindow | changes the window; window _NSPopoverWindow | **keep**: the system's share picker (a popover): what is shared goes where the user sends it, with this Mac's accounts |
 | File › Export as PDF… | - | nothing seen | nothing seen | **keep** |
-| File › Add to Dock… | - | changes the window; sheet NSWindow | changes the window; sheet NSWindow | **removed** (the owner's decision): a web app made from the page runs in Safari's own web-app container, outside the profile and its proxy; its action shows our notice |
-| File › Import Browsing Data from File or Folder… | - | alert | alert | **removed** (the owner's decision): imports passwords and cards into this Mac's keychain, not into the profile; its action shows our notice |
-| File › Export Browsing Data to File… | - | changes the window; window NSPanel | changes the window; window NSPanel | **removed** (the owner's decision): its passwords and cards are this Mac's keychain's, not the profile's; its action shows our notice |
-| File › Print… | ⌘P | another app in front; changes the window; sheet NSPanel | another app in front; changes the window; sheet NSPanel | **keep**: the print panel (answered Cancel); the system's notification center came forward |
+| File › Import From › Bookmarks HTML File… | - | open panel | open panel | **keep**: the profile's bookmarks, from a file the user picks; put back where Safari's File menu has the Browsing Data items instead |
+| File › Export › Bookmarks… | - | save panel | save panel | **keep**: the profile's bookmarks, to a file the user picks (E2: on the owner's Mac no file was written, in CI it is — open); put back where Safari's File menu has the Browsing Data items instead |
+| File › Print… | ⌘P | changes the window; sheet NSPanel | changes the window; sheet NSPanel | **keep**: the print panel (answered Cancel); in some walks the system's notification center came forward |
 | Edit › Undo | ⌘Z | nothing seen | nothing seen | **keep** |
 | Edit › Redo | ⇧⌘Z | nothing seen | nothing seen | **keep** |
 | Edit › Cut | ⌘X | nothing seen | nothing seen | **keep** |
 | Edit › Copy | ⌘C | nothing seen | nothing seen | **keep** |
 | Edit › Copy Search Terms | ⌃⌘C | disabled | disabled | **keep** |
-| Edit › Paste | ⌘V | nothing seen | nothing seen | **keep**: on macOS 26 the real ~/Library/Safari/PasswordBreachStore.plist was written meanwhile in runs 460 and 463, not in 468 — not by the profile's processes (fs_usage); by Safari's password breach agent, most likely |
+| Edit › Paste | ⌘V | nothing seen | nothing seen | **keep**: on macOS 26 the real ~/Library/Safari/PasswordBreachStore.plist was written meanwhile in runs 460 and 463, not since — not by the profile's processes (fs_usage); by Safari's password breach agent, most likely |
 | Edit › Paste and Match Style | ⌥⇧⌘V | nothing seen | nothing seen | **keep** |
 | Edit › Paste as Typed | ⌃⌘V | alert | alert | **ours**: our paste as typed (keys typed into the page's field) |
 | Edit › Delete | - | nothing seen | nothing seen | **keep** |
@@ -268,7 +291,7 @@ an exception by name; *nothing seen*; *—* where that Safari has no such item.
 | Edit › Save Webpage With Metadata | ⌃⌘S | disabled | disabled | **keep** |
 | Edit › Distraction Control › Hide Distracting Items... | - | alert | alert | **keep** |
 | Edit › Distraction Control › Show Hidden Items | - | disabled | disabled | **keep** |
-| Edit › Distraction Control › Report Issues... | - | alert; exception NSGenericException | alert; exception NSGenericException | **keep**: Safari's report form, answered Cancel; AppKit's layout exception inside it is caught |
+| Edit › Distraction Control › Report Issues... | - | alert; exception NSGenericException | alert; exception NSGenericException | **keep**: Safari's report form, answered Cancel; AppKit's layout exception, when it comes, is caught inside AppKit |
 | Edit › Find › Google Search… | ⌥⌘F | changes the window | changes the window | **keep** |
 | Edit › Find › Find… | ⌘F | changes the window | changes the window | **keep** |
 | Edit › Find › Find Next | ⌘G | disabled | disabled | **keep** |
@@ -292,10 +315,10 @@ an exception by name; *nothing seen*; *—* where that Safari has no such item.
 | Edit › Transformations › Capitalize | - | disabled | disabled | **keep** |
 | Edit › Speech › Start Speaking | - | nothing seen | nothing seen | **keep** |
 | Edit › Speech › Stop Speaking | - | nothing seen | nothing seen | **keep** |
-| Edit › Start Dictation… | D | nothing seen | nothing seen | **keep**: the system's dictation |
-| Edit › Start Dictation… | D | disabled | disabled | **keep**: the system's dictation |
-| Edit › Emoji & Symbols | E | character viewer | character viewer | **keep** |
-| Edit › Emoji & Symbols | ⌃⌘  | character viewer | character viewer | **keep** |
+| Edit › Start Dictation… | D | nothing seen | nothing seen | **keep**: the system's dictation; whether it is enabled follows the system, and its second key the Mac (a MacBook's dictation key on the owner's) |
+| Edit › Start Dictation… | D | disabled | disabled | **keep**: the system's dictation; whether it is enabled follows the system, and its second key the Mac (a MacBook's dictation key on the owner's) |
+| Edit › Emoji & Symbols | ⌘ | character viewer | character viewer | **keep** |
+| Edit › Emoji & Symbols | ⌃⌘ | character viewer | character viewer | **keep** |
 | Edit › Emoji & Symbols | E | character viewer | character viewer | **keep** |
 | View › Always Show Toolbar in Full Screen | - | disabled | disabled | **keep** |
 | View › Customize Toolbar… | - | changes the window; sheet NSToolbarConfigPanel | changes the window; sheet NSToolbarConfigPanel | **keep** |
@@ -305,48 +328,45 @@ an exception by name; *nothing seen*; *—* where that Safari has no such item.
 | View › Show Sidebar | ⇧⌘L | nothing seen | nothing seen | **keep** |
 | View › Show Bookmarks Sidebar | ⌃⌘1 | nothing seen | nothing seen | **keep** |
 | View › Show Reading List Sidebar | ⌃⌘2 | nothing seen | nothing seen | **keep** |
-| View › Show Shared with You | - | changes the window | changes the window | **removed** (the owner's decision): it showed what was shared with this Mac's Messages account; its action shows our notice |
-| View › Show Reader | ⇧⌘R | nothing seen | nothing seen | **keep** (enabled in the walk since Show Shared with You is gone; it was disabled behind its view) |
-| View › Show Tab Overview | ⇧⌘\ | changes the window | changes the window | **keep** (enabled in the walk since Show Shared with You is gone; the View items after it are disabled) |
+| View › Show Reader | ⇧⌘R | nothing seen | nothing seen | **keep** |
+| View › Show Tab Overview | ⇧⌘\ | changes the window | changes the window | **keep** |
 | View › Show Downloads | ⌥⌘L | disabled | disabled | **keep** |
 | View › Stop | ⌘. | disabled | disabled | **keep** |
-| View › Reload Page | ⌘R | disabled | disabled | **keep** (disabled in the walk after Show Tab Overview) |
-| View › Reload Page From Origin | ⌥⌘R | disabled | disabled | **keep** (disabled in the walk after Show Tab Overview) |
-| View › Reload With Content Blockers | - | disabled | disabled | **keep** (disabled in the walk after Show Tab Overview) |
+| View › Reload Page | ⌘R | disabled | disabled | **keep** |
+| View › Reload Page From Origin | ⌥⌘R | disabled | disabled | **keep** |
+| View › Reload With Content Blockers | - | disabled | disabled | **keep** |
 | View › Actual Size | ⌘0 | disabled | disabled | **keep** |
-| View › Zoom In | ⌘+ | disabled | disabled | **keep** (disabled in the walk after Show Tab Overview) |
-| View › Make Text Bigger | ⌥⌘+ | disabled | disabled | **keep** (disabled in the walk after Show Tab Overview) |
-| View › Zoom Out | ⌘- | disabled | disabled | **keep** (disabled in the walk after Show Tab Overview) |
-| View › Make Text Smaller | ⌥⌘- | disabled | disabled | **keep** (disabled in the walk after Show Tab Overview) |
-| View › Text Encoding › Default | - | disabled | disabled | **keep** (disabled in the walk after Show Tab Overview) |
-| View › Enter Full Screen | F | changes the window; exception NSGenericException; window NSToolbarFullScreenWindow | changes the window; exception NSGenericException; window _NSFullScreenTransitionOverlayWindow | **keep**: AppKit's layout exception on macOS 27 is caught inside AppKit |
-| View › Enter Full Screen | ⌃⌘F | changes the window; window NSToolbarFullScreenWindow | changes the window | **keep**: AppKit's layout exception on macOS 27 is caught inside AppKit |
+| View › Zoom In | ⌘+ | disabled | disabled | **keep** |
+| View › Make Text Bigger | ⌥⌘+ | disabled | disabled | **keep** |
+| View › Zoom Out | ⌘- | disabled | disabled | **keep** |
+| View › Make Text Smaller | ⌥⌘- | disabled | disabled | **keep** |
+| View › Text Encoding › Default | - | disabled | disabled | **keep** |
+| View › Enter Full Screen | F | changes the window; window NSToolbarFullScreenWindow | changes the window; window NSToolbarFullScreenWindow | **keep**: AppKit's layout exception, when it comes (runs 463 and 468), is caught inside AppKit |
+| View › Enter Full Screen | ⌃⌘F | changes the window; window NSToolbarFullScreenWindow | changes the window; window NSToolbarFullScreenWindow | **keep**: AppKit's layout exception, when it comes (runs 463 and 468), is caught inside AppKit |
 | History › Show All History | ⌘Y | changes the window | changes the window | **keep** |
 | History › Back | ⌘[ | changes the window | changes the window | **keep** |
 | History › Forward | ⌘] | disabled | disabled | **keep** |
-| History › Home | ⇧⌘H | changes the window | changes the window | **fixed** (the owner's decision): the profile's start page, Safari's own home page setting in the process's argument domain; Safari's default (apple.com/startpage) for a profile without one |
+| History › Home | ⇧⌘H | nothing seen | nothing seen | **fixed**: (the owner's decision) the profile's start page, Safari's own home page setting in the process's argument domain; Safari's default (apple.com/startpage) for a profile without one |
 | History › Return to Search Results | ⌥⌘S | disabled | disabled | **keep** |
 | History › Reopen Last Closed Window or Tab | ⇧⌘T | nothing seen | nothing seen | **keep** |
 | History › Reopen All Windows from Last Session | - | disabled | disabled | **keep** |
 | Bookmarks › Show Start Page | - | changes the window | changes the window | **keep** |
-| Bookmarks › Show Bookmarks | - | changes the window | changes the window | **keep** |
+| Bookmarks › Show Bookmarks | - | nothing seen | changes the window | **keep** |
 | Bookmarks › Edit Bookmarks | ⌥⌘B | changes the window | changes the window | **keep** |
-| Bookmarks › Add Bookmark… | ⌘D | exception NSInternalInconsistencyException; our notice | changes the window; exception NSInternalInconsistencyException; our notice | **fix**: threw (a bookmark folder with no title in the sheet's location menu) once the walk had made an empty tab group; our notice instead of the sheet |
-| Bookmarks › Add Bookmarks for Open Tabs… | - | exception NSInternalInconsistencyException; our notice | exception NSInternalInconsistencyException; our notice | **fix**: the same as Add Bookmark… |
+| Bookmarks › Add Bookmark… | ⌘D | exception NSInternalInconsistencyException; our notice | exception NSInternalInconsistencyException; our notice | **broken**: does not work: throws (a bookmark folder with no title in the sheet's location menu); our notice comes instead of the sheet, and no bookmark is added — in every walk, CI's and the owner's, each of which has made an empty tab group before it; without tab groups, not measured |
+| Bookmarks › Add Bookmarks for Open Tabs… | - | exception NSInternalInconsistencyException; our notice | exception NSInternalInconsistencyException; our notice | **broken**: does not work: the same as Add Bookmark… |
 | Bookmarks › Add Bookmark Folder | - | changes the window | changes the window | **keep** |
 | Bookmarks › Add to Reading List | ⇧⌘D | nothing seen | nothing seen | **keep** |
 | Bookmarks › Add Open Tabs to Reading List | - | nothing seen | nothing seen | **keep** |
 | Bookmarks › Select Previous Item in Reading List | - | disabled | disabled | **keep** |
 | Bookmarks › Select Next Item in Reading List | - | disabled | disabled | **keep** |
-| Bookmarks › Favorites › No Bookmarks in Bar | ⌥⌘1 | disabled | disabled | **keep** |
-| Bookmarks › Tab Group Favorites › No Bookmarks in Folder | - | disabled | disabled | **keep** |
 | Window › Minimize | ⌘M | changes the window | changes the window | **keep** |
 | Window › Minimize All | ⌥⌘M | changes the window | changes the window | **keep** |
 | Window › Zoom | - | nothing seen | nothing seen | **keep** |
 | Window › Arrange Tabs By › Title | - | nothing seen | nothing seen | **keep** |
 | Window › Arrange Tabs By › Website | - | nothing seen | nothing seen | **keep** |
-| Window › Show Previous Tab | ⌃⇧	 | changes the window | nothing seen | **keep** |
-| Window › Show Next Tab | ⌃	 | nothing seen | nothing seen | **keep** |
+| Window › Show Previous Tab | ⌃⇧⇥ | changes the window | changes the window | **keep** |
+| Window › Show Next Tab | ⌃⇥ | nothing seen | nothing seen | **keep** |
 | Window › Go To Previous Tab Group | ⇧⌘ | disabled | disabled | **keep** |
 | Window › Go To Previous Tab Group | ⌃⌘[ | disabled | disabled | **keep** |
 | Window › Go To Previous Tab Group | ⌥⌘[ | disabled | disabled | **keep** |
@@ -361,11 +381,22 @@ an exception by name; *nothing seen*; *—* where that Safari has no such item.
 | Window › Mute This Tab | - | nothing seen | nothing seen | **keep** |
 | Window › Mute Other Tabs | - | disabled | disabled | **keep** |
 | Window › Bring All to Front | - | nothing seen | nothing seen | **keep** |
-| Window › Arrange in Front | - | nothing seen | nothing seen | **keep** |
 | Window › (a window of the profile) | - | nothing seen | nothing seen | **keep** |
 | Help › Safari Help | ⌘? | Help | Help | **keep**: Safari's help, in the Help viewer (another application) |
 | Help › Acknowledgments | - | changes the window | changes the window | **keep** |
-| (sent to the first responder) _handleInsertFromContactsCommand: | - | our notice | changes the window; our notice | **ours**: our notice: AutoFill from this Mac is off in profiles |
-| (sent to the first responder) _handleInsertFromPasswordsCommand: | - | our notice | our notice | **ours**: our notice: AutoFill from this Mac is off in profiles |
-| (sent to the first responder) _handleInsertFromCreditCardsCommand: | - | our notice | our notice | **ours**: our notice: AutoFill from this Mac is off in profiles |
-| File › Close Other Tabs | - | — | disabled | **keep** |
+| (sent to the first responder) _handleInsertFromContactsCommand: | - | our notice | changes the window; our notice | **fixed**: our notice: AutoFill from this Mac is off in profiles |
+| (sent to the first responder) _handleInsertFromPasswordsCommand: | - | our notice | our notice | **fixed**: our notice: AutoFill from this Mac is off in profiles |
+| (sent to the first responder) _handleInsertFromCreditCardsCommand: | - | our notice | our notice | **fixed**: our notice: AutoFill from this Mac is off in profiles |
+| (sent to the first responder) generateWebAppForCurrentPage: | - | our notice | our notice | **removed**: (the owner's decision), not in a profile's menu: a web app made from the page runs in Safari's own web-app container, outside the profile and its proxy — sent to the first responder, as a key or Safari's Share menu would send it, its action shows our notice |
+| (sent to the first responder) _importFromFile: | - | our notice | our notice | **removed**: (the owner's decision), not in a profile's menu: it imported passwords and cards into this Mac's keychain, not into the profile — sent to the first responder, as a key or Safari's Share menu would send it, its action shows our notice |
+| (sent to the first responder) runExportDataPanel: | - | our notice | our notice | **removed**: (the owner's decision), not in a profile's menu: its passwords and cards were this Mac's keychain's, not the profile's — sent to the first responder, as a key or Safari's Share menu would send it, its action shows our notice |
+| (sent to the first responder) toggleSharedWithYou: | - | our notice | our notice | **removed**: (the owner's decision), not in a profile's menu: it showed what was shared with this Mac's Messages account — sent to the first responder, as a key or Safari's Share menu would send it, its action shows our notice |
+
+Taken out of a profile's menu (not walked as items: their actions are sent to the first responder, above):
+
+| Item | Decision |
+|---|---|
+| File › Add to Dock… | **removed** (the owner's decision), not in a profile's menu: a web app made from the page runs in Safari's own web-app container, outside the profile and its proxy — sent to the first responder, as a key or Safari's Share menu would send it, its action shows our notice |
+| File › Import Browsing Data from File or Folder… | **removed** (the owner's decision), not in a profile's menu: it imported passwords and cards into this Mac's keychain, not into the profile — sent to the first responder, as a key or Safari's Share menu would send it, its action shows our notice |
+| File › Export Browsing Data to File… | **removed** (the owner's decision), not in a profile's menu: its passwords and cards were this Mac's keychain's, not the profile's — sent to the first responder, as a key or Safari's Share menu would send it, its action shows our notice |
+| View › Show Shared with You | **removed** (the owner's decision), not in a profile's menu: it showed what was shared with this Mac's Messages account — sent to the first responder, as a key or Safari's Share menu would send it, its action shows our notice |

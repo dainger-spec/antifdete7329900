@@ -193,6 +193,64 @@ def keyed(items):
     return named
 
 
+def parse_name(name):
+    """A record's name as (path, action, keys, place): "path | action | keys", and " #n" for the n-th
+    item of a name that repeats."""
+    path, action, rest = (name.split(" | ", 2) + ["-", "-"])[:3]
+    keys, _, place = rest.partition(" #")
+    return path, action, keys, int(place) if place.isdigit() else 1
+
+
+def match_items(recorded, current):
+    """The record's items paired with this walk's, never by title: Safari builds its menus in the
+    system's language, so on a Mac in Russian every title differs from the record's (the owner's walk,
+    1 November: 90 items came or went by title, 144 of 147 did the same). First by action and keys;
+    then, of what is left, by an action only one item has on each side (or one item listed twice):
+    an item whose keys follow the Mac rather than Safari (Start Dictation's second key is a MacBook's
+    dictation key; Close Other Tabs has ⌥⌘W on some Macs and runners and none on others). Returns the
+    pairs (recorded name, current name, how they were paired) and the names left on each side."""
+    left_recorded = sorted(recorded, key=lambda name: (parse_name(name)[3], name))
+    left_current = sorted(current, key=lambda name: (parse_name(name)[3], name))
+    pairs = []
+    for how, part in (("action and keys", lambda name: parse_name(name)[1:3]), ("action", lambda name: parse_name(name)[1])):
+        on_record, here = {}, {}
+        for name in left_recorded:
+            on_record.setdefault(part(name), []).append(name)
+        for name in left_current:
+            here.setdefault(part(name), []).append(name)
+        paired = set()
+        for key, names in on_record.items():
+            others = here.get(key, [])
+            # By action alone: one item on each side, or one item each side lists more than once
+            # (Safari has a few items twice, one hidden), paired in their order.
+            if how == "action" and not (len(names) == len(others) and len({parse_name(name)[:3] for name in names}) == 1
+                                        and len({parse_name(name)[:3] for name in others}) == 1):
+                continue
+            for was, now in zip(names, others):
+                pairs.append((was, now, how))
+                paired.update((was, now))
+        left_recorded = [name for name in left_recorded if name not in paired]
+        left_current = [name for name in left_current if name not in paired]
+    return pairs, left_recorded, left_current
+
+
+def compare_with_record(recorded, current):
+    """The walk against its record, item by item (`match_items`): the items whose steady behaviour
+    changed, those that came or went, those paired by their action under other keys, how many were
+    paired under other titles, and how many did the same."""
+    pairs, gone, new = match_items(recorded, current)
+    differences, other_keys, retitled = [], [], 0
+    for was, now, how in pairs:
+        if parse_name(was)[0] != parse_name(now)[0]:
+            retitled += 1
+        if how == "action":
+            other_keys.append(f"other keys: {now} (the record: {parse_name(was)[2]})")
+        if recorded[was] != current[now]:
+            differences.append(f"changed: {now} (the record's {was}) — was {recorded[was]}, now {current[now]}")
+    comings = [f"gone: {name}" for name in gone] + [f"new: {name} — {'; '.join(current[name]['behaviour'])}" for name in new]
+    return differences, comings, other_keys, retitled, len(pairs) - len(differences)
+
+
 def start_trace(out):
     """fs_usage of the app's, WebKit's and cfprefsd's file-system calls, into out/fs.txt; None
     without sudo."""
@@ -215,8 +273,8 @@ SAFARI_SENTINELS = {"SearchProviderIdentifier": "com.duckduckgo", "SearchProvide
 def safari_domain():
     """The real Safari's own preferences as `defaults export com.apple.Safari` reads them, through
     cfprefsd — from Safari's container where it has one — and whether it has one; (None, …) when
-    they cannot be read. The file trace does not see cfprefsd's writes there: it writes through a
-    directory descriptor, which fs_usage shows as a relative path."""
+    they cannot be read. The file trace names cfprefsd's writes (`disk_check.Resolver`) but not the
+    process cfprefsd wrote for; this reads what the domain holds."""
     container = os.path.isdir(os.path.expanduser("~/Library/Containers/com.apple.Safari"))
     try:
         data = subprocess.run(["defaults", "export", "com.apple.Safari", "-"], capture_output=True, timeout=30).stdout
@@ -237,25 +295,29 @@ def domain_changes(before, after):
             + [f"changed {key}" for key in sorted(set(before) & set(after)) if before[key] != after[key]])
 
 
-def traced_writes(out):
-    """The writes in the real Safari's places in out/fs.txt, as "process: path", and what the
-    trace was (lines read, or why it is none)."""
+def traced_writes(out, canary=None):
+    """The writes in the real Safari's places in out/fs.txt by the app's and WebKit's processes, as
+    "process: path"; what the trace was (lines read, or why it is none); the files cfprefsd wrote
+    there, for a process the trace cannot name; and whether the trace named cfprefsd's write of
+    `canary` (disk_check.Resolver names a path given relative to a directory descriptor)."""
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     import disk_check
     path_of_trace = os.path.join(out, "fs.txt")
     if not os.path.exists(path_of_trace):
-        return [], "no trace (no sudo)"
+        return [], "no trace (no sudo)", [], None
     with open(path_of_trace, encoding="utf-8", errors="replace") as handle:
         head = [line for _, line in zip(range(10), handle)]
     if len(head) < 10 and any("ktrace" in line or "Resource busy" in line for line in head):
-        return [], "no trace: " + " ".join(head)[:200]
+        return [], "no trace: " + " ".join(head)[:200], [], None
     roots = disk_check.forbidden_roots(os.path.expanduser("~"))
-    found = []
-    kept = []
+    resolver = disk_check.Resolver()
+    found, by_cfprefsd, kept = [], [], []
+    canary_seen = False if canary else None
     count = 0
     for line in open(path_of_trace, encoding="utf-8", errors="replace"):
         count += 1
         line = line.rstrip("\n")
+        paths = resolver.paths(line)
         fields = line.split()
         if len(fields) < 3:
             continue
@@ -263,16 +325,19 @@ def traced_writes(out):
         writes = call in disk_check.WRITES or (call in disk_check.OPENS and re.search(r"\([^)]*[WC][^)]*\)", line))
         if not writes or disk_check.FAILED.match(line):
             continue
-        for path in disk_check.PATH.findall(line):
-            path = path.replace("\\ ", " ")
+        process = fields[-1].rsplit(".", 1)[0]
+        if canary and process == "cfprefsd" and canary in paths:
+            canary_seen = True
+        for path in paths:
             if disk_check.is_forbidden(path, roots):
-                found.append(f"{fields[-1].rsplit('.', 1)[0]}: {path}")
+                # cfprefsd writes for whichever process asks it; the trace does not say which.
+                (by_cfprefsd if process == "cfprefsd" else found).append(f"{process}: {path}")
                 kept.append(line)
     # The whole trace is hundreds of megabytes; what is kept is what counted.
     with open(os.path.join(out, "fs-real-safari.txt"), "w") as handle:
         handle.write("\n".join(kept) + ("\n" if kept else ""))
     os.remove(path_of_trace)
-    return sorted(set(found)), f"{count} lines traced"
+    return sorted(set(found)), f"{count} lines traced", sorted(set(by_cfprefsd)), canary_seen
 
 
 def crash_reports(since, out):
@@ -341,6 +406,15 @@ def main():
     domain_before, container_before = safari_domain()
     safari_ran = safari_running()
     trace = start_trace(out)
+    # A preferences file cfprefsd writes while the trace runs, through a directory descriptor as it
+    # writes every one: the trace must name it, or it is blind to cfprefsd again.
+    canary = None
+    if trace:
+        os.makedirs(os.path.join(out, "trace-canary"), exist_ok=True)
+        domain = os.path.join(out, "trace-canary", "PBTraceCanary")
+        if subprocess.run(["defaults", "write", domain, "Canary", "-string", str(time.time())],
+                          capture_output=True).returncode == 0:
+            canary = domain + ".plist"
     started = time.time()
     with open(os.path.join(out, "walk.txt"), "w") as log:
         try:
@@ -354,9 +428,11 @@ def main():
     if trace:
         subprocess.run(["sudo", "-n", "pkill", "-INT", "-f", "fs_usage -w"], capture_output=True)
         time.sleep(2)
-    by_profile, traced = traced_writes(out)
-    print(f"MENU-WALK file trace: {traced}; writes in the real Safari's places by the app's, WebKit's or cfprefsd's "
-          f"processes: {len(by_profile)}", flush=True)
+    by_profile, traced, by_cfprefsd, canary_seen = traced_writes(out, canary)
+    print(f"MENU-WALK file trace: {traced}; writes in the real Safari's places by the app's or WebKit's processes: "
+          f"{len(by_profile)}; by cfprefsd, for a process the trace cannot name: {len(by_cfprefsd)}; "
+          f"cfprefsd's write of the canary named: {'yes' if canary_seen else ('no' if canary_seen is False else 'no canary')}",
+          flush=True)
     time.sleep(2)
     domain_after, container_after = safari_domain()
     if domain_before is None or domain_after is None:
@@ -424,6 +500,12 @@ def main():
     if by_profile:
         notice("error" if args.check else "warning", args.title,
                f"the profile wrote in the real Safari's places (fs_usage): " + " · ".join(by_profile[:8]))
+    if by_cfprefsd:
+        notice("warning", args.title, f"cfprefsd wrote in the real Safari's places, for a process the trace cannot name "
+               f"(listed, not failed on): " + " · ".join(by_cfprefsd[:8]))
+    if canary_seen is False:
+        notice("error" if args.check else "warning", args.title,
+               f"the file trace did not name cfprefsd's write of {canary}: it is blind to cfprefsd's writes again")
     if domain_changed:
         notice("error" if args.check else "warning", args.title,
                "the real Safari's own preferences changed during the walk: " + "; ".join(domain_changed[:20]))
@@ -437,28 +519,27 @@ def main():
     if refused_views > 1000:
         notice("error" if args.check else "warning", args.title,
                f"the profile's process asked {refused_views} times for a view whose service it is refused: a loop")
-    failed = args.check and (not finished or bool(by_profile) or bool(domain_changed) or refused_views > 1000)
+    failed = args.check and (not finished or bool(by_profile) or bool(domain_changed) or refused_views > 1000
+                             or canary_seen is False)
     if args.record and os.path.exists(args.record):
         with open(args.record) as handle:
             recorded = json.load(handle)
-        # An item whose steady behaviour changed fails the check; an item that came or went is
-        # said: which items a menu has follows the window's state and, on Safari 27, the runner
-        # (Import Browsing Data in some runs, Import From › Bookmarks HTML File in others, either Safari).
-        differences, comings = [], []
-        for name in sorted(set(recorded) | set(current)):
-            if name not in current:
-                comings.append(f"gone: {name}")
-            elif name not in recorded:
-                comings.append(f"new: {name} — {'; '.join(current[name]['behaviour'])}")
-            elif recorded[name] != current[name]:
-                was, now = recorded[name], current[name]
-                differences.append(f"changed: {name} — was {was}, now {now}")
+        # Items are paired by what they do, not by their titles (`match_items`). An item whose steady
+        # behaviour changed fails the check; an item that came or went is said: which items a menu
+        # has follows the window's state and, on Safari 27, the runner (Import Browsing Data in some
+        # runs, Import From › Bookmarks HTML File in others, either Safari); so is an item paired by
+        # its action whose keys are this Mac's.
+        differences, comings, other_keys, retitled, same = compare_with_record(recorded, current)
         for difference in differences[:60]:
             notice("error" if args.check else "warning", args.title, difference)
+        for line in other_keys[:20]:
+            notice("warning", args.title, line)
         for coming in comings[:30]:
             notice("warning", args.title, coming)
         print(f"MENU-WALK {len(differences)} item(s) that changed, {len(comings)} that came or went, "
-              f"from the record {args.record}", flush=True)
+              f"from the record {args.record}; {same} of {len(recorded)} recorded items did the same, "
+              f"{len(other_keys)} of them under this Mac's keys, {retitled} under other titles (the system's language)",
+              flush=True)
         if differences and args.check:
             failed = True
     return 1 if failed else 0

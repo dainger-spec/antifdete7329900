@@ -24,10 +24,13 @@ fails on any path in the real Safari's places:
 
 Every other path written outside the self-test's temporary vault is listed by directory, so that
 what the app leaves behind is visible run after run. A call that failed (fs_usage shows its errno,
-`[  1]` for a sandbox's refusal) wrote nothing: those are listed as refused, never failed on. A
-trace of cfprefsd (`sudo fs_usage -w -f filesys cfprefsd`) counts as well, for the preferences a
-profile's process sets through it. A trace that could not be made is a warning (exit 0); a write
-to the real Safari's places is exit 1.
+`[  1]` for a sandbox's refusal) wrote nothing: those are listed as refused, never failed on.
+cfprefsd's calls are traced too: it writes every preferences file through a directory descriptor,
+and `Resolver` names those paths whole. What it writes in the real Safari's places is listed, not
+failed on — it writes for whichever process asks, and the trace cannot say which — and with
+--canary, a preferences file written through it while the trace ran must be named, or the trace is
+blind to cfprefsd (exit 1). A trace that could not be made is a warning (exit 0); a write to the
+real Safari's places by the app's or WebKit's processes is exit 1.
 """
 import argparse
 import os
@@ -40,9 +43,62 @@ WRITES = {"mkdir", "rename", "renameat", "renamex_np", "unlink", "unlinkat", "rm
           "removexattr", "link", "symlink", "clonefile", "clonefileat", "copyfile", "exchangedata", "utimes", "futimes"}
 OPENS = {"open", "openat", "open_nocancel", "openat_nocancel", "open_extended", "creat"}
 TIME = re.compile(r"^(\d\d):(\d\d):(\d\d)\.(\d+)")
-# "15:42:15.747185  unlink  [  2]  /Users/..." — the call failed with that errno.
-FAILED = re.compile(r"^\S+\s+\S+\s+\[\s*(\d+)\]")
+# "15:42:15.747185  unlink  [  2]  /Users/..." — the call failed with that errno; not "[6]//…" or
+# "[3]/name", a path given with a directory descriptor (a renameat of cfprefsd's reads so).
+FAILED = re.compile(r"^\S+\s+\S+\s+\[\s*(\d+)\](?!/)")
 PATH = re.compile(r"(/(?:[^\s]|\\ )+)")
+# "[3]/name": a path relative to a directory descriptor (openat, renameat, fstatat…); "[-2]/…" is the
+# current directory's, with an absolute path; "[6]//private/…", an absolute path given with a descriptor.
+RELATIVE = re.compile(r"\[(-?\d+)\](/(?:[^\s]|\\ )*)")
+DESCRIPTOR = re.compile(r"\bF=(\d+)")
+RENAMES = {"rename", "renameat", "renamex_np", "renameatx_np"}
+
+
+class Resolver:
+    """fs_usage's paths, whole. cfprefsd writes every preferences file the same way: it opens the
+    file's directory, opens the file relative to it to create it ("[3]/name.plist"), writes a
+    temporary file in its own temporary folder and renames that onto the file — and fs_usage names
+    only the rename's source (CI's measurement run 521, a canary domain by name, by a path in a home
+    and by a path in a container, on macOS 26 and 27). So a path relative to a descriptor is named by
+    the path that descriptor was opened on, as the same process opened it earlier in the trace, and a
+    rename of a temporary file onto a file the process opened to create is that file. A descriptor
+    opened before the trace began stays "[N?]/name"."""
+
+    def __init__(self):
+        self.descriptors = {}
+        self.created = {}
+
+    def paths(self, line):
+        """The paths of one line of the trace, whole, and those it writes to the process's records."""
+        fields = line.split()
+        if len(fields) < 3:
+            return []
+        process = fields[-1]
+        call = fields[1].split("[")[0]
+        table = self.descriptors.setdefault(process, {})
+        found = []
+        for match in RELATIVE.finditer(line):
+            descriptor, rest = int(match.group(1)), match.group(2)
+            if rest.startswith("//") or descriptor == -2:
+                found.append(rest[1:] if rest.startswith("//") else rest)
+            elif descriptor in table:
+                found.append(table[descriptor] + rest)
+            else:
+                found.append(f"[{descriptor}?]{rest}")
+        found += PATH.findall(RELATIVE.sub(" ", line))
+        found = [path.replace("\\ ", " ") for path in found]
+        opened = DESCRIPTOR.search(line)
+        if call == "close" and opened:
+            table.pop(int(opened.group(1)), None)
+        elif call in OPENS and opened and found and not FAILED.match(line):
+            table[int(opened.group(1))] = found[0]
+            if re.search(r"\([^)]*C[^)]*\)", line):
+                self.created.setdefault(process, {})[os.path.basename(found[0])] = found[0]
+        if call in RENAMES and found and not FAILED.match(line):
+            target = self.created.get(process, {}).get(os.path.basename(found[0]).rsplit(".", 1)[0])
+            if target:
+                found.append(target)
+        return found
 
 
 def forbidden_roots(home):
@@ -76,6 +132,8 @@ def main():
     parser.add_argument("--trace", action="append", default=[])
     parser.add_argument("--selftest-log", required=True)
     parser.add_argument("--home", default=os.path.expanduser("~"))
+    parser.add_argument("--canary", help="a preferences file cfprefsd wrote while the trace ran (a path domain set "
+                                         "with `defaults write`): the trace must name it, or it is blind to cfprefsd")
     args = parser.parse_args()
 
     log = open(args.selftest_log, encoding="utf-8", errors="replace").read()
@@ -96,6 +154,7 @@ def main():
 
     roots = forbidden_roots(args.home)
     failures, refused, elsewhere, lines_read = [], [], Counter(), 0
+    by_cfprefsd, canary_seen = [], False
     for trace in args.trace:
         try:
             lines = open(trace, encoding="utf-8", errors="replace").read().splitlines()
@@ -109,10 +168,9 @@ def main():
         print(f"disk check: {trace}: {len(lines)} lines; first ones, for the format:")
         for line in lines[:3]:
             print("   ", line[:200])
+        resolver = Resolver()
         for line in lines:
-            when = seconds_of_day(line)
-            if when is None or not any(start - 1 <= when <= end + 1 for start, end in windows):
-                continue
+            paths = resolver.paths(line)
             fields = line.split()
             if len(fields) < 2:
                 continue
@@ -120,12 +178,23 @@ def main():
             writes = call in WRITES or (call in OPENS and re.search(r"\([^)]*[WC][^)]*\)", line) is not None)
             if not writes:
                 continue
-            for path in PATH.findall(line):
-                path = path.replace("\\ ", " ")
+            cfprefsd = fields[-1].startswith("cfprefsd.")
+            if args.canary and cfprefsd and args.canary in paths:
+                canary_seen = True
+            when = seconds_of_day(line)
+            if when is None or not any(start - 1 <= when <= end + 1 for start, end in windows):
+                continue
+            for path in paths:
                 if path.startswith("/dev/") or any(path.startswith(v) or path.startswith("/private" + v) for v in vaults):
                     continue
                 if is_forbidden(path, roots):
-                    (refused if FAILED.match(line) else failures).append(line)
+                    if FAILED.match(line):
+                        refused.append(line)
+                    elif cfprefsd:
+                        # cfprefsd writes for whichever process asks it, and the trace does not say which.
+                        by_cfprefsd.append(f"{path}  ({line.split()[1]} {fields[-1]})")
+                    else:
+                        failures.append(line)
                 elif path.startswith(args.home) or path.startswith("/private/var/folders") or path.startswith("/var/folders"):
                     parts = path.split("/")
                     elsewhere["/".join(parts[:7])] += 1
@@ -136,6 +205,17 @@ def main():
         print("written outside the self-test's vault during the check (listed, not failed on):")
         for directory, count in elsewhere.most_common(40):
             print(f"  {count:6d}  {directory}")
+    if args.canary:
+        if canary_seen:
+            print(f"disk check: the trace names cfprefsd's write of the canary, {args.canary}")
+        else:
+            print(f"::error::disk check: the trace does not name cfprefsd's write of the canary {args.canary}: "
+                  "it is blind to cfprefsd again")
+    if by_cfprefsd:
+        print(f"::warning::disk check: cfprefsd wrote {len(set(by_cfprefsd))} file(s) in the real Safari's places while a "
+              "profile ran, for a process the trace cannot name (listed, not failed on):")
+        for entry in sorted(set(by_cfprefsd))[:30]:
+            print("CFPREFSD " + entry[:300])
     if refused:
         print(f"disk check: {len(refused)} calls into the real Safari's places were refused (they wrote nothing):")
         for line in refused[:20]:
@@ -145,7 +225,9 @@ def main():
         for line in failures[:60]:
             print("WRITE " + line[:300])
         return 1
-    print("disk check: nothing was written into the real Safari's places")
+    if args.canary and not canary_seen:
+        return 1
+    print("disk check: nothing was written into the real Safari's places by the app's or WebKit's processes")
     return 0
 
 

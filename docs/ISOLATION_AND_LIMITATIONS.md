@@ -925,8 +925,15 @@ So nothing of a profile's that must stay its own is written to a domain:
   sentinels set in them first — the search provider's two keys among them — kept (run 504, macOS 26
   and 27, `claude/measure-container-walk`). Most likely cfprefsd asks the sandboxed process's
   sandbox whether it may write that file, and the kernel's refusal of the real Safari's places
-  answers no; that is not measured. The file-system trace sees neither: cfprefsd writes through a
-  directory descriptor, which fs_usage shows as a relative path. So the menu walk reads the real
+  answers no; that is not measured. The file-system trace saw neither: cfprefsd writes through a
+  directory descriptor, which fs_usage shows as a relative path (`[3]/name.plist`), and names only
+  the source of the rename that puts the file in place. Since the owner's week of 1 November it
+  names them: `disk_check.Resolver` follows the descriptors each process opens in the trace (CI's
+  measurement run 521: a canary by name, by a path in a home and by a path in a container, all
+  named whole), and the self-test's disk check and the menu walk each write a canary through
+  cfprefsd and fail when the trace does not name it. What cfprefsd writes in the real Safari's
+  places is listed, not failed on: it writes for whichever process asks, and the trace cannot say
+  which. So the menu walk still reads the real
   Safari's own preferences before and after (`defaults export com.apple.Safari`), with sentinels
   set first on CI's runners, and fails on any change; the self-test reads them around its
   Safari-chrome profile, without sentinels. Both skip the comparison while the real Safari runs.
