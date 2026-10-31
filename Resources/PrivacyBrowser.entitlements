@@ -2,8 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- App Sandbox (default build). Every entitlement below is required; see
-	     docs/ISOLATION_AND_LIMITATIONS.md §7 for what each one is used for. -->
+	<!-- App Sandbox (build-app.sh's default build; never released: in the sandbox Safari's frameworks
+	     cannot be loaded, docs/UPDATES.md §6). Every entitlement below is required; see
+	     docs/ISOLATION_AND_LIMITATIONS.md §9 for what each one is used for. -->
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
 	<!-- WKWebView networking (WebKit's network process acts on the app's behalf) and sync. -->

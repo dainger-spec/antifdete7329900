@@ -320,10 +320,35 @@ jobs:
         # against this SDK and lays out its bundle so its plists are checked.
         run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: Release, dry run (no Apple account, a throwaway update key)
-        # scripts/release.sh end to end: the app built with an update feed and keys, signed (ad hoc),
-        # zipped, the zip signed with Ed25519, the appcast made and signed, both checked with the
-        # app's own code (pbupdate verify). Notarization and stapling are skipped and said so.
+        # scripts/release.sh end to end: the app built without the App Sandbox with an update feed and
+        # keys, signed (ad hoc, the hardened runtime), its signature read back, then the release gate —
+        # Safari's pieces, and a profile started as the app starts one opening in Safari's own window
+        # (Lumen --release-check) — then zipped, the zip signed with Ed25519, the appcast made and
+        # signed, both checked with the app's own code (pbupdate verify). Notarization and stapling
+        # are skipped and said so.
         run: VERSION=0.1.1 BUILD=2 OUT=build/release scripts/release.sh
+      - name: The release gate fails where Safari's chrome is not hosted (its controls)
+        # A gate that cannot fail proves nothing. The sandboxed build, and the release with Safari's
+        # chrome turned off for the profile's process (--control), must each come back FAIL, for
+        # their own reason; and release.sh must refuse SANDBOX=1 before it builds anything.
+        run: |
+          status=0
+          out=$(build/sandboxed/Lumen.app/Contents/MacOS/Lumen --release-check 2>&1) \
+            && { echo "::error title=Release gate::the sandboxed build passed the release check"; status=1; }
+          echo "$out" | grep '^RELEASE-CHECK' || echo "$out" | tail -n 20
+          echo "$out" | grep -F 'runs in the App Sandbox' >/dev/null \
+            || { echo "::error title=Release gate::the sandboxed build did not fail for the sandbox"; status=1; }
+          out=$(build/release/app/Lumen.app/Contents/MacOS/Lumen --release-check --control 2>&1) \
+            && { echo "::error title=Release gate::the control (Safari's chrome off) passed the release check"; status=1; }
+          echo "$out" | grep '^RELEASE-CHECK' || echo "$out" | tail -n 20
+          echo "$out" | grep -F "window is the app's own" >/dev/null \
+            || { echo "::error title=Release gate::the control did not fail for its window"; status=1; }
+          if SANDBOX=1 VERSION=0.1.1 BUILD=2 OUT=build/release-sandboxed scripts/release.sh > build/release-sandboxed.log 2>&1; then
+            echo "::error title=Release gate::release.sh made a release of the sandboxed build"; status=1
+          fi
+          grep -F 'a release is never the sandboxed build' build/release-sandboxed.log \
+            || { echo "::error title=Release gate::release.sh did not refuse SANDBOX=1 for the sandbox"; cat build/release-sandboxed.log; status=1; }
+          exit $status
       - name: Updates end to end (a local feed and a new build; sandboxed and unsandboxed)
         # scripts/update_check.py: the old build's own updater against a local HTTPS feed — no request
         # with checks off (packet capture), an older build never offered, a stale and a forged appcast

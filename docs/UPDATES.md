@@ -331,6 +331,78 @@ Developer ID — the Team ID updates must be signed by (and a secure timestamp, 
 needs). At the end the appcast and the zip are checked with `pbupdate verify`, the code the app
 itself checks them with, and the script lists what a real release still needs when it ran dry.
 
+### Which build is released
+
+**The build without the App Sandbox** (`SANDBOX=0`). `release.sh` refuses `SANDBOX=1` before it
+builds anything, and refuses an app that, signed as it ships, does not host Safari's chrome on the
+Mac it is made on (the gate, below).
+
+**Why not the sandboxed build.** In the App Sandbox Safari's private frameworks cannot be loaded
+(`SafariChrome.load`), so no profile's window is Safari's, and the app keeps every profile in its
+one process (`ProfileProcess.isEnabled`) — the process that also holds the vault's master key,
+where a profile's own process holds only its profile's key and its own locks
+(ISOLATION_AND_LIMITATIONS.md §4a). To a site that build is plain WebKit: not what Lumen is. Before
+this, it was `release.sh`'s default.
+
+**Nothing requires the sandbox.** Developer ID distribution with notarization requires the hardened
+runtime, not the App Sandbox. Only the Mac App Store requires the sandbox — and it does not take an
+app that loads Safari's private frameworks at all, sandboxed or not: were the App Store ever the
+channel, it is the product's promise that would change, not the build. The updater does not need
+it (its helper runs outside the sandbox by design; §8's end-to-end run covers both builds). The
+packet tunnel's system extension is sandboxed by its own entitlements; the app that installs it
+need not be (`build-app.sh` adds the extension's entitlements to either build; untried with a real
+team, docs/TUNNEL.md).
+
+**Signing.** The same Developer ID Application certificate, hardened runtime and secure timestamp.
+The entitlements are `Resources/PrivacyBrowser-NoSandbox.entitlements`: camera and microphone, and
+`com.apple.security.cs.disable-library-validation` — Safari's frameworks are Apple's code loaded into
+a process this team signed, which library validation refuses otherwise. The sandbox's own
+entitlements (`network.*`, `files.*`, the temporary exception for the update's staging folder) and
+`container-migration.plist` are not in it. `release.sh` reads the signature back and stops on the
+sandbox, on library validation left on, on `get-task-allow`, or without the hardened runtime.
+
+**Notarization.** Unchanged: `notarytool submit`, `stapler staple`, `spctl --assess`. The notary
+service requires the hardened runtime and accepts its documented exceptions, library validation
+among them; it does not look for private interfaces (that is App Store review).
+
+**The system's trust.**
+- Gatekeeper: the same — a Developer ID app, notarized and stapled.
+- The app runs with the user's rights rather than a container's; TCC still asks for what it
+  protects. New with this build: the first download into `~/Downloads` asks (the sandboxed build had
+  an entitlement for that folder), as do Desktop and Documents; camera, microphone and the local
+  network asked in either build.
+- The vault is in `~/Library/Application Support/PrivacyBrowser` rather than the container,
+  encrypted the same. While a profile runs, its WebKit data is plaintext under
+  `~/Library/WebKit/<bundle ID>/`: sandboxed apps cannot read it (their own sandbox), programs of
+  this user that are not sandboxed can — in the container, macOS 14 and later asked the user first.
+  Malware running as the user was never in scope (ISOLATION_AND_LIMITATIONS.md §10).
+- The manager's process — the vault, the master key — is not confined by the App Sandbox, and holds
+  no web content: every profile runs in a process of its own, with its profile's key only and a
+  kernel sandbox profile of its own (UDP with a proxy, the real Safari's places, Safari's XPC
+  services; §4a) — except a profile whose WebRTC goes through the packet tunnel, which stays in the
+  manager's process.
+- With library validation off, the process would load a library that is neither Apple's nor this
+  team's if asked to: it loads only from `/System/Library/PrivateFrameworks`, on the sealed system
+  volume, and `DYLD_*` variables stay refused (no `allow-dyld-environment-variables`).
+- The local automation API exists in this build only (off by default; ISOLATION_AND_LIMITATIONS.md
+  §10).
+
+There has been no release yet. A tester's sandboxed build of the same bundle ID: the build without
+the sandbox takes over its vault at its first start (README).
+
+**The gate** (`release.sh` step 2b, on the app after notarization and stapling, run from a copy so
+that what is published is exactly what was checked): `Lumen --check-safari-chrome` — every class and
+method the chrome, and a profile's hold on its proxy, rely on is in this Safari — and
+`Lumen --release-check` (`ReleaseCheck.swift`): a profile started the way the app starts one, with
+nothing set by hand (`PB_PROFILE_PROCESS`, `PB_SAFARI_CHROME` or the `PBProfileProcess` default set
+fail it), held to a proxy that goes nowhere, in a vault of its own in a temporary folder, must get a
+process of its own whose window is Safari's own chrome. Anything else stops the release. CI runs the
+gate in the release dry run on every push, and its controls, each of which must fail for its own
+reason: the sandboxed build, the release with Safari's chrome turned off for the profile's process
+(`--release-check --control`), and `release.sh` given `SANDBOX=1`. What it proves is the Mac the
+release is made on; on another macOS a profile whose window cannot be Safari's says so in its window
+(simplified mode, ISOLATION_AND_LIMITATIONS.md §4a).
+
 ## 7. Interface
 
 The **Updates** section of the app's Settings window (⌘, or Profiles window → ⋯ → Settings…;

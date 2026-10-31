@@ -16,8 +16,12 @@
 #   DOWNLOAD_URL=https://…/            where the zips are published (default: next to FEED_URL)
 #   PREVIOUS_APPCAST=path      the appcast published now: its releases are kept in the new one
 #   NOTES_FILE=path            the release notes, plain text
-#   SANDBOX=0|1                which build is released (default 1, as build-app.sh)
 #   OUT=build/release          where everything goes
+#
+# What is released is always the build without the App Sandbox: only there does a profile get a
+# process of its own and Safari's own window, which is what Lumen is. SANDBOX=1 is refused, and so
+# is an app that, signed as it ships, does not host Safari's chrome on this Mac (step 2b;
+# docs/UPDATES.md §6, "Which build is released").
 #
 # The private key never enters the repository, CI or the app; only its public half is built in.
 set -euo pipefail
@@ -34,7 +38,13 @@ DOWNLOAD_URL="${DOWNLOAD_URL:-${FEED_URL%/*}/}"
 [[ "$DOWNLOAD_URL" == */ ]] || DOWNLOAD_URL="$DOWNLOAD_URL/"
 OUT="${OUT:-build/release}"
 [[ "$OUT" != "/" && "$OUT" != "." && "$OUT" != "$HOME" ]] || { echo "error: OUT must be a folder of its own" >&2; exit 1; }
-SANDBOX="${SANDBOX:-1}"
+if [[ "${SANDBOX:-0}" != "0" ]]; then
+  echo "error: SANDBOX=$SANDBOX: a release is never the sandboxed build. In the App Sandbox Safari's frameworks" \
+    "cannot be loaded and every profile runs in the app's one process, on plain WebKit — not what Lumen is" \
+    "(docs/UPDATES.md §6). build-app.sh still makes that build for development." >&2
+  exit 1
+fi
+SANDBOX=0
 DRY=()
 
 rm -rf "$OUT"
@@ -71,6 +81,19 @@ APP_VERSION="$VERSION" APP_BUILD="$BUILD" SANDBOX="$SANDBOX" APP_DIR="$OUT/app" 
 APP="$OUT/app/Lumen.app"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")" == "$BUILD" ]] \
   || { echo "error: the app's CFBundleVersion is not $BUILD" >&2; exit 1; }
+# The signature a release needs, read back from the app: the hardened runtime (notarization requires
+# it), no App Sandbox, library validation off (Safari's frameworks are loaded into a process this
+# team signed: SafariChrome.swift), and no debugger allowed to attach.
+SIGNED_ENTITLEMENTS="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null || true)"
+SIGNED_FLAGS="$(codesign -d --verbose=2 "$APP" 2>&1 | awk '/^CodeDirectory/ { print }')"
+[[ "$SIGNED_ENTITLEMENTS" != *"com.apple.security.app-sandbox"* ]] \
+  || { echo "error: the app's signature carries the App Sandbox: it would not host Safari's chrome" >&2; exit 1; }
+[[ "$SIGNED_ENTITLEMENTS" == *"com.apple.security.cs.disable-library-validation"* ]] \
+  || { echo "error: the app's signature keeps library validation on: Safari's frameworks would not load" >&2; exit 1; }
+[[ "$SIGNED_ENTITLEMENTS" != *"com.apple.security.get-task-allow"* ]] \
+  || { echo "error: the app's signature lets a debugger attach (DEBUGGABLE): never in a release" >&2; exit 1; }
+[[ "$SIGNED_FLAGS" == *"runtime"* ]] \
+  || { echo "error: the app is not signed with the hardened runtime ($SIGNED_FLAGS)" >&2; exit 1; }
 # An executable that declares macOS 15's SDK or newer gets WebKit's network loader, and with it, on
 # macOS 27, this Mac fetched a certificate's missing intermediate outside a profile's proxy: every
 # SDK from 15.0 on, 26.5 (what Xcode 26 declares) among them; 14.x was clean (CI run 451,
@@ -101,6 +124,29 @@ else
   DRY+=("not notarized and not stapled (needs NOTARY_PROFILE and a Developer ID): Gatekeeper would refuse this app on another Mac")
 fi
 codesign --verify --strict --deep "$APP"
+
+# 2b. The app as it ships hosts Safari's chrome on this Mac, or there is no release: every class and
+# method the chrome and a profile's hold on its proxy rely on is in this Safari
+# (--check-safari-chrome), and a profile started the way the app starts one, with nothing set by
+# hand, gets a process of its own whose window is Safari's own (--release-check: ReleaseCheck.swift).
+# Run from a copy, so that what is published is exactly what was signed, notarized and stapled.
+CHECK_DIR="$OUT/release-check"
+rm -rf "$CHECK_DIR"
+mkdir -p "$CHECK_DIR"
+ditto "$APP" "$CHECK_DIR/Lumen.app"
+CHECK_APP="$CHECK_DIR/Lumen.app/Contents/MacOS/Lumen"
+if ! env -u PB_PROFILE_PROCESS -u PB_SAFARI_CHROME "$CHECK_APP" --check-safari-chrome > "$OUT/check-safari-chrome.txt" 2>&1; then
+  grep -E '^(MISSING|SAFARI-CHROME)' "$OUT/check-safari-chrome.txt" >&2 || tail -n 20 "$OUT/check-safari-chrome.txt" >&2
+  echo "error: this Safari lacks classes or methods Safari's chrome, or a profile's hold on its proxy, relies on: no release" >&2
+  exit 1
+fi
+env -u PB_PROFILE_PROCESS -u PB_SAFARI_CHROME "$CHECK_APP" --release-check > "$OUT/release-check.txt" 2>&1 || true
+grep '^RELEASE-CHECK' "$OUT/release-check.txt" || tail -n 20 "$OUT/release-check.txt"
+if ! grep '^RELEASE-CHECK PASS' "$OUT/release-check.txt" >/dev/null; then
+  echo "error: a profile of this app, signed as it ships, did not open in Safari's own window on this Mac: no release" >&2
+  exit 1
+fi
+rm -rf "$CHECK_DIR"
 
 # 3. The zip the app downloads, and its release, signed.
 ZIP_NAME="Lumen-$VERSION.zip"

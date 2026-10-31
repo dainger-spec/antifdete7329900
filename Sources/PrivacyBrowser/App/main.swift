@@ -45,6 +45,11 @@ MainActor.assumeIsolated {
         // A window of this profile that is not Safari's says so, and once by itself (SimplifiedModeNotice).
         SimplifiedModeNotice.presentsAutomatically = true
         ProfileSessionHost.start(arguments: arguments)
+    } else if arguments.contains("--release-check") {
+        // What scripts/release.sh runs on the app it is about to publish: a profile started the way
+        // the app starts one gets a process of its own whose window is Safari's own chrome, or the
+        // release stops (ReleaseCheck.swift; `--control` must fail).
+        ReleaseCheck.start(arguments: arguments)
     } else if arguments.contains("--check-safari-chrome") {
         // Which of the private classes and methods the hosted Safari chrome relies on this macOS
         // still has (SafariChrome.expectedPieces): run after a macOS update, and in CI. In a

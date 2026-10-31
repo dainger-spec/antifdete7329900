@@ -1467,9 +1467,12 @@ has the keyboard; the command palette (⌘K) is the manager's and is not in that
 
 ## 9. App Sandbox
 
-The default build (`scripts/build-app.sh`) is **sandboxed**. `SANDBOX=0` produces a
-hardened-runtime build without the sandbox, for debugging. `build-app.sh` checks the
-signature and fails if the sandbox state isn't what was requested.
+**Releases are the build without the sandbox** (`SANDBOX=0`): only there does a profile get a process
+of its own and Safari's own window, and `scripts/release.sh` refuses the sandboxed one and any app
+that does not host Safari's chrome (docs/UPDATES.md §6, "Which build is released", which also says
+what the build without the sandbox changes in signing, notarization and the system's trust).
+`scripts/build-app.sh` still makes the sandboxed build by default, for development and CI.
+`build-app.sh` checks the signature and fails if the sandbox state isn't what was requested.
 
 **Entitlements** (`Resources/PrivacyBrowser.entitlements`):
 

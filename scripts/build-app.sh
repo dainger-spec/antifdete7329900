@@ -2,8 +2,9 @@
 # Builds Lumen.app from the Swift package (no Xcode project needed). The SwiftPM product, its
 # target and modules keep the code's name, PrivacyBrowser; the bundle and its executable are Lumen.
 #
-#   scripts/build-app.sh                       # sandboxed release build → build/Lumen.app
-#   SANDBOX=0 scripts/build-app.sh             # hardened runtime without App Sandbox (debugging)
+#   scripts/build-app.sh                       # sandboxed build (development; never released) → build/Lumen.app
+#   SANDBOX=0 scripts/build-app.sh             # hardened runtime without App Sandbox: the build that is
+#                                              # released (release.sh), profiles in Safari's window
 #   APP_DIR=build/variant scripts/build-app.sh # output directory
 #   BUNDLE_ID=org.me.PB scripts/build-app.sh
 #   SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh

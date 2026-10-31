@@ -41,15 +41,17 @@ approximations limited by what WebKit exposes. The tables below say which parts 
 ## Build and run
 
 ```bash
-scripts/build-app.sh                  # sandboxed release build → build/Lumen.app
+scripts/build-app.sh                  # sandboxed build (development; never released) → build/Lumen.app
 open build/Lumen.app
 
-SANDBOX=0 scripts/build-app.sh        # hardened runtime without App Sandbox (debugging)
+SANDBOX=0 scripts/build-app.sh        # without App Sandbox: the build that is released (Safari's window, a process per profile)
 APP_DIR=build/other scripts/build-app.sh
 BUNDLE_ID=org.example.Lumen SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
 ```
 
-- The default build is **sandboxed**. Its data lives in
+- **Releases are the build without the App Sandbox**: `scripts/release.sh` refuses the sandboxed
+  one, and any app whose profiles do not open in Safari's own window (docs/UPDATES.md §6).
+- `build-app.sh`'s default build is **sandboxed**. Its data lives in
   `~/Library/Containers/<bundle-id>/Data/`. `build-app.sh` checks the signature and fails if
   the sandbox entitlement doesn't match `SANDBOX`.
 - **From a sandboxed build to an unsandboxed one** (which hosts Safari's chrome): an unsandboxed
