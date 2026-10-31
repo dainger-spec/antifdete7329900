@@ -1,6 +1,6 @@
 <!-- Сгенерировано tools/export-copy.mjs из prototype/ru/checkout.html. Источник текста — copy/source/ru/*.mjs: правьте там. ⟦qN: …⟧ — решение владельца (вопрос N в README). -->
 
-# undefined
+# Оплата
 
 Заголовок окна: Оплата — Lumen
 

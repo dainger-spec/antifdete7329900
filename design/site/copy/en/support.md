@@ -20,7 +20,7 @@ A profile does not start Usually the proxy: a wrong address, or it wants a passw
 
 Importing cookies Which files work, and what to do with the report of skipped entries.
 
-Sync between Macs What syncs, how conflicts are resolved, how to revoke a Mac.
+Proxies, and when one fails How to give a profile a proxy, and what happens when it stops answering.
 
 Forgot the master password It cannot be recovered. What you can do with the old vault.
 

@@ -59,8 +59,8 @@ export default {
     title: 'Something wrong?',
     items: [
       { t: 'macOS will not open the app', d: 'Check the signature with the commands above. If it fails, do not open the file — write to us.', href: 'support.html' },
-      { t: 'A profile does not start', d: 'Usually the proxy: a wrong address, or it wants a password. The profile does not open sites directly in that case.', href: 'docs.html' },
-      { t: 'Forgot the master password', d: 'It cannot be recovered. The old vault can be set aside and a new one created.', href: 'docs.html' },
+      { t: 'A profile does not start', d: 'Usually the proxy: a wrong address, or it wants a password. The profile does not open sites directly in that case.', href: 'docs-trouble.html' },
+      { t: 'Forgot the master password', d: 'It cannot be recovered. The old vault can be set aside and a new one created.', href: 'docs-vault.html' },
     ],
   },
 };

@@ -1,0 +1,82 @@
+// Docs: “Importing and exporting cookies”. Written from the browser's code and the measurements in the repository (the product branch
+// claude/secret-partner-setup-e505tc at 194828b); where behaviour isn't confirmed by the code or a measurement — a
+// {{unv:…}} mark, not a guess. The source of every statement: design/site/docs-sources/docs-cookies.md.
+export default {
+  title: 'Importing and exporting cookies',
+  lead: 'Bring cookies from a file into a profile and write them out again: which files work, what {{name}} checks before importing, and when the cookies reach the profile.',
+  toc: [['formats', 'Which files work'], ['steps', 'How to import'], ['report', 'What the check shows'], ['when', 'Running and stopped profiles'], ['export', 'Exporting cookies'], ['storage', 'Where cookies are kept']],
+  body: `## Which files work {#formats}
+
+{{name}} reads cookie exports in JSON and in the Netscape \`cookies.txt\` format.
+
+| Format | From |
+|---|---|
+| JSON | the EditThisCookie and Cookie-Editor extensions |
+| JSON | Puppeteer and the DevTools protocol, Playwright (its \`storageState\` too), Selenium |
+| JSON | rows of Chrome’s and Firefox’s cookie databases exported to JSON; JSON Lines |
+| Netscape \`cookies.txt\` | curl, wget, yt-dlp, cookie extensions |
+
+The content decides, not the file name. Text starting with \`[\` or \`{\` is JSON; otherwise {{name}} looks for \`cookies.txt\` lines, then for JSON inside the text. UTF-8 and UTF-16 are read with or without a byte order mark, UTF-32 with one.
+
+A file can be up to 32 MB. A browser’s cookie database itself (an SQLite file), Safari’s binary cookies, an archive, a PDF or a web page is not read: the report says what the file is.
+
+## How to import {#steps}
+
+1. In the Profiles window, open the profile’s **⋯** menu (or right-click its row) and choose **Import Cookies…**
+2. Click **Choose File…** {{name}} reads and checks the file without touching the profile.
+3. Click **Import N Cookies** — N is how many can come across. With nothing to import, there is no button.
+
+The profile editor can do it too: on its **Data** tab, paste an export into the **Cookies** field or drop the file there. The cookies are imported when you save.
+
+::: note
+A damaged file does not stop the import: a broken line or entry costs only itself, and bytes that are not text cost only the cookie they are in.
+:::
+
+## What the check shows {#report}
+
+The report gives “N of M entries can be imported” and how the file was read (“Format: JSON, read as UTF-8”). Under “Not imported: N” it lists each entry left out: where (“Line N” or “Entry N (line M)”), the cookie’s name and the reason. Cookies are checked as a browser checks them.
+
+| Reason in the report | What it means |
+|---|---|
+| Expired on … | export the cookies again |
+| Encrypted value from Chrome's database… | only Chrome can read it: export with an extension |
+| A partitioned (CHIPS) cookie… | WebKit cannot set it in its partition |
+| No domain; Invalid domain “…” | also a domain in Cyrillic (\`пример.рф\`): {{name}} does not convert it to the \`xn--…\` form |
+| For all of “…”, a public suffix… | browsers refuse a cookie for all of \`.com\` or \`.co.uk\` |
+| A “__Host-” cookie must be Secure, host-only, with path / | prefix rules; a “__Secure-” cookie must be Secure |
+| Name and value together are longer than 4096 bytes | the cookie is too large |
+| Damaged bytes (not valid text) in this cookie | a value in a legacy encoding such as Windows-1251 looks the same |
+| N fields instead of 7 tab-separated ones | a broken \`cookies.txt\` line; eight fields mean a tab in the value |
+| Cut off…; Not valid JSON | a JSON entry ends early or is damaged |
+
+When the same cookie (name, domain, path) appears twice, the later one is imported. The earlier one stays listed, greyed out, as “Replaced by the same cookie later in the file” — not an error.
+
+## Running and stopped profiles {#when}
+
+- A **running** profile gets the cookies at once. {{name}} reads its cookie store back and lists, by name and domain, any cookie WebKit did not keep. An import replaces the profile’s same cookie, even an HttpOnly one.
+- A **stopped** profile gets them at its next launch, before the first page loads. Until then they wait in the vault, encrypted with the profile’s key; a later import joins them.
+- A profile that is starting or being encrypted answers: “The profile is starting or being encrypted; try again in a moment.”
+
+Session cookies — those without an expiry — last until the profile stops, as they last until you quit Safari: a stop deletes them. In an ephemeral profile every imported cookie lasts only until it stops.
+
+## Exporting cookies {#export}
+
+1. In the profile’s **⋯** menu, choose **Export Cookies…**
+2. Under **Format**, pick **cookies.txt (Netscape: curl, yt-dlp, extensions)** (the default), **JSON (EditThisCookie, Cookie-Editor)** or **JSON (Playwright, Puppeteer)** — the cookies array of a Playwright \`storageState\`.
+3. Click **Export…** and choose where to save.
+
+The file holds every cookie of the profile, session cookies included, except partitioned (CHIPS) ones. \`cookies.txt\` has no SameSite and leaves out a cookie with a tab or line break in a field; “N cookies saved to …” gives the count. Another {{name}} profile can import the file.
+
+For the export a stopped profile is started without a window, then stopped and encrypted again. It has no session cookies: its last stop deleted them.
+
+::: warn
+The sheet warns: “The file is not encrypted. Anyone who has it is signed in as this profile wherever its cookies are a sign-in.”
+:::
+
+## Where cookies are kept {#storage}
+
+- A stopped profile’s website data, cookie store included, is kept encrypted — see [The vault and the master password](docs-vault.html).
+- While the profile runs, WebKit keeps cookies in its own files on disk, unencrypted. At a stop {{name}} has WebKit write the last cookies, then encrypts the data and deletes the plain files.
+- Cookies imported into a stopped profile wait in a separate encrypted file, deleted once the launch has moved them in.
+- The export file is not encrypted.`,
+};

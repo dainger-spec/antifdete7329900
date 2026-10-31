@@ -5,9 +5,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 SITE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PAGES = ['index', 'features', 'how-it-works', 'verification', 'pricing', 'download',
-         'docs', 'docs-import-cookies', 'blog', 'blog-no-noise', 'login', 'login-code',
+         'docs', 'docs-install', 'docs-vault', 'docs-updates', 'docs-profile', 'docs-multiple', 'docs-mobile',
+         'docs-proxy', 'docs-cookies', 'docs-trouble', 'blog', 'blog-no-noise', 'login', 'login-code',
          'login-key', 'signup', 'account', 'account-devices', 'account-sync', 'account-invoices',
-         'account-settings', 'privacy', 'terms', 'refunds', 'support', '404']
+         'account-settings', 'checkout', 'privacy', 'terms', 'refunds', 'support', '404']
 
 def font(size):
     for f in ['/usr/share/fonts/opentype/inter/Inter-Medium.otf', '/System/Library/Fonts/SFNS.ttf']:

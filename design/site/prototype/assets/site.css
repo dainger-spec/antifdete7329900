@@ -951,6 +951,15 @@ html.rm .status .spin { border-color: var(--accent); border-right-color: transpa
 
 /* Values the owner decides (price, limits, periods, names): a marker-pen highlight. */
 .tbd-on .tbd { background: rgba(242, 193, 61, 0.14); box-shadow: inset 0 -1.5px 0 rgba(242, 193, 61, 0.75); border-radius: 3px; padding: 0 2px; }
+/* Documentation: behaviour neither the code nor a measurement confirms — always visible, so nobody reads a guess */
+.unv { padding: 0 4px; border-radius: 4px; background: rgba(242, 193, 61, 0.1); box-shadow: inset 0 0 0 1px rgba(242, 193, 61, 0.45); color: #EBD9A6; font-size: 0.94em; }
+.unv b { font-weight: 600; color: #F2C13D; }
+.note.unv { border-color: rgba(242, 193, 61, 0.45); border-style: dashed; background: rgba(242, 193, 61, 0.06); }
+.note.unv > svg { color: #F2C13D; }
+/* in the docs, a long path in `code` may wrap rather than push the page sideways on a phone */
+.page-docs-article .prose code { white-space: normal; overflow-wrap: anywhere; }
+.doc-meta .unv-count { display: inline-flex; align-items: center; gap: 6px; color: #EBD9A6; }
+.note.unv .unv-head { margin: 0 0 4px; font: 600 13px/18px var(--font); letter-spacing: 0.02em; color: #F2C13D; }
 /* A value each release's build fills in (version, size, SHA-256): blue in review mode, plain otherwise */
 .tbd-on .rel { background: rgba(111, 143, 234, 0.12); box-shadow: inset 0 -1.5px 0 rgba(143, 178, 255, 0.7); border-radius: 3px; padding: 0 2px; }
 .proto-bar {

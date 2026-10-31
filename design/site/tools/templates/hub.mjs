@@ -16,11 +16,11 @@ export const MOTION = [
   { file: 'menu-390.mp4', title: 'Меню на телефоне', note: 'Без JavaScript: <details>; стеклянная панель под шапкой появляется за 200 мс.' },
 ];
 
-export function hub({ pages, tbdIndex }) {
+export function hub({ pages, tbdIndex, unvIndex = {} }) {
   const groups = [...new Set(pages.map((p) => p.group))];
   const names = {
     index: 'Главная', features: 'Возможности', 'how-it-works': 'Как устроено', verification: 'Как мы проверяем', pricing: 'Цены', download: 'Скачать',
-    docs: 'Документация — структура', 'docs-import-cookies': 'Документация — шаблон статьи', blog: 'Обновления — список', 'blog-no-noise': 'Обновления — запись',
+    docs: 'Документация — оглавление', 'docs-install': 'Док.: установка и первый запуск', 'docs-vault': 'Док.: хранилище и мастер-пароль', 'docs-updates': 'Док.: обновления', 'docs-profile': 'Док.: создание профиля', 'docs-multiple': 'Док.: несколько профилей сразу', 'docs-mobile': 'Док.: мобильные профили', 'docs-proxy': 'Док.: прокси и его отказ', 'docs-cookies': 'Док.: импорт и экспорт cookies', 'docs-trouble': 'Док.: что делать при сбое', blog: 'Обновления — список', 'blog-no-noise': 'Обновления — запись',
     login: 'Вход по email', 'login-code': 'Вход: код из письма', 'login-key': 'Вход по ключу', signup: 'Регистрация',
     account: 'Кабинет: тариф и оплата', 'account-devices': 'Кабинет: устройства', 'account-sync': 'Кабинет: синхронизация', 'account-invoices': 'Кабинет: платежи', 'account-settings': 'Кабинет: настройки', checkout: 'Оплата криптовалютой',
     privacy: 'Политика конфиденциальности', terms: 'Условия использования', refunds: 'Правила возврата', support: 'Поддержка и контакты', 404: 'Страница 404',
@@ -88,6 +88,10 @@ export function hub({ pages, tbdIndex }) {
   <h2 class="h2" style="margin-top:72px">Движение</h2>
   <p class="lead" style="margin-top:10px;max-width:820px">Записи из этого же прототипа (Chromium, 25 кадров в секунду — кривые лучше смотреть вживую). Правила: обычное движение ≤ 300 мс, ничего не пульсирует в покое, всё уважает Reduce Motion, страница читается без JavaScript.</p>
   <div class="grid c2" style="margin-top:24px">${motion}</div>
+
+  <h2 class="h2" style="margin-top:72px" id="unconfirmed">Документация: что не подтверждено</h2>
+  <p class="lead" style="margin-top:10px;max-width:820px">Статьи написаны по коду браузера и измерениям из репозитория. Где поведение ни кодом, ни измерением не подтверждено, в статье стоит жёлтая отметка «Не подтверждено» — вместо предположения. Всего отметок: ${Object.values(unvIndex).reduce((a, b) => a + b, 0)}.</p>
+  <div class="table-wrap" style="margin-top:20px;max-width:900px"><div class="table-scroll"><table class="table compact"><tbody>${Object.entries(unvIndex).map(([slug, n]) => `<tr><td class="strong"><a href="ru/${slug}.html">${esc(names[slug] || slug)}</a> · <a href="en/${slug}.html">EN</a></td><td class="num">${n}</td></tr>`).join('') || '<tr><td>—</td></tr>'}</tbody></table></div></div>
 
   <h2 class="h2" style="margin-top:72px" id="decisions">Решения владельца</h2>
   <p class="lead" style="margin-top:10px;max-width:820px">Ответы на первые одиннадцать вопросов внесены в страницы; их отметок на сайте больше нет.</p>

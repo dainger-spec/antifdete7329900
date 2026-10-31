@@ -12,10 +12,10 @@ export default {
   topics: {
     title: 'Common questions',
     items: [
-      { icon: 'network', t: 'A profile does not start', d: 'Usually the proxy: a wrong address, or it wants a password. The profile does not open sites directly in that case.' },
-      { icon: 'cookie', t: 'Importing cookies', d: 'Which files work, and what to do with the report of skipped entries.' },
-      { icon: 'syncArrows', t: 'Sync between Macs', d: 'What syncs, how conflicts are resolved, how to revoke a Mac.' },
-      { icon: 'key', t: 'Forgot the master password', d: 'It cannot be recovered. What you can do with the old vault.' },
+      { icon: 'network', t: 'A profile does not start', d: 'Usually the proxy: a wrong address, or it wants a password. The profile does not open sites directly in that case.', href: 'docs-trouble' },
+      { icon: 'cookie', t: 'Importing cookies', d: 'Which files work, and what to do with the report of skipped entries.', href: 'docs-cookies' },
+      { icon: 'globe', t: 'Proxies, and when one fails', d: 'How to give a profile a proxy, and what happens when it stops answering.', href: 'docs-proxy' },
+      { icon: 'key', t: 'Forgot the master password', d: 'It cannot be recovered. What you can do with the old vault.', href: 'docs-vault' },
     ],
   },
   form: {

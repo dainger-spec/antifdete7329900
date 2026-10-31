@@ -27,7 +27,15 @@ export const PAGES = [
   { slug: 'pricing', template: 'pricing', copy: 'pricing', group: 'Маркетинг' },
   { slug: 'download', template: 'download', copy: 'download', group: 'Маркетинг' },
   { slug: 'docs', template: 'docs', copy: 'docs', group: 'Документация и обновления' },
-  { slug: 'docs-import-cookies', template: 'docs-article', copy: 'docs', group: 'Документация и обновления' },
+  { slug: 'docs-install', template: 'docs-article', copy: 'docs-install', group: 'Документация и обновления' },
+  { slug: 'docs-vault', template: 'docs-article', copy: 'docs-vault', group: 'Документация и обновления' },
+  { slug: 'docs-updates', template: 'docs-article', copy: 'docs-updates', group: 'Документация и обновления' },
+  { slug: 'docs-profile', template: 'docs-article', copy: 'docs-profile', group: 'Документация и обновления' },
+  { slug: 'docs-multiple', template: 'docs-article', copy: 'docs-multiple', group: 'Документация и обновления' },
+  { slug: 'docs-mobile', template: 'docs-article', copy: 'docs-mobile', group: 'Документация и обновления' },
+  { slug: 'docs-proxy', template: 'docs-article', copy: 'docs-proxy', group: 'Документация и обновления' },
+  { slug: 'docs-cookies', template: 'docs-article', copy: 'docs-cookies', group: 'Документация и обновления' },
+  { slug: 'docs-trouble', template: 'docs-article', copy: 'docs-trouble', group: 'Документация и обновления' },
   { slug: 'blog', template: 'blog', copy: 'blog', group: 'Документация и обновления' },
   { slug: 'blog-no-noise', template: 'blog-post', copy: 'blog', group: 'Документация и обновления' },
   { slug: 'login', template: 'auth', copy: 'auth', state: 'email', group: 'Вход и кабинет' },
@@ -89,16 +97,20 @@ export async function build({ only } = {}) {
   }
   if (!only) {
     // Where each owner decision shows (yellow marks), counted in the Russian pages, for the review page.
-    const tbdIndex = {};
+    const tbdIndex = {}, unvIndex = {};
     for (const page of PAGES) {
       const file = path.join(SITE, 'prototype', 'ru', `${page.slug}.html`);
       if (!exists(file)) continue;
-      for (const m of fs.readFileSync(file, 'utf8').matchAll(/class="tbd" data-q="(q\d+)"/g)) {
+      const html = fs.readFileSync(file, 'utf8');
+      // the documentation's unconfirmed marks ({{unv:…}}, ::: unv), counted per article for the review page
+      const unv = (html.match(/\sdata-unv[\s>]/g) || []).length;
+      if (unv) unvIndex[page.slug] = unv;
+      for (const m of html.matchAll(/class="tbd" data-q="(q\d+)"/g)) {
         tbdIndex[m[1]] = tbdIndex[m[1]] || {};
         tbdIndex[m[1]][page.slug] = (tbdIndex[m[1]][page.slug] || 0) + 1;
       }
     }
-    fs.writeFileSync(path.join(SITE, 'prototype', 'index.html'), hub({ pages: PAGES, tbdIndex }));
+    fs.writeFileSync(path.join(SITE, 'prototype', 'index.html'), hub({ pages: PAGES, tbdIndex, unvIndex }));
     built.push('index.html');
   }
   console.log(`BUILT ${built.length} pages`);

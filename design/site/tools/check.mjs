@@ -4,7 +4,8 @@
 //   3. a link to a page or an anchor that does not exist;
 //   4. a number in the visible text that is not in copy/facts.mjs (the rule: every number on the
 //      site is true from the repository, or it is not there). Not counted: values the owner decides
-//      (yellow, .tbd), example data in mock-ups ([data-sample]), code, and technical identifiers
+//      (yellow, .tbd), example data in mock-ups ([data-sample]), the documentation's unconfirmed marks ([data-unv]),
+//      code, and technical identifiers
 //      (.mono, HTTP/2, SHA-256, SOCKS5…);
 //   5. a word the site must not use (bypassing identity checks, verification or anti-fraud);
 //   6. a page that scrolls sideways on a phone (wider than 390 px).
@@ -93,7 +94,7 @@ for (const lang of LANGS) {
       const ids = new Set(Array.from(document.querySelectorAll('[id]')).map((e) => e.id));
       const links = Array.from(document.querySelectorAll('a[href]')).map((a) => a.getAttribute('href'));
       const root = document.body.cloneNode(true);
-      root.querySelectorAll('script, style, svg, .tbd, [data-sample], .mono, code, pre, kbd, [data-proto], input, textarea, select').forEach((e) => e.remove());
+      root.querySelectorAll('script, style, svg, .tbd, [data-sample], [data-unv], .mono, code, pre, kbd, [data-proto], input, textarea, select').forEach((e) => e.remove());
       const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       let text = '';
       while (tw.nextNode()) text += tw.currentNode.data + ' ';

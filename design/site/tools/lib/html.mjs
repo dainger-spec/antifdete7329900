@@ -49,7 +49,8 @@ export function typo(html, lang) {
 
 /// Inline markup in copy strings: **strong**, `code`, [text](href), _em_, {{name}}, {{domain}},
 /// {{tbd:qN:text}} (a value the owner decides, highlighted in the prototype), {{rel:text}} (a value each release's
-/// build fills in: version, size, SHA-256 — sample data in the prototype), {{nb:…}} (no wrap).
+/// build fills in: version, size, SHA-256 — sample data in the prototype), {{unv:text}} (in the documentation: behaviour
+/// that neither the code nor a measurement confirms — a visible mark, not a guess), {{nb:…}} (no wrap).
 export function inline(s, lang) {
   if (s == null) return '';
   let out = esc(s);
@@ -60,6 +61,7 @@ export function inline(s, lang) {
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, href) => `<a href="${href}">${t}</a>`);
   out = out.replace(/\{\{tbd:(q\d+):([^}]*)\}\}/g, (m, q, t) => `<span class="tbd" data-q="${q}" title="Решение владельца: вопрос ${q.slice(1)}">${t}</span>`);
   out = out.replace(/\{\{rel:([^}]*)\}\}/g, (m, t) => `<span class="rel" data-sample title="Подставляется из сборки выпуска">${t}</span>`);
+  out = out.replace(/\{\{unv:([^}]*)\}\}/g, (m, t) => `<span class="unv" data-unv title="${lang === 'en' ? 'Not confirmed by the code or a measurement' : 'Не подтверждено кодом или измерением'}"><b>${lang === 'en' ? 'Unconfirmed' : 'Не подтверждено'}:</b> ${t}</span>`);
   out = out.replace(/\{\{nb:([^}]*)\}\}/g, (m, t) => `<span style="white-space:nowrap">${t}</span>`);
   return lang ? typo(out, lang) : out;
 }
@@ -69,7 +71,7 @@ export function plain(s) {
   if (s == null) return '';
   return String(s)
     .replace(/\{\{name\}\}/g, product.name).replace(/\{\{domain\}\}/g, product.domain)
-    .replace(/\{\{tbd:q\d+:([^}]*)\}\}/g, '$1').replace(/\{\{rel:([^}]*)\}\}/g, '$1').replace(/\{\{nb:([^}]*)\}\}/g, '$1')
+    .replace(/\{\{tbd:q\d+:([^}]*)\}\}/g, '$1').replace(/\{\{rel:([^}]*)\}\}/g, '$1').replace(/\{\{unv:([^}]*)\}\}/g, '$1').replace(/\{\{nb:([^}]*)\}\}/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
 }
 
@@ -104,15 +106,17 @@ export function markdown(src, lang, { icon } = {}) {
       out.push(codeBlock(body.join('\n'), label, lang));
       continue;
     }
-    if ((m = t.match(/^:::\s*(note|warn|accent|danger)\s*$/))) {
+    if ((m = t.match(/^:::\s*(note|warn|accent|danger|unv)\s*$/))) {
       flushPara(para); para = [];
       const kind = m[1];
       const body = [];
       i++;
       while (i < lines.length && lines[i].trim() !== ':::') { body.push(lines[i]); i++; }
       i++;
-      const ic = { note: 'infoCircle', warn: 'exclamationTriangle', accent: 'infoCircle', danger: 'exclamationTriangle' }[kind];
-      out.push(`<div class="note ${kind === 'note' ? '' : kind}">${icon ? icon(ic, 18) : ''}<div>${markdown(body.join('\n'), lang, { icon })}</div></div>`);
+      const ic = { note: 'infoCircle', warn: 'exclamationTriangle', accent: 'infoCircle', danger: 'exclamationTriangle', unv: 'exclamationTriangle' }[kind];
+      // unv: in the documentation, behaviour neither the code nor a measurement confirms — said so, not guessed
+      const head = kind === 'unv' ? `<p class="unv-head">${lang === 'en' ? 'Unconfirmed' : 'Не подтверждено'}</p>` : '';
+      out.push(`<div class="note ${kind === 'note' ? '' : kind}"${kind === 'unv' ? ' data-unv' : ''}>${icon ? icon(ic, 18) : ''}<div>${head}${markdown(body.join('\n'), lang, { icon })}</div></div>`);
       continue;
     }
     if (t.startsWith('|')) {

@@ -53,6 +53,15 @@ export const FACTS = [
   { value: ['5', '1'], what: 'мест: Команда — 5, Личный и Профессиональный — 1', source: 'решение владельца, вопрос 2' },
   { value: ['7', '3'], what: 'пробный период: 7 дней, до 3 профилей', source: 'решение владельца, вопрос 3' },
   { value: ['14', '7'], what: 'возврат: 14 дней с первой оплаты, 7 дней после продления', source: 'решение владельца, вопрос 10' },
+  // The documentation (docs-*.html), from the browser's code at 194828b and docs/SCALE.md; every source in
+  // design/site/docs-sources/<article>.md
+  { value: ['27', '26.1'], what: 'Safari 27 и macOS 27 (вид iPhone, раннеры CI); iOS 26.1 и новее (замороженный токен ОС)', source: 'Sources/BrowserCore/…/DeviceGeneration.swift:23-24, 128-138 (gen.ios27); docs/SCALE.md (раннеры macOS 26.6.2 и 27.0.1); docs/ISOLATION_AND_LIMITATIONS.md:304-308' },
+  { value: ['390', '844', '820', '1180'], what: 'окно мобильного вида, пунктов: iPhone 390 × 844, iPad 820 × 1180', source: 'PrivacyScripts.swift:101-102 (CGSize(width: 390, height: 844), CGSize(width: 820, height: 1180))' },
+  { value: '4096', what: 'байт — предел имени и значения одного cookie при импорте', source: 'CookieImport.swift:148-149, 375; cookies.reason.tooLarge; Tests/…/CookieImportTests.swift:253' },
+  { value: ['30', '6'], what: '«Остановить» и выход ждут процесс профиля 30 секунд; системный журнал в диагностике — за 30 минут; обновления проверяются каждые 6 часов', source: 'ProfileManager.swift:770 (waitUntilExit(timeout: 30)); диагностика: 30 минут системного журнала (docs-sources/docs-trouble.md); AppUpdater.swift:125-128 (interval = 6 * 3600)' },
+  { value: ['6', '12', '150', '3', '7'], what: 'профиль — от 6 до 12 процессов и около 150 МБ; машина замеров CI — 3 процессора, 7 ГБ', source: 'docs/SCALE.md:43, 79-84, 148-151' },
+  { value: ['10–40', '40', '5–9', '9', '6–35', '35', '5,1–13,6', '5.1–13.6', '5,1', '5.1', '13,6', '13.6', '13'], what: 'замеры запуска и остановки: десять профилей стартуют за 10–40 с; остановка — 5–9 с до десяти, 6–35 с для двадцати-тридцати; выход с десятью — 5,1–13,6 с', source: 'docs/SCALE.md:35-38, 123, 125-127, 133-141' },
+  { value: '10', what: 'минут ждёт установщик обновления, пока приложение закроется', source: 'Installer.swift:42 (patience: 600); docs/UPDATES.md:75, 207-208' },
   // Dates and conventions
   { value: ['2026', '29'], what: 'даты прогонов и изменений: 29 октября 2026; год в подвале', source: 'git log (все изменения ветки — 2026-10-29); CI #385, #388' },
   { value: '26', what: 'дата статьи о шуме: 26 октября 2026', source: 'README: «Fingerprint note (2026-10-26)»' },

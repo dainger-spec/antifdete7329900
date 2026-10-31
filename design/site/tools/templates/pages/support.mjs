@@ -13,7 +13,7 @@ export default function support(c, { lang }) {
   const t = c.topics;
   const topics = `<section class="section"><div class="container">
     <h2 class="h3" style="margin-bottom:24px">${inline(t.title, lang)}</h2>
-    <div class="grid c4">${t.items.map((i) => `<a class="card card-link reveal" href="docs-import-cookies.html"><span class="tile-icon neutral">${icon(i.icon, 18)}</span><h3 class="h4">${inline(i.t, lang)}</h3><p>${inline(i.d, lang)}</p></a>`).join('')}</div>
+    <div class="grid c4">${t.items.map((i) => `<a class="card card-link reveal" href="${i.href}.html"><span class="tile-icon neutral">${icon(i.icon, 18)}</span><h3 class="h4">${inline(i.t, lang)}</h3><p>${inline(i.d, lang)}</p></a>`).join('')}</div>
   </div></section>`;
 
   const f = c.form;

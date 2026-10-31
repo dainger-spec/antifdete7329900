@@ -4,7 +4,7 @@
 
 Window title: Docs — Lumen
 
-Search description: Lumen documentation: installing, profiles, proxies, language and time zone, profile data, warm-up, security and verification.
+Search description: Lumen documentation: installing and the first launch, the vault and the master password, updates, profiles, mobile profiles, proxies, cookies, several profiles at once, and what to do when something fails.
 
 ---
 
@@ -12,72 +12,40 @@ Docs
 
 # Using Lumen
 
-From installing to warm-up and sync. Every article describes what the app has — in the words on its own buttons.
+From installing to working with several profiles. Every article describes what the app has — in the words on its own buttons. Where behaviour isn’t confirmed by the code or a measurement, the article says so.
 
 /
 
 Read most often:
 
-- Importing cookies
+- Installing and the first launch
 
-- If a profile does not start
+- Proxies: setup, and when one fails
 
-- The proxy list: importing and checking
+- Importing and exporting cookies
 
-- If you forgot the master password
+- When something fails
 
 ## Getting started
 
 - Installing and the first launch
-- The master password
-- Your first profile
-- Moving to another Mac
+- The vault and the master password
+- Updates
 
 ## Profiles
 
-- Creating and setting up a profile
-- Ephemeral profiles
+- Creating a profile
 - Several profiles at once
-- Exporting and importing a profile
+- Mobile profiles
 
 ## Proxies
 
-- A proxy for a profile
-- The proxy list: importing and checking
-- One proxy for many profiles, or in turn
-- If a profile does not start
-
-## Language, time and place
-
-- Language and region from the proxy’s country
-- Time zone
-- Geolocation
-- WebRTC
+- Proxies: setup, and when one fails
 
 ## Profile data
 
-- Importing cookies
-- Exporting cookies
-- Passwords and AutoFill
-- History and bookmarks
-- Sync between Macs
+- Importing and exporting cookies
 
-## Warm-up
+## When something is wrong
 
-- Ready-made lists and lists put together for you
-- Time and thoroughness
-- The queue and the schedule
-- The warm-up report
-
-## Security
-
-- How data is encrypted
-- What the server sees
-- If you forgot the master password
-- Locking and quitting
-
-## Verification
-
-- Checking a proxy yourself
-- Compared with Safari
-- Build reports
+- When something fails
