@@ -266,9 +266,10 @@ final class ProfileManager: ObservableObject {
             }
         }
         if ContentRules.needed(by: stored) { await ContentRules.prepare() }
+        var restored = WebDataStoreVault.Restored.nothing
         if !stored.ephemeral {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
-            try await webDataVault.prepareForLaunch(profileID: id, key: key)
+            restored = try await webDataVault.prepareForLaunch(profileID: id, key: key)
         }
         // The proxy's time zone and language should apply from the first page: the launch waits
         // a little for the lookup (briefly when a location is remembered for this proxy, which is
@@ -317,7 +318,7 @@ final class ProfileManager: ObservableObject {
         }
         // Synced cookies, and cookies imported while the profile was stopped: into its store
         // before the first page loads.
-        await prepareCookies(of: id, summary: summary, syncs: stored.syncsCookies, session: session)
+        await prepareCookies(of: id, summary: summary, syncs: stored.syncsCookies, storeRestored: restored != .nothing, session: session)
         // Attribution reports a page set up before Private Click Measurement was off for proxied
         // profiles would still be sent by WebKit, later, outside the page's session: removed.
         if configuration.proxy != nil, let store = session.dataStore {
@@ -1085,10 +1086,12 @@ final class ProfileManager: ObservableObject {
     /// it was last recorded (a run that ended without a stop) is recorded as changes of that
     /// time, the earliest they can be — with nothing recorded yet (sync just turned on), as old
     /// as can be: they fill in what the synced cookies lack, and any synced change wins over
-    /// them. Then the document (with what sync brought from the other devices) is applied to the
-    /// store, then the cookies imported while the profile was stopped go in and are recorded as
-    /// changes of now. With sync off, the profile keeps no synced cookies (`clearSyncedCookies`).
-    private func prepareCookies(of id: UUID, summary: ProfileSummary, syncs: Bool, session: BrowserSession) async {
+    /// them — unless the store came up with nothing (`storeRestored` false: no archive, no
+    /// plaintext), which is not every cookie deleted (CookieJarDocument.atLaunch). Then the
+    /// document (with what sync brought from the other devices) is applied to the store, then the
+    /// cookies imported while the profile was stopped go in and are recorded as changes of now.
+    /// With sync off, the profile keeps no synced cookies (`clearSyncedCookies`).
+    private func prepareCookies(of id: UUID, summary: ProfileSummary, syncs: Bool, storeRestored: Bool, session: BrowserSession) async {
         guard syncs else {
             try? repository.clearSyncedCookies(for: id)
             await applyQueuedCookies(of: id, name: summary.name, to: session)
@@ -1099,8 +1102,9 @@ final class ProfileManager: ObservableObject {
         do {
             let loaded = try repository.cookieJar(for: id)
             let baseline = try repository.cookieBaseline(for: id)
-            let jar = loaded.recording(store: await CookieStoreSync.persistentCookies(in: store), baseline: baseline.cookies,
-                                       at: baseline.savedAt)
+            // A store that came up with nothing (its website data lost) records no deletions.
+            let jar = loaded.atLaunch(store: await CookieStoreSync.persistentCookies(in: store), baseline: baseline,
+                                      storeRestored: storeRestored)
             let applied = await CookieStoreSync.apply(jar, to: store)
             log.notice("Synced cookies at launch: \(applied.set) set, \(applied.deleted) deleted, \(applied.refused.count) refused")
             synced = (loaded, jar, await CookieStoreSync.persistentCookies(in: store))

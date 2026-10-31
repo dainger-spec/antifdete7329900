@@ -195,9 +195,21 @@ final class WebDataStoreVault {
 
     // MARK: Launch
 
+    /// What the profile's store comes up with at a launch (`prepareForLaunch`).
+    enum Restored: Equatable {
+        /// Plaintext an earlier run left (a crash): used as it is.
+        case residue
+        /// The archive, decrypted.
+        case archive
+        /// Neither: the store starts empty (a profile that never stored anything — or whose
+        /// archive is gone; its synced cookies are then not recorded as deleted, CookieJarDocument.atLaunch).
+        case nothing
+    }
+
     /// Decrypts the profile's archived WebKit data into WebKit's directories.
     /// Must be called before the profile's `WKWebsiteDataStore` is created.
-    func prepareForLaunch(profileID: UUID, key: SymmetricKey) async throws {
+    @discardableResult
+    func prepareForLaunch(profileID: UUID, key: SymmetricKey) async throws -> Restored {
         let layout = Self.layout
         try discardResidueAfterForcedSeal(profileID: profileID)
         let residue = layout.discoverDirectories(for: profileID)
@@ -205,15 +217,16 @@ final class WebDataStoreVault {
             // Leftover plaintext from a crash. It is newer than the archive (it was produced
             // by unsealing that archive and then browsing), so keep it; the next stop seals it.
             log.notice("Using unsealed WebKit data left by a previous run for profile \(profileID.uuidString, privacy: .public)")
-            return
+            return .residue
         }
         let archive = repository.webDataArchiveURL(for: profileID)
-        guard FileManager.default.fileExists(atPath: archive.path) else { return }
+        guard FileManager.default.fileExists(atPath: archive.path) else { return .nothing }
         _ = try await Task.detached(priority: .userInitiated) {
             try EncryptedDirectoryArchive.unseal(from: archive, key: key) { label in
                 try layout.destination(forLabel: label, profileID: profileID)
             }
         }.value
+        return .archive
     }
 
     // MARK: Stop

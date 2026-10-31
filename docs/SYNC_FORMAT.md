@@ -225,7 +225,10 @@ document. Changes are the difference between the store and that baseline:
      without a stop) is recorded as changes of the baseline's time, the earliest they can
      be. With no baseline yet (cookie sync just turned on, or the first launch on this Mac),
      the store's cookies are recorded as changes of the earliest possible time: they fill in
-     what the document lacks, and any synced change wins over them;
+     what the document lacks, and any synced change wins over them. A store that came up with
+     nothing — no website data archive and no plaintext an earlier run left: the data lost — records
+     nothing: it is not every cookie deleted (which took them out of the document and, through
+     sync, off every other device), and step 2 puts the document's cookies back;
   2. the document — with what sync merged in from the other devices — is applied to the
      store: its cookies set where the store has none or another version, its deletions
      deleted; store cookies the document does not know are left alone. A cookie WebKit
