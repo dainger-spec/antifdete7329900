@@ -82,6 +82,9 @@ final class ProfileManager: ObservableObject {
     /// Profiles running in their own process (`ProfileProcess`, off unless asked for). A profile is
     /// in this or in `sessions`, never both.
     private var children: [UUID: ProfileProcess] = [:]
+    /// The profiles whose own process has said its window is up (`.running`), and who waits for that.
+    private var windowsUp: Set<UUID> = []
+    private var windowWaiters: [UUID: [CheckedContinuation<Bool, Never>]] = [:]
     /// Profile keys are held only while the profile runs (needed to seal on stop).
     private var keys: [UUID: SymmetricKey] = [:]
     /// The password vault a launch opened, until its session holds it (`passwordVault(for:)`).
@@ -145,6 +148,26 @@ final class ProfileManager: ObservableObject {
     var hasActivity: Bool { !sessions.isEmpty || !children.isEmpty || !busyProfileIDs.isEmpty }
 
     func isRunning(_ id: UUID) -> Bool { sessions[id] != nil || children[id] != nil }
+
+    /// Whether `id`'s window is up: at once for a profile run in this process, whose launch returns
+    /// with its window; for one in a process of its own, once that process says so — false when it
+    /// ends first, or after `seconds` (the selection's Launch, `LaunchQueue`).
+    func waitForWindow(_ id: UUID, seconds: Double) async -> Bool {
+        guard children[id] != nil else { return sessions[id] != nil }
+        if windowsUp.contains(id) { return true }
+        return await withCheckedContinuation { continuation in
+            windowWaiters[id, default: []].append(continuation)
+            // Held until then, so that a wait always ends.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                self.resumeWindowWaiters(of: id, up: false)
+            }
+        }
+    }
+
+    private func resumeWindowWaiters(of id: UUID, up: Bool) {
+        for waiter in windowWaiters.removeValue(forKey: id) ?? [] { waiter.resume(returning: up) }
+    }
 
     // MARK: Launch
 
@@ -373,6 +396,8 @@ final class ProfileManager: ObservableObject {
             case .error(let message):
                 self.onError?(message)
             case .running(let hostsSafariChrome):
+                self.windowsUp.insert(id)
+                self.resumeWindowWaiters(of: id, up: true)
                 self.onProfileRunning?(id, hostsSafariChrome)
                 self.objectWillChange.send()
             case .warmUp(let status):
@@ -421,6 +446,8 @@ final class ProfileManager: ObservableObject {
             self.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.children[id] = nil
+            self.windowsUp.remove(id)
+            self.resumeWindowWaiters(of: id, up: false)
             self.runningProfileIDs.remove(id)
             // Sealing on its own (`.sealing`) ends with the process.
             self.busyProfileIDs.remove(id)
@@ -447,6 +474,7 @@ final class ProfileManager: ObservableObject {
             self.onChildExited?(id, status)
         }
         children[id] = child
+        windowsUp.remove(id)
         runningProfileIDs.insert(id)
         try? repository.markLaunched(id)
         // The app's settings for browsing, before anything else is asked of it.
@@ -731,6 +759,8 @@ final class ProfileManager: ObservableObject {
     func stop(_ id: UUID) async throws {
         if let child = children.removeValue(forKey: id) {
             runningProfileIDs.remove(id)
+            windowsUp.remove(id)
+            resumeWindowWaiters(of: id, up: false)
             busyProfileIDs.insert(id)
             defer { busyProfileIDs.remove(id) }
             // Its own quit path seals the WebKit data; this returns when that finished, and then
