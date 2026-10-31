@@ -458,6 +458,7 @@ Sources/
   pbupdate/                        makes and checks the update feed: keys, a release's signature, the appcast
   UpdateInstaller/                 macOS: replaces the app with a checked release (code signature, processes, the swap)
   PrivacyBrowserUpdater/           macOS: the installer helper the app starts at the end of a quit
+  ObjCExceptions/                  macOS: PBCatchException, an Objective-C @try for Safari's code called from Swift tasks
   PrivacyBrowser/                  macOS app (SwiftUI + AppKit + WebKit)
     App/                           main.swift, PrivacyBrowserApp, AppModel (+Proxies), ProxyListModel, AppEnvironment,
                                    SelfTest, SiteCapture, WarmUpCoordinator (warm-up queue and schedule)
