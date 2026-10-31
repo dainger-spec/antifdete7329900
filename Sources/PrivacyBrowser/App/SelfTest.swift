@@ -686,6 +686,30 @@ final class SelfTest {
     }
 
     /// A preferences file's keys and when it was written, as one line (or "absent"), read as a file.
+    /// The real Safari's own preferences, as `defaults export com.apple.Safari` reads them through
+    /// cfprefsd — from Safari's container where it has one; nil when they cannot be read.
+    private static func realSafariDomain() -> [String: Any]? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        process.arguments = ["export", "com.apple.Safari", "-"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+    }
+
+    /// The keys whose values differ between two readings of a domain, added and removed ones too.
+    private static func changedKeys(_ before: [String: Any], _ after: [String: Any]) -> [String] {
+        Set(before.keys).union(after.keys).filter { key in
+            guard let old = before[key], let new = after[key] else { return true }
+            return !(old as AnyObject).isEqual(new)
+        }.sorted()
+    }
+
     private static func preferencesFileState(_ path: String) -> String {
         guard let data = FileManager.default.contents(atPath: path),
               let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] else {
@@ -1057,6 +1081,21 @@ final class SelfTest {
         // a profile's settings for Safari's services stay in its process (SafariChrome).
         let accountSafariPreferences = SafariPaths.realHome.map { $0 + "/Library/Preferences/com.apple.Safari.plist" }
         let accountSafariBefore = accountSafariPreferences.map(Self.preferencesFileState)
+        // And the real Safari's own preferences, as cfprefsd gives them (its container): Safari's
+        // code in the profile's process names that domain by its path (SafariPaths).
+        let safariDomainBefore = Self.realSafariDomain()
+        if let realHome = SafariPaths.realHome {
+            let home = "/private/tmp/pb-selftest-profile-home"
+            let container = realHome + "/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist"
+            let moved = SafariPaths.profileSuite(for: container, realHome: realHome, home: home)
+            check("Safari's places: a defaults suite named by the real Safari's container plist is the profile's, in its home",
+                  moved == home + "/" + SafariPaths.defaultsFolder + "/Library_Containers_com.apple.Safari_Data_Library_Preferences_com.apple.Safari.plist",
+                  moved ?? "nil")
+            let others = [realHome + "/Library/Preferences/com.apple.finder", "com.apple.Safari", home + "/Library/Safari/x.plist",
+                          "/Library/Preferences/com.apple.Safari"]
+            let moving = others.filter { SafariPaths.profileSuite(for: $0, realHome: realHome, home: home) != nil }
+            check("Safari's places: a suite named otherwise stays as it is", moving.isEmpty, moving.joined(separator: ", "))
+        }
         // The XPC services that start while the profile runs, and what they hold open in the real
         // Safari's places: the profile's guard does not see a service asked for through libxpc.
         let xpcWatch = SafariPaths.realHome.map { XPCServiceWatch(realHome: $0) }
@@ -1211,6 +1250,13 @@ final class SelfTest {
             check("Safari chrome: the profile's settings for Safari's services stay in its process — the account's ~/Library/Preferences/com.apple.Safari.plist is not written",
                   accountSafariAfter == accountSafariBefore,
                   "before: \(accountSafariBefore ?? "?"), now: \(accountSafariAfter ?? "?")")
+            if let before = safariDomainBefore, let after = Self.realSafariDomain() {
+                let changed = Self.changedKeys(before, after)
+                check("Safari chrome: the real Safari's own preferences (its container, through cfprefsd) are as they were",
+                      changed.isEmpty, changed.joined(separator: ", "))
+            } else {
+                info("Safari chrome: the real Safari's own preferences could not be read (defaults export com.apple.Safari)")
+            }
             info("Safari chrome: WebKit \(report.webKitVersion)")
             // The preference decides dns-prefetch only before WebKit 7621; from then on the
             // content rules do (checked above with <a ping>), so this is a check only there.

@@ -71,6 +71,10 @@ enum ProfileSessionHost {
         // of the one that started this) must not seal it from under it.
         if let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] {
             SafariHomeVault.holdWhileRunning(home: URL(fileURLWithPath: home, isDirectory: true))
+            // A preferences domain named by a path in the real Safari's places is the profile's.
+            if let realHome = SafariPaths.realHome {
+                SafariPaths.redirectDefaultsSuites(from: realHome, to: home)
+            }
         }
         // A web view that turns out not to be on the profile's data loads nothing (the guard's
         // second lock); the user is told why the page did not open.
@@ -194,6 +198,8 @@ enum ProfileSessionHost {
                 willSeal: {
                     ProfileSessionHost.send(.sealing)
                     SafariChromeHost.closeEveryWindow()
+                    // Safari's domains kept in the home (SafariPaths), in their files before the seal.
+                    SafariPaths.saveRedirectedSuites()
                 },
                 terminate: { NSApp.terminate(nil) })
             Task { @MainActor in

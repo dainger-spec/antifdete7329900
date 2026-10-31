@@ -20,6 +20,10 @@ import os
 ///      of the real one for anything under the real ~/Library (`redirectGetters`).
 ///   2. The kernel refuses the process any read or write in the real Safari's places
 ///      (`ProfileNetworkGuard`), so a path found some other way fails instead of reaching them.
+///
+/// Preferences are cfprefsd's to write, not the process's, and the kernel's refusal does not reach
+/// them: a preferences domain named by a path in the real Safari's places is the profile's, in its
+/// home (`redirectDefaultsSuites`).
 enum SafariPaths {
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "SafariPaths")
 
@@ -104,6 +108,91 @@ enum SafariPaths {
         method_setImplementation(method, imp_implementationWithBlock(replacement))
         let kind = class_isMetaClass(owner) ? "+" : "-"
         redirected.append("\(kind)[\(NSStringFromClass(owner)) \(NSStringFromSelector(selector))]")
+    }
+
+    /// Every `NSUserDefaults` suite named by a path in the real Safari's places is the profile's
+    /// (`profileSuite`), whoever makes it, from here on in this process. Safari's code names the real
+    /// Safari's container plist so — the search provider's keys, the start page's sections and some
+    /// ten more, written through it in a profile's process (CI run 496) — and the kernel's refusal
+    /// of those places (`sandboxFilter`) covers this process's own file calls, not cfprefsd, which
+    /// writes a domain for it: a write through that path from a process made like a profile's reached
+    /// the real Safari's container, `defaults read com.apple.Safari` and the real Safari's next launch
+    /// (run 503). Runs before Safari's frameworks load.
+    static func redirectDefaultsSuites(from realHome: String, to home: String) {
+        guard !suitesRedirected, realHome != home else { return }
+        suitesRedirected = true
+        try? FileManager.default.createDirectory(atPath: home + "/" + defaultsFolder, withIntermediateDirectories: true)
+        typealias WithSuite = @convention(c) (AnyObject, Selector, NSString?) -> Unmanaged<AnyObject>?
+        let withSuite = NSSelectorFromString("initWithSuiteName:")
+        if let method = class_getInstanceMethod(UserDefaults.self, withSuite) {
+            let original = unsafeBitCast(method_getImplementation(method), to: WithSuite.self)
+            let replacement: @convention(block) (AnyObject, NSString?) -> Unmanaged<AnyObject>? = { receiver, suite in
+                let moved = suite.flatMap { profileSuite(for: $0 as String, realHome: realHome, home: home) }
+                if let moved { remember(moved) }
+                return original(receiver, withSuite, moved.map { $0 as NSString } ?? suite)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+        // The one Foundation's own initializers go through, with a container.
+        typealias WithSuiteAndContainer = @convention(c) (AnyObject, Selector, NSString?, NSURL?) -> Unmanaged<AnyObject>?
+        let withContainer = NSSelectorFromString("_initWithSuiteName:container:")
+        if let method = class_getInstanceMethod(UserDefaults.self, withContainer) {
+            let original = unsafeBitCast(method_getImplementation(method), to: WithSuiteAndContainer.self)
+            let replacement: @convention(block) (AnyObject, NSString?, NSURL?) -> Unmanaged<AnyObject>? = { receiver, suite, container in
+                let moved = suite.flatMap { profileSuite(for: $0 as String, realHome: realHome, home: home) }
+                if let moved { remember(moved) }
+                return original(receiver, withContainer, moved.map { $0 as NSString } ?? suite, container)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+    }
+
+    private static var suitesRedirected = false
+    private static let suitesLock = NSLock()
+    private static var suites = Set<String>()
+
+    private static func remember(_ suite: String) {
+        suitesLock.lock()
+        let first = suites.insert(suite).inserted
+        suitesLock.unlock()
+        if first { log.notice("A defaults suite in the real Safari's places is the profile's, in its home") }
+    }
+
+    /// The profile's domains `redirectDefaultsSuites` named, written out by this process into its
+    /// home before the home is sealed: cfprefsd writes a domain's file a moment after a synchronize
+    /// (CI run 488 read one just after: the change was not in it yet).
+    static func saveRedirectedSuites() {
+        suitesLock.lock()
+        let named = suites
+        suitesLock.unlock()
+        for path in named {
+            let domain = path as CFString
+            CFPreferencesAppSynchronize(domain)
+            guard let keys = CFPreferencesCopyKeyList(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? [String],
+                  !keys.isEmpty,
+                  let values = CFPreferencesCopyMultiple(keys as CFArray, domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? [String: Any],
+                  let data = try? PropertyListSerialization.data(fromPropertyList: values, format: .binary, options: 0) else { continue }
+            let file = path.hasSuffix(".plist") ? path : path + ".plist"
+            do {
+                try data.write(to: URL(fileURLWithPath: file), options: .atomic)
+            } catch {
+                log.error("A domain of Safari's kept in the profile's home could not be written before the seal: \(error.logKind, privacy: .public)")
+            }
+        }
+    }
+
+    /// Where a profile keeps the domains named by a path in the real Safari's places, under its home.
+    static let defaultsFolder = "Library/PrivacyBrowser/Defaults"
+
+    /// The profile's own domain for a suite named by `suite`: nil for one outside the real Safari's
+    /// places; for one in them, a file under the profile's home named after the real one — in a
+    /// folder that is not a Library/Preferences one, where cfprefsd keeps a domain named by a path
+    /// as named (run 503: one under a home's Library/Preferences was taken for the account's own
+    /// domain of its name).
+    static func profileSuite(for suite: String, realHome: String, home: String) -> String? {
+        guard suite.hasPrefix("/"), !suite.hasPrefix(home + "/"), isRealSafariPlace(suite, realHome: realHome) else { return nil }
+        let name = suite.dropFirst(realHome.count + 1).replacingOccurrences(of: "/", with: "_")
+        return home + "/" + defaultsFolder + "/" + name
     }
 
     /// Whether `path` is in the real Safari's places — `sandboxFilter`'s, as a test of one path (the

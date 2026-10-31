@@ -37,6 +37,9 @@ Bookmarks, Window — are filled first):
    extensions, whoever asked for them), and the files written while it ran — in the profile's
    vault and home, in the real Safari's places, anywhere else in the account's home (minus
    macOS's own records of what any application does, such as Biome's record of menu use);
+   and, for the walk as a whole, the real Safari's own preferences read before and after
+   (`defaults export com.apple.Safari`, with sentinels set first on CI's runners): cfprefsd writes
+   them through a directory descriptor, which the file trace does not name;
 8. then back to where it began: what it opened is closed, the app shown, nothing minimized or
    full screen. Toggles an item made (a hidden toolbar, a zoom) stay for the items after it.
 

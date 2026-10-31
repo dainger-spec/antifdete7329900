@@ -160,8 +160,9 @@ jobs:
         # What each item of the menu bar does there: a crash, an exception, a window, a panel, a
         # request to open something outside, a service started, a write in the real Safari's places
         # (scripts/menu_walk.py), compared with docs/menu-walk/safari-<major>.json: an item that does
-        # something else, or a write in the real Safari's places by the profile, fails the step,
-        # not the job.
+        # something else, or a write in the real Safari's places by the profile — in the file trace,
+        # or in the real Safari's own preferences, read before and after with sentinels set
+        # (cfprefsd's writes are not in the trace) — fails the step, not the job.
         if: always()
         continue-on-error: true
         timeout-minutes: 30
@@ -169,7 +170,7 @@ jobs:
           major="$(defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString | cut -d. -f1)"
           python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/egress27/menu-walk \
             --title "macOS 27 - Safari's menu" --record "docs/menu-walk/safari-$major.json" --check \
-            --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners"
+            --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners" --safari-sentinels
       - name: Safari 27's question about the default browser — as built, and declared a browser (a measurement)
         if: always()
         continue-on-error: true
@@ -398,15 +399,17 @@ jobs:
         # request to open something outside, a service started, a write in the real Safari's places
         # (scripts/menu_walk.py), compared with docs/menu-walk/safari-<major>.json: a walk that does
         # not get to the end, an item that does something else, or a write in the real Safari's
-        # places by the profile fails the build. A Safari with no record yet (a new major version)
-        # only writes one, into the run's artifact.
+        # places by the profile — in the file trace, or in the real Safari's own preferences, read
+        # before and after with sentinels set (cfprefsd's writes are not in the trace) — fails the
+        # build. A Safari with no record yet (a new major version) only writes one, into the run's
+        # artifact.
         if: always()
         timeout-minutes: 30
         run: |
           major="$(defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString | cut -d. -f1)"
           python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/menu-walk \
             --title "Safari's menu" --record "docs/menu-walk/safari-$major.json" --check \
-            --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners"
+            --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners" --safari-sentinels
       - uses: actions/upload-artifact@v4
         if: always()
         with:

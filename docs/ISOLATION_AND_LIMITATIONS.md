@@ -827,6 +827,28 @@ So nothing of a profile's that must stay its own is written to a domain:
   each that still holds a value a profile of the vault would have written is taken out
   (`SafariAccountPreferences`); one changed since, and every other key of the file, stays; the log
   says which went and which stayed. **Checked by the self-test**, on a domain of its own.
+- **Safari's code names the real Safari's container plist by its path.** In a profile's process it
+  writes some ten keys through an `NSUserDefaults` suite named by
+  `~/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist` — the
+  search provider's identifier and name (removed), the start page's sections, the Browsing
+  Assistant's consent, Reader's last use, the offline search model's state and others (CI run 496,
+  every write logged with the instance it went through). cfprefsd writes such a domain for the
+  process: the kernel's refusal of the real Safari's places covers the process's own file calls,
+  and its sandbox allows preference writes. A write through that path from a process made like a
+  profile's reached the real Safari — its container's file, `defaults read com.apple.Safari`, and a
+  home page its next launch opened (run 503, macOS 26 and 27, measurement branch
+  `claude/measure-safari-container`). Every suite named by a path in the real Safari's places is the
+  profile's now (`SafariPaths.redirectDefaultsSuites`, before Safari's frameworks load): a file of
+  the profile's home under `Library/PrivacyBrowser/Defaults`, written out by the process before the
+  home is sealed — a folder that is not a `Library/Preferences` one, where cfprefsd keeps a domain
+  named by a path as named (run 503: one under a home's `Library/Preferences` went to the account's
+  own domain of its name). The file-system trace does not see cfprefsd's writes there — it writes
+  through a directory descriptor, which fs_usage shows as a relative path — so the menu walk reads
+  the real Safari's own preferences before and after (`defaults export com.apple.Safari`), with
+  sentinels set first on CI's runners, and fails on any change; the self-test reads them around its
+  Safari-chrome profile, without sentinels. **Checked** both ways, and the self-test checks which
+  suites are moved. A domain Safari's code would reach with `CFPreferences` and a path, not through
+  `NSUserDefaults`, is not moved; the walk's reading would show what it wrote.
 - **Open:** what Safari's chrome saves through the standard defaults — its window's frame, its
   toolbar, sidebar and favorites bar, the start page's sections, some WebKit preferences it keeps,
   dates of its own updates — goes to this app's own domain, `~/Library/Preferences/<bundle id>.plist`
