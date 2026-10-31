@@ -827,6 +827,24 @@ So nothing of a profile's that must stay its own is written to a domain:
   each that still holds a value a profile of the vault would have written is taken out
   (`SafariAccountPreferences`); one changed since, and every other key of the file, stays; the log
   says which went and which stayed. **Checked by the self-test**, on a domain of its own.
+- **Safari's code names the real Safari's container plist by its path.** In a profile's process it
+  writes some ten keys through an `NSUserDefaults` suite named by
+  `~/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist` — the
+  search provider's identifier and name (removed), the start page's sections, the Browsing
+  Assistant's consent, Reader's last use, the offline search model's state and others (CI run 496,
+  every write logged with the instance it went through). Such a write is cfprefsd's to make, not
+  the process's: from a process like a profile's but without its sandbox, it reached the real
+  Safari — its container's file, `defaults read com.apple.Safari`, and a home page its next launch
+  opened (run 503, macOS 26 and 27, measurement branch `claude/measure-safari-container`). From a
+  profile's process it did not: the menu walk left the real Safari's own preferences as they were,
+  sentinels set in them first — the search provider's two keys among them — kept (run 504, macOS 26
+  and 27, `claude/measure-container-walk`). Most likely cfprefsd asks the sandboxed process's
+  sandbox whether it may write that file, and the kernel's refusal of the real Safari's places
+  answers no; that is not measured. The file-system trace sees neither: cfprefsd writes through a
+  directory descriptor, which fs_usage shows as a relative path. So the menu walk reads the real
+  Safari's own preferences before and after (`defaults export com.apple.Safari`), with sentinels
+  set first on CI's runners, and fails on any change; the self-test reads them around its
+  Safari-chrome profile, without sentinels. Both skip the comparison while the real Safari runs.
 - **Open:** what Safari's chrome saves through the standard defaults — its window's frame, its
   toolbar, sidebar and favorites bar, the start page's sections, some WebKit preferences it keeps,
   dates of its own updates — goes to this app's own domain, `~/Library/Preferences/<bundle id>.plist`

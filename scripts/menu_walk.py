@@ -31,6 +31,7 @@ import argparse
 import glob
 import json
 import os
+import plistlib
 import re
 import socket
 import subprocess
@@ -203,6 +204,39 @@ def start_trace(out):
     return trace
 
 
+# Set in the real Safari's own preferences before the walk with --safari-sentinels (CI's runners
+# only): the search provider's keys, which Safari's code in a profile's process asks to remove through
+# a domain named by the real Safari's container plist (CI run 496; run 504: they were kept), and one
+# of our own.
+SAFARI_SENTINELS = {"SearchProviderIdentifier": "com.duckduckgo", "SearchProviderShortName": "DuckDuckGo",
+                    "PBMenuWalkSentinel": "kept"}
+
+
+def safari_domain():
+    """The real Safari's own preferences as `defaults export com.apple.Safari` reads them, through
+    cfprefsd — from Safari's container where it has one — and whether it has one; (None, …) when
+    they cannot be read. The file trace does not see cfprefsd's writes there: it writes through a
+    directory descriptor, which fs_usage shows as a relative path."""
+    container = os.path.isdir(os.path.expanduser("~/Library/Containers/com.apple.Safari"))
+    try:
+        data = subprocess.run(["defaults", "export", "com.apple.Safari", "-"], capture_output=True, timeout=30).stdout
+        return (plistlib.loads(data) if data else {}), container
+    except Exception:  # noqa: BLE001 - unreadable is said, not failed on
+        return None, container
+
+
+def safari_running():
+    """Whether the real Safari runs: its own writes to its domain would be counted as the profile's."""
+    return subprocess.run(["pgrep", "-x", "Safari"], capture_output=True).returncode == 0
+
+
+def domain_changes(before, after):
+    """The keys of the real Safari's domain added, removed or changed between two readings."""
+    return ([f"added {key}" for key in sorted(set(after) - set(before))]
+            + [f"removed {key}" for key in sorted(set(before) - set(after))]
+            + [f"changed {key}" for key in sorted(set(before) & set(after)) if before[key] != after[key]])
+
+
 def traced_writes(out):
     """The writes in the real Safari's places in out/fs.txt, as "process: path", and what the
     trace was (lines read, or why it is none)."""
@@ -279,6 +313,8 @@ def main():
     parser.add_argument("--check", action="store_true", help="fail when the walk differs from the record")
     parser.add_argument("--write-record", help="write this walk's reduction here")
     parser.add_argument("--ignore", default="", help="prefixes of files written by others, colon-separated")
+    parser.add_argument("--safari-sentinels", action="store_true",
+                        help="set sentinels in the real Safari's own preferences first (CI's runners only)")
     args = parser.parse_args()
     out = os.path.abspath(args.out)
     os.makedirs(out, exist_ok=True)
@@ -297,6 +333,12 @@ def main():
     environment = dict(os.environ, PRIVACYBROWSER_LANG="en", PB_MENU_WALK_IGNORE=args.ignore)
     if proxied:
         environment["PB_SELFTEST_HTTP_PROXY_PORT"] = str(PROXY_PORT)
+    if args.safari_sentinels:
+        for key, value in SAFARI_SENTINELS.items():
+            subprocess.run(["defaults", "write", "com.apple.Safari", key, "-string", value], capture_output=True)
+        time.sleep(2)
+    domain_before, container_before = safari_domain()
+    safari_ran = safari_running()
     trace = start_trace(out)
     started = time.time()
     with open(os.path.join(out, "walk.txt"), "w") as log:
@@ -314,6 +356,23 @@ def main():
     by_profile, traced = traced_writes(out)
     print(f"MENU-WALK file trace: {traced}; writes in the real Safari's places by the app's, WebKit's or cfprefsd's "
           f"processes: {len(by_profile)}", flush=True)
+    time.sleep(2)
+    domain_after, container_after = safari_domain()
+    if domain_before is None or domain_after is None:
+        domain_changed = []
+        print("MENU-WALK the real Safari's own preferences could not be read (defaults export com.apple.Safari)", flush=True)
+    elif safari_ran or safari_running():
+        domain_changed = []
+        print("MENU-WALK the real Safari runs: what it writes to its own preferences would be counted, so they are "
+              "not compared", flush=True)
+    else:
+        domain_changed = domain_changes(domain_before, domain_after)
+        if container_after and not container_before:
+            domain_changed.insert(0, "the real Safari's container was made")
+        print(f"MENU-WALK the real Safari's own preferences ({len(domain_after)} keys, "
+              f"{'its container' if container_after else 'no container'}"
+              f"{', sentinels set' if args.safari_sentinels else ''}): "
+              f"{'; '.join(domain_changed) if domain_changed else 'as they were'}", flush=True)
 
     items = []
     for line in output.splitlines():
@@ -364,6 +423,9 @@ def main():
     if by_profile:
         notice("error" if args.check else "warning", args.title,
                f"the profile wrote in the real Safari's places (fs_usage): " + " · ".join(by_profile[:8]))
+    if domain_changed:
+        notice("error" if args.check else "warning", args.title,
+               "the real Safari's own preferences changed during the walk: " + "; ".join(domain_changed[:20]))
 
     current = {name: reduce(item) for name, item in keyed(items).items()}
     if args.write_record or not args.record or not os.path.exists(args.record or ""):
@@ -374,7 +436,7 @@ def main():
     if refused_views > 1000:
         notice("error" if args.check else "warning", args.title,
                f"the profile's process asked {refused_views} times for a view whose service it is refused: a loop")
-    failed = args.check and (not finished or bool(by_profile) or refused_views > 1000)
+    failed = args.check and (not finished or bool(by_profile) or bool(domain_changed) or refused_views > 1000)
     if args.record and os.path.exists(args.record):
         with open(args.record) as handle:
             recorded = json.load(handle)
