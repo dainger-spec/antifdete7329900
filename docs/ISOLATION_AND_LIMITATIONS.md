@@ -168,7 +168,10 @@ for which the system does fetch — seen in every one): **clean with 14.0, 14.2 
 fetched with 15.0, 15.2, 15.4, 15.5, 26.1, 26.5, 26.6 and 27.0**, and with the switch. 26.5 is what
 a build made with Xcode 26 declares: such a build leaks on macOS 27. Builds made with Xcode 27
 declare 14.0 (its SwiftPM writes the deployment target), and `scripts/release.sh` refuses to release
-a build that declares 15.0 or newer. Of what WebKit turns on at 15.0 (WTF's
+a build that declares 15.0 or newer. CI's macOS 27 job fails the build when this Mac asks for the
+self-test's certificate canaries (`scripts/certificate_leak_check.py`), the one thing that job fails
+on: a change that had every build fetch (run 458, below) went through while it failed nothing. Of
+what WebKit turns on at 15.0 (WTF's
 `computeSDKAlignedBehaviors`), one thing is about the network: its network loader
 (`UseCFNetworkNetworkLoader`, `_usesNWLoader`); the capture names this app, not WebKit's network
 process, as the one the fetch was made for. How the loader comes to fetch, and so how to close it,

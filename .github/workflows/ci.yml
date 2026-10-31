@@ -40,25 +40,32 @@ jobs:
         run: python3 scripts/check_log_privacy.py
 
   macos-27:
-    name: macOS 27 — the self-test on the newest macOS (preview image, never fails the build)
+    name: macOS 27 — the self-test on the newest macOS (preview image; fails the build only on a certificate fetched outside the proxy)
     # GitHub's xcode-27 image runs macOS 27.0.1 with Safari 27.0.1 and Xcode 27 (its SDK): what a
     # user who updated has. The macOS job below (macos-26) is the one that gates the build; this one
-    # reports what changes on the next macOS before users meet it, and fails nothing.
+    # reports what changes on the next macOS before users meet it, and fails nothing but one thing:
+    # this Mac fetching for a certificate outside a profile's proxy (scripts/certificate_leak_check.py).
+    # Every other step goes on whatever it finds, and has a limit of its own, so that none can run
+    # the job out of its time.
     runs-on: xcode-27
-    continue-on-error: true
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - name: The machine
+        continue-on-error: true
         run: |
           sw_vers
           xcodebuild -version
           swift --version
           defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
       - name: Build the app without the App Sandbox (the build that runs profiles in Safari's window)
+        continue-on-error: true
+        timeout-minutes: 30
         run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: Self-test against WebKit 27 (unsandboxed), inside a capture of every packet leaving the machine
         id: selftest27
+        continue-on-error: true
+        timeout-minutes: 45
         run: |
           set -o pipefail
           python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
@@ -82,8 +89,19 @@ jobs:
             --selftest-log build/egress27/selftest.txt --tcpdump-errors build/egress27/tcpdump.err || status=1
           echo "::endgroup::"
           exit $status
+      - name: A certificate fetched for outside a profile's proxy on macOS 27 (fails the build)
+        # The self-test's AIA and OCSP canaries in its capture, its control seen; a run that cannot
+        # tell runs the certificate check again alone, with names of its own; still nothing to tell
+        # by fails too (scripts/certificate_leak_check.py). The one step of this job that fails it.
+        if: always()
+        timeout-minutes: 12
+        run: |
+          python3 scripts/certificate_leak_check.py --capture build/egress27/capture.txt \
+            --selftest-log build/egress27/selftest.txt --app build/unsandboxed/PrivacyBrowser.app \
+            --out build/egress27/certificate-leak
       - name: What failed on macOS 27, and the certificate checks
         if: always()
+        continue-on-error: true
         run: |
           log=build/egress27/selftest.txt
           grep -E '^(SELFTEST|INFO macOS|INFO WebKit [0-9])' $log 2>/dev/null | head -3 | sed 's/^/::notice title=macOS 27 self-test::/' || true
@@ -92,11 +110,13 @@ jobs:
           grep '^INFO XPC service' $log 2>/dev/null | head -6 | cut -c1-1500 | sed 's/^/::notice title=macOS 27 - XPC services::/' || true
       - name: The certificate checks on macOS 27
         if: always()
+        continue-on-error: true
         run: |
           grep -E '^(PASS|FAIL) certificates' build/egress27/selftest.txt 2>/dev/null | head -10 | cut -c1-1000 \
             | sed 's/^/::notice title=macOS 27 - certificates::/' || true
       - name: What crashed on macOS 27, if anything (crash reports)
         if: always()
+        continue-on-error: true
         run: |
           mkdir -p build/egress27/crashes
           shopt -s nullglob
@@ -109,6 +129,7 @@ jobs:
           grep '^CRASH' build/egress27/crashes/summary.txt | grep -v '^CRASH none' | head -16 | cut -c1-300 | sed 's/^/::warning title=macOS 27 - crash::/' || true
       - name: A jump to a fragment in a profile with a proxy (a measurement)
         if: always()
+        continue-on-error: true
         run: |
           grep '^INFO fragment jump' build/egress27/selftest.txt 2>/dev/null | head -8 | cut -c1-1000 \
             | sed 's/^/::notice title=macOS 27 - measured::/' || true
@@ -139,8 +160,8 @@ jobs:
         # What each item of the menu bar does there: a crash, an exception, a window, a panel, a
         # request to open something outside, a service started, a write in the real Safari's places
         # (scripts/menu_walk.py), compared with docs/menu-walk/safari-<major>.json: an item that does
-        # something else, or a write in the real Safari's places by the profile, fails the step.
-        # This job fails nothing.
+        # something else, or a write in the real Safari's places by the profile, fails the step,
+        # not the job.
         if: always()
         continue-on-error: true
         timeout-minutes: 30
@@ -208,6 +229,7 @@ jobs:
           exit 0
       - uses: actions/upload-artifact@v4
         if: always()
+        continue-on-error: true
         with:
           name: macos-27-selftest
           path: build/egress27
