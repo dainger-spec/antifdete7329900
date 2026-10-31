@@ -1087,6 +1087,11 @@ final class SelfTest {
         let started = await waitUntil(timeout: 90) { hostsChrome != nil }
         check("Safari chrome: the profile's own process started and reported its window",
               started, "no 'running' came back (the process may have died; see its own log)")
+        // What a selection's Launch waits for before it starts the next profile (LaunchQueue): the
+        // same word from the profile's process.
+        let windowSeen = await manager.waitForWindow(profile.id, seconds: 5)
+        check("Safari chrome: a selection's Launch sees the profile's window up once its process says so",
+              windowSeen || !started, "the process said its window was up; the manager's wait did not")
         check("Safari chrome: the window is Safari's own chrome", hostsChrome == true,
               "the profile opened our own window: this Mac would not host Safari's chrome")
 

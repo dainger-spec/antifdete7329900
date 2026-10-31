@@ -148,6 +148,7 @@ thirty first windows asked for at once were answered in minutes, while one to th
 for a refused view again as fast as they could (above, fixed since). **Memory** comes after: about 150 MB a profile on a
 nearly empty page, thirty in 4 to 5 GB (when all were up) without pressure on 7 GB; a real site adds
 what it adds in Safari, often hundreds of megabytes a tab, so with real pages memory is what bounds
-the number that can keep running. **Disk** and **our own code** are not near a limit. Starting a
-selection a few at a time, each after the window before it is up, would keep the first two out of
-the way (the owner's decision).
+the number that can keep running. **Disk** and **our own code** are not near a limit. The list's
+Launch now starts a selection four at a time, each next one when one of those has its window up
+(`LaunchQueue`, the owner's decision), which keeps the first two out of the way; the groups above are
+started all at once, as Launch did before, to measure what the Mac holds.
