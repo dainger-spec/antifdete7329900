@@ -357,7 +357,7 @@
     const near = (a, b) => t >= a && t <= b;
     if (near(CUE.dive[0], CUE.dive[1] + 0.05) || near(CUE.through[0], CUE.through[1] + 0.02) || near(CUE.fly[0], CUE.fly[1] + 0.05)) return 6;
     if (near(CUE.brandOut[0], CUE.brandOut[1]) || near(9.34, 9.95) || near(CUE.slam, CUE.slam + 0.3) || near(CUE.wipe1[0], CUE.wipe1[1]) || near(CUE.wipe2[0], CUE.wipe2[1]) || near(25.6, CUE.meet + 0.05)) return 4;
-    if (near(7.65, 7.95) || near(8.4, 8.7) || near(23.0, 24.0)) return 3;
+    if (near(7.65, 7.95) || near(8.4, 8.7) || near(23.02, 24.0)) return 3;   // never across a hard cut
     return 1;
   }
 
