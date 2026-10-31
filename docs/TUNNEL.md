@@ -228,11 +228,13 @@ relay subnets. It is not built.
 
 ## Building it
 
-1. In the developer account, create two App IDs:
-   - the app (`$BUNDLE_ID`): Network Extensions, System Extension and App Groups;
+1. In the developer account, create two App IDs (docs/IDENTITY.md lists every step, in order,
+   with Lumen's identifiers):
+   - the app (`$BUNDLE_ID`, `io.lumenbrowser.Lumen`): Network Extensions, System Extension and App Groups;
    - the extension (`$BUNDLE_ID.PacketTunnel`): Network Extensions and App Groups.
 
-   Both use the app group `$TEAM_ID.$BUNDLE_ID`.
+   Both use the app group `$TEAM_ID.$BUNDLE_ID`, which is not registered: named with the team ID's
+   prefix, it is the team's by its signature.
 2. Create a Developer ID provisioning profile for each, for the Developer ID Application
    certificate. For testing on a registered Mac, use Development profiles and an Apple
    Development identity with `NE_SIGNING=development`; the entitlement value is then

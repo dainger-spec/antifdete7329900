@@ -90,13 +90,14 @@ In this order, in Certificates, Identifiers & Profiles of the team that signs Lu
    request of the Mac that will sign). It signs the app, its helper and the extension; notarization
    takes only this. *Developer ID Installer* only for a `.pkg`.
 2. **Identifier, App ID (explicit, macOS) `io.lumenbrowser.Lumen`**, description "Lumen":
-   capabilities *Network Extensions* and *System Extension*.
+   capabilities *Network Extensions*, *System Extension* and *App Groups* (on, nothing assigned).
 3. **Identifier, App ID (explicit, macOS) `io.lumenbrowser.Lumen.PacketTunnel`**, description
-   "Lumen WebRTC relay": capability *Network Extensions*.
+   "Lumen WebRTC relay": capabilities *Network Extensions* and *App Groups* (on, nothing assigned).
 4. **The app group `<TEAM_ID>.io.lumenbrowser.Lumen`: nothing to register.** A macOS group named with
    the team ID's prefix is the team's by its signature; the portal's App Groups list holds `group.…`
-   identifiers only. Should a profile not carry it, `group.io.lumenbrowser.Lumen` registered there
-   and given as `APP_GROUP` is the other way.
+   identifiers only. This is the step least sure to hold as written: if the extension is refused for
+   its group, the other way is `group.io.lumenbrowser.Lumen`, registered there, assigned to both App
+   IDs, the profiles made again, and given as `APP_GROUP`.
 5. **Profiles, Developer ID**: one for `io.lumenbrowser.Lumen` (→ `APP_PROFILE`), one for
    `io.lumenbrowser.Lumen.PacketTunnel` (→ `EXTENSION_PROFILE`), both with the certificate of 1.
    For a test on one registered Mac first: *macOS App Development* profiles for the same two App IDs,
