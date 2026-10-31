@@ -239,7 +239,7 @@ relay subnets. It is not built.
    `packet-tunnel-provider` instead of `packet-tunnel-provider-systemextension`.
 3. Build:
    ```sh
-   NE=1 TEAM_ID=ABCDE12345 BUNDLE_ID=com.example.PrivacyBrowser \
+   NE=1 TEAM_ID=ABCDE12345 BUNDLE_ID=io.lumenbrowser.Lumen \
      SIGN_IDENTITY="Developer ID Application: Name (ABCDE12345)" \
      APP_PROFILE=app.provisionprofile EXTENSION_PROFILE=tunnel.provisionprofile \
      scripts/build-app.sh
@@ -252,9 +252,9 @@ relay subnets. It is not built.
    with the extra entitlements (hardened runtime, secure timestamp).
 4. Notarize and staple:
    ```sh
-   ditto -c -k --keepParent build/PrivacyBrowser.app PrivacyBrowser.zip
-   xcrun notarytool submit PrivacyBrowser.zip --keychain-profile <profile> --wait
-   xcrun stapler staple build/PrivacyBrowser.app
+   ditto -c -k --keepParent build/Lumen.app Lumen.zip
+   xcrun notarytool submit Lumen.zip --keychain-profile <profile> --wait
+   xcrun stapler staple build/Lumen.app
    ```
 5. Copy the app to /Applications and open it. In the Profiles window, choose More (⋯) →
    WebRTC through proxies (network extension)…, press **Enable**, and approve both prompts.
@@ -283,7 +283,7 @@ app, lints its plists and checks that the class named in `NEProviderClasses` is 
   page's candidates are relays at the proxy's address, that no srflx or host candidate appears,
   that the proxy saw the UDP, and that a data channel between two connections carries a
   message.
-- Where passwordless `sudo` works (the CI runner), `PrivacyBrowser --utun-relay` opens a utun
+- Where passwordless `sudo` works (the CI runner), `Lumen --utun-relay` opens a utun
   interface as root without the Network Extension (`UTunDevice`). It routes the relay subnets
   into it and serves two routes, each with its own UDP-capable proxy, with the extension's own
   `PacketRouter`, on real IP packets from real WebKit. One profile keeps WebKit's default network

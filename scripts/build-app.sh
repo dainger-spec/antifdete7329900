@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Builds PrivacyBrowser.app from the Swift package (no Xcode project needed).
+# Builds Lumen.app from the Swift package (no Xcode project needed). The SwiftPM product, its
+# target and modules keep the code's name, PrivacyBrowser; the bundle and its executable are Lumen.
 #
-#   scripts/build-app.sh                       # sandboxed release build → build/PrivacyBrowser.app
+#   scripts/build-app.sh                       # sandboxed release build → build/Lumen.app
 #   SANDBOX=0 scripts/build-app.sh             # hardened runtime without App Sandbox (debugging)
 #   APP_DIR=build/variant scripts/build-app.sh # output directory
 #   BUNDLE_ID=org.me.PB scripts/build-app.sh
@@ -27,12 +28,12 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-BUNDLE_ID="${BUNDLE_ID:-dev.local.PrivacyBrowser}"
+BUNDLE_ID="${BUNDLE_ID:-io.lumenbrowser.Lumen}"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"   # "-" = ad-hoc
 CONFIG="${CONFIG:-release}"
 SANDBOX="${SANDBOX:-1}"
 APP_DIR="${APP_DIR:-build}"
-APP="$APP_DIR/PrivacyBrowser.app"
+APP="$APP_DIR/Lumen.app"
 NE="${NE:-0}"
 EXTENSION_ID="${EXTENSION_ID:-$BUNDLE_ID.PacketTunnel}"
 if [[ "$NE" == "1" ]]; then
@@ -67,7 +68,8 @@ BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN_DIR/PrivacyBrowser" "$APP/Contents/MacOS/PrivacyBrowser"
+# The product is built as PrivacyBrowser and named Lumen here (CFBundleExecutable in Info.plist).
+cp "$BIN_DIR/PrivacyBrowser" "$APP/Contents/MacOS/Lumen"
 sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Info.plist > "$APP/Contents/Info.plist"
 PLIST="$APP/Contents/Info.plist"
 [[ -z "${APP_VERSION:-}" ]] || /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$PLIST"
@@ -103,9 +105,9 @@ plutil -lint "$PLIST" >/dev/null
 
 # The installer helper (docs/UPDATES.md §3): an app of its own, outside the sandbox, that the app
 # starts through LaunchServices at the end of a quit in which every profile was sealed.
-HELPER="$APP/Contents/Helpers/PrivacyBrowser Updater.app"
+HELPER="$APP/Contents/Helpers/Lumen Updater.app"
 mkdir -p "$HELPER/Contents/MacOS"
-cp "$BIN_DIR/PrivacyBrowserUpdater" "$HELPER/Contents/MacOS/PrivacyBrowserUpdater"
+cp "$BIN_DIR/PrivacyBrowserUpdater" "$HELPER/Contents/MacOS/LumenUpdater"
 sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Updater/Info.plist > "$HELPER/Contents/Info.plist"
 plutil -lint "$HELPER/Contents/Info.plist" >/dev/null
 
@@ -208,4 +210,4 @@ else
   echo "Built $APP (bundle id $BUNDLE_ID, App Sandbox OFF)"
 fi
 echo "Run:        open $APP"
-echo "Self-test:  $APP/Contents/MacOS/PrivacyBrowser --self-test"
+echo "Self-test:  $APP/Contents/MacOS/Lumen --self-test"

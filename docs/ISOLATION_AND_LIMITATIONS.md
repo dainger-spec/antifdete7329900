@@ -6,7 +6,7 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 
 ## 0. What is verified automatically
 
-`PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
+`Lumen --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
 (macOS 26: every check passed in both builds; CI prints the count, 188 at commit 854c87e, more
@@ -56,7 +56,7 @@ since):
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
-Run it yourself: `build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test`. For the
+Run it yourself: `build/Lumen.app/Contents/MacOS/Lumen --self-test`. For the
 proxy checks, start the self-test proxy as CI does,
 `python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 --tls-control 18086 --canary 18087 --silent 18088`,
 and set `PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081
@@ -456,7 +456,7 @@ driving Safari through `safaridriver`:
 - `scripts/safari_reference.py` runs `Resources/fingerprint_probe.js` in both: 434 keys identical,
   0 must-match keys differ.
 - `scripts/live_compare.py` loads the same pages in Safari and in on-screen profile windows of the
-  same outer size (`PrivacyBrowser --capture-sites`, `SiteCapture.swift`), once for a default profile
+  same outer size (`Lumen --capture-sites`, `SiteCapture.swift`), once for a default profile
   and once with the time-zone and WebRTC wrappers running on Safari's own values. Both JSON sets
   are kept in the `fingerprint-surfaces` artifact.
 

@@ -7,7 +7,7 @@
 # Safari's is. Given a folder, it also renders the app's screens from both (--render-ui-snapshots, in
 # English, into as-built/ and sdk-<SDK>/): what AppKit draws differently for each SDK.
 #
-#   scripts/sdk_check.sh <PrivacyBrowser.app> <out dir> <notice title> <SDK for the copy> [<snapshots dir>]
+#   scripts/sdk_check.sh <Lumen.app> <out dir> <notice title> <SDK for the copy> [<snapshots dir>]
 #
 # The copy's LC_BUILD_VERSION is rewritten with Xcode's vtool (its minos kept) and the copy signed ad
 # hoc with the app's own entitlements, in a temporary folder of its own. A measurement: it never fails.
@@ -17,7 +17,7 @@ out="$2"
 title="$3"
 sdk="$4"
 snapshots="${5:-}"
-binary="Contents/MacOS/PrivacyBrowser"
+binary="Contents/MacOS/Lumen"
 mkdir -p "$out"
 
 # <app> <name> [--everything]
@@ -39,7 +39,7 @@ if [ -z "$scratch" ] || [ ! -d "$scratch" ]; then
   echo "::warning title=$title::no temporary folder for the copy that declares SDK $sdk"
   exit 0
 fi
-copy="$scratch/PrivacyBrowser.app"
+copy="$scratch/Lumen.app"
 cp -R "$app" "$copy"
 if [ -n "$minos" ] && xcrun vtool -set-build-version macos "$minos" "$sdk" -replace -output "$copy/$binary.declared" "$copy/$binary" > "$out/vtool.txt" 2>&1; then
   mv "$copy/$binary.declared" "$copy/$binary"

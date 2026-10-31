@@ -1,7 +1,7 @@
 import AppKit
 import BrowserCore
 
-/// `PrivacyBrowser --export-check`: what Safari's File › Export › Bookmarks… does in a profile's
+/// `Lumen --export-check`: what Safari's File › Export › Bookmarks… does in a profile's
 /// process. On the owner's Mac its save panel opened, Save was pressed, and no file appeared, with
 /// no word of an error.
 ///

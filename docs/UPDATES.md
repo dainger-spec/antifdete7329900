@@ -8,7 +8,7 @@ it implements and how it is proven.
 |---|---|
 | §4, the formats of the files on disk | in force (`DocumentFormat`; `FormatPolicyTests`, the self-test's `formatPolicy`) |
 | §2, the signed feed and its checks | in BrowserCore (`UpdateVerifier`, `UpdateSigner`, `BuildVersion`; `UpdateTests`) and `pbupdate`; no app uses it yet |
-| §3, the installer helper | in every build (`Contents/Helpers/PrivacyBrowser Updater.app`; `UpdateInstaller`, tested on real signed bundles by `UpdateInstallerTests`) |
+| §3, the installer helper | in every build (`Contents/Helpers/Lumen Updater.app`; `UpdateInstaller`, tested on real signed bundles by `UpdateInstallerTests`) |
 | §3 the quit gate, Install Now; §5 the check; §7 the screen | in the app (`AppUpdater`, `UpdateGate`, `UpdatesView`); the gate in the self-test (`updateGate`), the sheet in the UI snapshots; only builds with a feed URL have an updater |
 | §6, `scripts/release.sh` | runs dry in CI on every push (ad hoc, a throwaway key, no notarization); a real release needs the account and the key from the environment |
 | the end-to-end scenarios of §8 | in CI on every push, sandboxed and unsandboxed builds (`scripts/update_check.py`, `--selftest-updates`); first passed in CI run 410 |
@@ -182,7 +182,7 @@ with windows, in their own processes, warm-ups without a window, launches and se
 and sealed, the vault locked, then the gate. If the gate fails then, the app does not exit: it stays
 locked, says why, and keeps the update.
 
-The helper is the only process that touches the bundle: `Contents/Helpers/PrivacyBrowser
+The helper is the only process that touches the bundle: `Contents/Helpers/Lumen
 Updater.app` (`<bundle-id>.Updater`, background only, hardened runtime, **no** sandbox
 entitlement — `build-app.sh` signs it first, then the app, and fails if it carries one). It is
 started by LaunchServices — so it is neither in the sandbox of the sandboxed build nor a child that
@@ -234,7 +234,7 @@ in the self-test, which runs the app's own code for it):
   files whose JSON is an array or a map of its own. A reader checks the format before it decodes
   anything and refuses a newer one, or one that is not a whole number, with `CoreError.newerFormat`;
   the app says so in the person's language ("The file … was saved by a newer version of
-  PrivacyBrowser…"). A file that declares a newer format is never written over and never deleted:
+  Lumen…"). A file that declares a newer format is never written over and never deleted:
   every writer looks before it writes, whatever its caller read or failed to read first — a save of
   defaults after a failed read included.
 - **R3 — no downgrade.** The updater never installs an older build. In the vault, the `format` of
@@ -264,7 +264,7 @@ in the self-test, which runs the app's own code for it):
 | `cookies-baseline.bin` | this device's last cookie state | no marker | `format` read (absent = 1); newer refused, not written over, not deleted |
 | `cookies-import.bin` | cookies queued for the next launch | no marker (an array); **deleted when it could not be read** | newer refused, not written, **not deleted** |
 | `warmup.bin`, `warmup-schedule.bin` | the warm-up plan, its schedule | no marker | `format` read (absent = 1); newer refused, never written |
-| `proxies.bin` | the proxy list | `format` = 1, anything else refused | newer refused with the newer-version message, never written; unknown kinds of entry: R4. Format 2 once it holds a proxy given by PrivacyBrowser's service (`ProxyOrigin`): a version from before origins would read that proxy as the user's own and write it back without its origin (R4); a list of the user's own proxies stays format 1, written as before. Nothing in this version gives a proxy from the service, so it writes format 1 only; the version that brings the service raises the vault's generation first (R3) |
+| `proxies.bin` | the proxy list | `format` = 1, anything else refused | newer refused with the newer-version message, never written; unknown kinds of entry: R4. Format 2 once it holds a proxy given by Lumen's service (`ProxyOrigin`): a version from before origins would read that proxy as the user's own and write it back without its origin (R4); a list of the user's own proxies stays format 1, written as before. Nothing in this version gives a proxy from the service, so it writes format 1 only; the version that brings the service raises the vault's generation first (R3) |
 | `settings.bin` | sync target, automation API settings | no marker — a failed read falls back to defaults **that are then saved over the file** | `format` read (absent = 1); newer: said at unlock, and the defaults are never saved over it |
 | `sync-state.bin` | what sync last saw | no marker (a map) | newer: the sync stops before it fetches or pushes anything (starting over would push this device's files over newer ones) |
 | `webdata.pbsa`, `safarihome.pbsa` | WebKit's data, Safari's home, archived | `PBSA` + version byte 1, anything else refused — **and a refused Safari home archive left an empty home behind, which the next unlock or an export of the profile sealed over the archive** | newer refused before anything is read from it; the profile does not start; no home is left; nothing is sealed over it |
@@ -378,7 +378,7 @@ handed over at the last quit — is said once at the next launch. In the UI snap
   - the new build's `--selftest-updates verify` opens the old build's vault, profiles, settings and
     bookmarks, starts a profile from the website data the old build sealed, and seals it again;
   - every request the feed got carries the same headers from any Mac — `User-Agent:
-    PrivacyBrowser`, `Accept-Language: en`, no cookie, no credentials, no query string.
+    Lumen`, `Accept-Language: en`, no cookie, no credentials, no query string.
   The feed's certificate is self-signed, and a runner's trust settings cannot be changed without
   someone at the screen (CI run 407: `security authorizationdb write` refused, -60005). So the
   scenario mode — and only it: a build of the check's own bundle id (`….PBUpdateCheck`),

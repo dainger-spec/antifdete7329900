@@ -3,7 +3,7 @@ import CoreServices
 import os
 import Security
 
-/// `PrivacyBrowser --safari-inventory`: what Safari's chrome brings into a profile's process, as
+/// `Lumen --safari-inventory`: what Safari's chrome brings into a profile's process, as
 /// facts to decide from rather than guesses.
 ///
 ///   * MENU: every item of Safari's menu bar as a profile's window has it — its path, its action,

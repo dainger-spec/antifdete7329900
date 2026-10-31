@@ -2,7 +2,7 @@
 """Did anything go around a profile's proxy while the self-test's Safari-chrome check ran?
 
     sudo tcpdump -i pktap,all -k NP -n -tt -l 'not host 127.0.0.1 and not host ::1' > capture.txt &
-    PrivacyBrowser --self-test | tee selftest.txt
+    Lumen --self-test | tee selftest.txt
     python3 scripts/egress_check.py --capture capture.txt --selftest-log selftest.txt
 
 Two checks of the self-test open a window (`INFO egress-window begin/end`) and name a run id

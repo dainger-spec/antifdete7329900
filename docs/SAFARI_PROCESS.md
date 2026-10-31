@@ -378,7 +378,7 @@ not measured here; this project's own match with Safari was measured separately
 - CI: `.github/workflows/safari-process.yml` runs the tests on Linux and the experiments on
   macos-14, macos-15 and macos-26; results are in the job log and the `safari-process-*` artifacts.
 
-## 7. What this means for PrivacyBrowser
+## 7. What this means for Lumen
 
 - **Keep WKWebView.** On the network, real Safari per profile gains nothing: the ClientHello and
   HTTP/2 preface are the operating system's, given an app linked against the macOS 15+ SDK (§5), and
@@ -629,7 +629,7 @@ exception went on without its call stack; AppKit, catching one in its run loop, 
 on. The hook now lives in `ExceptionLog` (every process, from `main`): it calls the preprocessor it
 replaced first, writes each exception's name, its reason with addresses, paths and quoted text cut
 out (in clear; the full reason privately) and its frames, and also hooks `reportException:` and the
-uncaught-exception handler. `PrivacyBrowser --exception-check` throws one in the run loop with these
+uncaught-exception handler. `Lumen --exception-check` throws one in the run loop with these
 hooks and, with `--replacing`, the earlier way; the self-test runs both. The name of a nib AppKit
 could not load, and the bundle it looked in, stay in clear: they are the system's and the app's
 files (a bundle outside `/System` and `/Applications` keeps only its own name).
@@ -640,7 +640,7 @@ Nibs Safari's controllers make themselves: the Bookmarks sidebar
 threw where Safari finds them (on the owner's Mac, macOS 27: the process went down, and once
 exceptions were lived through, the sidebar did nothing). Both that initializer and AppKit's
 `-_initWithNibNamed:bundle:options:` behind it make a nib the given bundle lacks from Safari's own
-file. `PrivacyBrowser --nib-check` makes the sidebar's nibs the same way in a process like a
+file. `Lumen --nib-check` makes the sidebar's nibs the same way in a process like a
 profile's, and the self-test fails unless each comes from Safari's file with nothing thrown.
 
 What the hosted chrome does once all of that is in place, measured by hand: the window with Safari's
@@ -726,7 +726,7 @@ self-test wants a stop of a profile in Safari's chrome done within 15 s and says
 was forced.
 
 **Which private pieces this needs.** `SafariChrome.expectedPieces` lists every class and method
-reached for by name. `PrivacyBrowser --check-safari-chrome` prints which this macOS has (CI runs it;
+reached for by name. `Lumen --check-safari-chrome` prints which this macOS has (CI runs it;
 it loads Safari's frameworks in a temporary home of its own, held to a closed proxy, as a profile's
 process does, and removes the home afterwards);
 a missing structural piece means the profile opens our own window, a missing network piece is a lock

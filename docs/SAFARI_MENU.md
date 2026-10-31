@@ -10,7 +10,7 @@ about it.
 
 ## How it is walked
 
-`scripts/menu_walk.py` runs `PrivacyBrowser --menu-walk` (`SafariMenuWalkCheck`): a new profile
+`scripts/menu_walk.py` runs `Lumen --menu-walk` (`SafariMenuWalkCheck`): a new profile
 in a temporary vault, launched as the app launches one — a process of its own, Safari's window,
 held to the self-test proxy (its start page, a login form, loads through it). The profile is
 asked over its channel to walk its menu (`ProfileCommand.walkMenu`, `SafariMenuWalk`); nothing

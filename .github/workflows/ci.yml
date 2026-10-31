@@ -94,7 +94,7 @@ jobs:
             > build/egress27/capture.txt 2> build/egress27/tcpdump.err &
           sleep 2
           status=0
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test | tee build/egress27/selftest.txt || status=1
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test | tee build/egress27/selftest.txt || status=1
           sudo pkill -INT -f "tcpdump -i pktap" || true
           sleep 2
           kill $PROXY_PID || true
@@ -111,7 +111,7 @@ jobs:
         timeout-minutes: 12
         run: |
           python3 scripts/certificate_leak_check.py --capture build/egress27/capture.txt \
-            --selftest-log build/egress27/selftest.txt --app build/unsandboxed/PrivacyBrowser.app \
+            --selftest-log build/egress27/selftest.txt --app build/unsandboxed/Lumen.app \
             --out build/egress27/certificate-leak
       - name: What failed on macOS 27, and the certificate checks
         if: always()
@@ -144,8 +144,8 @@ jobs:
           # *Name*: a fault the process lived through is ExcUserFault_<process>-….ips (the owner's
           # Mac, 1 November: WebKit's UI side refusing a message, EXC_GUARD namespace 31), which a
           # Name* pattern never found.
-          for report in ~/Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips ~/Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips \
-                        /Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips /Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips; do
+          for report in ~/Library/Logs/DiagnosticReports/*Lumen*.ips ~/Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips \
+                        /Library/Logs/DiagnosticReports/*Lumen*.ips /Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips; do
             cp "$report" build/egress27/crashes/ 2>/dev/null || sudo cp "$report" build/egress27/crashes/
           done
           sudo chmod -R a+r build/egress27/crashes 2>/dev/null || true
@@ -180,7 +180,7 @@ jobs:
         timeout-minutes: 12
         run: |
           set +e
-          python3 scripts/fragment_check.py --app build/unsandboxed/PrivacyBrowser.app | tee build/egress27/fragment.txt
+          python3 scripts/fragment_check.py --app build/unsandboxed/Lumen.app | tee build/egress27/fragment.txt
           grep '^FRAGMENT' build/egress27/fragment.txt | head -9 | cut -c1-600 | sed 's/^/::notice title=macOS 27 - fragment jump::/'
           exit 0
       - name: What Safari 27's chrome brings into a profile's process (an inventory)
@@ -189,7 +189,7 @@ jobs:
         timeout-minutes: 6
         run: |
           set +e
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --safari-inventory > build/egress27/safari-inventory.txt 2> build/egress27/safari-inventory.err
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --safari-inventory > build/egress27/safari-inventory.txt 2> build/egress27/safari-inventory.err
           echo "exit $?"
           grep -E '^(INVENTORY|LS) ' build/egress27/safari-inventory.txt | head -10 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - Safari inventory::/'
           grep -E '^XPC [^ ]*Safari' build/egress27/safari-inventory.txt | head -10 | cut -c1-600 | sed 's/^/::notice title=macOS 27 - XPC services of Safari frameworks::/'
@@ -207,14 +207,14 @@ jobs:
         timeout-minutes: 30
         run: |
           major="$(defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString | cut -d. -f1)"
-          python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/egress27/menu-walk \
+          python3 scripts/menu_walk.py --app build/unsandboxed/Lumen.app --out build/egress27/menu-walk \
             --title "macOS 27 - Safari's menu" --record "docs/menu-walk/safari-$major.json" --check \
             --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners" --safari-sentinels
       - name: Safari 27's question about the default browser — as built, and declared a browser (a measurement)
         if: always()
         continue-on-error: true
         timeout-minutes: 4
-        run: scripts/default_browser_check.sh build/unsandboxed/PrivacyBrowser.app build/egress27/default-browser "macOS 27 - default browser"
+        run: scripts/default_browser_check.sh build/unsandboxed/Lumen.app build/egress27/default-browser "macOS 27 - default browser"
       - name: Safari 27's paths in a profile's process — empty paths, app groups, bookmarks (a measurement)
         # The owner's Mac, 31 October: Safari's bookmarks database "at (null)", and an empty path
         # handed to -[NSURL initFileURLWithPath:] by WBSBannerTracker. Who asks for a file URL with
@@ -225,7 +225,7 @@ jobs:
         timeout-minutes: 3
         run: |
           set +e
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --paths-check > build/egress27/paths-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --paths-check > build/egress27/paths-check.txt 2>/dev/null
           echo "exit $?"; cat build/egress27/paths-check.txt
           grep '^PATHS-CHECK' build/egress27/paths-check.txt | grep -v '^PATHS-CHECK log ' | head -16 | cut -c1-900 | sed 's/^/::notice title=macOS 27 - paths in a profile process::/'
           # A run that saw nothing (Safari's window did not open) says so: SKIPPED, on the job's page and in its summary.
@@ -242,13 +242,13 @@ jobs:
           set +e
           # A run that dies leaves a crash report: which one is new since here, and its summary.
           since="$(mktemp)"
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --history-check > build/egress27/history-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --history-check > build/egress27/history-check.txt 2>/dev/null
           echo "exit $?"; cat build/egress27/history-check.txt
           grep '^HISTORY-CHECK' build/egress27/history-check.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - history in a profile process::/'
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --history-check --in-process-fallback > build/egress27/history-check-fallback.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --history-check --in-process-fallback > build/egress27/history-check-fallback.txt 2>/dev/null
           echo "exit $?"; cat build/egress27/history-check-fallback.txt
           grep '^HISTORY-CHECK' build/egress27/history-check-fallback.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - history in a profile process (fallback)::/'
-          find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -name 'PrivacyBrowser*.ips' -newer "$since" 2>/dev/null \
+          find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -name '*Lumen*.ips' -newer "$since" 2>/dev/null \
             | while read -r report; do python3 scripts/crash_summary.py "$report" | head -60; done
           exit 0
       - name: What follows the SDK on macOS 27 — the build as made, and a copy that declares Xcode 27's SDK (a measurement)
@@ -256,7 +256,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 6
         run: |
-          scripts/sdk_check.sh build/unsandboxed/PrivacyBrowser.app build/egress27/sdk-check "macOS 27 - SDK behaviors" \
+          scripts/sdk_check.sh build/unsandboxed/Lumen.app build/egress27/sdk-check "macOS 27 - SDK behaviors" \
             "$(xcrun --show-sdk-version)" build/egress27/sdk-check/ui
       - name: WebKit's features in a profile's web views as Safari has them, on macOS 27 (reported)
         # As on macOS 26, where it fails the build (scripts/engine_features_check.py); this job fails
@@ -265,7 +265,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 6
         run: |
-          python3 scripts/engine_features_check.py --app build/unsandboxed/PrivacyBrowser.app \
+          python3 scripts/engine_features_check.py --app build/unsandboxed/Lumen.app \
             --out build/egress27/engine-features --title "macOS 27 - WebKit's features as Safari's"
       - name: From which declared SDK this Mac fetches a certificate's address outside a profile's proxy, on macOS 27 (a measurement)
         # Run 451: clean with 14.0 to 14.4, the AIA canary fetched with every SDK from 15.0 to 27.0
@@ -277,7 +277,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 15
         run: |
-          python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app \
+          python3 scripts/aia_variants.py --app build/unsandboxed/Lumen.app \
             --sdk "14.4,15.0,26.5,$(xcrun --show-sdk-version)" \
             --out build/egress27/aia-variants --title "macOS 27 - AIA variants"
       - name: Which SDK SwiftPM writes into an executable on macOS 27 (a measurement)
@@ -291,7 +291,7 @@ jobs:
         timeout-minutes: 3
         run: |
           set +e
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --export-check > build/egress27/export-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --export-check > build/egress27/export-check.txt 2>/dev/null
           echo "exit $?"; cat build/egress27/export-check.txt
           grep '^EXPORT-CHECK' build/egress27/export-check.txt | head -20 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - export in a profile process::/'
           exit 0
@@ -365,7 +365,7 @@ jobs:
           status=0
           mkdir -p build/ui-snapshots
           for lang in en ru; do
-            PRIVACYBROWSER_LANG=$lang build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --render-ui-snapshots "$PWD/build/ui-snapshots/$lang" \
+            PRIVACYBROWSER_LANG=$lang build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --render-ui-snapshots "$PWD/build/ui-snapshots/$lang" \
               | tee "build/ui-snapshots/$lang.log" || status=1
           done
           # The sheet in the narrowest window, and its control, as notices on the job.
@@ -405,7 +405,7 @@ jobs:
           import os, subprocess, sys
           sys.path.insert(0, "scripts")
           from aia_variants import BINARY, copy_declaring, declared_sdk
-          app, folder = "build/unsandboxed/PrivacyBrowser.app", "build/release-sdk/unsandboxed"
+          app, folder = "build/unsandboxed/Lumen.app", "build/release-sdk/unsandboxed"
           os.makedirs(folder, exist_ok=True)
           entitlements = os.path.join(folder, "entitlements.plist")
           with open(entitlements, "wb") as handle:
@@ -437,16 +437,16 @@ jobs:
               # scripts/disk_check.py: nothing may be written where the real Safari keeps its data.
               # One fs_usage for all three (the kernel trace is exclusive: a second one gets
               # "ktrace_start: Resource busy" and sees nothing).
-              sudo fs_usage -w -f filesys PrivacyBrowser com.apple.WebKit cfprefsd > build/egress/fs.txt 2>&1 &
+              sudo fs_usage -w -f filesys Lumen com.apple.WebKit cfprefsd > build/egress/fs.txt 2>&1 &
               sleep 2
               # A preferences file cfprefsd writes through a directory descriptor, as it writes every
               # one: disk_check.py must name it, or the trace is blind to cfprefsd again.
               mkdir -p "$PWD/build/egress/trace-canary"
               defaults write "$PWD/build/egress/trace-canary/PBTraceCanary" Canary -string "$(date +%s)"
             fi
-            app="build/$variant/PrivacyBrowser.app"
-            if [ "$variant" = unsandboxed ]; then app="build/release-sdk/unsandboxed/PrivacyBrowser.app"; fi
-            "$app/Contents/MacOS/PrivacyBrowser" --self-test | tee "build/egress/selftest-$variant.txt" || status=1
+            app="build/$variant/Lumen.app"
+            if [ "$variant" = unsandboxed ]; then app="build/release-sdk/unsandboxed/Lumen.app"; fi
+            "$app/Contents/MacOS/Lumen" --self-test | tee "build/egress/selftest-$variant.txt" || status=1
             echo "::endgroup::"
             kill $PROXY_PID || true
             wait $PROXY_PID 2>/dev/null || true
@@ -474,8 +474,8 @@ jobs:
           # *Name*: a fault the process lived through is ExcUserFault_<process>-….ips (the owner's
           # Mac, 1 November: WebKit's UI side refusing a message, EXC_GUARD namespace 31), which a
           # Name* pattern never found.
-          for report in ~/Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips ~/Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips \
-                        /Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips /Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips; do
+          for report in ~/Library/Logs/DiagnosticReports/*Lumen*.ips ~/Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips \
+                        /Library/Logs/DiagnosticReports/*Lumen*.ips /Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips; do
             cp "$report" build/crashes/ 2>/dev/null || sudo cp "$report" build/crashes/
           done
           sudo chmod -R a+r build/crashes 2>/dev/null || true
@@ -501,7 +501,7 @@ jobs:
         # instead of a profile's window quietly degrading on a user's Mac. After the self-test, so
         # that a missing piece never hides what the self-test would have measured.
         if: always()
-        run: build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --check-safari-chrome
+        run: build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --check-safari-chrome
       - name: What Safari's chrome brings into a profile's process (an inventory, never fails the build)
         # SafariChromeInventory.swift: Safari's menu as a profile's window has it, LaunchServices'
         # answers with a home of its own, the classes around AutoFill, history and export, and the
@@ -511,7 +511,7 @@ jobs:
         timeout-minutes: 6
         run: |
           set +e
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --safari-inventory > build/safari-inventory.txt 2> build/safari-inventory.err
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --safari-inventory > build/safari-inventory.txt 2> build/safari-inventory.err
           echo "exit $?"
           grep -E '^(INVENTORY|LS) ' build/safari-inventory.txt | head -10 | cut -c1-500 | sed 's/^/::notice title=Safari inventory::/'
           grep -E '^XPC [^ ]*Safari' build/safari-inventory.txt | head -10 | cut -c1-600 | sed 's/^/::notice title=XPC services of Safari frameworks::/'
@@ -532,7 +532,7 @@ jobs:
         timeout-minutes: 30
         run: |
           major="$(defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString | cut -d. -f1)"
-          python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/menu-walk \
+          python3 scripts/menu_walk.py --app build/unsandboxed/Lumen.app --out build/menu-walk \
             --title "Safari's menu" --record "docs/menu-walk/safari-$major.json" --check \
             --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners" --safari-sentinels
       - uses: actions/upload-artifact@v4
@@ -557,7 +557,7 @@ jobs:
         if: always()
         continue-on-error: true
         timeout-minutes: 4
-        run: scripts/default_browser_check.sh build/unsandboxed/PrivacyBrowser.app build/default-browser "default browser"
+        run: scripts/default_browser_check.sh build/unsandboxed/Lumen.app build/default-browser "default browser"
       - name: Safari's paths in a profile's process — empty paths, app groups, bookmarks (a measurement)
         # The owner's Mac, 31 October: Safari's bookmarks database "at (null)", and an empty path
         # handed to -[NSURL initFileURLWithPath:] by WBSBannerTracker. Who asks for a file URL with
@@ -568,7 +568,7 @@ jobs:
         timeout-minutes: 3
         run: |
           set +e
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --paths-check > build/paths-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --paths-check > build/paths-check.txt 2>/dev/null
           echo "exit $?"; cat build/paths-check.txt
           grep '^PATHS-CHECK' build/paths-check.txt | grep -v '^PATHS-CHECK log ' | head -16 | cut -c1-900 | sed 's/^/::notice title=paths in a profile process::/'
           # A run that saw nothing (Safari's window did not open) says so: SKIPPED, on the job's page and in its summary.
@@ -587,13 +587,13 @@ jobs:
           set +e
           # A run that dies leaves a crash report: which one is new since here, and its summary.
           since="$(mktemp)"
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --history-check > build/history-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --history-check > build/history-check.txt 2>/dev/null
           echo "exit $?"; cat build/history-check.txt
           grep '^HISTORY-CHECK' build/history-check.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=history in a profile process::/'
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --history-check --in-process-fallback > build/history-check-fallback.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --history-check --in-process-fallback > build/history-check-fallback.txt 2>/dev/null
           echo "exit $?"; cat build/history-check-fallback.txt
           grep '^HISTORY-CHECK' build/history-check-fallback.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=history in a profile process (fallback)::/'
-          find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -name 'PrivacyBrowser*.ips' -newer "$since" 2>/dev/null \
+          find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -name '*Lumen*.ips' -newer "$since" 2>/dev/null \
             | while read -r report; do python3 scripts/crash_summary.py "$report" | head -60; done
           exit 0
       - name: What follows the SDK — the build as made (this Xcode's SDK), and a copy that declares SDK 14 (a measurement)
@@ -605,7 +605,7 @@ jobs:
         timeout-minutes: 6
         run: |
           # Xcode 26 builds declare their SDK (26.5); the copy declares what an Xcode 27 build does (14.0).
-          scripts/sdk_check.sh build/unsandboxed/PrivacyBrowser.app build/sdk-check "SDK behaviors" \
+          scripts/sdk_check.sh build/unsandboxed/Lumen.app build/sdk-check "SDK behaviors" \
             14.0 build/sdk-check/ui
       - name: WebKit's features in a profile's web views as Safari has them — as built, and declaring 14.0 (fails the build)
         # The features the SDK's behaviors change, set one by one as Safari has them
@@ -616,7 +616,7 @@ jobs:
         if: always()
         timeout-minutes: 8
         run: |
-          python3 scripts/engine_features_check.py --app build/unsandboxed/PrivacyBrowser.app --copy-sdk 14.0 \
+          python3 scripts/engine_features_check.py --app build/unsandboxed/Lumen.app --copy-sdk 14.0 \
             --out build/engine-features --title "WebKit's features as Safari's"
       - name: From which declared SDK this Mac fetches a certificate's address outside a profile's proxy (a measurement)
         # As on macOS 27 (scripts/aia_variants.py): as built (this Xcode's SDK), every behavior on,
@@ -626,7 +626,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 15
         run: |
-          python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app --sdk "14.0" \
+          python3 scripts/aia_variants.py --app build/unsandboxed/Lumen.app --sdk "14.0" \
             --out build/sdk-check/aia-variants --title "AIA variants"
       - name: Which SDK SwiftPM writes into an executable (a measurement)
         if: always()
@@ -647,7 +647,7 @@ jobs:
         timeout-minutes: 3
         run: |
           set +e
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --export-check > build/export-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --export-check > build/export-check.txt 2>/dev/null
           echo "exit $?"; cat build/export-check.txt
           grep '^EXPORT-CHECK' build/export-check.txt | head -20 | cut -c1-500 | sed 's/^/::notice title=export in a profile process::/'
           exit 0
@@ -665,7 +665,7 @@ jobs:
         # down makes it inconclusive, not red).
         if: always()
         timeout-minutes: 10
-        run: python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/leaks
+        run: python3 scripts/leak_check.py --app build/unsandboxed/Lumen.app --out build/leaks
       - name: Live fingerprinting pages in Safari and in profiles (report, never fails the build)
         # The same pages and scripts in this Mac's Safari and in on-screen profile windows of the
         # same size: probe, window geometry, request header order, TLS/HTTP2 (tls.peet.ws),
@@ -673,7 +673,7 @@ jobs:
         if: always()
         continue-on-error: true
         timeout-minutes: 25
-        run: python3 scripts/live_compare.py --app build/unsandboxed/PrivacyBrowser.app --out build/live
+        run: python3 scripts/live_compare.py --app build/unsandboxed/Lumen.app --out build/live
       - name: What sites see — a new profile's snapshot next to this Mac's Safari, as the panel takes it
         # The sandboxed build: its snapshot's listener (127.0.0.1, network.server) is the one under
         # test, and its profiles are in this app's own window. Safari is asked to open the page as
@@ -683,7 +683,7 @@ jobs:
         timeout-minutes: 8
         run: |
           set +e
-          build/sandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --what-sites-see-check | tee build/what-sites-see.txt
+          build/sandboxed/Lumen.app/Contents/MacOS/Lumen --what-sites-see-check | tee build/what-sites-see.txt
           code=${PIPESTATUS[0]}
           # The summary as notices on the job, readable without the log (ten at most per step).
           grep "^WHAT-SITES-SEE" build/what-sites-see.txt | head -10 | cut -c1-1500 \
@@ -700,7 +700,7 @@ jobs:
         timeout-minutes: 8
         run: |
           set +e
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --what-sites-see-check --safari-window --proxy 127.0.0.1:9 \
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --what-sites-see-check --safari-window --proxy 127.0.0.1:9 \
             | tee build/what-sites-see-safari-window-proxy.txt
           code=${PIPESTATUS[0]}
           grep "^WHAT-SITES-SEE" build/what-sites-see-safari-window-proxy.txt | head -10 | cut -c1-1500 \
@@ -713,7 +713,7 @@ jobs:
         timeout-minutes: 8
         run: |
           set +e
-          build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --what-sites-see-check --safari-window \
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --what-sites-see-check --safari-window \
             | tee build/what-sites-see-safari-window.txt
           code=${PIPESTATUS[0]}
           grep "^WHAT-SITES-SEE" build/what-sites-see-safari-window.txt | head -10 | cut -c1-1500 \
@@ -728,7 +728,7 @@ jobs:
         timeout-minutes: 12
         run: |
           set +e
-          python3 scripts/fragment_check.py --app build/unsandboxed/PrivacyBrowser.app | tee build/fragment.txt
+          python3 scripts/fragment_check.py --app build/unsandboxed/Lumen.app | tee build/fragment.txt
           grep '^FRAGMENT' build/fragment.txt | head -9 | cut -c1-600 | sed 's/^/::notice title=fragment jump::/'
           exit 0
       - name: Apple Pay, Payment Request and Web Push — what their calls answer in Safari and in a profile (a measurement)
@@ -743,7 +743,7 @@ jobs:
         timeout-minutes: 25
         run: |
           set +e
-          python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --trust system --out build/payments \
+          python3 scripts/payments_check.py --app build/unsandboxed/Lumen.app --trust system --out build/payments \
             | tee build/payments.txt
           code=${PIPESTATUS[0]}
           grep "^PAYMENTS-SUMMARY" build/payments.txt | head -10 | cut -c1-2000 \
@@ -773,7 +773,7 @@ jobs:
         timeout-minutes: 10
         run: |
           set +e
-          python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --http --out build/payments-direct \
+          python3 scripts/payments_check.py --app build/unsandboxed/Lumen.app --http --out build/payments-direct \
             --proxy none --variants shipped-safari-window | tee build/payments-direct.txt
           grep "^PAYMENTS-NAMES" build/payments-direct.txt | head -5 | cut -c1-4000 \
             | sed 's/^/::notice title=Window names - Safari'"'"'s window without a proxy::/'
@@ -803,13 +803,41 @@ jobs:
           # Its profile's website data (a cookie, localStorage, IndexedDB) holds this token, which the
           # sandboxed build must read back from its container's layout.
           export PB_SELFTEST_MIGRATION_TOKEN="pbmigration$(date +%s)"
-          PB_SELFTEST_MIGRATION=1 build/migration-old/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --selftest-write-vault
-          build/migration-new/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --selftest-read-vault
+          PB_SELFTEST_MIGRATION=1 build/migration-old/Lumen.app/Contents/MacOS/Lumen --selftest-write-vault
+          build/migration-new/Lumen.app/Contents/MacOS/Lumen --selftest-read-vault
           test ! -e "$HOME/Library/Application Support/PrivacyBrowser/vault.json" || { echo "vault was not moved"; exit 1; }
+      - name: The product renamed — a vault of the last build named PrivacyBrowser opens in Lumen, its profile's website data with it
+        # The rename (bundle ID dev.local.PrivacyBrowser → io.lumenbrowser.Lumen, executable
+        # PrivacyBrowser → Lumen) leaves the vault's folder its name, ~/Library/Application Support/
+        # PrivacyBrowser, which is where Lumen without the App Sandbox looks; what changes under a
+        # profile is where WebKit keeps its website data, by bundle ID. The build of the last commit
+        # before the rename — PrivacyBrowser.app, its own default bundle ID, as the owner's installs
+        # are — writes a real vault into the runner's vault folder, with a profile whose cookie,
+        # localStorage and IndexedDB it seals; the Lumen build opens that vault in place, restores the
+        # profile's website data under its own bundle ID and reads the token back through WebKit.
+        run: |
+          set -euo pipefail
+          old=194828b3dfa0a6c00059e03cbb84a454c4c2881c
+          git fetch --no-tags --depth=1 origin "$old"
+          git worktree add --detach build/old-identity-src "$old"
+          (cd build/old-identity-src && SANDBOX=0 APP_DIR="$PWD/../old-identity" scripts/build-app.sh)
+          app=build/old-identity/PrivacyBrowser.app
+          old_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"
+          new_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' build/unsandboxed/Lumen.app/Contents/Info.plist)"
+          echo "the last build named PrivacyBrowser: $old_id; Lumen: $new_id"
+          [ "$old_id" = dev.local.PrivacyBrowser ] && [ "$new_id" = io.lumenbrowser.Lumen ] \
+            || { echo "::error::the two builds are not the old and the new identity ($old_id, $new_id)"; exit 1; }
+          vault="$HOME/Library/Application Support/PrivacyBrowser"
+          test ! -e "$vault/vault.json" || { echo "::error::a vault is already in $vault"; exit 1; }
+          export PB_SELFTEST_MIGRATION_TOKEN="pbrename$(date +%s)"
+          PB_SELFTEST_MIGRATION=1 "$app/Contents/MacOS/PrivacyBrowser" --selftest-write-vault
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --selftest-read-vault
+          rm -rf "$vault"
+          git worktree remove --force build/old-identity-src
       - uses: actions/upload-artifact@v4
         with:
-          name: PrivacyBrowser.app
-          path: build/sandboxed/PrivacyBrowser.app
+          name: Lumen.app
+          path: build/sandboxed/Lumen.app
       - name: Updates end to end, result
         if: always() && steps.updates.outcome == 'failure'
         run: |

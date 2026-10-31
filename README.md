@@ -1,4 +1,8 @@
-# PrivacyBrowser — multi-profile WebKit browser prototype for macOS
+# Lumen — multi-profile WebKit browser prototype for macOS
+
+The app is Lumen (`Lumen.app`, bundle ID `io.lumenbrowser.Lumen`); its code — the Swift package, its
+targets and modules — keeps the name it was written under, PrivacyBrowser, and so do the vault's folder
+(`~/Library/Application Support/PrivacyBrowser`) and the log's subsystem.
 
 A Swift/SwiftUI + AppKit browser that runs several isolated profiles at once on the
 system WebKit engine (`WKWebView`), with tabs, per-profile history and bookmarks, and the
@@ -37,12 +41,12 @@ approximations limited by what WebKit exposes. The tables below say which parts 
 ## Build and run
 
 ```bash
-scripts/build-app.sh                  # sandboxed release build → build/PrivacyBrowser.app
-open build/PrivacyBrowser.app
+scripts/build-app.sh                  # sandboxed release build → build/Lumen.app
+open build/Lumen.app
 
 SANDBOX=0 scripts/build-app.sh        # hardened runtime without App Sandbox (debugging)
 APP_DIR=build/other scripts/build-app.sh
-BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
+BUNDLE_ID=org.example.Lumen SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
 ```
 
 - The default build is **sandboxed**. Its data lives in
@@ -61,7 +65,7 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: �
 - **Versions and updates:** `APP_VERSION` and `APP_BUILD` stamp the bundle;
   `UPDATE_FEED_URL`, `UPDATE_PUBLIC_KEYS` (`<key id>=<base64>,…`, from `pbupdate keygen`) and
   `UPDATE_TEAM_ID` make it a build that checks for updates — without a feed URL it has none.
-  Every build carries the installer helper (`Contents/Helpers/PrivacyBrowser Updater.app`,
+  Every build carries the installer helper (`Contents/Helpers/Lumen Updater.app`,
   outside the sandbox, signed first); docs/UPDATES.md.
 - Run the `.app`, not `swift run`. WebKit names its storage directories after the bundle
   identifier, and the sandbox needs a signed bundle. For Xcode, run `open Package.swift`
@@ -74,7 +78,7 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: �
 - **Appearance:** the app's own windows are always dark (Lumen's theme). Web content follows
   the system's light/dark setting, as in Safari, so pages see the `prefers-color-scheme`
   Safari would give them.
-- **Design review:** `PrivacyBrowser --render-ui-snapshots <folder>` renders the screens with
+- **Design review:** `Lumen --render-ui-snapshots <folder>` renders the screens with
   sample data into PNG files (CI uploads them as the `ui-snapshots` artifact). In real windows it
   also checks that clicks reach the buttons under the transparent title bar and that a real sheet
   fits in the narrowest Profiles window; exit code 1 otherwise.
@@ -99,18 +103,18 @@ PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083 \
 PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085 \
 PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088 \
 PB_SELFTEST_SURFACE_OUT=build/surface \
-  build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test
+  build/Lumen.app/Contents/MacOS/Lumen --self-test
 
 # What a page measures in a macOS profile vs. this Mac's real Safari (needs `sudo safaridriver --enable` once):
 python3 scripts/safari_reference.py --compare build/surface/surface-macos.json
 # The same pages in Safari and in on-screen profile windows: geometry, headers, APIs, TLS/HTTP2 (unsandboxed build):
-python3 scripts/live_compare.py --app build/unsandboxed/PrivacyBrowser.app --out build/live
+python3 scripts/live_compare.py --app build/unsandboxed/Lumen.app --out build/live
 # Does QUIC or WebRTC go around a profile's proxy? (forwarding proxies on this Mac; unsandboxed build):
-python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/leaks
+python3 scripts/leak_check.py --app build/unsandboxed/Lumen.app --out build/leaks
 # What Apple Pay's, Payment Request's and Web Push's calls answer in Safari and in profiles (unsandboxed
 # build; --trust user trusts a throwaway certificate authority for the run, asking for the password or
 # Touch ID, and removes it after; CI uses --trust system, with sudo):
-python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --trust user --out build/payments
+python3 scripts/payments_check.py --app build/unsandboxed/Lumen.app --trust user --out build/payments
 # Updates end to end: an old and a new build, a local signed feed, the quit gate, the real installer
 # (it replaces an app, trusts a certificate for the run and captures packets with sudo: CI runners only):
 python3 scripts/update_check.py --variant sandboxed --out build/update-sandboxed
@@ -412,7 +416,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Automation API and `pbctl` | **⋯ → Automation API…** (off by default; the build without the App Sandbox): scripts on this Mac list, start (with a window or out of sight), open pages in and stop profiles, and read and write their cookies (Playwright, Netscape, extension JSON) — through the same code as the app's buttons, so a script's profile has its proxy, its process and its sealing. HTTP on 127.0.0.1 only, a 43-character token, requests from web pages (`Origin`, `Sec-Fetch-*`) and rebinding names (`Host`) refused, never a proxy's credentials in an answer; `scripts/pbctl` on the command line ([docs/AUTOMATION_API.md](docs/AUTOMATION_API.md)). It does not drive pages: WebKit's embedded views have no CDP for Puppeteer or Playwright to attach to. **Checked by the self-test** on a real listener (refusals, a hidden start, cookies in and out, stop) and by unit tests |
 | Profile export and import | **⋯ → Export Profile…** / **Import Profile…**: a profile whole — settings and proxy, passwords, history, bookmarks, warm-up plan, cookies and website data, Safari's state — in one `.pbprofile` file under a password of its own (Argon2id), for another Mac, a backup or a colleague. Nothing is written in plaintext on either side (the website data is re-encrypted from archive to archive in memory); an import is always a new profile. **Checked by the self-test** (a cookie of the original is sent by the imported profile's first request) and by unit tests |
 | Profile sync: cookies and settings | A profile's persistent cookies sync as `cookies.bin` (encrypted with the profile key), merged cookie by cookie — the newer change wins, deletions included; recorded when the profile stops, applied at its next launch before the first page loads, imported cookies joining at that launch. Settings changed on two Macs: the newer edit wins, the other kept as `config.bin.conflict`. Session and partitioned cookies, and ephemeral profiles, never sync ([docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md)). **Checked by the self-test** with a second vault set up from the sync folder, and by unit tests |
-| Proxy manager: import, stepwise check, edit, export, assign, rotate | **Profiles window sidebar → Proxies**: a list kept encrypted in the vault (`proxies.bin`, this Mac only); each profile keeps its own copy of its proxy, linked to the list by host, port and user name — profiles' proxies are taken into the list once, an edit in the list reaches the profiles that use it as it is, and a missing entry never leaves a profile without its proxy. Import reads pasted lines or a text file — `host:port`, `host:port:user:pass`, `user:pass@host:port`, `socks5://` / `http://` / `https://user:pass@host:port`, ` # label` — reports every line it could not read with its number and why, and leaves the type of a line without a scheme to the first check (`ProxyListImport`). The check (`ProxyProbe`, POSIX sockets, only to the proxy) resolves the name, connects, tries a SOCKS5 and an HTTP handshake at once, logs in, opens a tunnel (the target named to the proxy), then asks the geolocation services through the proxy (`allowFailover = false`): exit IP, country, city, network, median latency of three tunnels. Distinct states, each with its own symbol and colour, a report step by step with advice: host not found, DNS failed, a VPN's substitute DNS (fake IP: every address in 198.18.0.0/15 or 240.0.0.0/4 and no proxy's answer there — behind such a DNS a name that does not exist looks the same), refused, unreachable, no connection, **silent after connecting**, closes at once, not a proxy, login needed or rejected, refuses this Mac, no way out, no answer through it. A profile whose proxy does not work at its launch says why, with Check. Edit (profiles follow), export (plaintext warning, 0600 file), assign one to many or round-robin. Each proxy says where it came from — added by you, or given by PrivacyBrowser's own proxy service (which does not exist yet: the list, its file and its screens tell the two apart already). **Checked by the self-test** against every listener of the self-test proxy (HTTP, SOCKS5, both with a login none/wrong/right, IPv6, silent, closed, unknown host), end to end with exit details, inside a packet capture that fails on any packet of the app past loopback; the probe's verdicts against scripted servers, parsing, the link and migration by unit tests |
+| Proxy manager: import, stepwise check, edit, export, assign, rotate | **Profiles window sidebar → Proxies**: a list kept encrypted in the vault (`proxies.bin`, this Mac only); each profile keeps its own copy of its proxy, linked to the list by host, port and user name — profiles' proxies are taken into the list once, an edit in the list reaches the profiles that use it as it is, and a missing entry never leaves a profile without its proxy. Import reads pasted lines or a text file — `host:port`, `host:port:user:pass`, `user:pass@host:port`, `socks5://` / `http://` / `https://user:pass@host:port`, ` # label` — reports every line it could not read with its number and why, and leaves the type of a line without a scheme to the first check (`ProxyListImport`). The check (`ProxyProbe`, POSIX sockets, only to the proxy) resolves the name, connects, tries a SOCKS5 and an HTTP handshake at once, logs in, opens a tunnel (the target named to the proxy), then asks the geolocation services through the proxy (`allowFailover = false`): exit IP, country, city, network, median latency of three tunnels. Distinct states, each with its own symbol and colour, a report step by step with advice: host not found, DNS failed, a VPN's substitute DNS (fake IP: every address in 198.18.0.0/15 or 240.0.0.0/4 and no proxy's answer there — behind such a DNS a name that does not exist looks the same), refused, unreachable, no connection, **silent after connecting**, closes at once, not a proxy, login needed or rejected, refuses this Mac, no way out, no answer through it. A profile whose proxy does not work at its launch says why, with Check. Edit (profiles follow), export (plaintext warning, 0600 file), assign one to many or round-robin. Each proxy says where it came from — added by you, or given by Lumen's own proxy service (which does not exist yet: the list, its file and its screens tell the two apart already). **Checked by the self-test** against every listener of the self-test proxy (HTTP, SOCKS5, both with a login none/wrong/right, IPv6, silent, closed, unknown host), end to end with exit details, inside a packet capture that fails on any packet of the app past loopback; the probe's verdicts against scripted servers, parsing, the link and migration by unit tests |
 | Several profiles at once | ⌘-click and ⇧-click select rows of the Profiles list; with two or more, a bar acts on all of them: Launch (the stopped ones, at most four starting at a time: the next when one of those has its window up — `LaunchQueue`, checked by unit tests and the self-test), Stop (the running ones, sealed together), Warm Up (opens the warm-up for the first; a hook for a queue), Assign Proxy (from the list, one or in turn), Delete (one confirmation naming the count) |
 
 ### Approximated (the platform offers no native API)

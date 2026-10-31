@@ -88,7 +88,7 @@ final class AppUpdater: ObservableObject, Updater {
         let app: URL
         let staging: URL
 
-        var helper: URL { app.appendingPathComponent("Contents/Helpers/PrivacyBrowser Updater.app", isDirectory: true) }
+        var helper: URL { app.appendingPathComponent("Contents/Helpers/Lumen Updater.app", isDirectory: true) }
 
         /// Nil for a build without a feed URL or keys (every development build), and in a
         /// profile's own process: then there is no updater, and nothing is ever asked.

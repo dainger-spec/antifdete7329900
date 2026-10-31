@@ -149,7 +149,7 @@ def build_app(folder, version, build, sandbox, feed_url, public_key):
     environment = dict(os.environ, BUNDLE_ID=BUNDLE_ID, SANDBOX="1" if sandbox else "0", APP_DIR=folder,
                        APP_VERSION=version, APP_BUILD=build, UPDATE_FEED_URL=feed_url, UPDATE_PUBLIC_KEYS=public_key)
     run([os.path.join(ROOT, "scripts/build-app.sh")], cwd=ROOT, env=environment)
-    return os.path.join(folder, "PrivacyBrowser.app")
+    return os.path.join(folder, "Lumen.app")
 
 
 def item(tool, key, archive, version, build, url, notes):
@@ -181,7 +181,7 @@ def forged(envelope_bytes, port):
 # MARK: The run
 
 def app_processes(app):
-    found = subprocess.run(["pgrep", "-f", os.path.join(app, "Contents/MacOS/PrivacyBrowser")],
+    found = subprocess.run(["pgrep", "-f", os.path.join(app, "Contents/MacOS/Lumen")],
                            capture_output=True, text=True).stdout.split()
     return [int(pid) for pid in found]
 
@@ -295,8 +295,8 @@ def main():
         # The old build and the new one.
         old_app = build_app(os.path.join(out, "old"), *OLD, sandboxed, feed_url, f"{key_id}={public}")
         new_app = build_app(os.path.join(out, "new"), *NEW, sandboxed, feed_url, f"{key_id}={public}")
-        archive_name = f"PrivacyBrowser-{NEW[0]}.zip"
-        new_zip, old_zip = os.path.join(out, archive_name), os.path.join(out, f"PrivacyBrowser-{OLD[0]}.zip")
+        archive_name = f"Lumen-{NEW[0]}.zip"
+        new_zip, old_zip = os.path.join(out, archive_name), os.path.join(out, f"Lumen-{OLD[0]}.zip")
         run(["ditto", "-c", "-k", "--keepParent", new_app, new_zip])
         run(["ditto", "-c", "-k", "--keepParent", old_app, old_zip])
         notes = os.path.join(out, "notes.txt")
@@ -305,7 +305,7 @@ def main():
         base = f"https://localhost:{args.port}/"
         release = item(tool, key, new_zip, *NEW, base + archive_name, notes)
         same = item(tool, key, old_zip, *OLD, base + os.path.basename(old_zip), notes)
-        older = item(tool, key, old_zip, "0.0.9", "0.9", base + "PrivacyBrowser-0.0.9.zip", notes)
+        older = item(tool, key, old_zip, "0.0.9", "0.9", base + "Lumen-0.0.9.zip", notes)
         appcasts = {"stale": appcast(tool, key, os.path.join(out, "stale.json"), [release])}
         time.sleep(1.2)
         appcasts["downgrade"] = appcast(tool, key, os.path.join(out, "downgrade.json"), [same, older])
@@ -337,7 +337,7 @@ def main():
         else:
             vault = os.path.join(out, "vault")
             roots = [os.path.join(home, "Library/WebKit", BUNDLE_ID), os.path.join(home, "Library/Caches", BUNDLE_ID)]
-        binary = os.path.join(old_app, "Contents/MacOS/PrivacyBrowser")
+        binary = os.path.join(old_app, "Contents/MacOS/Lumen")
         environment = dict(os.environ, PB_SELFTEST_UPDATES="1", PRIVACYBROWSER_VAULT_DIR=vault,
                            PB_SELFTEST_UPDATE_CONTROL=f"https://localhost:{args.port}/__control",
                            PB_SELFTEST_UPDATE_CERT_SHA256=cert_sha256)
@@ -401,7 +401,7 @@ def main():
                    if egress_check.TIME.search(line)]
 
         def ours(packet):
-            return any(owner and owner[0].startswith("PrivacyBrowser") for owner in (packet["proc"], packet["eproc"]))
+            return any(owner and owner[0].startswith("Lumen") for owner in (packet["proc"], packet["eproc"]))
 
         off = windows(log, "egress-window")
         control = windows(log, "feed-control-window")

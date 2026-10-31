@@ -2,7 +2,7 @@ import AppKit
 import BrowserCore
 import os
 
-/// `PrivacyBrowser --history-check`: can Safari's history run inside a profile's process?
+/// `Lumen --history-check`: can Safari's history run inside a profile's process?
 ///
 /// Safari's own history store asks Safari's History service, an XPC service of Safari.app that
 /// no other process can start, so in a profile's window it waits for it for ever: the History

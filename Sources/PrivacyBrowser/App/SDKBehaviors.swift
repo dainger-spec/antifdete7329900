@@ -60,7 +60,7 @@ enum SDKBehaviors {
     }
 }
 
-/// `PrivacyBrowser --sdk-check [--everything] [--as-profile] [--features]`: what a page sees, and
+/// `Lumen --sdk-check [--everything] [--as-profile] [--features]`: what a page sees, and
 /// what the screen is, in a process of this build — with WebKit's behaviors as the SDK this
 /// executable declares gives them, or, with `--everything`, as Safari has them
 /// (`SDKBehaviors.matchSafari`). CI runs it on the app as built and on a copy whose executable

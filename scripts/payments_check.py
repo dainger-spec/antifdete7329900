@@ -3,7 +3,7 @@
 profile. A measurement for the parity rule (docs/ISOLATION_AND_LIMITATIONS.md §2, *Parity with
 Safari*); it turns nothing on in the app.
 
-    python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --trust system --out build/payments
+    python3 scripts/payments_check.py --app build/unsandboxed/Lumen.app --trust system --out build/payments
 
 One page, served here over HTTPS, measures itself: which of the interfaces the window has, the
 window's own property names, and what each call answers — `ApplePaySession.canMakePayments()`,
@@ -14,7 +14,7 @@ user gesture; `window.pushManager` too. Nothing is evaluated into the page from 
 an app or WebDriver runs in a page is part of what is measured here, so the page's own script is
 the only one. Apple Pay answers only a page with a certificate, hence HTTPS.
 
-The page is opened in this Mac's Safari, and in new profiles of the app (`PrivacyBrowser
+The page is opened in this Mac's Safari, and in new profiles of the app (`Lumen
 --payments-check`, PaymentsCheck.swift), one variant at a time:
 
   shipped                the profile as it ships, in the app's own window
@@ -57,7 +57,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-CA_NAME = "PrivacyBrowser payments check CA (throwaway)"
+CA_NAME = "Lumen payments check CA (throwaway)"
 VARIANTS = ["shipped", "shipped-safari-window", "on-page", "on-isolated", "on-none"]
 
 INTERFACES = [
@@ -391,7 +391,7 @@ def compare(side, report, safari):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].replace("\n", " "))
-    parser.add_argument("--app", required=True, help="PrivacyBrowser.app, the build without the App Sandbox")
+    parser.add_argument("--app", required=True, help="Lumen.app, the build without the App Sandbox")
     parser.add_argument("--out", default="build/payments")
     parser.add_argument("--trust", choices=["system", "user"],
                         help="trust the throwaway authority for the run: in the System keychain (sudo), "
@@ -404,7 +404,7 @@ def main():
                              "window's own property names (Apple Pay answers no call there)")
     options = parser.parse_args()
 
-    executable = os.path.join(options.app, "Contents", "MacOS", "PrivacyBrowser")
+    executable = os.path.join(options.app, "Contents", "MacOS", "Lumen")
     if not os.path.exists(executable):
         log(f"PAYMENTS no app at {options.app}")
         return 64

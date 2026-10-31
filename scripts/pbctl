@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pbctl — the PrivacyBrowser automation API from the command line (docs/AUTOMATION_API.md).
+"""pbctl — the Lumen automation API from the command line (docs/AUTOMATION_API.md).
 
     pbctl list
     pbctl show <profile>

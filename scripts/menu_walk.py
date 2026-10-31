@@ -2,10 +2,10 @@
 """Every item of Safari's menu bar chosen in a profile's own process, what each did, and whether
 that is still what it did when the record was made.
 
-    python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/menu-walk \\
+    python3 scripts/menu_walk.py --app build/unsandboxed/Lumen.app --out build/menu-walk \\
         --title "Menu walk" [--record docs/menu-walk/safari-26.json] [--check] [--write-record FILE]
 
-Runs `PrivacyBrowser --menu-walk` (SafariMenuWalkCheck.swift, SafariMenuWalk.swift) with the
+Runs `Lumen --menu-walk` (SafariMenuWalkCheck.swift, SafariMenuWalk.swift) with the
 self-test proxy started for it (the profile's start page loads through it), reads its `MENUWALK`
 lines, and adds the crash report of every item that ended the process (scripts/crash_summary.py).
 Writes `menu-walk.json` and `menu-walk.md` (a table: item, keys, what it did, what it wrote,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal HTTP-CONNECT and SOCKS5 proxy used by `PrivacyBrowser --self-test`.
+"""Minimal HTTP-CONNECT and SOCKS5 proxy used by `Lumen --self-test`.
 
 It never connects anywhere: after the proxy handshake it answers the tunnelled HTTP request
 itself with a page that reports how the request arrived, e.g.

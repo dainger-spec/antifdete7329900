@@ -2,7 +2,7 @@ import AppKit
 import BrowserCore
 import OSLog
 
-/// `PrivacyBrowser --paths-check`: where Safari's code in a profile's process finds no path.
+/// `Lumen --paths-check`: where Safari's code in a profile's process finds no path.
 ///
 /// The owner's Mac, 31 October: Safari's bookmarks database "at (null)" (SQLite error 11, "Couldn't
 /// create bookmarks database at (null)", "Failed to instantiate tab collection") from a profile's

@@ -198,7 +198,7 @@ enum ExceptionLog {
 
     // MARK: The check
 
-    /// `PrivacyBrowser --exception-check [--replacing]`: an exception thrown from a timer of
+    /// `Lumen --exception-check [--replacing]`: an exception thrown from a timer of
     /// AppKit's run loop — as one thrown handling a key or a click is — in a process with this
     /// file's hooks as every process has them, or with `--replacing` as the earlier hook had them
     /// (the preprocessor before it replaced, not called). Prints `EXCEPTION-CHECK` lines: whether

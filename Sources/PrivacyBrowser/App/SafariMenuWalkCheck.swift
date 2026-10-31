@@ -3,7 +3,7 @@ import BrowserCore
 import CoreServices
 import Foundation
 
-/// `PrivacyBrowser --menu-walk` (CI): Safari's menu bar walked item by item in a profile's own
+/// `Lumen --menu-walk` (CI): Safari's menu bar walked item by item in a profile's own
 /// process, from the manager's side (`SafariMenuWalk` is the profile's side).
 ///
 /// A new profile in a temporary vault, launched as the app launches one (a process of its own,

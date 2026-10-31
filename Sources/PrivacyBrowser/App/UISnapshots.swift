@@ -2,7 +2,7 @@ import AppKit
 import BrowserCore
 import SwiftUI
 
-/// `PrivacyBrowser --render-ui-snapshots <folder>`: renders the app's screens with sample data
+/// `Lumen --render-ui-snapshots <folder>`: renders the app's screens with sample data
 /// into PNG files, so the design can be reviewed from CI (no vault, no WebKit, no network).
 ///
 /// Each screen is shown in a real window like the app's own (dark, title bar transparent over
@@ -15,7 +15,7 @@ enum UISnapshots {
     static func start(arguments: [String]) {
         setvbuf(stdout, nil, _IOLBF, 0)
         guard let index = arguments.firstIndex(of: "--render-ui-snapshots"), arguments.indices.contains(index + 1) else {
-            print("usage: PrivacyBrowser --render-ui-snapshots <folder>")
+            print("usage: Lumen --render-ui-snapshots <folder>")
             exit(2)
         }
         let folder = URL(fileURLWithPath: arguments[index + 1], isDirectory: true)

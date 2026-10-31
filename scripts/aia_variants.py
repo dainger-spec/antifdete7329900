@@ -2,7 +2,7 @@
 """From which SDK an app's executable declares does this Mac fetch a certificate's missing
 intermediate outside a profile's proxy?
 
-    python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app \\
+    python3 scripts/aia_variants.py --app build/unsandboxed/Lumen.app \\
         --sdk "15.0,26.5,$(xcrun --show-sdk-version)" --out build/aia-variants --title "AIA variants"
 
 WebKit turns some of its behaviors on only for an app whose executable declares a recent enough SDK
@@ -38,7 +38,7 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BINARY = "Contents/MacOS/PrivacyBrowser"
+BINARY = "Contents/MacOS/Lumen"
 PORTS = {"http": 18180, "socks": 18181, "tls-control": 18186, "canary": 18187}
 LINE = re.compile(r"^(\d+\.\d+) \(([^)]*)\)")
 
@@ -66,7 +66,7 @@ def declared_sdk(binary):
 
 def copy_declaring(app, sdk, folder, entitlements):
     """A copy of `app` in `folder` whose executable declares `sdk`, or None."""
-    copy = os.path.join(folder, "PrivacyBrowser.app")
+    copy = os.path.join(folder, "Lumen.app")
     shutil.copytree(app, copy, symlinks=True)
     binary = os.path.join(copy, BINARY)
     minos, _ = declared_sdk(binary)

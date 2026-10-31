@@ -2,7 +2,7 @@
 """What crashed, in a few lines: the summary of macOS crash reports (.ips) of this app's processes
 and of WebKit's.
 
-    python3 scripts/crash_summary.py ~/Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips ...
+    python3 scripts/crash_summary.py ~/Library/Logs/DiagnosticReports/*Lumen*.ips ...
 
 A profile's own process that dies leaves the self-test only "the profile quit unexpectedly"; the
 system writes what happened to a crash report. For each report given this prints the process,

@@ -3,7 +3,7 @@ import BrowserCore
 import Foundation
 import os
 
-/// The child process of one profile: `PrivacyBrowser --profile-session <uuid>`.
+/// The child process of one profile: `Lumen --profile-session <uuid>`.
 ///
 /// Started by the manager process (`ProfileProcess`, which explains why), and given its profile's
 /// grant on its standard input — that profile's key and entry in the index, not the vault's master

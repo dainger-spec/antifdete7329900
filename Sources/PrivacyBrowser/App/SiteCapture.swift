@@ -4,7 +4,7 @@ import TunnelCore
 import TunnelTransport
 import WebKit
 
-/// `PrivacyBrowser --capture-sites <spec.json> <out-dir>`: loads pages in real profile windows and
+/// `Lumen --capture-sites <spec.json> <out-dir>`: loads pages in real profile windows and
 /// records what a script on each page returns. `scripts/live_compare.py` writes the spec, runs the
 /// same pages and scripts in this Mac's Safari (safaridriver) and compares the two, so the
 /// fingerprinting sites a user would try (deviceinfo.me, CreepJS, a TLS/HTTP2 echo, …) are measured
@@ -38,7 +38,7 @@ final class SiteCapture {
             var proxy: Proxy?
             /// "harness": WebRTC through the packet tunnel's TURN server and SOCKS5 relay, run on a
             /// UDP socket of this Mac instead of in the extension (`TURNUDPHost`) — what CI can run.
-            /// "utun": through `route`'s virtual relay addresses, which `PrivacyBrowser --utun-relay`
+            /// "utun": through `route`'s virtual relay addresses, which `Lumen --utun-relay`
             /// (run as root, `UTunRelayHarness`) serves on a utun interface with the extension's router.
             var relay: String?
             var route: TunnelRoute?
@@ -68,7 +68,7 @@ final class SiteCapture {
     static func start(arguments: [String]) {
         setvbuf(stdout, nil, _IOLBF, 0)
         guard let index = arguments.firstIndex(of: "--capture-sites"), arguments.count > index + 2 else {
-            print("usage: PrivacyBrowser --capture-sites <spec.json> <out-dir>")
+            print("usage: Lumen --capture-sites <spec.json> <out-dir>")
             exit(64)
         }
         let specPath = arguments[index + 1], outPath = arguments[index + 2]

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Does anything a profile sends go around its proxy? Measured, not assumed.
 
-    python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/leaks
+    python3 scripts/leak_check.py --app build/unsandboxed/Lumen.app --out build/leaks
 
-Runs `PrivacyBrowser --capture-sites` (SiteCapture.swift) with profiles that use real forwarding
+Runs `Lumen --capture-sites` (SiteCapture.swift) with profiles that use real forwarding
 proxies started here (HTTP CONNECT and SOCKS5; every request they get is logged), next to a
 profile without a proxy as the control:
 
@@ -22,7 +22,7 @@ profile without a proxy as the control:
   then open a data channel to each other through the relay and the proxy (the test proxy plays
   the NAT hairpin a real proxy's public address would need). The server urls the page is told
   (ICE events, `getStats()`) must be its own: the relay's address here is this Mac's.
-* WebRTC through a utun interface: where passwordless sudo works (CI), `PrivacyBrowser
+* WebRTC through a utun interface: where passwordless sudo works (CI), `Lumen
   --utun-relay` opens a utun interface as root, routes the tunnel's subnets into it and serves
   two routes with the extension's own PacketRouter, each through its own UDP-capable proxy. One
   profile uses WebKit's default network selection (sockets bound to the physical interface's
@@ -403,14 +403,14 @@ def utun_route(slot, proxy_port):
 
 
 def start_utun_relay(app, routes, out):
-    """`sudo -n PrivacyBrowser --utun-relay`: the extension's router on a utun interface. The
+    """`sudo -n Lumen --utun-relay`: the extension's router on a utun interface. The
     process once it is routed, or None where it cannot run (no passwordless sudo, no utun)."""
     if sys.platform != "darwin":
         return None
     path = os.path.join(out, "utun-routes.json")
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(routes, handle)
-    binary = os.path.join(app, "Contents", "MacOS", "PrivacyBrowser")
+    binary = os.path.join(app, "Contents", "MacOS", "Lumen")
     try:
         process = subprocess.Popen(["sudo", "-n", binary, "--utun-relay", path], stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -441,7 +441,7 @@ def stop_utun_relay(process):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--app", required=True, help="the unsandboxed PrivacyBrowser.app")
+    parser.add_argument("--app", required=True, help="the unsandboxed Lumen.app")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)

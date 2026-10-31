@@ -4,7 +4,7 @@
 # when ⌘, opened Safari's settings in a profile's window — and is that because the app is not a
 # browser as far as the system knows? (SafariChrome.runDefaultBrowserCheck)
 #
-#   scripts/default_browser_check.sh <PrivacyBrowser.app> <out dir> <notice title>
+#   scripts/default_browser_check.sh <Lumen.app> <out dir> <notice title>
 #
 # Runs the check on the app as built, then on a copy that declares itself a browser — the http and
 # https schemes and the web's document types, as a browser's Info.plist does — signed ad hoc with
@@ -20,7 +20,7 @@ title="$3"
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 mkdir -p "$out"
 
-"$app/Contents/MacOS/PrivacyBrowser" --default-browser-check > "$out/as-built.txt" 2>/dev/null
+"$app/Contents/MacOS/Lumen" --default-browser-check > "$out/as-built.txt" 2>/dev/null
 echo "exit $?" >> "$out/as-built.txt"
 
 # The copy goes in a folder of its own in ~/Applications, where LaunchServices looks for apps, not
@@ -31,7 +31,7 @@ if [ -z "$scratch" ] || [ ! -d "$scratch" ]; then
   echo "::warning title=$title::no folder in ~/Applications for the copy declared a browser"
   exit 0
 fi
-copy="$scratch/PrivacyBrowser.app"
+copy="$scratch/Lumen.app"
 cp -R "$app" "$copy"
 codesign -d --entitlements - --xml "$app" > "$out/entitlements.plist" 2>/dev/null
 if python3 - "$copy/Contents/Info.plist" > "$out/declared-plist.txt" 2>&1 <<'PY'
@@ -62,7 +62,7 @@ then
     || echo "::warning title=$title::the copy declared a browser could not be signed: $(tail -1 "$out/codesign.txt")"
   "$lsregister" -f "$copy" > "$out/lsregister.txt" 2>&1
   echo "lsregister -f: exit $?" >> "$out/lsregister.txt"
-  "$copy/Contents/MacOS/PrivacyBrowser" --default-browser-check > "$out/declared.txt" 2>/dev/null
+  "$copy/Contents/MacOS/Lumen" --default-browser-check > "$out/declared.txt" 2>/dev/null
   echo "exit $?" >> "$out/declared.txt"
   "$lsregister" -u "$copy" 2>/dev/null
 else

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """WebKit's features in a profile's web views as Safari has them (SafariEngineFeatures), checked.
 
-    scripts/engine_features_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/engine-features \
+    scripts/engine_features_check.py --app build/unsandboxed/Lumen.app --out build/engine-features \
         [--copy-sdk 14.0] [--title "WebKit's features"] [--report-only]
 
 For the app as built, and with --copy-sdk a copy of it whose executable declares that SDK (made as

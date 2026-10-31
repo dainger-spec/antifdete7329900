@@ -12,7 +12,7 @@ enum UTunRelayHarness {
     static func start(arguments: [String]) -> Never {
         setvbuf(stdout, nil, _IOLBF, 0)
         guard let index = arguments.firstIndex(of: "--utun-relay"), arguments.count > index + 1 else {
-            print("usage: sudo PrivacyBrowser --utun-relay <routes.json>")
+            print("usage: sudo Lumen --utun-relay <routes.json>")
             exit(64)
         }
         let queue = DispatchQueue(label: "PrivacyBrowser.utun-relay")

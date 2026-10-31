@@ -5,7 +5,7 @@ import Network
 import os
 import WebKit
 
-/// `PrivacyBrowser --self-test`: headless end-to-end checks against the real WebKit of the
+/// `Lumen --self-test`: headless end-to-end checks against the real WebKit of the
 /// running macOS, in the real (sandboxed or not) process. Exit code 0 = all checks passed.
 ///
 /// Unit tests cover the platform-independent core. This covers what only WebKit can answer:

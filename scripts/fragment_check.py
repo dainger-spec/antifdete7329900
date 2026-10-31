@@ -2,12 +2,12 @@
 """Does a jump to a fragment of the page shown stay in the same document — in this Mac's Safari
 and in a profile?
 
-    python3 scripts/fragment_check.py --app build/unsandboxed/PrivacyBrowser.app
+    python3 scripts/fragment_check.py --app build/unsandboxed/Lumen.app
 
 On macOS 27.0.1 (WebKit 22625) the self-test found its web views making a new document of a
 jump to `#fragment` — an anchor clicked, `location.hash` set, the app loading `page#fragment` —
 where macOS 26 keeps the page (CI runs 432 and 433). This asks the same of the real Safari and of
-a profile as it ships, in this app's window and in Safari's window (`PrivacyBrowser
+a profile as it ships, in this app's window and in Safari's window (`Lumen
 --payments-check`, the variants `shipped` and `shipped-safari-window`).
 
 One page, on 127.0.0.1 over HTTP. Its own script, as soon as it loads: a mark on the document
@@ -140,10 +140,10 @@ def describe(report):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].replace("\n", " "))
-    parser.add_argument("--app", required=True, help="PrivacyBrowser.app, the build without the App Sandbox")
+    parser.add_argument("--app", required=True, help="Lumen.app, the build without the App Sandbox")
     parser.add_argument("--no-safari", action="store_true")
     options = parser.parse_args()
-    executable = os.path.join(options.app, "Contents", "MacOS", "PrivacyBrowser")
+    executable = os.path.join(options.app, "Contents", "MacOS", "Lumen")
     pages = Pages()
     missing = []
     if not options.no_safari:

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""The app with many profiles, in numbers: `PrivacyBrowser --scale-check` (ScaleCheck.swift) with
+"""The app with many profiles, in numbers: `Lumen --scale-check` (ScaleCheck.swift) with
 the self-test proxy started for it, its `SCALE` lines turned into a report.
 
-    python3 scripts/scale_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/scale \\
+    python3 scripts/scale_check.py --app build/unsandboxed/Lumen.app --out build/scale \\
         [--profiles 200] [--running 1,5,10,20] [--quit 10] [--title "Scale"]
 
 Writes `scale.json` (every measurement) and `scale.md` (the report) into --out, with the Profiles
@@ -19,7 +19,7 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BINARY = "Contents/MacOS/PrivacyBrowser"
+BINARY = "Contents/MacOS/Lumen"
 PROXY_PORT = 18200
 
 
@@ -41,9 +41,9 @@ def wait_for_port(port, seconds=20):
 def crash_reports(since, out):
     """Summaries of this app's crash reports written since `since` (scripts/crash_summary.py)."""
     found = []
-    # *PrivacyBrowser*: a fault a process lived through is ExcUserFault_PrivacyBrowser-….ips (its
+    # *Lumen*: a fault a process lived through is ExcUserFault_Lumen-….ips (its
     # summary's lines say FAULT, not CRASH).
-    for path in sorted(glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips"))):
+    for path in sorted(glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/*Lumen*.ips"))):
         if os.path.getmtime(path) < since:
             continue
         summary = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "crash_summary.py"), path],

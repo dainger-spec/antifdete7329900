@@ -205,7 +205,7 @@ enum SafariChrome {
         return absent
     }
 
-    /// `PrivacyBrowser --check-safari-chrome`: loads Safari's frameworks and says which of the
+    /// `Lumen --check-safari-chrome`: loads Safari's frameworks and says which of the
     /// pieces this build relies on this macOS has. Exit code 0 when every structural and network
     /// piece is there, 1 when any is missing, 2 when the frameworks do not load (a sandboxed build,
     /// or a macOS without them). Absent stubs are listed only. Touches nothing else: no window, no
@@ -1445,7 +1445,7 @@ enum SafariChrome {
 // MARK: - Standalone run
 
 extension SafariChrome {
-    /// `PrivacyBrowser --safari-chrome [url]`: Safari's chrome with one of our web views in it, on
+    /// `Lumen --safari-chrome [url]`: Safari's chrome with one of our web views in it, on
     /// an ephemeral data store, as the way to try this outside the profile machinery. Returns
     /// without running anything when the frameworks cannot be loaded, which is what a sandboxed
     /// build does.

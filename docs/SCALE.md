@@ -7,7 +7,7 @@ anything. Nobody had measured it; the owner has 22 profiles and had never run mo
 
 ## How it is measured
 
-`scripts/scale_check.py` runs `PrivacyBrowser --scale-check` (`ScaleCheck.swift`) with the
+`scripts/scale_check.py` runs `Lumen --scale-check` (`ScaleCheck.swift`) with the
 self-test proxy started for it, on GitHub's macOS runners (`.github/workflows/scale.yml`: when its
 own files change, every Monday, and by hand). Everything runs as the app runs it:
 

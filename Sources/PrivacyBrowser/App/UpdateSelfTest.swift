@@ -2,7 +2,7 @@ import AppKit
 import BrowserCore
 import Foundation
 
-/// `PrivacyBrowser --selftest-updates run|verify`: the update scenarios of docs/UPDATES.md §8, driven
+/// `Lumen --selftest-updates run|verify`: the update scenarios of docs/UPDATES.md §8, driven
 /// by `scripts/update_check.py` on a CI runner — the app's own updater against a local HTTPS feed
 /// (`PB_SELFTEST_UPDATE_CONTROL` says which list it serves), a "new" build of this app the script
 /// made and signed, and the real installer helper.
@@ -51,7 +51,7 @@ enum UpdateSelfTest {
             case "run": await run()
             case "verify": await verify()
             default:
-                print("usage: PrivacyBrowser --selftest-updates run|verify")
+                print("usage: Lumen --selftest-updates run|verify")
                 exit(64)
             }
             print("SELFTEST-UPDATES \(phase) \(failures == 0 ? "PASSED" : "FAILED"): \(failures) failed")

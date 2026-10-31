@@ -27,7 +27,7 @@ cd "$(dirname "$0")/.."
 : "${BUILD:?BUILD is needed (CFBundleVersion: whole numbers separated by dots, e.g. 2)}"
 [[ "$BUILD" =~ ^[0-9]{1,9}(\.[0-9]{1,9}){0,7}$ ]] || { echo "error: BUILD '$BUILD' is not a build number" >&2; exit 1; }
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
-FEED_URL="${FEED_URL:-https://updates.invalid/privacybrowser/appcast.json}"
+FEED_URL="${FEED_URL:-https://updates.invalid/lumen/appcast.json}"
 [[ "$FEED_URL" == https://* ]] || { echo "error: FEED_URL must be https" >&2; exit 1; }
 DOWNLOAD_URL="${DOWNLOAD_URL:-${FEED_URL%/*}/}"
 [[ "$DOWNLOAD_URL" == https://* ]] || { echo "error: DOWNLOAD_URL must be https" >&2; exit 1; }
@@ -68,7 +68,7 @@ fi
 APP_VERSION="$VERSION" APP_BUILD="$BUILD" SANDBOX="$SANDBOX" APP_DIR="$OUT/app" SIGN_IDENTITY="$SIGN_IDENTITY" \
   UPDATE_FEED_URL="$FEED_URL" UPDATE_PUBLIC_KEYS="$PUBLIC_KEYS" UPDATE_TEAM_ID="$TEAM_FOR_UPDATES" \
   scripts/build-app.sh
-APP="$OUT/app/PrivacyBrowser.app"
+APP="$OUT/app/Lumen.app"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")" == "$BUILD" ]] \
   || { echo "error: the app's CFBundleVersion is not $BUILD" >&2; exit 1; }
 # An executable that declares macOS 15's SDK or newer gets WebKit's network loader, and with it, on
@@ -77,7 +77,7 @@ APP="$OUT/app/PrivacyBrowser.app"
 # scripts/aia_variants.py; docs/ISOLATION_AND_LIMITATIONS.md §2). Until that is closed, a release is
 # made only from a build that declares an older SDK — Xcode 27's SwiftPM writes 14.0. A dry run
 # says so and goes on.
-DECLARED_SDK="$(xcrun vtool -show-build "$APP/Contents/MacOS/PrivacyBrowser" | awk '$1 == "sdk" { print $2; exit }')"
+DECLARED_SDK="$(xcrun vtool -show-build "$APP/Contents/MacOS/Lumen" | awk '$1 == "sdk" { print $2; exit }')"
 if [[ "${DECLARED_SDK%%.*}" -ge 15 ]]; then
   if [[ "$SIGN_IDENTITY" == "-" ]]; then
     DRY+=("the build declares SDK $DECLARED_SDK: a signed release of it would be refused (docs/ISOLATION_AND_LIMITATIONS.md §2)")
@@ -103,7 +103,7 @@ fi
 codesign --verify --strict --deep "$APP"
 
 # 3. The zip the app downloads, and its release, signed.
-ZIP_NAME="PrivacyBrowser-$VERSION.zip"
+ZIP_NAME="Lumen-$VERSION.zip"
 ditto -c -k --keepParent "$APP" "$OUT/$ZIP_NAME"
 NOTES="$OUT/notes.txt"
 if [[ -n "${NOTES_FILE:-}" ]]; then cp "$NOTES_FILE" "$NOTES"; else : > "$NOTES"; fi

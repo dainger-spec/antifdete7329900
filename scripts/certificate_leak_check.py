@@ -3,7 +3,7 @@
 job that fails the build: everything else that job finds is reported, never failed on.
 
     python3 scripts/certificate_leak_check.py --capture build/egress27/capture.txt \\
-        --selftest-log build/egress27/selftest.txt --app build/unsandboxed/PrivacyBrowser.app \\
+        --selftest-log build/egress27/selftest.txt --app build/unsandboxed/Lumen.app \\
         --out build/egress27/certificate-leak
 
 The self-test's certificate check (`certificatesWithoutFetching`) loads, in a profile with a proxy,

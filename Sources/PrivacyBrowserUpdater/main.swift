@@ -4,7 +4,7 @@ import Foundation
 import os
 import UpdateInstaller
 
-// PrivacyBrowser Updater: Contents/Helpers/PrivacyBrowser Updater.app inside the app
+// Lumen Updater: Contents/Helpers/Lumen Updater.app inside the app
 // (docs/UPDATES.md §3). The app starts it through LaunchServices at the end of a quit in which every
 // profile was sealed — so it is not a child of the app, and not in the app's sandbox — and it
 // replaces the app it is in with the release the app's request names. It takes no arguments and

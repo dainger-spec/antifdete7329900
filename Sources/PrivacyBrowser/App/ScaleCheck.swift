@@ -4,7 +4,7 @@ import Darwin
 import Foundation
 import SwiftUI
 
-/// `PrivacyBrowser --scale-check [--profiles 200] [--running 1,5,10,20] [--quit 10] [--out DIR]`
+/// `Lumen --scale-check [--profiles 200] [--running 1,5,10,20] [--quit 10] [--out DIR]`
 /// (CI): how the app holds up with many profiles, in numbers. Nobody had measured it; the owner
 /// has 22 profiles and had never run more than ten at once.
 ///

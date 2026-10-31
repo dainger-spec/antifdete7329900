@@ -127,7 +127,7 @@ of … factories`), and each web view they missed is logged as caught by the ini
 ```sh
 cd ~/antifdete7329900 && git pull && SANDBOX=0 scripts/build-app.sh
 log stream --level info --predicate 'subsystem == "PrivacyBrowser"' > ~/pb-27.log &
-PB_PROFILE_PROCESS=1 build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+PB_PROFILE_PROCESS=1 build/Lumen.app/Contents/MacOS/Lumen
 # Unlock, start the profile with the German proxy, open https://api.ipify.org in it, note the
 # address, quit the app. Then:
 kill %1
