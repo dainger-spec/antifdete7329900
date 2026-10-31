@@ -46,6 +46,10 @@ jobs:
       # written to the system log in clear (scripts/check_log_privacy.py).
       - name: Log lines keep the user's data private
         run: python3 scripts/check_log_privacy.py
+      # No check of the self-test stops after a note without skip() or check(): a check that
+      # cannot be made is a counted SKIP, never a quiet INFO (scripts/check_selftest_skips.py).
+      - name: The self-test never stops a check quietly
+        run: python3 scripts/check_selftest_skips.py
 
   macos-27:
     name: macOS 27 — the self-test on the newest macOS (preview image; fails the build only on a certificate fetched outside the proxy)
