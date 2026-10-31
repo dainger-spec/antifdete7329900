@@ -169,6 +169,18 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-empty", size: CGSize(width: 1180, height: 640)) {
             ProfilesPreview(rows: [], sync: .notYet)
         }.capture(into: folder)
+        // The profile index missing, or unreadable, with the profiles' folders kept (never "no
+        // profiles yet"); and profile folders a restored, older index does not list.
+        let vaultPath = "~/Library/Application Support/Lumen"
+        problems += await Shot(name: "profiles-index-missing", size: CGSize(width: 1180, height: 640)) {
+            ProfilesPreview(rows: [], sync: .off, indexNotice: AppModel.IndexNotice(kind: .missing, folders: 12, vaultPath: vaultPath))
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-index-unreadable", size: CGSize(width: 1180, height: 640)) {
+            ProfilesPreview(rows: [], sync: .off, indexNotice: AppModel.IndexNotice(kind: .unreadable, folders: 12, vaultPath: vaultPath))
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-index-unlisted", size: CGSize(width: 1180, height: 740)) {
+            ProfilesPreview(rows: rows, sync: .off, indexNotice: AppModel.IndexNotice(kind: .unlisted, folders: 3, vaultPath: vaultPath))
+        }.capture(into: folder)
         problems += await Shot(name: "profiles-no-matches", size: CGSize(width: 1180, height: 520)) {
             ProfilesPreview(rows: rows, search: "zzz", sync: .syncing)
         }.capture(into: folder)
@@ -890,10 +902,11 @@ private struct ProfilesPreview: View {
     var section: ProfilesSection = .profiles
     var proxyCount: Int? = 9
     var proxies: AnyView?
+    var indexNotice: AppModel.IndexNotice?
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
-                       section: .constant(section), proxyCount: proxyCount, proxies: proxies)
+                       section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice)
     }
 }
 

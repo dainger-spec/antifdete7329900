@@ -248,6 +248,15 @@
 "history.notice.ephemeral" = "Ephemeral profile: history is kept in memory only and discarded when the profile stops.";
 "history.notice.off" = "History recording is turned off for this profile.";
 "history.search" = "Search history";
+"index.missing.title" = "Profile list not found — nothing was deleted";
+"index.missing.text" = "The vault has no index.bin file, which records the profiles and their keys. The profile folders (%ld) are still there and are not deleted, but they cannot be opened without it. To get the profiles back, put index.bin from a backup (such as Time Machine) into the vault folder and restart Lumen. If this vault was synced before, choose Sync Now in the More menu: the list comes back from the server.";
+"index.unreadable.title" = "Profile list can't be read — nothing was deleted";
+"index.unreadable.text" = "The vault's index.bin could not be read: it is damaged or belongs to another vault. The profile folders (%ld) are still there and are not deleted; the file is not written over, and no new profile is created until it is read. To get the profiles back, replace index.bin with a copy from a backup and restart Lumen. If this vault was synced before, you can instead rename index.bin (for example to index-damaged.bin), restart Lumen and choose Sync Now in the More menu.";
+"index.unlisted.title" = "Some profile folders are not in the list";
+"index.unlisted.text" = "Profile folders not in the profile list (index.bin): %ld. This happens when the list was replaced with an older copy, or made anew while the old one was missing. Nothing was deleted. These profiles' keys are only in a copy of index.bin that lists them. If you have one, keep the current index.bin aside, put that copy back and restart Lumen. Profiles made after that copy will then be outside the list; their folders are kept too.";
+"index.reveal" = "Show in Finder";
+"index.path" = "Vault folder: %@";
+"index.unreadable.cannotCreate" = "The profile was not created: the profile list (index.bin) could not be read, and it is not written over until it is restored. The Profiles window says how.";
 "launch.error.proxyInvalid" = "The profile's proxy is misconfigured (address “%@”). The profile was not started, so no site opens directly. Fix the proxy address in the profile settings.";
 "launch.error.proxyNeedsCredentials" = "The proxy at “%@” requires a user name and password. The profile was not started, so no site opens directly. Add them in the profile settings.";
 "launch.languageFixed" = "Websites see the language “%1$@” (set for this run by the first profile launched). For this profile’s proxy they would expect “%2$@”: quit the app and launch this profile first.";

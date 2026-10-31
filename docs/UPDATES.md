@@ -256,7 +256,7 @@ in the self-test, which runs the app's own code for it):
 | File | Holds | Before these rules | Now |
 |---|---|---|---|
 | `vault.json` | KDF parameters, the wrapped master key, the vault id | `format` = 1, anything else refused | newer: the vault does not open, and a password change does not write over it; also the generation of the vault (R3) |
-| `index.bin` | the profile list | `format` = 1, anything else refused | newer refused; not written over, by this device or by sync |
+| `index.bin` | the profile list | `format` = 1, anything else refused | newer refused; not written over, by this device or by sync. Missing or unreadable: no profile folder deleted, nothing pushed (ARCHITECTURE.md, `index.bin` missing or unreadable) |
 | `config.bin`, `config.bin.conflict` | a profile's settings (synced) | **no marker** — an older version drops new fields and writes the rest back | `format` read (absent = 1; this version writes none); newer: the profile does not start, nothing is written |
 | `passwords.bin` | saved passwords | **no marker** (a JSON array) | the array is format 1; an object with a newer `format` is refused, and no change is written |
 | `history.bin`, `bookmarks.bin` | history, bookmarks | `format` = 1, **not checked** | checked; newer refused, never written |

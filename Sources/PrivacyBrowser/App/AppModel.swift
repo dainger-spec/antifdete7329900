@@ -27,6 +27,25 @@ final class AppModel: ObservableObject {
     @Published private(set) var unlockFailed = false
     /// Where `startOver()` moved the previous vault (shown on the setup screen).
     @Published private(set) var movedAsideVaultPath: String?
+    /// The vault's profile index not read as it should be, or profile folders on disk that it does
+    /// not list: said in the Profiles window with the vault's folder and what to do (nil: all is well).
+    @Published private(set) var indexNotice: IndexNotice?
+
+    struct IndexNotice: Equatable {
+        enum Kind: Equatable {
+            /// No `index.bin`, and profile folders there.
+            case missing
+            /// An `index.bin` that could not be read: kept, never written over.
+            case unreadable
+            /// The index was read, and profile folders are there that it neither lists nor
+            /// records as deleted (an older index put back, or one made anew while it was missing).
+            case unlisted
+        }
+        let kind: Kind
+        /// The profile folders kept: all of them (missing, unreadable), or those not listed.
+        let folders: Int
+        let vaultPath: String
+    }
     @Published private(set) var deviceSettings = DeviceSettings()
     /// The app's own settings (Settings…, ⌘,).
     let settings = AppSettings()
@@ -175,6 +194,36 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// `indexNotice` from the repository as it is now: a sync can have put a missing index back.
+    private func updateIndexNotice() {
+        guard let repository else {
+            indexNotice = nil
+            return
+        }
+        let unlisted = repository.unlistedProfileFolders().count
+        let notice: IndexNotice?
+        switch repository.indexState {
+        case .unreadable(let folders):
+            notice = IndexNotice(kind: .unreadable, folders: folders, vaultPath: vaultPathDescription)
+        case .missing:
+            notice = unlisted > 0 ? IndexNotice(kind: .missing, folders: unlisted, vaultPath: vaultPathDescription) : nil
+        case .read:
+            notice = unlisted > 0 ? IndexNotice(kind: .unlisted, folders: unlisted, vaultPath: vaultPathDescription) : nil
+        }
+        if notice != indexNotice { indexNotice = notice }
+    }
+
+    /// A new profile is refused while the index cannot be read (the repository refuses it as well):
+    /// said in words, pointing at the notice that says how to restore it.
+    private func refuseWhileTheIndexIsUnreadable(_ repository: ProfileRepository) throws {
+        if case .unreadable = repository.indexState { throw DraftProblem(L("index.unreadable.cannotCreate")) }
+    }
+
+    /// The vault's folder in the Finder (the Profiles window's notice about the index).
+    func revealVaultFolder() {
+        NSWorkspace.shared.activateFileViewerSelecting([root])
+    }
+
     private static func displayPath(_ url: URL) -> String {
         let path = url.path
         if let home = getpwuid(getuid())?.pointee.pw_dir.map({ String(cString: $0) }), path.hasPrefix(home + "/") {
@@ -196,8 +245,20 @@ final class AppModel: ObservableObject {
     }
 
     private func didUnlock(_ vault: UnlockedVault) throws {
-        let repository = try ProfileRepository(vault: vault)
-        repository.removeOrphanedDirectories()
+        // The index read, or found missing or unreadable — then nothing is swept, and the Profiles
+        // window says so (`indexNotice`); with it read, only the folders of profiles it records as
+        // deleted go (ProfileRepository.openedAtUnlock, which the tests run as well).
+        let repository = try ProfileRepository.openedAtUnlock(vault: vault)
+        switch repository.indexState {
+        case .read:
+            break
+        case .missing(let folders):
+            Logger(subsystem: "PrivacyBrowser", category: "Vault")
+                .error("The profile index is missing: \(Int(folders), privacy: .public) profile folders kept, none deleted")
+        case .unreadable(let folders):
+            Logger(subsystem: "PrivacyBrowser", category: "Vault")
+                .error("The profile index could not be read: \(Int(folders), privacy: .public) profile folders kept, none deleted, the index not written over")
+        }
         let manager = ProfileManager(repository: repository)
         manager.onError = { [weak self] message in self?.showError(message) }
         manager.onReturnToProfiles = { [weak self] in
@@ -341,6 +402,7 @@ final class AppModel: ObservableObject {
 
     func refresh() {
         profiles = repository?.list() ?? []
+        updateIndexNotice()
         var details: [UUID: ProfileDetails] = [:]
         if let repository {
             for profile in profiles {
@@ -356,6 +418,7 @@ final class AppModel: ObservableObject {
     @discardableResult
     func createProfile(name: String, configuration: ProfileConfiguration) throws -> UUID? {
         guard let repository else { return nil }
+        try refuseWhileTheIndexIsUnreadable(repository)
         let summary = try repository.create(name: name, configuration: configuration)
         refresh()
         return summary.id
@@ -407,6 +470,7 @@ final class AppModel: ObservableObject {
     /// Imports a profile export as a new profile named `name`.
     func importProfile(from url: URL, password: String, name: String?) async throws -> ProfileSummary {
         guard let repository else { throw CoreError.vaultNotFound }
+        try refuseWhileTheIndexIsUnreadable(repository)
         let summary = try await Task.detached(priority: .userInitiated) {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }

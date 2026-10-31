@@ -199,7 +199,8 @@ struct ProfileListView: View {
         ProfilesScreen(rows: rows, isWorking: model.isWorking, sync: syncLine,
                        filter: $filter, search: $search, actions: actions,
                        section: $section, proxyCount: proxyCount,
-                       proxies: AnyView(ProxyListView(selection: $proxySelection)))
+                       proxies: AnyView(ProxyListView(selection: $proxySelection)),
+                       indexNotice: model.indexNotice, revealVault: { model.revealVaultFolder() })
     }
 
     /// The window's Proxies section; with `ids`, those proxies selected (else the selection it had).
@@ -464,6 +465,10 @@ struct ProfilesScreen: View {
     var section: Binding<ProfilesSection> = .constant(.profiles)
     var proxyCount: Int?
     var proxies: AnyView?
+    /// The vault's profile index missing or unreadable, or profile folders it does not list
+    /// (AppModel.indexNotice): said above the list, with the vault's folder in the Finder.
+    var indexNotice: AppModel.IndexNotice?
+    var revealVault: () -> Void = {}
     /// Rows selected with ⌘- and ⇧-click; with two or more, `ProfileBulkBar` acts on them all.
     @State private var selection = ProfileSelection()
 
@@ -482,6 +487,9 @@ struct ProfilesScreen: View {
                 VStack(spacing: 0) {
                     header
                     Rectangle().fill(Theme.divider).frame(height: 1)
+                    if let indexNotice {
+                        IndexNoticeBox(notice: indexNotice, reveal: revealVault)
+                    }
                     if selectedRows.count >= 2 {
                         ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
                                        selectAll: { selection.select(displayOrder.map(\.id)) },
@@ -597,7 +605,11 @@ struct ProfilesScreen: View {
 
     @ViewBuilder
     private var content: some View {
-        if rows.isEmpty {
+        if rows.isEmpty, let indexNotice, indexNotice.kind != .unlisted {
+            // Not "no profiles yet": the index that lists them is missing or unreadable (the notice
+            // above says so), and their folders are kept.
+            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if rows.isEmpty {
             EmptyProfilesView(onNew: actions.newProfile)
         } else if visibleRows.isEmpty {
             NoMatchesView {
@@ -1127,6 +1139,62 @@ private struct WarmUpLine: View {
 }
 
 // MARK: - Empty states
+
+/// The vault's profile index not read as it should be: what happened, that nothing was deleted,
+/// and how to get the profiles back — above the list, in the warning box the app uses elsewhere.
+struct IndexNoticeBox: View {
+    let notice: AppModel.IndexNotice
+    let reveal: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.warning)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(Self.title(notice))
+                    .font(.lumenLabel)
+                    .foregroundStyle(Theme.textPrimary)
+                Text(Self.text(notice))
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(String(format: L("index.path"), notice.vaultPath))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Button(L("index.reveal"), action: reveal)
+                .buttonStyle(.lumenSecondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Theme.warning.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).strokeBorder(Theme.warning.opacity(0.4), lineWidth: 1))
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .contain)
+    }
+
+    static func title(_ notice: AppModel.IndexNotice) -> String {
+        switch notice.kind {
+        case .missing: return L("index.missing.title")
+        case .unreadable: return L("index.unreadable.title")
+        case .unlisted: return L("index.unlisted.title")
+        }
+    }
+
+    static func text(_ notice: AppModel.IndexNotice) -> String {
+        switch notice.kind {
+        case .missing: return String(format: L("index.missing.text"), notice.folders)
+        case .unreadable: return String(format: L("index.unreadable.text"), notice.folders)
+        case .unlisted: return String(format: L("index.unlisted.text"), notice.folders)
+        }
+    }
+}
 
 private struct EmptyProfilesView: View {
     let onNew: () -> Void

@@ -153,8 +153,13 @@ public final class SyncEngine: @unchecked Sendable {
         let local = repository.currentIndex()
         let localBytes = try JSONCoding.encoder.encode(local)
         let known = state[name]
+        // An index this device could not read (missing, unreadable) is not an empty one: the
+        // server's copy is fetched and taken in whatever its revision, and nothing of this device's
+        // is pushed — it once was, the empty index over the server's, whose profiles' keys were
+        // then on no copy anywhere.
+        let localWasRead = repository.indexState == .read
 
-        if let remoteRevision = remote[objectID], remoteRevision != known?.revision {
+        if let remoteRevision = remote[objectID], remoteRevision != known?.revision || !localWasRead {
             guard let blob = try await transport.fetch(objectID: objectID) else { return }
             let decoded = try codec.decode(blob)
             // A newer version's index stops the sync: nothing is merged, nothing written either side.
@@ -172,7 +177,7 @@ public final class SyncEngine: @unchecked Sendable {
             } else {
                 state[name] = ItemState(revision: remoteRevision, sha256: Self.hash(mergedBytes))
             }
-        } else if Self.hash(localBytes) != known?.sha256 {
+        } else if localWasRead, Self.hash(localBytes) != known?.sha256 {
             let remoteRevision = remote[objectID]
             try await push(name: name, data: localBytes, revision: (remoteRevision ?? 0) + 1,
                            expected: remoteRevision, state: &state, report: &report)

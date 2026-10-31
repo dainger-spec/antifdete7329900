@@ -153,6 +153,27 @@ never leaves a half-written ciphertext.
 What a version does with a file a newer version wrote — refuses to read it, never writes over or
 deletes it — and which format each file carries: docs/UPDATES.md §4 (`DocumentFormat`).
 
+### `index.bin` missing or unreadable
+
+The profiles' keys are only in `index.bin` (wrapped by the profile-key wrapping key), so a profile
+folder without its entry cannot be opened — and an index that is missing or cannot be read is not
+"no profiles". `ProfileRepository.IndexState` tells the cases apart, and nothing deletes a profile
+folder on the strength of an index it did not read:
+
+| `index.bin` at unlock | `indexState` | Profile folders | `index.bin` | The Profiles window |
+|---|---|---|---|---|
+| read | `.read` | only those the index records as deleted (`deletedProfileIDs`) are swept — a deletion that stopped between the index and the folder | written as usual | folders the index neither lists nor records as deleted (an older index put back, or one made anew while it was missing): kept, and said, with how to get them back |
+| none, and no profile folder | `.read` | — | a new vault's | — |
+| none, with profile folders | `.missing` | all kept | not written over if one is put back while the vault is unlocked (a backup restored, as the window says to); a profile made meanwhile writes a new one | "Profile list not found — nothing was deleted", the folders' count, the vault's folder, and how to restore it: a backup's `index.bin`, or Sync Now |
+| there, not readable (damaged, another vault's) | `.unreadable` | all kept | never written over; no new profile | "Profile list can't be read — nothing was deleted", and how: a backup's copy, or, with sync, the file renamed and Sync Now |
+| a newer version's | — | — | unlock refuses (`newerFormat`), as before | — |
+
+Sync (`SyncEngine.syncIndex`) never pushes an index that was not read: with `.missing` or
+`.unreadable` it fetches the server's whatever its revision, merges, and pushes only the merge. (Before
+this was fixed, an index that went missing read as empty, the next unlock swept every profile folder,
+and a sync with the server unchanged since the last one pushed the empty index over the server's copy.)
+Tests: `ProfileIndexLossTests`.
+
 ### `webdata.pbsa` format
 
 ```

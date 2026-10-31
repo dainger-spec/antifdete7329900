@@ -82,6 +82,28 @@ public final class ProfileRepository: @unchecked Sendable {
     private let lock = NSLock()
     private var index: ProfileIndex
 
+    /// How the vault's profile index was found when this repository was opened. An index that
+    /// could not be read is not "no profiles": the profiles' keys are in it, and their folders are
+    /// kept whatever happens, for the index to be put back (a backup, a sync).
+    public enum IndexState: Equatable, Sendable {
+        /// Read from `index.bin` — or there is none and no profile folder either (a new vault).
+        case read
+        /// No `index.bin`, while `profiles/` holds this many profile folders.
+        case missing(profileFolders: Int)
+        /// An `index.bin` this version could not read — not a newer version's, which still refuses
+        /// to open (`CoreError.newerFormat`). It is never written over while this repository is open.
+        case unreadable(profileFolders: Int)
+    }
+
+    /// See `IndexState`. Only `.read` lets a sweep delete anything (`removeOrphanedDirectories`).
+    public var indexState: IndexState { lock.withLock { state } }
+    /// `indexState`, under `lock`.
+    private var state: IndexState = .read
+    /// With the index missing: the SHA-256 of the `index.bin` this repository wrote since (a profile
+    /// created). A file there with other bytes was put back by someone — a backup restored, as the
+    /// app tells a person to — and is never written over: the next unlock reads it.
+    private var writtenWhileMissing: Data?
+
     /// In a repository on a granted vault: the profile's settings were saved. The manager's index
     /// counts that as a new revision of the profile (sync's merge of the index goes by it), and
     /// only the manager writes the index — so it is told, through this, instead.
@@ -93,8 +115,17 @@ public final class ProfileRepository: @unchecked Sendable {
         if let grant = vault.grant {
             index.entries = [ProfileIndexEntry(summary: grant.summary, wrappedKey: Data())]
         } else {
-            self.index = try loadIndex()
+            (self.index, self.state) = try loadIndex()
         }
+    }
+
+    /// The repository as unlocking opens it: the index read (or found missing or unreadable), and
+    /// the folders of profiles the index says were deleted swept away — nothing else, and nothing at
+    /// all from an index that was not read. What AppModel's unlock runs, and what the tests run.
+    public static func openedAtUnlock(vault: UnlockedVault) throws -> ProfileRepository {
+        let repository = try ProfileRepository(vault: vault)
+        repository.removeOrphanedDirectories()
+        return repository
     }
 
     /// What the profile's own process is given to run it: its summary and its key, not the
@@ -141,13 +172,24 @@ public final class ProfileRepository: @unchecked Sendable {
         let wrapped = try AEAD.seal(profileKey.rawBytes, key: vault.profileKeyWrappingKey, aad: Self.keyAAD(id))
         let summary = ProfileSummary(id: id, name: cleanName, createdAt: Date(), lastLaunchedAt: nil, revision: 1)
 
+        // Nothing of a new profile is written beside an index that is not written over.
+        if case .unreadable = indexState {
+            throw CoreError.corruptData("the profile index (index.bin) could not be read, and is not written over")
+        }
         try SecureFile.ensureDirectory(directory(for: id))
-        try writeConfiguration(configuration, id: id, key: profileKey)
-        try lock.withLock {
-            var updated = index
-            updated.entries.append(ProfileIndexEntry(summary: summary, wrappedKey: wrapped))
-            try saveIndex(updated)
-            index = updated
+        do {
+            try writeConfiguration(configuration, id: id, key: profileKey)
+            try lock.withLock {
+                var updated = index
+                updated.entries.append(ProfileIndexEntry(summary: summary, wrappedKey: wrapped))
+                try saveIndex(updated)
+                index = updated
+            }
+        } catch {
+            // Its key was only ever in the index: a folder the index never got is of no use, and
+            // the sweep no longer takes folders the index does not list.
+            try? FileManager.default.removeItem(at: directory(for: id))
+            throw error
         }
         return summary
     }
@@ -191,15 +233,46 @@ public final class ProfileRepository: @unchecked Sendable {
         try? FileManager.default.removeItem(at: directory(for: id))
     }
 
-    /// Deletes profile directories that are not referenced by the index.
-    public func removeOrphanedDirectories() {
+    /// Deletes the folders of profiles the index records as deleted (`deletedProfileIDs`) that are
+    /// still on disk: a deletion interrupted between the index and the folder, or one that came
+    /// through sync. Returns their IDs.
+    ///
+    /// Never more than that. Before this was fixed, it deleted every profile folder the index did not
+    /// list — and an index that was missing read as empty, so losing that one file deleted every
+    /// profile at the next unlock. A folder the index does not list is not one it says was deleted:
+    /// the index may be missing or unreadable (nothing at all is deleted then), restored from an
+    /// older copy, or written new while it was missing. Such a folder is kept, and said
+    /// (`unlistedProfileFolders`).
+    @discardableResult
+    public func removeOrphanedDirectories() -> [UUID] {
         // A granted vault's index is one profile: every other profile's directory would look orphaned.
-        guard vault.grant == nil else { return }
-        let known = Set(list().map { $0.id.uuidString })
-        let contents = (try? FileManager.default.contentsOfDirectory(atPath: profilesDirectory.path)) ?? []
-        for name in contents where !known.contains(name) && UUID(uuidString: name) != nil {
-            try? FileManager.default.removeItem(at: profilesDirectory.appendingPathComponent(name))
+        guard vault.grant == nil, indexState == .read else { return [] }
+        let (listed, deleted) = lock.withLock { (Set(index.entries.map(\.summary.id)), Set(index.deletedProfileIDs)) }
+        var removed: [UUID] = []
+        for id in profileFolderIDs() where deleted.contains(id) && !listed.contains(id) {
+            if (try? FileManager.default.removeItem(at: directory(for: id))) != nil { removed.append(id) }
         }
+        return removed
+    }
+
+    /// The profile folders on disk (folders of `profiles/` named by a UUID).
+    public func profileFolderIDs() -> [UUID] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: profilesDirectory.path)) ?? []
+        return names.compactMap { name -> UUID? in
+            guard let id = UUID(uuidString: name) else { return nil }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: profilesDirectory.appendingPathComponent(name).path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { return nil }
+            return id
+        }.sorted { $0.uuidString < $1.uuidString }
+    }
+
+    /// Profile folders on disk that the index neither lists nor records as deleted: kept, never
+    /// swept, and to be told (the index missing, unreadable, or older than they are).
+    public func unlistedProfileFolders() -> [UUID] {
+        guard vault.grant == nil else { return [] }
+        let (listed, deleted) = lock.withLock { (Set(index.entries.map(\.summary.id)), Set(index.deletedProfileIDs)) }
+        return profileFolderIDs().filter { !listed.contains($0) && !deleted.contains($0) }
     }
 
     // MARK: Keys and configuration
@@ -411,6 +484,10 @@ public final class ProfileRepository: @unchecked Sendable {
         try lock.withLock {
             try saveIndex(incoming)
             index = incoming
+            // A missing index the sync just put back from the server is this vault's index again.
+            // (An unreadable one is never written over: saveIndex refused above.)
+            state = .read
+            writtenWhileMissing = nil
         }
     }
 
@@ -537,23 +614,51 @@ public final class ProfileRepository: @unchecked Sendable {
         return entry
     }
 
-    private func loadIndex() throws -> ProfileIndex {
-        guard FileManager.default.fileExists(atPath: indexURL.path) else { return ProfileIndex() }
-        let plaintext = try AEAD.open(SecureFile.read(indexURL), key: vault.indexKey, aad: indexAAD)
-        try DocumentFormat.check(plaintext, supported: Self.indexFormat, what: "index.bin")
-        return try JSONCoding.decoder.decode(ProfileIndex.self, from: plaintext)
+    /// The index on disk, and how it was found. No file is an empty index only when there is no
+    /// profile folder either; with folders it is `.missing`. A file that cannot be read is
+    /// `.unreadable`, but for a newer version's, which still throws (`newerFormat`).
+    private func loadIndex() throws -> (ProfileIndex, IndexState) {
+        let folders = profileFolderIDs().count
+        guard FileManager.default.fileExists(atPath: indexURL.path) else {
+            return (ProfileIndex(), folders == 0 ? .read : .missing(profileFolders: folders))
+        }
+        do {
+            let plaintext = try AEAD.open(SecureFile.read(indexURL), key: vault.indexKey, aad: indexAAD)
+            try DocumentFormat.check(plaintext, supported: Self.indexFormat, what: "index.bin")
+            return (try JSONCoding.decoder.decode(ProfileIndex.self, from: plaintext), .read)
+        } catch let error as CoreError {
+            if case .newerFormat = error { throw error }
+            return (ProfileIndex(), .unreadable(profileFolders: folders))
+        } catch {
+            return (ProfileIndex(), .unreadable(profileFolders: folders))
+        }
     }
 
     /// The newest format of `index.bin` this version reads and writes (docs/UPDATES.md §4).
     static let indexFormat = 1
 
-    /// Caller must hold `lock`. Never over an index a newer version wrote since this one read it.
+    /// Caller must hold `lock`. Never over an index a newer version wrote since this one read it,
+    /// nor over one that could not be read, nor over one put back while it was missing.
     private func saveIndex(_ index: ProfileIndex) throws {
+        switch state {
+        case .read:
+            break
+        case .unreadable:
+            // Kept as it is: it may be readable again (a transient read error, a backup restored
+            // over it), and the profiles' keys are in it.
+            throw CoreError.corruptData("the profile index (index.bin) could not be read, and is not written over")
+        case .missing:
+            if let onDisk = try? SecureFile.read(indexURL), Data(SHA256.hash(data: onDisk)) != writtenWhileMissing {
+                throw CoreError.corruptData("an index.bin was put back after the vault was unlocked without one; it is read at the next unlock, not written over")
+            }
+        }
         try DocumentFormat.guardOverwrite(of: indexURL, supported: Self.indexFormat, what: "index.bin") {
             try AEAD.open($0, key: vault.indexKey, aad: indexAAD)
         }
         let plaintext = try JSONCoding.encoder.encode(index)
-        try SecureFile.write(AEAD.seal(plaintext, key: vault.indexKey, aad: indexAAD), to: indexURL)
+        let sealed = try AEAD.seal(plaintext, key: vault.indexKey, aad: indexAAD)
+        try SecureFile.write(sealed, to: indexURL)
+        if case .missing = state { writtenWhileMissing = Data(SHA256.hash(data: sealed)) }
     }
 
     var indexAAD: String { "profile-index:v1:\(vault.vaultID.uuidString)" }
