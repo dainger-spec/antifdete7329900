@@ -1754,6 +1754,15 @@ final class SelfTest {
               !inTask.signaled && inTask.status == 0 && inTask.output.contains("EXCEPTION-CHECK caught in a Swift task: PBExceptionCheck")
                   && inTask.output.contains("EXCEPTION-CHECK the task went on"),
               inTask.output.trimmingCharacters(in: .whitespacesAndNewlines))
+        // Nothing catches it, on a background queue (Safari's WBSBannerTracker on the owner's Mac): the
+        // process ends by the exception (SIGABRT) after writing down which queue threw — an earlier
+        // reportException: hook read AppKit's current event under MainActor.assumeIsolated, which
+        // trapped there (SIGTRAP) and made every such exception a crash of this app's own.
+        let background = await runOwnExecutable(executable, ["--exception-check", "--background"], timeout: 30)
+        check("exceptions: one nothing catches on a background queue is written down with its queue, and the process ends by the exception, not by a trap in this app's handler",
+              background.signaled && background.status == SIGABRT
+                  && background.output.contains("EXCEPTION-CHECK not caught, on PBExceptionCheck.background: PBExceptionCheck"),
+              "\(background.signaled ? "signal" : "exit") \(background.status): \(background.output.trimmingCharacters(in: .whitespacesAndNewlines))")
         let control = await runOwnExecutable(executable, ["--exception-check", "--replacing"], timeout: 30)
         let first = control.output.split(separator: "\n").first.map(String.init) ?? ""
         info("exceptions, the control (the earlier hook, CoreFoundation's preprocessor replaced): "

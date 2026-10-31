@@ -37,7 +37,9 @@ enum ExceptionLog {
         installPreprocessor(chained: true)
         previousUncaughtHandler = NSGetUncaughtExceptionHandler()
         NSSetUncaughtExceptionHandler { exception in
-            ExceptionLog.write(exception, when: "uncaught: the process ends", frames: exception.callStackSymbols)
+            let thread = ExceptionLog.currentThreadName()
+            ExceptionLog.write(exception, when: "uncaught, on the thread \(thread): the process ends", frames: exception.callStackSymbols)
+            ExceptionLog.onNotCaught?(exception.name.rawValue, thread)
             previousUncaughtHandler?(exception)
         }
         watchReportException(of: NSApplication.self)
@@ -52,6 +54,13 @@ enum ExceptionLog {
     /// own implementation logs and returns. A subclass's is not called: Safari's application object
     /// is built for Safari, which may well end the process there to get its crash report; here the
     /// exception is written down and AppKit's implementation runs instead, so the loop goes on.
+    ///
+    /// ANY THREAD. AppKit's own uncaught-exception handler hands this, too, an exception nothing
+    /// caught, on the thread that threw it — one of Safari's background queues as often as not
+    /// (the owner's Mac, 31 October: `com.apple.WBSAppLinkBannerTracker`, opening youtube.com). That
+    /// process ends whatever this does; until then nothing here may assume the main thread: an
+    /// earlier version read the current event under `MainActor.assumeIsolated`, which traps off the
+    /// main thread, and so turned every such exception into a crash of its own, in this file.
     static func watchReportException(of applicationClass: AnyClass) {
         let selector = #selector(NSApplication.reportException(_:))
         guard let method = class_getInstanceMethod(applicationClass, selector) else { return }
@@ -61,10 +70,25 @@ enum ExceptionLog {
         let isAppKits = applicationClass == NSApplication.self
         if isAppKits { appKitReport = original }
         let replacement: @convention(block) (AnyObject, NSException) -> Void = { application, exception in
-            ExceptionLog.reported += 1
+            ExceptionLog.countReport()
+            guard Thread.isMainThread else {
+                // Not the run loop: AppKit's uncaught-exception handler, on the thread that threw.
+                // Written down with that thread's name; nothing to tell the user from here (the
+                // process ends, and the manager says so), and AppKit's own handling goes on.
+                let thread = ExceptionLog.currentThreadName()
+                ExceptionLog.write(exception, when: "not caught, on the thread \(thread): the process ends",
+                                   frames: exception.callStackSymbols)
+                ExceptionLog.onNotCaught?(exception.name.rawValue, thread)
+                if isAppKits {
+                    original(application, selector, exception)
+                } else {
+                    ExceptionLog.appKitReport?(application, selector, exception)
+                }
+                return
+            }
             ExceptionLog.write(exception, when: "caught by the run loop, which goes on", frames: exception.callStackSymbols)
-            // What the user was doing, read now (the run loop calls this on the main thread, in the
-            // event that threw); what to tell them, after this event is over.
+            // What the user was doing, read now (on the main thread, in the event that threw); what
+            // to tell them, after this event is over.
             let event = MainActor.assumeIsolated { NSApplication.shared.currentEvent?.type }
             DispatchQueue.main.async { ExceptionLog.onCaughtInRunLoop?(exception, event) }
             if isAppKits {
@@ -147,14 +171,30 @@ enum ExceptionLog {
     private static var isInstalled = false
     private static var watchedImplementations: Set<UInt> = []
     fileprivate static var isProbing = false
-    /// Exceptions `reportException:` has been handed in this process.
-    private(set) static var reported = 0
+    /// Exceptions `reportException:` has been handed in this process, from any thread.
+    static var reported: Int { reportedLock.withLock { reportedCount } }
+    private static let reportedLock = NSLock()
+    nonisolated(unsafe) private static var reportedCount = 0
+
+    fileprivate static func countReport() {
+        reportedLock.withLock { reportedCount += 1 }
+    }
+
+    /// The thread's name, or its dispatch queue's label: which of Safari's queues threw.
+    fileprivate static func currentThreadName() -> String {
+        if let name = Thread.current.name, !name.isEmpty { return name }
+        let label = String(cString: __dispatch_queue_get_label(nil))
+        return label.isEmpty ? "an unnamed thread" : label
+    }
     /// Called after the event in which the run loop caught an exception, with that event's type: a
     /// profile's process tells the user (`SafariChrome.installUnavailableNotice`).
     static var onCaughtInRunLoop: ((NSException, NSEvent.EventType?) -> Void)?
     /// Every exception as it is thrown — its name, its reason cut as the log has it, and the frames
     /// of the throw — for the menu walk, which says which item threw (`SafariMenuWalk`).
     static var onThrown: ((String, String, [String]) -> Void)?
+    /// An exception nothing caught, with the thread it was thrown on — from any thread, just before
+    /// the process ends (`--exception-check --background` prints it).
+    nonisolated(unsafe) static var onNotCaught: ((String, String) -> Void)?
 
     // MARK: The check
 
@@ -190,6 +230,21 @@ enum ExceptionLog {
         }
         print("EXCEPTION-CHECK preprocessor: \(replacing ? "replacing the one before it" : "chained"); "
               + "an exception passed through it keeps its call stack: \(preprocessorKeepsCallStacks())")
+        // `--background`: thrown on a background queue and caught by nothing, as Safari's
+        // WBSBannerTracker threw on the owner's Mac (31 October). The process ends — by the exception
+        // itself (SIGABRT), not by a trap in this file's handlers (SIGTRAP), which is what it once did
+        // — and says first which queue threw.
+        if arguments.contains("--background") {
+            onNotCaught = { name, thread in print("EXCEPTION-CHECK not caught, on \(thread): \(name)") }
+            let application = NSApplication.shared
+            application.setActivationPolicy(.prohibited)
+            DispatchQueue(label: "PBExceptionCheck.background").asyncAfter(deadline: .now() + 0.3) { Thrower().throwOne() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                print("EXCEPTION-CHECK lived through an exception nothing caught: unexpected")
+                exit(0)
+            }
+            application.run()
+        }
         // `--in-task`: thrown by Objective-C code called from a Swift task, as Safari's code is when
         // a profile's window opens, and caught where it is called (PBCatchException).
         if arguments.contains("--in-task") {
