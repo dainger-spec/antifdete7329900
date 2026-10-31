@@ -58,6 +58,9 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CA_NAME = "PrivacyBrowser payments check CA (throwaway)"
+# Measurement round 2: the page under a name (Web Authentication refuses a page on an address), which
+# CI maps to 127.0.0.1 in /etc/hosts; the certificate names it too.
+PAGE_HOST = os.environ.get("PB_PAGE_HOST", "127.0.0.1")
 VARIANTS = ["shipped", "shipped-safari-window", "on-page", "on-isolated", "on-none", "parity"]
 
 INTERFACES = [
@@ -130,19 +133,33 @@ PAGE = r"""<!doctype html>
   const createOptions = () => ({ publicKey: { rp: { name: 'Parity check' },
     user: { id: new Uint8Array(16), name: 'check', displayName: 'Check' },
     challenge: crypto.getRandomValues(new Uint8Array(32)), pubKeyCredParams: [{ type: 'public-key', alg: -7 }], timeout: 8000 } });
-  // A user gesture: the button covers the page; the app's parity variant clicks it, Safari's side
-  // has no click.
+  // A user gesture: the button covers the page; the app's parity variant clicks it every second, and
+  // each click runs the next step (Safari's side has no click).
+  const digitalRequest = () => ({ digital: { requests: [{ protocol: 'openid4vp', data: { response_type: 'vp_token',
+    nonce: 'pb-parity-nonce', client_id: 'web-origin:https://' + location.host, dcql_query: { credentials: [{ id: 'mdl',
+      format: 'mso_mdoc', meta: { doctype_value: 'org.iso.18013.5.1.mDL' },
+      claims: [{ path: ['org.iso.18013.5.1', 'family_name'] }] }] } } }] } });
+  const steps = [
+    ['navigator.credentials.create(publicKey) on a click', () => navigator.credentials.create(createOptions())],
+    ['navigator.credentials.get(digital, an mDL request) on a click', () => navigator.credentials.get(digitalRequest())],
+    ['navigator.mediaSession.coordinator.join() on a click', () => navigator.mediaSession.coordinator.join()],
+  ];
+  const clicked = {};
+  let step = 0;
   const onClick = new Promise((resolve) => {
     document.getElementById('gesture').addEventListener('click', async () => {
+      if (step >= steps.length) return;
+      const [name, run] = steps[step++];
       const started = performance.now();
       try {
-        const made = await navigator.credentials.create(createOptions());
-        resolve({ ok: true, value: (made ? 'a credential' : String(made)) + ' (after ' + since(started) + ')' });
+        const value = await run();
+        clicked[name] = { ok: true, value: (value === undefined ? 'undefined' : value === null ? 'null' : String(value)) + ' (after ' + since(started) + ')' };
       } catch (error) {
-        resolve({ ok: false, name: String(error && error.name), message: String(error && error.message) + ' (after ' + since(started) + ')' });
+        clicked[name] = { ok: false, name: String(error && error.name), message: String(error && error.message) + ' (after ' + since(started) + ')' };
       }
-    }, { once: true });
-    setTimeout(() => resolve({ ok: false, name: 'no click', message: 'within 45 s' }), 45000);
+      if (step >= steps.length) resolve();
+    });
+    setTimeout(resolve, 50000);
   });
   const key = Uint8Array.from(atob(KEY), (c) => c.charCodeAt(0));
   const applePay = { supportedMethods: 'https://apple.com/apple-pay', data: { version: 3,
@@ -198,7 +215,10 @@ PAGE = r"""<!doctype html>
   });
   await call('MediaSessionCoordinator.prototype own names',
     () => typeof MediaSessionCoordinator === 'function' ? Object.getOwnPropertyNames(MediaSessionCoordinator.prototype).sort().join(',') : 'absent');
-  report.calls['navigator.credentials.create(publicKey) on a click'] = await onClick;
+  await call('navigator.credentials.get(digital, an mDL request) without a user gesture', timed(() => navigator.credentials.get(digitalRequest())));
+  await call('navigator.mediaSession.coordinator.join() without a user gesture', timed(() => navigator.mediaSession.coordinator.join()));
+  await onClick;
+  for (const [name] of steps) report.calls[name] = clicked[name] || { ok: false, name: 'no click', message: 'within 50 s' };
   report.calls['new WebTransport(https://192.0.2.1:4433).ready'] = await webTransport;
   await fetch('/report?side=' + encodeURIComponent(side), { method: 'POST',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report) });
@@ -230,7 +250,8 @@ def make_certificates(directory):
                      "subjectKeyIdentifier=hash\n")
     with open(leaf_ext, "w") as handle:
         handle.write("basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
-                     "extendedKeyUsage=serverAuth\nsubjectAltName=IP:127.0.0.1,DNS:localhost\n")
+                     "extendedKeyUsage=serverAuth\nsubjectAltName=IP:127.0.0.1,DNS:localhost"
+                     + (f",DNS:{PAGE_HOST}" if PAGE_HOST != "127.0.0.1" else "") + "\n")
     steps = [
         ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", ca_key, "-out", ca, "-days", "1",
          "-subj", f"/CN={CA_NAME}", "-config", ca_cnf],
@@ -352,7 +373,7 @@ class Pages:
 
             def allowed(self):
                 host = self.headers.get("Host", "")
-                return host in (f"127.0.0.1:{pages.port}", f"localhost:{pages.port}")
+                return host in (f"127.0.0.1:{pages.port}", f"localhost:{pages.port}", f"{PAGE_HOST}:{pages.port}")
 
             def do_GET(self):
                 url = urllib.parse.urlparse(self.path)
@@ -394,7 +415,7 @@ class Pages:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def url(self, side):
-        return f"{self.scheme}://127.0.0.1:{self.port}/pay?side={urllib.parse.quote(side)}"
+        return f"{self.scheme}://{PAGE_HOST}:{self.port}/pay?side={urllib.parse.quote(side)}"
 
     def wait(self, side, timeout):
         deadline = time.time() + timeout
@@ -499,7 +520,7 @@ def measure(options, executable, variants, work, trusted):
             log("PAYMENTS the authority could not be trusted: neither browser would load the page")
             return 1
     pages = Pages(leaf, key, push_key)
-    log(f"PAYMENTS the page is served at {pages.scheme}://127.0.0.1:{pages.port}/pay")
+    log(f"PAYMENTS the page is served at {pages.scheme}://{PAGE_HOST}:{pages.port}/pay")
 
     safari = None
     if not options.no_safari:
