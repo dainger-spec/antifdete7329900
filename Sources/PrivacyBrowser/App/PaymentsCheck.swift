@@ -118,6 +118,9 @@ enum PaymentsCheck {
                     "\(key) " + (WebKitFeatures.isEnabled(configuration.preferences, key).map { $0 ? "on" : "off" } ?? "unknown")
                 }
                 print("PAYMENTS-CHECK parity: \(states.joined(separator: ", "))")
+                // Round 3: the page's marks, the trace between them, and the calls a ceremony could pass through.
+                WebAuthnIntercept.install()
+                configuration.userContentController.add(WebAuthnProbe.shared, name: "pbmark")
                 let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 1000, height: 700), configuration: configuration)
                 view.uiDelegate = ParityPanelDelegate.shared
                 let made = NSWindow(contentRect: view.frame, styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -129,7 +132,7 @@ enum PaymentsCheck {
                 window = made
                 // A user gesture for the page's button, which covers the page.
                 Task { @MainActor in
-                    for _ in 0..<40 {
+                    for _ in 0..<170 {
                         try? await Task.sleep(nanoseconds: 1_000_000_000)
                         Self.click(view)
                     }
@@ -178,6 +181,7 @@ enum PaymentsCheck {
         }
         let reported = await waitForReport(of: page, timeout: 240)
         print("PAYMENTS-CHECK \(variant.rawValue): the page \(reported ? "reported" : "did not report within 240 s")")
+        if variant == .parity { WebAuthnProbe.shared.printTrace() }
         window?.close()
         window = nil
         try? await manager.stop(profile.id)

@@ -105,121 +105,80 @@ PAGE = r"""<!doctype html>
       clearTimeout(timer);
     }
   }
-  // ---- The owner's measurements (31 October): WebTransport, Web Authentication, Digital
-  // Credentials and the MediaSession coordinator. Each answer carries how long it took.
-  const since = (started) => Math.round(performance.now() - started) + ' ms';
-  const timed = (run) => async () => {
+  // ---- Round 3 (the owner's questions of 1 November): can a Web Authentication ceremony be taken
+  // in this app's process before the system shows its sheet; how does this app's refusal differ from
+  // a user's cancel in Safari; how long does Safari's sheet take. Each step says when it began and
+  // ended to the app (its trace and its interception, through a script message handler only the
+  // app's measurement view has) and to the server (Safari's sheet watcher), and records its outcome:
+  // the value, or the error's name and message, and the milliseconds it took. (The Apple Pay and Web
+  // Push calls of the first rounds are answered, and not asked again.)
+  const since = (started) => Math.round(performance.now() - started);
+  const describe = (value) => value === undefined ? 'undefined' : value === null ? 'null'
+    : (typeof value === 'object' ? ((value.constructor && value.constructor.name) || 'object') + ' ' + JSON.stringify(value) : String(value));
+  const mark = (step, phase, extra) => {
+    try { window.webkit.messageHandlers.pbmark.postMessage(Object.assign({ step: step, phase: phase }, extra || {})); } catch (e) {}
+    return fetch('/mark?side=' + encodeURIComponent(side) + '&step=' + encodeURIComponent(step) + '&phase=' + phase,
+      { method: 'POST' }).catch(() => {});
+  };
+  report.webauthn = {};
+  async function measured(step, mode, abortAfter, run) {
+    await mark(step, 'begin', { mode: mode });
+    const controller = new AbortController();
+    const timer = abortAfter ? setTimeout(() => controller.abort(), abortAfter) : null;
     const started = performance.now();
+    const at = Date.now();
+    let outcome;
     try {
-      const value = await run();
-      return (value === undefined ? 'undefined' : value === null ? 'null' : String(value)) + ' (after ' + since(started) + ')';
+      outcome = { ok: true, value: describe(await run(controller.signal)), ms: since(started), at: at };
     } catch (error) {
-      throw { name: String(error && error.name), message: String(error && error.message) + ' (after ' + since(started) + ')' };
+      outcome = { ok: false, name: String(error && error.name), message: String(error && error.message), ms: since(started), at: at };
     }
-  };
-  // WebTransport to a documentation address no one answers: how and when \`ready\` fails (a QUIC
-  // timeout, or at once); the capture around this run says whether UDP left for it.
-  const webTransport = (async () => {
-    const started = performance.now();
-    let transport;
-    try { transport = new WebTransport('https://192.0.2.1:4433/pb-parity'); }
-    catch (error) { return { ok: false, name: String(error && error.name), message: String(error && error.message) + ' (at once)' }; }
-    const late = new Promise((resolve) => setTimeout(() => resolve('late'), 60000));
-    const outcome = await Promise.race([transport.ready.then(() => 'ready', (error) => error), late]);
-    if (outcome === 'late') return { ok: false, name: 'no answer', message: 'within 60 s' };
-    if (outcome === 'ready') return { ok: true, value: 'ready after ' + since(started) };
-    return { ok: false, name: String(outcome && outcome.name), message: String(outcome && outcome.message) + ' (after ' + since(started) + ')' };
-  })();
-  const createOptions = () => ({ publicKey: { rp: { name: 'Parity check' },
-    user: { id: new Uint8Array(16), name: 'check', displayName: 'Check' },
-    challenge: crypto.getRandomValues(new Uint8Array(32)), pubKeyCredParams: [{ type: 'public-key', alg: -7 }], timeout: 8000 } });
-  // A user gesture: the button covers the page; the app's parity variant clicks it every second, and
-  // each click runs the next step (Safari's side has no click).
-  const digitalRequest = () => ({ digital: { requests: [{ protocol: 'openid4vp', data: { response_type: 'vp_token',
-    nonce: 'pb-parity-nonce', client_id: 'web-origin:https://' + location.host, dcql_query: { credentials: [{ id: 'mdl',
-      format: 'mso_mdoc', meta: { doctype_value: 'org.iso.18013.5.1.mDL' },
-      claims: [{ path: ['org.iso.18013.5.1', 'family_name'] }] }] } } }] } });
-  const steps = [
-    ['navigator.credentials.create(publicKey) on a click', () => navigator.credentials.create(createOptions())],
-    ['navigator.credentials.get(digital, an mDL request) on a click', () => navigator.credentials.get(digitalRequest())],
-    ['navigator.mediaSession.coordinator.join() on a click', () => navigator.mediaSession.coordinator.join()],
+    if (timer) clearTimeout(timer);
+    report.webauthn[step] = outcome;
+    await mark(step, 'end', { result: JSON.stringify(outcome) });
+    return outcome;
+  }
+  const bytes = (count) => crypto.getRandomValues(new Uint8Array(count));
+  const create = (signal) => navigator.credentials.create({ signal: signal, publicKey: { rp: { name: 'Parity check' },
+    user: { id: bytes(16), name: 'check', displayName: 'Check' }, challenge: bytes(32),
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }] } });
+  const get = (signal) => navigator.credentials.get({ signal: signal, publicKey: { challenge: bytes(32), rpId: location.hostname } });
+  const conditional = (signal) => navigator.credentials.get({ signal: signal, mediation: 'conditional',
+    publicKey: { challenge: bytes(32), rpId: location.hostname } });
+  await measured('isUserVerifyingPlatformAuthenticatorAvailable', 'pass', 0,
+    () => PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
+  await measured('isConditionalMediationAvailable', 'pass', 0, () => PublicKeyCredential.isConditionalMediationAvailable());
+  await measured('getClientCapabilities', 'pass', 0,
+    () => typeof PublicKeyCredential.getClientCapabilities === 'function' ? PublicKeyCredential.getClientCapabilities() : 'absent');
+  // Safari: no click (none can be given to it here); every ceremony runs until the sheet watcher's
+  // Escape, at most 15 s. The app: each click runs the next step, a user gesture.
+  const safariSteps = [
+    ['create', 'pass', 15000, create], ['get', 'pass', 15000, get], ['get conditional', 'pass', 6000, conditional],
   ];
-  const clicked = {};
-  let step = 0;
-  const onClick = new Promise((resolve) => {
-    document.getElementById('gesture').addEventListener('click', async () => {
-      if (step >= steps.length) return;
-      const [name, run] = steps[step++];
-      const started = performance.now();
-      try {
-        const value = await run();
-        clicked[name] = { ok: true, value: (value === undefined ? 'undefined' : value === null ? 'null' : String(value)) + ' (after ' + since(started) + ')' };
-      } catch (error) {
-        clicked[name] = { ok: false, name: String(error && error.name), message: String(error && error.message) + ' (after ' + since(started) + ')' };
-      }
-      if (step >= steps.length) resolve();
+  const appSteps = [
+    ['create', 'pass', 15000, create], ['create held then cancelled', 'cancel', 15000, create],
+    ['get', 'pass', 15000, get], ['get held then cancelled', 'cancel', 15000, get],
+    ['get conditional', 'pass', 6000, conditional], ['get conditional held', 'hold', 6000, conditional],
+  ];
+  const inApp = (() => { try { return !!window.webkit.messageHandlers.pbmark; } catch (e) { return false; } })();
+  report.webauthnSide = inApp ? 'the app, each ceremony on a click' : 'without a click';
+  if (!inApp) {
+    for (const [step, mode, abortAfter, run] of safariSteps) await measured(step, mode, abortAfter, run);
+  } else {
+    await new Promise((resolve) => {
+      let index = 0;
+      let busy = false;
+      document.getElementById('gesture').addEventListener('click', async () => {
+        if (busy || index >= appSteps.length) return;
+        busy = true;
+        const [step, mode, abortAfter, run] = appSteps[index++];
+        await measured(step + ' on a click', mode, abortAfter, run);
+        busy = false;
+        if (index >= appSteps.length) resolve();
+      });
+      setTimeout(resolve, 150000);
     });
-    setTimeout(resolve, 50000);
-  });
-  const key = Uint8Array.from(atob(KEY), (c) => c.charCodeAt(0));
-  const applePay = { supportedMethods: 'https://apple.com/apple-pay', data: { version: 3,
-    merchantIdentifier: 'merchant.com.example.check', merchantCapabilities: ['supports3DS'],
-    supportedNetworks: ['visa', 'masterCard'], countryCode: 'US' } };
-  const details = { total: { label: 'Check', amount: { currency: 'USD', value: '1.00' } } };
-  await call('ApplePaySession.canMakePayments()', () => ApplePaySession.canMakePayments());
-  await call('ApplePaySession.supportsVersion(3)', () => ApplePaySession.supportsVersion(3));
-  await call('ApplePaySession.canMakePaymentsWithActiveCard()',
-    () => ApplePaySession.canMakePaymentsWithActiveCard('merchant.com.example.check'));
-  await call('new ApplePaySession() without a user gesture', () => {
-    new ApplePaySession(3, { countryCode: 'US', currencyCode: 'USD', supportedNetworks: ['visa'],
-      merchantCapabilities: ['supports3DS'], total: { label: 'Check', amount: '1.00' } });
-    return 'made';
-  });
-  await call('PaymentRequest(apple-pay).canMakePayment()', () => new PaymentRequest([applePay], details).canMakePayment());
-  await call('PaymentRequest(basic-card).canMakePayment()',
-    () => new PaymentRequest([{ supportedMethods: 'basic-card' }], details).canMakePayment());
-  await call('Notification.permission', () => Notification.permission);
-  await call('permissions.query(notifications)', async () => (await navigator.permissions.query({ name: 'notifications' })).state);
-  await call('permissions.query(push)', async () => (await navigator.permissions.query({ name: 'push', userVisibleOnly: true })).state);
-  let registration = null;
-  await call('serviceWorker.register()', async () => {
-    registration = await navigator.serviceWorker.register('/sw.js');
-    await navigator.serviceWorker.ready;
-    return 'registered';
-  });
-  const manager = () => {
-    if (!registration) throw new Error('no registration');
-    if (!registration.pushManager) throw new Error('no registration.pushManager');
-    return registration.pushManager;
-  };
-  await call('registration.pushManager', () => registration && registration.pushManager ? typeof registration.pushManager : 'absent');
-  await call('pushManager.permissionState()', () => manager().permissionState({ userVisibleOnly: true }));
-  await call('pushManager.getSubscription()', async () => ((await manager().getSubscription()) === null ? null : 'a subscription'));
-  await call('pushManager.subscribe() without a user gesture',
-    async () => ((await manager().subscribe({ userVisibleOnly: true, applicationServerKey: key })) ? 'a subscription' : null));
-  await call('PushManager.supportedContentEncodings', () => Array.from(PushManager.supportedContentEncodings));
-  await call('window.pushManager.permissionState()', () => window.pushManager.permissionState({ userVisibleOnly: true }));
-  await call('window.pushManager.subscribe() without a user gesture',
-    async () => ((await window.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })) ? 'a subscription' : null));
-  if (registration) { try { await registration.unregister(); } catch (e) {} }
-  await call('PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()',
-    timed(() => PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()));
-  await call('PublicKeyCredential.isConditionalMediationAvailable()', timed(() => PublicKeyCredential.isConditionalMediationAvailable()));
-  await call('navigator.credentials.create(publicKey) without a user gesture', timed(() => navigator.credentials.create(createOptions())));
-  await call('DigitalCredential.userAgentAllowsProtocol(openid4vp)', timed(() => DigitalCredential.userAgentAllowsProtocol('openid4vp')));
-  await call('navigator.credentials.get(digital) without a user gesture',
-    timed(() => navigator.credentials.get({ digital: { requests: [{ protocol: 'openid4vp', data: {} }] } })));
-  await call('navigator.mediaSession.coordinator', () => {
-    const coordinator = navigator.mediaSession ? navigator.mediaSession.coordinator : 'no mediaSession';
-    return coordinator === undefined ? 'undefined' : coordinator === null ? 'null' : Object.prototype.toString.call(coordinator);
-  });
-  await call('MediaSessionCoordinator.prototype own names',
-    () => typeof MediaSessionCoordinator === 'function' ? Object.getOwnPropertyNames(MediaSessionCoordinator.prototype).sort().join(',') : 'absent');
-  await call('navigator.credentials.get(digital, an mDL request) without a user gesture', timed(() => navigator.credentials.get(digitalRequest())));
-  await call('navigator.mediaSession.coordinator.join() without a user gesture', timed(() => navigator.mediaSession.coordinator.join()));
-  await onClick;
-  for (const [name] of steps) report.calls[name] = clicked[name] || { ok: false, name: 'no click', message: 'within 50 s' };
-  report.calls['new WebTransport(https://192.0.2.1:4433).ready'] = await webTransport;
+  }
   await fetch('/report?side=' + encodeURIComponent(side), { method: 'POST',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report) });
   document.getElementById('state').textContent = 'Done. This page can be closed.';
@@ -395,6 +354,18 @@ class Pages:
                 side = urllib.parse.parse_qs(url.query).get("side", [""])[0]
                 length = min(int(self.headers.get("Content-Length", "0") or 0), 4 * 1024 * 1024)
                 body = self.rfile.read(length)
+                if url.path == "/mark" and self.allowed():
+                    # Round 3: a step of the page began or ended; Safari's sheet watcher acts on it.
+                    query = urllib.parse.parse_qs(url.query)
+                    step = query.get("step", ["?"])[0].replace(" ", "_")
+                    phase = query.get("phase", ["?"])[0]
+                    stamp = int(time.time() * 1000)
+                    log(f"PAYMENTS mark {side} {phase} {step} at {stamp}")
+                    trigger = os.environ.get("PB_SHEET_TRIGGER")
+                    if trigger and side == "safari":
+                        with open(trigger, "a") as handle:
+                            handle.write(f"{phase} {step} {stamp}\n")
+                    return self.send(200, "ok")
                 if not self.allowed() or url.path != "/report" or not side:
                     return self.send(404, "")
                 try:
@@ -524,9 +495,26 @@ def measure(options, executable, variants, work, trusted):
 
     safari = None
     if not options.no_safari:
+        # Round 3: every window that comes or goes while Safari measures, and an Escape 3 s after each
+        # of its ceremonies begins (scripts/measure/sheet_watch.swift), when CI built the watcher.
+        watcher = None
+        if os.environ.get("PB_SHEET_WATCH") and os.environ.get("PB_SHEET_TRIGGER"):
+            open(os.environ["PB_SHEET_TRIGGER"], "w").close()
+            watcher = subprocess.Popen([os.environ["PB_SHEET_WATCH"], os.environ["PB_SHEET_TRIGGER"], "300", os.path.abspath(options.out)],
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            time.sleep(1)
         subprocess.run(["open", "-b", "com.apple.Safari", pages.url("safari")])
         safari = pages.wait("safari", 240)
         log("PAYMENTS Safari " + ("reported" if safari else "did not report within 240 s"))
+        if watcher:
+            watcher.terminate()
+            try:
+                output, _ = watcher.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                watcher.kill()
+                output, _ = watcher.communicate()
+            for line in output.splitlines():
+                log(line)
 
     missing = []
     for variant in variants:

@@ -1,18 +1,23 @@
 name: CI
 
-# A measurement branch only (the owner's questions of 31 October), never merged: one HTTPS page of the
-# runner in Safari, in a profile as it ships, and in a profile with WebKit's own switches for
-# WebTransport, Web Authentication, Digital Credentials and the MediaSession coordinator on
-# (scripts/payments_check.py, variant "parity") — what each call answers and how long it takes; whether
-# WebKit asks the app to run a web authentication panel, and what the page gets when the app cancels
-# it; and, around it all, every UDP packet to 192.0.2.1 with the process that sent it (WebTransport is
-# QUIC over UDP, which no proxy here carries).
+# A measurement branch only, never merged (the owner's questions of 1 November, round 3 of Web
+# Authentication): on a page under a name, in this Mac's Safari and in the parity profile (WebKit's
+# own switch for Web Authentication on, in a view of this app's process, no proxy):
+#   - whether a ceremony can be taken in this app's process before the system shows its sheet: every
+#     Objective-C message of the process between the page's marks (instrumentObjcMessageSends), and
+#     the methods of AuthenticationServices' and WebKit's classes a ceremony could pass through,
+#     recorded as called; on ASAuthorizationController the call is held and cancelled as a user's
+#     cancel, or held until the page aborts (Sources/PrivacyBrowser/App/WebAuthnProbe.swift);
+#   - what the page gets in each case, and in Safari when its sheet is cancelled — Escape, and the
+#     Cancel button through Accessibility where the runner allows it — 3 s after a ceremony begins;
+#   - when Safari's sheet comes and goes: every window on screen, every 25 ms, with a picture
+#     (scripts/measure/sheet_watch.swift).
 on:
   push:
 
 jobs:
-  parity:
-    name: The four, measured on ${{ matrix.runner }}
+  webauthn:
+    name: Web Authentication, round 3, on ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
@@ -21,56 +26,52 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Build the app without the App Sandbox
-        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
-      - name: Safari, a shipped profile and the parity profile, under a capture of UDP to 192.0.2.1
+      - name: The machine
+        run: sw_vers; defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString
+      - name: Build the app without the App Sandbox, and the sheet watcher
+        run: |
+          SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+          swiftc -O -o build/sheet_watch scripts/measure/sheet_watch.swift
+      - name: Safari and the parity profile
         continue-on-error: true
         timeout-minutes: 40
         env:
-          # Round 2: the page under a name (Web Authentication refuses a page on an address).
           PB_PAGE_HOST: parity-check.example
         run: |
           echo "127.0.0.1 parity-check.example" | sudo tee -a /etc/hosts
           sudo dscacheutil -flushcache || true
           mkdir -p build/parity
-          sudo tcpdump -i pktap,all -k NP -n -tt -l 'udp and host 192.0.2.1' > build/parity/udp.txt 2> build/parity/tcpdump.err &
-          sleep 2
-          code=0
-          python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --trust system --out build/parity \
-            --variants shipped,parity --proxy none | tee build/parity/check.txt || code=$?
-          sleep 2
-          sudo pkill -INT -f "tcpdump -i pktap" || true
-          sleep 1
-          exit $code
+          PB_SHEET_WATCH="$PWD/build/sheet_watch" PB_SHEET_TRIGGER="$PWD/build/parity/trigger.txt" \
+            python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --trust system --out build/parity \
+            --variants parity --proxy none | tee build/parity/check.txt
       - name: What was measured
         if: always()
         run: |
-          echo "== the parity profile's switches and the web authentication panel"
-          grep -h "PAYMENTS-CHECK parity" build/parity/check.txt || true
-          echo "== the four, side by side"
+          echo "== Safari's sheet: the watcher"
+          grep -h "SHEET-WATCH" build/parity/check.txt | cut -c1-300 || true
+          echo "== the marks"
+          grep -h "PAYMENTS mark\|parity mark" build/parity/check.txt | cut -c1-400 || true
+          echo "== the calls taken in this app's process"
+          grep -h "parity intercept" build/parity/check.txt | cut -c1-600 || true
+          echo "== the trace, step by step"
+          grep -h "parity trace" build/parity/check.txt | cut -c1-300 | head -700 || true
+          echo "== each step's outcome, side by side"
           python3 - <<'PY'
           import json
           reports = json.load(open("build/parity/payments.json"))
-          keys = [k for k in (reports.get("safari") or {}).get("calls", {}) if any(w in k for w in
-                  ("WebTransport", "PublicKeyCredential", "credentials", "DigitalCredential", "mediaSession", "MediaSessionCoordinator", "coordinator"))]
-          keys += [k for k in ("navigator.credentials.create(publicKey) on a click", "navigator.credentials.get(digital, an mDL request) on a click",
-                               "navigator.mediaSession.coordinator.join() on a click") if k not in keys]
-          for side in ("safari", "shipped", "parity"):
+          for side in ("safari", "parity"):
               report = reports.get(side)
               if not report:
                   print(f"{side}: no report"); continue
-              print(f"== {side}: window's own names {report.get('windowOwnCount')}; present: "
-                    + ", ".join(f"{n}={report['present'].get(n)}" for n in ("WebTransport", "PublicKeyCredential", "DigitalCredential", "MediaSessionCoordinator")))
-              for key in keys:
-                  print(f"   {key}: {json.dumps(report['calls'].get(key), ensure_ascii=False)}")
+              print(f"== {side}: {report.get('webauthnSide')}; userAgent {report.get('userAgent')}")
+              for step, outcome in (report.get("webauthn") or {}).items():
+                  print(f"   {step}: {json.dumps(outcome, ensure_ascii=False)}")
           PY
-          echo "== UDP to 192.0.2.1, by process (pktap)"
-          wc -l < build/parity/udp.txt
-          grep -o "proc [^ ,]*\|[a-zA-Z.]*:[0-9]*\]" build/parity/udp.txt | sort | uniq -c | sort -rn | head -20 || true
-          head -5 build/parity/udp.txt || true
+          ls -la build/parity/*.png 2>/dev/null || echo "no pictures"
+          for trace in /tmp/msgSends-*; do [ -f "$trace" ] && gzip -c "$trace" > "build/parity/$(basename "$trace").gz"; done; true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: parity-${{ matrix.runner }}
+          name: webauthn-${{ matrix.runner }}
           path: build/parity
           if-no-files-found: ignore
