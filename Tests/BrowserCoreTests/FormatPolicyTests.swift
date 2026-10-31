@@ -11,7 +11,9 @@ import XCTest
 /// reader needs the format.
 ///
 /// A "newer" file is what a later version would write: the same file under the same key, its JSON
-/// declaring `"format": 2` and a field this version does not know.
+/// declaring the format after this version's — `"format": 2` for the files at 1, 3 for those at 2
+/// (the vault's generation, saved passwords, profile exports) — and a field this version does not
+/// know.
 final class FormatPolicyTests: XCTestCase {
     var root: URL!
     var vault: UnlockedVault!
@@ -20,6 +22,8 @@ final class FormatPolicyTests: XCTestCase {
     var key: SymmetricKey!
 
     let newer = Data(#"{"format": 2, "somethingNew": true}"#.utf8)
+    /// For the files at format 2.
+    let newerThan2 = Data(#"{"format": 3, "somethingNew": true}"#.utf8)
     let cookie = ImportedCookie(name: "sid", value: "v", domain: "a.example", hostOnly: true)
 
     override func setUpWithError() throws {
@@ -52,12 +56,12 @@ final class FormatPolicyTests: XCTestCase {
     }
 
     /// The same for a body that awaits (sync).
-    private func assertRefused(_ what: String, line: UInt = #line, _ body: () async throws -> Void) async {
+    private func assertRefused(_ what: String, supported: Int = 1, line: UInt = #line, _ body: () async throws -> Void) async {
         do {
             try await body()
             XCTFail("\(what) of a newer version was not refused", line: line)
         } catch {
-            XCTAssertEqual(error as? CoreError, .newerFormat(what: what, found: 2, supported: 1), line: line)
+            XCTAssertEqual(error as? CoreError, .newerFormat(what: what, found: supported + 1, supported: supported), line: line)
         }
     }
 
@@ -162,7 +166,6 @@ final class FormatPolicyTests: XCTestCase {
 
         let unmarked: [(String, Data)] = [
             ("config.bin", try json(at: repository.configURL(for: id)) { try AEAD.open($0, key: key, aad: ProfileRepository.configAAD(id)) }),
-            ("passwords.bin", try json(at: repository.passwordsURL(for: id)) { try PasswordVault.open($0, profileID: id, profileKey: key) }),
             ("warmup.bin", try json(at: repository.warmUpPlanURL(for: id)) { try repository.warmUpPlanFile(for: id).open($0) }),
             ("warmup-schedule.bin", try json(at: repository.warmUpScheduleURL(for: id)) { try repository.warmUpScheduleFile(for: id).open($0) }),
             ("cookies-baseline.bin", try json(at: repository.cookieBaselineURL(for: id)) { try repository.cookieBaselineFile(for: id).open($0) }),
@@ -174,6 +177,10 @@ final class FormatPolicyTests: XCTestCase {
             XCTAssertNil((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["format"], "\(name) has a format now")
             XCTAssertEqual(DocumentFormat.declared(in: data), 1, name)
         }
+        // Saved passwords keep deletions and versions since the vault's generation 2.
+        let passwords = try json(at: repository.passwordsURL(for: id)) { try PasswordVault.open($0, profileID: id, profileKey: key) }
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: passwords) as? [String: Any])?["format"] as? Int, 2, "passwords.bin")
+        XCTAssertEqual(try MasterVault.readHeader(in: vault.root).format, 2, "vault.json")
         try repository.saveCookieJar(CookieJarDocument(), for: id)
         try repository.saveOpenTabs(OpenTabs(windows: [.init(tabs: [URL(string: "https://a.example/")!])]), for: id)
         try ProxyList().save(to: vault)
@@ -215,12 +222,14 @@ final class FormatPolicyTests: XCTestCase {
         let grant = try repository.grant(for: id)
         let header = MasterVault.headerURL(in: vault.root)
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: header)) as? [String: Any])
-        json["format"] = 2
+        json["format"] = 3
         try JSONSerialization.data(withJSONObject: json).write(to: header)
-        try assertRefused("vault.json", keeps: header) { _ = try MasterVault.unlock(in: vault.root, password: "pw") }
-        try assertRefused("vault.json", keeps: header) { _ = try MasterVault.readHeader(in: vault.root) }
-        try assertRefused("vault.json", keeps: header) { _ = try MasterVault.open(in: vault.root, grant: grant) }
-        try assertRefused("vault.json", keeps: header) { try vault.changePassword(current: "pw", new: "new pw", iterations: 1_000) }
+        try assertRefused("vault.json", keeps: header, supported: 2) { _ = try MasterVault.unlock(in: vault.root, password: "pw") }
+        try assertRefused("vault.json", keeps: header, supported: 2) { _ = try MasterVault.readHeader(in: vault.root) }
+        try assertRefused("vault.json", keeps: header, supported: 2) { _ = try MasterVault.open(in: vault.root, grant: grant) }
+        try assertRefused("vault.json", keeps: header, supported: 2) { try vault.changePassword(current: "pw", new: "new pw", iterations: 1_000) }
+        // A vault already at this version's generation raises nothing, and writes nothing over it.
+        XCTAssertFalse(try vault.raiseGenerationIfNeeded())
     }
 
     func testTheIndexOfANewerVersion() throws {
@@ -253,10 +262,10 @@ final class FormatPolicyTests: XCTestCase {
     func testPasswordsOfANewerVersion() throws {
         let url = repository.passwordsURL(for: id)
         let openBefore = try repository.passwordVault(for: id)
-        try SecureFile.write(AEAD.seal(newer, key: PasswordVault.fileKey(profileID: id, profileKey: key),
+        try SecureFile.write(AEAD.seal(newerThan2, key: PasswordVault.fileKey(profileID: id, profileKey: key),
                                        aad: PasswordVault.aad(profileID: id)), to: url)
-        try assertRefused("passwords.bin", keeps: url) { _ = try repository.passwordVault(for: id) }
-        try assertRefused("passwords.bin", keeps: url) {
+        try assertRefused("passwords.bin", keeps: url, supported: 2) { _ = try repository.passwordVault(for: id) }
+        try assertRefused("passwords.bin", keeps: url, supported: 2) {
             try openBefore.upsert(PasswordEntry(origin: "https://a.example", username: "u", password: "p"))
         }
     }
@@ -353,8 +362,8 @@ final class FormatPolicyTests: XCTestCase {
         let start = ProfileTransfer.magic.count
         let length = bytes[start..<start + 4].reduce(0) { ($0 << 8) | Int($1) }
         var header = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(bytes[start + 4..<start + 4 + length])) as? [String: Any])
-        XCTAssertEqual(header["format"] as? Int, 1)
-        header["format"] = 2
+        XCTAssertEqual(header["format"] as? Int, 2)
+        header["format"] = 3
         let patched = try JSONSerialization.data(withJSONObject: header)
         var rewritten = Data(bytes.prefix(start))
         withUnsafeBytes(of: UInt32(patched.count).bigEndian) { rewritten.append(contentsOf: $0) }
@@ -363,8 +372,8 @@ final class FormatPolicyTests: XCTestCase {
         try rewritten.write(to: file)
 
         let profiles = repository.list().count
-        try assertRefused("Newer.pbprofile", keeps: file) { _ = try ProfileTransfer.manifest(of: file, password: "pw") }
-        try assertRefused("Newer.pbprofile", keeps: file) { _ = try ProfileTransfer.importProfile(from: file, password: "pw", into: repository) }
+        try assertRefused("Newer.pbprofile", keeps: file, supported: 2) { _ = try ProfileTransfer.manifest(of: file, password: "pw") }
+        try assertRefused("Newer.pbprofile", keeps: file, supported: 2) { _ = try ProfileTransfer.importProfile(from: file, password: "pw", into: repository) }
         XCTAssertEqual(repository.list().count, profiles)
     }
 
@@ -398,16 +407,16 @@ final class FormatPolicyTests: XCTestCase {
         let remote = try await transport.listObjects().first { $0.objectID == SyncEngine.vaultHeaderObjectID }
         let blob = try await transport.fetch(objectID: SyncEngine.vaultHeaderObjectID)
         var header = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(blob)) as? [String: Any])
-        header["format"] = 2
+        header["format"] = 3
         try await transport.store(objectID: SyncEngine.vaultHeaderObjectID, revision: XCTUnwrap(remote).revision + 1,
                                   data: JSONSerialization.data(withJSONObject: header), expectedRevision: remote?.revision)
         let server = try await snapshot(transport)
         let index = try Data(contentsOf: repository.indexURL)
 
-        await assertRefused("vault.json") { _ = try await a.sync() }
-        await assertRefused("vault.json") { try await a.publishVaultHeader() }
+        await assertRefused("vault.json", supported: 2) { _ = try await a.sync() }
+        await assertRefused("vault.json", supported: 2) { try await a.publishVaultHeader() }
         let third = root.appendingPathComponent("c")
-        await assertRefused("vault.json") { _ = try await SyncEngine.bootstrap(transport: transport, root: third, password: "pw") }
+        await assertRefused("vault.json", supported: 2) { _ = try await SyncEngine.bootstrap(transport: transport, root: third, password: "pw") }
         XCTAssertFalse(MasterVault.exists(in: third))
         let after = try await snapshot(transport)
         XCTAssertEqual(after, server)

@@ -131,7 +131,9 @@ Application Support/PrivacyBrowser/      (0700)
     config.bin                    AES-GCM(profile key, ProfileConfiguration JSON) — also the person's own tags,
                                   notes and glyph (written only when set; the Profiles list reads them into
                                   ProfileDetails at each refresh)
-    passwords.bin                 AES-GCM(password key, [PasswordEntry] JSON: origin, user name, password, note, dates)
+    passwords.bin                 AES-GCM(password key, PasswordDocument JSON, format 2: the logins — origin, user name, password,
+                                  note, dates, each with its version and the versions before it — and the deletions;
+                                  sync merges it login by login. Format 1, still read, was the logins alone, an array)
     cookies-import.bin            AES-GCM(cookie-import key, [ImportedCookie] JSON)   [only while imported cookies wait for the next launch]
     cookies.bin                   AES-GCM(cookies key, CookieJarDocument JSON)        [persistent cookies, synced; with cookie sync on]
     cookies-baseline.bin          AES-GCM(cookie-baseline key, CookieBaseline JSON)   [this Mac only: the store at the last record or apply]
@@ -139,7 +141,8 @@ Application Support/PrivacyBrowser/      (0700)
     warmup-schedule.bin           AES-GCM(warm-up-schedule key, WarmUpSchedule JSON)  [this Mac only, not exported: every N hours, last run]
     tabs.bin                      AES-GCM(open-tabs key, OpenTabs JSON)               [this Mac only, not synced or exported: http(s) tabs
                                                                                        left open, with Settings → Startup → restore tabs]
-    config.bin.conflict, passwords.bin.conflict   the other device's version after a sync conflict (encrypted as the file)
+    config.bin.conflict           the other device's version after a sync conflict (encrypted as the file; passwords.bin.conflict
+                                  only from before passwords.bin format 2: a password conflict now keeps both versions in the file)
     history.bin                   AES-GCM(history key, HistoryDocument JSON)          [not for ephemeral profiles]
     bookmarks.bin                 AES-GCM(bookmarks key, BookmarkDocument JSON)
     webdata.pbsa                  streaming encrypted archive of WebKit's data dirs

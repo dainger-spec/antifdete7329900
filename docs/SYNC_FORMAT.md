@@ -67,7 +67,7 @@ buyer can check it the same way the competitor was checked.
 
 | Layer | Code | Status |
 |---|---|---|
-| Wire format: envelope, opaque object IDs, AAD binding | `SyncEnvelope.swift` | ready, stable (`pbsync-1`) |
+| Wire format: envelope, opaque object IDs, AAD binding | `SyncEnvelope.swift` | ready (`pbsync-2` written since the vault's generation 2; `pbsync-1` still read) |
 | Engine: CAS writes, deferral, tombstones, per-record merges | `SyncEngine.swift` | ready, unit-tested |
 | Backend contract | `SyncTransport` protocol | ready; this is all a backend implements |
 | `HTTPSyncTransport` | `Sync/Transports/HTTPSyncTransport.swift` | **server-ready client**: speaks SYNC_SERVER_API.md, tested against an in-process stub; no server included |
@@ -111,7 +111,7 @@ own through `cookies.bin`, cookie by cookie.
 
 ```json
 {
-  "format": "pbsync-1",
+  "format": "pbsync-2",
   "vaultID": "7C1E…",
   "objectID": "3f9a…(64 hex)",
   "revision": 7,
@@ -119,8 +119,12 @@ own through `cookies.bin`, cookie by cookie.
 }
 ```
 
-- `AAD = "pbsync-1|<vaultID>|<objectID>|<revision>"`. The server can't move a blob to
+- `AAD = "<format>|<vaultID>|<objectID>|<revision>"`. The server can't move a blob to
   another object ID or replay it under a different revision.
+- `pbsync-2` came with the vault's generation 2 (docs/UPDATES.md §4, R3): the versions before it
+  read only `pbsync-1` and look at nothing else on the sync location, so a new envelope is what
+  stops them there. This version reads both and writes `pbsync-2`; when it raises a vault's
+  generation it also raises the header on the sync location.
 - `payload = {"logicalName": "...", "deleted": false, "data": "<base64>"}`. After
   decrypting, the client checks that `HMAC(objectIDKey, logicalName) == objectID`.
 - `envelopeKey = HKDF(VMK, "sync-envelope")` and `objectIDKey = HKDF(VMK, "sync-object-id")`.
@@ -162,8 +166,9 @@ revision and the SHA-256 of the last synced bytes.
        the remote file is taken, with no copy and no conflict reported. A version with the
        time beats one without (never edited since it was created, or rewritten by an older
        build); with neither or equal times, the resolver decides, as for passwords;
-     - **passwords** go to the resolver (default `keepRemote`; the local copy is kept as
-       `<file>.conflict`, reported in `report.resolvedConflicts`).
+     - **passwords** are merged login by login (`passwords.bin` format 2, see below) — and so
+       is a password file that changed only here while the server holds one, as for the other
+       mergeable files.
 4. Delete local directories of profiles removed from the index, and report their IDs so
    the app also removes their WebKit stores.
 
@@ -264,9 +269,17 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
   disk, not live sessions. The app enforces this: a sync first waits for profiles still
   starting or being encrypted (they read and write their synced cookies), and a launch asked
   for during a sync starts after it.
-- Passwords are not merged per entry yet: concurrent edits on two devices resolve to the
-  remote file, and the local one is kept as `passwords.bin.conflict`. Adding tombstones
-  to `PasswordVault` would allow the same merge as bookmarks.
+- Saved passwords merge login by login since `passwords.bin` format 2 (vault generation 2):
+  each login carries its version and every version it was made from, and the file keeps its
+  deletions. A login changed on one device after the other's version wins; one changed on two
+  devices between syncs keeps both changes — the later in place, the other as a separate version
+  of the same login (`conflictOf`), under an id made from its version (the same on every device,
+  once), shown in the password manager to be chosen or deleted and never offered to a page. A
+  deletion takes only the versions it saw: a change made elsewhere at the same time survives
+  it. A fill is not a change (only `lastUsedAt`, the later of the two). Logins saved before
+  versions get one derived from what they hold, so two devices holding the same login agree. Until
+  then a concurrent edit kept the remote file and moved the local one to `passwords.bin.conflict`,
+  which the next conflict replaced (`PasswordMergeTests`).
 - The warm-up plan (`warmup.bin`) is not synced; the cookies and history its visits leave are,
   with the profile's.
 - `cookies-import.bin` (cookies imported into a stopped profile, until its next launch) is not
@@ -295,8 +308,8 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
   (`keepRemote`, local copy as `config.bin.conflict`).
 - An older build skips the `cookies` object entirely: it neither uploads nor applies cookies,
   and leaves the object untouched for newer devices.
-- The conflict copy (`config.bin.conflict`, `passwords.bin.conflict`) is encrypted like the
-  file and stays on that Mac; a later conflict replaces it. The app reports conflicts in the
+- The conflict copy (`config.bin.conflict`; `passwords.bin.conflict` from before format 2) is
+  encrypted like the file and stays on that Mac; a later conflict replaces it. The app reports conflicts in the
   sync status but does not offer to restore a copy yet.
 - `PasswordEntry.lastUsedAt` (when AutoFill last filled the login) and the configuration's
   `passwordAutoFill` / `passwordNeverSaveSites` are optional fields: an older build reads the

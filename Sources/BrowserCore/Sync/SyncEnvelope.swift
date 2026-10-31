@@ -9,14 +9,14 @@ import Foundation
 ///
 /// ```json
 /// {
-///   "format":     "pbsync-1",
+///   "format":     "pbsync-2",
 ///   "vaultID":    "<uuid>",
 ///   "objectID":   "<hex HMAC-SHA256(objectIDKey, logicalName)>",
 ///   "revision":   7,
 ///   "ciphertext": "<base64 AES-256-GCM(envelopeKey, SyncPayload JSON)>"
 /// }
 /// ```
-/// AAD of the ciphertext = `"pbsync-1|<vaultID>|<objectID>|<revision>"`, so the server
+/// AAD of the ciphertext = `"<format>|<vaultID>|<objectID>|<revision>"`, so the server
 /// cannot move a blob to another object ID or replay it under a different revision.
 ///
 /// What the server learns: vault ID, number of objects, their sizes, revision counters,
@@ -27,7 +27,12 @@ import Foundation
 /// revisions) is not detected across devices; that requires a signed, monotonic
 /// manifest or a trusted server-side counter.
 public struct SyncEnvelope: Codable, Equatable, Sendable {
-    public static let currentFormat = "pbsync-1"
+    /// Raised with the vault's generation (docs/UPDATES.md §4, R3): the versions from before it look
+    /// only at each record's envelope, never at the header on the sync location, and refuse any
+    /// other than `pbsync-1`.
+    public static let currentFormat = "pbsync-2"
+    /// The envelopes this version reads: every one a released version wrote.
+    public static let readableFormats: Set<String> = ["pbsync-1", "pbsync-2"]
     public var format: String
     public var vaultID: UUID
     public var objectID: String
@@ -63,7 +68,7 @@ public struct SyncCodec: @unchecked Sendable {
     public func encode(_ payload: SyncPayload, revision: Int) throws -> Data {
         let objectID = objectID(for: payload.logicalName)
         let ciphertext = try AEAD.seal(JSONCoding.encoder.encode(payload), key: envelopeKey,
-                                       aad: Self.aad(vaultID: vaultID, objectID: objectID, revision: revision))
+                                       aad: Self.aad(format: SyncEnvelope.currentFormat, vaultID: vaultID, objectID: objectID, revision: revision))
         let envelope = SyncEnvelope(format: SyncEnvelope.currentFormat, vaultID: vaultID,
                                     objectID: objectID, revision: revision, ciphertext: ciphertext)
         return try JSONCoding.encoder.encode(envelope)
@@ -73,10 +78,10 @@ public struct SyncCodec: @unchecked Sendable {
     /// the envelope's object ID (prevents a valid blob being served under another name).
     public func decode(_ blob: Data) throws -> (payload: SyncPayload, revision: Int, objectID: String) {
         let envelope = try JSONCoding.decoder.decode(SyncEnvelope.self, from: blob)
-        guard envelope.format == SyncEnvelope.currentFormat else { throw CoreError.unsupportedFormat(envelope.format) }
+        guard SyncEnvelope.readableFormats.contains(envelope.format) else { throw CoreError.unsupportedFormat(envelope.format) }
         guard envelope.vaultID == vaultID else { throw CoreError.corruptData("envelope belongs to another vault") }
         let plaintext = try AEAD.open(envelope.ciphertext, key: envelopeKey,
-                                      aad: Self.aad(vaultID: vaultID, objectID: envelope.objectID, revision: envelope.revision))
+                                      aad: Self.aad(format: envelope.format, vaultID: vaultID, objectID: envelope.objectID, revision: envelope.revision))
         let payload = try JSONCoding.decoder.decode(SyncPayload.self, from: plaintext)
         guard objectID(for: payload.logicalName) == envelope.objectID else {
             throw CoreError.corruptData("object ID does not match payload name")
@@ -84,7 +89,7 @@ public struct SyncCodec: @unchecked Sendable {
         return (payload, envelope.revision, envelope.objectID)
     }
 
-    static func aad(vaultID: UUID, objectID: String, revision: Int) -> String {
-        "\(SyncEnvelope.currentFormat)|\(vaultID.uuidString)|\(objectID)|\(revision)"
+    static func aad(format: String, vaultID: UUID, objectID: String, revision: Int) -> String {
+        "\(format)|\(vaultID.uuidString)|\(objectID)|\(revision)"
     }
 }

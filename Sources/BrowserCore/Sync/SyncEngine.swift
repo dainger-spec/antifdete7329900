@@ -111,10 +111,13 @@ public final class SyncEngine: @unchecked Sendable {
         let remoteObjects = try await transport.listObjects()
         if !remoteObjects.contains(where: { $0.objectID == Self.vaultHeaderObjectID }) {
             try await publishVaultHeader()
-        } else if let blob = try await transport.fetch(objectID: Self.vaultHeaderObjectID),
-                  // A newer version's vault on the sync location stops the sync here.
-                  try VaultHeader.decodeChecked(blob).vaultID != repository.vault.vaultID {
-            throw CoreError.corruptData("sync location holds a different vault")
+        } else if let blob = try await transport.fetch(objectID: Self.vaultHeaderObjectID) {
+            // A newer version's vault on the sync location stops the sync here.
+            let remoteHeader = try VaultHeader.decodeChecked(blob)
+            guard remoteHeader.vaultID == repository.vault.vaultID else { throw CoreError.corruptData("sync location holds a different vault") }
+            // The vault's generation raised here and not yet there: raised there too, so that a
+            // version from before refuses the sync location as it refuses the vault (R3).
+            if remoteHeader.format < repository.vault.header.format { try await publishVaultHeader() }
         }
         let remote = Dictionary(remoteObjects.map { ($0.objectID, $0.revision) }, uniquingKeysWith: max)
 

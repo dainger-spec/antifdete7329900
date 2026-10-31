@@ -34,7 +34,11 @@ import Foundation
 public enum ProfileTransfer {
     public static let fileExtension = "pbprofile"
     static let magic = Data("PBPROFILE1\n".utf8)
-    static let format = 1
+    /// 2: its saved passwords carry versions, and the versions kept after a conflict — which a
+    /// version that reads only 1 would import as ordinary logins, one over another (R4).
+    static let format = 2
+    /// The formats this version imports (R1).
+    static let readableFormats = 1...format
 
     /// What a file holds, readable with its password before it is imported.
     public struct Manifest: Codable, Equatable, Sendable {
@@ -175,7 +179,8 @@ public enum ProfileTransfer {
         do {
             let key = try repository.profileKey(for: id)
             let vault = try repository.passwordVault(for: id)
-            for entry in documents.passwords { try vault.upsert(entry) }
+            // As the export holds them: their versions, and the versions kept after a conflict.
+            try vault.importEntries(documents.passwords)
             if let history = documents.history {
                 try HistoryStore.file(url: repository.historyURL(for: id), profileID: id, profileKey: key).save(history)
             }
@@ -230,7 +235,7 @@ public enum ProfileTransfer {
         // A newer version's export is refused before its header is decoded (docs/UPDATES.md §4).
         try DocumentFormat.check(headerData, supported: format, what: url.lastPathComponent)
         let header = try JSONCoding.decoder.decode(Header.self, from: headerData)
-        guard header.format == format else { throw CoreError.unsupportedFormat("profile export format \(header.format)") }
+        guard readableFormats.contains(header.format) else { throw CoreError.unsupportedFormat("profile export format \(header.format)") }
         let documents = try readLengthPrefixed(handle)
         return Parsed(header: header, documents: documents, archiveOffset: try handle.offset())
     }

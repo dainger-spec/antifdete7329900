@@ -142,6 +142,10 @@ struct PasswordListView: View {
                             Text(entry.host)
                             Text(entry.username.isEmpty ? L("passwords.noUsername") : entry.username)
                                 .font(.caption).foregroundStyle(.secondary)
+                            if entry.isConflictVersion {
+                                Label(L("passwords.conflict.badge"), systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption).foregroundStyle(Theme.warning)
+                            }
                         }
                     }
                 }
@@ -211,6 +215,12 @@ struct PasswordListView: View {
 
     private func details(_ entry: PasswordEntry) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            if entry.isConflictVersion {
+                Label(L("passwords.conflict.explanation"), systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             row(L("passwords.field.website"), entry.origin, copy: entry.origin)
             row(L("passwords.field.username"), entry.username.isEmpty ? L("passwords.noUsername") : entry.username,
                 copy: entry.username.isEmpty ? nil : entry.username)
@@ -234,12 +244,18 @@ struct PasswordListView: View {
             }
             Spacer()
             HStack {
-                Button(L("passwords.edit")) {
-                    revealed = true
-                    draft = Draft(id: entry.id, website: entry.origin, username: entry.username,
-                                  password: entry.password, note: entry.note ?? "")
+                if entry.isConflictVersion {
+                    // A version kept after a conflict is chosen, or deleted; it is not edited.
+                    Button(L("passwords.conflict.keep")) { keepConflictVersion(entry) }
+                        .buttonStyle(.lumenSecondary)
+                } else {
+                    Button(L("passwords.edit")) {
+                        revealed = true
+                        draft = Draft(id: entry.id, website: entry.origin, username: entry.username,
+                                      password: entry.password, note: entry.note ?? "")
+                    }
+                    .buttonStyle(.lumenSecondary)
                 }
-                .buttonStyle(.lumenSecondary)
                 Spacer()
                 Button(L("common.delete"), role: .destructive) { pendingDelete = entry }
                     .buttonStyle(.lumenDestructive)
@@ -333,7 +349,7 @@ struct PasswordListView: View {
                 try vault.update(entry)
                 selection = id
             } else {
-                guard !vault.allEntries().contains(where: { $0.origin == origin && $0.username == draft.username }) else {
+                guard !vault.allEntries().contains(where: { !$0.isConflictVersion && $0.origin == origin && $0.username == draft.username }) else {
                     throw PasswordVaultError.duplicate
                 }
                 let entry = PasswordEntry(origin: origin, username: draft.username, password: draft.password,
@@ -346,6 +362,17 @@ struct PasswordListView: View {
             reload()
         } catch PasswordVaultError.duplicate {
             error = L("passwords.error.duplicate")
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// The version kept after a conflict becomes the login's password (the other version goes).
+    private func keepConflictVersion(_ entry: PasswordEntry) {
+        do {
+            try model.passwordVault(for: profile.id).keepConflictVersion(entry.id)
+            selection = entry.conflictOf ?? entry.id
+            reload()
         } catch {
             self.error = error.localizedDescription
         }

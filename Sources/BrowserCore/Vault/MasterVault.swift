@@ -15,8 +15,11 @@ public struct VaultHeader: Codable, Equatable, Sendable {
     /// The vault's format, and with it the generation of everything in the vault: a later version
     /// raises it before it writes anything an older one could not read, and every older version
     /// then refuses the whole vault — those from before this rule too, which open only format 1
-    /// (docs/UPDATES.md §4, R3).
-    public static let currentFormat = 1
+    /// (docs/UPDATES.md §4, R3). 2: saved passwords keep deletions and versions (`passwords.bin`
+    /// format 2), and sync records are `pbsync-2`.
+    public static let currentFormat = 2
+    /// The generations this version opens (R1): every one a released version wrote.
+    public static let readableFormats = 1...currentFormat
 
     public var format: Int
     public var vaultID: UUID
@@ -32,7 +35,7 @@ public struct VaultHeader: Codable, Equatable, Sendable {
     public static func decodeChecked(_ json: Data) throws -> VaultHeader {
         try DocumentFormat.check(json, supported: currentFormat, what: "vault.json")
         let header = try JSONCoding.decoder.decode(VaultHeader.self, from: json)
-        guard header.format == currentFormat else { throw CoreError.unsupportedFormat("vault format \(header.format)") }
+        guard readableFormats.contains(header.format) else { throw CoreError.unsupportedFormat("vault format \(header.format)") }
         return header
     }
 }
@@ -190,6 +193,21 @@ public final class UnlockedVault: @unchecked Sendable {
     }
 
     private var vaultSalt: Data { withUnsafeBytes(of: header.vaultID.uuid) { Data($0) } }
+
+    /// Raises the vault's generation to this version's (`VaultHeader.currentFormat`) when it is
+    /// lower — before anything is written that a version from before could not read, so that such a
+    /// version refuses the whole vault instead of failing on one file after another (R3). Only with
+    /// the master key: the header is the whole vault's. Returns whether it was raised.
+    @discardableResult
+    public func raiseGenerationIfNeeded() throws -> Bool {
+        guard masterKey != nil else { throw CoreError.notGranted("the vault's header") }
+        guard header.format < VaultHeader.currentFormat else { return false }
+        var raised = header
+        raised.format = VaultHeader.currentFormat
+        try MasterVault.writeHeader(raised, in: root)
+        header = raised
+        return true
+    }
 
     /// Whether `password` opens this vault (one key derivation: Argon2id, a fraction of a second).
     /// Asked before saved passwords are shown, as Safari asks for Touch ID or the login password.

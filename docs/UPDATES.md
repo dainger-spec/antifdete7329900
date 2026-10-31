@@ -245,7 +245,7 @@ in the self-test, which runs the app's own code for it):
   same: a newer `vault.json` there stops this version's sync, and the setup of a new device from it.
   The versions from before these rules do not look at the header on the sync location, only at each
   record's envelope (`pbsync-1`, anything else refused), so a version that raises the vault's format
-  raises the envelope's too. (A separate data-generation field was planned first; those versions
+  raises the envelope's too. Generation 2 did both: `vault.json` format 2 and `pbsync-2`. (A separate data-generation field was planned first; those versions
   would have ignored it, as they ignore every key they do not know.)
 - **R4 — a change an older reader would get wrong is a format change.** The settings' decoder takes
   what it knows from any JSON and defaults the rest, so a newer version's settings would be read as
@@ -255,10 +255,10 @@ in the self-test, which runs the app's own code for it):
 
 | File | Holds | Before these rules | Now |
 |---|---|---|---|
-| `vault.json` | KDF parameters, the wrapped master key, the vault id | `format` = 1, anything else refused | newer: the vault does not open, and a password change does not write over it; also the generation of the vault (R3) |
+| `vault.json` | KDF parameters, the wrapped master key, the vault id | `format` = 1, anything else refused | newer: the vault does not open, and a password change does not write over it; also the generation of the vault (R3). Generation 2 (saved passwords with versions and deletions, sync records `pbsync-2`): raised at unlock (`raiseGenerationIfNeeded`, before anything of generation 2 is written) and on the sync location at the next sync; generation 1 still opens |
 | `index.bin` | the profile list | `format` = 1, anything else refused | newer refused; not written over, by this device or by sync. Missing or unreadable: no profile folder deleted, nothing pushed (ARCHITECTURE.md, `index.bin` missing or unreadable) |
 | `config.bin`, `config.bin.conflict` | a profile's settings (synced) | **no marker** — an older version drops new fields and writes the rest back | `format` read (absent = 1; this version writes none); newer: the profile does not start, nothing is written |
-| `passwords.bin` | saved passwords | **no marker** (a JSON array) | the array is format 1; an object with a newer `format` is refused, and no change is written |
+| `passwords.bin` | saved passwords | **no marker** (a JSON array) | format 2: the logins with their versions, and the deletions — sync merges it login by login; the array (format 1) is still read and written back as 2; 3 or newer refused, and no change is written |
 | `history.bin`, `bookmarks.bin` | history, bookmarks | `format` = 1, **not checked** | checked; newer refused, never written |
 | `cookies.bin` | the synced cookie jar | `format` = 1, **not checked** | checked; newer refused: not merged, not emptied when cookie sync is turned off |
 | `cookies-baseline.bin` | this device's last cookie state | no marker | `format` read (absent = 1); newer refused, not written over, not deleted |
@@ -268,8 +268,8 @@ in the self-test, which runs the app's own code for it):
 | `settings.bin` | sync target, automation API settings | no marker — a failed read falls back to defaults **that are then saved over the file** | `format` read (absent = 1); newer: said at unlock, and the defaults are never saved over it. Unreadable for any other reason: said at unlock, the defaults shown, and at the first change the file is moved aside as `settings.bin.unreadable` (then `-2`, …), never written over |
 | `sync-state.bin` | what sync last saw | no marker (a map) | newer: the sync stops before it fetches or pushes anything (starting over would push this device's files over newer ones) |
 | `webdata.pbsa`, `safarihome.pbsa` | WebKit's data, Safari's home, archived | `PBSA` + version byte 1, anything else refused — **and a refused Safari home archive left an empty home behind, which the next unlock or an export of the profile sealed over the archive** | newer refused before anything is read from it; the profile does not start; no home is left; nothing is sealed over it. The same for a Safari home archive that cannot be restored for any other reason (damaged, a full disk): no home is left, and a home without a single file is never sealed over an archive |
-| `*.pbprofile` | a profile export | `format` = 1 in its header, anything else refused | newer: the newer-version message, nothing imported |
-| sync records | on the sync server | envelope `pbsync-1`, anything else refused | the envelope as before; the file inside a record is checked like the file itself, on the remote copy and on this device's: a newer one is neither pulled, nor merged, nor written over — the sync stops |
+| `*.pbprofile` | a profile export | `format` = 1 in its header, anything else refused | 2 since saved passwords have versions (a version that reads 1 would import a version kept after a conflict as an ordinary login, over the other); 1 still imported; newer: the newer-version message, nothing imported |
+| sync records | on the sync server | envelope `pbsync-1`, anything else refused | `pbsync-2` written since generation 2, `pbsync-1` still read, any other refused; the file inside a record is checked like the file itself, on the remote copy and on this device's: a newer one is neither pulled, nor merged, nor written over — the sync stops |
 
 Two of these lost a newer version's file whatever its format said, and were found while writing
 the rules: the queued cookie imports, deleted when they could not be read, and the Safari home above.

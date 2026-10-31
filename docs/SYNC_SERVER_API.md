@@ -91,7 +91,7 @@ append-only log of `(object, revision, sha256(blob))`. That is not part of v1.
 
 | Part | Status |
 |---|---|
-| Wire format (envelope, object IDs, AAD binding) | ready, stable (`pbsync-1`) |
+| Wire format (envelope, object IDs, AAD binding) | ready (`pbsync-2` since the vault's generation 2; `pbsync-1` still read) |
 | Client engine (merge, CAS, deferral, tombstones) | ready, unit-tested |
 | HTTP client for this API | ready, tested against an in-process stub |
 | Folder transport | ready, **local-only** (NAS share, external disk) |

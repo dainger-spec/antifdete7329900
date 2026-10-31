@@ -123,6 +123,9 @@ public final class ProfileRepository: @unchecked Sendable {
     /// the folders of profiles the index says were deleted swept away — nothing else, and nothing at
     /// all from an index that was not read. What AppModel's unlock runs, and what the tests run.
     public static func openedAtUnlock(vault: UnlockedVault) throws -> ProfileRepository {
+        // This version writes what a version from before cannot read (saved passwords, format 2):
+        // the vault's generation first (docs/UPDATES.md §4, R3).
+        try vault.raiseGenerationIfNeeded()
         let repository = try ProfileRepository(vault: vault)
         repository.removeOrphanedDirectories()
         return repository
@@ -549,7 +552,9 @@ public final class ProfileRepository: @unchecked Sendable {
                 return try codec.encode(CookieJarDocument())
             }
             return try codec.encode(CookieJarDocument.merge(codec.decode(local), codec.decode(remote)))
-        case .config, .passwords:
+        case .passwords:
+            return try PasswordVault.merge(local, remote, profileID: id, profileKey: key)
+        case .config:
             throw CoreError.unsupportedFormat("\(file.rawValue) is not mergeable")
         }
     }
@@ -681,7 +686,8 @@ public final class ProfileRepository: @unchecked Sendable {
 enum ProfileSyncFile: String, CaseIterable {
     case config, passwords, bookmarks, history, cookies
 
-    var isMergeable: Bool { self == .bookmarks || self == .history || self == .cookies }
+    /// Merged record by record (passwords login by login, since `passwords.bin` format 2).
+    var isMergeable: Bool { self != .config }
     /// Changed on two devices: the newer version wins, the other is kept as `<file>.conflict`.
     var prefersNewer: Bool { self == .config }
 }
