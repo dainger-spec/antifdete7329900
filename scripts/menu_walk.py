@@ -334,8 +334,9 @@ def main():
     if proxied:
         environment["PB_SELFTEST_HTTP_PROXY_PORT"] = str(PROXY_PORT)
     if args.safari_sentinels:
-        for key, value in SAFARI_SENTINELS.items():
-            subprocess.run(["defaults", "write", "com.apple.Safari", key, "-string", value], capture_output=True)
+        # (Not `key`: that is the item's name in the record, used below in this function.)
+        for name, value in SAFARI_SENTINELS.items():
+            subprocess.run(["defaults", "write", "com.apple.Safari", name, "-string", value], capture_output=True)
         time.sleep(2)
     domain_before, container_before = safari_domain()
     safari_ran = safari_running()
