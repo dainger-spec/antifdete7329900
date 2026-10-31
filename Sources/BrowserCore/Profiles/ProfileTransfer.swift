@@ -224,7 +224,7 @@ public enum ProfileTransfer {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         guard (try handle.read(upToCount: magic.count) ?? Data()) == magic else {
-            throw CoreError.unsupportedFormat("not a PrivacyBrowser profile export")
+            throw CoreError.unsupportedFormat("not a Lumen profile export")
         }
         let headerData = try readLengthPrefixed(handle)
         // A newer version's export is refused before its header is decoded (docs/UPDATES.md §4).

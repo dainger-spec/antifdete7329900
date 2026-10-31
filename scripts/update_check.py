@@ -29,7 +29,7 @@ installer helper. This script waits for the swap (the old build's folder holds b
 the vault on disk at that moment, waits for the new build to be started by the helper and for the
 helper's own word ("Update: installed") in the unified log, quits it, and runs the new build's
 `--selftest-updates verify`: the old build's vault, profiles and data open. Every request the feed
-got must carry the same headers from any Mac — no cookie, no query, User-Agent "PrivacyBrowser".
+got must carry the same headers from any Mac — no cookie, no query, User-Agent "Lumen".
 
 It replaces an app and captures packets (sudo): a CI runner's job only. Exit code 1 on any failure.
 """
@@ -423,7 +423,7 @@ def main():
             problems = []
             if "?" in request["path"]:
                 problems.append("a query string")
-            if headers.get("user-agent") != "PrivacyBrowser":
+            if headers.get("user-agent") != "Lumen":
                 problems.append(f"User-Agent {headers.get('user-agent')!r}")
             if "cookie" in headers or "authorization" in headers:
                 problems.append("a cookie or credentials")

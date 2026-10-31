@@ -1,4 +1,4 @@
-/* PrivacyBrowser localized strings. Generated; keep keys in sync with the UI. */
+/* Lumen localized strings. Generated; keep keys in sync with the UI. */
 "auth.logIn" = "Log In";
 "auth.login" = "Log in to %@";
 "auth.realm" = "Realm: %@";
@@ -226,7 +226,7 @@
 "editor.webrtc.tunnelSettings" = "Network extension…";
 "editor.webrtc.unrestricted" = "Unrestricted";
 "editor.webrtc.viaTunnel" = "With a proxy, WebRTC goes through the network extension: relay only, the proxy's address.";
-"error.newerFormat" = "The file %@ was saved by a newer version of PrivacyBrowser. This version neither reads nor changes it: install the newer version to open it.";
+"error.newerFormat" = "The file %@ was saved by a newer version of Lumen. This version neither reads nor changes it: install the newer version to open it.";
 "errorpage.proxy.noCredentials" = "The profile’s proxy requires a user name and password. Add them in the profile settings.";
 "errorpage.proxy.rejected" = "The proxy rejected the profile’s user name and password.";
 "errorpage.title" = "Page could not be loaded";
@@ -352,8 +352,8 @@
 "whatSites.note.tls" = "The ClientHello, as this Mac's listener read it: what every https server sees first.";
 "whatSites.note.headerOrder" = "The order the browser sends its request headers in.";
 "whatSites.page.title" = "What sites see";
-"whatSites.page.measuring" = "Measuring… This page reports to PrivacyBrowser on this Mac and nowhere else.";
-"whatSites.page.done" = "Done. You can close this tab and go back to PrivacyBrowser.";
+"whatSites.page.measuring" = "Measuring… This page reports to Lumen on this Mac and nowhere else.";
+"whatSites.page.done" = "Done. You can close this tab and go back to Lumen.";
 "whatSites.error.scripts" = "The measuring scripts are missing from the app.";
 "whatSites.error.notStarted" = "The profile did not start.";
 "whatSites.error.listen" = "Could not listen on 127.0.0.1 for the snapshot.";
@@ -532,9 +532,9 @@
 "proxies.import.kind.help" = "Found by Check: both SOCKS5 and HTTP are tried on the first check, and the one that answers is the proxy's type. Until then the proxy is given to no profile.";
 "proxies.import.unknownKinds" = "Lines without a scheme: %ld — the first check finds their type.";
 "proxies.menu.edit" = "Edit…";
-"proxies.origin.service" = "Given by PrivacyBrowser's service";
+"proxies.origin.service" = "Given by Lumen's service";
 "proxies.origin.service.short" = "From the service";
-"proxies.origin.service.since" = "Given by PrivacyBrowser's service on %@";
+"proxies.origin.service.since" = "Given by Lumen's service on %@";
 "proxies.origin.user" = "Added by you";
 "proxies.origin.user.since" = "Added by you on %@";
 "proxies.profiles.help" = "Profiles that use this proxy: %ld";
@@ -781,14 +781,14 @@
 "toolbar.address.placeholder" = "Search or enter address";
 "toolbar.fillPassword" = "Fill saved password";
 "toolbar.savePassword" = "Save password from this page";
-"tunnel.configurationName" = "PrivacyBrowser — WebRTC through proxies";
+"tunnel.configurationName" = "Lumen — WebRTC through proxies";
 "tunnel.enable" = "Enable";
 "tunnel.error.authorization" = "macOS needs an administrator to allow the extension";
-"tunnel.error.location" = "move PrivacyBrowser to /Applications and press Enable again";
+"tunnel.error.location" = "move Lumen to /Applications and press Enable again";
 "tunnel.error.policy" = "this Mac's management profile (MDM) does not allow the extension";
 "tunnel.error.signing" = "this build is not signed for the network extension (docs/TUNNEL.md)";
-"tunnel.instructions" = "If it did not turn on: System Settings → General → Login Items & Extensions → Network Extensions (ⓘ) → turn on PrivacyBrowser → Done. On macOS 14: System Settings → Privacy & Security → Allow. Then allow adding the VPN configuration. The app must be in /Applications.";
-"tunnel.intro" = "PrivacyBrowser's network extension sends the WebRTC of profiles with a SOCKS5 proxy through that proxy: pages get a relay (TURN) on a virtual address, which sends their UDP through the proxy's UDP ASSOCIATE. Sites and peers see the proxy's address, not this Mac's. The extension leaves the rest of the Mac's traffic alone.";
+"tunnel.instructions" = "If it did not turn on: System Settings → General → Login Items & Extensions → Network Extensions (ⓘ) → turn on Lumen → Done. On macOS 14: System Settings → Privacy & Security → Allow. Then allow adding the VPN configuration. The app must be in /Applications.";
+"tunnel.intro" = "Lumen's network extension sends the WebRTC of profiles with a SOCKS5 proxy through that proxy: pages get a relay (TURN) on a virtual address, which sends their UDP through the proxy's UDP ASSOCIATE. Sites and peers see the proxy's address, not this Mac's. The extension leaves the rest of the Mac's traffic alone.";
 "tunnel.limits" = "Only the WebRTC of profiles with a SOCKS5 proxy without TLS goes through the extension (an HTTP proxy cannot carry UDP); the proxy must support UDP ASSOCIATE. Pages get relay candidates only. While the tunnel is connected macOS shows a VPN, and it runs one such VPN at a time: starting this tunnel disconnects another VPN app's tunnel (WireGuard, Tailscale, …), and when that one starts, this one stops — WebRTC in proxied profiles then fails, it does not fall back to this Mac's address.";
 "tunnel.notBuilt.note" = "This build has no network extension. It needs a signed build (NE=1 scripts/build-app.sh): a paid Apple Developer account, the packet-tunnel entitlement for the app and the extension, and the app in /Applications.";
 "tunnel.openSettings" = "Open System Settings";
@@ -821,7 +821,7 @@
 "updates.installNow" = "Install Now…";
 "updates.installNow.confirm" = "Quit and Install";
 "updates.installNow.confirmStopping" = "Stop, Encrypt and Install";
-"updates.installNow.nothingRuns" = "PrivacyBrowser quits, installs the update and starts again.";
+"updates.installNow.nothingRuns" = "Lumen quits, installs the update and starts again.";
 "updates.installNow.stops" = "These are stopped first, and their data encrypted:";
 "updates.installNow.title" = "Install %@ now?";
 "updates.installed" = "Updated to %@ (%@).";
@@ -833,7 +833,7 @@
 "updates.notice.rolledBack" = "Update %@ was installed but did not start, so the previous version is back. %@";
 "updates.now.blocked" = "The update cannot be installed where the app is; see Settings → Updates.";
 "updates.now.failed" = "The installer did not start: %@";
-"updates.now.refused" = "The update was not installed, and PrivacyBrowser stays open (locked):\n%@";
+"updates.now.refused" = "The update was not installed, and Lumen stays open (locked):\n%@";
 "updates.policy" = "When an update is found";
 "updates.policy.atQuit" = "Download it, install when I quit";
 "updates.policy.notifyOnly" = "Only tell me";
@@ -846,7 +846,7 @@
 "updates.state.idleManual" = "Not checked: automatic checks are off.";
 "updates.state.notWritable" = "Version %@ is available, but you cannot replace the app where it is. Move it to a folder you can write, or install it from the download page.";
 "updates.state.ready" = "Version %@ is downloaded and checked. It installs when you quit, once every profile is encrypted.";
-"updates.state.translocated" = "Version %@ is available, but macOS runs this copy from a temporary place. Move PrivacyBrowser to Applications, then check again.";
+"updates.state.translocated" = "Version %@ is available, but macOS runs this copy from a temporary place. Move Lumen to Applications, then check again.";
 "updates.state.upToDate" = "Up to date (checked %@).";
 "updates.stops.busy" = "%@ — starting or being encrypted";
 "updates.stops.ownProcess" = "%@ — window, in its own process";
@@ -932,8 +932,8 @@
 "window.profiles.title" = "Profiles";
 
 /* Network guard of a profile's own process */
-"network.webViewOffProfile" = "A page of this profile was about to open outside its data and proxy, and was stopped: better a page that does not open than one opened from this Mac's own address. Please report this with the log (subsystem PrivacyBrowser).";
-"safari.chrome.missingPieces" = "This macOS's Safari no longer has parts the Safari window of a profile relies on (%@). The profile still loads only through its proxy, but some of Safari's window may misbehave; an update of PrivacyBrowser is needed.";
+"network.webViewOffProfile" = "A page of this profile was about to open outside its data and proxy, and was stopped: better a page that does not open than one opened from this Mac's own address. Please report this with the diagnostics: Settings → Diagnostics → Collect Diagnostics…";
+"safari.chrome.missingPieces" = "This macOS's Safari no longer has parts the Safari window of a profile relies on (%@). The profile still loads only through its proxy, but some of Safari's window may misbehave; an update of Lumen is needed.";
 "safari.unavailable.title" = "This Safari feature is not available in a profile";
 "safari.unavailable.item" = "“%@” relies on services of the real Safari that a profile does not have, so it did not work. The profile keeps running; the details are in the log.";
 "safari.unavailable.action" = "This relies on services of the real Safari that a profile does not have, so it did not work. The profile keeps running; the details are in the log.";
@@ -968,7 +968,7 @@
 "transfer.import.action" = "Import";
 "transfer.import.done" = "Profile “%@” added.";
 "transfer.error.password" = "Wrong password, or the file is damaged.";
-"transfer.error.notExport" = "This is not a PrivacyBrowser profile file.";
+"transfer.error.notExport" = "This is not a Lumen profile file.";
 "recovery.homeNotSealed" = "Could not encrypt Safari's state of profile “%1$@” again: %2$@";
 "recovery.webDataNotSealed" = "Could not encrypt the data of profile “%1$@” again: %2$@";
 "profile.homeNotSealed" = "Could not encrypt Safari's state of profile “%1$@”: %2$@. It is encrypted again at the next unlock.";
@@ -1194,7 +1194,7 @@
 "window.closeTabs.title" = "Close the window and its %ld tabs?";
 "window.closeTabs.message" = "If it is the profile's last window, the profile stops and its data is encrypted.";
 "window.closeTabs.confirm" = "Close";
-"quit.confirm.title" = "Quit PrivacyBrowser?";
+"quit.confirm.title" = "Quit Lumen?";
 "quit.confirm.message" = "These are stopped, and their data encrypted:";
 "quit.confirm.quit" = "Quit";
 "proxyProblem.title.notStarted" = "“%@” was not started";

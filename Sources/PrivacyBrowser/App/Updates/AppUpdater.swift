@@ -390,7 +390,7 @@ final class AppUpdater: ObservableObject, Updater {
         configuration.urlCache = nil
         configuration.urlCredentialStorage = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        configuration.httpAdditionalHeaders = ["User-Agent": "PrivacyBrowser", "Accept-Language": "en"]
+        configuration.httpAdditionalHeaders = ["User-Agent": "Lumen", "Accept-Language": "en"]
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 30 * 60
         configuration.waitsForConnectivity = false

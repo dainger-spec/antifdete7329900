@@ -181,7 +181,7 @@ final class TunnelManager: NSObject, ObservableObject {
                 let configuration = manager ?? NETunnelProviderManager()
                 let proto = NETunnelProviderProtocol()
                 proto.providerBundleIdentifier = identifier
-                proto.serverAddress = "PrivacyBrowser WebRTC relay"
+                proto.serverAddress = "Lumen WebRTC relay"
                 // A socket bound to the physical interface's address would leave by that interface
                 // whatever the routing table says. libwebrtc gathers on the tunnel interface for the
                 // relays (measured with a utun in CI); enforced routes, documented to supersede such

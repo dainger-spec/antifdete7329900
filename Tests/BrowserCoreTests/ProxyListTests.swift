@@ -186,7 +186,7 @@ final class ProxyListImportTests: XCTestCase {
         XCTAssertEqual(unknown.proxy.password, "p#a%ss w:@")
         // The export writes the same lines.
         XCTAssertEqual(ProxyList.exportText([ProxyListEntry(label: "B", proxy: proxies[3])]),
-                       "# PrivacyBrowser proxies. The user names and passwords below are in plaintext.\nhttps://u:p@tls.example:443  # B\n")
+                       "# Lumen proxies. The user names and passwords below are in plaintext.\nhttps://u:p@tls.example:443  # B\n")
     }
 
     func testThePasswordIsFoundWhereItWasWrittenToBeMasked() {

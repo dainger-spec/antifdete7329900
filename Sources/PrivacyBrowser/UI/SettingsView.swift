@@ -681,7 +681,7 @@ private struct AboutSettings: View {
     }
 
     static var appName: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "PrivacyBrowser" // l10n: not text
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Lumen" // l10n: not text
     }
 
     /// What the app runs on: this Mac's system, its Safari and WebKit, and how the app is built.

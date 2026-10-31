@@ -1,4 +1,4 @@
-/* PrivacyBrowser localized strings. Generated; keep keys in sync with the UI. */
+/* Lumen localized strings. Generated; keep keys in sync with the UI. */
 "auth.logIn" = "Войти";
 "auth.login" = "Вход на %@";
 "auth.realm" = "Область: %@";
@@ -226,7 +226,7 @@
 "editor.webrtc.tunnelSettings" = "Сетевое расширение…";
 "editor.webrtc.unrestricted" = "Без ограничений";
 "editor.webrtc.viaTunnel" = "С прокси WebRTC идёт через сетевое расширение: только ретранслятор, адрес прокси.";
-"error.newerFormat" = "Файл %@ сохранён более новой версией PrivacyBrowser. Эта версия его не читает и не меняет: чтобы открыть его, установите новую версию.";
+"error.newerFormat" = "Файл %@ сохранён более новой версией Lumen. Эта версия его не читает и не меняет: чтобы открыть его, установите новую версию.";
 "errorpage.proxy.noCredentials" = "Прокси этого профиля требует имя пользователя и пароль. Укажите их в настройках профиля.";
 "errorpage.proxy.rejected" = "Прокси отклонил имя пользователя и пароль профиля.";
 "errorpage.title" = "Не удалось загрузить страницу";
@@ -352,8 +352,8 @@
 "whatSites.note.tls" = "ClientHello, как его прочитал слушатель этого Mac: то, что первым видит любой https-сервер.";
 "whatSites.note.headerOrder" = "Порядок, в котором браузер отправляет заголовки запроса.";
 "whatSites.page.title" = "Что видят сайты";
-"whatSites.page.measuring" = "Измерение… Эта страница отчитывается PrivacyBrowser на этом Mac и больше никуда.";
-"whatSites.page.done" = "Готово. Можно закрыть вкладку и вернуться в PrivacyBrowser.";
+"whatSites.page.measuring" = "Измерение… Эта страница отчитывается Lumen на этом Mac и больше никуда.";
+"whatSites.page.done" = "Готово. Можно закрыть вкладку и вернуться в Lumen.";
 "whatSites.error.scripts" = "В приложении нет скриптов измерения.";
 "whatSites.error.notStarted" = "Профиль не запустился.";
 "whatSites.error.listen" = "Не удалось слушать 127.0.0.1 для снимка.";
@@ -532,9 +532,9 @@
 "proxies.import.kind.help" = "«Определит проверка»: при первой проверке пробуются и SOCKS5, и HTTP, и тот, что ответил, становится типом прокси. До этого прокси не назначается профилям.";
 "proxies.import.unknownKinds" = "Строк без схемы: %ld — их тип определит первая проверка.";
 "proxies.menu.edit" = "Изменить…";
-"proxies.origin.service" = "Выдан сервисом PrivacyBrowser";
+"proxies.origin.service" = "Выдан сервисом Lumen";
 "proxies.origin.service.short" = "Из сервиса";
-"proxies.origin.service.since" = "Выдан сервисом PrivacyBrowser %@";
+"proxies.origin.service.since" = "Выдан сервисом Lumen %@";
 "proxies.origin.user" = "Добавлен вами";
 "proxies.origin.user.since" = "Добавлен вами %@";
 "proxies.profiles.help" = "Профилей с этим прокси: %ld";
@@ -781,14 +781,14 @@
 "toolbar.address.placeholder" = "Поиск или адрес сайта";
 "toolbar.fillPassword" = "Подставить сохранённый пароль";
 "toolbar.savePassword" = "Сохранить пароль с этой страницы";
-"tunnel.configurationName" = "PrivacyBrowser — WebRTC через прокси";
+"tunnel.configurationName" = "Lumen — WebRTC через прокси";
 "tunnel.enable" = "Включить";
 "tunnel.error.authorization" = "macOS нужно разрешение администратора для расширения";
-"tunnel.error.location" = "переместите PrivacyBrowser в папку «Программы» и нажмите «Включить» снова";
+"tunnel.error.location" = "переместите Lumen в папку «Программы» и нажмите «Включить» снова";
 "tunnel.error.policy" = "профиль управления этого Mac (MDM) не разрешает расширение";
 "tunnel.error.signing" = "эта сборка не подписана для сетевого расширения (docs/TUNNEL.md)";
-"tunnel.instructions" = "Если не включилось: Системные настройки → Основные → Объекты входа и расширения → Сетевые расширения (ⓘ) → включите PrivacyBrowser → Готово. В macOS 14: Системные настройки → Конфиденциальность и безопасность → Разрешить. Затем разрешите добавление конфигурации VPN. Приложение должно лежать в папке «Программы».";
-"tunnel.intro" = "Сетевое расширение PrivacyBrowser пропускает WebRTC профилей с SOCKS5-прокси через их прокси: страницы получают ретранслятор (TURN) на виртуальном адресе, а он отправляет UDP через UDP ASSOCIATE прокси. Сайты и собеседники видят адрес прокси, а не этого Mac. Остальной трафик Mac расширение не трогает.";
+"tunnel.instructions" = "Если не включилось: Системные настройки → Основные → Объекты входа и расширения → Сетевые расширения (ⓘ) → включите Lumen → Готово. В macOS 14: Системные настройки → Конфиденциальность и безопасность → Разрешить. Затем разрешите добавление конфигурации VPN. Приложение должно лежать в папке «Программы».";
+"tunnel.intro" = "Сетевое расширение Lumen пропускает WebRTC профилей с SOCKS5-прокси через их прокси: страницы получают ретранслятор (TURN) на виртуальном адресе, а он отправляет UDP через UDP ASSOCIATE прокси. Сайты и собеседники видят адрес прокси, а не этого Mac. Остальной трафик Mac расширение не трогает.";
 "tunnel.limits" = "Через расширение идёт только WebRTC профилей с SOCKS5-прокси без TLS (HTTP-прокси UDP не переносит); у прокси должен работать UDP ASSOCIATE. Страницы получают только кандидаты-ретрансляторы. Пока туннель подключён, macOS показывает VPN, и таких VPN одновременно работает только один: запуск этого туннеля отключает туннель другого VPN-приложения (WireGuard, Tailscale…), а когда тот запускается, останавливается этот — тогда WebRTC в профилях с прокси не работает, но и на адрес этого Mac не переключается.";
 "tunnel.notBuilt.note" = "Эта сборка без сетевого расширения. Нужна подписанная сборка (NE=1 scripts/build-app.sh): платный аккаунт Apple Developer и право (entitlement) packet tunnel для приложения и расширения, приложение в папке «Программы».";
 "tunnel.openSettings" = "Открыть Системные настройки";
@@ -821,7 +821,7 @@
 "updates.installNow" = "Установить сейчас…";
 "updates.installNow.confirm" = "Выйти и установить";
 "updates.installNow.confirmStopping" = "Остановить, зашифровать и установить";
-"updates.installNow.nothingRuns" = "PrivacyBrowser завершится, установит обновление и запустится снова.";
+"updates.installNow.nothingRuns" = "Lumen завершится, установит обновление и запустится снова.";
 "updates.installNow.stops" = "Сначала будут остановлены, а их данные зашифрованы:";
 "updates.installNow.title" = "Установить %@ сейчас?";
 "updates.installed" = "Обновлено до %@ (%@).";
@@ -833,7 +833,7 @@
 "updates.notice.rolledBack" = "Обновление %@ было установлено, но не запустилось, поэтому возвращена прежняя версия. %@";
 "updates.now.blocked" = "Обновление нельзя установить там, где лежит приложение; подробности — в «Настройки → Обновления».";
 "updates.now.failed" = "Установщик не запустился: %@";
-"updates.now.refused" = "Обновление не установлено, PrivacyBrowser остаётся открытым (заблокирован):\n%@";
+"updates.now.refused" = "Обновление не установлено, Lumen остаётся открытым (заблокирован):\n%@";
 "updates.policy" = "Когда найдено обновление";
 "updates.policy.atQuit" = "Скачать и установить при выходе";
 "updates.policy.notifyOnly" = "Только сообщить";
@@ -846,7 +846,7 @@
 "updates.state.idleManual" = "Не проверялось: автоматическая проверка выключена.";
 "updates.state.notWritable" = "Доступна версия %@, но заменить приложение там, где оно лежит, нельзя. Переместите его в папку, доступную для записи, или установите со страницы загрузки.";
 "updates.state.ready" = "Версия %@ скачана и проверена. Она установится при выходе, когда все профили будут зашифрованы.";
-"updates.state.translocated" = "Доступна версия %@, но macOS запускает эту копию из временного места. Переместите PrivacyBrowser в «Программы» и проверьте снова.";
+"updates.state.translocated" = "Доступна версия %@, но macOS запускает эту копию из временного места. Переместите Lumen в «Программы» и проверьте снова.";
 "updates.state.upToDate" = "Установлена последняя версия (проверено %@).";
 "updates.stops.busy" = "%@ — запускается или шифруется";
 "updates.stops.ownProcess" = "%@ — окно, в собственном процессе";
@@ -932,8 +932,8 @@
 "window.profiles.title" = "Профили";
 
 /* Network guard of a profile's own process */
-"network.webViewOffProfile" = "Страница этого профиля чуть не открылась вне его данных и прокси — загрузка остановлена: лучше не открыть страницу, чем открыть её с реального адреса этого Mac. Сообщите об этом и приложите лог (subsystem PrivacyBrowser).";
-"safari.chrome.missingPieces" = "В Safari этой версии macOS нет частей, на которые опирается окно Safari профиля (%@). Профиль по-прежнему ходит только через свой прокси, но часть окна Safari может работать неправильно; нужно обновление PrivacyBrowser.";
+"network.webViewOffProfile" = "Страница этого профиля чуть не открылась вне его данных и прокси — загрузка остановлена: лучше не открыть страницу, чем открыть её с реального адреса этого Mac. Сообщите об этом и приложите диагностику: Настройки → Диагностика → «Собрать диагностику…».";
+"safari.chrome.missingPieces" = "В Safari этой версии macOS нет частей, на которые опирается окно Safari профиля (%@). Профиль по-прежнему ходит только через свой прокси, но часть окна Safari может работать неправильно; нужно обновление Lumen.";
 "safari.unavailable.title" = "Эта функция Safari недоступна в профиле";
 "safari.unavailable.item" = "«%@» опирается на службы настоящей Safari, которых в профиле нет, поэтому не сработал. Профиль продолжает работать; подробности записаны в журнал.";
 "safari.unavailable.action" = "Это действие опирается на службы настоящей Safari, которых в профиле нет, поэтому не сработало. Профиль продолжает работать; подробности записаны в журнал.";
@@ -968,7 +968,7 @@
 "transfer.import.action" = "Импортировать";
 "transfer.import.done" = "Профиль «%@» добавлен.";
 "transfer.error.password" = "Неверный пароль, или файл повреждён.";
-"transfer.error.notExport" = "Это не файл профиля PrivacyBrowser.";
+"transfer.error.notExport" = "Это не файл профиля Lumen.";
 "recovery.homeNotSealed" = "Не удалось заново зашифровать состояние Safari профиля «%1$@»: %2$@";
 "recovery.webDataNotSealed" = "Не удалось заново зашифровать данные профиля «%1$@»: %2$@";
 "profile.homeNotSealed" = "Не удалось зашифровать состояние Safari профиля «%1$@»: %2$@. Оно будет зашифровано заново при следующей разблокировке.";
@@ -1194,7 +1194,7 @@
 "window.closeTabs.title" = "Закрыть окно и его вкладки (%ld)?";
 "window.closeTabs.message" = "Если это последнее окно профиля, профиль остановится, а его данные зашифруются.";
 "window.closeTabs.confirm" = "Закрыть";
-"quit.confirm.title" = "Выйти из PrivacyBrowser?";
+"quit.confirm.title" = "Выйти из Lumen?";
 "quit.confirm.message" = "Будут остановлены, а их данные зашифрованы:";
 "quit.confirm.quit" = "Выйти";
 "proxyProblem.title.notStarted" = "«%@» не запущен";

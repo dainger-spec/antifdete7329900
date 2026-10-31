@@ -3659,7 +3659,7 @@ final class SelfTest {
         check("diagnostics: this run's log is in it, with the user's values as <private>",
               markerSeen, String(log.suffix(400)))
         let report = String(decoding: entries.first { $0.path == "report.txt" }?.data ?? Data(), as: UTF8.self)
-        let named: Bool = report.contains("PrivacyBrowser ") && report.contains("macOS ") && report.contains("Safari \(HostSafari.version)")
+        let named: Bool = report.contains("Lumen ") && report.contains("macOS ") && report.contains("Safari \(HostSafari.version)")
         check("diagnostics: the short report names the version, macOS, Safari and WebKit, and the checks made",
               named && report.contains("✓"), report)
         info("diagnostics: the short report reads\n\(report)")

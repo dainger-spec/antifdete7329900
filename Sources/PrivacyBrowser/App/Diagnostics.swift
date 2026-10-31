@@ -89,7 +89,7 @@ enum Diagnostics {
         let info = Bundle.main.infoDictionary ?? [:]
         let version = "\(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))"
         var lines = [
-            "PrivacyBrowser \(version), \(AppEnvironment.isSandboxed ? "App Sandbox" : "without the App Sandbox")",
+            "Lumen \(version), \(AppEnvironment.isSandboxed ? "App Sandbox" : "without the App Sandbox")",
             "macOS \(ProcessInfo.processInfo.operatingSystemVersionString), \(machine), \(ProcessInfo.processInfo.activeProcessorCount) cores",
             "Safari \(HostSafari.version), WebKit \(WebKitBuild.version)",
             "",
@@ -199,16 +199,16 @@ enum Diagnostics {
         return (try? StoredZip.archive(entries)) ?? Data()
     }
 
-    /// "PrivacyBrowser-Diagnostics-2026-10-30-1015.zip".
+    /// "Lumen-Diagnostics-2026-10-30-1015.zip".
     static func suggestedFileName(at date: Date = Date()) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd-HHmm"
-        return "PrivacyBrowser-Diagnostics-\(formatter.string(from: date)).zip"
+        return "Lumen-Diagnostics-\(formatter.string(from: date)).zip"
     }
 
     static let readme = """
-    PrivacyBrowser diagnostics, for support.
+    Lumen diagnostics, for support.
 
     report.txt      the version, macOS, this Mac's Safari and WebKit, and the app's checks of itself
     state.json      the settings, and the profiles by number: running or not, the kind of connection

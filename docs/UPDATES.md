@@ -284,7 +284,7 @@ read before any vault is unlocked.
 
 - **One static URL**, from the app's `Info.plist` (`PBUpdateFeedURL`): a plain GET with no query
   string, no install id, no serial, no hardware or profile detail, no cookies, no cache, no
-  credentials, and a User-Agent of `PrivacyBrowser` without a version. A build without a feed URL
+  credentials, and a User-Agent of `Lumen` without a version. A build without a feed URL
   (every development build) has no updater and sends nothing.
 - **What the server sees, honestly:** this Mac's IP address and when it checks; when an update is
   downloaded, which one — and so, roughly, which version was installed before. Nothing else.
@@ -306,7 +306,7 @@ read before any vault is unlocked.
   nothing. "Check Now" is a request the user makes by pressing it. Default on in a build that has a
   feed URL: the first check a minute after launch, then every 6 hours.
 - **The request itself** (`AppUpdater`): its own ephemeral `URLSession` — no cookies, no cache, no
-  credentials — with the same two headers from every Mac (`User-Agent: PrivacyBrowser`,
+  credentials — with the same two headers from every Mac (`User-Agent: Lumen`,
   `Accept-Language: en`), and the appcast refused above 1 MB. Its server trust is the system's; the
   one exception is the end-to-end scenarios' local feed, accepted by its certificate's hash only in
   their own mode (§8). The archive is downloaded by the same

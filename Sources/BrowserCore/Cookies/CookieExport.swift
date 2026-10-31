@@ -47,7 +47,7 @@ public enum CookieExport {
     }
 
     private static func netscape(_ cookies: [ImportedCookie]) -> String {
-        var lines = ["# Netscape HTTP Cookie File", "# Exported by PrivacyBrowser. Every value here is in plaintext.", ""]
+        var lines = ["# Netscape HTTP Cookie File", "# Exported by Lumen. Every value here is in plaintext.", ""]
         for cookie in cookies where isWritableAsLine(cookie) {
             let expiry = cookie.expires.map { String(Int64($0.timeIntervalSince1970.rounded(.down))) } ?? "0"
             let fields = [(cookie.httpOnly ? "#HttpOnly_" : "") + cookie.storedDomain,

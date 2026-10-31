@@ -88,13 +88,13 @@ public struct ProxyCheckResult: Codable, Equatable, Sendable {
     }
 }
 
-/// Where a proxy of the list came from. Only the user's own exist for now: PrivacyBrowser's own
+/// Where a proxy of the list came from. Only the user's own exist for now: Lumen's own
 /// proxy service does not yet. The list, its file and its screens tell the two apart already, so
 /// that the service's proxies can come without the manager being made over.
 public enum ProxyOrigin: String, Codable, Sendable {
     /// Typed, pasted or imported by the user, or taken in from a profile's own settings.
     case user
-    /// Given by PrivacyBrowser's proxy service.
+    /// Given by Lumen's proxy service.
     case service
 }
 
@@ -351,7 +351,7 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// (`scheme://user:password@host:port  # label`; no scheme while the type is unknown). The
     /// user names and passwords are in it in plaintext: the file is only what the user asked for.
     public static func exportText(_ entries: [ProxyListEntry]) -> String {
-        var lines = ["# PrivacyBrowser proxies. The user names and passwords below are in plaintext."]
+        var lines = ["# Lumen proxies. The user names and passwords below are in plaintext."]
         for entry in entries {
             var line = ProxyListImport.line(for: entry.proxy, kindKnown: entry.kindKnown)
             let label = Self.cleanLabel(entry.label)

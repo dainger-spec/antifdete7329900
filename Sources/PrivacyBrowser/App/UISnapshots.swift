@@ -45,13 +45,13 @@ enum UISnapshots {
             }.capture(into: folder)
         }
         let configuration = AppUpdater.Configuration(
-            feed: URL(string: "https://updates.example/privacybrowser/appcast.json")!, keys: [:], version: "0.1.0",
-            build: BuildVersion("1")!, bundleIdentifier: "dev.local.PrivacyBrowser",
-            app: URL(fileURLWithPath: "/Applications/PrivacyBrowser.app"),
+            feed: URL(string: "https://updates.example/lumen/appcast.json")!, keys: [:], version: "0.1.0",
+            build: BuildVersion("1")!, bundleIdentifier: "io.lumenbrowser.Lumen",
+            app: URL(fileURLWithPath: "/Applications/Lumen.app"),
             staging: URL(fileURLWithPath: "/nonexistent/updates"))
         let item = AppcastItem(
             version: "0.2.0", build: "2", minimumSystemVersion: "14.0",
-            url: URL(string: "https://updates.example/privacybrowser/PrivacyBrowser-0.2.0.zip")!, length: 48_210_944,
+            url: URL(string: "https://updates.example/lumen/Lumen-0.2.0.zip")!, length: 48_210_944,
             sha256: String(repeating: "0", count: 64), keyID: "0123456789abcdef", edSignature: Data(count: 64),
             publishedAt: Date().addingTimeInterval(-2 * 3600),
             notes: "• Safari's chrome: the proxy hook holds on macOS 27.\n• Proxies: a proxy that stays silent after the connection is named as such.\n"

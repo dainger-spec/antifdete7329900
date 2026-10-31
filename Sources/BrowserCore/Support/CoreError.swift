@@ -36,7 +36,7 @@ public enum CoreError: Error, Equatable, CustomStringConvertible {
         case .profileNotFound(let id): return "Profile not found: \(id)"
         case .unsupportedFormat(let detail): return "Unsupported format: \(detail)"
         case .newerFormat(let what, let found, let supported):
-            return "\(what) was written by a newer version of PrivacyBrowser (format \(found.map(String.init) ?? "unknown"), "
+            return "\(what) was written by a newer version of Lumen (format \(found.map(String.init) ?? "unknown"), "
                 + "this version reads up to \(supported)); nothing was read from it or written over it"
         case .unsafeArchivePath(let path): return "Archive contains unsafe path: \(path)"
         case .syncConflict(let objectID, let revision): return "Sync conflict on \(objectID) (remote revision \(revision))"
