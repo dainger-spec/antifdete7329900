@@ -403,31 +403,39 @@
         return { part, a, b, last: -1, counts: Array.from(part.querySelectorAll('[data-count]')).map((n) => ({ n, to: +n.dataset.count })) };
       }),
     }));
-    let ticking = false;
-    function update() {
-      ticking = false;
-      const vh = window.innerHeight;
-      for (const s of scenes) {
-        const r = s.el.getBoundingClientRect();
-        if (r.bottom < -vh || r.top > vh * 2) continue;
-        const total = r.height - vh;
-        const p = total > 0 ? clamp01(-r.top / total) : (r.top <= 0 ? 1 : 0);
-        if (Math.abs(p - s.last) < 0.0002) continue;
-        s.last = p;
-        s.el.style.setProperty('--p', p.toFixed(4));
-        for (const q of s.parts) {
-          const t = clamp01((p - q.a) / (q.b - q.a));
-          if (Math.abs(t - q.last) < 0.0002) continue;
-          q.last = t;
-          q.part.style.setProperty('--t', t.toFixed(4));
-          q.counts.forEach((c) => { c.n.textContent = String(Math.round(c.to * easeOut(t))); });
-        }
-        (SCENE[s.name] || []).forEach((fn) => fn(p, s.el));
+    /// One scene at progress p: its --p, every part's --t and counts, then the scene's hooks.
+    function apply(s, p) {
+      if (Math.abs(p - s.last) < 0.0002) return;
+      s.last = p;
+      s.el.style.setProperty('--p', p.toFixed(4));
+      for (const q of s.parts) {
+        const t = clamp01((p - q.a) / (q.b - q.a));
+        if (Math.abs(t - q.last) < 0.0002) continue;
+        q.last = t;
+        q.part.style.setProperty('--t', t.toFixed(4));
+        q.counts.forEach((c) => { c.n.textContent = String(Math.round(c.to * easeOut(t))); });
       }
+      (SCENE[s.name] || []).forEach((fn) => fn(p, s.el));
     }
-    const onScroll = () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', () => { scenes.forEach((s) => { s.last = -1; s.parts.forEach((q) => { q.last = -1; }); }); onScroll(); });
-    update();
+    if (root.classList.contains('film')) {
+      // The promo film (tools/film) plays the scenes by its own clock instead of the scroll.
+      window.LumenFilm = { play(name, p) { scenes.forEach((s) => { if (s.name === name) apply(s, clamp01(p)); }); } };
+    } else {
+      let ticking = false;
+      const update = () => {
+        ticking = false;
+        const vh = window.innerHeight;
+        for (const s of scenes) {
+          const r = s.el.getBoundingClientRect();
+          if (r.bottom < -vh || r.top > vh * 2) continue;
+          const total = r.height - vh;
+          apply(s, total > 0 ? clamp01(-r.top / total) : (r.top <= 0 ? 1 : 0));
+        }
+      };
+      const onScroll = () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } };
+      window.addEventListener('scroll', onScroll, { passive: true });
+      window.addEventListener('resize', () => { scenes.forEach((s) => { s.last = -1; s.parts.forEach((q) => { q.last = -1; }); }); onScroll(); });
+      update();
+    }
   }
 })();

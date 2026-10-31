@@ -1,0 +1,153 @@
+/* The promo film's stage (tools/film/build.mjs → video/stage/<lang>.html): one 1920 × 1080 frame that holds
+   every shot. film.js puts the stage at any moment of the film; nothing here moves by itself, so transitions
+   and animations are off on the whole stage. Type is Inter Display, the font the film is rendered with (SF Pro
+   is not available where it is rendered), set large and bold: this is an advertisement, read in a glance. */
+
+html.film, html.film body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+.film *, .film *::before, .film *::after { transition: none !important; animation: none !important; }
+.film .reveal { opacity: 1; transform: none; }   /* film.js may still move a part the site reveals */
+.film { --fd: "Inter Display", "Inter", var(--font-display); --white: #F6F7F9; --grey: #9099A8; --blue: #2F6BEF; }
+
+.reel { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #050608; isolation: isolate; }
+/* An unseen shot is both: hidden (not painted) and transparent (a part that sets its own visibility stays unseen) */
+.shot { position: absolute; inset: 0; overflow: hidden; opacity: 0; visibility: hidden; background: #050608; }
+.shot.on { opacity: 1; visibility: visible; }
+.shot > .cam { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+
+/* The home page's scenes, each pinned to the frame (on the site they pin to the window while it scrolls) */
+.film .scene { height: 1080px !important; min-height: 0 !important; }
+.film .scene-pin { position: absolute !important; left: 0; top: 0; width: 1920px; height: 1080px !important; }
+/* What the film says in its own words, and the scenes' small print, is not shown */
+.film .mi-head, .film .sit-head, .film .sit-lead, .film .sit-side, .film .ly-head, .film .ly-legend, .film .px-head,
+.film .px-notes, .film .enc-head, .film .enc-foot, .film .wu-head, .film .wu-facts, .film .nm-head, .film .nm-link,
+.film .nm-t, .film .bx-head, .film .bx-more, .film .nm-cols, .film .nm-wide { visibility: hidden !important; }
+.film .mi-label { font-size: 22px; }
+.film .sc-proxy .px-status { font-size: 40px; line-height: 50px; max-width: 1200px; }
+
+/* MARK: The opening: the MacBook's frames, and the name over the dark */
+.hero-cv { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; display: block; }
+.brand { position: absolute; inset: 0; display: grid; place-items: center; }
+.brand-in { display: flex; align-items: center; gap: 46px; transform-origin: 50% 50%; margin-top: -60px; }
+.brand-in > svg { flex: none; filter: drop-shadow(0 0 30px rgba(79, 123, 240, 0.35)); }
+.brand-word svg { display: block; filter: drop-shadow(0 0 40px rgba(170, 196, 255, 0.25)); }
+
+/* MARK: Titles — big and bold; each line a mask the words rise into */
+.titles { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+.ttl {
+  position: absolute; left: 0; right: 0; top: 64px; visibility: hidden; text-align: center;
+  font-family: var(--fd); font-weight: 700; font-size: 112px; line-height: 112px; letter-spacing: -0.042em; color: var(--white);
+  font-feature-settings: "ss01", "cv11";
+}
+.ttl.on { visibility: visible; }
+.ttl .ln { overflow: hidden; padding: 0.06em 0.06em 0.18em; margin: -0.06em -0.06em -0.18em; }
+.ttl .ln2 { color: var(--grey); }
+.ttl .w { display: inline-block; }
+.ttl .ln3 { margin-top: 30px; font-size: 46px; line-height: 56px; font-weight: 600; letter-spacing: -0.02em; color: #C9CED8; }
+.ttl-hero { top: 52px; font-size: 104px; line-height: 104px; }
+.ttl-mission { top: 70px; left: 120px; right: auto; text-align: left; font-size: 150px; line-height: 146px; }
+.ttl-safari { top: 46px; font-size: 104px; line-height: 104px; }
+.ttl-probe { top: 742px; font-size: 52px; line-height: 64px; font-weight: 600; letter-spacing: -0.024em; }
+.ttl-layers { top: 70px; left: 120px; right: auto; text-align: left; font-size: 120px; line-height: 118px; }
+.ttl-proxy { top: 60px; }
+.ttl-encryption { top: 56px; }
+.ttl-warmup { top: 64px; left: 120px; right: auto; text-align: left; font-size: 104px; line-height: 104px; }
+.ttl-features { top: 56px; font-size: 100px; line-height: 102px; }
+
+/* MARK: Each profile from its own country: the country and its time, rolling with the window */
+.cty { position: absolute; left: 1250px; top: 236px; width: 640px; font-family: var(--fd); }
+.cty-k { font: 600 38px/48px var(--fd); letter-spacing: -0.014em; color: var(--grey); }
+/* the countries roll past like a slot: each sits one window-height below the last */
+.cty-roll { position: relative; margin-top: 40px; height: 420px; overflow: hidden; }
+.cty-i { position: absolute; left: 0; top: 0; width: 640px; height: 420px; }
+.cty-n { display: flex; align-items: center; gap: 26px; font-weight: 700; font-size: 104px; line-height: 110px; letter-spacing: -0.04em; color: var(--white); }
+.cty-n svg { flex: none; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12); }
+.cty-t { margin-top: 22px; font-weight: 300; font-size: 200px; line-height: 190px; letter-spacing: -0.05em; color: var(--white); font-variant-numeric: tabular-nums; }
+.cty-l { margin-top: 18px; font: 500 32px/40px var(--font-mono, ui-monospace), monospace; color: var(--grey); letter-spacing: 0; }
+
+/* MARK: The comparison with Safari: an open book, the same fingerprint on both pages */
+.vs { position: absolute; inset: 0; perspective: 1900px; perspective-origin: 960px 560px; }
+.vs-book { position: absolute; inset: 0; transform-style: preserve-3d; }
+.vs-page {
+  position: absolute; top: 372px; width: 640px; height: 520px; box-sizing: border-box; padding: 34px 40px; border-radius: 30px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.1), inset 0 1.5px 0 rgba(255, 255, 255, 0.16), 0 40px 120px rgba(0, 0, 0, 0.6);
+  font-family: var(--fd); color: var(--white);
+}
+.vs-l { left: 200px; transform-origin: 100% 50%; }
+.vs-r { left: 1080px; transform-origin: 0 50%; }
+.vs-head { display: flex; align-items: center; gap: 16px; height: 50px; font-weight: 700; font-size: 40px; letter-spacing: -0.03em; }
+.vs-dot { width: 30px; height: 30px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #F4F6FA, #9AA4B4); flex: none; }
+.vs-row { position: relative; margin-top: 34px; height: 104px; }
+.vs-t { display: block; font-weight: 600; font-size: 30px; line-height: 38px; letter-spacing: -0.016em; color: #D4D8E0; }
+.vs-code { position: relative; display: block; margin-top: 16px; width: 420px; height: 40px; }
+.vs-bars { position: absolute; left: 0; top: 0; fill: rgba(255, 255, 255, 0.22); }
+.vs-bars.vs-lit { fill: #E9EEFF; filter: drop-shadow(0 0 6px rgba(120, 160, 255, 0.9)); clip-path: inset(0 calc((1 - var(--s, 0)) * 100%) 0 0); }
+.vs-scan { position: absolute; left: -40px; right: -40px; top: 46px; height: 60px; opacity: 0; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(150, 185, 255, 0.55), rgba(79, 123, 240, 0.12) 60%, transparent); }
+.vs-mid { position: absolute; left: 840px; width: 240px; top: 372px; height: 520px; }
+.vs-eq {
+  position: absolute; left: 50%; width: max-content; display: flex; align-items: baseline; gap: 4px; padding: 12px 18px 12px 24px; border-radius: 40px; white-space: nowrap;
+  transform: translateX(-50%); background: rgba(14, 18, 28, 0.92); box-shadow: inset 0 0 0 1.5px rgba(120, 160, 255, 0.4), 0 10px 40px rgba(47, 107, 239, 0.35);
+  font-family: var(--fd); color: var(--white);
+}
+.vs-eq b { font-weight: 700; font-size: 54px; line-height: 58px; letter-spacing: -0.035em; }
+.vs-eq span { font-weight: 600; font-size: 32px; color: var(--grey); margin-right: 12px; }
+.vs-eq svg { flex: none; align-self: center; width: 36px; height: 36px; }
+.vs-eq[data-i="0"] { top: 100px; } .vs-eq[data-i="1"] { top: 238px; } .vs-eq[data-i="2"] { top: 376px; }
+.vs-spine { position: absolute; left: 958px; top: 330px; width: 4px; height: 600px; border-radius: 2px; opacity: 0;
+  background: linear-gradient(180deg, transparent, #fff 20%, #fff 80%, transparent);
+  box-shadow: 0 0 16px 3px rgba(150, 180, 255, 0.85), 0 0 70px 18px rgba(79, 123, 240, 0.5); }
+
+/* MARK: Isolation: the layers named one by one */
+.lw { position: absolute; left: 1330px; top: 300px; margin: 0; padding: 0; list-style: none; font-family: var(--fd); }
+.lw li { font-weight: 700; font-size: 84px; line-height: 122px; letter-spacing: -0.035em; color: var(--white); opacity: 0; }
+
+/* MARK: The cipher's names under the lock */
+.cn { position: absolute; left: 0; right: 0; top: 930px; display: flex; justify-content: center; align-items: center; gap: 44px; font: 700 60px/1 var(--fd); letter-spacing: -0.03em; color: var(--white); }
+.cn i { width: 2px; height: 54px; background: rgba(255, 255, 255, 0.25); }
+.cn span:last-child { color: var(--grey); }
+
+/* MARK: The features: the bento grid as a plane tilted back, under the title; it fades out towards the top */
+.shot-features { perspective: 1700px; perspective-origin: 960px 380px; }
+.shot-features::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, #050608 0%, rgba(5, 6, 8, 0.94) 25%, rgba(5, 6, 8, 0) 50%), linear-gradient(0deg, rgba(5, 6, 8, 0.7) 0%, rgba(5, 6, 8, 0) 22%);
+}
+/* the scenes the film turns in 3D */
+.shot-mission > .cam, .shot-sites > .cam, .shot-layers > .cam, .shot-encryption > .cam, .shot-warmup > .cam, .shot-proxy > .cam { perspective: 2200px; perspective-origin: 960px 540px; }
+
+/* MARK: The end card: the mark in code, the name, what it is, the button */
+.shot-end { background: #030405; }
+.end-mark { position: absolute; left: 960px; top: 340px; width: 420px; height: 420px; margin: -210px 0 0 -210px; --q: 1; --d: 200px; }
+.end-mark canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.end-l, .end-r { filter: brightness(1.35) saturate(1.1); }
+.end-glow {
+  position: absolute; inset: -55%; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(47, 107, 239, 0.26), rgba(47, 107, 239, 0.07) 48%, transparent 74%);
+}
+/* The seam's normal is (3, 1)/√10: the left half comes from up and left, the right half from down and right */
+.end-l { transform: translate(calc(var(--d) * -0.949 * (1 - var(--q))), calc(var(--d) * -0.316 * (1 - var(--q)))); }
+.end-r { transform: translate(calc(var(--d) * 0.949 * (1 - var(--q))), calc(var(--d) * 0.316 * (1 - var(--q)))); }
+.end-name, .end-line { position: absolute; left: 0; right: 0; display: flex; justify-content: center; text-align: center; }
+.end-name { top: 600px; }
+.end-name svg { filter: drop-shadow(0 0 30px rgba(170, 196, 255, 0.18)); }
+.end-line { top: 748px; font: 600 40px/50px var(--fd); letter-spacing: -0.018em; color: var(--grey); }
+.end-btn {
+  position: absolute; left: 960px; top: 836px; transform: translateX(-50%); white-space: nowrap;
+  height: 84px; padding: 0 50px; border-radius: 42px; background: var(--blue); color: #fff;
+  font: 700 34px/84px "Inter", var(--font); letter-spacing: -0.015em;
+  box-shadow: 0 20px 70px rgba(47, 107, 239, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* MARK: Over everything: a quiet vignette; the seam of light that wipes one shot into the next; a flash of
+   light on the big moments; black for the cuts that go through it */
+.fx { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+.fx > i { position: absolute; display: block; }
+.fx-vignette { inset: 0; background: radial-gradient(ellipse 78% 74% at 50% 48%, transparent 58%, rgba(0, 0, 0, 0.34) 100%); }
+.fx-black { inset: 0; background: #000; opacity: 0; }
+.fx-flash { inset: -20%; opacity: 0; mix-blend-mode: screen; background: radial-gradient(closest-side, rgba(170, 196, 255, 0.55), rgba(79, 123, 240, 0.18) 45%, transparent 75%); }
+.fx-seam {
+  left: 0; top: -200px; width: 6px; height: 1480px; opacity: 0; transform-origin: 50% 50%; border-radius: 3px;
+  background: linear-gradient(180deg, transparent, #E8EEFF 18%, #FFFFFF 50%, #E8EEFF 82%, transparent);
+  box-shadow: 0 0 18px 4px rgba(150, 180, 255, 0.85), 0 0 80px 22px rgba(79, 123, 240, 0.55), 0 0 220px 70px rgba(47, 107, 239, 0.28);
+}
