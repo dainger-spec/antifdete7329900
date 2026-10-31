@@ -257,6 +257,7 @@
 "index.reveal" = "Show in Finder";
 "index.path" = "Vault folder: %@";
 "index.unreadable.cannotCreate" = "The profile was not created: the profile list (index.bin) could not be read, and it is not written over until it is restored. The Profiles window says how.";
+"settings.device.unreadable" = "This Mac's settings (settings.bin: sync, the automation API) could not be read, so the defaults are shown. The file is not written over: at the first change of settings it is kept beside as settings.bin.unreadable.";
 "launch.error.proxyInvalid" = "The profile's proxy is misconfigured (address “%@”). The profile was not started, so no site opens directly. Fix the proxy address in the profile settings.";
 "launch.error.proxyNeedsCredentials" = "The proxy at “%@” requires a user name and password. The profile was not started, so no site opens directly. Add them in the profile settings.";
 "launch.languageFixed" = "Websites see the language “%1$@” (set for this run by the first profile launched). For this profile’s proxy they would expect “%2$@”: quit the app and launch this profile first.";

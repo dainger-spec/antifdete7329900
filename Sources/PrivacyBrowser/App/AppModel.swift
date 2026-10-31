@@ -47,6 +47,10 @@ final class AppModel: ObservableObject {
         let vaultPath: String
     }
     @Published private(set) var deviceSettings = DeviceSettings()
+    /// `settings.bin` could not be read at unlock (and is not a newer version's): the defaults are
+    /// shown, and at the first change the file is moved aside (`settings.bin.unreadable`), never
+    /// written over — it holds the sync target, the server's token and the automation token.
+    private var deviceSettingsUnreadable = false
     /// The app's own settings (Settings…, ⌘,).
     let settings = AppSettings()
     /// The Proxies section is asked for from outside the Profiles window (Settings → Proxies).
@@ -297,11 +301,19 @@ final class AppModel: ObservableObject {
         }
         do {
             deviceSettings = try DeviceSettings.load(from: vault)
+            deviceSettingsUnreadable = false
         } catch {
             deviceSettings = DeviceSettings()
             // A newer version's settings are neither shown nor saved over (the save refuses):
             // said once, rather than showing defaults as if they were this device's settings.
-            if case CoreError.newerFormat = error { showError(errorText(error)) }
+            // Settings that could not be read are said too, and kept (`deviceSettingsUnreadable`).
+            if case CoreError.newerFormat = error {
+                showError(errorText(error))
+            } else {
+                deviceSettingsUnreadable = true
+                Logger(subsystem: "PrivacyBrowser", category: "Vault").error("settings.bin could not be read: \(error.logKind, privacy: .public); kept, the defaults shown")
+                showError(L("settings.device.unreadable"))
+            }
         }
         restartAutomation()
         phase = .unlocked
@@ -386,6 +398,7 @@ final class AppModel: ObservableObject {
         profiles = []
         details = [:]
         deviceSettings = DeviceSettings()
+        deviceSettingsUnreadable = false
         phase = MasterVault.exists(in: root) ? .locked : .setup
     }
 
@@ -736,6 +749,11 @@ final class AppModel: ObservableObject {
         guard let vault = repository?.vault else { return }
         var updated = deviceSettings
         change(&updated)
+        if deviceSettingsUnreadable {
+            // Kept beside, not written over (`deviceSettingsUnreadable`).
+            try DeviceSettings.moveUnreadableAside(in: vault)
+            deviceSettingsUnreadable = false
+        }
         try updated.save(to: vault)
         deviceSettings = updated
     }

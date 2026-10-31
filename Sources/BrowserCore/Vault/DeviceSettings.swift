@@ -69,4 +69,21 @@ extension DeviceSettings {
     public func save(to vault: UnlockedVault) throws {
         try Self.file(for: vault).save(self)
     }
+
+    /// Moves a `settings.bin` that could not be read aside — `settings.bin.unreadable`, then
+    /// `.unreadable-2`, … — so that saving new settings never writes over it: it holds the sync
+    /// target, the server's token and the automation token. Returns where it went (nil: no file).
+    @discardableResult
+    public static func moveUnreadableAside(in vault: UnlockedVault) throws -> URL? {
+        let file = vault.root.appendingPathComponent("settings.bin")
+        guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+        var aside = file.appendingPathExtension("unreadable")
+        var next = 2
+        while FileManager.default.fileExists(atPath: aside.path) {
+            aside = file.appendingPathExtension("unreadable-\(next)")
+            next += 1
+        }
+        try FileManager.default.moveItem(at: file, to: aside)
+        return aside
+    }
 }

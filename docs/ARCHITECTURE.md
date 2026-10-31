@@ -124,6 +124,7 @@ Application Support/PrivacyBrowser/      (0700)
   vault.json                      plaintext: format, vaultID, KDF params, wrapped VMK
   index.bin                       AES-GCM(index key, ProfileIndex JSON)
   settings.bin                    AES-GCM(device-settings key, DeviceSettings JSON)   [after configuring sync]
+  settings.bin.unreadable         a settings.bin that could not be read, moved aside at the next change of settings, never written over
   proxies.bin                     AES-GCM(proxy-list key, ProxyList JSON)             [after the first proxy is added; this Mac only]
   sync-state.bin                  AES-GCM(sync key, per-object revision + hash)        [only after sync]
   profiles/<uuid>/
