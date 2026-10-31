@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Does a profile's process (or the WebKit processes working for it) write outside its own home?
 
-    sudo fs_usage -w -f filesys PrivacyBrowser com.apple.WebKit cfprefsd > fs.txt &
-    PrivacyBrowser --self-test | tee selftest.txt
+    sudo fs_usage -w -f filesys Lumen com.apple.WebKit cfprefsd > fs.txt &
+    Lumen --self-test | tee selftest.txt
     python3 scripts/disk_check.py --trace fs.txt --selftest-log selftest.txt
 
 (One fs_usage for all the processes: the kernel trace is exclusive, and a second fs_usage
@@ -29,9 +29,13 @@ cfprefsd's calls are traced too: it writes every preferences file through a dire
 and `Resolver` names those paths whole. What it writes in the real Safari's places is listed, not
 failed on — it writes for whichever process asks, and the trace cannot say which — and with
 --canary, a preferences file written through it while the trace ran must be named, or the trace is
-blind to cfprefsd (exit 1). A trace that could not be made, or a self-test log without the
-Safari-chrome check's window, is SKIPPED and exit 1 too: a check that could not look is never a
-pass. A write to the real Safari's places by the app's or WebKit's processes is exit 1.
+blind to cfprefsd (exit 1). The app's own process is known by the name the self-test prints
+(`INFO egress-process <name> <pid>`), the name fs_usage must have been given: a trace that names no
+write by it was made without the app in it (fs_usage given another name — a renamed executable),
+and what the profile's process wrote is not in it. That, a trace that could not be made, or a
+self-test log without the Safari-chrome check's window, is SKIPPED and exit 1 too: a check that
+could not look is never a pass. A write to the real Safari's places by the app's or WebKit's
+processes is exit 1.
 """
 import argparse
 import os
@@ -143,9 +147,15 @@ def main():
     # The self-test's vault, as its "INFO vault <path>" line names it (in Application Support since
     # 1 November: the path has a space in it), and any other folder of its own it names.
     vaults = set(re.findall(r"^INFO vault (.+?)\s*$", log, re.M)) | set(re.findall(r"(/\S*pb-selftest-[0-9A-Fa-f-]+)", log))
+    # The app's processes, by the name the self-test gives its own (a profile's process shares it).
+    app_names = sorted({name[:16] for name in re.findall(r"^INFO egress-process (\S+) \d+\s*$", log, re.M)})
     # A check with nothing to look at, or no trace to look in, is never a pass: SKIPPED, and it fails.
     if not begins:
         print("::error::disk check SKIPPED: the self-test did not run its Safari-chrome check, so there was no window to look in")
+        return 1
+    if not app_names:
+        print("::error::disk check SKIPPED: the self-test did not name its process (no INFO egress-process), so the trace "
+              "cannot be shown to hold the app's own writes")
         return 1
     # fs_usage prints the local time of day; the window is in epoch seconds.
     import time
@@ -158,7 +168,7 @@ def main():
 
     roots = forbidden_roots(args.home)
     failures, refused, elsewhere, lines_read = [], [], Counter(), 0
-    by_cfprefsd, canary_seen = [], False
+    by_cfprefsd, canary_seen, app_writes = [], False, 0
     for trace in args.trace:
         try:
             lines = open(trace, encoding="utf-8", errors="replace").read().splitlines()
@@ -182,6 +192,8 @@ def main():
             writes = call in WRITES or (call in OPENS and re.search(r"\([^)]*[WC][^)]*\)", line) is not None)
             if not writes:
                 continue
+            if any(fields[-1].rsplit(".", 1)[0][:16].startswith(name) for name in app_names):
+                app_writes += 1
             cfprefsd = fields[-1].startswith("cfprefsd.")
             if args.canary and cfprefsd and args.canary in paths:
                 canary_seen = True
@@ -205,6 +217,11 @@ def main():
     if lines_read == 0:
         print("::error::disk check SKIPPED: no fs_usage trace to look in")
         return 1
+    if not app_writes:
+        print(f"::error::disk check SKIPPED: the trace names no write by the app's process {app_names}: fs_usage was not "
+              "given the app's name, so what a profile's own process wrote is not in it")
+        return 1
+    print(f"disk check: the trace names {app_writes} writes by the app's process {app_names}")
     if elsewhere:
         print("written outside the self-test's vault during the check (listed, not failed on):")
         for directory, count in elsewhere.most_common(40):

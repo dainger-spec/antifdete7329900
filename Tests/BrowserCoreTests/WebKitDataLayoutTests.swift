@@ -66,6 +66,34 @@ final class WebKitDataLayoutTests: XCTestCase {
                        library.appendingPathComponent("WebKit/\(bundleID)/WebsiteDataStore/\(id)").path)
     }
 
+    /// The product renamed (bundle ID dev.local.PrivacyBrowser → io.lumenbrowser.Lumen): what the last
+    /// build of the old one sealed — labels as its own layout made them, of both roots — is restored
+    /// under the new bundle ID, by an unsandboxed build and by a sandboxed one. What a crash left
+    /// unsealed under the old bundle ID is not found by the new one: sealing it is the old build's
+    /// (it seals it at its next unlock), which is why the old build is opened once before the switch.
+    func testWhatTheOldBundleIDSealedIsRestoredUnderTheNewOne() throws {
+        let old = WebKitDataLayout(library: library, bundleID: "dev.local.PrivacyBrowser", sandboxed: false)
+        let data = try mkdir("WebKit/dev.local.PrivacyBrowser/WebsiteDataStore/\(uuid)")
+        let cache = try mkdir("Caches/dev.local.PrivacyBrowser/WebKit/WebsiteDataStore/\(uuid)")
+        let labels = try [data, cache].map { try old.label(for: $0) }
+        XCTAssertEqual(labels, ["WebKit|dev.local.PrivacyBrowser|WebsiteDataStore|\(uuid)",
+                                "Caches|dev.local.PrivacyBrowser|WebKit|WebsiteDataStore|\(uuid)"])
+
+        let new = WebKitDataLayout(library: library, bundleID: "io.lumenbrowser.Lumen", sandboxed: false)
+        XCTAssertEqual(try labels.map { try new.destination(forLabel: $0, profileID: profileID).standardizedFileURL.path },
+                       ["WebKit/io.lumenbrowser.Lumen/WebsiteDataStore/\(uuid)",
+                        "Caches/io.lumenbrowser.Lumen/WebKit/WebsiteDataStore/\(uuid)"]
+                        .map { library.appendingPathComponent($0).standardizedFileURL.path })
+        let container = try mkdir("Containers/io.lumenbrowser.Lumen/Data/Library")
+        let boxed = WebKitDataLayout(library: container, bundleID: "io.lumenbrowser.Lumen", sandboxed: true)
+        XCTAssertEqual(try labels.map { try boxed.destination(forLabel: $0, profileID: profileID).standardizedFileURL.path },
+                       ["WebKit/WebsiteDataStore/\(uuid)", "Caches/WebKit/WebsiteDataStore/\(uuid)"]
+                        .map { container.appendingPathComponent($0).standardizedFileURL.path })
+
+        XCTAssertEqual(new.discoverDirectories(for: profileID), [])
+        XCTAssertEqual(old.discoverDirectories(for: profileID).count, 2)
+    }
+
     func testRejectsUnsafeLabels() {
         let layout = WebKitDataLayout(library: library, bundleID: bundleID, sandboxed: false)
         let id = profileID.uuidString

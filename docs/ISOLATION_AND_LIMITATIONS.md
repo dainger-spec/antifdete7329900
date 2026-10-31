@@ -100,6 +100,16 @@ trace (§4a, its cfprefsd canary), the menu walk and the comparison with the rea
 QUIC/WebRTC leak check, which depends on sites on the internet, lists what it could not show as
 SKIPPED and goes on.
 
+The capture, the file trace and the crash-report search tell the app's processes by their name,
+which is the executable's (a profile's own process runs the same one). None of them has it written
+in: the capture and the trace take it from the self-test's `INFO egress-process <name> <pid>`, the
+menu walk from the app's Info.plist. And each shows that the name finds the app before it is
+believed: a control packet of the capture must carry it (the proxy checker's question, asked for the
+self-test's own process), the trace must name writes by it, and the crash-report search must find
+the report of the self-test's deliberate crash (its exception check, on the queue
+`PBExceptionCheck.background`). Otherwise each is SKIPPED and fails: a renamed executable that one
+of them was not told about would have made it look at nothing, and pass.
+
 ## 1. Storage isolation between profiles
 
 **Mechanism.** Each persistent profile uses `WKWebsiteDataStore(forIdentifier: <profile UUID>)`.

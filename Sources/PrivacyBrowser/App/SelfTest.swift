@@ -56,16 +56,45 @@ final class SelfTest {
         app.run()
     }
 
-    // MARK: Container migration check (two processes)
+    // MARK: Vault migration checks (two processes, two builds)
 
-    /// `--selftest-write-vault` (run by an unsandboxed build) creates a small vault at the
-    /// default location; `--selftest-read-vault` (run by the sandboxed build of the same bundle
-    /// ID, first launch) checks that macOS moved it into the container per container-migration.plist.
+    /// `--selftest-write-vault` (an unsandboxed build, CI only) creates a small vault at the default
+    /// location: a profile "Migrated" with website data of its own — a cookie, localStorage and
+    /// IndexedDB that hold the token `PB_SELFTEST_MIGRATION_TOKEN` — sealed as a profile's stop
+    /// seals it. `--selftest-read-vault` (another build, the same token) opens the vault where that
+    /// build finds it and reads the website data back through WebKit:
+    ///   - the sandboxed build of the same bundle ID at its first launch: inside its container, where
+    ///     macOS moved it (container-migration.plist), the website data restored in the container's
+    ///     layout;
+    ///   - an unsandboxed build of another bundle ID (CI: the last build named PrivacyBrowser writes,
+    ///     the build named Lumen reads): in the same folder, the website data restored under the
+    ///     reading build's bundle ID.
     static func migrationStep(write: Bool) -> Never {
         setvbuf(stdout, nil, _IOLBF, 0)
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+        let test = SelfTest()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
+            print("FAIL vault migration step (\(write ? "write" : "read")): no answer after 300 s")
+            exit(3)
+        }
+        Task { @MainActor in
+            exit(await test.migration(write: write))
+        }
+        app.run()
+        exit(1)
+    }
+
+    private func migration(write: Bool) async -> Int32 {
         let root = AppEnvironment.vaultDirectory
         let password = "migration-check"
+        let token = ProcessInfo.processInfo.environment["PB_SELFTEST_MIGRATION_TOKEN"] ?? ""
+        let bundleID = Bundle.main.bundleIdentifier ?? "?"
         do {
+            guard token.count >= 8 else {
+                throw CoreError.invalidConfiguration("PB_SELFTEST_MIGRATION_TOKEN (what the website data holds, 8 characters or more) is not set")
+            }
+            let layout = WebDataStoreVault.layout
             if write {
                 guard !AppEnvironment.isSandboxed else { throw CoreError.invalidConfiguration("run the unsandboxed build") }
                 // This writes a REAL vault (password "migration-check") into the real unsandboxed
@@ -75,20 +104,72 @@ final class SelfTest {
                     throw CoreError.invalidConfiguration("--selftest-write-vault creates a real vault at \(root.path); it runs only in CI with PB_SELFTEST_MIGRATION=1")
                 }
                 let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: password, iterations: 10_000))
-                try repository.create(name: "Migrated", configuration: ProfileConfiguration())
-                print("PASS wrote vault at \(root.path)")
-            } else {
-                guard AppEnvironment.isSandboxed else { throw CoreError.invalidConfiguration("run the sandboxed build") }
-                let repository = try ProfileRepository(vault: MasterVault.unlock(in: root, password: password))
-                guard repository.list().map(\.name) == ["Migrated"], root.path.contains("/Library/Containers/") else {
-                    throw CoreError.corruptData("unexpected vault contents at \(root.path)")
+                let profile = try repository.create(name: "Migrated", configuration: ProfileConfiguration())
+                // A profile protects its local requests by default, and does not start without the rule list.
+                await ContentRules.prepare()
+                let vault = WebDataStoreVault(repository: repository)
+                let key = try repository.profileKey(for: profile.id)
+                try await vault.prepareForLaunch(profileID: profile.id, key: key)
+                var session: BrowserSession? = try makeSession(repository, profile.id, key: key)
+                var web: WKWebView? = WKWebView(frame: .zero, configuration: session!.makeWebViewConfiguration())
+                try await PageLoader.load(web!, html: page, baseURL: origin)
+                guard try await js(web!, Self.writeLocalStorageAndIndexedDB, ["token": token]) as? Bool == true else {
+                    throw CoreError.corruptData("the page could not write localStorage and IndexedDB")
                 }
-                print("PASS migrated vault unlocked inside the container at \(root.path)")
+                let cookie = HTTPCookie(properties: [.domain: "selftest.invalid", .path: "/", .name: "pb", .value: token,
+                                                     .secure: "TRUE", .expires: Date().addingTimeInterval(30 * 86_400)])!
+                await setCookie(cookie, in: session!.dataStore!)
+                web = nil
+                session?.shutDown()
+                session = nil
+                let sealed = try await vault.seal(profileID: profile.id, key: key)
+                for directory in sealed.directories {
+                    print("INFO sealed \(directory.path) as \((try? layout.label(for: directory)) ?? "?")")
+                }
+                guard !sealed.directories.isEmpty, layout.discoverDirectories(for: profile.id).isEmpty else {
+                    throw CoreError.corruptData("the website data was not sealed (\(sealed.directories.count) directories) or was left in plaintext")
+                }
+                print("PASS wrote vault at \(root.path): profile Migrated, its website data sealed by bundle ID \(bundleID)")
+            } else {
+                let repository = try ProfileRepository(vault: MasterVault.unlock(in: root, password: password))
+                guard repository.list().map(\.name) == ["Migrated"], let profile = repository.list().first else {
+                    throw CoreError.corruptData("unexpected vault contents at \(root.path): \(repository.list().map(\.name))")
+                }
+                guard root.path.contains("/Library/Containers/") == AppEnvironment.isSandboxed else {
+                    throw CoreError.corruptData("the vault is at \(root.path), \(AppEnvironment.isSandboxed ? "not in" : "in") a container")
+                }
+                await ContentRules.prepare()
+                let vault = WebDataStoreVault(repository: repository)
+                let key = try repository.profileKey(for: profile.id)
+                try await vault.prepareForLaunch(profileID: profile.id, key: key)
+                let restored = layout.discoverDirectories(for: profile.id)
+                for directory in restored { print("INFO restored into \(directory.path)") }
+                // Where this build keeps a store: the container's own Library, or the bundle ID's subtree.
+                guard !restored.isEmpty, restored.allSatisfy({ directory in
+                    layout.searchRoots.contains { directory.standardizedFileURL.path.hasPrefix($0.standardizedFileURL.path + "/") }
+                }) else {
+                    throw CoreError.corruptData("the website data was not restored where this build looks (\(layout.searchRoots.map(\.path)))")
+                }
+                var session: BrowserSession? = try makeSession(repository, profile.id, key: key)
+                var web: WKWebView? = WKWebView(frame: .zero, configuration: session!.makeWebViewConfiguration())
+                try await PageLoader.load(web!, html: page, baseURL: origin)
+                let local = try await js(web!, "return localStorage.getItem('pb') ?? 'null';") as? String
+                let indexed = try await js(web!, Self.readIndexedDB) as? String
+                let cookie = await cookies(in: session!.dataStore!).first { $0.name == "pb" }?.value
+                web = nil
+                session?.shutDown()
+                session = nil
+                _ = try await vault.seal(profileID: profile.id, key: key)
+                guard local == token, indexed == token, cookie == token else {
+                    throw CoreError.corruptData("the website data read back: localStorage \(local ?? "nil"), IndexedDB \(indexed ?? "nil"), cookie \(cookie ?? "nil")")
+                }
+                print("PASS vault at \(root.path) opened by bundle ID \(bundleID)"
+                      + "\(AppEnvironment.isSandboxed ? " inside its container" : ""): profile Migrated, its cookie, localStorage and IndexedDB read back")
             }
-            exit(0)
+            return 0
         } catch {
-            print("FAIL container migration step (\(write ? "write" : "read")): \(error)")
-            exit(1)
+            print("FAIL vault migration step (\(write ? "write" : "read")) by bundle ID \(bundleID): \(error)")
+            return 1
         }
     }
 
@@ -198,6 +279,11 @@ final class SelfTest {
         defer { try? FileManager.default.removeItem(at: root) }
         // scripts/disk_check.py: what is written in here is the self-test's own.
         info("vault \(root.path)")
+        // scripts/egress_check.py and disk_check.py: the name this app's processes go by in a packet
+        // capture and in a file trace (a profile's own process has the same one). Those checks tell
+        // the app's packets and writes by it, and say they were skipped without it: a name they had
+        // written in themselves would see nothing once the executable were named otherwise.
+        info("egress-process \(ProcessInfo.processInfo.processName) \(getpid())")
         let repository: ProfileRepository
         do {
             repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
@@ -402,22 +488,7 @@ final class SelfTest {
         check("native: custom user agent",
               try await js(webA!, "return navigator.userAgent;") as? String == "PrivacyBrowserSelfTest/1.0")
 
-        check("write localStorage + IndexedDB", try await js(webA!, """
-            localStorage.setItem('pb', token);
-            await new Promise((resolve, reject) => {
-              const req = indexedDB.open('pb', 1);
-              req.onupgradeneeded = () => req.result.createObjectStore('s');
-              req.onerror = () => reject(req.error);
-              req.onsuccess = () => {
-                const db = req.result;
-                const tx = db.transaction('s', 'readwrite');
-                tx.objectStore('s').put(token, 'k');
-                tx.oncomplete = () => { db.close(); resolve(); };
-                tx.onerror = () => reject(tx.error);
-              };
-            });
-            return true;
-            """, ["token": token]) as? Bool == true)
+        check("write localStorage + IndexedDB", try await js(webA!, Self.writeLocalStorageAndIndexedDB, ["token": token]) as? Bool == true)
         let cookie = HTTPCookie(properties: [.domain: "selftest.invalid", .path: "/", .name: "pb", .value: token,
                                              .secure: "TRUE", .expires: Date().addingTimeInterval(3_600)])!
         await setCookie(cookie, in: sessionA!.dataStore!)
@@ -489,6 +560,24 @@ final class SelfTest {
         try await vault.seal(profileID: b, key: keyB)
         check("both profiles sealed", layout.discoverDirectories(for: a).isEmpty && layout.discoverDirectories(for: b).isEmpty)
     }
+
+    /// `token` (an argument) into localStorage and IndexedDB, as `readIndexedDB` reads it.
+    private static let writeLocalStorageAndIndexedDB = """
+        localStorage.setItem('pb', token);
+        await new Promise((resolve, reject) => {
+          const req = indexedDB.open('pb', 1);
+          req.onupgradeneeded = () => req.result.createObjectStore('s');
+          req.onerror = () => reject(req.error);
+          req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction('s', 'readwrite');
+            tx.objectStore('s').put(token, 'k');
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => reject(tx.error);
+          };
+        });
+        return true;
+        """
 
     private static let readIndexedDB = """
         return await new Promise((resolve) => {

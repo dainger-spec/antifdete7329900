@@ -151,6 +151,14 @@ jobs:
           sudo chmod -R a+r build/egress27/crashes 2>/dev/null || true
           python3 scripts/crash_summary.py build/egress27/crashes/*.ips | tee build/egress27/crashes/summary.txt
           grep -E '^(CRASH|FAULT)' build/egress27/crashes/summary.txt | grep -v '^CRASH none' | head -16 | cut -c1-300 | sed 's/^/::warning title=macOS 27 - crash::/' || true
+          # The search's control: the self-test's exception check ends a process on purpose (an
+          # exception nothing catches, on the queue PBExceptionCheck.background), and macOS writes a
+          # report of it. Not among the reports found, the search is looking under another name.
+          if ! grep -q "crashed thread PBExceptionCheck.background" build/egress27/crashes/summary.txt; then
+            echo "::error title=macOS 27 - crash reports SKIPPED::the report of the self-test's deliberate crash (queue PBExceptionCheck.background) is not among those found: the search for crash reports is blind to this app's processes"
+            echo "### macOS 27 - crash reports SKIPPED: the deliberate crash's report was not found" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           # A message WebKit's UI side refused from one of its processes, as the log names it.
           sudo log show --style compact --last 3h --predicate 'eventMessage CONTAINS[c] "invalid message" AND process != "log"' 2>/dev/null \
             | grep -iv '^timestamp' | grep -v ' log\[[0-9]' | head -40 | tee build/egress27/crashes/invalid-messages.txt || true
@@ -377,6 +385,9 @@ jobs:
           export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088
           mkdir -p build/egress
           status=0
+          # The account's keychain before the app runs (scripts/keychain_check.py; compared after the
+          # menu walk below): what the app leaves there would be tied to its identity.
+          python3 scripts/keychain_check.py snapshot build/keychain/before.json || true
           # What a release declares: Xcode 26 writes SDK 26.5 into the executables, and with 15.0 or
           # newer this Mac fetches a certificate's missing intermediate outside a profile's proxy
           # (docs/ISOLATION_AND_LIMITATIONS.md §2; the step "From which declared SDK…" below measures
@@ -465,6 +476,14 @@ jobs:
           sudo chmod -R a+r build/crashes 2>/dev/null || true
           python3 scripts/crash_summary.py build/crashes/*.ips | tee build/crashes/summary.txt
           grep -E '^(CRASH|FAULT)' build/crashes/summary.txt | grep -v '^CRASH none' | head -16 | cut -c1-300 | sed 's/^/::warning title=crash::/' || true
+          # The search's control: the self-test's exception check ends a process on purpose (an
+          # exception nothing catches, on the queue PBExceptionCheck.background), and macOS writes a
+          # report of it. Not among the reports found, the search is looking under another name.
+          if ! grep -q "crashed thread PBExceptionCheck.background" build/crashes/summary.txt; then
+            echo "::error title=crash reports SKIPPED::the report of the self-test's deliberate crash (queue PBExceptionCheck.background) is not among those found: the search for crash reports is blind to this app's processes"
+            echo "### Crash reports SKIPPED: the deliberate crash's report was not found" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           # A message WebKit's UI side refused from one of its processes, as the log names it.
           sudo log show --style compact --last 3h --predicate 'eventMessage CONTAINS[c] "invalid message" AND process != "log"' 2>/dev/null \
             | grep -iv '^timestamp' | grep -v ' log\[[0-9]' | head -40 | tee build/crashes/invalid-messages.txt || true
@@ -517,6 +536,15 @@ jobs:
           name: menu-walk
           path: build/menu-walk
           if-no-files-found: ignore
+      - name: What the app left in the account's keychain (a measurement)
+        # The self-test of both builds and the menu walk ran between the two snapshots: every item
+        # that appeared in the account's default keychain, by its attributes, never its secret. A
+        # snapshot that could not show an item of its own is SKIPPED (scripts/keychain_check.py).
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 scripts/keychain_check.py snapshot build/keychain/after.json
+          python3 scripts/keychain_check.py compare build/keychain/before.json build/keychain/after.json
       - name: Safari's question about the default browser — as built, and declared a browser (a measurement)
         # Whether -[GeneralPreferences _defaultWebBrowserMayHaveChanged], which threw on a nil when ⌘,
         # opened Safari's settings in a profile's window, throws because the app is no http/https
@@ -762,6 +790,9 @@ jobs:
           BUNDLE_ID=dev.local.PBMigrationCheck SANDBOX=0 APP_DIR=build/migration-old scripts/build-app.sh
           BUNDLE_ID=dev.local.PBMigrationCheck APP_DIR=build/migration-new scripts/build-app.sh
           # Writes a real vault into the runner's unsandboxed vault folder: CI only (see SelfTest.migrationStep).
+          # Its profile's website data (a cookie, localStorage, IndexedDB) holds this token, which the
+          # sandboxed build must read back from its container's layout.
+          export PB_SELFTEST_MIGRATION_TOKEN="pbmigration$(date +%s)"
           PB_SELFTEST_MIGRATION=1 build/migration-old/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --selftest-write-vault
           build/migration-new/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --selftest-read-vault
           test ! -e "$HOME/Library/Application Support/PrivacyBrowser/vault.json" || { echo "vault was not moved"; exit 1; }

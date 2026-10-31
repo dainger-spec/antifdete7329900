@@ -39,7 +39,9 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BINARY = "Contents/MacOS/PrivacyBrowser"
+# The app's executable and bundle ID, from its Info.plist (main): what the trace, the crash reports
+# and the walk itself know the app's processes by.
+EXECUTABLE = None
 PROXY_PORT = 18190
 
 
@@ -99,7 +101,7 @@ def behaviour(item):
 # The account's home outside the profile, by what a write there would mean. Everything else in
 # it is written all the time by the system's own daemons (Spotlight, Duet, IdentityServices…),
 # whatever runs: listed in the JSON, not counted as the item's.
-BUNDLE_ID = "dev.local.PrivacyBrowser"
+BUNDLE_ID = None
 PLACES = (("this app's files in the account's home", lambda path: BUNDLE_ID in path),
           ("the user's folders", lambda path: path.startswith(("~/Downloads", "~/Desktop", "~/Documents", "~/Pictures", "~/Movies", "~/Music"))),
           ("the keychain", lambda path: path.startswith("~/Library/Keychains")),
@@ -256,7 +258,7 @@ def start_trace(out):
     without sudo."""
     if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode != 0:
         return None
-    trace = subprocess.Popen(["sudo", "-n", "fs_usage", "-w", "-f", "filesys", "PrivacyBrowser", "com.apple.WebKit", "cfprefsd"],
+    trace = subprocess.Popen(["sudo", "-n", "fs_usage", "-w", "-f", "filesys", EXECUTABLE, "com.apple.WebKit", "cfprefsd"],
                              stdout=open(os.path.join(out, "fs.txt"), "w"), stderr=subprocess.STDOUT)
     time.sleep(2)
     return trace
@@ -298,22 +300,23 @@ def domain_changes(before, after):
 def traced_writes(out, canary=None):
     """The writes in the real Safari's places in out/fs.txt by the app's and WebKit's processes, as
     "process: path"; what the trace was (lines read, or why it is none); the files cfprefsd wrote
-    there, for a process the trace cannot name; and whether the trace named cfprefsd's write of
-    `canary` (disk_check.Resolver names a path given relative to a directory descriptor)."""
+    there, for a process the trace cannot name; whether the trace named cfprefsd's write of
+    `canary` (disk_check.Resolver names a path given relative to a directory descriptor); and how
+    many writes it names by the app's own process (none: fs_usage was not given the app's name)."""
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     import disk_check
     path_of_trace = os.path.join(out, "fs.txt")
     if not os.path.exists(path_of_trace):
-        return [], "no trace (no sudo)", [], None
+        return [], "no trace (no sudo)", [], None, 0
     with open(path_of_trace, encoding="utf-8", errors="replace") as handle:
         head = [line for _, line in zip(range(10), handle)]
     if len(head) < 10 and any("ktrace" in line or "Resource busy" in line for line in head):
-        return [], "no trace: " + " ".join(head)[:200], [], None
+        return [], "no trace: " + " ".join(head)[:200], [], None, 0
     roots = disk_check.forbidden_roots(os.path.expanduser("~"))
     resolver = disk_check.Resolver()
     found, by_cfprefsd, kept = [], [], []
     canary_seen = False if canary else None
-    count = 0
+    count, app_writes = 0, 0
     for line in open(path_of_trace, encoding="utf-8", errors="replace"):
         count += 1
         line = line.rstrip("\n")
@@ -326,6 +329,8 @@ def traced_writes(out, canary=None):
         if not writes or disk_check.FAILED.match(line):
             continue
         process = fields[-1].rsplit(".", 1)[0]
+        if process[:16] == EXECUTABLE[:16]:
+            app_writes += 1
         if canary and process == "cfprefsd" and canary in paths:
             canary_seen = True
         for path in paths:
@@ -337,14 +342,14 @@ def traced_writes(out, canary=None):
     with open(os.path.join(out, "fs-real-safari.txt"), "w") as handle:
         handle.write("\n".join(kept) + ("\n" if kept else ""))
     os.remove(path_of_trace)
-    return sorted(set(found)), f"{count} lines traced", sorted(set(by_cfprefsd)), canary_seen
+    return sorted(set(found)), f"{count} lines traced", sorted(set(by_cfprefsd)), canary_seen, app_writes
 
 
 def crash_reports(since, out):
     """The crash reports of this app's processes written since `since`, summarized, by pid."""
     found = {}
-    # *PrivacyBrowser*: a fault a process lived through is ExcUserFault_PrivacyBrowser-….ips.
-    for path in glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips")):
+    # *<executable>*: a fault a process lived through is ExcUserFault_<executable>-….ips.
+    for path in glob.glob(os.path.expanduser(f"~/Library/Logs/DiagnosticReports/*{EXECUTABLE}*.ips")):
         if os.path.getmtime(path) < since:
             continue
         summary = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "crash_summary.py"), path],
@@ -384,13 +389,15 @@ def main():
     args = parser.parse_args()
     out = os.path.abspath(args.out)
     os.makedirs(out, exist_ok=True)
-    global BUNDLE_ID
+    global BUNDLE_ID, EXECUTABLE
     try:
         import plistlib
         with open(os.path.join(args.app, "Contents", "Info.plist"), "rb") as handle:
-            BUNDLE_ID = plistlib.load(handle).get("CFBundleIdentifier", BUNDLE_ID)
-    except (OSError, ValueError):
-        pass
+            info = plistlib.load(handle)
+        BUNDLE_ID, EXECUTABLE = info["CFBundleIdentifier"], info["CFBundleExecutable"]
+    except (OSError, ValueError, KeyError) as error:
+        print(f"::error::menu walk: {args.app} has no readable Info.plist with its bundle ID and executable ({error})")
+        return 1
 
     proxy = subprocess.Popen([sys.executable, os.path.join(ROOT, "scripts", "selftest_proxy.py"),
                               "--http", str(PROXY_PORT), "--socks", str(PROXY_PORT + 1)],
@@ -419,7 +426,7 @@ def main():
     started = time.time()
     with open(os.path.join(out, "walk.txt"), "w") as log:
         try:
-            result = subprocess.run([os.path.join(args.app, BINARY), "--menu-walk"], env=environment,
+            result = subprocess.run([os.path.join(args.app, "Contents", "MacOS", EXECUTABLE), "--menu-walk"], env=environment,
                                     stdout=subprocess.PIPE, stderr=log, text=True, timeout=2700)
             output, status = result.stdout, result.returncode
         except subprocess.TimeoutExpired as expired:
@@ -429,8 +436,9 @@ def main():
     if trace:
         subprocess.run(["sudo", "-n", "pkill", "-INT", "-f", "fs_usage -w"], capture_output=True)
         time.sleep(2)
-    by_profile, traced, by_cfprefsd, canary_seen = traced_writes(out, canary)
-    print(f"MENU-WALK file trace: {traced}; writes in the real Safari's places by the app's or WebKit's processes: "
+    by_profile, traced, by_cfprefsd, canary_seen, app_writes = traced_writes(out, canary)
+    print(f"MENU-WALK file trace: {traced}; writes by the app's process {EXECUTABLE}: {app_writes}; "
+          f"writes in the real Safari's places by the app's or WebKit's processes: "
           f"{len(by_profile)}; by cfprefsd, for a process the trace cannot name: {len(by_cfprefsd)}; "
           f"cfprefsd's write of the canary named: {'yes' if canary_seen else ('no' if canary_seen is False else 'no canary')}",
           flush=True)
@@ -439,6 +447,9 @@ def main():
     skipped = []
     if traced.startswith("no trace"):
         skipped.append(f"the file trace ({traced}): no write in the real Safari's places could have been seen")
+    elif not app_writes:
+        skipped.append(f"the file trace names no write by the app's process {EXECUTABLE}: fs_usage was not given its name, "
+                       "so what a profile's own process wrote could not have been seen")
     time.sleep(2)
     domain_after, container_after = safari_domain()
     if domain_before is None or domain_after is None:

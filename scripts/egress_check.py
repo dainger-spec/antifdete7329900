@@ -25,9 +25,10 @@ so. It fails on:
   through the proxy they never leave the loopback interface;
 * any packet carrying the run's id — a DNS query for one of the leak page's host names means a
   name was resolved on this Mac instead of by the proxy;
-* during the check (the self-test prints `INFO egress-window begin/end`), any packet of a
-  `PrivacyBrowser` process (the profile's own, `INFO egress-pid`, or the self-test's), or made on
-  its behalf by another process, to anything but loopback. A resolver's answer (from port 53) is
+* during the check (the self-test prints `INFO egress-window begin/end`), any packet of the app's
+  process (the profile's own, `INFO egress-pid`, or the self-test's, named by `INFO egress-process`
+  — the name a profile's process shares), or made on its behalf by another process, to anything but
+  loopback. A resolver's answer (from port 53) is
   not a packet the app sent — the question is, and a question asked in a window fails — so an
   answer that comes in a window to a question asked before it is listed, not failed on (measured:
   the NXDOMAIN for the proxy checker's control arrived 0.1 s after its window opened).
@@ -51,6 +52,11 @@ proxy checker's `pbinvalid…`, a proxy host name under selftest.invalid that th
 is asked for (the proxy checker's geolocation service is a name under selftest.invalid too). Seen,
 the capture is known to see such packets, and their absence where a proxy should have been used
 means something; not seen, that part shows nothing: it is said as SKIPPED, and the run fails.
+The app's packets are told by its process's name, which the self-test prints (`INFO egress-process
+<name> <pid>`), never by a name written in here: a control packet must be named after it (the proxy
+checker's question is asked for the self-test's own process), or the capture's names are not the
+app's — a renamed executable, a name cut short — and a packet the app sent around the proxy would go
+unnoticed: SKIPPED, and the run fails.
 
 A capture that could not be made (no pktap, no sudo, no packets), or a self-test log with no window
 to look in, is the same: SKIPPED, exit code 1 — a check that could not look is never a pass.
@@ -71,7 +77,7 @@ LEAK_DOMAIN = "leak.example.com"
 QUESTION = re.compile(r"\b(?:A|AAAA|HTTPS|SVCB|ANY|CNAME|TXT|PTR)(?: \(Q[MU]\))?\? (\S+?)\.? ")
 DOCUMENTATION = [ipaddress.ip_network(n) for n in
                  ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")]
-# "1730000000.123456 (proc PrivacyBrowser:4242, eproc ..., svc BE, out) IP 10.0.0.5.51000 > 192.0.2.10.8080: ..."
+# "1730000000.123456 (proc Lumen:4242, eproc ..., svc BE, out) IP 10.0.0.5.51000 > 192.0.2.10.8080: ..."
 META = re.compile(r"\(([^()]*)\)")
 PROC = re.compile(r"(?<![e])proc ([^,():]+):(\d+)")
 EPROC = re.compile(r"eproc ([^,():]+):(\d+)")
@@ -121,10 +127,19 @@ def main() -> int:
     begins = [float(t) for t in re.findall(r"INFO egress-window begin ([\d.]+)", log)]
     ends = [float(t) for t in re.findall(r"INFO egress-window end ([\d.]+)", log)]
     pids = {int(p) for p in re.findall(r"INFO egress-pid (\d+)", log)}
+    # The app's processes by name: the self-test's own, as it names itself (a profile's process runs
+    # the same executable). The capture cuts a name to 16 characters.
+    named = re.findall(r"^INFO egress-process (\S+) (\d+)\s*$", log, re.M)
+    app_names = sorted({name[:16] for name, _ in named})
+    pids |= {int(pid) for _, pid in named}
     # A capture this check cannot read, or one with nothing to look for, is never a pass: it says
     # it was skipped, and fails.
     if not tokens or not begins:
         print("::error::egress check SKIPPED: no check of the self-test opened an egress window (no egress-token), so nothing was looked at")
+        return 1
+    if not app_names:
+        print("::error::egress check SKIPPED: the self-test did not name its process (no INFO egress-process), so this check "
+              "cannot tell the app's packets from others")
         return 1
     # Each window ends at the first end after its begin: a check that stopped before printing its
     # end leaves its window open to the end of the run, never borrows another check's end.
@@ -155,8 +170,11 @@ def main() -> int:
     def in_window(packet):
         return packet["time"] is not None and any(b <= packet["time"] <= e for b, e in windows)
 
+    def named_as_app(owner):
+        return owner is not None and any(owner[0][:16].startswith(name) for name in app_names)
+
     def ours(owner):
-        return owner is not None and (owner[1] in pids or owner[0].startswith("PrivacyBrowser"))
+        return owner is not None and (owner[1] in pids or named_as_app(owner))
 
     # A service that was running before the profile's first process started was not started for
     # it; its traffic cannot be told apart from the system's own (Safe Browsing's periodic update),
@@ -168,7 +186,7 @@ def main() -> int:
             return False
         return first_profile_pid is None or owner[1] >= first_profile_pid
 
-    failures, others, seen_controls = [], {}, {}
+    failures, others, seen_controls, controls_named_as_app = [], {}, {}, []
     for packet in packets:
         line = packet["line"]
         lowered = line.lower()
@@ -178,6 +196,8 @@ def main() -> int:
         if control:
             owners = [f"{kind} {owner[0]}" for kind, owner in (("proc", packet["proc"]), ("eproc", packet["eproc"])) if owner]
             seen_controls.setdefault(control, []).append(", ".join(owners) or "no process")
+            if named_as_app(packet["proc"]) or named_as_app(packet["eproc"]):
+                controls_named_as_app.append(control)
             continue
         if any(packet["dst"] is not None and packet["dst"].version == net.version and packet["dst"] in net
                for net in DOCUMENTATION):
@@ -194,7 +214,7 @@ def main() -> int:
             others.setdefault("DNS answers (to questions asked before the window)", []).append(line)
         elif in_window(packet) and (ours(packet["proc"]) or ours(packet["eproc"])):
             if packet["dst"] is None or not packet["dst"].is_loopback:
-                failures.append(("a PrivacyBrowser process (or one acting for it) reached past the proxy", line))
+                failures.append(("the app's process (or one acting for it) reached past the proxy", line))
         elif in_window(packet) and (service(packet["proc"]) or service(packet["eproc"])):
             who = packet["proc"][0] if service(packet["proc"]) else f"{packet['eproc'][0]} (through {packet['proc'][0] if packet['proc'] else '?'})"
             failures.append((f"{who} fetched for someone while the profile ran", line))
@@ -214,6 +234,16 @@ def main() -> int:
             unseen.append(control)
             print(f"::error::egress check SKIPPED for {control}'s kind: the control was never seen — this macOS did not "
                   f"send it, or the capture cannot see it — so the matching check where a proxy is used shows nothing")
+    # The app's packets are told by its process's name: a control the self-test's own process asked
+    # for must carry that name, or this check was never looking at the app.
+    if controls_named_as_app:
+        print(f"egress check: the capture names the app's process {app_names} (on control "
+              f"{sorted(set(controls_named_as_app))[0]}): the app's own packets are told apart")
+    else:
+        unseen.append("the app's own packets")
+        print(f"::error::egress check SKIPPED for the app's own packets: no control packet was named after the app's "
+              f"process {app_names} — the capture's process names are not the ones the self-test gave — so a packet "
+              f"the app sent around the proxy would go unnoticed")
 
     if others:
         print("other processes during the check (listed, not failed on):")
