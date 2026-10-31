@@ -861,7 +861,23 @@ profile, which gets our own window presenting its device, and a profile whose We
 the packet tunnel, which stays in the manager process. The emergency switch back to every profile
 in the manager process, in our own windows: `PB_PROFILE_PROCESS=0`, or
 `defaults write <bundle id> PBProfileProcess -bool NO`. The sandboxed build keeps every profile in
-the one process (it cannot load Safari's frameworks). A profile's process holds Safari's frameworks
+the one process (it cannot load Safari's frameworks).
+
+A profile in our own window is in a **simplified mode**: its proxy and its data are the same, but
+without Safari's frameworks hosting the window it is plain WebKit to a site, and does not match
+Safari. That window says so, never only the log (`SimplifiedModeNotice`): a "Simplified mode" chip
+in its toolbar — the toolbar, whose height a page measures, keeps its height — whose tooltip gives
+the reason and whose popover, opened by itself once when the app's first such window becomes key,
+says what the mode is and why. The reasons, each in words of its own: an iPhone or iPad profile; the
+sandboxed build; a profile whose WebRTC goes through the tunnel; Safari's window turned off
+(`PB_SAFARI_CHROME=0`); profiles kept in the manager's process (`PB_PROFILE_PROCESS`,
+`PBProfileProcess`); and, in a profile's own process, what failed — Safari's frameworks not loading,
+a structural piece missing (by name), the process not becoming Safari's application, Safari's window
+factory giving no window (`SafariChromeHost.reasonForOwnWindow`). Until 1 November none of these
+was shown in the window: the log had them, and a missing structural piece was told in the profile
+list as "some of Safari's window may misbehave", when there was no Safari window (that message is
+now kept for pieces missing while the chrome is hosted). The self-test checks the chip, its reason
+and its popover in our windows of both builds. A profile's process holds Safari's frameworks
 next to the profile, and Safari builds the web views; so the profile's proxy is held for the **whole process**, not only for
 the web views it knows about (`ProfileNetworkGuard`), and it is decided before Safari's frameworks
 load (the child opens the vault and reads the profile first).

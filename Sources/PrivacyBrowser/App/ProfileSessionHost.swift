@@ -151,8 +151,11 @@ enum ProfileSessionHost {
             // launch builds anything (with the chrome, that happened before its menu came up).
             ProfileNetworkGuard.takeOverDefaultStore()
             // What Safari's chrome needs and this macOS does not have is said where the user is
-            // looking, not only in the log: a renamed method can be a feature gone quiet.
-            let missing = SafariChrome.missingPieces()
+            // looking, not only in the log: a renamed method can be a feature gone quiet. Only while
+            // the chrome is hosted: without it the profile's window itself says why, and a missing
+            // structural piece is that reason (SimplifiedModeNotice) — not "some of Safari's window
+            // may misbehave", when there is no Safari window.
+            let missing = SafariChromeHost.isHosting ? SafariChrome.missingPieces() : []
             if !missing.isEmpty {
                 ProfileSessionHost.send(.error(String(format: L("safari.chrome.missingPieces"), missing.joined(separator: ", "))))
             }

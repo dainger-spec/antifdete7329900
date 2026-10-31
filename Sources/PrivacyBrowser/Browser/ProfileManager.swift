@@ -1034,6 +1034,12 @@ final class ProfileManager: ObservableObject {
     }
 
     private func relaysWebRTCThroughTunnel(_ configuration: ProfileConfiguration) -> Bool {
+        Self.relaysWebRTCThroughTunnel(configuration, tunnel: tunnel)
+    }
+
+    /// A profile whose WebRTC goes through the packet tunnel: it runs in the manager's process,
+    /// whose routes the tunnel's are, and so in our own window (`SafariChromeHost.reasonForOwnWindow`).
+    static func relaysWebRTCThroughTunnel(_ configuration: ProfileConfiguration, tunnel: TunnelManager) -> Bool {
         configuration.webRTCPolicy != .disabled && configuration.proxy?.kind == .socks5 && tunnel.canCarryWebRTC
     }
 

@@ -114,6 +114,14 @@ enum UISnapshots {
         problems += await Shot(name: "palette-search", size: CommandPaletteView.size, titled: false) {
             CommandPaletteView(commands: paletteCommands, query: "north")
         }.capture(into: folder)
+        // A profile's window that is not Safari's: what its chip's popover says, for a structural
+        // piece missing and for the sandboxed build (SimplifiedModeNotice).
+        problems += await Shot(name: "simplified-mode", size: CGSize(width: 360, height: 290), titled: false) {
+            SimplifiedModeExplanation(reason: .missingPieces(["BrowserWindowController"]))
+        }.capture(into: folder)
+        problems += await Shot(name: "simplified-mode-sandboxed", size: CGSize(width: 360, height: 260), titled: false) {
+            SimplifiedModeExplanation(reason: .sandboxed)
+        }.capture(into: folder)
         // What sites see: before a snapshot, its differences, every signal, and Safari silent.
         func seen(comparedWithSafari: Bool = true) -> WhatSitesSee {
             let snapshot = WhatSitesSee(profileID: UUID(), manager: { nil }, launch: { _ in })

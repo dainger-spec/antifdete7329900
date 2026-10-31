@@ -26,6 +26,48 @@ enum SafariChromeHost {
     /// This process hosts Safari's chrome: its windows are Safari's own.
     static var isHosting: Bool { isPrepared }
 
+    /// Why a profile's window is the app's own rather than Safari's — which is a simplified mode:
+    /// without Safari's frameworks hosting the window, the profile is plain WebKit to a site. The
+    /// window says so, with this (`SimplifiedModeNotice`), never only the log.
+    enum OwnWindowReason: Equatable {
+        /// An iPhone or iPad profile: our window presents the device; Safari's is a Mac's.
+        case deviceProfile
+        /// A build with the App Sandbox: Safari's chrome cannot be hosted in it.
+        case sandboxed
+        /// `PB_SAFARI_CHROME=0`.
+        case turnedOff
+        /// The profile's WebRTC goes through the packet tunnel, whose routes are the app's
+        /// process's: the profile runs there, and Safari's chrome is hosted only in a profile's own.
+        case tunnelProfile
+        /// Profiles run in the app's own process (`ProfileProcess.isEnabled` off): Safari's chrome
+        /// is hosted only in a profile's own process.
+        case notInProfileProcess
+        /// Safari's private frameworks did not load on this macOS.
+        case frameworksDidNotLoad
+        /// This Safari lacks pieces without which its chrome is not hosted (by name).
+        case missingPieces([String])
+        /// The process could not make Safari's application object its `NSApp`.
+        case notSafarisApplication
+        /// Everything was prepared, and Safari's window factory gave no window.
+        case windowDidNotOpen
+    }
+
+    /// What went wrong in this process, preparing Safari's chrome or opening its window: the
+    /// reason a profile's window here is ours. Nil while nothing has.
+    private(set) static var failure: OwnWindowReason?
+
+    /// Why `configuration`'s window, opened in this process, is ours: a profile that presents a
+    /// device, then what failed here, then what this process is (a sandboxed build, the chrome
+    /// turned off, a profile not in a process of its own).
+    static func reasonForOwnWindow(_ configuration: ProfileConfiguration) -> OwnWindowReason {
+        if !canHost(configuration) { return .deviceProfile }
+        if let failure { return failure }
+        if AppEnvironment.isSandboxed { return .sandboxed }
+        if isTurnedOff { return .turnedOff }
+        if ProfileProcess.isEnabled, ProfileManager.relaysWebRTCThroughTunnel(configuration, tunnel: .shared) { return .tunnelProfile }
+        return .notInProfileProcess
+    }
+
     /// Loads Safari's frameworks and makes this process the kind of process its chrome expects,
     /// with Safari's own services set the way `configuration` needs them. Must run before anything
     /// touches `NSApplication.shared`, and after `ProfileNetworkGuard.engage` — the frameworks
@@ -34,14 +76,20 @@ enum SafariChromeHost {
     @discardableResult
     static func prepareForChildProcess(configuration: ProfileConfiguration) -> Bool {
         guard !isPrepared else { return true }
-        guard !isTurnedOff else { return false }
+        guard !isTurnedOff else {
+            failure = .turnedOff
+            return false
+        }
         guard canHost(configuration) else {
             log.notice("An iPhone or iPad profile: our own window, which presents that device, rather than Safari's desktop chrome")
             return false
         }
         // Before the frameworks load: some of what they read, they read as they load.
         SafariChrome.configureSafarisOwnServices(for: configuration)
-        guard SafariChrome.load() else { return false }
+        guard SafariChrome.load() else {
+            failure = .frameworksDidNotLoad
+            return false
+        }
         // Before any of Safari's code runs: its own folders are the profile's (SafariPaths).
         if let realHome = SafariPaths.realHome, let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] {
             SafariPaths.redirectGetters(from: realHome, to: home)
@@ -51,10 +99,12 @@ enum SafariChromeHost {
         let structural = SafariChrome.missingStructuralPieces()
         guard structural.isEmpty else {
             log.error("This Safari lacks what its chrome needs here (\(structural.joined(separator: ", "), privacy: .public)): our own window instead")
+            failure = .missingPieces(structural)
             return false
         }
         guard SafariChrome.installApplication() else {
             log.error("NSApp is not Safari's application object: Safari's chrome is not hosted here")
+            failure = .notSafarisApplication
             return false
         }
         // NSApp exists now, and nothing of Safari's has run yet: WebKit's default store is closed
@@ -129,6 +179,7 @@ enum SafariChromeHost {
         let address = url ?? session.configuration.startURL
         guard let controller = SafariChrome.openWindow(address: address) else {
             log.error("Safari's chrome did not open a window for \(session.profileName, privacy: .private); using ours")
+            failure = .windowDidNotOpen
             return false
         }
         // The first window opens where the user last left one of the profile's (`SavedWindowFrame`);

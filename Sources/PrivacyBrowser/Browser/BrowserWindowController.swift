@@ -53,6 +53,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private var startPageObservation: AnyCancellable?
     private var isClosing = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserWindow")
+    /// Why this window is ours and not Safari's: the profile runs in a simplified mode, and its
+    /// toolbar says so (`SimplifiedModeNotice`).
+    let ownWindowReason: SafariChromeHost.OwnWindowReason
+    private(set) var simplifiedChip: NSView?
 
     init(session: BrowserSession) {
         self.session = session
@@ -61,6 +65,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         self.chrome = BrowserChromeModel(profileName: session.profileName, profileID: session.profileID,
                                          exit: BrowserWindowController.profileExit(of: session),
                                          avatar: session.configuration.avatar)
+        self.ownWindowReason = SafariChromeHost.reasonForOwnWindow(session.configuration)
 
         // A mobile generation's window is the declared device's screen: its web content can never
         // be wider or taller than the screen the page is told about (see PrivacyScripts).
@@ -139,6 +144,12 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         // The profile chip: its glyph, name and the flag of where it exits.
         let badge = NSHostingView(rootView: ProfileChipView(model: chrome))
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // This window is not Safari's: said where the person looks, with why (SimplifiedModeNotice).
+        // In the toolbar, whose height a page measures and which this leaves as it is.
+        let reason = ownWindowReason
+        let simplified = NSHostingView(rootView: SimplifiedModeChip(reason: reason) { [weak self] in self?.showSimplifiedMode() })
+        simplified.setContentCompressionResistancePriority(.required, for: .horizontal)
+        simplifiedChip = simplified
         // The app's mark, where Safari has its sidebar button.
         let mark = NSHostingView(rootView: LumenMark(size: 20))
         mark.setFrameSize(NSSize(width: 20, height: 20))
@@ -158,7 +169,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             (.init("reload"), "Reload", reloadButton!), (.init("address"), "Address", addressField),
             (.init("bookmark"), "Bookmark", bookmarkButton!), (.init("bookmarks"), "Bookmarks", bookmarksMenuButton),
             (.init("history"), "History", historyButton), (.init("fill"), "Fill Password", fillButton),
-            (.init("save"), "Save Password", saveButton), (.init("profile"), profileName, badge),
+            (.init("save"), "Save Password", saveButton), (.init("simplified"), L("simplified.chip"), simplified),
+            (.init("profile"), profileName, badge),
         ]
         let toolbar = NSToolbar(identifier: "PrivacyBrowser.BrowserWindow")
         toolbar.delegate = self
@@ -215,6 +227,24 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     func windowDidResize(_ notification: Notification) {
         fitAddressField()
+    }
+
+    /// The simplified mode's popover, from the chip.
+    private func showSimplifiedMode() {
+        guard let simplifiedChip else { return }
+        SimplifiedModeNotice.present(from: simplifiedChip, reason: ownWindowReason)
+    }
+
+    /// The first time a profile's window of this process is key, the popover opens by itself: the
+    /// mode and its reason are read, not only found in the toolbar (`SimplifiedModeNotice`).
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard !isForWarmUp else { return }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let chip = self.simplifiedChip else { return }
+                SimplifiedModeNotice.presentAutomaticallyOnce(from: chip, reason: self.ownWindowReason)
+            }
+        }
     }
 
     /// A toolbar button: VoiceOver reads `label`; the tooltip adds the keyboard shortcut.
@@ -616,7 +646,7 @@ extension BrowserWindowController: NSToolbarDelegate {
         // bordered items one), the same look on every macOS.
         item.isBordered = false
         switch itemIdentifier.rawValue {
-        case "address", "profile": item.visibilityPriority = .high
+        case "address", "profile", "simplified": item.visibilityPriority = .high
         case "mark": item.visibilityPriority = .low
         default: break
         }

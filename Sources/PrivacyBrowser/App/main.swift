@@ -42,6 +42,8 @@ MainActor.assumeIsolated {
         // One profile in its own process, started by the manager process (ProfileProcess.swift
         // says why, ProfileSessionHost.swift what it does). Its language, locale and time zone are
         // already in argv and the environment; the profile's key arrives on stdin (ProfileGrant).
+        // A window of this profile that is not Safari's says so, and once by itself (SimplifiedModeNotice).
+        SimplifiedModeNotice.presentsAutomatically = true
         ProfileSessionHost.start(arguments: arguments)
     } else if arguments.contains("--check-safari-chrome") {
         // Which of the private classes and methods the hosted Safari chrome relies on this macOS
@@ -127,6 +129,7 @@ MainActor.assumeIsolated {
     } else {
         // Russian by default (English fallback); must be set before AppKit builds its menus.
         Localization.applyProcessLanguage()
+        SimplifiedModeNotice.presentsAutomatically = true
         PrivacyBrowserApp.main()
     }
 }

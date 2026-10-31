@@ -338,6 +338,7 @@ final class SelfTest {
         await group("tabs and library") { try await tabsAndLibrary(repository) }
         await group("restoring tabs") { try await restoreTabs(repository) }
         await group("window lifecycle") { try await windowLifecycle(repository) }
+        await group("simplified mode") { try await simplifiedMode(repository) }
         await group("dialogs") { try await dialogTeardown(repository) }
         await group("password AutoFill") { try await passwordAutoFill(repository) }
         await group("cookie import") { try await cookieImport(repository) }
@@ -4201,6 +4202,62 @@ final class SelfTest {
         var receivedRight = false
         if case .preferences(let preferences)? = received { receivedRight = preferences == sent }
         check("settings: a profile's own process gets the settings over its channel as they were sent", receivedRight, line)
+    }
+
+    // MARK: Simplified mode (a profile's window that is not Safari's)
+
+    /// A profile whose window is the app's own and not Safari's runs in a simplified mode, and that
+    /// window says so with why (`SimplifiedModeNotice`): its toolbar has the chip, in the toolbar —
+    /// whose height a page measures — and no taller than what is already there; its reason is the
+    /// one the window was opened for; and the chip's popover opens and closes. Every session here
+    /// is in this process: a Mac profile's window is ours because the App Sandbox is on (the
+    /// sandboxed build) or profiles are not in processes of their own (this run), an iPhone's always.
+    /// Nothing opens by itself here (`presentsAutomatically`): a page of the self-test keeps its focus.
+    private func simplifiedMode(_ repository: ProfileRepository) async throws {
+        check("simplified mode: nothing opens by itself in the self-test, whose pages keep their focus",
+              !SimplifiedModeNotice.presentsAutomatically)
+        let macReason: SafariChromeHost.OwnWindowReason = AppEnvironment.isSandboxed ? .sandboxed : .notInProfileProcess
+        for (name, configuration, expected) in [
+            ("Mac", ProfileConfiguration(ephemeral: true), macReason),
+            ("iPhone", ProfileConfiguration(ephemeral: true, deviceGenerationID: "ios-26"), SafariChromeHost.OwnWindowReason.deviceProfile),
+        ] {
+            let profile = try repository.create(name: "Simplified \(name)", configuration: configuration)
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            let controller = session.openWindow(url: nil)
+            defer {
+                controller.close()
+                session.shutDown()
+                try? repository.delete(profile.id)
+            }
+            let shown = await waitUntil(timeout: 5) {
+                controller.window?.toolbar?.items.contains { $0.itemIdentifier.rawValue == "simplified" && $0.view === controller.simplifiedChip } == true
+            }
+            let chip = controller.simplifiedChip
+            let height = chip?.fittingSize.height ?? 0
+            check("simplified mode: a \(name) profile's own window has the chip in its toolbar, no taller than the address field",
+                  shown && chip != nil && height > 0 && height <= 28, "in the toolbar: \(shown), height \(height)")
+            check("simplified mode: a \(name) profile's window gives the reason it is not Safari's (\(expected))",
+                  controller.ownWindowReason == expected, "\(controller.ownWindowReason)")
+            if name == "Mac", let chip {
+                guard chip.window?.isVisible == true else {
+                    skip("simplified mode: the chip's popover opens and closes", "the profile's window is not on screen here, so nothing can be shown from it")
+                    continue
+                }
+                SimplifiedModeNotice.present(from: chip, reason: controller.ownWindowReason)
+                let opened = await waitUntil(timeout: 3) { SimplifiedModeNotice.shown?.isShown == true }
+                SimplifiedModeNotice.shown?.performClose(nil)
+                let closed = await waitUntil(timeout: 3) { SimplifiedModeNotice.shown?.isShown != true }
+                check("simplified mode: the chip's popover opens and closes", opened && closed, "opened \(opened), closed \(closed)")
+            }
+        }
+        // Every reason says something of its own, and the missing pieces by name.
+        let reasons: [SafariChromeHost.OwnWindowReason] = [.deviceProfile, .sandboxed, .turnedOff, .tunnelProfile, .notInProfileProcess,
+                                                           .frameworksDidNotLoad, .missingPieces(["BrowserWindowController"]),
+                                                           .notSafarisApplication, .windowDidNotOpen]
+        let texts = reasons.map { SimplifiedModeNotice.reasonText($0) }
+        check("simplified mode: each of the nine reasons is said in words of its own, the missing pieces by name",
+              texts.allSatisfy { $0.count > 20 && !$0.contains("simplified.") } && Set(texts).count == reasons.count
+                && texts[6].contains("BrowserWindowController"), texts.joined(separator: " | "))
     }
 
     // MARK: Window lifecycle (regression test for the close/quit crash)
