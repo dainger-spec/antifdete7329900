@@ -1,13 +1,15 @@
 name: CI
 
-# A measurement branch only: do the com.apple.Safari keys a profile's process wrote before dbea98c
-# reach the real Safari? (scripts/safari_prefs_reach.py) Never merged anywhere.
+# A measurement branch only: does a write through a preferences domain named by the path of the real
+# Safari's container plist — as Safari's own code makes some in a profile's process (run 496) — reach
+# the real Safari? And where does a domain named by a path land (SafariUIState)?
+# (scripts/container_path_reach.py) Never merged anywhere.
 on:
   push:
 
 jobs:
   measure:
-    name: Safari's preferences on ${{ matrix.runner }}
+    name: The container plist's path on ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
@@ -16,11 +18,11 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: The keys, the real Safari, a canary
-        run: python3 scripts/safari_prefs_reach.py --out build/measure/safari-prefs
+      - name: The write, the real Safari, a canary; the path domains
+        run: python3 scripts/container_path_reach.py --out build/measure/container-path
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: safari-prefs-${{ matrix.runner }}
+          name: container-path-${{ matrix.runner }}
           path: build/measure
           if-no-files-found: ignore
