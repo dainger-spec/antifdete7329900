@@ -1,16 +1,16 @@
 #!/bin/sh
-# The film v3 from its frames (capture.mjs → video/.cache/frames3/<lang>/) and a sound: H.264 High, 1920 × 1080,
+# The film (v4) from its frames (capture.mjs → video/.cache/frames3/<lang>/, or <lang>-v/ for the vertical cut) and a sound: H.264 High,
 # 60 frames a second, BT.709 (what every player and site expects), AAC 256 kb/s, the index at the front so it
 # starts at once.
 #
-#   sh tools/film3/encode.sh ru --audio FILE [--out FILE]   # → video/lumen-v3-ru.mp4
+#   sh tools/film3/encode.sh ru --audio FILE [--out FILE]   # → video/lumen-v4-ru.mp4 (ru-v: the vertical cut)
 # Without --audio the mp4 has no sound (and says so).
 set -e
 cd "$(dirname "$0")/../.."
 lang=${1:-ru}
 shift || true
 audio=""
-out=video/lumen-v3-$lang.mp4
+out=video/lumen-v4-$lang.mp4
 while [ $# -gt 0 ]; do
   case "$1" in
     --audio) audio="$2"; shift 2 ;;
