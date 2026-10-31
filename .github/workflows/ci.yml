@@ -4,7 +4,7 @@ name: CI
 # set one by one on the app as built, as every behavior has them — what a page then sees, against the
 # real Safari and against every behavior on (scripts/page_probe.py), and on macOS 27 whether the AIA
 # canary stays unasked for (scripts/aia_variants.py) — and every feature's default both ways on each
-# macOS. Never merged.
+# macOS; on macOS 26 also with a copy declaring SDK 14.0, as the release builds (Xcode 27) do. Never merged.
 on:
   push:
 
@@ -14,7 +14,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-26, xcode-27]
+        # This commit: macOS 26 only (run 497 had macOS 27, whose build declares 14.0 already).
+        runner: [macos-26]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
@@ -36,6 +37,28 @@ jobs:
         timeout-minutes: 10
         run: |
           python3 scripts/page_probe.py --app build/unsandboxed/PrivacyBrowser.app --out build/measure/page \
+            --features "TrustedTypesEnabled=on,MutationEventsEnabled=off,FontFaceSetConstructorEnabled=off,ShouldTakeNearSuspendedAssertions=off"
+      - name: On macOS 26, the same with a copy declaring SDK 14.0, as a build made with Xcode 27 does
+        if: matrix.runner == 'macos-26'
+        continue-on-error: true
+        timeout-minutes: 12
+        run: |
+          mkdir -p build/sdk14 build/measure/sdk14
+          codesign -d --entitlements - --xml build/unsandboxed/PrivacyBrowser.app > build/sdk14/entitlements.plist 2>/dev/null || true
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0, "scripts")
+          import aia_variants
+          copy = aia_variants.copy_declaring("build/unsandboxed/PrivacyBrowser.app", "14.0", "build/sdk14", "build/sdk14/entitlements.plist")
+          print("the copy:", copy, aia_variants.declared_sdk(copy + "/Contents/MacOS/PrivacyBrowser") if copy else "none")
+          PY
+          app=build/sdk14/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
+          "$app" --loader-inventory --all-features | grep '^LOADER feature' | sort > build/measure/sdk14/as-built.txt
+          "$app" --loader-inventory --all-features --sdk-everything | grep '^LOADER feature' | sort > build/measure/sdk14/everything.txt
+          wc -l build/measure/sdk14/*.txt
+          echo "== SDK 14.0 on macOS 26: the features whose default the SDK's behaviors change"
+          diff build/measure/sdk14/as-built.txt build/measure/sdk14/everything.txt || true
+          python3 scripts/page_probe.py --app build/sdk14/PrivacyBrowser.app --out build/measure/page14 \
             --features "TrustedTypesEnabled=on,MutationEventsEnabled=off,FontFaceSetConstructorEnabled=off,ShouldTakeNearSuspendedAssertions=off"
       - name: The AIA canary with the four features
         if: matrix.runner == 'xcode-27'
