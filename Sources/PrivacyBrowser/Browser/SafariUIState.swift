@@ -48,6 +48,8 @@ enum SafariUIState {
             return
         }
         let saved = NSDictionary(contentsOfFile: path + ".plist") as? [String: Any] ?? [:]
+        let original = UserDefaults.standard
+        let cached = profileDefaults.persistentDomain(forName: path)?.count ?? 0
         if !NSDictionary(dictionary: profileDefaults.persistentDomain(forName: path) ?? [:]).isEqual(to: saved) {
             profileDefaults.setPersistentDomain(saved, forName: path)
         }
@@ -57,6 +59,7 @@ enum SafariUIState {
         defaults = profileDefaults
         domain = path
         atexit { SafariUIState.writeOut() }
+        SafariUIStateMeasure.started(path: path, suite: profileDefaults, original: original, cached: cached, saved: saved.count)
     }
 
     /// The domain written to its file as the process exits: after the application's own end, when
@@ -71,5 +74,6 @@ enum SafariUIState {
         } catch {
             log.error("Safari's window state could not be written before the seal: \(error.logKind, privacy: .public)")
         }
+        SafariUIStateMeasure.lateWrite(defaults)
     }
 }
