@@ -10,7 +10,7 @@ Search description: Sign in to your Lumen account: by email with a one-time code
 
 # Create an account
 
-You need an account for a subscription and for sync between Macs. Profiles and their data stay encrypted on your Mac.
+You need an account to pay and to sync between Macs. Profiles and their data stay encrypted on your Mac.
 
 ## With email
 
@@ -32,7 +32,7 @@ Already have an account? Sign in
 
 ## What the account holds
 
-- Your subscription and invoices
+- Your plan, paid period and payments
 - Your Macs: how many, and when they were last online
 - Encrypted sync blocks — only you can read them
 

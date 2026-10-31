@@ -90,8 +90,8 @@ export default {
   },
   reports: {
     title: 'Reports',
-    lead: 'The raw data of every release’s comparison and checks — JSON you can open and compare yourself.',
-    status: '{{tbd:q7:Published here with each release}}',
+    lead: 'The raw data of the comparison with Safari and the leak checks — JSON you can open and compare yourself. No build logs and no build machine paths: only what was measured.',
+    status: 'Published here with every release',
     sample: ['Release of 29 October 2026', 'macOS 26.6.2 · Safari 26.6.2', 'JSON'],
   },
   cta: {

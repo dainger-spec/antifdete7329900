@@ -32,11 +32,14 @@ export default function pricing(c, { lang }) {
     <div>${checkList(c.included.items, lang, { accent: true })}</div>
   </div></div></section>`;
 
+  // Four cards, two by two: the trial, how to pay (crypto only), what happens when a period ends (no automatic
+  // charges: a reminder, export only, data kept), refunds.
   const terms = `<section class="section"><div class="container">
-    <div class="grid c3">
+    <div class="grid c2">
       <div class="card pad-lg reveal"><span class="tile-icon">${icon('clock', 18)}</span><h3 class="h3">${inline(c.trial.title, lang)}</h3><p style="margin-top:10px">${inline(c.trial.text, lang)}</p></div>
-      <div class="card pad-lg reveal"><span class="tile-icon">${icon('creditcard', 18)}</span><h3 class="h3">${inline(c.payment.title, lang)}</h3>
+      <div class="card pad-lg reveal"><span class="tile-icon">${icon('wallet', 18)}</span><h3 class="h3">${inline(c.payment.title, lang)}</h3>
         <ul class="list-check" style="margin-top:14px">${c.payment.items.map((i) => `<li>${icon(i.icon, 16)}<span><strong>${inline(i.t, lang)}.</strong> ${inline(i.d, lang)}</span></li>`).join('')}</ul></div>
+      <div class="card pad-lg reveal"><span class="tile-icon">${icon('calendar', 18)}</span><h3 class="h3">${inline(c.period.title, lang)}</h3><p style="margin-top:10px">${inline(c.period.text, lang)}</p></div>
       <div class="card pad-lg reveal"><span class="tile-icon">${icon('refresh', 18)}</span><h3 class="h3">${inline(c.refunds.title, lang)}</h3><p style="margin-top:10px">${inline(c.refunds.text, lang)}</p><p style="margin-top:16px">${linkArrow('refunds.html', c.refunds.link, lang)}</p></div>
     </div>
   </div></section>`;

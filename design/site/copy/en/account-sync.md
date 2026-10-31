@@ -4,24 +4,24 @@
 
 Window title: Account — Lumen
 
-Search description: Your Lumen account: subscription and billing, devices, sync, invoices and account settings.
+Search description: Your Lumen account: plan and paid period, devices, sync, payments and account settings.
 
 ---
 
 you@example.com
 
-⟦q2: Professional⟧ plan
+Professional plan
 
-- Subscription and billing
+- Plan and payment
 - Devices
 - Sync
-- Invoices
+- Payments
 - Settings
 - Sign out
 
 # Sync
 
-What the server stores. Only you can decrypt it — on your Mac, with your master password.
+Lumen’s main promise, right in your account: the server holds only ciphertext. Only you can read it — on your Mac, with your master password.
 
 Objects
 
@@ -49,7 +49,7 @@ Opaque names, sizes and times. What is inside only your Macs know.
 
 33 more objects
 
-Profile names, and what is in them, live only in the app.
+There are no profile names here: the server doesn’t know them. They exist only in the app on your Macs.
 
 `vault-header` is the vault’s header: the salt, the Argon2id parameters and the encrypted key. It holds no secret: a new Mac needs it to open the vault with your password.
 

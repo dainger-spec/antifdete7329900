@@ -18,30 +18,30 @@ Refunds
 
 What we know about you, why, and for how long. And what we do not know and cannot find out.
 
-In effect from ⟦q9: the publication date⟧
+In effect from ⟦q12: the publication date⟧
 
 ## Sections
 
 1. In short
-2. Who we are
+2. What this covers
 3. What the server knows about you
-4. What we do not know
+4. What we don’t know
 5. The app
-6. This site
+6. The website
 7. Who we share data with
 8. Your rights
 9. Changes
 
 ## In short
 
-- Profiles, what is in them, and your master password stay on your Macs. The server does not see them and cannot decrypt them.
-- We know little about you: your email (if you sign in with one), the IP addresses of requests to our server, how many devices you have, the sizes and change times of encrypted sync blocks — and what an invoice needs.
+- Your profiles, what’s in them and your master password stay on your Macs. The server can’t see them and can’t decrypt them.
+- We know little about you: your email (if you sign in by email), the IP addresses of requests to the server, how many devices you have, the sizes and change times of encrypted sync blocks — and your payment data.
 - **A forgotten master password cannot be recovered.** Not by us, not by anyone.
-- This site has no analytics and no third-party scripts. The app sends us neither analytics nor crash reports.
+- The website has no analytics and no third-party scripts. The app sends us no analytics and no crash reports.
 
-## Who we are
+## What this covers
 
-The data controller is ⟦q9: company name⟧, ⟦q9: country of registration, address, registration number⟧. For anything about data, write to privacy@lumen.example.
+Lumen: the Mac app, the lumenbrowser.io website and the sync server. For questions about your data, write to privacy@lumenbrowser.io.
 
 ## What the server knows about you
 
@@ -49,51 +49,50 @@ This is the complete list.
 
 | Data | Why | How long we keep it |
 | --- | --- | --- |
-| **Email** — only if you sign in with one | Signing in with a one-time code, invoices, subscription notices | While the account exists |
-| **IP addresses** of requests to the server | Abuse prevention and diagnostics | ⟦q9: 30 days⟧ in server logs |
-| **How many devices** the account has, and when each last called in | The plan’s device limit, revoking a device | While the account exists |
+| **Email** — only if you sign in by email | One-time sign-in codes, receipts, the reminder before a period ends | As long as the account exists |
+| **IP addresses** of requests to the server | Abuse protection and diagnostics | ⟦q12: 30 days⟧ in server logs |
+| **The number of devices** in the account and when each last checked in | The plan’s Mac limit, revoking a device | As long as the account exists |
 | **Sizes and change times** of encrypted sync blocks, and their revisions | Sync itself | Until you delete them or the account |
-| **Payment data**: plan, amount, date, status; for crypto, the address and transaction | Invoices, accounting, refunds | ⟦q9: as long as accounting law requires⟧ |
-| **Support correspondence** | To answer you | ⟦q9: 2 years⟧ |
+| **Payment data**: the plan, the period, the amount in dollars, the coin and how much of it, the payment address and the network transaction | Receipts, the paid period, refunds | ⟦q12: the retention period⟧ |
+| **Support emails** | To answer you | ⟦q12: 2 years⟧ |
 
-Your card number is handled by the payment provider; it never reaches us.
+## What we don’t know and can’t find out
 
-## What we do not know and cannot find out
-
-- Everything in your profiles — settings, proxies, passwords, cookies, history, bookmarks — is encrypted on your Mac with a key derived from your master password **before** anything leaves for the server. The server keeps ciphertext only. It does not have the key.
-- **We cannot decrypt profile data** — not on our own initiative and not on anyone’s demand.
-- Objects on the server are named by an HMAC of their real names. They do not even say that an object is “a profile’s history”, or exactly how many profiles there are.
-- We do not store your master password and cannot reset it. **A forgotten master password cannot be recovered**: without it, profile data cannot be decrypted — by you or by us.
-- If you sign in with a licence key, we do not have your email either.
+- Everything in your profiles — settings, proxies, passwords, cookies, history, bookmarks — is encrypted on your Mac with a key from your master password **before** anything goes to the server. The server stores only ciphertext. It has no key.
+- **We cannot decrypt your profile data** — not by choice, not on anyone’s demand.
+- Object names on the server are HMACs of their real names. They don’t even reveal that an object is “a profile’s history”, or the exact number of profiles.
+- We don’t store your master password and can’t reset it. **A forgotten master password cannot be recovered**: without it, profile data can’t be decrypted — by you or by us.
+- If you sign in with a licence key, we don’t have your email either.
 
 ## The app on your Mac
 
-- The app sends us no analytics, no crash reports, and nothing about the sites you open.
-- To learn a proxy’s country, time zone and exit IP, the app asks the geolocation services ipinfo.io, get.geojs.io and ipwho.is — **through the proxy itself**, when a proxied profile starts or when you check a proxy. They see the proxy’s address, not yours.
-- The search at the start of a warm-up goes through DuckDuckGo, as from the address bar — through the profile’s proxy as well.
-- The sites you open in profiles get what they would get from Safari. That is between you and those sites; their privacy policies apply to them.
+- The app sends us no analytics, no crash reports and nothing about which sites you open.
+- To learn a proxy’s country, time zone and external IP, the app asks the geolocation services ipinfo.io, get.geojs.io and ipwho.is — **through the proxy itself**, when a profile with a proxy starts or you check a proxy. They see the proxy’s address, not yours.
+- The search at the start of a warm-up goes through DuckDuckGo, as from the address bar — through the profile’s proxy too.
+- Sites you open in your profiles get what they would get from Safari. That is between you and those sites; their privacy policies apply to them.
 
-## This site
+## The website
 
-- This site has no analytics, no advertising pixels and no third-party scripts. Fonts and images come from our own server.
-- The site has one cookie: your account session after you sign in. Until you do, there are none.
+- The website has no analytics, no ad pixels and no third-party scripts. Fonts and images come from our own server.
+- The website has one cookie: your account session after you sign in. Until you sign in, there are no cookies.
+- The payment page is ours: you don’t leave the site; the server gets the address to pay to from the crypto processor.
 
 ## Who we share data with
 
-- **Payment provider** — ⟦q8: name⟧ — for card payments.
-- **Email service** — ⟦q9: name⟧ — to send sign-in codes and invoices.
-- **Hosting** — ⟦q9: name and country⟧ — where the server runs.
+- **The crypto processor** — ⟦q12: name⟧ — takes crypto payments: it gets the amount, the coin and the order number and gives back an address to pay to. It is the only one that receives payment data. Neither your email nor any profile data is passed to it.
+- **The email service** — ⟦q12: name⟧ — to send sign-in codes, receipts and reminders.
+- **Hosting** — ⟦q12: name and country⟧ — where the server runs.
 
-We do not sell data or pass it to advertising networks. On a lawful demand we can hand over only what we have — the list above. Profile data is encrypted with us, and we cannot decrypt it.
+We don’t sell data or pass it to ad networks. On a lawful demand we can hand over only what we have — the list above. Your profile data is encrypted on our side, and we can’t decrypt it.
 
 ## Your rights
 
-- **Find out** what data we hold about you, and get a copy — write to privacy@lumen.example.
-- **Delete** your account and all sync data — in your account, at once, with no emails needed.
-- **Correct** your email — in your account settings.
-- **Opt out** of release emails — in the same place.
-- **Complain** to a supervisory authority — ⟦q9: which one depends on the jurisdiction⟧.
+- **Find out** what data we have about you and get a copy — write to privacy@lumenbrowser.io.
+- **Delete** your account and all sync data — in your account, at once, no emails needed.
+- **Correct** your email — in account settings.
+- **Opt out** of release emails — there too.
+- **Complain** to the data protection authority of your country.
 
 ## Changes
 
-We email you about significant changes ⟦q9: 30 days⟧ before they take effect. Earlier versions of this policy stay on this page.
+We’ll email you about material changes ⟦q12: 30 days⟧ before they take effect. Earlier versions of this policy stay on this page.

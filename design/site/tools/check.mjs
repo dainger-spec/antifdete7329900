@@ -57,7 +57,13 @@ function norm(x) { return String(x).replace(/[\s  ]/g, '').replace(/,/g, '.')
 const FORBIDDEN = [
   /антидетект/i, /anti-?detect/i, /undetect/i, /верификац/i, /антифрод/i, /anti-?fraud/i, /\bKYC\b/i,
   /обход\S*\s+(провер|верифик|антифрод|защит)/i, /\bbypass\S*\s+(check|verif|anti)/i, /\bevad/i, /не\s+обнаруж/i,
+  // the owner's decisions: no cards at all (crypto only), nothing renews by itself, macOS 26, no Team ID, the domain
+  /банковск\S*\s+карт/i, /номер\S*\s+карт/i, /\bкартой\b/i, /без\s+(привязки\s+)?карты/i, /\bby card\b/i, /\bcard number/i, /\bno card\b/i, /\bVisa\b/, /Mastercard/i, /\bStripe\b/, /\bPaddle\b/,
+  /автопродл/i, /auto-?renew/i, /отменить\s+подписку/i, /cancel\s+(your\s+|the\s+)?subscription/i, /следующее\s+списание/i, /next\s+charge/i,
+  /Sonoma/i, /macOS\s*14\b/i, /\bTeam\s*ID\b/i, /lumen\.example/i,
 ];
+// Words that may appear nowhere in a page's source either: not in the meta tags, the alt texts or titles
+const FORBIDDEN_SOURCE = [/антидетект/i, /anti-?detect/i, /lumen\.example/i, /\bTeam\s*ID\b/i];
 const browser = await chromium.launch();
 const ctx = await browser.newContext();
 await ctx.route((u) => !u.href.startsWith('file:'), (r) => { fail('network', `request ${r.request().url()}`); return r.abort(); });
@@ -124,6 +130,11 @@ for (const lang of LANGS) {
     for (const rx of FORBIDDEN) {
       const m = text.match(rx);
       if (m) fail('wording', `${lang}/${page.slug}: «${m[0]}»`);
+    }
+    const source = fs.readFileSync(file, 'utf8');
+    for (const rx of FORBIDDEN_SOURCE) {
+      const m = source.match(rx);
+      if (m) fail('wording', `${lang}/${page.slug} (source): «${m[0]}»`);
     }
     await p.close();
   }

@@ -2,7 +2,7 @@
 export default {
   navTitle: 'Download',
   title: 'Try {{name}} free',
-  lead: '{{tbd:q3:7 days}}, every feature, no card needed.',
+  lead: '7 days free, up to 3 profiles, every feature.',
   primary: 'Download for Mac',
   secondary: 'Pricing',
 };

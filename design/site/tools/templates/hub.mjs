@@ -22,7 +22,7 @@ export function hub({ pages, tbdIndex }) {
     index: 'Главная', features: 'Возможности', 'how-it-works': 'Как устроено', verification: 'Как мы проверяем', pricing: 'Цены', download: 'Скачать',
     docs: 'Документация — структура', 'docs-import-cookies': 'Документация — шаблон статьи', blog: 'Обновления — список', 'blog-no-noise': 'Обновления — запись',
     login: 'Вход по email', 'login-code': 'Вход: код из письма', 'login-key': 'Вход по ключу', signup: 'Регистрация',
-    account: 'Кабинет: подписка и оплата', 'account-devices': 'Кабинет: устройства', 'account-sync': 'Кабинет: синхронизация', 'account-invoices': 'Кабинет: счета', 'account-settings': 'Кабинет: настройки',
+    account: 'Кабинет: тариф и оплата', 'account-devices': 'Кабинет: устройства', 'account-sync': 'Кабинет: синхронизация', 'account-invoices': 'Кабинет: платежи', 'account-settings': 'Кабинет: настройки', checkout: 'Оплата криптовалютой',
     privacy: 'Политика конфиденциальности', terms: 'Условия использования', refunds: 'Правила возврата', support: 'Поддержка и контакты', 404: 'Страница 404',
   };
   const rows = groups.map((g) => `<tr><th colspan="4" style="padding-top:24px;color:var(--text-secondary)">${esc(g)}</th></tr>` +
@@ -35,15 +35,18 @@ export function hub({ pages, tbdIndex }) {
   const motion = MOTION.map((m) => `<figure class="card" style="padding:16px"><video src="../shots/motion/${m.file}" controls muted playsinline preload="metadata" style="width:100%;border-radius:8px;background:var(--backdrop);display:block" aria-label="${esc(m.title)}"></video>
     <figcaption style="margin-top:12px"><div class="h4" style="font-size:15px">${esc(m.title)}</div><p class="caption" style="margin-top:4px">${esc(m.note)}</p><p class="caption" style="margin-top:4px"><a href="../shots/motion/${m.file}">${esc(m.file)}</a></p></figcaption></figure>`).join('');
 
-  const q = QUESTIONS.map((x, i) => {
+  // Decided questions: what was decided, in one line each. Open ones: options, a note, where they show on the pages.
+  const decided = QUESTIONS.filter((x) => x.decision);
+  const open = QUESTIONS.filter((x) => !x.decision);
+  const done = `<div class="table-wrap" style="margin-top:20px;max-width:900px"><div class="table-scroll"><table class="table compact"><tbody>${decided.map((x) => `<tr><td class="strong" style="width:34%">${x.id.slice(1)}. ${esc(x.title)}</td><td>${esc(x.decision)}</td></tr>`).join('')}</tbody></table></div></div>`;
+  const q = open.map((x) => {
     const where = tbdIndex[x.id] ? Object.entries(tbdIndex[x.id]).map(([slug, n]) => `<a href="ru/${slug}.html">${esc(names[slug] || slug)}</a>${n > 1 ? ` <span class="caption">×${n}</span>` : ''}`).join(', ') : '';
     const opts = x.options ? `<div class="qopts">${x.options.map((o, k) => `<label class="qopt"><input type="radio" name="${x.id}" value="${o.id}"${k === 0 ? ' checked' : ''}><span><strong>${o.id}. ${esc(o.label)}</strong>${k === 0 && x.recommend ? ' <span class="tag accent" style="height:20px;font-size:11px">рекомендую</span>' : ''}<br><span class="caption" style="font-size:13px;color:var(--text-secondary)">${esc(o.note)}</span></span></label>`).join('')}</div>` : '';
     const facts = x.facts ? `<ul class="bullets" style="margin-top:12px">${x.facts.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : '';
-    const extra = x.extra ? `<ul class="bullets" style="margin-top:12px">${x.extra.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : '';
     return `<section class="card pad-lg qcard" id="${x.id}" data-q="${x.id}">
-      <div class="row" style="justify-content:space-between;align-items:flex-start"><h3 class="h3">${i + 1}. ${esc(x.title)}</h3>${where ? '' : ''}</div>
+      <h3 class="h3">${x.id.slice(1)}. ${esc(x.title)}</h3>
       <p class="small muted" style="margin-top:8px">${esc(x.why)}</p>
-      ${opts}${extra}${facts}
+      ${opts}${facts}
       ${x.recommend ? `<p class="small" style="margin-top:12px;color:var(--text-primary)">${esc(x.recommend)}</p>` : ''}
       <textarea class="input" data-note placeholder="Комментарий или свой вариант" style="margin-top:14px;min-height:64px"></textarea>
       ${where ? `<p class="caption" style="margin-top:10px">Жёлтым на страницах: ${where}</p>` : ''}
@@ -86,8 +89,12 @@ export function hub({ pages, tbdIndex }) {
   <p class="lead" style="margin-top:10px;max-width:820px">Записи из этого же прототипа (Chromium, 25 кадров в секунду — кривые лучше смотреть вживую). Правила: обычное движение ≤ 300 мс, ничего не пульсирует в покое, всё уважает Reduce Motion, страница читается без JavaScript.</p>
   <div class="grid c2" style="margin-top:24px">${motion}</div>
 
-  <h2 class="h2" style="margin-top:72px" id="questions">Вопросы</h2>
-  <p class="lead" style="margin-top:10px;max-width:820px">Выберите варианты — рекомендуемый отмечен и выбран по умолчанию, — допишите комментарии и нажмите «Скопировать ответы»: получится текст для чата.</p>
+  <h2 class="h2" style="margin-top:72px" id="decisions">Решения владельца</h2>
+  <p class="lead" style="margin-top:10px;max-width:820px">Ответы на первые одиннадцать вопросов внесены в страницы; их отметок на сайте больше нет.</p>
+  ${done}
+
+  <h2 class="h2" style="margin-top:72px" id="questions">Открытые вопросы</h2>
+  <p class="lead" style="margin-top:10px;max-width:820px">Выберите варианты — рекомендуемый отмечен и выбран по умолчанию, — допишите комментарии и нажмите «Скопировать ответы»: получится текст, который можно прислать одним сообщением. Жёлтым на страницах подсвечено то, что от них зависит.</p>
   <div style="display:grid;gap:16px;margin-top:24px;max-width:900px">${q}</div>
   <div class="row" style="margin-top:24px"><button class="btn primary lg" type="button" id="copy-answers">${icon('copy', 16)}Скопировать ответы</button><span class="caption copied-msg">Скопировано в буфер обмена</span></div>
   <pre id="answers-out" class="code" style="margin-top:16px;padding:14px 16px;white-space:pre-wrap;display:none"></pre>
@@ -102,7 +109,7 @@ export function hub({ pages, tbdIndex }) {
       var picked = card.querySelector('input[type=radio]:checked');
       var note = card.querySelector('[data-note]').value.trim();
       var title = card.querySelector('h3').textContent.replace(/^\\d+\\.\\s*/, '');
-      var line = (i + 1) + '. ' + title + ': ' + (picked ? picked.value + ' — ' + picked.parentElement.querySelector('strong').textContent.replace(/^\\w\\.\\s*/, '') : '—');
+      var line = id.slice(1) + '. ' + title + ': ' + (picked ? picked.value + ' — ' + picked.parentElement.querySelector('strong').textContent.replace(/^\\w\\.\\s*/, '') : '—');
       if (note) line += ' (' + note + ')';
       lines.push(line);
     });

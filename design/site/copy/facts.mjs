@@ -41,10 +41,18 @@ export const FACTS = [
   { value: ['4', '12', '84'], what: 'образец данных приложения: прогрев 4 из 12 страниц, 84 cookies (профиль Northwind)', source: 'Sources/PrivacyBrowser/App/UISnapshots.swift sampleRows: WarmUpStatus(phase: .running, visited: 3, total: 12, cookies: 84); в прототипе списка — «Прогрев 4/12 · cookies: 84»' },
   { value: ['84', '142', '1730', '1 730', '1,730'], what: 'образец списка прокси: задержка 84, 142 и 1 730 мс (медиана трёх туннелей)', source: 'UISnapshots.swift proxyList() (7064cca): works(…, [80, 84, 97]), works(…, [138, 142, 160]), works(…, [1730]); latencyMilliseconds = medianLatency' },
   // Product facts
-  { value: '14', what: 'минимальная macOS 14 Sonoma', source: 'Resources/Info.plist: LSMinimumSystemVersion 14.0; README «macOS 14 Sonoma or later»' },
+  { value: '26', what: 'минимальная macOS — 26 и новее, только Apple Silicon', source: 'решение владельца (вопрос 11, сквозная правка 3): «macOS 26 и новее», «Intel не поддерживается»; прежние 14.0 из Info.plist неверны' },
   { value: '26', what: 'Safari 26 (геометрия окна, «Mac · Safari 26» в образцах)', source: 'docs/ISOLATION_AND_LIMITATIONS.md §2; UISnapshots.swift' },
   { value: '10', what: 'символов — минимум мастер-пароля', source: 'Localizable.strings setup.rule.length: «Используйте не менее 10 символов.»' },
   { value: '32', what: 'МБ — предел файла cookies', source: 'Localizable.strings cookies.reason.fileTooLarge: «не больше 32 МБ»' },
+  // The owner's decisions (questions 2, 3, 10)
+  { value: ['19', '59', '149'], what: 'цена в месяц, $: Личный, Профессиональный, Команда', source: 'решение владельца, вопрос 2' },
+  { value: ['190', '590', '1490', '1 490', '1,490'], what: 'цена за год, $ — цена десяти месяцев', source: 'решение владельца, вопрос 2: «Годовая оплата — цена десяти месяцев»' },
+  { value: ['10', '50', '200'], what: 'профилей в тарифе: Личный, Профессиональный, Команда', source: 'решение владельца, вопрос 2' },
+  { value: ['2', '3', '10'], what: 'Mac в тарифе: Личный, Профессиональный, Команда', source: 'решение владельца, вопрос 2' },
+  { value: ['5', '1'], what: 'мест: Команда — 5, Личный и Профессиональный — 1', source: 'решение владельца, вопрос 2' },
+  { value: ['7', '3'], what: 'пробный период: 7 дней, до 3 профилей', source: 'решение владельца, вопрос 3' },
+  { value: ['14', '7'], what: 'возврат: 14 дней с первой оплаты, 7 дней после продления', source: 'решение владельца, вопрос 10' },
   // Dates and conventions
   { value: ['2026', '29'], what: 'даты прогонов и изменений: 29 октября 2026; год в подвале', source: 'git log (все изменения ветки — 2026-10-29); CI #385, #388' },
   { value: '26', what: 'дата статьи о шуме: 26 октября 2026', source: 'README: «Fingerprint note (2026-10-26)»' },

@@ -254,15 +254,15 @@ On your Mac, encrypted. When you sync, only encrypted data goes to the server, a
 
 **Which Mac and macOS do I need?**
 
-macOS 14 Sonoma or later, ⟦q11: on Apple silicon or Intel⟧.
+A Mac with Apple Silicon and macOS 26 or later. Intel Macs are not supported.
 
 **How can I pay?**
 
-By card or in crypto. Paying in crypto, you can skip the email: you get a licence key.
+In crypto, on our own payment page — for a month or a whole year. You can skip the email: you get a licence key.
 
 ## Try it free
 
-⟦q3: 7 days⟧, every feature, no card needed.
+7 days free, up to 3 profiles, every feature.
 
 [Download for Mac]
 

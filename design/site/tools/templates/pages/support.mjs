@@ -31,8 +31,7 @@ export default function support(c, { lang }) {
   const k = c.contacts;
   const contacts = `<section class="section" id="contacts"><div class="container">
     <h2 class="h2" style="margin-bottom:32px">${inline(k.title, lang)}</h2>
-    <div class="grid c3">${k.items.map((i) => `<div class="card reveal"><span class="tile-icon neutral">${icon(i.icon, 18)}</span><h3 class="h4">${inline(i.t, lang)}</h3><p><a href="mailto:${esc(plain(i.v))}">${inline(i.v, lang)}</a></p>${i.d ? `<p style="margin-top:8px">${inline(i.d, lang)}</p>` : ''}</div>`).join('')}
-      <div class="card reveal"><span class="tile-icon neutral">${icon('house', 18)}</span><h3 class="h4">${inline(k.company, lang)}</h3><p>${inline(k.companyValue, lang)}</p></div></div>
+    <div class="grid c3">${k.items.map((i) => `<div class="card reveal"><span class="tile-icon neutral">${icon(i.icon, 18)}</span><h3 class="h4">${inline(i.t, lang)}</h3><p><a href="mailto:${esc(plain(i.v))}">${inline(i.v, lang)}</a></p>${i.d ? `<p style="margin-top:8px">${inline(i.d, lang)}</p>` : ''}</div>`).join('')}</div>
   </div></section>`;
 
   return { body: hero + topics + form + contacts, bodyClass: 'page-support' };

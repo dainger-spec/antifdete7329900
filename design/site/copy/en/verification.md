@@ -202,11 +202,11 @@ If the test page says “Canvas: Spoofed”, open it in plain Safari 26: devicei
 
 ### Reports
 
-The raw data of every release’s comparison and checks — JSON you can open and compare yourself.
+The raw data of the comparison with Safari and the leak checks — JSON you can open and compare yourself. No build logs and no build machine paths: only what was measured.
 
 **Release of 29 October 2026** · macOS 26.6.2 · Safari 26.6.2 · JSON
 
-⟦q7: Published here with each release⟧
+Published here with every release
 
 [JSON]
 

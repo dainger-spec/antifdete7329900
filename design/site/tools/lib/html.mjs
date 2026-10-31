@@ -5,7 +5,7 @@
 export const esc = (s) => String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-let product = { name: 'Lumen', domain: 'lumen.example' };
+let product = { name: 'Lumen', domain: 'lumenbrowser.io' };
 export function setProduct(p) { product = { ...product, ...p }; }
 export const productName = () => product.name;
 
@@ -48,7 +48,8 @@ export function typo(html, lang) {
 }
 
 /// Inline markup in copy strings: **strong**, `code`, [text](href), _em_, {{name}}, {{domain}},
-/// {{tbd:qN:text}} (a value the owner decides, highlighted in the prototype), {{nb:…}} (no wrap).
+/// {{tbd:qN:text}} (a value the owner decides, highlighted in the prototype), {{rel:text}} (a value each release's
+/// build fills in: version, size, SHA-256 — sample data in the prototype), {{nb:…}} (no wrap).
 export function inline(s, lang) {
   if (s == null) return '';
   let out = esc(s);
@@ -58,6 +59,7 @@ export function inline(s, lang) {
   out = out.replace(/(^|[\s(])_([^_]+)_(?=[\s.,;:)!?]|$)/g, '$1<em>$2</em>');
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, href) => `<a href="${href}">${t}</a>`);
   out = out.replace(/\{\{tbd:(q\d+):([^}]*)\}\}/g, (m, q, t) => `<span class="tbd" data-q="${q}" title="Решение владельца: вопрос ${q.slice(1)}">${t}</span>`);
+  out = out.replace(/\{\{rel:([^}]*)\}\}/g, (m, t) => `<span class="rel" data-sample title="Подставляется из сборки выпуска">${t}</span>`);
   out = out.replace(/\{\{nb:([^}]*)\}\}/g, (m, t) => `<span style="white-space:nowrap">${t}</span>`);
   return lang ? typo(out, lang) : out;
 }
@@ -67,7 +69,7 @@ export function plain(s) {
   if (s == null) return '';
   return String(s)
     .replace(/\{\{name\}\}/g, product.name).replace(/\{\{domain\}\}/g, product.domain)
-    .replace(/\{\{tbd:q\d+:([^}]*)\}\}/g, '$1').replace(/\{\{nb:([^}]*)\}\}/g, '$1')
+    .replace(/\{\{tbd:q\d+:([^}]*)\}\}/g, '$1').replace(/\{\{rel:([^}]*)\}\}/g, '$1').replace(/\{\{nb:([^}]*)\}\}/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
 }
 

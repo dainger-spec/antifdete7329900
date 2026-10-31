@@ -4,18 +4,18 @@
 
 Window title: Account — Lumen
 
-Search description: Your Lumen account: subscription and billing, devices, sync, invoices and account settings.
+Search description: Your Lumen account: plan and paid period, devices, sync, payments and account settings.
 
 ---
 
 you@example.com
 
-⟦q2: Professional⟧ plan
+Professional plan
 
-- Subscription and billing
+- Plan and payment
 - Devices
 - Sync
-- Invoices
+- Payments
 - Settings
 - Sign out
 
@@ -30,13 +30,13 @@ Signing in, emails, and deleting the account.
 - **Email** — you@example.com
 - **Method** — One-time code by email
 
-We delete your email and give you a licence key. Without the key, access cannot be recovered.
+We delete your email and give you a licence key. Without the key, access cannot be recovered, and there will be no email reminders when a period ends.
 
 [Switch to a licence key]
 
 ## Emails
 
-Invoices and subscription notices
+Receipts, and a reminder before your paid period ends
 
 New releases — at most once a month
 
@@ -54,6 +54,6 @@ This browser — now
 
 ## Delete account
 
-We delete the account, the subscription and all encrypted sync data. The profiles on your Macs stay — encrypted, as they were.
+We delete the account and all encrypted sync data from the server. The profiles on your Macs stay — encrypted, as they were.
 
 [Delete account…]

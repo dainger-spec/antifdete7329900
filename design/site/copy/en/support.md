@@ -12,7 +12,7 @@ Support
 
 # How can we help?
 
-Most answers are in the docs. If yours is not, write to us: we answer by email ⟦q9: within a business day⟧.
+Most answers are in the docs. If yours is not, write to us: we answer by email ⟦q12: within a business day⟧.
 
 ## Common questions
 
@@ -30,7 +30,7 @@ Never send your master password, licence key or cookie export files. We will not
 
 Topic
 
-Варианты: A question about using it · Billing and subscription · A bug in the app · Security
+Варианты: A question about using it · Payments and refunds · A bug in the app · Security
 
 Email for our reply
 
@@ -50,26 +50,22 @@ The logs hold none of your data in the clear — every build checks that.
 
 ### Support
 
-support@lumen.example
+support@lumenbrowser.io
 
 ### Security
 
-security@lumen.example
+security@lumenbrowser.io
 
 Found a vulnerability? Write here — we reply, and tell you when the fix ships.
 
-### Billing and refunds
+### Payments and refunds
 
-billing@lumen.example
+billing@lumenbrowser.io
 
 ### Privacy
 
-privacy@lumen.example
+privacy@lumenbrowser.io
 
 ### Legal
 
-legal@lumen.example
-
-### Company
-
-⟦q9: name, country, address⟧
+legal@lumenbrowser.io

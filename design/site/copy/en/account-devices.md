@@ -4,26 +4,26 @@
 
 Window title: Account — Lumen
 
-Search description: Your Lumen account: subscription and billing, devices, sync, invoices and account settings.
+Search description: Your Lumen account: plan and paid period, devices, sync, payments and account settings.
 
 ---
 
 you@example.com
 
-⟦q2: Professional⟧ plan
+Professional plan
 
-- Subscription and billing
+- Plan and payment
 - Devices
 - Sync
-- Invoices
+- Payments
 - Settings
 - Sign out
 
 # Devices
 
-The Macs signed in to this account. Revoke one you no longer use: it is signed out and stops syncing.
+The Macs signed in to your account. Revoke one you no longer use: it signs out and stops syncing.
 
-## Macs in the account: 2 of ⟦q2: 3⟧
+## Macs in the account: 2 of 3
 
 Mac
 

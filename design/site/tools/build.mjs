@@ -15,8 +15,8 @@ import { hub } from './templates/hub.mjs';
 
 export const LANGS = ['ru', 'en'];
 
-// The working name and a reserved placeholder domain (RFC 2606): both are the owner's decision (q1).
-export const PRODUCT = { name: 'Lumen', domain: 'lumen.example' };
+// The name and the domain, as the owner decided (q1): Lumen, lumenbrowser.io.
+export const PRODUCT = { name: 'Lumen', domain: 'lumenbrowser.io' };
 
 // slug: the file name; template: tools/templates/pages/<template>.mjs; copy: copy/source/<lang>/<copy>.mjs
 export const PAGES = [
@@ -39,6 +39,7 @@ export const PAGES = [
   { slug: 'account-sync', template: 'account', copy: 'account', state: 'sync', group: 'Вход и кабинет' },
   { slug: 'account-invoices', template: 'account', copy: 'account', state: 'invoices', group: 'Вход и кабинет' },
   { slug: 'account-settings', template: 'account', copy: 'account', state: 'settings', group: 'Вход и кабинет' },
+  { slug: 'checkout', template: 'checkout', copy: 'checkout', group: 'Вход и кабинет' },
   { slug: 'privacy', template: 'legal', copy: 'legal', state: 'privacy', group: 'Правовое и поддержка' },
   { slug: 'terms', template: 'legal', copy: 'legal', state: 'terms', group: 'Правовое и поддержка' },
   { slug: 'refunds', template: 'legal', copy: 'legal', state: 'refunds', group: 'Правовое и поддержка' },

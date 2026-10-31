@@ -24,7 +24,7 @@ No account yet? Create one
 
 ## What the account holds
 
-- Your subscription and invoices
+- Your plan, paid period and payments
 - Your Macs: how many, and when they were last online
 - Encrypted sync blocks — only you can read them
 

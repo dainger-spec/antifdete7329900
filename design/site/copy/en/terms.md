@@ -4,7 +4,7 @@
 
 Window title: Terms of use — Lumen
 
-Search description: The rules under which you use Lumen. Short, and with no small print.
+Search description: The rules on which you use Lumen. Short, and no small print.
 
 ---
 
@@ -16,59 +16,63 @@ Refunds
 
 # Terms of use
 
-The rules under which you use Lumen. Short, and with no small print.
+The rules on which you use Lumen. Short, and no small print.
 
-In effect from ⟦q9: the publication date⟧
+In effect from ⟦q12: the publication date⟧
 
 ## Sections
 
 1. Licence
 2. Account
-3. Subscription and payment
+3. Payment and periods
 4. Acceptable use
 5. Your data
 6. Liability
 7. Ending
-8. Governing law
+8. Questions
 
 ## Licence
 
-While your subscription or trial is active, we give you a non-exclusive right to install and use Lumen on your Macs — within your plan’s number of devices and profiles.
+While you have a trial or a paid period, you may install and use Lumen on your Macs — within your plan’s number of profiles and Macs. How many profiles run at once is not limited on any plan.
+
+Lumen runs on Macs with Apple Silicon and macOS 26 or later. Intel Macs are not supported.
 
 ## Account
 
 - You sign in by email with a one-time code, or with a licence key.
-- The key is the only way into an account without an email. Lose it and we cannot restore access.
-- The master password of your profiles is not tied to your account and is unknown to us. A forgotten master password cannot be recovered.
+- The key is the only way into an account without an email. Lose it and we can’t restore access.
+- Your profiles’ master password is not tied to the account and is unknown to us. A forgotten master password cannot be recovered.
 
-## Subscription and payment
+## Payment and periods
 
-- The subscription renews itself at the end of every period until you cancel it. You can cancel in your account at any time; the period you paid for stays in effect.
-- Free trial: ⟦q3: 7 days, no card needed⟧. Nothing is charged when it ends.
-- Prices are on the pricing page. We tell you before a price changes; the change applies from the next period.
+- You pay in crypto, for a month or for a whole year; a year costs ten months. Prices are in US dollars, on the pricing page.
+- Crypto can’t be charged automatically, so nothing renews by itself and there is nothing to cancel: a paid period simply ends. We remind you by email in advance if you sign in by email. You can renew in your account at any time.
+- The trial is 7 days free, up to 3 profiles, with every feature.
+- When a period has ended, the app opens your profiles for data export only, until you renew. **Your data is never deleted.**
+- We tell you about a price change in advance; the new price applies to periods paid for after the change.
 - Refunds follow the refund policy.
 
 ## Acceptable use
 
 Lumen is made for privacy and for working with several accounts. You may not use it:
 
-- for fraud, impersonating another person, or anything that breaks the law;
+- for fraud, for impersonating someone else, or for anything that breaks the law;
 - to spread malware, send spam or attack other people’s systems.
 
-Keeping to the rules of the sites and services you use is up to you. If we learn of prohibited use, we may suspend or end the subscription.
+You follow the rules of the sites and services you use. If we learn of prohibited use, we may close access to the account.
 
 ## Your data
 
-Profiles and everything in them are yours, and are stored on your Macs encrypted. How we handle account data is described in the privacy policy.
+Your profiles and everything in them belong to you and are stored on your Macs, encrypted. We never delete them — not when a period ends, not when you stop paying. How we handle account data is described in the privacy policy.
 
 ## Liability
 
-We check Lumen on every build and publish what we measure and how. Still, the software is provided “as is”: we do not promise it suits every purpose, and we are not responsible for how sites treat your accounts. Our liability is limited to what you paid in the last ⟦q9: 12 months⟧, as far as the law allows.
+We check Lumen on every build and publish what we measure and how. But the software is provided “as is”: we don’t promise it fits every task, and we are not responsible for how sites treat your accounts. Our liability is limited to what you paid in the last ⟦q12: 12 months⟧, as far as the law allows.
 
 ## Ending
 
-You can cancel the subscription and delete the account at any time. When a subscription ends, your profiles stay on your Macs. ⟦q2: Without a subscription the app opens them for export only.⟧
+You can delete your account at any time, in your account. When a paid period ends, your profiles stay on your Macs: the app opens them for data export only. Your data is never deleted.
 
-## Governing law
+## Questions
 
-These terms are governed by the law of ⟦q9: the country⟧. Disputes go ⟦q9: to the courts where the company is registered⟧. Questions: legal@lumen.example.
+Questions about these terms: legal@lumenbrowser.io.

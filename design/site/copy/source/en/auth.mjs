@@ -31,7 +31,7 @@ export default {
   },
   signup: {
     title: 'Create an account',
-    lead: 'You need an account for a subscription and for sync between Macs. Profiles and their data stay encrypted on your Mac.',
+    lead: 'You need an account to pay and to sync between Macs. Profiles and their data stay encrypted on your Mac.',
     emailTitle: 'With email',
     emailText: 'Sign in with a one-time code; invoices by email.',
     label: 'Email',
@@ -46,7 +46,7 @@ export default {
   side: {
     title: 'What the account holds',
     items: [
-      ['creditcard', 'Your subscription and invoices'],
+      ['wallet', 'Your plan, paid period and payments'],
       ['laptop', 'Your Macs: how many, and when they were last online'],
       ['server', 'Encrypted sync blocks — only you can read them'],
     ],

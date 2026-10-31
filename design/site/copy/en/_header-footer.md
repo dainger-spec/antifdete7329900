@@ -42,7 +42,7 @@ A macOS browser where every profile is real Safari in a process of its own, with
 - Terms of use
 - Refunds
 
-© 2026 ⟦q9: Company name⟧
+© 2026 Lumen
 
 No analytics and no third-party scripts on this site.
 

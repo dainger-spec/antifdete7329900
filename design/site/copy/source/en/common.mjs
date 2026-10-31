@@ -1,5 +1,5 @@
 // Strings every page shares: header, footer, screen-reader labels.
-// {{name}} is the product's name (working name: Lumen), {{domain}} its domain (lumen.example for now).
+// {{name}} is the product's name (Lumen), {{domain}} its domain (lumenbrowser.io).
 // {{tbd:qN:…}} marks a value the owner decides (question N in the README).
 export default {
   meta: {
@@ -26,7 +26,7 @@ export default {
       ['Help', [['docs.html', 'Docs'], ['support.html', 'Support'], ['support.html#contacts', 'Contact'], ['account.html', 'Account']]],
       ['Legal', [['privacy.html', 'Privacy'], ['terms.html', 'Terms of use'], ['refunds.html', 'Refunds']]],
     ],
-    copyright: '© 2026 {{tbd:q9:Company name}}',
+    copyright: '© 2026 {{name}}',
     noTracking: 'No analytics and no third-party scripts on this site.',
   },
   a11y: {

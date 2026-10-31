@@ -16,13 +16,13 @@ One.dmg file. The app is signed with a Developer ID and notarized by Apple: macO
 
 [Download.dmg]
 
-Version ⟦q11: release number⟧ · ⟦q11: file size⟧ · macOS 14 Sonoma or later
+Version 1.0 · 68 MB · Apple Silicon, macOS 26 or later
 
 Every release, and what is new
 
 Lumen.dmg
 
-macOS 14 Sonoma or later
+Apple Silicon, macOS 26 or later
 
 Developer ID
 
@@ -30,8 +30,8 @@ Notarized
 
 ## System requirements
 
-- **macOS** — 14 Sonoma or later
-- **Processor** — ⟦q11: Apple silicon or Intel⟧
+- **macOS** — 26 or later
+- **Processor** — Apple Silicon. Intel Macs are not supported
 - **Internet** — to load pages and sync; a proxy if you like, one per profile
 - **Access** — the app asks for the camera and microphone only when a site asks for them; the Mac’s real location is never given to sites
 
@@ -44,11 +44,11 @@ Notarized
 
 ## Signature and checksum
 
-The signature proves we built the app and nobody changed it since. Check it with one command.
+The signature proves we built the app and nobody changed it since. Check it with one command, and the image by its checksum.
 
-- **Signed by** — Developer ID Application: ⟦q9: company name⟧ (⟦q11: Team ID⟧)
+- **Signed with** — A Developer ID certificate issued by Apple
 - **Notarized by** — Apple Notary Service
-- **Image SHA-256** — ⟦q11: published with every release⟧
+- **Image SHA-256** — 9c1e4b7a…f03d2a68 — published with every release
 
 Terminal
 
@@ -62,7 +62,7 @@ $ spctl --assess --type execute --verbose /Applications/Lumen.app
 $ shasum -a 256 ~/Downloads/Lumen.dmg
 ```
 
-Expected: `valid on disk`, `satisfies its Designated Requirement` and `source=Notarized Developer ID`.
+If the signature is intact, `codesign` answers `valid on disk` and `satisfies its Designated Requirement`, and `spctl` answers `accepted` and `source=Notarized Developer ID`: the app is signed with a developer certificate issued by Apple and notarized by Apple. If anyone changed the file, the check fails — don’t open it. The checksum of the downloaded image must match the one published here for this release.
 
 ## The first launch
 

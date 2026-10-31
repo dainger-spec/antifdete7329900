@@ -142,7 +142,7 @@ All features
 
 ## Try Lumen free
 
-⟦q3: 7 days⟧, every feature, no card needed.
+7 days free, up to 3 profiles, every feature.
 
 [Download for Mac]
 

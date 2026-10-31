@@ -4,29 +4,29 @@
 
 Window title: Account — Lumen
 
-Search description: Your Lumen account: subscription and billing, devices, sync, invoices and account settings.
+Search description: Your Lumen account: plan and paid period, devices, sync, payments and account settings.
 
 ---
 
 you@example.com
 
-⟦q2: Professional⟧ plan
+Professional plan
 
-- Subscription and billing
+- Plan and payment
 - Devices
 - Sync
-- Invoices
+- Payments
 - Settings
 - Sign out
 
-# Invoices
+# Payments
 
-Payments and invoices. PDFs for your accountant.
+Every payment on the account. The PDF receipt is for your records.
 
-| Date | Invoice | Amount | Method | Status |  |
+| Date | Number | Amount | Paid in | Status |  |
 | --- | --- | --- | --- | --- | --- |
-| 29 October 2026 | `INV-0003` | ⟦q2: $49⟧ | Card | Paid | [PDF] |
-| 29 September 2026 | `INV-0002` | ⟦q2: $49⟧ | Crypto | Paid | [PDF] |
-| 29 August 2026 | `INV-0001` | ⟦q2: $19⟧ | Card | Paid | [PDF] |
+| 29 October 2026 | `LMN-0003` | $59 | USDT | Received | [PDF] |
+| 29 September 2026 | `LMN-0002` | $59 | BTC | Received | [PDF] |
+| 29 August 2026 | `LMN-0001` | $19 | USDT | Received | [PDF] |
 
-Company details for invoices are in your account settings.
+A receipt shows the amount in dollars, the coin and how much of it, and the network transaction. Refunds go by it: the same coin, the same amount.

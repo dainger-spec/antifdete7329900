@@ -4,7 +4,7 @@
 
 Window title: Pricing — Lumen
 
-Search description: Lumen pricing: every protection in every plan; plans differ by the number of profiles and devices. Free trial, card or crypto, refunds.
+Search description: Lumen pricing: every protection in every plan; plans differ by the number of profiles and Macs. 7 days free, crypto payments, refunds.
 
 ---
 
@@ -12,17 +12,17 @@ Pricing
 
 # Simple plans, every feature in each
 
-Plans differ only by how many profiles and Macs you get. Start with a free trial.
+Plans differ only by the number of profiles and Macs. Start with 7 free days.
 
 Monthly
 
-Yearly ⟦q2: two months free⟧
+Yearly the price of 10 months
 
 Personal
 
 For yourself: work, personal and a few projects.
 
-⟦q2: $19⟧⟦q2: $190⟧
+$19$190
 
 per monthper year
 
@@ -30,15 +30,15 @@ per monthper year
 
 Profiles
 
-⟦q2: 10⟧
+10
 
 Macs
 
-⟦q2: 2⟧
+2
 
 Seats
 
-⟦q2: 1⟧
+1
 
 Professional
 
@@ -46,7 +46,7 @@ Recommended
 
 For people who run dozens of accounts.
 
-⟦q2: $49⟧⟦q2: $490⟧
+$59$590
 
 per monthper year
 
@@ -54,21 +54,21 @@ per monthper year
 
 Profiles
 
-⟦q2: 50⟧
+50
 
 Macs
 
-⟦q2: 3⟧
+3
 
 Seats
 
-⟦q2: 1⟧
+1
 
 Team
 
-For agencies: one bill, seats for your people.
+For agencies: one account and seats for the team.
 
-⟦q2: $129⟧⟦q2: $1290⟧
+$149$1490
 
 per monthper year
 
@@ -76,71 +76,84 @@ per monthper year
 
 Profiles
 
-⟦q2: 200⟧
+200
 
 Macs
 
-⟦q2: 10⟧
+10
 
 Seats
 
-⟦q2: 5⟧
+5
 
-- ⟦q3: 7 days free⟧
-- No card needed
-- Money back within ⟦q10: 14 days⟧
-- Card or crypto
+- 7 days free, up to 3 profiles
+- Run profiles at once, no limit
+- Money back within 14 days
+- Your data is never deleted
 
 ## In every plan
 
-- Real Safari, and a process of its own for every profile
+- Real Safari and a separate process for every profile
+- As many profiles at once as you like: a plan only limits how many you have
 - Everything on disk encrypted: Argon2id and AES-256-GCM
-- A proxy with no way around it; a proxy list checked through the proxy itself
-- Warm-up: ready-made lists, lists put together for you, a queue and a schedule
-- Cookie import, password AutoFill, history and bookmarks
+- Proxies with no way around them, and a proxy list checked through the proxy itself
+- Warm-up: ready lists, smart picks, a queue and a schedule
+- Cookie import, passwords with AutoFill, history and bookmarks
 - Sync between Macs, end-to-end encrypted
-- Profile export to a file under a password of its own
+- Profile export to a file under its own password
 - Updates and email support
 
 ### Free trial
 
-⟦q3: 7 days free, no card needed: every feature, up to 3 profiles⟧. Nothing is charged when it ends.
+7 days free, up to 3 profiles, with every feature. If you like it, pick a plan and pay for a period.
 
-### Paying
+### Payment
 
-- **By card.** Through ⟦q8: our payment provider⟧. The provider handles your card number — it never reaches us.
-- **In crypto.** ⟦q8: USDT, BTC or ETH⟧. We show an address and an amount; the subscription starts once the network confirms the payment.
-- **Without an email.** Paying in crypto, you can leave the email out: you get a licence key, and the key is your account.
+- **In crypto.** ⟦q13: USDT, BTC or ETH⟧, on our own payment page: the address, a QR code, the amount and a timer. Your period starts when the network confirms the payment.
+- **A year at once.** One payment instead of twelve, at the price of ten months.
+- **No email.** You can skip the email: you get a licence key, and it becomes your account.
+
+### When a period ends
+
+Crypto can’t be charged automatically, so you renew yourself, when it suits you. We remind you by email in advance. If you don’t renew, the app opens your profiles for data export only. **Your data is never deleted**: renew, and everything works as before.
 
 ### Refunds
 
-Money back within ⟦q10: 14 days⟧ of your first payment, no questions asked. Crypto is returned in the same coin to the address it came from.
+We refund within 14 days of your first payment, no questions asked, and within 7 days of a renewal if you haven’t worked in the new period. We return the same coin and the same amount we received, whatever the exchange rate has done.
 
 Refund policy
 
 ## Questions
 
-**What happens to my profiles if my subscription ends?**
+**What happens when my paid period ends?**
 
-They stay on your Mac, encrypted as before. ⟦q2: Without a subscription the app opens them for export, but does not launch them.⟧
+Your profiles stay on your Mac, encrypted as they were. Until you renew, the app opens them for data export only. Your data is never deleted.
+
+**How do I renew?**
+
+In your account: choose a month or a year and pay in crypto on our payment page. We remind you by email in advance that your period is ending.
+
+**How many profiles can I run at once?**
+
+As many as you need. Running profiles at once is unlimited on every plan: a plan only sets how many profiles and Macs you have.
 
 **Can I move profiles to another Mac?**
 
-Yes: with sync between the Macs of your account, or by exporting a profile to a file under a password of its own. An import makes a new profile.
+Yes: by syncing between the Macs in your account, or by exporting a profile to a file under its own password. Importing creates a new profile.
 
 **Why sign in with a key and no email?**
 
-So that we do not even have your email. The key is the only way in: lose it and access cannot be recovered. Keep it as carefully as your master password.
+So that we don’t even have your email. The key is the only way in: lose it and access can’t be restored. Keep it as carefully as your master password. There is no reminder email in that case — the end of your period is shown in your account.
 
-**Does the server see my profiles?**
+**Can the server see my profiles?**
 
-No. It keeps encrypted blocks and knows only their size and when they changed. The key is derived from your master password and never leaves your Mac.
+No. It stores encrypted blocks and knows only their size and when they changed. The key comes from your master password and never leaves your Mac.
 
 **Can I change plans?**
 
-Yes, in your account, at any time. ⟦q2: Moving up, the difference is prorated for the days left.⟧
+Yes, in your account. ⟦q14: Moving up, you pay the difference for the days left; moving down takes effect from the next period.⟧
 
-## Start with the free trial
+## Start with 7 free days
 
 Download Lumen and check everything described here on your own Mac.
 

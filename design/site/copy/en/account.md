@@ -4,50 +4,52 @@
 
 Window title: Account — Lumen
 
-Search description: Your Lumen account: subscription and billing, devices, sync, invoices and account settings.
+Search description: Your Lumen account: plan and paid period, devices, sync, payments and account settings.
 
 ---
 
 you@example.com
 
-⟦q2: Professional⟧ plan
+Professional plan
 
-- Subscription and billing
+- Plan and payment
 - Devices
 - Sync
-- Invoices
+- Payments
 - Settings
 - Sign out
 
-# Subscription and billing
+# Plan and payment
 
-Your plan, its renewal and how you pay.
+Your plan, the period you’ve paid for, and renewing.
 
 ## Plan
 
-Active
+Paid
 
-⟦q2: Professional⟧
+Professional
 
-- **Price** — ⟦q2: $49 per month⟧
-- **Next charge** — 29 November 2026
-- **Macs in the account** — 2 of ⟦q2: 3⟧
-- **Profiles** — up to ⟦q2: 50⟧ — counted by the app on your Mac
+- **Price** — $59 per month
+- **Paid until** — 29 November 2026
+- **Macs in the account** — 2 of 3
+- **Profiles** — up to 50 — counted by the app on your Mac
 
-The server does not know how many profiles you have: the app checks the limit.
+The server doesn’t know how many profiles you have or what they’re called — so neither does this page. The app on your Mac checks the plan’s limit.
 
 [Change plan]
 
-[Cancel subscription]
+[Renew]
 
-## Payment method
+## Renewing
 
-Bank card
+Crypto can’t be charged automatically: your period simply ends. You renew yourself, when it suits you.
 
-through ⟦q8: our payment provider⟧ · the provider keeps the card number, not us
+We remind you by email in advance that your period is ending.
 
-[Change]
+If you don’t renew, the app opens your profiles for data export only. Your data is never deleted.
 
-You can pay for the next period in crypto
+A year at once: one payment instead of twelve, at the price of ten months.
 
-[Pay in crypto]
+[One month — $59]
+
+[One year — $590]

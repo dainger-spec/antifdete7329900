@@ -3,7 +3,7 @@ import { icon } from '../../lib/kit.mjs';
 import { result } from '../components.mjs';
 
 // Every user value on these pages is example data (data-sample): the email, dates, device codes, the
-// sync objects and invoices. Plan names and amounts are the owner's decisions (yellow).
+// sync objects and payments. Plans and prices are the owner's (pricing.mjs).
 export default function account(c, { lang, slug, state }) {
   const nav = `<aside class="account-nav" aria-label="${lang === 'ru' ? 'Разделы кабинета' : 'Account sections'}">
     <div class="who"><div class="e" data-sample>${inline(c.who.email, lang)}</div><div class="p">${inline(c.who.plan, lang)}</div></div>
@@ -15,14 +15,16 @@ export default function account(c, { lang, slug, state }) {
   let content = '';
 
   if (state === 'subscription') {
-    const s = c.subscription;
+    // Crypto can't be charged automatically: the plan shows the date the period is paid until and a button to
+    // renew (the payment page), and the renewal panel says plainly what happens when the period ends.
+    const s = c.subscription, r = s.renewal;
     content = head(s.title, s.lead) + `
       <section class="panel"><div class="panel-head"><div><h2>${inline(s.plan.title, lang)}</h2></div><span class="tag ok">${icon('check', 12)}${inline(s.plan.status, lang)}</span></div>
         <div class="panel-body" data-sample><div style="font:600 24px/30px var(--font-display);padding:16px 0 4px">${inline(s.plan.name, lang)}</div>${kv(s.plan.rows)}</div>
-        <div class="panel-foot"><span>${inline(s.plan.foot, lang)}</span><span class="row"><a class="btn secondary sm" href="pricing.html">${inline(s.plan.change, lang)}</a><a class="btn ghost sm" href="account.html">${inline(s.plan.cancel, lang)}</a></span></div></section>
-      <section class="panel"><div class="panel-head"><h2>${inline(s.payment.title, lang)}</h2></div>
-        <div class="panel-body pad"><div class="device" style="padding:0;border:0"><span class="dicon">${icon('creditcard', 18)}</span><div><div class="dn">${inline(s.payment.card, lang)}</div><div class="dm">${inline(s.payment.cardSub, lang)}</div></div><span class="dact"><a class="btn secondary sm" href="account.html">${inline(s.payment.update, lang)}</a></span></div></div>
-        <div class="panel-foot"><span>${inline(s.payment.crypto, lang)}</span><a class="btn ghost sm" href="account.html">${icon('wallet', 14)}${inline(s.payment.cryptoAction, lang)}</a></div></section>`;
+        <div class="panel-foot"><span>${inline(s.plan.foot, lang)}</span><span class="row"><a class="btn secondary sm" href="pricing.html">${inline(s.plan.change, lang)}</a><a class="btn primary sm" href="checkout.html">${inline(s.plan.renew, lang)}</a></span></div></section>
+      <section class="panel"><div class="panel-head"><div><h2>${inline(r.title, lang)}</h2><p>${inline(r.lead, lang)}</p></div></div>
+        <div class="panel-body pad" style="display:grid;gap:12px">${r.points.map(([ic, t]) => `<div style="display:grid;grid-template-columns:16px minmax(0,1fr);gap:10px;align-items:start;font-size:15px;line-height:22px">${icon(ic, 16)}<span>${inline(t, lang)}</span></div>`).join('')}</div>
+        <div class="panel-foot"><span></span><span class="row"><a class="btn secondary sm" href="checkout.html">${icon('wallet', 14)}${inline(r.month, lang)}</a><a class="btn secondary sm" href="checkout.html">${icon('calendar', 14)}${inline(r.year, lang)}</a></span></div></section>`;
   } else if (state === 'devices') {
     const d = c.devices;
     content = head(d.title, d.lead) + `
@@ -46,7 +48,7 @@ export default function account(c, { lang, slug, state }) {
     const v = c.invoices;
     content = head(v.title, v.lead) + `
       <section class="panel"><div class="table-scroll" data-sample><table class="table stack-mobile"><thead><tr>${v.head.map((h, i) => `<th${i === 2 ? ' class="num"' : ''}>${esc(h)}</th>`).join('')}</tr></thead>
-        <tbody>${v.rows.map((r) => `<tr><td data-label="${esc(v.head[0])}">${esc(r[0])}</td><td data-label="${esc(v.head[1])}"><span class="mono">${esc(r[1])}</span></td><td class="num strong" data-label="${esc(v.head[2])}">${inline(r[2], lang)}</td><td data-label="${esc(v.head[3])}">${icon(/Карта|Card/.test(r[3]) ? 'creditcard' : 'wallet', 13)} ${esc(r[3])}</td><td data-label="${esc(v.head[4])}">${result('same', r[4], lang)}</td><td class="num"><a class="btn ghost sm" href="account-invoices.html">${icon('download', 13)}${esc(v.pdf)}</a></td></tr>`).join('')}</tbody></table></div>
+        <tbody>${v.rows.map((r) => `<tr><td data-label="${esc(v.head[0])}">${esc(r[0])}</td><td data-label="${esc(v.head[1])}"><span class="mono">${esc(r[1])}</span></td><td class="num strong" data-label="${esc(v.head[2])}">${inline(r[2], lang)}</td><td data-label="${esc(v.head[3])}">${icon('wallet', 13)} ${esc(r[3])}</td><td data-label="${esc(v.head[4])}">${result('same', r[4], lang)}</td><td class="num"><a class="btn ghost sm" href="account-invoices.html">${icon('download', 13)}${esc(v.pdf)}</a></td></tr>`).join('')}</tbody></table></div>
         <div class="panel-foot"><span>${inline(v.note, lang)}</span></div></section>`;
   } else {
     const s = c.settings;

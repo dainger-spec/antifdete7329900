@@ -1,4 +1,4 @@
-// Support and contacts. Response times and company details are the owner's decisions (question 9). The
+// Support and contacts. The response time is still the owner's call (question 12); there are no company details — there is no legal entity. The
 // app's logs are checked on every build (scripts/check_log_privacy.py): no user data in them in the clear.
 export default {
   title: 'Support',
@@ -6,7 +6,7 @@ export default {
   hero: {
     eyebrow: 'Support',
     title: 'How can we help?',
-    lead: 'Most answers are in the docs. If yours is not, write to us: we answer by email {{tbd:q9:within a business day}}.',
+    lead: 'Most answers are in the docs. If yours is not, write to us: we answer by email {{tbd:q12:within a business day}}.',
     search: 'Search the docs',
   },
   topics: {
@@ -21,7 +21,7 @@ export default {
   form: {
     title: 'Write to us',
     topic: 'Topic',
-    topics: ['A question about using it', 'Billing and subscription', 'A bug in the app', 'Security'],
+    topics: ['A question about using it', 'Payments and refunds', 'A bug in the app', 'Security'],
     email: 'Email for our reply',
     emailHint: 'Signing in with a key? Give any address for the reply — we delete it with the conversation.',
     message: 'Message',
@@ -36,11 +36,9 @@ export default {
     items: [
       { icon: 'lifebuoy', t: 'Support', v: 'support@{{domain}}' },
       { icon: 'shieldCheck', t: 'Security', v: 'security@{{domain}}', d: 'Found a vulnerability? Write here — we reply, and tell you when the fix ships.' },
-      { icon: 'creditcard', t: 'Billing and refunds', v: 'billing@{{domain}}' },
+      { icon: 'wallet', t: 'Payments and refunds', v: 'billing@{{domain}}' },
       { icon: 'lock', t: 'Privacy', v: 'privacy@{{domain}}' },
       { icon: 'doc', t: 'Legal', v: 'legal@{{domain}}' },
     ],
-    company: 'Company',
-    companyValue: '{{tbd:q9:name, country, address}}',
   },
 };
