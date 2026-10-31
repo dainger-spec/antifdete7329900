@@ -287,7 +287,7 @@
       cam('warmup', about(0.95 + 0.04 * span(t, 20.84, 23), 960, 680, 70, 20));
       clipShot('warmup', wipe(t, CUE.wipe2[0], CUE.wipe2[1]));
       show('warmup', true);
-      title('warmup', t, 21.12, 22.75);
+      title('warmup', t, 21.12, 22.5);
     } },
     { name: 'features', from: 23.0, to: 25.56, frame(t) {
       // the grid of tiles as a plane tilted back, gliding up and away under the title
@@ -295,7 +295,8 @@
       const rx = lerp(40, 30, E.out(u)), rz = lerp(-13, -8, E.out(u)), yc = lerp(800, 560, E.out(u));
       camEl('features').style.transform = `translate(960px, ${yc.toFixed(2)}px) rotateX(${rx.toFixed(3)}deg) rotateZ(${rz.toFixed(3)}deg) scale(0.98) translate(${(-g.cx).toFixed(1)}px, ${(-g.cy).toFixed(1)}px)`;
       M.tiles.forEach((el, i) => {
-        const a = CUE.tiles[Math.min(i, CUE.tiles.length - 1)];
+        // a head start, so the plane is there on the cut; each tile lands on its note
+        const a = CUE.tiles[Math.min(i, CUE.tiles.length - 1)] - 0.16;
         const v = span(t, a, a + 0.55);
         el.style.opacity = E.out(clamp01(v * 1.5)).toFixed(3);
         el.style.transform = `translateY(${((1 - E.expo(v)) * 110).toFixed(2)}px)`;
@@ -304,7 +305,7 @@
       const ep = $('.shot-features .ep-win');
       if (ep) ep.style.setProperty('--x', E.inOut(span(t, 23.9, 24.6)).toFixed(3));
       show('features', true, 1 - E.smooth(span(t, 25.36, 25.52)));
-      title('features', t, 23.06, 25.2);
+      title('features', t, 23.0, 25.2);
     } },
     { name: 'end', from: 25.5, to: 30.01, frame(t) {
       const q = E.inOut(span(t, 25.62, CUE.meet));
