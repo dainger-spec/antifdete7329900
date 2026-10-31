@@ -71,7 +71,7 @@ final class ProfileLibrary: ObservableObject {
         do {
             try history.save()
         } catch {
-            report("Could not save history: \(error.localizedDescription)")
+            report(String(format: L("history.error.save"), errorText(error)))
         }
     }
 
@@ -88,7 +88,7 @@ final class ProfileLibrary: ObservableObject {
             guard let self else { return }
             self.saveTask = nil
             if case .failure(let error) = result {
-                self.report("Could not save history: \(error.localizedDescription)")
+                self.report(String(format: L("history.error.save"), errorText(error)))
             }
         }
     }
@@ -124,7 +124,7 @@ final class ProfileLibrary: ObservableObject {
         do {
             return try change()
         } catch {
-            report((error as? CoreError)?.description ?? error.localizedDescription)
+            report(errorText(error))
             return nil
         }
     }

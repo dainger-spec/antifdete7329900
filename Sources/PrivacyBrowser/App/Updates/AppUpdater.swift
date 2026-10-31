@@ -425,13 +425,13 @@ final class AppUpdater: ObservableObject, Updater {
         case status(Int)
         var description: String {
             switch self {
-            case .status(let code): return "the server answered \(code)"
+            case .status(let code): return String(format: L("error.update.status"), code)
             }
         }
     }
 
     private static func describe(_ error: Error) -> String {
-        if let error = error as? UpdateError { return error.description }
+        if let error = error as? UpdateError { return errorText(error) }
         if let error = error as? UpdateFetchError { return error.description }
         return error.localizedDescription
     }

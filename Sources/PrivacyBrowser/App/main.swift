@@ -8,6 +8,8 @@ import SystemConfiguration
 // Top-level code runs on the main thread; Swift 5 mode does not infer main-actor isolation for it.
 MainActor.assumeIsolated {
     let arguments = CommandLine.arguments
+    // The core's errors in the person's language wherever one is shown (Localization.swift).
+    installErrorTranslation()
     if arguments.contains("--sdk-check") {
         // What follows the SDK this build was made with — a page's interfaces, the screen's visible
         // frame — with WebKit's behaviors as the build's or, with --everything, as Safari's

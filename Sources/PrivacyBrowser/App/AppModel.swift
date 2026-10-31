@@ -197,7 +197,7 @@ final class AppModel: ObservableObject {
             unlockFailed = false
             phase = .setup
         } catch {
-            showError((error as? CoreError)?.description ?? error.localizedDescription)
+            showError(errorText(error))
         }
     }
 
@@ -661,7 +661,7 @@ final class AppModel: ObservableObject {
             let bookmark = try folder.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
             try updateDeviceSettings { $0.syncTarget = .folder(bookmark: bookmark, path: folder.path) }
         } catch {
-            showError("Could not remember the sync folder: \(error.localizedDescription)")
+            showError(String(format: L("sync.error.rememberFolder"), errorText(error)))
         }
     }
 
@@ -674,7 +674,7 @@ final class AppModel: ObservableObject {
             try HTTPSyncTransport.validate(url)
             try updateDeviceSettings { $0.syncTarget = .server(baseURL: url, token: token) }
         } catch {
-            showError((error as? CoreError)?.description ?? error.localizedDescription)
+            showError(errorText(error))
         }
     }
 
@@ -690,7 +690,7 @@ final class AppModel: ObservableObject {
     func syncNow() async {
         guard let repository, let manager, let target = deviceSettings.syncTarget, !isSyncing else { return }
         guard !manager.hasRunningProfiles else {
-            showError("Stop all profiles before syncing.")
+            showError(L("sync.error.profilesRunning"))
             return
         }
         isWorking = true
@@ -700,7 +700,7 @@ final class AppModel: ObservableObject {
         // A profile still starting or being encrypted reads and writes its synced cookies: after it.
         await manager.waitWhileBusy()
         guard !manager.hasRunningProfiles else {
-            showError("Stop all profiles before syncing.")
+            showError(L("sync.error.profilesRunning"))
             return
         }
         var scopedFolder: URL?
@@ -717,7 +717,7 @@ final class AppModel: ObservableObject {
         } catch {
             let message = errorText(error)
             status = DeviceSettings.SyncStatus(error: message)
-            showError("Sync failed: \(message)")
+            showError(String(format: L("sync.error.failed"), message))
         }
         try? updateDeviceSettings { $0.lastSync = status }
         refresh()

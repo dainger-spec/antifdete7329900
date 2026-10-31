@@ -96,7 +96,7 @@ extension AppModel {
                     do {
                         try await manager.stop(id)
                     } catch {
-                        self.showError((error as? CoreError)?.description ?? error.localizedDescription)
+                        self.showError(errorText(error))
                     }
                 }
             }

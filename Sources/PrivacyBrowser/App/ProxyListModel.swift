@@ -38,7 +38,7 @@ final class ProxyListModel: ObservableObject {
             loadError = nil
         } catch {
             list = ProxyList()
-            loadError = (error as? CoreError)?.description ?? error.localizedDescription
+            loadError = errorText(error)
             log.error("The proxy list could not be read: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
         }
     }

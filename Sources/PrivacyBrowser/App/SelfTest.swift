@@ -341,6 +341,7 @@ final class SelfTest {
         await group("restoring tabs") { try await restoreTabs(repository) }
         await group("window lifecycle") { try await windowLifecycle(repository) }
         await group("simplified mode") { try await simplifiedMode(repository) }
+        await group("errors in the person's language") { errorsInThePersonsLanguage() }
         await group("dialogs") { try await dialogTeardown(repository) }
         await group("password AutoFill") { try await passwordAutoFill(repository) }
         await group("cookie import") { try await cookieImport(repository) }
@@ -3521,6 +3522,39 @@ final class SelfTest {
               (try? Data(contentsOf: local)) == Data("local".utf8) && (try? Data(contentsOf: held)) == Data("held".utf8)
                   && (try? Data(contentsOf: dataArchive)) == dataSealed)
         for directory in WebDataStoreVault.discoverDirectories(for: profile.id) { try? FileManager.default.removeItem(at: directory) }
+    }
+
+    /// Every error of the core a person can be shown — the vault's, sync's, saved passwords' and
+    /// the updater's — is said in the interface's language wherever the app shows one
+    /// (`localizedDescription`, `errorText`): never the core's English, never a key without its
+    /// text. Before, "Wrong master password", "Sync failed: …" and "Authentication failed" were
+    /// shown in English in the Russian interface.
+    private func errorsInThePersonsLanguage() {
+        let core: [CoreError] = [
+            .authenticationFailed, .wrongPassword, .vaultAlreadyExists, .vaultNotFound, .corruptData("x"), .cryptoFailure("x"),
+            .invalidConfiguration("x"), .profileNotFound(UUID()), .unsupportedFormat("x"),
+            .newerFormat(what: "x.bin", found: 3, supported: 2), .unsafeArchivePath("x"), .syncConflict(objectID: "x", remoteRevision: 2),
+            .syncServer(status: 403, message: ""), .syncServer(status: 500, message: "x"), .io("x"), .notGranted("x"),
+        ]
+        let update: [UpdateError] = [
+            .notAnAppcast, .newerAppcastFormat(3), .unknownKey("x"), .badSignature("appcast"), .badSignature("archive"),
+            .staleAppcast(generatedAt: Date(), newestAccepted: Date()), .invalidItem("x"), .notNewer(build: "1", running: "2"),
+            .needsNewerSystem("26.0"), .archiveLength(expected: 2, found: 1), .archiveHash,
+        ]
+        let errors: [(Error, String)] = core.map { ($0, $0.description) } + update.map { ($0, $0.description) }
+            + [(PasswordVaultError.duplicate, ""), (PasswordVaultError.notFound, "")]
+        var wrong: [String] = []
+        for (error, english) in errors {
+            let shown = error.localizedDescription
+            if shown.contains("error.") || shown.contains("passwords.") || (Localization.languageCode != "en" && shown == english) {
+                wrong.append(shown)
+            }
+            if errorText(error) != shown { wrong.append("errorText: \(errorText(error))") }
+        }
+        check("errors in the person's language: every error of the core is said in the interface's language (\(errors.count))",
+              wrong.isEmpty, wrong.joined(separator: " | "))
+        check("errors in the person's language: the sync messages are the interface's",
+              !L("sync.error.failed").hasPrefix("sync.") && !L("sync.error.profilesRunning").hasPrefix("sync."))
     }
 
     // MARK: Update gate (docs/UPDATES.md §3)

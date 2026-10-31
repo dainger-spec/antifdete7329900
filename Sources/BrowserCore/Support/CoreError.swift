@@ -48,6 +48,23 @@ public enum CoreError: Error, Equatable, CustomStringConvertible {
     }
 }
 
+/// What a person is told about an error of the core: the app sets `translate` to its own words in
+/// the person's language (`Localization.swift`); without it — the core's tests, its tools — the
+/// English `description`, which is also what logs keep.
+public enum CoreErrorText {
+    nonisolated(unsafe) public static var translate: ((Error) -> String?)?
+}
+
 extension CoreError: LocalizedError {
-    public var errorDescription: String? { description }
+    public var errorDescription: String? { CoreErrorText.translate?(self) ?? description }
+}
+
+extension PasswordVaultError: LocalizedError {
+    public var errorDescription: String? {
+        CoreErrorText.translate?(self) ?? (self == .duplicate ? "A login with this website and user name is already saved" : "The login was deleted meanwhile")
+    }
+}
+
+extension UpdateError: LocalizedError {
+    public var errorDescription: String? { CoreErrorText.translate?(self) ?? description }
 }

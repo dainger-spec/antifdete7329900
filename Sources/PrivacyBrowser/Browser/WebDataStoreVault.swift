@@ -46,8 +46,8 @@ final class WebDataStoreVault {
 
         var errorDescription: String? {
             switch self {
-            case .storeStillInUse(let id):
-                return "WebKit did not release the data store of profile \(id). Its data remains unencrypted on disk until it is sealed on the next stop or unlock."
+            case .storeStillInUse:
+                return L("webdata.error.stillInUse")
             }
         }
     }

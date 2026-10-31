@@ -823,7 +823,7 @@ struct ProxyExportView: View {
             try SecureFile.writeOwnerOnly(Data(text.utf8), over: url)
             saved = url
         } catch {
-            self.error = String(format: L("proxies.export.failed"), (error as? CoreError)?.description ?? error.localizedDescription)
+            self.error = String(format: L("proxies.export.failed"), errorText(error))
         }
     }
 }

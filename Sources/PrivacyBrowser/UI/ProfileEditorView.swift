@@ -572,7 +572,7 @@ struct ProfileEditorView: View {
             }
             dismiss()
         } catch {
-            self.error = (error as? CoreError)?.description ?? error.localizedDescription
+            self.error = errorText(error)
         }
     }
 }
