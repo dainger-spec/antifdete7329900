@@ -1,0 +1,157 @@
+/* The promo film v3's stage (tools/film3/build.mjs → video/stage3/<lang>.html): one 1920 × 1080 frame that holds
+   every shot. v1's cut, with what read as cheap taken out: no glows, halos or flashes, no blur on the words, a
+   graphite studio behind every shot instead of black, soft shadows under the windows. film.js puts the stage at any moment of the film; nothing here moves by itself, so transitions
+   and animations are off on the whole stage. Type is Inter Display, the font the film is rendered with (SF Pro
+   is not available where it is rendered), set large and bold: this is an advertisement, read in a glance. */
+
+html.film, html.film body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+.film *, .film *::before, .film *::after { transition: none !important; animation: none !important; }
+.film .reveal { opacity: 1; transform: none; }   /* film.js may still move a part the site reveals */
+.film { --fd: "Inter Display", "Inter", var(--font-display); --white: #F6F7F9; --grey: #9099A8; --blue: #2F6BEF; }
+
+.reel { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #0E0F11; isolation: isolate; }
+/* An unseen shot is both: hidden (not painted) and transparent (a part that sets its own visibility stays unseen) */
+.shot { position: absolute; inset: 0; overflow: hidden; opacity: 0; visibility: hidden; background: #0E0F11; }
+/* The studio: a graphite cyc out of focus, a little larger than the frame so it can follow the camera a little */
+.studio { position: absolute; left: -96px; top: -54px; width: 2112px !important; height: 1188px !important; max-width: none !important; display: block; transform-origin: 1056px 594px; pointer-events: none; user-select: none; }
+.shot.on { opacity: 1; visibility: visible; }
+.shot > .cam { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+
+/* The home page's scenes, each pinned to the frame (on the site they pin to the window while it scrolls), with
+   no ground of their own: they stand in the studio */
+.film .scene { height: 1080px !important; min-height: 0 !important; background: transparent !important; }
+.film .scene-pin, .film .scene-stage, .film .scene > div { background-color: transparent !important; }
+/* the 448 stands in the studio, not on a wall of code */
+.film .sc-numbers .nm-macro { display: none !important; }
+.film .scene-pin { position: absolute !important; left: 0; top: 0; width: 1920px; height: 1080px !important; }
+/* What the film says in its own words, and the scenes' small print, is not shown */
+.film .mi-head, .film .sit-head, .film .sit-lead, .film .sit-side, .film .ly-head, .film .ly-legend, .film .px-head,
+.film .px-notes, .film .enc-head, .film .enc-foot, .film .wu-head, .film .wu-facts, .film .nm-head, .film .nm-link,
+.film .nm-t, .film .bx-head, .film .bx-more, .film .nm-cols, .film .nm-wide { visibility: hidden !important; }
+.film .mi-label { font-size: 22px; }
+.film .sc-proxy .px-status { font-size: 40px; line-height: 50px; max-width: 1200px; }
+
+/* MARK: The opening: the MacBook's frames, and the name over the dark */
+.hero-cv { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; display: block; }
+.brand { position: absolute; inset: 0; display: grid; place-items: center; }
+.brand-in { display: flex; align-items: center; gap: 46px; transform-origin: 50% 50%; margin-top: -60px; }
+.brand-in > svg { flex: none; }
+.brand-word svg { display: block; }
+
+/* MARK: Titles — big and bold; each line a mask the words rise into */
+.titles { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+.ttl {
+  position: absolute; left: 0; right: 0; top: 64px; visibility: hidden; text-align: center;
+  font-family: var(--fd); font-weight: 700; font-size: 112px; line-height: 112px; letter-spacing: -0.042em; color: var(--white);
+  font-feature-settings: "ss01", "cv11";
+}
+.ttl.on { visibility: visible; }
+.ttl .ln { overflow: hidden; padding: 0.06em 0.06em 0.18em; margin: -0.06em -0.06em -0.18em; }
+.ttl .ln2 { color: var(--grey); }
+.ttl .w { display: inline-block; }
+.ttl .ln3 { margin-top: 30px; font-size: 46px; line-height: 56px; font-weight: 600; letter-spacing: -0.02em; color: #C9CED8; }
+.ttl-hero { top: 52px; font-size: 104px; line-height: 104px; }
+.ttl-mission { top: 70px; left: 120px; right: auto; text-align: left; font-size: 150px; line-height: 146px; }
+.ttl-safari { top: 46px; font-size: 104px; line-height: 104px; }
+.ttl-probe { top: 742px; font-size: 52px; line-height: 64px; font-weight: 600; letter-spacing: -0.024em; }
+.ttl-layers { top: 70px; left: 120px; right: auto; text-align: left; font-size: 120px; line-height: 118px; }
+.ttl-proxy { top: 60px; }
+.ttl-encryption { top: 56px; }
+.ttl-warmup { top: 64px; left: 120px; right: auto; text-align: left; font-size: 104px; line-height: 104px; }
+.ttl-features { top: 56px; font-size: 100px; line-height: 102px; }
+
+/* MARK: Each profile from its own country: the country and its time, rolling with the window */
+.cty { position: absolute; left: 1250px; top: 236px; width: 640px; font-family: var(--fd); }
+.cty-k { font: 600 38px/48px var(--fd); letter-spacing: -0.014em; color: var(--grey); }
+/* the countries roll past like a slot: each sits one window-height below the last */
+.cty-roll { position: relative; margin-top: 40px; height: 420px; overflow: hidden; }
+.cty-i { position: absolute; left: 0; top: 0; width: 640px; height: 420px; }
+.cty-n { display: flex; align-items: center; gap: 26px; font-weight: 700; font-size: 104px; line-height: 110px; letter-spacing: -0.04em; color: var(--white); }
+.cty-n svg { flex: none; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12); }
+.cty-t { margin-top: 22px; font-weight: 300; font-size: 200px; line-height: 190px; letter-spacing: -0.05em; color: var(--white); font-variant-numeric: tabular-nums; }
+.cty-l { margin-top: 18px; font: 500 32px/40px var(--font-mono, ui-monospace), monospace; color: var(--grey); letter-spacing: 0; }
+
+/* MARK: The comparison with Safari: an open book, the same fingerprint on both pages */
+.vs { position: absolute; inset: 0; perspective: 1900px; perspective-origin: 960px 560px; }
+.vs-book { position: absolute; inset: 0; transform-style: preserve-3d; }
+.vs-page {
+  position: absolute; top: 372px; width: 640px; height: 520px; box-sizing: border-box; padding: 34px 40px; border-radius: 30px;
+  background: linear-gradient(180deg, #23262C, #1B1D22);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 50px 90px -20px rgba(0, 0, 0, 0.6), 0 12px 24px rgba(0, 0, 0, 0.3);
+  font-family: var(--fd); color: var(--white);
+}
+.vs-l { left: 200px; transform-origin: 100% 50%; }
+.vs-r { left: 1080px; transform-origin: 0 50%; }
+.vs-head { display: flex; align-items: center; gap: 16px; height: 50px; font-weight: 700; font-size: 40px; letter-spacing: -0.03em; }
+.vs-dot { width: 30px; height: 30px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #F4F6FA, #9AA4B4); flex: none; }
+.vs-row { position: relative; margin-top: 34px; height: 104px; }
+.vs-t { display: block; font-weight: 600; font-size: 30px; line-height: 38px; letter-spacing: -0.016em; color: #D4D8E0; }
+.vs-code { position: relative; display: block; margin-top: 16px; width: 420px; height: 40px; }
+.vs-bars { position: absolute; left: 0; top: 0; fill: rgba(255, 255, 255, 0.22); }
+.vs-bars.vs-lit { fill: #F2F4F8; clip-path: inset(0 calc((1 - var(--s, 0)) * 100%) 0 0); }
+.vs-scan { display: none; }
+.vs-mid { position: absolute; left: 840px; width: 240px; top: 372px; height: 520px; }
+.vs-eq {
+  position: absolute; left: 50%; width: max-content; display: flex; align-items: baseline; gap: 4px; padding: 12px 18px 12px 24px; border-radius: 40px; white-space: nowrap;
+  transform: translateX(-50%); background: #16181D; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 18px 40px rgba(0, 0, 0, 0.45);
+  font-family: var(--fd); color: var(--white);
+}
+.vs-eq b { font-weight: 700; font-size: 54px; line-height: 58px; letter-spacing: -0.035em; }
+.vs-eq span { font-weight: 600; font-size: 32px; color: var(--grey); margin-right: 12px; }
+.vs-eq svg { flex: none; align-self: center; width: 36px; height: 36px; }
+.vs-eq[data-i="0"] { top: 100px; } .vs-eq[data-i="1"] { top: 238px; } .vs-eq[data-i="2"] { top: 376px; }
+.vs-spine { position: absolute; left: 959px; top: 330px; width: 2px; height: 600px; opacity: 0;
+  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.28) 20%, rgba(255, 255, 255, 0.28) 80%, transparent); }
+
+/* MARK: Isolation: the layers named one by one */
+.lw { position: absolute; left: 1330px; top: 300px; margin: 0; padding: 0; list-style: none; font-family: var(--fd); }
+.lw li { font-weight: 700; font-size: 84px; line-height: 122px; letter-spacing: -0.035em; color: var(--white); opacity: 0; }
+
+/* MARK: The cipher's names under the lock */
+.cn { position: absolute; left: 0; right: 0; top: 930px; display: flex; justify-content: center; align-items: center; gap: 44px; font: 700 60px/1 var(--fd); letter-spacing: -0.03em; color: var(--white); }
+.cn i { width: 2px; height: 54px; background: rgba(255, 255, 255, 0.25); }
+.cn span:last-child { color: var(--grey); }
+
+/* MARK: The features: the bento grid as a plane tilted back, under the title; it fades out towards the top (a
+   mask in the frame, so the studio shows through) */
+.shot-features { perspective: 1700px; perspective-origin: 960px 380px; }
+.shot-features > .cam-mask { position: absolute; inset: 0; perspective: 1700px; perspective-origin: 960px 380px;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.06) 25%, #000 52%, #000 80%, rgba(0, 0, 0, 0.35) 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.06) 25%, #000 52%, #000 80%, rgba(0, 0, 0, 0.35) 100%); }
+.shot-features .cam { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+/* the scenes the film turns in 3D */
+.shot-mission > .cam, .shot-sites > .cam, .shot-layers > .cam, .shot-encryption > .cam, .shot-warmup > .cam, .shot-proxy > .cam { perspective: 2200px; perspective-origin: 960px 540px; }
+
+/* MARK: The end card: the mark in code, the name, what it is, the button */
+.shot-end { background: #0E0F11; }
+.end-mark { position: absolute; left: 960px; top: 340px; width: 420px; height: 420px; margin: -210px 0 0 -210px; --q: 1; --d: 200px; }
+.end-mark canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.end-l, .end-r { filter: brightness(1.5); }
+/* The seam's normal is (3, 1)/√10: the left half comes from up and left, the right half from down and right */
+.end-l { transform: translate(calc(var(--d) * -0.949 * (1 - var(--q))), calc(var(--d) * -0.316 * (1 - var(--q)))); }
+.end-r { transform: translate(calc(var(--d) * 0.949 * (1 - var(--q))), calc(var(--d) * 0.316 * (1 - var(--q)))); }
+.end-name, .end-line { position: absolute; left: 0; right: 0; display: flex; justify-content: center; text-align: center; }
+.end-name { top: 600px; }
+
+.end-line { top: 748px; font: 600 40px/50px var(--fd); letter-spacing: -0.018em; color: var(--grey); }
+.end-btn {
+  position: absolute; left: 960px; top: 836px; transform: translateX(-50%); white-space: nowrap;
+  height: 84px; padding: 0 50px; border-radius: 42px; background: var(--blue); color: #fff;
+  font: 700 34px/84px "Inter", var(--font); letter-spacing: -0.015em;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+/* MARK: Over everything: a quiet vignette; the hairline that wipes one shot into the next (the mark's seam,
+   leaning 1 : 3 — a line, not a light); black for the cuts that go through it */
+.fx { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+.fx > i { position: absolute; display: block; }
+.fx-vignette { inset: 0; background: radial-gradient(ellipse 80% 76% at 50% 48%, transparent 55%, rgba(0, 0, 0, 0.3) 100%); }
+.fx-black { inset: 0; background: #000; opacity: 0; }
+.fx-seam {
+  left: 0; top: -200px; width: 2px; height: 1480px; opacity: 0; transform-origin: 50% 50%;
+  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.55) 25%, rgba(255, 255, 255, 0.7) 50%, rgba(255, 255, 255, 0.55) 75%, transparent);
+}
+
+/* MARK: Soft shadows: the windows stand off the studio (a long soft shadow under, a short one close) */
+.film .sc-mission .mi-frame, .film .sc-sites .sw, .film .sc-proxy .pxw, .film .sc-encryption .enc-card, .film .sc-warmup .wu-win,
+.film .sc-bento .bx { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 60px 110px -30px rgba(0, 0, 0, 0.75), 0 18px 36px -8px rgba(0, 0, 0, 0.45) !important; }

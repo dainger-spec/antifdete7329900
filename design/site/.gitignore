@@ -4,3 +4,5 @@ tools/bake/warmup/raw/
 tools/bake/warmup/out/
 video/.cache/
 video/preview-v2/*.mp4
+video/preview-v3/*.mp4
+video/music/
