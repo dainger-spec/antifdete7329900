@@ -146,6 +146,7 @@ final class SelfTest {
         await group("fingerprint surface") { try await fingerprintSurface(repository) }
         await group("recovery sealing") { try await recoverySealing(repository) }
         await group("format policy") { try formatPolicy(repository) }
+        await group("earlier versions' Safari keys") { earlierVersionsSafariKeys() }
         await group("update gate") { try updateGate(repository) }
         await group("settings") { try await appSettings(repository) }
         await group("editor labels") { try editorLabels() }
@@ -2719,6 +2720,91 @@ final class SelfTest {
         let restored = try await js(web2, "return localStorage.getItem('pb') ?? 'null';") as? String
         check("recovery: data restored after recovery seal", restored == token, restored ?? "nil")
         session2.shutDown()
+    }
+
+    // MARK: What earlier versions left in the account's com.apple.Safari.plist
+
+    /// `SafariAccountPreferences`, on a domain of the self-test's own in place of
+    /// `com.apple.Safari` (the account's file is left alone): the keys earlier versions wrote, as a
+    /// profile with a proxy and Safe Browsing off wrote them, three of them changed since — one to
+    /// the other value, one to a value no profile of the vault gives, one to a number — and a key
+    /// of the open and save panel's. The keys still holding a profile's value go; the three and the
+    /// panel's stay, as another process (`defaults`) reads the domain; and a second time nothing
+    /// is done.
+    private func earlierVersionsSafariKeys() {
+        guard !AppEnvironment.isSandboxed else {
+            info("earlier versions' Safari keys: not checked in the sandboxed build, which does not take them out")
+            return
+        }
+        let domain = "PrivacyBrowser.SelfTest.SafariKeys-\(UUID().uuidString.prefix(8))"
+        let suite = "PrivacyBrowser.SelfTest.SafariKeysDone-\(UUID().uuidString.prefix(8))"
+        let app = domain as CFString
+        func set(_ key: String, _ value: CFPropertyList?) {
+            CFPreferencesSetValue(key as CFString, value, app, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        }
+        /// What the `defaults` command prints: another process, which gets the domain from cfprefsd.
+        func defaultsCommand(_ arguments: [String]) -> Data {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            process.arguments = arguments
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            guard (try? process.run()) != nil else { return Data() }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return data
+        }
+        func exported() -> [String: Any] {
+            let data = defaultsCommand(["export", domain, "-"])
+            return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] ?? [:]
+        }
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            check("earlier versions' Safari keys: a defaults suite of the self-test's own", false, suite)
+            return
+        }
+        defer {
+            for (key, _) in SafariAccountPreferences.written { set(key, nil) }
+            set("NSNavLastRootDirectory", nil)
+            CFPreferencesSynchronize(app, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+            _ = defaultsCommand(["delete", domain])
+            defaults.removePersistentDomain(forName: suite)
+        }
+        var profile = ProfileConfiguration()
+        profile.proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9)
+        profile.safeBrowsingEnabled = false
+        let profiles = [profile]
+        for (key, written) in SafariAccountPreferences.written {
+            set(key, written.value(for: profile) ? kCFBooleanTrue : kCFBooleanFalse)
+        }
+        let changed = ["AutoFillPasswords", "WebKitDNSPrefetchingEnabled", "PreloadTopHit"]
+        set("AutoFillPasswords", kCFBooleanTrue)
+        set("WebKitDNSPrefetchingEnabled", kCFBooleanTrue)
+        set("PreloadTopHit", NSNumber(value: 0))
+        set("NSNavLastRootDirectory", "~/Documents" as CFString)
+        CFPreferencesSynchronize(app, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        let planted = exported()
+        check("earlier versions' Safari keys: the domain holds them as planted, for another process too",
+              planted.count == SafariAccountPreferences.written.count + 1, "\(planted.keys.sorted())")
+
+        let first = SafariAccountPreferences.removeOnce(from: domain, defaults: defaults) { profiles }
+        let ours = SafariAccountPreferences.written.map(\.key).filter { !changed.contains($0) }
+        check("earlier versions' Safari keys: those still holding a profile's value are taken out, the three changed since are left",
+              first?.removed == ours && first?.left == changed, String(describing: first))
+        let after = exported()
+        check("earlier versions' Safari keys: another process reads the domain without them",
+              ours.allSatisfy { after[$0] == nil }, "\(after.keys.sorted())")
+        check("earlier versions' Safari keys: the three changed since and the panel's key are as they were",
+              (after["AutoFillPasswords"] as? Bool) == true && (after["WebKitDNSPrefetchingEnabled"] as? Bool) == true
+                  && (after["PreloadTopHit"] as? NSNumber)?.intValue == 0
+                  && (after["NSNavLastRootDirectory"] as? String) == "~/Documents",
+              "\(after)")
+
+        set("ExtensionsEnabled", kCFBooleanFalse)
+        CFPreferencesSynchronize(app, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        let second = SafariAccountPreferences.removeOnce(from: domain, defaults: defaults) { profiles }
+        check("earlier versions' Safari keys: taken out once — the second time nothing is done",
+              second == nil && (exported()["ExtensionsEnabled"] as? Bool) == false, String(describing: second))
     }
 
     // MARK: Format policy (docs/UPDATES.md §4)

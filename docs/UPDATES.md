@@ -326,7 +326,7 @@ As built: `VERSION` and `BUILD` are required; `FEED_URL` and `DOWNLOAD_URL` (htt
 the appcast and the zips are published; `UPDATE_KEY_FILE` is the private key from `pbupdate keygen`
 (kept out of the repository and of CI); `UPDATE_EXTRA_PUBLIC_KEYS` adds keys the app also trusts
 (rotation); `PREVIOUS_APPCAST` keeps the releases of the appcast published now; `NOTES_FILE` is the
-release notes. The app is built by `build-app.sh` with the feed, the public keys and — with a
+release notes (`docs/release-notes-next.txt` gathers what the next release's are to say). The app is built by `build-app.sh` with the feed, the public keys and — with a
 Developer ID — the Team ID updates must be signed by (and a secure timestamp, which notarization
 needs). At the end the appcast and the zip are checked with `pbupdate verify`, the code the app
 itself checks them with, and the script lists what a real release still needs when it ran dry.

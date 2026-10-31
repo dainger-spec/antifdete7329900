@@ -235,6 +235,8 @@ final class AppModel: ObservableObject {
         restartAutomation()
         phase = .unlocked
         refresh()
+        // What earlier versions left in the account's com.apple.Safari.plist is taken out, once.
+        SafariAccountPreferences.removeOnce { repository.list().compactMap { try? repository.loadConfiguration($0.id) } }
         // A quit that was not finished (an update refused at Install Now) recorded what ran then;
         // the next quit records afresh.
         recordedProfilesToReopen = false

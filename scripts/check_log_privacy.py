@@ -83,6 +83,9 @@ ALLOWED_IN_FILE = {
     ("ProfileProcess.swift", "status"): "a process's exit status or signal number",
     ("ProfileManager.swift", "report.attempts"): "a count of seal attempts",
     ("ProfileManager.swift", "report.pagesClosed"): "a count of pages closed",
+    ("SafariAccountPreferences.swift", "domain"): "a preferences domain's name from the code: com.apple.Safari, or the self-test's",
+    ("SafariAccountPreferences.swift", "removed"): "names of com.apple.Safari keys from that file's own list, or \"none\"",
+    ("SafariAccountPreferences.swift", "left"): "names of com.apple.Safari keys from that file's own list, or \"none\"",
     ("ExceptionLog.swift", "redactedReason"):
         "an exception's reason with every address, path, e-mail, quote and long number cut out "
         "(LogRedaction, LogRedactionTests); the full reason is logged privately",

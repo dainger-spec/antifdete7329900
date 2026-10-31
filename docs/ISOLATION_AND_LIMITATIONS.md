@@ -815,6 +815,18 @@ So nothing of a profile's that must stay its own is written to a domain:
   `~/Library/Preferences/com.apple.Safari.plist` — among the real Safari's places, the same file for
   every profile. **Checked by the self-test**: Safari's lookups in the profile's process answer
   with the profile's values, and that file is not written while the profile runs.
+- The real Safari does not read that file (CI run 488, measurement branch
+  `claude/measure-safari-prefs`, macOS 26 and 27, `scripts/safari_prefs_reach.py`): cfprefsd's log
+  has Safari asking for `com.apple.Safari` only from its container, `/Library/Preferences` and
+  managed preferences; a home page put in the file next to the 15 keys, as those versions wrote
+  them, did not open in a new window — with Safari's container in use, and on Safari's first launch
+  with a new container, which took none of the keys — while the same page given as a launch argument
+  did. The one process seen reading the file is AppKit's open and save panel service, for the
+  panels' own settings. On the owner's Mac, Safari's four AutoFill settings are on, the file saying
+  off. The keys are ours all the same: once, after the vault's first unlock in a version with it,
+  each that still holds a value a profile of the vault would have written is taken out
+  (`SafariAccountPreferences`); one changed since, and every other key of the file, stays; the log
+  says which went and which stayed. **Checked by the self-test**, on a domain of its own.
 - **Open:** what Safari's chrome saves through the standard defaults — its window's frame, its
   toolbar, sidebar and favorites bar, the start page's sections, some WebKit preferences it keeps,
   dates of its own updates — goes to this app's own domain, `~/Library/Preferences/<bundle id>.plist`
