@@ -264,12 +264,15 @@ def main():
         # Measurement branch: where the profile's process spends its time while it repeats
         # "an error occurred while attempting to obtain endpoint for listener 'com.apple.view-bridge'"
         # (runs 468: from its start to the end of the walk, hundreds of thousands of times).
-        for when in (40, 150):
-            time.sleep(when - (time.time() - started) if when > time.time() - started else 0)
-            found = subprocess.run(["pgrep", "-f", "--", "--profile-session"], capture_output=True, text=True).stdout.split()
-            for pid in found[:1]:
-                subprocess.run(["/usr/bin/sample", pid, "3", "-mayDie", "-file", os.path.join(out, f"spin-{pid}-{when}s.txt")],
-                               capture_output=True, timeout=60)
+        # Run 472: sampling took longer than a minute on the runner (symbols); one sample, given time.
+        time.sleep(40)
+        found = subprocess.run(["pgrep", "-f", "--", "--profile-session"], capture_output=True, text=True).stdout.split()
+        for pid in found[:1]:
+            try:
+                subprocess.run(["/usr/bin/sample", pid, "3", "-mayDie", "-file", os.path.join(out, f"spin-{pid}.txt")],
+                               capture_output=True, timeout=600)
+            except subprocess.TimeoutExpired:
+                print(f"MENUWALK-INFO sampling {pid} took more than ten minutes", flush=True)
     threading.Thread(target=sample_the_profile, daemon=True).start()
     with open(os.path.join(out, "walk.txt"), "w") as log:
         try:
