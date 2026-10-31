@@ -41,7 +41,7 @@ export default function checkout(c, { lang }) {
   const coinRow = (x) => `<span class="coin-t">${esc(x.t)}</span><span class="coin-n">${esc(x.n)}</span><span class="coin-net">${x.net.toLowerCase() === x.n.toLowerCase() ? '' : esc(x.net)}</span>`;
   const style = `<style>
     .pay { max-width: 440px; margin: 0 auto; padding: 32px 0 112px; text-align: center; }
-    #pay-month:checked ~ .container .pay label[for="pay-month"], #pay-year:checked ~ .container .pay label[for="pay-year"] { background: rgba(255, 255, 255, 0.12); color: var(--text-primary); }
+    #pay-month:checked ~ .container .pay label[for="pay-month"], #pay-year:checked ~ .container .pay label[for="pay-year"] { background: linear-gradient(180deg, rgba(255, 255, 255, 0.17), rgba(255, 255, 255, 0.10)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 8px rgba(0, 0, 0, 0.35); color: var(--text-primary); }
     #pay-month:focus-visible ~ .container .pay label[for="pay-month"], #pay-year:focus-visible ~ .container .pay label[for="pay-year"] { outline: 2px solid var(--accent); outline-offset: 1px; }
     .pay-back { display: inline-flex; align-items: center; gap: 6px; font: var(--t-small); color: var(--text-tertiary); }
     .pay-back:hover { color: var(--text-primary); text-decoration: none; }
@@ -54,36 +54,40 @@ export default function checkout(c, { lang }) {
     .pay-sum { font: 600 56px/60px var(--font-display); letter-spacing: -0.025em; color: var(--text-primary); font-variant-numeric: tabular-nums; }
     .pay-head .seg { margin-top: 14px; }
     .pay-until { margin-top: 10px; font: 400 13px/18px var(--font); color: var(--text-tertiary); }
-    .pay-card { margin-top: 36px; padding: 24px; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 18px; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--r-card); }
+    /* the card and what is in it: Liquid Glass (site.css) — the card a panel with the strong rim, the coin and the
+       address capsules of lighter glass, the QR code on white in a frame of glass, the list a floating pane */
+    .pay-card { --rim: var(--lg-rim-strong); margin-top: 36px; padding: 22px 22px 20px; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 18px; border-radius: 30px; }
     /* the coin: one line closed; open, a search field and a list that scrolls */
     .coin-wrap { width: 100%; }
     .coin { position: relative; width: 100%; text-align: left; }
-    .coin-btn { width: 100%; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px 0 14px; border-radius: 10px; background: var(--control-fill); border: 1px solid var(--hairline); color: var(--text-primary); font: var(--t-ui); cursor: pointer; }
-    .coin-btn:hover { border-color: var(--strong-border, rgba(255, 255, 255, 0.16)); }
-    .coin-btn[aria-expanded="true"] { border-color: rgba(111, 143, 234, 0.55); }
+    .coin-btn { width: 100%; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 16px 0 18px; border-radius: var(--r-pill); color: var(--text-primary); font: var(--t-ui); cursor: pointer; }
+    .coin-btn[aria-expanded="true"] { box-shadow: var(--lgc-edge), 0 0 0 1.5px rgba(111, 143, 234, 0.6); }
     .coin-btn svg { flex: none; color: var(--text-tertiary); }
     .coin-t { font-weight: 600; color: var(--text-primary); }
     .coin-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); }
+    .coin-btn .coin-n { color: var(--text-secondary); }
     .coin-net { margin-left: auto; flex: none; color: var(--text-secondary); font: 400 13px/18px var(--font); }
-    .coin-pop { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 30; padding: 6px; border-radius: 12px; background: #1E222A; border: 1px solid var(--hairline); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); }
+    /* the list is opaque: it opens over the white QR code, and names in it must read whatever is under it */
+    .coin-pop { position: absolute; left: 0; right: 0; top: calc(100% + 8px); z-index: 30; padding: 6px; border-radius: 24px; background: #181A20; -webkit-backdrop-filter: none; backdrop-filter: none; }
     .coin-pop[hidden] { display: none; }
-    .coin-search { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 10px; margin-bottom: 4px; border-radius: 8px; background: var(--control-fill); color: var(--text-tertiary); }
+    .coin-search { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; margin-bottom: 4px; border-radius: var(--r-pill); background: rgba(255, 255, 255, 0.06); box-shadow: var(--lgs); color: var(--text-tertiary); }
     .coin-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: var(--t-ui); }
     .coin-list { list-style: none; margin: 0; padding: 0; max-height: 264px; overflow-y: auto; }
-    .coin-list li { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 10px; border-radius: 8px; font: var(--t-ui); cursor: pointer; outline: 0; }
+    .coin-list li { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 14px; border-radius: 14px; font: var(--t-ui); cursor: pointer; outline: 0; }
     .coin-list li:hover, .coin-list li:focus { background: rgba(255, 255, 255, 0.07); }
     .coin-list li .ok { flex: none; width: 14px; color: var(--accent); visibility: hidden; }
     .coin-list li[aria-selected="true"] .ok { visibility: visible; }
     .coin-list li[hidden] { display: none; }
     .coin-empty { padding: 10px; font: var(--t-small); color: var(--text-tertiary); }
-    .pay-qr { padding: 10px; border-radius: 14px; background: #fff; line-height: 0; }
+    .pay-qr { margin: 8px 0 6px; padding: 12px; border-radius: 22px; background: #fff; line-height: 0; box-shadow: 0 0 0 7px rgba(255, 255, 255, 0.055), 0 0 0 8px rgba(255, 255, 255, 0.11), 0 24px 50px -24px rgba(0, 0, 0, 0.9); }
     .pay-amount { font: 600 22px/28px var(--font-display); letter-spacing: -0.01em; color: var(--text-primary); }
     .pay-net { margin-top: -14px; font: 400 13px/18px var(--font); color: var(--text-tertiary); }
-    .pay-addr { width: 100%; display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 14px; border-radius: 10px; background: var(--control-fill); border: 1px solid var(--hairline); text-align: left; }
+    .pay-addr { width: 100%; display: flex; align-items: center; gap: 4px; padding: 5px 5px 5px 18px; border-radius: var(--r-pill); text-align: left; }
+    .pay-addr:hover { background: var(--lgc-tint); }
     .pay-addr span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 13px/20px var(--font-mono); color: var(--text-primary); }
-    .pay-addr button { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; }
-    .pay-addr button:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); }
-    .pay-status { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid var(--hairline); font: var(--t-small); color: var(--text-secondary); white-space: nowrap; }
+    .pay-addr button { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.08); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14); color: var(--text-secondary); cursor: pointer; }
+    .pay-addr button:hover { background: rgba(255, 255, 255, 0.14); color: var(--text-primary); }
+    .pay-status { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 2px 0; background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.12) 20%, rgba(255, 255, 255, 0.12) 80%, rgba(255, 255, 255, 0)) top / 100% 1px no-repeat; font: var(--t-small); color: var(--text-secondary); white-space: nowrap; }
     .pay-status .dot { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
     .pay-status .t { display: inline-flex; align-items: center; gap: 6px; color: var(--text-tertiary); }
     .pay-status .t b { font: 500 13px/20px var(--font-mono); color: var(--text-secondary); }
@@ -97,8 +101,8 @@ export default function checkout(c, { lang }) {
     @media (max-width: 389px) { .coin-btn .coin-n { display: none; } }
   </style>`;
   const coin = `<div class="tbd coin-wrap" data-q="q13" title="Решение владельца: вопрос 13"><div class="coin" data-sample>
-      <button type="button" class="coin-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="${esc(c.coinLabel)}">${coinRow(k0)}${icon('chevronUpDown', 14)}</button>
-      <div class="coin-pop" hidden>
+      <button type="button" class="coin-btn lg-c" aria-haspopup="listbox" aria-expanded="false" aria-label="${esc(c.coinLabel)}">${coinRow(k0)}${icon('chevronUpDown', 14)}</button>
+      <div class="coin-pop lg-f" hidden>
         <label class="coin-search">${icon('magnifyingglass', 14)}<input type="search" placeholder="${esc(c.coinSearch)}" aria-label="${esc(c.coinSearch)}" autocomplete="off"></label>
         <ul class="coin-list" role="listbox" aria-label="${esc(c.coinLabel)}">${c.coins.map((x, i) => `<li role="option" tabindex="-1" data-i="${i}" aria-selected="${i === 0}">${coinRow(x)}<span class="ok">${icon('check', 14)}</span></li>`).join('')}</ul>
         <p class="coin-empty" hidden>${inline(c.coinEmpty, lang)}</p>
@@ -117,12 +121,12 @@ export default function checkout(c, { lang }) {
       <div class="seg" role="group" aria-label="${lang === 'ru' ? 'Период' : 'Period'}"><label for="pay-month">${inline(m[0], lang)}</label><label for="pay-year">${inline(y[0], lang)}</label></div>
       <p class="pay-until" data-sample>${both(inline(m[2], lang), inline(y[2], lang))}</p>
     </div>
-    <section class="pay-card" aria-label="${esc(c.qr)}">
+    <section class="pay-card lg" aria-label="${esc(c.qr)}">
       ${coin}
       <div class="pay-qr" data-sample role="img" aria-label="${esc(c.qr)}" data-qr>${qrDrawing(k0.a, 168)}</div>
       <div class="pay-amount" data-sample>${both(`${esc(k0.m)} ${esc(k0.t)}`, `${esc(k0.y)} ${esc(k0.t)}`)}</div>
       <div class="pay-net" data-sample data-net>${net(k0.net)}</div>
-      <div class="pay-addr" data-sample><span data-addr>${esc(k0.a)}</span><button type="button" data-copy="${esc(k0.a)}" aria-label="${esc(c.copy)}" title="${esc(c.copy)}">${icon('copy', 15)}</button></div>
+      <div class="pay-addr lg-c" data-sample><span data-addr>${esc(k0.a)}</span><button type="button" data-copy="${esc(k0.a)}" aria-label="${esc(c.copy)}" title="${esc(c.copy)}">${icon('copy', 15)}</button></div>
       <div class="pay-status"><span><span class="live"><i class="dot"></i>${inline(c.status, lang)}</span><span class="gone">${inline(c.expired, lang)} <a href="checkout.html">${inline(c.newAddress, lang)}</a></span></span><span class="t live" data-sample>${icon('clock', 13)}<span class="lbl">${inline(c.timerLabel, lang)}</span> <b data-timer>${esc(c.timer)}</b></span></div>
     </section>
     <p class="pay-note">${inline(c.exact, lang)}<br>${inline(c.after, lang)}</p>

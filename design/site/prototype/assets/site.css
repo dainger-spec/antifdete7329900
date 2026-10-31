@@ -899,7 +899,7 @@ select.input { appearance: none; padding-right: 36px; background-image: none; }
 .legend { display: flex; flex-wrap: wrap; gap: 10px 22px; font: var(--t-caption); color: var(--text-tertiary); margin-top: var(--s4); }
 .legend .res { font: var(--t-caption); color: var(--text-secondary); }
 .leak-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gutter); }
-.leak { padding: var(--s5); background: var(--pane); border: 1px solid var(--pane-line); box-shadow: var(--pane-hi); border-radius: var(--r-card); }
+.leak { padding: var(--s5); border-radius: var(--r-card); }
 .leak .lh { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 6px 12px; }
 .leak .lh .res { white-space: normal; }
 .leak .lt { font: var(--t-h4); }
@@ -1111,11 +1111,7 @@ html.shot .proto-bar, html.rec .proto-bar { display: none; }
   --glass-blur: blur(24px) saturate(170%);
   --glass-rim: linear-gradient(140deg, rgba(255, 255, 255, 0.44), rgba(255, 255, 255, 0.10) 28%, rgba(255, 255, 255, 0.03) 58%, rgba(255, 255, 255, 0.18));
   --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 18px 50px rgba(0, 0, 0, 0.45);
-  /* A pane: what sits on the plain page (cards, tables, tiles) — the glass's tone without the blur */
-  --pane: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
-  --pane-line: rgba(255, 255, 255, 0.085);
-  --pane-hi: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  --r-card: 20px;
+  --r-card: 24px;
   --r-window: 16px;
   --r-tile: 26px;
 }
@@ -1140,13 +1136,9 @@ body { background: var(--backdrop); }
 .btn.secondary { background: var(--glass); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); border-color: rgba(255, 255, 255, 0.13); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14); }
 .btn.secondary:hover { background: rgba(255, 255, 255, 0.11); }
 
-/* Panes: cards, tables, notes, tiles — one family, large radii, a hairline and a top light */
-.card, .table-wrap, .stats, .diagram, .code, .note:not(.accent):not(.warn):not(.danger), .steps3 li, .appwin, .swin {
-  background: var(--pane); border: 1px solid var(--pane-line); box-shadow: var(--pane-hi);
-}
+/* Panes: cards, tables, notes, tiles — one family, large radii; their material is Liquid Glass (at the end) */
 .card, .table-wrap, .stats, .diagram, .code, .note, .steps3 li { border-radius: var(--r-card); }
 .table th { background: transparent; }
-.card-link:hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); }
 .tag, .chip { border-radius: var(--r-pill); }
 
 /* The last call: the mark in code, small */
@@ -1312,4 +1304,172 @@ label.acc-row { cursor: pointer; }
   /* in a full-page shot the tab bar sits at the end of the page, not across its middle */
   html.shot body.page-account { position: relative; }
   html.shot .acc-tabs { position: absolute; }
+}
+
+/* ===================================================================================================
+   MARK: Liquid Glass — every surface. The owner: «все элементы сделай liquid glass … на сайте везде».
+   One material in three weights, after macOS 26:
+     panel   — cards, tables, notes, lists, tiles: a clear tint a touch lighter at the top, a sheen at the top
+               left, a rim of light brightest at the top-left and bottom-right corners, a soft inner edge and
+               a long shadow below;
+     control — what you press or type into: capsules a step lighter, with a rim of their own;
+     float   — what floats over the page (menus, popovers, the account's tab bar): denser and blurred.
+   Only floating glass blurs what is behind it: panels sit on the plain near-black page, where a blur changes
+   nothing you can see and costs a phone a layer per card. The rim is the host's ::after (a mask keeps 1 px of a
+   gradient), so a host keeps ::before for itself (step numbers); hosts lose their hairline border, the rim
+   takes its place. <input> and <details> can't carry a ::after: their rim is an inset shadow.
+   =================================================================================================== */
+
+:root {
+  --lg-tint: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.028) 36%, rgba(255, 255, 255, 0.02) 72%, rgba(255, 255, 255, 0.036) 100%);
+  --lg-sheen: radial-gradient(110% 55% at 0% 0%, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 62%);
+  --lg-rim: linear-gradient(135deg, rgba(255, 255, 255, 0.46) 0%, rgba(255, 255, 255, 0.15) 14%, rgba(255, 255, 255, 0.05) 38%, rgba(255, 255, 255, 0.045) 60%, rgba(255, 255, 255, 0.15) 84%, rgba(255, 255, 255, 0.32) 100%);
+  --lg-rim-strong: linear-gradient(135deg, rgba(255, 255, 255, 0.62) 0%, rgba(255, 255, 255, 0.20) 14%, rgba(255, 255, 255, 0.06) 38%, rgba(255, 255, 255, 0.05) 60%, rgba(255, 255, 255, 0.20) 84%, rgba(255, 255, 255, 0.46) 100%);
+  --lg-edge: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 0 18px rgba(255, 255, 255, 0.04), inset 0 26px 44px -30px rgba(255, 255, 255, 0.16);
+  --lg-drop: 0 2px 6px rgba(0, 0, 0, 0.3), 0 30px 70px -30px rgba(0, 0, 0, 0.85);
+  /* a rim made of shadows, for hosts that can't carry a ::after */
+  --lg-ring: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.075);
+  --lgc-tint: linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.04));
+  --lgc-hover: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06));
+  --lgc-rim: linear-gradient(135deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.10) 30%, rgba(255, 255, 255, 0.05) 60%, rgba(255, 255, 255, 0.22));
+  --lgc-edge: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 8px 22px -12px rgba(0, 0, 0, 0.7);
+  /* a small piece of glass: icon wells, step numbers, tags, the selected row of a side list */
+  --lgs: inset 0 1px 0 rgba(255, 255, 255, 0.13), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  --lgf-fill: rgba(20, 22, 28, 0.86);
+  --lgf-blur: blur(28px) saturate(180%);
+  --lgf-edge: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.07), 0 24px 60px rgba(0, 0, 0, 0.6);
+  /* tinted rims: the recommended plan, notes that inform, warn or stop */
+  --rim-accent: linear-gradient(135deg, rgba(170, 194, 255, 0.85) 0%, rgba(111, 143, 234, 0.32) 16%, rgba(111, 143, 234, 0.12) 42%, rgba(111, 143, 234, 0.10) 60%, rgba(111, 143, 234, 0.28) 84%, rgba(170, 194, 255, 0.62) 100%);
+  --rim-warn: linear-gradient(135deg, rgba(240, 200, 120, 0.62), rgba(217, 164, 65, 0.16) 20%, rgba(217, 164, 65, 0.08) 55%, rgba(240, 200, 120, 0.34));
+  --rim-danger: linear-gradient(135deg, rgba(245, 150, 145, 0.62), rgba(236, 111, 104, 0.16) 20%, rgba(236, 111, 104, 0.08) 55%, rgba(245, 150, 145, 0.34));
+}
+
+/* Panels */
+.lg, .card, .plan, .panel, .run-card, .leak, .acc-card, .acc-list, .acc-stats > div, .table-wrap, .stats, .diagram, .code,
+.note, .steps3 li, .versus, .knows, .pager a {
+  position: relative; border: 0; background: var(--lg-sheen), var(--lg-tint); box-shadow: var(--lg-edge), var(--lg-drop);
+}
+.card.inset { background: var(--lg-sheen), var(--lg-tint); }
+.card-link, .pager a { transition: background-color var(--d-hover-out) var(--ease-out), box-shadow var(--d-hover-out) var(--ease-out); }
+.card-link:hover, .pager a:hover { background: var(--lg-sheen), linear-gradient(180deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.045)); }
+.acc-card, .acc-list { border-radius: var(--r-card); }
+.acc-stats > div { border-radius: 18px; }
+.versus > div, .knows > div { background: transparent; }
+
+/* The rim: a gradient, masked down to its outer pixel */
+:is(.lg, .card, .plan, .panel, .run-card, .leak, .acc-card, .acc-list, .acc-stats > div, .table-wrap, .stats, .diagram, .code,
+.note, .steps3 li, .versus, .knows, .pager a, .lg-c, .btn.secondary, .appwin, .swin, .sc-bento .bx)::after {
+  content: ""; position: absolute; inset: 0; z-index: 2; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: var(--rim, var(--lg-rim));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
+}
+
+/* The recommended plan: a blue rim and a breath of blue at the top */
+.plan.featured { --rim: var(--rim-accent); background: radial-gradient(90% 40% at 50% 0%, rgba(111, 143, 234, 0.16), rgba(111, 143, 234, 0) 72%), var(--lg-sheen), var(--lg-tint); }
+.danger-zone { --rim: var(--rim-danger); }
+
+/* Notes: glass tinted by what they say */
+.note.accent { --rim: var(--rim-accent); background: linear-gradient(180deg, rgba(111, 143, 234, 0.17), rgba(111, 143, 234, 0.07)), var(--lg-sheen); }
+.note.warn { --rim: var(--rim-warn); background: linear-gradient(180deg, rgba(217, 164, 65, 0.15), rgba(217, 164, 65, 0.06)), var(--lg-sheen); }
+.note.danger { --rim: var(--rim-danger); background: linear-gradient(180deg, rgba(236, 111, 104, 0.14), rgba(236, 111, 104, 0.05)), var(--lg-sheen); }
+/* «not confirmed» keeps its dashed amber frame: it is a mark, not a surface (and the inline mark's padding and
+   size, .unv, stay out of the note) */
+.note.unv { padding: 16px 18px; font: var(--t-small); border: 1px dashed rgba(242, 193, 61, 0.45); background: rgba(242, 193, 61, 0.06); box-shadow: none; }
+.note.unv::after { content: none; }
+
+/* Windows of the app keep the app's own flat inside; only their frame catches the light, as in macOS 26 */
+.appwin { position: relative; border-color: transparent; box-shadow: var(--lg-drop); }
+.swin { border-color: transparent; box-shadow: var(--lg-drop); }
+.appwin::after, .swin::after { --rim: var(--lg-rim-strong); }
+
+/* Sign-in: the side that says what the account keeps is a pane of the same glass, not a grey slab */
+.auth-side { background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)); border-color: rgba(255, 255, 255, 0.07); }
+
+/* The home page's tiles */
+.sc-bento .bx { background: var(--lg-sheen), var(--lg-tint); box-shadow: var(--lg-edge), var(--lg-drop); }
+
+/* FAQ and the docs' section menu are <details>: glass cards with a rim of shadows */
+.faq { border-top: 0; display: grid; gap: 10px; }
+.faq details { border-bottom: 0; padding: 0 22px; border-radius: 20px; background: var(--lg-sheen), var(--lg-tint); box-shadow: var(--lg-ring), var(--lg-edge), var(--lg-drop); }
+.faq summary { padding: 18px 0; }
+.faq .answer { padding-bottom: 20px; }
+@media (max-width: 899px) { .docs-nav-toggle { border: 0; border-radius: 20px; background: var(--lg-sheen), var(--lg-tint); box-shadow: var(--lg-ring), var(--lg-drop); } }
+
+/* Controls */
+.lg-c, .btn.secondary { position: relative; border: 0; background: var(--lgc-tint); box-shadow: var(--lgc-edge); }
+.lg-c::after, .btn.secondary::after { --rim: var(--lgc-rim); }
+.btn.secondary:hover, .lg-c:hover { background: var(--lgc-hover); }
+.seg { background: var(--lgc-tint); border-color: transparent; box-shadow: var(--lg-ring), 0 8px 22px -12px rgba(0, 0, 0, 0.7); }
+.seg a[aria-current="page"], .seg a[aria-current="true"], .seg input:checked + label,
+#bill-month:checked ~ .billing label[for="bill-month"], #bill-year:checked ~ .billing label[for="bill-year"] {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.17), rgba(255, 255, 255, 0.10)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 8px rgba(0, 0, 0, 0.35);
+  color: var(--text-primary);
+}
+/* the pricing switch is two radios outside it: it shows which one is on, and where the keyboard is */
+#bill-month:focus-visible ~ .billing label[for="bill-month"], #bill-year:focus-visible ~ .billing label[for="bill-year"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lang { background: var(--lgc-tint); border-color: transparent; box-shadow: var(--lg-ring); }
+.lang a[aria-current="true"] { background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16); }
+.tag { border-color: transparent; background: var(--lgc-tint); box-shadow: var(--lgs); }
+.tag.accent { background: linear-gradient(180deg, rgba(111, 143, 234, 0.26), rgba(111, 143, 234, 0.13)); box-shadow: inset 0 1px 0 rgba(200, 214, 255, 0.20), inset 0 0 0 1px rgba(143, 178, 255, 0.16); }
+.tag.ok { background: linear-gradient(180deg, rgba(76, 195, 138, 0.24), rgba(76, 195, 138, 0.11)); box-shadow: inset 0 1px 0 rgba(190, 240, 214, 0.18), inset 0 0 0 1px rgba(76, 195, 138, 0.16); }
+.tag.warn { background: linear-gradient(180deg, rgba(217, 164, 65, 0.24), rgba(217, 164, 65, 0.11)); box-shadow: inset 0 1px 0 rgba(245, 220, 170, 0.18), inset 0 0 0 1px rgba(217, 164, 65, 0.16); }
+.chip { border-radius: var(--r-pill); border-color: transparent; background: var(--lgc-tint); box-shadow: var(--lgs); }
+.code-badge, kbd { border-color: transparent; background: var(--lgc-tint); box-shadow: var(--lgs); }
+.node { border-color: transparent; border-radius: 12px; background: var(--lgc-tint); box-shadow: var(--lgs); }
+.node.on { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13), inset 0 0 0 1px rgba(111, 143, 234, 0.6); }
+.node.closed { border-color: var(--strong-border); background: transparent; box-shadow: none; }
+.versus .runs div { border-radius: 12px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06); }
+.copy-btn { border-radius: var(--r-pill); }
+.copy-btn:hover { background: var(--lgc-tint); box-shadow: var(--lgs); }
+
+/* Icon wells and step numbers: small pieces of glass */
+.tile-icon { border-radius: 12px; background: linear-gradient(180deg, rgba(111, 143, 234, 0.30), rgba(111, 143, 234, 0.12)); box-shadow: inset 0 1px 0 rgba(200, 214, 255, 0.22), inset 0 0 0 1px rgba(143, 178, 255, 0.18); }
+.tile-icon.neutral, .acc-row .ic, .device .dicon, .keys .kl .ki { border-color: transparent; background: var(--lgc-tint); box-shadow: var(--lgs); }
+.acc-row .ic, .device .dicon { border-radius: 10px; }
+.steps > li::before, .steps3 li::before { border-color: transparent; background: var(--lgc-tint); box-shadow: var(--lgs); }
+
+/* Fields: glass you type into — clear, with a lit upper lip; search fields are capsules */
+.input { background: linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.035)); border-color: rgba(255, 255, 255, 0.10); border-radius: 14px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+.input:hover { border-color: rgba(255, 255, 255, 0.16); }
+.input:focus-visible, .input:focus { border-color: var(--accent); }
+.search .input { border-radius: var(--r-pill); }
+textarea.input { border-radius: 18px; }
+.check input { border-color: rgba(255, 255, 255, 0.20); background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10); border-radius: 6px; }
+.switch { background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.switch::after { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(0, 0, 0, 0.2); }
+.switch:checked { background: var(--accent-fill-strong); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18); }
+
+/* The selected row of a side list: a lens of lighter glass */
+.local-nav a, .docs-nav a, .acc-side a, .account-nav a { border-radius: 12px; }
+.local-nav a[aria-current="true"], .local-nav a.active, .docs-nav a[aria-current="page"], .acc-side a[aria-current="page"], .account-nav a[aria-current="page"] {
+  background: var(--lgc-tint); box-shadow: var(--lgs);
+}
+.chipnav a { border-color: transparent; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.chipnav a.active { background: var(--lgc-tint); box-shadow: var(--lgs); }
+
+/* Floating glass: dense enough to read on whatever passes under it, even where a browser doesn't blur */
+.lg-f { position: relative; background: var(--lgf-fill); -webkit-backdrop-filter: var(--lgf-blur); backdrop-filter: var(--lgf-blur); box-shadow: var(--lgf-edge); }
+.lg-f::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; background: var(--lgc-rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
+}
+.chipnav { background: rgba(6, 7, 9, 0.7); -webkit-backdrop-filter: var(--lgf-blur); backdrop-filter: var(--lgf-blur); border-bottom-color: rgba(255, 255, 255, 0.07); }
+.menu-panel { background: var(--lgf-fill); -webkit-backdrop-filter: var(--lgf-blur); backdrop-filter: var(--lgf-blur); }
+
+/* The account on a phone: the tab bar floats as a capsule of glass over the page, as in iOS 26 */
+@media (max-width: 899px) {
+  .acc-tabs {
+    left: 14px; right: 14px; bottom: calc(12px + env(safe-area-inset-bottom)); padding: 5px; border-top: 0; border-radius: var(--r-pill);
+    background: var(--lgf-fill); -webkit-backdrop-filter: var(--lgf-blur); backdrop-filter: var(--lgf-blur); box-shadow: var(--lgf-edge);
+  }
+  .acc-tabs::after {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; background: var(--lgc-rim);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
+  }
+  .acc-tabs a { position: relative; z-index: 1; padding: 6px 0 4px; border-radius: var(--r-pill); }
+  .acc-tabs a[aria-current="page"] { color: #AFC2F5; background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.07)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14); }
+  html.shot .acc-tabs { bottom: 12px; }
 }
