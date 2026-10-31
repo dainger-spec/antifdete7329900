@@ -20,6 +20,7 @@ enum SafariUIStateMeasure {
         NSLog("UISTATE this app's own domain through the standard defaults (CI's probe): %@",
               UserDefaults.standard.string(forKey: "PBUIStateAppDomainProbe") ?? "not seen")
         WriteRecorder.install(standard: original, suite: suite)
+        describeObservableDefaults()
         // A canary through the domain: when cfprefsd has it in the file, and whether the account's
         // domain of this app got it. Taken out again, so that the next run's saved keys are Safari's.
         suite.set("canary", forKey: "PBUIStateCanary")
@@ -47,6 +48,87 @@ enum SafariUIStateMeasure {
             NSLog("UISTATE the argument domain through the standard defaults: %ld of its %ld keys answer as there",
                   same.count, arguments.count)
         }
+    }
+
+    /// Which class methods Safari's frameworks add to NSUserDefaults answer, with no argument, with
+    /// an instance named by a path in the real Safari's container — the one Safari's code writes
+    /// through (run 496: nine classes of Safari's) — each such method then answering with `instead`,
+    /// the profile's domain. Right after Safari's frameworks load, before any of Safari's
+    /// application exists.
+    static func findBrowserDefaults(instead: UserDefaults?) {
+        guard isOn, let instead, let meta = object_getClass(UserDefaults.self) else { return }
+        var count: UInt32 = 0
+        guard let methods = class_copyMethodList(meta, &count) else { return }
+        defer { free(methods) }
+        var listed: [String] = []
+        for position in 0..<Int(count) {
+            let method = methods[position]
+            let selector = method_getName(method)
+            let name = NSStringFromSelector(selector)
+            var info = Dl_info()
+            guard method_getNumberOfArguments(method) == 2, !name.hasPrefix("_"), name != "standardUserDefaults",
+                  let encoding = method_getTypeEncoding(method), encoding.pointee == 64,
+                  dladdr(UnsafeRawPointer(method_getImplementation(method)), &info) != 0, let file = info.dli_fname,
+                  String(cString: file).range(of: "/Safari", options: .caseInsensitive) != nil else { continue }
+            let image = (String(cString: file) as NSString).lastPathComponent
+            let answer = (UserDefaults.self as AnyObject).perform(selector)?.takeUnretainedValue()
+            let suite = (answer as? UserDefaults).map { WriteRecorder.identifier(of: $0) }
+                ?? "not an NSUserDefaults (\(answer.map { String(describing: type(of: $0)) } ?? "nil"))"
+            listed.append("+\(name) (\(image)): \(suite)")
+            guard suite.contains("/Library/Containers/com.apple.Safari/") else { continue }
+            let replacement: @convention(block) (AnyObject) -> UserDefaults = { _ in instead }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+            NSLog("UISTATE +[NSUserDefaults %@] answered with the real Safari's container domain; now with the profile's", name)
+        }
+        NSLog("UISTATE class methods of Safari's frameworks on NSUserDefaults, with no argument: %@",
+              listed.isEmpty ? "none" : listed.joined(separator: " | "))
+    }
+
+    /// AppKit's NSObservableDefaults, through which NSToolbar saved its configuration to this app's
+    /// own domain on macOS 26 (run 508: the one key that went there): what it is — its superclass,
+    /// its own class and instance methods, its ivars — and what its class methods with no argument
+    /// answer. Reads only.
+    static func describeObservableDefaults() {
+        guard isOn else { return }
+        guard let cls = NSClassFromString("NSObservableDefaults") else {
+            NSLog("UISTATE NSObservableDefaults: not in this AppKit")
+            return
+        }
+        let superName = class_getSuperclass(cls).map { NSStringFromClass($0) } ?? "none"
+        var classMethods: [String] = []
+        var count: UInt32 = 0
+        if let meta = object_getClass(cls), let methods = class_copyMethodList(meta, &count) {
+            defer { free(methods) }
+            for position in 0..<Int(count) {
+                let method = methods[position]
+                let selector = method_getName(method)
+                let name = NSStringFromSelector(selector)
+                let types = method_getTypeEncoding(method).map { String(cString: $0) } ?? "?"
+                if method_getNumberOfArguments(method) == 2, types.hasPrefix("@"), !name.hasPrefix("alloc"), !name.hasPrefix("new") {
+                    let answer = (cls as AnyObject).perform(selector)?.takeUnretainedValue()
+                    let suite = (answer as? UserDefaults).map { WriteRecorder.identifier(of: $0) } ?? "-"
+                    let kind = answer.map { NSStringFromClass(type(of: $0)) } ?? "nil"
+                    classMethods.append("+\(name) → \(kind) \(suite)\(answer.map { $0 === UserDefaults.standard ? " (the standard defaults)" : "" } ?? "")")
+                } else {
+                    classMethods.append("+\(name) \(types)")
+                }
+            }
+        }
+        var instanceMethods: [String] = []
+        if let methods = class_copyMethodList(cls, &count) {
+            defer { free(methods) }
+            for position in 0..<Int(count) { instanceMethods.append(NSStringFromSelector(method_getName(methods[position]))) }
+        }
+        var ivars: [String] = []
+        if let list = class_copyIvarList(cls, &count) {
+            defer { free(list) }
+            for position in 0..<Int(count) {
+                let ivar = list[position]
+                ivars.append((ivar_getName(ivar).map { String(cString: $0) } ?? "?") + ":" + (ivar_getTypeEncoding(ivar).map { String(cString: $0) } ?? "?"))
+            }
+        }
+        NSLog("UISTATE NSObservableDefaults: a %@; class methods %@; instance methods %@; ivars %@", superName,
+              classMethods.joined(separator: ", "), instanceMethods.joined(separator: ", "), ivars.joined(separator: ", "))
     }
 
     /// At exit, after the file was written: one more key, left to cfprefsd.

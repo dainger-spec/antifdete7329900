@@ -23,6 +23,8 @@ import os
 /// manager seals the home as soon as the process has exited.
 enum SafariUIState {
     private static var defaults: UserDefaults?
+    /// The profile's domain, once `keepInProfileHome` made it.
+    static var profileDefaults: UserDefaults? { defaults }
     /// The domain, by its path; nil until `keepInProfileHome`.
     private(set) static var domain: String?
     /// The keys the file held as the process started: what Safari's chrome saved in the profile's

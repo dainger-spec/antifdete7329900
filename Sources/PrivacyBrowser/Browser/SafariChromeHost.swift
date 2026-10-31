@@ -46,6 +46,8 @@ enum SafariChromeHost {
         if let realHome = SafariPaths.realHome, let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] {
             SafariPaths.redirectGetters(from: realHome, to: home)
         }
+        // Measurement: which accessor Safari's code gets the real Safari's container domain from.
+        SafariUIStateMeasure.findBrowserDefaults(instead: SafariUIState.profileDefaults)
         let structural = SafariChrome.missingStructuralPieces()
         guard structural.isEmpty else {
             log.error("This Safari lacks what its chrome needs here (\(structural.joined(separator: ", "), privacy: .public)): our own window instead")
