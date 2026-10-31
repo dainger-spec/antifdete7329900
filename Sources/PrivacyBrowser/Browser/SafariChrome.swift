@@ -947,6 +947,12 @@ enum SafariChrome {
     /// out as well), a context menu, a key. On macOS 26, Passwords… in a profile's window had
     /// Safari's helper (SafariPlatformSupport) write into the real Safari's container and
     /// ~/Library/Safari and fetch over its own connection, as this Mac (the menu walk, CI run 452).
+    ///
+    /// Replacing the implementations AppKit and WebKit have was not all of it: with a page's field
+    /// focused, something else in the responder chain took the actions and our notice never came
+    /// (the menu walk on a page, CI run 463, macOS 26 and 27). So they are stopped where every
+    /// action sent to a responder passes, the application's `sendAction:to:from:` — Safari's
+    /// application object's, which is the one sending.
     private static func closeAutoFillInsertActions() {
         var replaced: Set<UInt> = []
         let notice: @convention(block) (AnyObject, AnyObject?) -> Void = { _, _ in
@@ -958,6 +964,22 @@ enum SafariChrome {
                       replaced.insert(UInt(bitPattern: method)).inserted else { continue }
                 method_setImplementation(method, imp_implementationWithBlock(notice))
             }
+        }
+        let sendAction = #selector(NSApplication.sendAction(_:to:from:))
+        let closed = Set(autoFillInsertActions)
+        for owner in [NSClassFromString("BrowserApplication"), NSApplication.self].compactMap({ $0 }) {
+            guard let method = class_getInstanceMethod(owner, sendAction),
+                  replaced.insert(UInt(bitPattern: method)).inserted else { continue }
+            typealias Send = @convention(c) (AnyObject, Selector, Selector?, AnyObject?, AnyObject?) -> Bool
+            let original = unsafeBitCast(method_getImplementation(method), to: Send.self)
+            let replacement: @convention(block) (AnyObject, Selector?, AnyObject?, AnyObject?) -> Bool = { application, action, target, sender in
+                if let action, closed.contains(NSStringFromSelector(action)) {
+                    MainActor.assumeIsolated { SafariChrome.presentNotice(L("safari.autofill.closed.title"), L("safari.autofill.closed.text")) }
+                    return true
+                }
+                return original(application, sendAction, action, target, sender)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
         log.notice("The AutoFill insert actions are off: \(replaced.count, privacy: .public) implementation(s) replaced")
     }
