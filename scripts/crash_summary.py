@@ -2,16 +2,20 @@
 """What crashed, in a few lines: the summary of macOS crash reports (.ips) of this app's processes
 and of WebKit's.
 
-    python3 scripts/crash_summary.py ~/Library/Logs/DiagnosticReports/PrivacyBrowser*.ips ...
+    python3 scripts/crash_summary.py ~/Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips ...
 
 A profile's own process that dies leaves the self-test only "the profile quit unexpectedly"; the
 system writes what happened to a crash report. For each report given this prints the process,
 when, the exception and signal, the termination reason, any message the process left (an abort's,
 a Swift runtime error's), and the crashed thread's frames, image and symbol — enough to find the
-line, without the whole report. Exit 0 always: a summary, not a verdict.
+line, without the whole report. A fault the process lived through (a report named
+ExcUserFault_<process>-…, as when WebKit's UI side refuses a message from one of its processes)
+is summarized the same way, on lines that begin with FAULT instead of CRASH. Exit 0 always: a
+summary, not a verdict.
 """
 
 import json
+import os
 import sys
 
 FRAMES = 40
@@ -20,26 +24,33 @@ FRAMES = 40
 def summarize(path):
     with open(path, encoding="utf-8", errors="replace") as handle:
         text = handle.read()
+    # A fault the process lived through says so on every line: no one is to read it as a crash.
+    word = "FAULT" if os.path.basename(path).startswith("ExcUserFault_") else "CRASH"
     header_text, _, body_text = text.partition("\n")
     try:
         header = json.loads(header_text)
         body = json.loads(body_text)
     except ValueError:
-        print(f"CRASH {path}: not a JSON crash report; its first lines:")
+        print(f"{word} {path}: not a JSON crash report; its first lines:")
         print("\n".join(text.splitlines()[:30]))
         return
     process = body.get("procName") or header.get("app_name") or "?"
-    print(f"CRASH {process} (pid {body.get('pid', '?')}) at {header.get('timestamp', body.get('captureTime', '?'))}: {path}")
+    print(f"{word} {process} (pid {body.get('pid', '?')}) at {header.get('timestamp', body.get('captureTime', '?'))}: {path}")
     exception = body.get("exception") or {}
-    print(f"CRASH   exception {exception.get('type', '?')} signal {exception.get('signal', '?')} "
+    print(f"{word}   exception {exception.get('type', '?')} signal {exception.get('signal', '?')} "
           f"codes {exception.get('codes', '?')} subtype {exception.get('subtype', '')}".rstrip())
+    if exception.get("message"):
+        print(f"{word}   exception message: {str(exception['message'])[:1500]}")
     termination = body.get("termination") or {}
     if termination:
-        print(f"CRASH   termination {termination.get('namespace', '?')} {termination.get('indicator', '')} "
+        print(f"{word}   termination {termination.get('namespace', '?')} {termination.get('indicator', '')} "
               f"{' | '.join(termination.get('reasons', []) or [])}".rstrip())
-    for key in ("asi", "vmRegionInfo", "ktriageinfo"):
+    # What a fault carries (WebKit's names the message it refused): under whichever key this
+    # macOS writes it.
+    extra = [key for key in body if any(word in key.lower() for word in ("fault", "payload", "reason"))]
+    for key in ["asi", "vmRegionInfo", "ktriageinfo"] + extra:
         if body.get(key):
-            print(f"CRASH   {key}: {json.dumps(body[key], ensure_ascii=False)[:1500]}")
+            print(f"{word}   {key}: {json.dumps(body[key], ensure_ascii=False)[:1500]}")
     images = body.get("usedImages") or []
     threads = body.get("threads") or []
     faulting = body.get("faultingThread")
@@ -51,14 +62,14 @@ def summarize(path):
         backtraces.append(("last exception", {"frames": body["lastExceptionBacktrace"]}))
     for title, thread in backtraces:
         name = thread.get("name") or thread.get("queue") or ""
-        print(f"CRASH   {title} {name}".rstrip() + ":")
+        print(f"{word}   {title} {name}".rstrip() + ":")
         for index, frame in enumerate((thread.get("frames") or [])[:FRAMES]):
             image_index = frame.get("imageIndex")
             image = images[image_index].get("name", "?") if isinstance(image_index, int) and image_index < len(images) else "?"
             symbol = frame.get("symbol") or f"+{frame.get('imageOffset', '?')}"
             location = frame.get("symbolLocation")
             source = f" ({frame['sourceFile']}:{frame.get('sourceLine', '?')})" if frame.get("sourceFile") else ""
-            print(f"CRASH     {index:2d} {image:<32} {symbol}{f' + {location}' if location is not None else ''}{source}")
+            print(f"{word}     {index:2d} {image:<32} {symbol}{f' + {location}' if location is not None else ''}{source}")
 
 
 def main():

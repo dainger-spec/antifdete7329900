@@ -41,7 +41,9 @@ def wait_for_port(port, seconds=20):
 def crash_reports(since, out):
     """Summaries of this app's crash reports written since `since` (scripts/crash_summary.py)."""
     found = []
-    for path in sorted(glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/PrivacyBrowser*.ips"))):
+    # *PrivacyBrowser*: a fault a process lived through is ExcUserFault_PrivacyBrowser-….ips (its
+    # summary's lines say FAULT, not CRASH).
+    for path in sorted(glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips"))):
         if os.path.getmtime(path) < since:
             continue
         summary = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "crash_summary.py"), path],
@@ -177,7 +179,7 @@ def main():
             text += (f"\n**A profile's process with no window, where its main thread was** ({os.path.basename(path)}):\n\n"
                      + "\n".join("    " + line[:160] for line in lines[start:start + 40]) + "\n")
     if crashes:
-        text += f"\n**The app's processes that crashed during the check:** {len(crashes)}\n\n" + "\n".join(
+        text += f"\n**The app's processes that crashed (CRASH) or lived through a fault (FAULT) during the check:** {len(crashes)}\n\n" + "\n".join(
             "    " + "\n    ".join(lines) + "\n" for lines in crashes)
     with open(os.path.join(out, "scale.md"), "w") as handle:
         handle.write(text)

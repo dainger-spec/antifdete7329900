@@ -4,6 +4,14 @@ on:
   push:
   pull_request:
 
+env:
+  # The self-test's checks a GitHub runner cannot make, by the beginnings of their names: no real
+  # key event reaches a page there (a person's typing into AutoFill is not shown; the AutoFill
+  # world is driven directly), and Safari fetches neither a page's touch icon nor its OpenSearch
+  # description there. Each is still a SKIP line with its reason and in the summary; under
+  # PB_SELFTEST_STRICT any other check skipped on the runner fails the step.
+  PB_SELFTEST_EXPECTED_SKIPS: "passwords: a person's own clicks and keys|Safari chrome: its touch icon|Safari chrome: its OpenSearch description"
+
 jobs:
   core-linux:
     name: Core tests (Linux, swift-crypto)
@@ -66,6 +74,8 @@ jobs:
         id: selftest27
         continue-on-error: true
         timeout-minutes: 45
+        env:
+          PB_SELFTEST_STRICT: "1"
         run: |
           set -o pipefail
           python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
@@ -104,8 +114,15 @@ jobs:
         continue-on-error: true
         run: |
           log=build/egress27/selftest.txt
-          grep -E '^(SELFTEST|INFO macOS|INFO WebKit [0-9])' $log 2>/dev/null | head -3 | sed 's/^/::notice title=macOS 27 self-test::/' || true
+          grep -E '^(SELFTEST [A-Z]*:|INFO macOS|INFO WebKit [0-9])' $log 2>/dev/null | head -3 | sed 's/^/::notice title=macOS 27 self-test::/' || true
           grep '^FAIL' $log 2>/dev/null | head -7 | cut -c1-1500 | sed 's/^/::notice title=macOS 27 self-test - failed::/' || true
+          grep '^SELFTEST SKIPPED' $log 2>/dev/null | cut -c1-600 | sed 's/^/::warning title=macOS 27 self-test - skipped::/' || true
+          {
+            echo "### Self-test on macOS 27"
+            summary="$(grep -h "^SELFTEST [A-Z]*:" $log 2>/dev/null | head -1)"
+            echo "    ${summary:-no summary line: the self-test did not finish}"
+            grep -h "^SELFTEST SKIPPED" $log 2>/dev/null | cut -c1-600 | sed 's/^SELFTEST SKIPPED /- /' || true
+          } >> "$GITHUB_STEP_SUMMARY"
           # The XPC services that started while a profile ran in Safari's chrome, and what they held open.
           grep '^INFO XPC service' $log 2>/dev/null | head -6 | cut -c1-1500 | sed 's/^/::notice title=macOS 27 - XPC services::/' || true
       - name: The certificate checks on macOS 27
@@ -120,13 +137,23 @@ jobs:
         run: |
           mkdir -p build/egress27/crashes
           shopt -s nullglob
-          for report in ~/Library/Logs/DiagnosticReports/PrivacyBrowser*.ips ~/Library/Logs/DiagnosticReports/com.apple.WebKit*.ips \
-                        /Library/Logs/DiagnosticReports/PrivacyBrowser*.ips /Library/Logs/DiagnosticReports/com.apple.WebKit*.ips; do
+          # *Name*: a fault the process lived through is ExcUserFault_<process>-….ips (the owner's
+          # Mac, 1 November: WebKit's UI side refusing a message, EXC_GUARD namespace 31), which a
+          # Name* pattern never found.
+          for report in ~/Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips ~/Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips \
+                        /Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips /Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips; do
             cp "$report" build/egress27/crashes/ 2>/dev/null || sudo cp "$report" build/egress27/crashes/
           done
           sudo chmod -R a+r build/egress27/crashes 2>/dev/null || true
           python3 scripts/crash_summary.py build/egress27/crashes/*.ips | tee build/egress27/crashes/summary.txt
-          grep '^CRASH' build/egress27/crashes/summary.txt | grep -v '^CRASH none' | head -16 | cut -c1-300 | sed 's/^/::warning title=macOS 27 - crash::/' || true
+          grep -E '^(CRASH|FAULT)' build/egress27/crashes/summary.txt | grep -v '^CRASH none' | head -16 | cut -c1-300 | sed 's/^/::warning title=macOS 27 - crash::/' || true
+          # A message WebKit's UI side refused from one of its processes, as the log names it.
+          sudo log show --style compact --last 3h --predicate 'eventMessage CONTAINS[c] "invalid message"' 2>/dev/null \
+            | grep -iv '^timestamp' | head -40 | tee build/egress27/crashes/invalid-messages.txt || true
+          cut -c1-400 build/egress27/crashes/invalid-messages.txt | head -8 | sed 's/^/::warning title=macOS 27 - WebKit refused a message::/' || true
+          if [ -s build/egress27/crashes/invalid-messages.txt ]; then
+            { echo "### macOS 27 - WebKit refused a message"; cut -c1-400 build/egress27/crashes/invalid-messages.txt | head -20 | sed 's/^/    /'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: A jump to a fragment in a profile with a proxy (a measurement)
         if: always()
         continue-on-error: true
@@ -321,19 +348,27 @@ jobs:
           path: build/ui-snapshots
           if-no-files-found: ignore
       - name: Self-test against real WebKit (sandboxed and unsandboxed)
+        env:
+          # A check skipped on this runner fails the step, but for the ones this runner cannot make
+          # (each said with its reason in the self-test's own SKIP line and summary).
+          PB_SELFTEST_STRICT: "1"
         run: |
           set -o pipefail
-          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
-            --tls-control 18086 --canary 18087 --silent 18088 &
-          PROXY_PID=$!
-          # The proxy makes its TLS certificates before it listens.
-          for attempt in $(seq 1 40); do nc -z 127.0.0.1 18081 && break; sleep 0.5; done
           export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
           export PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
           export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088
           mkdir -p build/egress
           status=0
           for variant in sandboxed unsandboxed; do
+            # A proxy of its own for each build, its certificates naming addresses no earlier run
+            # asked for (--aia-tag): the intermediate this Mac fetched for the sandboxed build's
+            # control stayed in its cache, and the unsandboxed build's capture then saw neither the
+            # control nor would it have seen the canary (macOS 26, every run up to 523).
+            python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
+              --tls-control 18086 --canary 18087 --silent 18088 --aia-tag "${variant:0:1}$(date +%s)" &
+            PROXY_PID=$!
+            # The proxy makes its TLS certificates before it listens.
+            for attempt in $(seq 1 40); do nc -z 127.0.0.1 18081 && break; sleep 0.5; done
             echo "::group::self-test ($variant)"
             # The surface dump goes to the repository folder, which only the unsandboxed build may write.
             if [ "$variant" = unsandboxed ]; then
@@ -355,11 +390,12 @@ jobs:
             fi
             build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test | tee "build/egress/selftest-$variant.txt" || status=1
             echo "::endgroup::"
+            kill $PROXY_PID || true
+            wait $PROXY_PID 2>/dev/null || true
           done
           sudo pkill -INT -f "tcpdump -i pktap" || true
           sudo pkill -INT -f "fs_usage -w" || true
           sleep 2
-          kill $PROXY_PID || true
           echo "::group::egress capture around the Safari-chrome check"
           python3 scripts/egress_check.py --capture build/egress/capture.txt \
             --selftest-log build/egress/selftest-unsandboxed.txt --tcpdump-errors build/egress/tcpdump.err || status=1
@@ -377,13 +413,23 @@ jobs:
         run: |
           mkdir -p build/crashes
           shopt -s nullglob
-          for report in ~/Library/Logs/DiagnosticReports/PrivacyBrowser*.ips ~/Library/Logs/DiagnosticReports/com.apple.WebKit*.ips \
-                        /Library/Logs/DiagnosticReports/PrivacyBrowser*.ips /Library/Logs/DiagnosticReports/com.apple.WebKit*.ips; do
+          # *Name*: a fault the process lived through is ExcUserFault_<process>-….ips (the owner's
+          # Mac, 1 November: WebKit's UI side refusing a message, EXC_GUARD namespace 31), which a
+          # Name* pattern never found.
+          for report in ~/Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips ~/Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips \
+                        /Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips /Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips; do
             cp "$report" build/crashes/ 2>/dev/null || sudo cp "$report" build/crashes/
           done
           sudo chmod -R a+r build/crashes 2>/dev/null || true
           python3 scripts/crash_summary.py build/crashes/*.ips | tee build/crashes/summary.txt
-          grep '^CRASH' build/crashes/summary.txt | grep -v '^CRASH none' | head -16 | cut -c1-300 | sed 's/^/::warning title=crash::/' || true
+          grep -E '^(CRASH|FAULT)' build/crashes/summary.txt | grep -v '^CRASH none' | head -16 | cut -c1-300 | sed 's/^/::warning title=crash::/' || true
+          # A message WebKit's UI side refused from one of its processes, as the log names it.
+          sudo log show --style compact --last 3h --predicate 'eventMessage CONTAINS[c] "invalid message"' 2>/dev/null \
+            | grep -iv '^timestamp' | head -40 | tee build/crashes/invalid-messages.txt || true
+          cut -c1-400 build/crashes/invalid-messages.txt | head -8 | sed 's/^/::warning title=WebKit refused a message::/' || true
+          if [ -s build/crashes/invalid-messages.txt ]; then
+            { echo "### WebKit refused a message"; cut -c1-400 build/crashes/invalid-messages.txt | head -20 | sed 's/^/    /'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Safari's private classes and methods the hosted chrome relies on
         # SafariChrome.expectedPieces: a macOS whose Safari renamed or removed one fails here, by name,
         # instead of a profile's window quietly degrading on a user's Mac. After the self-test, so
@@ -516,7 +562,8 @@ jobs:
           sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
           python3 scripts/safari_reference.py --compare build/surface-unsandboxed/surface-macos.json --out build/safari-surface.json
           code=$?
-          if [ "$code" = "2" ]; then echo "::warning::Safari could not be driven on this runner; surface not compared"; exit 0; fi
+          # Safari not driven: nothing compared, so not a pass (SKIPPED, and the step fails).
+          if [ "$code" = "2" ]; then echo "::error::fingerprint surface SKIPPED: Safari could not be driven on this runner, so nothing was compared"; exit 1; fi
           exit $code
       - name: Leak check — does QUIC or WebRTC go around a profile's proxy?
         # Real forwarding proxies on this runner and a profile without one as the control; see
@@ -683,6 +730,19 @@ jobs:
           for variant in sandboxed unsandboxed; do
             echo "--- self-test notes ($variant)"
             grep -h "^INFO" "build/egress/selftest-$variant.txt" | cut -c1-400 || true
+          done
+          # Every check the self-test could not make, on this runner or in that build: on the job's
+          # page and in its summary, never only in the log.
+          for variant in sandboxed unsandboxed; do
+            log="build/egress/selftest-$variant.txt"
+            grep -h "^SELFTEST [A-Z]*:" "$log" 2>/dev/null | head -1 | sed "s/^/::notice title=self-test ($variant)::/" || true
+            grep -h "^SELFTEST SKIPPED" "$log" 2>/dev/null | cut -c1-600 | sed "s/^/::warning title=self-test ($variant) - skipped::/" || true
+            {
+              echo "### Self-test ($variant)"
+              summary="$(grep -h "^SELFTEST [A-Z]*:" "$log" 2>/dev/null | head -1)"
+              echo "    ${summary:-no summary line: the self-test did not finish}"
+              grep -h "^SELFTEST SKIPPED" "$log" 2>/dev/null | cut -c1-600 | sed 's/^SELFTEST SKIPPED /- /' || true
+            } >> "$GITHUB_STEP_SUMMARY"
           done
           # What real input reached on this runner, as notices on the job (readable without the log).
           grep -h "^INFO \(paste as typed\|what sites see\|password AutoFill\)" build/egress/selftest-unsandboxed.txt \

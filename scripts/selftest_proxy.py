@@ -271,7 +271,10 @@ def leak_page(run: str) -> bytes:
     document.body.appendChild(blank);
     result.rtcBlankFrame = typeof blank.contentWindow.RTCPeerConnection;
   } catch (e) { result.rtcBlankFrame = 'error'; }
-  document.getElementById('ping').click();
+  // The ping check's own precondition: the click happened (a listener runs inside click()).
+  const pingLink = document.getElementById('ping');
+  pingLink.addEventListener('click', () => { result.pingClicked = true; });
+  pingLink.click();
   // A dns-prefetch added after the page loaded, as a script would.
   setTimeout(() => document.head.insertAdjacentHTML('beforeend', '<link rel="dns-prefetch" href="//late-RUN.leak.example.com">'), 1500);
   try { result.beacon = navigator.sendBeacon('http://beacon-RUN.leak.example.com/pb-leak/beacon?run=RUN', 'x'); } catch (e) { result.beacon = 'error'; }

@@ -343,7 +343,8 @@ def traced_writes(out, canary=None):
 def crash_reports(since, out):
     """The crash reports of this app's processes written since `since`, summarized, by pid."""
     found = {}
-    for path in glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/PrivacyBrowser*.ips")):
+    # *PrivacyBrowser*: a fault a process lived through is ExcUserFault_PrivacyBrowser-….ips.
+    for path in glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/*PrivacyBrowser*.ips")):
         if os.path.getmtime(path) < since:
             continue
         summary = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "crash_summary.py"), path],
@@ -433,15 +434,20 @@ def main():
           f"{len(by_profile)}; by cfprefsd, for a process the trace cannot name: {len(by_cfprefsd)}; "
           f"cfprefsd's write of the canary named: {'yes' if canary_seen else ('no' if canary_seen is False else 'no canary')}",
           flush=True)
+    # What this walk could not look at: never a pass. Each is a SKIPPED line, and under --check the
+    # walk fails on it.
+    skipped = []
+    if traced.startswith("no trace"):
+        skipped.append(f"the file trace ({traced}): no write in the real Safari's places could have been seen")
     time.sleep(2)
     domain_after, container_after = safari_domain()
     if domain_before is None or domain_after is None:
         domain_changed = []
-        print("MENU-WALK the real Safari's own preferences could not be read (defaults export com.apple.Safari)", flush=True)
+        skipped.append("the real Safari's own preferences: they could not be read (defaults export com.apple.Safari)")
     elif safari_ran or safari_running():
         domain_changed = []
-        print("MENU-WALK the real Safari runs: what it writes to its own preferences would be counted, so they are "
-              "not compared", flush=True)
+        skipped.append("the real Safari's own preferences: the real Safari runs, and what it writes to them would be "
+                       "counted, so they are not compared")
     else:
         domain_changed = domain_changes(domain_before, domain_after)
         if container_after and not container_before:
@@ -468,10 +474,15 @@ def main():
         refused_views = sum(1 for line in handle if "listener 'com.apple.view-bridge'" in line)
     print(f"MENU-WALK views asked for again after their service was refused: {refused_views}", flush=True)
     reports = crash_reports(started, out)
+    for path, (pid, summary) in sorted(reports.items()):
+        if os.path.basename(path).startswith("ExcUserFault_"):
+            notice("warning", args.title, f"a fault a process lived through (pid {pid}): "
+                   + " / ".join(line.strip() for line in summary.splitlines()[:4])[:600])
     for item in items:
         if "exit" in item:
             # The report of a process that ended while this item ran: written after its begin.
-            near = [summary for path, (pid, summary) in reports.items() if os.path.getmtime(path) >= item.get("begin", 0) - 1]
+            near = [summary for path, (pid, summary) in reports.items()
+                    if os.path.getmtime(path) >= item.get("begin", 0) - 1 and not os.path.basename(path).startswith("ExcUserFault_")]
             item["crashReport"] = near[0].splitlines()[:30] if near else ["no crash report found"]
     with open(os.path.join(out, "menu-walk.json"), "w") as handle:
         json.dump(items, handle, indent=1, ensure_ascii=False)
@@ -519,8 +530,11 @@ def main():
     if refused_views > 1000:
         notice("error" if args.check else "warning", args.title,
                f"the profile's process asked {refused_views} times for a view whose service it is refused: a loop")
+    for what in skipped:
+        print(f"MENU-WALK SKIPPED: {what}", flush=True)
+        notice("error" if args.check else "warning", args.title, f"skipped: {what}")
     failed = args.check and (not finished or bool(by_profile) or bool(domain_changed) or refused_views > 1000
-                             or canary_seen is False)
+                             or canary_seen is False or bool(skipped))
     if args.record and os.path.exists(args.record):
         with open(args.record) as handle:
             recorded = json.load(handle)

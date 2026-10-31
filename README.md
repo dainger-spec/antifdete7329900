@@ -90,12 +90,14 @@ TZ=America/New_York node scripts/test-shims.mjs   # JS shim logic and CreepJS-st
 TZ=America/New_York bun scripts/test-shims.mjs    # the same under JavaScriptCore, Safari's engine
 
 # End-to-end against the real WebKit of this Mac (headless, temporary vault, cleans up):
+# The last lines say PASSED, INCOMPLETE (a check could not be made on this Mac: each is a SKIP line,
+# named again below the summary) or FAILED; see docs/ISOLATION_AND_LIMITATIONS.md §0.
 python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 \
-  --socks2 18084 --socks-auth 18085 --silent 18088 &
+  --socks2 18084 --socks-auth 18085 --tls-control 18086 --canary 18087 --silent 18088 &
 PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083 \
 PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085 \
-PB_SELFTEST_SILENT_PROXY_PORT=18088 \
+PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088 \
 PB_SELFTEST_SURFACE_OUT=build/surface \
   build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test
 
@@ -168,7 +170,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   outside a profile's proxy (`scripts/certificate_leak_check.py`: the self-test's AIA and OCSP
   canaries in the capture, its control seen; a run that cannot tell runs the certificate check
   again alone, and one that still cannot fails too). In every run each group of the self-test stands on its own: an
-  error a group did not expect fails that group by name, and the run goes on;
+  error a group did not expect fails that group by name, and the run goes on. A check that could
+  not be made is a SKIP line, never a pass; on the runners a skip fails the self-test, but for the
+  few a runner cannot make (`PB_SELFTEST_EXPECTED_SKIPS`), and every skip is a warning on the job
+  and in its summary;
 - WebKit's features in a profile's web views as Safari has them (`scripts/engine_features_check.py`):
   the four the SDK's behaviors change for a build declaring 14.0 — Trusted Types on, mutation events,
   the legacy `FontFaceSet` constructor and near-suspended assertions off (`SafariEngineFeatures`) —

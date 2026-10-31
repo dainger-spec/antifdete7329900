@@ -27,6 +27,9 @@ import WebKit
 final class SelfTest {
     private var failures = 0
     private var passes = 0
+    /// Whether a plain web view of this WebKit, without the rule list, sends an `<a ping>` (the
+    /// ping checks' control); nil until measured.
+    private var pingsSentWithoutRules: Bool?
     private var retainedDelegates: [NSObject] = []
     private let origin = URL(string: "https://selftest.invalid/")!
     private let page = "<html><head><title>PB self-test</title></head><body>self-test</body></html>"
@@ -38,16 +41,17 @@ final class SelfTest {
         setenv("PB_PROFILE_PROCESS", "0", 1)
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
-        // A hung check must not hold CI; the whole run takes about five minutes on the runner.
+        let test = SelfTest()
+        // A hung check must not hold CI; the whole run takes about five minutes on the runner. What
+        // had been checked by then is still counted.
         DispatchQueue.main.asyncAfter(deadline: .now() + 600) {
             print("SELFTEST TIMEOUT after 600 s")
+            MainActor.assumeIsolated { _ = test.finish(timedOut: true) }
             exit(3)
         }
         Task { @MainActor in
-            let test = SelfTest()
             await test.run()
-            print("SELFTEST \(test.failures == 0 ? "PASSED" : "FAILED"): \(test.passes) passed, \(test.failures) failed")
-            exit(test.failures == 0 ? 0 : 1)
+            exit(test.finish())
         }
         app.run()
     }
@@ -102,6 +106,70 @@ final class SelfTest {
     }
 
     private func info(_ text: String) { print("INFO \(text)") }
+
+    /// Where a check could not be made: in this build (the sandboxed one cannot host Safari's
+    /// frameworks, by design), or on this machine (what the run had: a listener of the self-test
+    /// proxy not started, no keyboard for the window, an observer that saw nothing at all — its
+    /// own control included).
+    private enum SkipPlace: String {
+        case build = "in this build"
+        case machine = "on this machine"
+    }
+
+    private var skipped: [(name: String, reason: String, place: SkipPlace, expected: Bool)] = []
+
+    /// `PB_SELFTEST_STRICT=1` (CI): a check skipped on this machine fails the run, unless
+    /// `PB_SELFTEST_EXPECTED_SKIPS` (names, or their beginnings, separated by `|`) says this runner
+    /// cannot make it.
+    private static let strict = ProcessInfo.processInfo.environment["PB_SELFTEST_STRICT"] == "1"
+    private static let expectedSkips: [String] = (ProcessInfo.processInfo.environment["PB_SELFTEST_EXPECTED_SKIPS"] ?? "")
+        .split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+
+    /// A check that could not be made here — never a pass, and never quiet: a line of its own,
+    /// counted, and named again in the summary. A check whose observer could have been blind (a
+    /// trace, a listener, a watch) says first that it saw its own control, or it is skipped.
+    private func skip(_ name: String, _ reason: String, _ place: SkipPlace = .machine) {
+        let expected = place == .machine && Self.expectedSkips.contains { name.hasPrefix($0) }
+        skipped.append((name, reason, place, expected))
+        print("SKIP \(name) — \(reason) (\(place.rawValue)\(expected ? "; expected on this runner" : ""))")
+    }
+
+    /// The last lines of the run: how many checks passed, failed and were skipped, then every
+    /// skipped one again by name, and the exit code. A run with a check skipped on this machine is
+    /// INCOMPLETE, not PASSED; under PB_SELFTEST_STRICT it fails, but for the expected ones.
+    private func finish(timedOut: Bool = false) -> Int32 {
+        let onMachine = skipped.filter { $0.place == .machine }
+        let inBuild = skipped.count - onMachine.count
+        let unexpected = onMachine.filter { Self.strict && !$0.expected }
+        let failed = timedOut || failures > 0 || !unexpected.isEmpty
+        let verdict: String
+        if timedOut {
+            verdict = "TIMEOUT"
+        } else if failed {
+            verdict = "FAILED"
+        } else {
+            verdict = onMachine.isEmpty ? "PASSED" : "INCOMPLETE"
+        }
+        var line = "SELFTEST \(verdict): \(passes) passed, \(failures) failed, \(skipped.count) skipped"
+        line += " (\(onMachine.count) on this machine, \(inBuild) in this build)"
+        if !unexpected.isEmpty {
+            line += "; \(unexpected.count) skipped on this machine that this strict run may not skip"
+        }
+        if let only = ProcessInfo.processInfo.environment["PB_SELFTEST_ONLY"] {
+            line += "; only the groups \(only) ran"
+        }
+        print(line)
+        for entry in skipped {
+            var place = entry.place.rawValue
+            if entry.expected {
+                place += ", expected on this runner"
+            } else if Self.strict && entry.place == .machine {
+                place += ", NOT expected: fails this run"
+            }
+            print("SELFTEST SKIPPED (\(place)): \(entry.name) — \(entry.reason)")
+        }
+        return failed ? 1 : 0
+    }
 
     // MARK: Run
 
@@ -365,7 +433,8 @@ final class SelfTest {
             let policy = try await js(webB!, "return new RTCPeerConnection({ iceTransportPolicy: 'all' }).getConfiguration().iceTransportPolicy;") as? String
             check("shim: WebRTC relay-only under JavaScriptCore", policy == "relay", policy ?? "nil")
         } else {
-            info("WKWebView exposes no RTCPeerConnection here (typeof = \(nativeRTC ?? "nil")); relay check skipped")
+            skip("shim: WebRTC relay-only under JavaScriptCore",
+                 "this WebKit's web view has no RTCPeerConnection (typeof = \(nativeRTC ?? "nil")), so there is nothing to make relay-only")
         }
 
         // --- Stop A: release everything, seal.
@@ -453,7 +522,8 @@ final class SelfTest {
         let environment = ProcessInfo.processInfo.environment
         guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init),
               let socksPort = environment["PB_SELFTEST_SOCKS_PROXY_PORT"].flatMap(Int.init) else {
-            info("proxy checks skipped (PB_SELFTEST_HTTP_PROXY_PORT / PB_SELFTEST_SOCKS_PROXY_PORT not set)")
+            skip("proxy: every load through the self-test proxy (HTTP, SOCKS5, IPv6, fail-closed, pings, 407)",
+                 "PB_SELFTEST_HTTP_PROXY_PORT / PB_SELFTEST_SOCKS_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         let target = URL(string: "http://proxied.selftest.invalid/check")!
@@ -483,7 +553,7 @@ final class SelfTest {
             check("proxy: an IPv6 proxy address carries the request", v6Body?.contains("PB-PROXY-OK via=connect6") == true,
                   v6Body ?? "load failed")
         } else {
-            info("IPv6 proxy check skipped (PB_SELFTEST_HTTP6_PROXY_PORT not set)")
+            skip("proxy: an IPv6 proxy address carries the request", "PB_SELFTEST_HTTP6_PROXY_PORT not set: the self-test proxy's IPv6 listener is not running")
         }
 
         // Port 9 (discard) on localhost is closed on CI runners: the load must fail, not go direct.
@@ -497,10 +567,21 @@ final class SelfTest {
 
         // What WebKit would send outside the proxy is blocked by the proxied profile's rule list: an
         // <a ping> (the same load type as a dns-prefetch) never reaches the proxy, a fetch does.
+        // The control, after the profile's own (the proxy's list of served paths only grows): the
+        // same click in a plain web view without the rule list must send its ping, or this WebKit
+        // sends none, and a blocked ping could not be told from one never sent.
         do {
-            let served = try await servedPathsAfterPing(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort))
-            check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
-                  served.contains("/fetch-allowed") && !served.contains("/ping-blocked"), served.joined(separator: ","))
+            let http = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+            let served = try await servedPathsAfterPing(repository, http)
+            let controlReached = try await controlPingReachesProxy(http)
+            pingsSentWithoutRules = controlReached
+            if controlReached {
+                check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
+                      served.contains("/fetch-allowed") && !served.contains("/ping-blocked"), served.joined(separator: ","))
+            } else {
+                skip("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
+                     "the control — the same click in a plain web view without the rule list — sent no ping either, so a blocked ping cannot be told from none sent")
+            }
             info("proxy: a beacon \(served.contains("/beacon") ? "still reaches" : "does not reach") the proxy (beacons are fetches, not pings)")
         } catch {
             check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile", false, String(describing: error))
@@ -509,7 +590,7 @@ final class SelfTest {
             try await fragmentJumps(repository, http: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort),
                                     socks: ProxySettings(kind: .socks5, host: "127.0.0.1", port: socksPort))
         } catch {
-            info("fragment jump: not measured — \(error)")
+            skip("fragment jump (a measurement)", "not measured: \(error)")
         }
 
         // A proxy that answers 407: the profile's credentials are sent, wrong ones fail closed.
@@ -542,7 +623,8 @@ final class SelfTest {
                   WebDataStoreVault.discoverDirectories(for: noCredentials.id).isEmpty)
             try repository.delete(noCredentials.id)
         } else {
-            info("proxy auth checks skipped (PB_SELFTEST_HTTP_AUTH_PROXY_PORT not set)")
+            skip("proxy: 407 answered with the profile's credentials, wrong ones and none fail closed",
+                 "PB_SELFTEST_HTTP_AUTH_PROXY_PORT not set: the self-test proxy's listener with a login is not running")
         }
     }
 
@@ -586,6 +668,32 @@ final class SelfTest {
         return try await js(webView, Self.readServedPaths) as? [String] ?? []
     }
 
+    /// The ping check's control: in a plain web view whose non-persistent store has only WebKit's
+    /// own proxy setting — no profile, no script, no rule list — the page served by the proxy
+    /// clicks an `<a ping>` of its own; whether the proxy then lists the ping's path.
+    private func controlPingReachesProxy(_ proxy: ProxySettings) async throws -> Bool {
+        let configuration = WKWebViewConfiguration()
+        let store = WKWebsiteDataStore.nonPersistent()
+        store.proxyConfigurations = try ProxyConfigurationFactory.make(proxy)
+        configuration.websiteDataStore = store
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        try await PageLoader.load(webView, url: URL(string: "http://proxied.selftest.invalid/ping-page")!)
+        _ = try await js(webView, """
+            const a = document.createElement('a');
+            a.href = '#control'; a.ping = '/ping-control'; a.textContent = 'ping';
+            document.body.appendChild(a);
+            a.click();
+            return true;
+            """)
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            _ = await waitUntil(timeout: 5) { !webView.isLoading }
+            if let served = try? await js(webView, Self.readServedPaths) as? [String], served.contains("/ping-control") { return true }
+        }
+        return false
+    }
+
     /// The page's actions: a beacon, a fetch, and last an `<a ping>` clicked.
     private static let pingScript = """
         navigator.sendBeacon('/beacon', 'x');
@@ -610,7 +718,7 @@ final class SelfTest {
     private func fragmentJumps(_ repository: ProfileRepository, http: ProxySettings, socks: ProxySettings) async throws {
         let local = SiteSnapshotServer { _, _ in "<!doctype html><html><head><title>Plain page</title></head><body><p>A page of this Mac.</p></body></html>" }
         guard await local.start() else {
-            info("fragment jump: no page of this Mac could be served")
+            skip("fragment jump (a measurement)", "no page of this Mac could be served (SiteSnapshotServer did not start)")
             return
         }
         defer { local.stop() }
@@ -762,7 +870,8 @@ final class SelfTest {
     private func certificatesWithoutFetching(_ repository: ProfileRepository) async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("certificate checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("certificates: a chain that needs a fetch is checked without one, through a proxy",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         info("egress-token pbaiacanary")
@@ -782,6 +891,9 @@ final class SelfTest {
         if let controlPort = environment["PB_SELFTEST_TLS_CONTROL_PORT"].flatMap(Int.init) {
             _ = try await load(URL(string: "https://localhost:\(controlPort)/pb-aia-control")!, in: ProfileConfiguration(ephemeral: true))
             info("egress-control pbaiacontrol")
+        } else {
+            skip("certificates: the capture's control — a certificate fetched for a profile without a proxy, which the capture must see",
+                 "PB_SELFTEST_TLS_CONTROL_PORT not set: without it the capture (scripts/egress_check.py) cannot show a fetch would be seen")
         }
 
         let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
@@ -839,7 +951,8 @@ final class SelfTest {
             // Measured (CI runs 383–384): in the App Sandbox the mark is set without an error and
             // does not stay on the container's folders. A limitation of the sandboxed build
             // (docs/ISOLATION_AND_LIMITATIONS.md §3), reported here with what writing it directly did.
-            info("backups: in the sandboxed build WebKit's directories of this app cannot be excluded from Time Machine: \(backupDetail)")
+            skip("backups: WebKit's directories of this app are excluded from Time Machine",
+                 "the sandboxed build cannot keep the mark on its container's folders (docs/ISOLATION_AND_LIMITATIONS.md §3): \(backupDetail)", .build)
         } else {
             check("backups: WebKit's directories of this app are excluded from Time Machine", excluded, backupDetail)
         }
@@ -877,7 +990,8 @@ final class SelfTest {
     /// exists at all), in the page, a dedicated, a shared and a service worker.
     private func workersInOurWindows(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("worker checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("workers: WebTransport in a page and its workers, with a proxy and without",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
@@ -1047,13 +1161,15 @@ final class SelfTest {
     /// say when this check ran and which run id to look for.
     private func safariChromeThroughTheProxy(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("Safari-chrome proxy check skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("Safari chrome: a profile in Safari's window, in its own process, sends nothing outside its proxy",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         // A process per profile, and Safari's frameworks inside it, is a feature of the
         // unsandboxed build (it needs library validation off); the sandboxed one cannot do it.
         guard !AppEnvironment.isSandboxed else {
-            info("Safari-chrome proxy check skipped (the sandboxed build runs no process per profile)")
+            skip("Safari chrome: a profile in Safari's window, in its own process, sends nothing outside its proxy",
+                 "the sandboxed build runs no process per profile, and cannot host Safari's frameworks", .build)
             return
         }
         let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
@@ -1209,11 +1325,29 @@ final class SelfTest {
         // Measured through the proxy in run 383; kept that way.
         check("Safari chrome: a fetch to a private-network address (10.255.255.1) goes through the profile's proxy",
               reached("10.255.255.1:8080", "/pb-leak/lan10"), "not seen by the proxy (\(page["lan10"] ?? "nil"))")
-        // The proxied profile's rule list (dns-prefetch, <a ping>) reaches the web views Safari builds.
-        check("Safari chrome: <a ping> is blocked in Safari's web views (and dns-prefetch with it)",
-              !log.targets.contains { $0.path.hasPrefix("/pb-leak/ping") }, "the ping reached the proxy")
+        // The proxied profile's rule list (dns-prefetch, <a ping>) reaches the web views Safari builds:
+        // shown only where the page says it clicked its ping, and a plain web view of this WebKit
+        // sends one without the rule list (the control in the proxy checks).
+        let pingName = "Safari chrome: <a ping> is blocked in Safari's web views (and dns-prefetch with it)"
+        if page["pingClicked"] as? Bool != true {
+            skip(pingName, "the leak page did not say it clicked its ping link (\(page.isEmpty ? "no report" : "pingClicked \(page["pingClicked"] ?? "nil")"))")
+        } else if pingsSentWithoutRules != true {
+            skip(pingName, pingsSentWithoutRules == nil
+                 ? "the control — a plain web view's ping without the rule list — was not measured in this run"
+                 : "the control — a plain web view's ping without the rule list — sent none either, so a blocked ping cannot be told from none sent")
+        } else {
+            check(pingName, !log.targets.contains { $0.path.hasPrefix("/pb-leak/ping") }, "the ping reached the proxy")
+        }
+        // What the capture's coverage holds: a request that reached the proxy is listed; one that
+        // did not was either not made (then nothing about it is shown) or went around the proxy
+        // (then the capture, scripts/egress_check.py, fails on it).
         for (what, path) in [("the font", "/pb-leak/font.woff"), ("the video", "/pb-leak/media.mp4"), ("the beacon", "/pb-leak/beacon")] {
-            info("Safari chrome: \(what) \(log.targets.contains { $0.path.hasPrefix(path) } ? "reached" : "did not reach") the proxy")
+            if log.targets.contains(where: { $0.path.hasPrefix(path) }) {
+                info("Safari chrome: \(what) reached the proxy")
+            } else {
+                skip("Safari chrome: \(what) of the leak page goes through the profile's proxy (the capture's coverage)",
+                     "it did not reach the proxy in this run: not asked for (then not shown), or gone around it (then the capture fails)")
+            }
         }
 
         // The profile's process, from inside: where its web views are, what WebRTC their engines
@@ -1254,14 +1388,14 @@ final class SelfTest {
             check("Safari chrome: the profile's settings for Safari's services stay in its process — the account's ~/Library/Preferences/com.apple.Safari.plist is not written",
                   accountSafariAfter == accountSafariBefore,
                   "before: \(accountSafariBefore ?? "?"), now: \(accountSafariAfter ?? "?")")
+            let realSafariPreferences = "Safari chrome: the real Safari's own preferences (its container, through cfprefsd) are as they were"
             if !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").isEmpty {
-                info("Safari chrome: the real Safari runs, so its own preferences are not compared (its writes would be counted)")
+                skip(realSafariPreferences, "the real Safari runs on this Mac: its own writes would be counted, so they are not compared")
             } else if let before = safariDomainBefore, let after = Self.realSafariDomain() {
                 let changed = Self.changedKeys(before, after)
-                check("Safari chrome: the real Safari's own preferences (its container, through cfprefsd) are as they were",
-                      changed.isEmpty, changed.joined(separator: ", "))
+                check(realSafariPreferences, changed.isEmpty, changed.joined(separator: ", "))
             } else {
-                info("Safari chrome: the real Safari's own preferences could not be read (defaults export com.apple.Safari)")
+                skip(realSafariPreferences, "they could not be read (defaults export com.apple.Safari \(safariDomainBefore == nil ? "before" : "after") the run)")
             }
             info("Safari chrome: WebKit \(report.webKitVersion)")
             // The preference decides dns-prefetch only before WebKit 7621; from then on the
@@ -1271,8 +1405,14 @@ final class SelfTest {
                   report.webViewsWithFeatureOn.values.allSatisfy { $0 == 0 }, "\(report.webViewsWithFeatureOn)")
             check("Safari chrome: nothing the profile has off can be turned on again by another setter",
                   report.pinBypasses.isEmpty, report.pinBypasses.joined(separator: ", "))
-            check("Safari chrome: the profile's service workers have the profile's preferences",
-                  report.workerPreferences != false, "this WebKit has no service-worker preferences of a store's own")
+            // nil: no session of the process said whether its store took them — not a pass.
+            if let workerPreferences = report.workerPreferences {
+                check("Safari chrome: the profile's service workers have the profile's preferences",
+                      workerPreferences, "this WebKit has no service-worker preferences of a store's own")
+            } else {
+                skip("Safari chrome: the profile's service workers have the profile's preferences",
+                     "the profile's process made no session of its own before it reported, so nothing said whether its store took them")
+            }
             check("Safari chrome: nothing of a page is handed outside the profile (no link preview, no address opened in another app, no sharing service, no password kept in the keychain, copies local)",
                   report.webViewsWithLinkPreview == 0 && !report.openedInAnotherApp && report.sharingServices == 0
                     && !report.credentialsKept && (report.handOffsRefused["clipboard"] ?? 0) > 0,
@@ -1281,7 +1421,7 @@ final class SelfTest {
                   report.safariPlacesClosed, "no sandbox over ~/Library/Safari and the rest")
             info("Safari chrome: \(report.safariPathsRedirected.count) path getters of Safari's frameworks answer with the profile's home: \(report.safariPathsRedirected.prefix(80).joined(separator: " "))")
             check("Safari chrome: UDP is closed to the profile's process (QUIC cannot go around the proxy)",
-                  report.udpClosed && !report.udp.values.contains { $0 == "sent" || $0.hasPrefix("ready") },
+                  report.udpClosed && report.udp.count == 2 && !report.udp.values.contains { $0 == "sent" || $0.hasPrefix("ready") },
                   "closed=\(report.udpClosed) \(report.udp)")
             let inherited = Set(report.environmentNames).intersection(managerEnvironment.subtracting(ProfileProcess.environmentNames))
             check("Safari chrome: the profile's process has only its own environment, not the manager's",
@@ -1401,6 +1541,15 @@ final class SelfTest {
             }
             info("Safari chrome: the profile's home holds \(listed.joined(separator: ", "))")
         }
+        // The canary listener's control: a connection of the self-test's own, straight to it, under
+        // this run's id. A listener that does not list it (none started, its log unread) would not
+        // have listed the page's either: then nothing is shown about this Mac being reached.
+        let canaryControlPath = "/pb-canary-control?run=\(run)"
+        var canaryControlMade = false
+        if canaryPort > 1 {
+            let request = Data("GET \(canaryControlPath) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n".utf8)
+            canaryControlMade = await Task.detached { Self.rawHTTP(port: canaryPort, request) != nil }.value
+        }
         // The page's https request is answered by WebKit's own timing, which can be after the page
         // reported: looked for last.
         log = await leakLog()
@@ -1409,12 +1558,26 @@ final class SelfTest {
         check("Safari chrome: an HTTPS image whose certificate needs a fetch reached the proxy, and its certificate was refused",
               log.targets.contains { $0.target == "aia-\(run).\(domain):443" && $0.path.hasPrefix("(tls refused") },
               log.targets.filter { $0.target.hasPrefix("aia-") }.map(\.path).joined(separator: " | "))
-        check("Safari chrome: nothing reached this Mac directly (the canary listener took no connection: no fetch, frame or worker)",
-              log.canary.isEmpty, log.canary.joined(separator: " | "))
+        let directs = log.canary.filter { !$0.contains("/pb-canary-control") }
+        let canaryName = "Safari chrome: nothing reached this Mac directly (the canary listener took no connection: no fetch, frame or worker)"
+        // A connection listed fails whatever the control says; none listed is a pass only where
+        // the control was listed.
+        if !directs.isEmpty || log.canary.contains(where: { $0.contains("/pb-canary-control") }) {
+            check(canaryName, directs.isEmpty, directs.joined(separator: " | "))
+        } else {
+            skip(canaryName, canaryPort <= 1
+                 ? "PB_SELFTEST_CANARY_PORT not set: no canary listener runs, so a direct connection would go unseen"
+                 : "the canary listener did not list the self-test's own direct connection (\(canaryControlMade ? "made" : "not made")), so it would not have listed the page's")
+        }
         // Whether Safari fetches these is Safari's business; where it does, it is through the proxy
         // (https: the CONNECT is the proof), and anything it fetched another way is in the capture.
         for (what, host) in [("the page's icon", "icon-"), ("its touch icon", "touchicon-"), ("its OpenSearch description", "osd-")] {
-            info("Safari chrome: \(what) \(log.targets.contains { $0.target.hasPrefix(host + run) } ? "was fetched through the proxy" : "was not fetched (not exercised)")")
+            if log.targets.contains(where: { $0.target.hasPrefix(host + run) }) {
+                info("Safari chrome: \(what) was fetched through the proxy")
+            } else {
+                skip("Safari chrome: \(what), where Safari fetches it, goes through the profile's proxy (the capture's coverage)",
+                     "Safari did not fetch it in this run (not exercised): where it would go is not shown")
+            }
         }
         // A stop: Safari's window goes first, then the seal, whose retries no longer wait for Safari
         // (it keeps the pages of the windows it closes); the process reports how the seal went.
@@ -1492,9 +1655,17 @@ final class SelfTest {
             info("Safari chrome: keys this app's own domain in the account's home got while the profile ran: \(added.sorted())")
             check("Safari chrome: none of it went to this app's own domain in the account's home",
                   added.isDisjoint(with: saved), added.intersection(saved).sorted().joined(separator: ", "))
+        } else {
+            skip("Safari chrome, second launch: on the restored home, through SOCKS5, in the proxy's country's language, Safari's saved state back",
+                 "PB_SELFTEST_SOCKS_PROXY_PORT not set: the self-test proxy's SOCKS5 listener is not running")
         }
         await manager.shutDown()
-        if let xpcWatch { reportXPCServices(xpcWatch.stop(), profilePIDs: profilePIDs) }
+        if let xpcWatch {
+            reportXPCServices(xpcWatch.stop(), profilePIDs: profilePIDs)
+        } else {
+            skip("Safari chrome: no XPC service of Safari's frameworks started for the profile",
+                 "the account's real home is not known (SafariPaths.realHome), so no watch of XPC services ran")
+        }
         info("egress-window end \(Date().timeIntervalSince1970)")
         check("Safari chrome: nothing went wrong while it ran", messages.isEmpty, messages.joined(separator: " | "))
     }
@@ -1523,8 +1694,19 @@ final class SelfTest {
             entry.service.bundleName.hasPrefix("com.apple.Safari")
                 && entry.service.responsible.map { ours.contains($0) || $0 == ownResponsible } ?? true
         }
-        check("Safari chrome: no XPC service of Safari's frameworks started for the profile",
-              safaris.isEmpty, safaris.map { "\($0.service.bundleName) (pid \($0.service.pid))" }.joined(separator: ", "))
+        // The watch's control: the profile's own web content process, which WebKit starts as an XPC
+        // service for it every time. A watch that did not see that one would not have seen
+        // Safari's either.
+        let ownWebContent = seen.contains { entry in
+            entry.service.bundleName.hasPrefix("com.apple.WebKit.WebContent")
+                && entry.service.responsible.map { ours.contains($0) || $0 == ownResponsible } == true
+        }
+        let name = "Safari chrome: no XPC service of Safari's frameworks started for the profile"
+        if !safaris.isEmpty || ownWebContent {
+            check(name, safaris.isEmpty, safaris.map { "\($0.service.bundleName) (pid \($0.service.pid))" }.joined(separator: ", "))
+        } else {
+            skip(name, "the watch saw no WebKit content process start for this app (\(seen.count) services seen in all), so it would not have seen Safari's")
+        }
     }
 
     // MARK: Exceptions
@@ -1553,7 +1735,10 @@ final class SelfTest {
         // frameworks loaded and prepared. Only a build without the App Sandbox can host them.
         let inSafari = await runOwnExecutable(executable, ["--exception-check", "--safari"], timeout: 60)
         if inSafari.status == 2, inSafari.output.contains("cannot be hosted") {
-            info("exceptions with Safari's application object: not in this build (\(AppEnvironment.isSandboxed ? "sandboxed" : "frameworks did not load"))")
+            skip("exceptions: with Safari's own application object as NSApp, one thrown by a menu item's action is lived through, and the user told",
+                 AppEnvironment.isSandboxed ? "the sandboxed build cannot host Safari's frameworks"
+                     : "Safari's frameworks did not load here: \(inSafari.output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))",
+                 AppEnvironment.isSandboxed ? .build : .machine)
         } else {
             check("exceptions: with Safari's own application object as NSApp, one thrown by a menu item's action reaches reportException: and is lived through",
                   !inSafari.signaled && inSafari.status == 0 && inSafari.output.contains("EXCEPTION-CHECK lived through it; reportException: saw 1"),
@@ -1585,21 +1770,24 @@ final class SelfTest {
             return
         }
         let run = await runOwnExecutable(executable, ["--nib-check"], timeout: 60)
+        let name = "Safari's chrome: the Bookmarks sidebar's nibs, asked of this app as Safari's code asks, are made from Safari's files, and nothing throws"
         if run.status == 2, run.output.contains("cannot be hosted") {
-            info("Safari's nibs: not in this build (\(AppEnvironment.isSandboxed ? "sandboxed" : "frameworks did not load"))")
+            skip(name, AppEnvironment.isSandboxed ? "the sandboxed build cannot host Safari's frameworks"
+                     : "Safari's frameworks did not load here: \(run.output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))",
+                 AppEnvironment.isSandboxed ? .build : .machine)
             return
         }
         let lines = run.output.split(separator: "\n").map(String.init).filter { $0.hasPrefix("NIB-CHECK") }
         let detail = lines.joined(separator: " | ")
         let held = SafariChrome.checkedNibs.filter { !lines.contains("NIB-CHECK \($0): not in this Safari") }
-        guard !held.isEmpty else {
-            info("Safari's nibs: none of \(SafariChrome.checkedNibs.joined(separator: ", ")) is in this Safari — \(detail)")
-            return
+        for nib in SafariChrome.checkedNibs where !held.contains(nib) {
+            skip("Safari's chrome: the nib \(nib) is made from Safari's file", "this Safari has no such nib")
         }
+        guard !held.isEmpty else { return }
         let made = held.filter { lines.contains("NIB-CHECK \($0): made") }
         let bridged = run.output.range(of: #"made from Safari's files: (\d+)"#, options: .regularExpression)
             .flatMap { Int(run.output[$0].split(separator: " ").last ?? "") } ?? 0
-        check("Safari's chrome: the Bookmarks sidebar's nibs, asked of this app as Safari's code asks, are made from Safari's files, and nothing throws",
+        check(name,
               !run.signaled && run.status == 0 && made.count == held.count && bridged >= held.count
                   && run.output.contains("; exceptions: 0"),
               detail.isEmpty ? run.output.trimmingCharacters(in: .whitespacesAndNewlines) : detail)
@@ -1637,7 +1825,7 @@ final class SelfTest {
 
     private func tabsAndLibrary(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("tab/history checks skipped (need the self-test proxy to serve pages)")
+            skip("tabs and library: pages loaded in tabs, history, bookmarks, closed tabs", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the pages)")
             return
         }
         let profile = try repository.create(name: "Tabs", configuration: ProfileConfiguration(
@@ -1687,7 +1875,7 @@ final class SelfTest {
     /// profile never keeps any.
     private func restoreTabs(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("restore tabs checks skipped (need the self-test proxy to serve pages)")
+            skip("restore tabs: a profile's tabs come back, an ephemeral one's never", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the pages)")
             return
         }
         defer { BrowsingPreferences.current = BrowsingPreferences() }
@@ -1840,7 +2028,10 @@ final class SelfTest {
             // The features the SDK's behaviors change, as Safari has them: in the profile's
             // preferences, and as its page sees them (scripts/engine_features_check.py compares the
             // page with one with every behavior on).
-            if SafariEngineFeatures.appliesHere {
+            if !SafariEngineFeatures.appliesHere {
+                skip("surface (\(generationID)): WebKit's features the SDK's behaviors change are as Safari has them",
+                     "SafariEngineFeatures does not apply to this WebKit (\(WebKitBuild.version))")
+            } else {
                 let otherwise = SafariEngineFeatures.asSafari
                     .filter { WebKitFeatures.isEnabled(tabConfiguration.preferences, $0.key) != $0.enabled }.map { $0.key }
                 let seen = try await js(tab.webView, "return [typeof trustedTypes, typeof MutationEvent].join(' ');") as? String
@@ -1961,7 +2152,9 @@ final class SelfTest {
             let data = try JSONSerialization.data(withJSONObject: nested, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("surface-\(name).json"))
         } catch {
-            info("could not write the \(name) surface: \(error.localizedDescription)")
+            // PB_SELFTEST_SURFACE_OUT is CI's: its comparison with the real Safari reads this file.
+            check("surface (\(name)): written for the comparison with this Mac's Safari (PB_SELFTEST_SURFACE_OUT)", false,
+                  error.localizedDescription)
         }
     }
 
@@ -1973,7 +2166,7 @@ final class SelfTest {
     /// answers the lookup itself (Europe/Berlin, DE).
     private func proxyLocationAtLaunch(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("proxy location checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("proxy location: the time zone and country of the proxy's exit, looked up at launch", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         let services = ProxyGeoLookup.services
@@ -2050,7 +2243,7 @@ final class SelfTest {
         guard let socksPort = environment["PB_SELFTEST_SOCKS_PROXY_PORT"].flatMap(Int.init),
               let socks2Port = environment["PB_SELFTEST_SOCKS2_PROXY_PORT"].flatMap(Int.init),
               let authPort = environment["PB_SELFTEST_SOCKS_AUTH_PROXY_PORT"].flatMap(Int.init) else {
-            info("concurrent SOCKS5 checks skipped (PB_SELFTEST_SOCKS2_PROXY_PORT / PB_SELFTEST_SOCKS_AUTH_PROXY_PORT not set)")
+            skip("SOCKS5 side by side: several profiles, each through its own SOCKS5 proxy at once", "PB_SELFTEST_SOCKS2_PROXY_PORT / PB_SELFTEST_SOCKS_AUTH_PROXY_PORT not set: the self-test proxy's second SOCKS5 listeners are not running")
             return
         }
         let services = ProxyGeoLookup.services
@@ -2157,7 +2350,7 @@ final class SelfTest {
     /// With `warnOnProxyIPChange` (off by default) a changed exit IP is reported, and only then.
     private func proxyLookupAndExitIP(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("proxy lookup timing and exit IP checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("launch: how long a launch waits for the lookup through the proxy, and the exit IP warning", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         let services = ProxyGeoLookup.services
@@ -2309,10 +2502,20 @@ final class SelfTest {
     private func proxyChecker(_ repository: ProfileRepository) async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("proxy checker checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("proxy checker: every listener told apart, end to end, the list and the launch", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
-        func port(_ name: String) -> Int? { environment[name].flatMap(Int.init) }
+        // A listener of the self-test proxy that is not running: every check through it is skipped,
+        // said once per listener.
+        var missingListeners: Set<String> = []
+        func port(_ name: String) -> Int? {
+            if let value = environment[name].flatMap(Int.init) { return value }
+            if missingListeners.insert(name).inserted {
+                skip("proxy checker: the checks through the self-test proxy's listener of \(name)",
+                     "\(name) not set: scripts/selftest_proxy.py runs without that listener")
+            }
+            return nil
+        }
         let loopback = "127.0.0.1"
         let services = ProxyGeoLookup.services
         let timeout = ProxyChecker.timeout
@@ -2348,8 +2551,9 @@ final class SelfTest {
         let substituted = unresolvedProbe.verdict == .substituteDNS
             && unresolvedProbe.connectedAddress.map(SubstituteDNS.isSubstitute) == true
         if substituted {
-            info("this Mac's resolver gives a name that does not exist a VPN's substitute address "
-                 + "(\(unresolvedProbe.connectedAddress ?? "")): the probe says so, as host not found cannot be told here")
+            skip("proxy probe: a proxy whose host name does not exist is told as host not found",
+                 "this Mac's resolver gives a name that does not exist a VPN's substitute address "
+                 + "(\(unresolvedProbe.connectedAddress ?? "")); what is checked here is that the probe says so instead")
         }
         check("proxy probe: a proxy whose host name does not exist is told apart (host not found, or a VPN's substitute DNS said as that)",
               unresolvedProbe.verdict == .hostNotFound || substituted, String(describing: unresolvedProbe))
@@ -2411,8 +2615,6 @@ final class SelfTest {
         if let silentPort {
             cases.append(ProbeCase(name: "a port that takes the connection and never answers",
                                    proxy: ProxySettings(kind: .socks5, host: loopback, port: silentPort), verdict: .silent))
-        } else {
-            info("proxy probe: the silent listener's checks skipped (PB_SELFTEST_SILENT_PROXY_PORT not set)")
         }
         let probe = ProxyChecker.probe()
         // All at once: the silent one alone takes the probe's whole answer timeout.
@@ -2494,9 +2696,16 @@ final class SelfTest {
         check("proxy checker: an unreachable proxy is dead, and nothing answered — not the website a direct request would reach either",
               unreachableResult.failure == .noAnswer && unreachable?.answered == false && unreachableResult.exitIP == nil,
               String(describing: unreachableResult))
-        check("proxy checker: checking the unreachable proxy connected to nothing but it",
-              unreachable?.connections.allSatisfy { ($0.port ?? 9) == 9 } == true,
-              unreachable?.connections.map(\.description).joined(separator: ", ") ?? "no lookup")
+        // A refused connection has no peer, so nothing listed is what a clean check shows; it is a
+        // pass only where the same observer (the task's metrics) listed the working proxy's.
+        let unreachableName = "proxy checker: checking the unreachable proxy connected to nothing but it"
+        let elsewhere = unreachable?.connections.filter { ($0.port ?? 9) != 9 } ?? []
+        if !elsewhere.isEmpty || alive?.connections.isEmpty == false {
+            check(unreachableName, unreachable != nil && elsewhere.isEmpty,
+                  unreachable?.connections.map(\.description).joined(separator: ", ") ?? "no lookup")
+        } else {
+            skip(unreachableName, "the lookup's metrics listed no connection for the working proxy either, so one made elsewhere would not have been listed")
+        }
         let notApplicable = await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: "127.0.0.1:1080", port: 1080))
         check("proxy checker: settings that cannot be applied are not checked at all (no request without the proxy)",
               notApplicable == nil && ProxyChecker.result(of: notApplicable).failure == .invalidSettings)
@@ -2629,6 +2838,9 @@ final class SelfTest {
                       && configuration.rememberedProxyLocation?.countryCode == "DE"
                       && configuration.rememberedProxyLocation?.timeZoneIdentifier == "Europe/Berlin",
                   String(describing: configuration.lastProxyLocation))
+        } else {
+            check("proxy list: a profile given a checked proxy has it, and knows where it exits without a launch", false,
+                  "the list kept no entry labelled working: \(stored.entries.map(\.label))")
         }
         try repository.delete(profile.id)
 
@@ -2831,7 +3043,7 @@ final class SelfTest {
     /// is done.
     private func earlierVersionsSafariKeys() {
         guard !AppEnvironment.isSandboxed else {
-            info("earlier versions' Safari keys: not checked in the sandboxed build, which does not take them out")
+            skip("earlier versions' Safari keys: taken out of the account's com.apple.Safari once, the changed ones kept", "the sandboxed build does not take them out (it cannot write that domain)", .build)
             return
         }
         let domain = "PrivacyBrowser.SelfTest.SafariKeys-\(UUID().uuidString.prefix(8))"
@@ -3061,7 +3273,7 @@ final class SelfTest {
     /// in — and never larger than the screen allows; a new profile's random size fits.
     private func windowSizes(_ repository: ProfileRepository) async throws {
         guard let visible = WindowSizing.visibleScreen else {
-            info("window size: no screen to measure against; skipped")
+            skip("window size: a profile's window opens at its size, never larger than the screen", "this Mac has no screen to measure against (NSScreen.main is nil)")
             return
         }
         func frame(of size: WindowSize) async throws -> (window: CGSize, page: [Int]) {
@@ -3133,7 +3345,7 @@ final class SelfTest {
         check("local requests: the local-network rule list compiled", compiled, ContentRules.compileErrors.joined(separator: " | "))
         let environment = ProcessInfo.processInfo.environment
         guard compiled, let canary = environment["PB_SELFTEST_CANARY_PORT"].flatMap(Int.init) else {
-            info("local requests: no canary listener (PB_SELFTEST_CANARY_PORT); the checks in a page skipped")
+            skip("local requests: protected, a page reaches neither this Mac nor the local network; allowed, it reaches this Mac", compiled ? "PB_SELFTEST_CANARY_PORT not set: no canary listener runs to take the page's requests" : "the rule list did not compile (failed above)")
             return
         }
         func attempt(_ requests: LocalRequests, run: String) async throws -> [String: String] {
@@ -3184,6 +3396,12 @@ final class SelfTest {
         let allowedHits = await canaryHits(allowedRun)
         check("local requests: allowed, the same page reaches this Mac, as in Safari",
               allowed["loopback"] == "resolved" && (allowedHits ?? 1) > 0, "\(allowed), canary \(allowedHits.map(String.init) ?? "not asked")")
+        // The canary's side is what shows a request did not arrive; with its log unread, only the
+        // page's own answers were checked above.
+        if protectedHits == nil || allowedHits == nil {
+            skip("local requests: what reached the canary listener — nothing when protected, the page's request when allowed",
+                 "the self-test proxy's log could not be read (PB_SELFTEST_HTTP_PROXY_PORT), so only the page's own answers were checked")
+        }
         info("local requests: allowed, the local network answered \(allowed["lan"] ?? "?") (10.255.255.1) and \(allowed["name"] ?? "?") (a .local name)")
     }
 
@@ -3307,7 +3525,9 @@ final class SelfTest {
             let value = await field()
             check("paste as typed: into a window without the keyboard nothing is typed, and it says so",
                   outcome == HumanPaste.Outcome.notAField && value.isEmpty, "outcome \(outcome), field \(value)")
-            info("paste as typed: this runner gives the window no keyboard — the typing itself is not shown here")
+            for name in Self.pasteAsTypedTypingChecks {
+                skip(name, "this Mac gives the self-test's window no keyboard (app active: \(NSApp.isActive), key window: false), so nothing can be typed into it")
+            }
             return
         }
         // The control: one key down and up as the password checks send theirs. Where it does not
@@ -3329,12 +3549,14 @@ final class SelfTest {
         _ = try? await js(webView, "document.getElementById('field').value = ''; document.activeElement.blur(); return true;")
         let unfocused = await HumanPaste.type("x", into: webView, speed: 8)
         let untouched = await field()
-        check("paste as typed: with no field focused in the page, nothing is typed and it says so",
+        check(Self.pasteAsTypedTypingChecks[0],
               unfocused == HumanPaste.Outcome.notAField && untouched.isEmpty, "\(unfocused), field \(untouched)")
         _ = try? await js(webView, "document.getElementById('field').focus(); window.typed = []; return true;")
         guard control == "z" else {
             let none = await HumanPaste.type(text, into: webView, speed: 8)
-            info("paste as typed: synthesized key events do not reach the page on this runner (the control key did not arrive; Paste as Typed: \(none)) — the typing itself is not shown here")
+            for name in Self.pasteAsTypedTypingChecks.dropFirst() {
+                skip(name, "synthesized key events do not reach the page on this Mac: the control key did not arrive (Paste as Typed: \(none))")
+            }
             return
         }
         let outcome = await HumanPaste.type(text, into: webView, speed: 8)
@@ -3345,7 +3567,7 @@ final class SelfTest {
             value = await field()
         }
         let events = (try? await js(webView, "return window.typed;")) as? [[Any]] ?? []
-        check("paste as typed: the clipboard's text arrives in the page's focused field, as typed",
+        check(Self.pasteAsTypedTypingChecks[1],
               outcome == HumanPaste.Outcome.typed(text.count) && value == text, "outcome \(outcome), field \(value)")
         let keydowns = events.filter { $0.first as? String == "keydown" }
         let characterDowns = keydowns.filter { ($0[2] as? String) != "Shift" }
@@ -3353,10 +3575,17 @@ final class SelfTest {
         let shift: Bool = keydowns.contains { ($0[2] as? String) == "Shift" }
         let codes: Bool = characterDowns.contains { ($0[2] as? String) == "H" && ($0[3] as? String) == "KeyH" }
             && characterDowns.contains { ($0[2] as? String) == "М" && ($0[3] as? String) == "KeyV" }
-        check("paste as typed: the page sees trusted key events — a key down per character, on its own key (H on KeyH, М on KeyV), Shift around a capital",
+        check(Self.pasteAsTypedTypingChecks[2],
               trusted && characterDowns.count == text.count && shift && codes,
               "\(events.prefix(16).map { $0.map { "\($0)" }.joined(separator: " ") })")
     }
+
+    /// Paste as Typed's checks that need the keyboard: skipped by name where there is none.
+    private static let pasteAsTypedTypingChecks = [
+        "paste as typed: with no field focused in the page, nothing is typed and it says so",
+        "paste as typed: the clipboard's text arrives in the page's focused field, as typed",
+        "paste as typed: the page sees trusted key events — a key down per character, on its own key (H on KeyH, М on KeyV), Shift around a capital",
+    ]
 
     /// What sites see, in this process: the snapshot's listener answers only its own pages and
     /// only to this Mac's loopback address; a profile's window (no proxy, its local requests
@@ -3797,7 +4026,7 @@ final class SelfTest {
     /// (reported).
     private func passwordAutoFill(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("password AutoFill checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("passwords: AutoFill in a profile's window — save, suggest, fill, update, never, other sites' frames", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the sign-in page)")
             return
         }
         let profile = try repository.create(name: "Passwords", configuration: ProfileConfiguration(
@@ -3902,8 +4131,15 @@ final class SelfTest {
                 let typed = await eventually(2) { await self.inputValues(webView, selectors) == values }
                 if realInput == nil {
                     realInput = typed
-                    info(typed ? "password AutoFill: real clicks and typing reach the page"
-                               : "password AutoFill: no real key events reach the page on this runner; the isolated world is driven directly")
+                    if typed {
+                        info("password AutoFill: real clicks and typing reach the page")
+                    } else {
+                        // The checks below still run, on values written from the page and marked
+                        // typed in the AutoFill world: what a person's own clicks and keys do is
+                        // what is not shown.
+                        skip("passwords: a person's own clicks and keys reach the sign-in page and drive AutoFill",
+                             "no real key events reach the page on this Mac (app active: \(NSApp.isActive), key window: \(window.isKeyWindow)); the AutoFill world is driven directly instead")
+                    }
                 }
                 if typed {
                     AutoFillPanel.current?.dismiss()
@@ -3970,7 +4206,8 @@ final class SelfTest {
             let marked = await page("return document.querySelector('#pass').matches(':-webkit-autofill');") as? Bool
             check("passwords: filled fields are marked :autofill (Safari's highlight)", marked == true, "\(String(describing: marked))")
         } else {
-            info("password AutoFill: no AutoFill world in this WebKit; filled fields are not marked :autofill")
+            skip("passwords: filled fields are marked :autofill (Safari's highlight)",
+                 "this WebKit has no AutoFill world (\(PasswordAutoFill.worldKind)): filled fields cannot be marked")
         }
         check("passwords: the filled login is marked used (offered first next time)", vault.allEntries().first?.lastUsedAt != nil)
         _ = await page("document.querySelector('form').requestSubmit(); return true;")
@@ -4044,7 +4281,7 @@ final class SelfTest {
     /// imported cookies survive a stop (sealed) and a launch, the session cookie does not.
     private func cookieImport(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("cookie import checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("cookie import and export: into a stopped and a running profile, back out, and what survives a stop", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it shows what a request carries)")
             return
         }
         let start = URL(string: "http://cookies.selftest.invalid/pb-cookies")!
@@ -4203,7 +4440,7 @@ final class SelfTest {
     /// store — the archive's directories are renamed after the new profile on the way.
     private func profileTransfer(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("profile transfer checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("profile transfer: an export carries the website data, encrypted, and opens with its password only", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         let start = URL(string: "http://transfer.selftest.invalid/pb-cookies")!
@@ -4257,7 +4494,7 @@ final class SelfTest {
     /// settings changed on both devices end as the newer ones, the older kept as a conflict copy.
     private func profileSync(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("profile sync checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("profile sync: cookies recorded at stop, uploaded encrypted, in the other device's store before its first page", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-sync-\(UUID().uuidString)")
@@ -4359,7 +4596,7 @@ final class SelfTest {
     /// shows a dialog and when the profile stops (whose data then seals as usual).
     private func warmUp(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("warm-up checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("warm-up: a plan's pages visited, dwelt on, scrolled and followed as the plan says", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves and times the pages)")
             return
         }
         let run = String(UUID().uuidString.prefix(8)).lowercased()
@@ -4558,7 +4795,7 @@ final class SelfTest {
     /// run for its schedule.
     private func warmUpQueue(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("warm-up queue checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("warm-up queue: profiles warmed up one after another, each sealed before the next", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         let run = String(UUID().uuidString.prefix(8)).lowercased()

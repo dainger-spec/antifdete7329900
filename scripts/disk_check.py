@@ -29,8 +29,9 @@ cfprefsd's calls are traced too: it writes every preferences file through a dire
 and `Resolver` names those paths whole. What it writes in the real Safari's places is listed, not
 failed on — it writes for whichever process asks, and the trace cannot say which — and with
 --canary, a preferences file written through it while the trace ran must be named, or the trace is
-blind to cfprefsd (exit 1). A trace that could not be made is a warning (exit 0); a write to the
-real Safari's places by the app's or WebKit's processes is exit 1.
+blind to cfprefsd (exit 1). A trace that could not be made, or a self-test log without the
+Safari-chrome check's window, is SKIPPED and exit 1 too: a check that could not look is never a
+pass. A write to the real Safari's places by the app's or WebKit's processes is exit 1.
 """
 import argparse
 import os
@@ -140,9 +141,10 @@ def main():
     begins = [float(t) for t in re.findall(r"INFO egress-window begin ([\d.]+)", log)]
     ends = [float(t) for t in re.findall(r"INFO egress-window end ([\d.]+)", log)]
     vaults = set(re.findall(r"(/\S*pb-selftest-[0-9A-Fa-f-]+)", log))
+    # A check with nothing to look at, or no trace to look in, is never a pass: SKIPPED, and it fails.
     if not begins:
-        print("::warning::disk check: the self-test did not run its Safari-chrome check; nothing to look at")
-        return 0
+        print("::error::disk check SKIPPED: the self-test did not run its Safari-chrome check, so there was no window to look in")
+        return 1
     # fs_usage prints the local time of day; the window is in epoch seconds.
     import time
     windows = []
@@ -199,8 +201,8 @@ def main():
                     parts = path.split("/")
                     elsewhere["/".join(parts[:7])] += 1
     if lines_read == 0:
-        print("::warning::disk check inconclusive: no fs_usage trace")
-        return 0
+        print("::error::disk check SKIPPED: no fs_usage trace to look in")
+        return 1
     if elsewhere:
         print("written outside the self-test's vault during the check (listed, not failed on):")
         for directory, count in elsewhere.most_common(40):

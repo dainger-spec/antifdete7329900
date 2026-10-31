@@ -34,9 +34,10 @@ profile without a proxy as the control:
 Both proxies run on this machine, so the address a site sees is the same either way; what counts
 is whether the traffic passed through the proxy. Measured on macOS 26 (CI): HTTP/3 without a
 proxy, HTTP/2 through either proxy (CFNetwork does not use QUIC with a data store's proxy), and a
-STUN request around the proxy while WebRTC was allowed. Exit code 1 only if a proxied profile
-leaked (or a page was shown the relay's address): a site or STUN server being down makes the
-result inconclusive (a warning), never a leak.
+STUN request around the proxy while WebRTC was allowed. Exit code 1 if a proxied profile leaked
+(or a page was shown the relay's address), or if nothing at all was measured. A site or STUN
+server being down makes that part inconclusive, never a leak: it is a LEAK-CHECK SKIPPED line, a
+warning on the job and a line in its summary, and the run goes on.
 """
 import argparse
 import ipaddress
@@ -463,6 +464,7 @@ def main():
     for slot, (name, _) in enumerate(utun_profiles):
         proxies[name] = ForwardingProxy(udp=True)
         routes.append(utun_route(slot, proxies[name].socks_port))
+    skipped = []
     utun = start_utun_relay(os.path.abspath(args.app), routes, args.out)
     if utun:
         for (name, all_interfaces), route in zip(utun_profiles, routes):
@@ -470,7 +472,7 @@ def main():
                              "allInterfaces": all_interfaces, "scopingProbe": not all_interfaces,
                              "proxy": {"kind": "socks5", "host": "127.0.0.1", "port": proxies[name].socks_port}})
     else:
-        print("::warning::leak check: the utun relay could not run here (it needs passwordless sudo on macOS)")
+        skipped.append("WebRTC through a utun interface: the utun relay could not run here (it needs passwordless sudo on macOS)")
         for name, _ in utun_profiles:
             del proxies[name]
     pages = [
@@ -486,8 +488,8 @@ def main():
         if utun:
             stop_utun_relay(utun)
     if not results:
-        print("::warning::leak check: nothing measured")
-        return 0
+        print("::error::leak check SKIPPED: nothing measured (the app gave no result for any profile)")
+        return 1
 
     def quic_protocols(result):
         seen = []
@@ -537,6 +539,9 @@ def main():
             continue
         quic = ("BYPASSES THE PROXY (HTTP/3 over UDP)" if quic_bypass else
                 "stays on the proxy" if control_h3 and seen else "inconclusive (no HTTP/3 without a proxy, or no answer)")
+        if not quic_bypass and not (control_h3 and seen):
+            skipped.append(f"{name}, QUIC: {'the control saw no HTTP/3 without a proxy' if not control_h3 else 'no answer through the proxy'}"
+                           " — the site is down or answers no HTTP/3 here, so a bypass could not have shown")
         if stun_bypass:
             rtc = "BYPASSES THE PROXY (srflx/host candidate)"
         elif webrtc.get("available") is False:
@@ -563,6 +568,17 @@ def main():
         json.dump(report, handle, indent=1, sort_keys=True)
     for warning in warnings:
         print(f"::warning::leak check: {warning}")
+    # What could not be shown here — the network's doing, not a leak, so not a failure — is said
+    # apart from what was, each on a line of its own and in the job's summary.
+    for what in skipped:
+        print(f"LEAK-CHECK SKIPPED: {what}")
+        print(f"::warning title=leak check - skipped::{what}")
+    print(f"LEAK-CHECK SUMMARY: {sum(1 for p in profiles if p['name'] in proxies)} proxied profile(s) checked, "
+          f"{len(skipped)} part(s) skipped")
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+            summary.write("### Leak check (QUIC, WebRTC)\n" + "".join(f"- skipped: {what}\n" for what in skipped)
+                          + ("" if skipped else "- nothing skipped\n"))
     leaked = [name for name, r in report.items() if r["quicBypassesProxy"] or r["stunBypassesProxy"]]
     if leaked:
         print(f"::error::traffic went around the proxy in: {', '.join(leaked)}")

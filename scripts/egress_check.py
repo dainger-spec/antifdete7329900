@@ -50,10 +50,10 @@ whose intermediate the system's trust service fetches, from a profile without a 
 proxy checker's `pbinvalid…`, a proxy host name under selftest.invalid that this Mac's resolver
 is asked for (the proxy checker's geolocation service is a name under selftest.invalid too). Seen,
 the capture is known to see such packets, and their absence where a proxy should have been used
-means something; not seen, that part is inconclusive, and said so.
+means something; not seen, that part shows nothing: it is said as SKIPPED, and the run fails.
 
-A capture that could not be made (no pktap, no sudo) makes the result inconclusive: a warning,
-exit code 0.
+A capture that could not be made (no pktap, no sudo, no packets), or a self-test log with no window
+to look in, is the same: SKIPPED, exit code 1 — a check that could not look is never a pass.
 """
 import argparse
 import ipaddress
@@ -121,9 +121,11 @@ def main() -> int:
     begins = [float(t) for t in re.findall(r"INFO egress-window begin ([\d.]+)", log)]
     ends = [float(t) for t in re.findall(r"INFO egress-window end ([\d.]+)", log)]
     pids = {int(p) for p in re.findall(r"INFO egress-pid (\d+)", log)}
+    # A capture this check cannot read, or one with nothing to look for, is never a pass: it says
+    # it was skipped, and fails.
     if not tokens or not begins:
-        print("::warning::egress check: no check of the self-test opened an egress window (no egress-token); nothing to look at")
-        return 0
+        print("::error::egress check SKIPPED: no check of the self-test opened an egress window (no egress-token), so nothing was looked at")
+        return 1
     # Each window ends at the first end after its begin: a check that stopped before printing its
     # end leaves its window open to the end of the run, never borrows another check's end.
     windows = [(b, min((e for e in ends if e >= b), default=float("inf"))) for b in begins]
@@ -131,8 +133,8 @@ def main() -> int:
     try:
         lines = open(args.capture, encoding="utf-8", errors="replace").read().splitlines()
     except OSError as error:
-        print(f"::warning::egress check inconclusive: no capture ({error})")
-        return 0
+        print(f"::error::egress check SKIPPED: no capture ({error})")
+        return 1
     packets = [parse(line) for line in lines if TIME.search(line)]
     if not packets:
         errors = ""
@@ -141,8 +143,8 @@ def main() -> int:
                 errors = open(args.tcpdump_errors, encoding="utf-8", errors="replace").read()[-2000:]
             except OSError:
                 pass
-        print(f"::warning::egress check inconclusive: the capture holds no packets. tcpdump said: {errors}")
-        return 0
+        print(f"::error::egress check SKIPPED: the capture holds no packets. tcpdump said: {errors}")
+        return 1
     with_meta = sum(1 for p in packets if p["proc"])
     print(f"egress check: {len(packets)} packets captured, {with_meta} with a process; run ids {tokens}; "
           f"windows {[(round(b, 1), round(e, 1)) for b, e in windows]}; profile processes {sorted(pids)}")
@@ -199,13 +201,19 @@ def main() -> int:
         elif in_window(packet) and packet["proc"]:
             others.setdefault(packet["proc"][0], []).append(line)
 
+    # Each control is what shows the capture would have seen its kind of leak: one never seen
+    # leaves that check with nothing to show, and the run fails as skipped (macOS 26 runs up to 523:
+    # an intermediate the sandboxed build had fetched stayed in this Mac's cache, so the capture
+    # around the unsandboxed build never saw the control; each build now has names of its own).
+    unseen = []
     for control in controls:
         if control in seen_controls:
             print(f"egress check: control {control} seen {len(seen_controls[control])} times "
                   f"({sorted(set(seen_controls[control]))[:4]}): the capture sees such packets")
         else:
-            print(f"::warning::egress check: control {control} was never seen — this macOS did not send it, or the "
-                  f"capture cannot see it; the matching check where a proxy is used is inconclusive")
+            unseen.append(control)
+            print(f"::error::egress check SKIPPED for {control}'s kind: the control was never seen — this macOS did not "
+                  f"send it, or the capture cannot see it — so the matching check where a proxy is used shows nothing")
 
     if others:
         print("other processes during the check (listed, not failed on):")
@@ -215,6 +223,10 @@ def main() -> int:
         print(f"::error::egress check: {len(failures)} packets went around the profile's proxy")
         for reason, line in failures[:60]:
             print(f"LEAK {reason}: {line[:300]}")
+        return 1
+    if unseen:
+        print(f"egress check: nothing went around the profile's proxy that the capture could see; "
+              f"SKIPPED for {', '.join(unseen)} (control never seen)")
         return 1
     print("egress check: nothing went around the profile's proxy")
     return 0
