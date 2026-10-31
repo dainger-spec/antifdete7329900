@@ -62,6 +62,11 @@ MainActor.assumeIsolated {
         // What Safari's File › Export › Bookmarks… does in a profile's process: where its save panel
         // opens, what its exporter is given, what it writes where (SafariExportCheck; CI).
         SafariExportCheck.run(arguments: arguments)
+    } else if arguments.contains("--scale-check") {
+        // The app with many profiles, in numbers: creating, the list, running several at once,
+        // quitting with them running (CI; ScaleCheck; scripts/scale_check.py makes the report).
+        Localization.applyProcessLanguage()
+        ScaleCheck.start(arguments: arguments)
     } else if arguments.contains("--menu-walk") {
         // Every item of Safari's menu bar chosen in a profile's own process, and what each did:
         // windows, panels, exceptions, crashes, services started, files written (CI;

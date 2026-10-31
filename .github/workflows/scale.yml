@@ -1,0 +1,47 @@
+name: Scale
+
+# How the app holds up with many profiles, in numbers (scripts/scale_check.py, ScaleCheck.swift;
+# docs/SCALE.md): 200 profiles made, listed, searched and filtered; 1, 5, 10, 20 and 30 running at
+# once; quitting with 10 running and nothing lost. A measurement of up to half an hour, so not on
+# every push of the main workflow: when its own files change, every Monday, and by hand. It fails
+# only when the check itself could not run; the numbers are the report.
+on:
+  push:
+    paths:
+      - "Sources/PrivacyBrowser/App/ScaleCheck.swift"
+      - "scripts/scale_check.py"
+      - ".github/workflows/scale.yml"
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  scale:
+    name: Scale on macOS ${{ matrix.macos }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - macos: "26"
+            runner: macos-26
+          - macos: "27"
+            runner: xcode-27
+    runs-on: ${{ matrix.runner }}
+    # macOS 27's runner is a preview image, as in the main workflow.
+    continue-on-error: ${{ matrix.macos == '27' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the app without the App Sandbox (the build that runs a process per profile)
+        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Scale check
+        timeout-minutes: 70
+        run: |
+          python3 scripts/scale_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/scale \
+            --running 1,5,10,20,30 --title "macOS ${{ matrix.macos }} - scale"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scale-${{ matrix.macos }}
+          path: build/scale
+          if-no-files-found: ignore

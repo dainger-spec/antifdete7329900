@@ -174,6 +174,8 @@ enum SafariChrome {
         Piece(className: "BrowserDocument", selector: "fileType", kind: .instanceMethod, role: .stub),
         Piece(className: "NSFileManager", selector: "safari_topLevelDirectoriesAtURL:", kind: .instanceMethod, role: .stub),
         Piece(className: "WBTabGroupSyncAgentProxy", selector: "scheduleSyncIfNeeded", kind: .instanceMethod, role: .stub),
+        Piece(className: "WBTabGroupSyncAgentProxy", selector: "addSyncObserver:", kind: .instanceMethod, role: .stub),
+        Piece(className: "WBTabGroupSyncAgentProxy", selector: "removeSyncObserver:", kind: .instanceMethod, role: .stub),
     ]
 
     /// The structural and network pieces this macOS does not have, by name. Meaningful once
@@ -841,6 +843,13 @@ enum SafariChrome {
             // _sendInvocation:…]): the menu walk, CI run 461, macOS 26, a page loaded in a window
             // with a tab group. A profile's tab groups are its own and stay in its home.
             ("WBTabGroupSyncAgentProxy", "scheduleSyncIfNeeded"),
+            // The same proxy's observers: with twenty profiles launched at once, one profile's
+            // process ended at its start in objc_retain under -[NSXPCConnection
+            // remoteObjectProxy], from the block -[WBTabGroupSyncAgentProxy addSyncObserver:] runs
+            // on its sync observer queue (the scale check, CI run 468, macOS 26). Nothing is
+            // observed from an agent the profile does not reach, and nothing removed.
+            ("WBTabGroupSyncAgentProxy", "addSyncObserver:"),
+            ("WBTabGroupSyncAgentProxy", "removeSyncObserver:"),
         ]
         for (className, selectorName) in nothing {
             replaceWithConstant(className, selectorName) { nil }
