@@ -193,8 +193,12 @@ runs as named).
   runtime's record of the running job pointing into a stack that is gone; the next check of the main
   actor then ends the process (run 460: the walk's own task, fixed in the walk by choosing items from
   the run loop as a click does). A click has no Swift task under it; code of ours that calls into
-  Safari's from a task does. Catching such exceptions before they leave Safari's code needs an
-  Objective-C `@try` around the call, i.e. a small Objective-C target in the package: the owner's.
+  Safari's from a task does. A small Objective-C target (`ObjCExceptions`, the owner's decision)
+  catches them where they are thrown, with a `@try` around the call (`PBCatchException`): around
+  Safari's window factory and its tab's first load, which a profile's launch calls from its task —
+  an exception there opens our own window instead of ending the process. The self-test throws one
+  from a task and sees it caught and the task going on. Other calls into Safari's code from tasks
+  are not looked for one by one.
 - AppKit throws and catches its own "layout constraints are not satisfiable" in View › Enter Full
   Screen and in Edit › Distraction Control › Report Issues… (both macOS): logged, nothing else.
 

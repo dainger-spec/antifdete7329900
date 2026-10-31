@@ -1,5 +1,6 @@
 import AppKit
 import BrowserCore
+import ObjCExceptions
 import os
 import WebKit
 
@@ -1402,7 +1403,14 @@ enum SafariChrome {
             log.error("No +[BrowserWindowController openEmptyBrowserWindowController] in this Safari")
             return nil
         }
-        guard let controller = windowClass.perform(factory)?.takeUnretainedValue() as? NSWindowController else {
+        // A profile's launch opens it from a Swift task: an exception of Safari's here is caught
+        // where it is thrown (PBCatchException), and the profile opens our own window instead.
+        var made: NSWindowController?
+        if let exception = PBCatchException({ made = windowClass.perform(factory)?.takeUnretainedValue() as? NSWindowController }) {
+            log.error("Safari's window factory threw \(exception.name.rawValue, privacy: .public): \(exception.reason ?? "", privacy: .private)")
+            return nil
+        }
+        guard let controller = made else {
             log.error("Safari's window factory returned nothing")
             return nil
         }
@@ -1410,8 +1418,9 @@ enum SafariChrome {
         controller.window?.isRestorable = false
         if let address, let tab = firstTab(of: windowClass) {
             let selector = NSSelectorFromString("loadURL:")
-            if tab.responds(to: selector) {
-                _ = tab.perform(selector, with: address as NSURL)
+            if tab.responds(to: selector),
+               let exception = PBCatchException({ _ = tab.perform(selector, with: address as NSURL) }) {
+                log.error("Safari's tab threw \(exception.name.rawValue, privacy: .public) loading the start page: \(exception.reason ?? "", privacy: .private)")
             }
         }
         log.notice("Safari's chrome is up\(address.map { ", at " + $0.absoluteString } ?? "")")
