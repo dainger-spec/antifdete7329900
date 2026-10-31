@@ -21,7 +21,8 @@ done
 frames=video/.cache/frames3/$lang
 n=$(ls "$frames" 2>/dev/null | grep -c '^[0-9]\{4\}\.png$' || true)
 [ "$n" -eq 1800 ] || { echo "encode: $frames has $n frames of 1800 — film them first (capture.mjs $lang)"; exit 1; }
-venc="-c:v libx264 -preset slow -crf 16 -tune film -profile:v high -level 4.2 -pix_fmt yuv420p -g 120 -bf 3"
+# tune grain + aq-mode 3: keeps the dither in the studio's long dark gradient (CRF 16 -tune film banded at ×5)
+venc="-c:v libx264 -preset slow -crf 18 -tune grain -x264-params aq-mode=3:deblock=-2,-2 -profile:v high -level 4.2 -pix_fmt yuv420p -g 120 -bf 3"
 tags="-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"
 scale="scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"
 if [ -n "$audio" ]; then
