@@ -186,9 +186,10 @@ public final class SyncEngine: @unchecked Sendable {
 
     // MARK: Opaque encrypted files
 
-    /// `merge` (bookmarks, history, cookies) combines both versions record by record; `newer`
-    /// (config) tells which version is newer, the other is kept as `<file>.conflict`; the rest
-    /// (passwords, or a config without times) goes through `resolveConflict`.
+    /// `merge` (bookmarks, history, cookies) combines both versions record by record — whenever
+    /// this device's copy changed and the server holds one, whether or not the server's changed
+    /// too; `newer` (config) tells which version is newer, the other is kept as `<file>.conflict`;
+    /// the rest (passwords, or a config without times) goes through `resolveConflict`.
     ///
     /// `check` refuses a copy a newer version of the app wrote (docs/UPDATES.md §4). It runs on every
     /// remote copy before it is used — pulled, merged, compared, or written over — and on this
@@ -208,12 +209,17 @@ public final class SyncEngine: @unchecked Sendable {
         switch (localChanged, remoteChanged) {
         case (false, false):
             return
-        case (true, false):
+        case (true, false) where merge == nil || remoteRevision == nil:
             try await push(name: name, data: localData!, revision: (remoteRevision ?? 0) + 1,
                            expected: remoteRevision, state: &state, report: &report)
         case (false, true):
             try await pull(name: name, objectID: objectID, url: url, check: check, state: &state, report: &report)
-        case (true, true):
+        case (true, _):
+            // Both copies changed — or only this device's copy of a mergeable file did, while the
+            // server holds one: merged with it as well, never pushed over it. A copy made anew from
+            // nothing (the file lost, one bookmark added since) holds only what was added since;
+            // pushed as it was, it took everything else off every other device. The merge goes
+            // record by record, with each deletion's tombstone, so what was deleted here still is.
             if let localData { try check(localData) }
             if let merge, let localData {
                 guard let blob = try await transport.fetch(objectID: objectID) else { return }

@@ -142,9 +142,15 @@ revision and the SHA-256 of the last synced bytes.
 2. **Index:** if the remote revision changed, fetch it and merge with the local index:
    the union by profile ID, the higher summary revision wins, and profiles in either
    side's `deletedProfileIDs` are dropped. Save the result locally, and push it if it
-   differs from the remote copy. If only the local index changed, push it.
+   differs from the remote copy. If only the local index changed, push it. A local index that
+   was not read (missing or unreadable, `ProfileRepository.IndexState`) is never pushed: the
+   remote one is fetched and merged whatever its revision (docs/ARCHITECTURE.md, `index.bin`
+   missing or unreadable).
 3. **Per-profile files**, for each profile in the merged index:
-   - local change only → push (`revision = remote + 1`, CAS on the remote revision)
+   - local change only → push (`revision = remote + 1`, CAS on the remote revision) — but
+     **bookmarks**, **history** and **cookies** are merged with the remote copy when there is
+     one, as if both had changed: a file this device lost and made anew holds only what was
+     added since, and pushed as it was it took everything else off every other device
    - remote change only → pull and write the file atomically
    - both changed:
      - **bookmarks**, **history** and **cookies** are merged record by record (see below)
