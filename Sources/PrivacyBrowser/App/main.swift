@@ -54,6 +54,11 @@ MainActor.assumeIsolated {
         // the classes around AutoFill, history and export, the methods that wait — printed for CI
         // (SafariChromeInventory.swift). In a temporary home, held to a closed proxy.
         SafariChromeInventory.start(arguments: arguments)
+    } else if arguments.contains("--paths-check") {
+        // Where Safari's code in a profile's process finds no path: file URLs asked for with none,
+        // app group containers asked for, and its own log about bookmarks, its tab collection and
+        // downloads (SafariPathsCheck; CI). A measurement.
+        SafariPathsCheck.run(arguments: arguments)
     } else if arguments.contains("--history-check") {
         // Whether Safari's history can run inside a profile's process: its service's own code, in
         // this process, with its database in the profile's home (SafariHistoryCheck; CI).
