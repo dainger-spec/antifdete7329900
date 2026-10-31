@@ -35,6 +35,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -258,6 +259,18 @@ def main():
         environment["PB_SELFTEST_HTTP_PROXY_PORT"] = str(PROXY_PORT)
     trace = start_trace(out)
     started = time.time()
+
+    def sample_the_profile():
+        # Measurement branch: where the profile's process spends its time while it repeats
+        # "an error occurred while attempting to obtain endpoint for listener 'com.apple.view-bridge'"
+        # (runs 468: from its start to the end of the walk, hundreds of thousands of times).
+        for when in (40, 150):
+            time.sleep(when - (time.time() - started) if when > time.time() - started else 0)
+            found = subprocess.run(["pgrep", "-f", "--", "--profile-session"], capture_output=True, text=True).stdout.split()
+            for pid in found[:1]:
+                subprocess.run(["/usr/bin/sample", pid, "3", "-mayDie", "-file", os.path.join(out, f"spin-{pid}-{when}s.txt")],
+                               capture_output=True, timeout=60)
+    threading.Thread(target=sample_the_profile, daemon=True).start()
     with open(os.path.join(out, "walk.txt"), "w") as log:
         try:
             result = subprocess.run([os.path.join(args.app, BINARY), "--menu-walk"], env=environment,

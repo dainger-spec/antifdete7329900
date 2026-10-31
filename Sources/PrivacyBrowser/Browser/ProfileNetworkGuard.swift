@@ -557,6 +557,9 @@ enum ProfileNetworkGuard {
     /// XPC services this process has connected to (refused ones marked), for the report.
     nonisolated private static let servicesSeen = LockedSet()
 
+    /// The same, for the menu walk's report (measurement branch).
+    nonisolated static var connectedServices: [String] { servicesSeen.sorted }
+
     /// A set any thread may add to.
     final class LockedSet: @unchecked Sendable {
         private let lock = NSLock()
