@@ -34,7 +34,8 @@ jobs:
           status=0
           for mode in "--in-task" "" "--replacing"; do
             echo "== --exception-check $mode"
-            "$app" --exception-check $mode; code=$?
+            code=0
+            "$app" --exception-check $mode || code=$?
             echo "exit $code"
             if [ "$mode" = "--in-task" ] && [ "$code" != "0" ]; then status=1; fi
           done
