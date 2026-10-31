@@ -702,6 +702,11 @@ final class SelfTest {
         return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
     }
 
+    /// The keys of this app's own domain in the account's home, as cfprefsd has them.
+    private static func appDomainKeys() -> Set<String> {
+        Set(UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "dev.local.PrivacyBrowser")?.keys.map { $0 } ?? [])
+    }
+
     /// The keys whose values differ between two readings of a domain, added and removed ones too.
     private static func changedKeys(_ before: [String: Any], _ after: [String: Any]) -> [String] {
         Set(before.keys).union(after.keys).filter { key in
@@ -1084,6 +1089,9 @@ final class SelfTest {
         // And the real Safari's own preferences, as cfprefsd gives them (its container): Safari's
         // code in the profile's process names that domain by its path (CI run 496).
         let safariDomainBefore = Self.realSafariDomain()
+        // This app's own domain in the account's home: what Safari's chrome saves as its
+        // preferences goes to the profile's home instead (SafariDefaults).
+        let appDomainBefore = Self.appDomainKeys()
         // The XPC services that start while the profile runs, and what they hold open in the real
         // Safari's places: the profile's guard does not see a service asked for through libxpc.
         let xpcWatch = SafariPaths.realHome.map { XPCServiceWatch(realHome: $0) }
@@ -1283,6 +1291,11 @@ final class SelfTest {
             check("Safari chrome: HOME and TMPDIR of the profile's process are in the profile's home",
                   !home.isEmpty && report.places["HOME"] == home && (report.places["TMPDIR"] ?? "").hasPrefix(home + "/"),
                   "\(report.places)")
+            check("Safari chrome: what Safari's chrome saves through the standard defaults is kept in the profile's home",
+                  !home.isEmpty && report.standardDefaultsDomain == SafariDefaults.domain(inHome: home),
+                  report.standardDefaultsDomain)
+            check("Safari chrome: Safari's own defaults, which it names by the real Safari's container, are that same domain of the profile's",
+                  report.safarisOwnDefaultsInProfile, "+[NSUserDefaults safari_browserDefaults] answers with another domain, or this Safari has none")
             info("Safari chrome: Foundation's temporary directory in the profile's process is \(report.places["temporaryDirectory"] ?? "?")")
             check("Safari chrome: certificates are checked without fetching, and the leak page's were refused",
                   report.trustEvaluated > 0 && report.trustRefused > 0 && report.trustFetchAllowed == 0,
@@ -1415,6 +1428,13 @@ final class SelfTest {
         info("Safari chrome: the stop sealed the profile's data "
              + (sealReport.map { $0.forced ? "by force (WebKit kept the store in use)" : "without force (WebKit let the store go)" } ?? "(no report)")
              + ", attempts \(sealReport?.attempts ?? 0), pages closed first \(sealReport?.pagesClosed ?? 0), seal \(Int(sealReport?.seconds ?? 0)) s, stop \(Int(stopSeconds)) s")
+        // Nothing is written in the home once it is sealed: a file written there late (cfprefsd
+        // writes a domain's file a moment after a change) would make a plaintext home, which the
+        // next launch takes for one a crash left and uses instead of the archive.
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        let leftInHome = (FileManager.default.enumerator(atPath: home.path)?.allObjects ?? []).compactMap { $0 as? String }
+        check("Safari chrome: the profile's home stays sealed after the stop (nothing is there 5 s later)",
+              !FileManager.default.fileExists(atPath: home.path), leftInHome.prefix(10).joined(separator: ", "))
         // What Safari's window visited is in the profile's own, encrypted history (`HostedPageHistory`).
         let visited = (try? repository.historyStore(for: profile.id, key: repository.profileKey(for: profile.id)).entries().map(\.url)) ?? []
         check("Safari chrome: the pages Safari's window visited are in the profile's own encrypted history",
@@ -1464,7 +1484,14 @@ final class SelfTest {
                   String(describing: networkReport))
             info("exceptions: in the profile's process with Safari's chrome, an exception passed through the preprocessor keeps its call stack: "
                  + "\(networkReport.map { String($0.exceptionCallStacks) } ?? "no report")")
+            let saved = Set(networkReport?.standardDefaultsSavedKeys ?? [])
+            check("Safari chrome, second launch: what Safari's chrome saved in the first run came back with the profile's home",
+                  !saved.isEmpty, "\(saved.count) keys: \(saved.sorted().prefix(12).joined(separator: ", "))")
             try? await manager.stop(profile.id)
+            let added = Self.appDomainKeys().subtracting(appDomainBefore)
+            info("Safari chrome: keys this app's own domain in the account's home got while the profile ran: \(added.sorted())")
+            check("Safari chrome: none of it went to this app's own domain in the account's home",
+                  added.isDisjoint(with: saved), added.intersection(saved).sorted().joined(separator: ", "))
         }
         await manager.shutDown()
         if let xpcWatch { reportXPCServices(xpcWatch.stop(), profilePIDs: profilePIDs) }

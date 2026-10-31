@@ -177,6 +177,7 @@ enum SafariChrome {
         Piece(className: "WBTabGroupSyncAgentProxy", selector: "scheduleSyncIfNeeded", kind: .instanceMethod, role: .stub),
         Piece(className: "WBTabGroupSyncAgentProxy", selector: "addSyncObserver:", kind: .instanceMethod, role: .stub),
         Piece(className: "WBTabGroupSyncAgentProxy", selector: "removeSyncObserver:", kind: .instanceMethod, role: .stub),
+        Piece(className: "NSUserDefaults", selector: SafariDefaults.browserDefaultsSelector, kind: .classMethod, role: .stub),
     ]
 
     /// The structural and network pieces this macOS does not have, by name. Meaningful once

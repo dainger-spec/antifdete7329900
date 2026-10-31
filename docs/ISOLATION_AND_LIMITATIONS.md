@@ -873,13 +873,38 @@ So nothing of a profile's that must stay its own is written to a domain:
   Safari's own preferences before and after (`defaults export com.apple.Safari`), with sentinels
   set first on CI's runners, and fails on any change; the self-test reads them around its
   Safari-chrome profile, without sentinels. Both skip the comparison while the real Safari runs.
-- **Open:** what Safari's chrome saves through the standard defaults — its window's frame, its
-  toolbar, sidebar and favorites bar, the start page's sections, some WebKit preferences it keeps,
-  dates of its own updates — goes to this app's own domain, `~/Library/Preferences/<bundle id>.plist`
-  in the account's real home: shared by every profile and the manager, outside the vault. No page
-  data was seen there in the walk; whether something of a profile's browsing could land there (a
-  recent search, say) is not measured. Keeping it per profile is a decision of the owner's (it
-  would start every existing profile from Safari's defaults for these).
+  The sandbox stays the first defense; the second is below: Safari's code no longer names that
+  domain at all.
+- **Safari's preferences are the profile's, in its home** (`SafariDefaults`; the owner's decision).
+  What Safari's chrome saves — through the standard defaults its window's frame, its toolbar,
+  sidebar and favorites bar, the start page's sections, some WebKit preferences, the dates of its
+  own updates; through its own accessor, `+[NSUserDefaults safari_browserDefaults]`, the keys above
+  — went to two places: this app's own domain in the account's real home (53 keys a walk on macOS 26,
+  56 on 27, run 496; shared by every profile and the manager, outside the vault), and the real
+  Safari's container, which the sandbox refuses (none of it kept). Both are one domain of the
+  profile's now, as Safari has one: named by a path in its home,
+  `<home>/Library/PrivacyBrowser/SafariDefaults`, which cfprefsd keeps in the file at that path —
+  not under the home's `Library/Preferences`, where a domain named by a path is the account's own
+  domain of that name (runs 496 and 503). The standard defaults are made that domain before
+  Safari's frameworks load, Safari's accessor right after they do; the argument domain (the
+  profile's settings for Safari's services) still answers through it (24 of 24 keys, run 508), and
+  this app's own domain no longer does. As the process starts the domain is what the file restored
+  with the home says (empty without one: cfprefsd keeps a domain in memory after its file is gone);
+  as it exits it is written to the file, before the manager seals the home. Measured on both macOS
+  (runs 508 and 510, measurement branches `claude/measure-ui-state-2` and `-3`): every write went
+  to the profile's domain (291 to 297 a self-test, 290 to 295 a walk) but the toolbar's
+  configuration on macOS 26 (below); the walk added no
+  key to this app's domain and none to the real Safari's, and matched its record item for item;
+  the file held 52 to 56 keys after a walk; a second launch got the first's back (38 and 42 keys);
+  with a key left to cfprefsd as the process exits, nothing was in the home 5, 10 and 30 seconds
+  after its seal. **Checked by the self-test**: both ways reach the profile's domain, the home stays
+  sealed after a stop, a second launch gets what the first saved, and none of it is in this app's
+  domain. Every profile starts once from Safari's defaults for these, which is the owner's call;
+  earlier versions' keys stay in this app's domain, unread.
+- **Not covered, on macOS 26:** AppKit saves the toolbar's configuration through an
+  `NSObservableDefaults` of its own, made for this app's domain before any of this runs: one key,
+  `NSToolbar Configuration BrowserStandaloneTabBarToolbarIdentifier-v3.1`, still goes there (run 510;
+  on macOS 27 nothing does). It says which toolbar buttons are shown, nothing of a page.
 
 **The system log.** Lines the app writes to the unified log (kept on disk at notice level and
 above, and in a sysdiagnose) carry the user's data only as `<private>`: profile names, proxy hosts
