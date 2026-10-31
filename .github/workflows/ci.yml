@@ -26,13 +26,18 @@ jobs:
       - name: Safari, a shipped profile and the parity profile, under a capture of UDP to 192.0.2.1
         continue-on-error: true
         timeout-minutes: 40
+        env:
+          # Round 2: the page under a name (Web Authentication refuses a page on an address).
+          PB_PAGE_HOST: parity-check.example
         run: |
+          echo "127.0.0.1 parity-check.example" | sudo tee -a /etc/hosts
+          sudo dscacheutil -flushcache || true
           mkdir -p build/parity
           sudo tcpdump -i pktap,all -k NP -n -tt -l 'udp and host 192.0.2.1' > build/parity/udp.txt 2> build/parity/tcpdump.err &
           sleep 2
           code=0
           python3 scripts/payments_check.py --app build/unsandboxed/PrivacyBrowser.app --trust system --out build/parity \
-            --variants shipped,parity --proxy 127.0.0.1:9 | tee build/parity/check.txt || code=$?
+            --variants shipped,parity --proxy none | tee build/parity/check.txt || code=$?
           sleep 2
           sudo pkill -INT -f "tcpdump -i pktap" || true
           sleep 1
@@ -47,7 +52,9 @@ jobs:
           import json
           reports = json.load(open("build/parity/payments.json"))
           keys = [k for k in (reports.get("safari") or {}).get("calls", {}) if any(w in k for w in
-                  ("WebTransport", "PublicKeyCredential", "credentials", "DigitalCredential", "mediaSession", "MediaSessionCoordinator"))]
+                  ("WebTransport", "PublicKeyCredential", "credentials", "DigitalCredential", "mediaSession", "MediaSessionCoordinator", "coordinator"))]
+          keys += [k for k in ("navigator.credentials.create(publicKey) on a click", "navigator.credentials.get(digital, an mDL request) on a click",
+                               "navigator.mediaSession.coordinator.join() on a click") if k not in keys]
           for side in ("safari", "shipped", "parity"):
               report = reports.get(side)
               if not report:
