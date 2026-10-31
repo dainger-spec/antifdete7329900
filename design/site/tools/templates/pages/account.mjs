@@ -1,67 +1,70 @@
 import { inline, esc } from '../../lib/html.mjs';
 import { icon } from '../../lib/kit.mjs';
-import { result } from '../components.mjs';
 
-// Every user value on these pages is example data (data-sample): the email, dates, device codes, the
-// sync objects and payments. Plans and prices are the owner's (pricing.mjs).
+// The account: four sections — overview, Macs and sync, payments, settings. On a computer, a column on the left
+// (who you are, the sections, Sign out); on a phone, a tab bar at the bottom, as in an app, and one column of cards
+// and lists, so nothing on a page needs a table or a sideways scroll. Every user value is sample data
+// (data-sample): the email, dates, device codes, the sync objects and payments.
 export default function account(c, { lang, slug, state }) {
-  const nav = `<aside class="account-nav" aria-label="${lang === 'ru' ? 'Разделы кабинета' : 'Account sections'}">
-    <div class="who"><div class="e" data-sample>${inline(c.who.email, lang)}</div><div class="p">${inline(c.who.plan, lang)}</div></div>
-    <ul>${c.nav.map(([href, ic, t]) => `<li><a href="${href}"${href === `${slug}.html` ? ' aria-current="page"' : ''}>${icon(ic, 15)}${esc(t)}</a></li>`).join('')}
-    <li class="sep" aria-hidden="true"></li><li><a href="index.html">${icon('logout', 15)}${esc(c.logout)}</a></li></ul>
+  const here = `${slug}.html`;
+  const side = `<aside class="acc-side" aria-label="${lang === 'ru' ? 'Разделы кабинета' : 'Account sections'}">
+    <div class="acc-who" data-sample><span class="avatar">${esc(c.who.initial)}</span><div style="min-width:0"><div class="e">${inline(c.who.email, lang)}</div><div class="p">${inline(c.who.plan, lang)}</div></div></div>
+    <ul>${c.nav.map(([href, ic, t]) => `<li><a href="${href}"${href === here ? ' aria-current="page"' : ''}>${icon(ic, 16)}${esc(t)}</a></li>`).join('')}</ul>
+    <a class="acc-out" href="index.html">${icon('logout', 16)}${esc(c.logout)}</a>
   </aside>`;
-  const head = (t, l, extra = '') => `<div class="account-head"><div><h1 class="h1">${inline(t, lang)}</h1><p>${inline(l, lang)}</p></div>${extra}</div>`;
-  const kv = (rows) => `<dl class="kv">${rows.map(([k, v]) => `<dt>${inline(k, lang)}</dt><dd>${inline(v, lang)}</dd>`).join('')}</dl>`;
+  const tabs = `<nav class="acc-tabs" aria-label="${lang === 'ru' ? 'Разделы кабинета' : 'Account sections'}">${c.nav.map(([href, ic, t]) => `<a href="${href}"${href === here ? ' aria-current="page"' : ''}>${icon(ic, 22)}<span>${esc(t)}</span></a>`).join('')}</nav>`;
+  const row = (href, ic, k, v, sample = true) => `<li><a class="acc-row" href="${href}"><span class="ic">${icon(ic, 16)}</span><span class="k">${inline(k, lang)}</span><span class="v"${sample ? ' data-sample' : ''}>${inline(v, lang)}</span>${icon('chevronRight', 14)}</a></li>`;
   let content = '';
 
-  if (state === 'subscription') {
-    // Crypto can't be charged automatically: the plan shows the date the period is paid until and a button to
-    // renew (the payment page), and the renewal panel says plainly what happens when the period ends.
-    const s = c.subscription, r = s.renewal;
-    content = head(s.title, s.lead) + `
-      <section class="panel"><div class="panel-head"><div><h2>${inline(s.plan.title, lang)}</h2></div><span class="tag ok">${icon('check', 12)}${inline(s.plan.status, lang)}</span></div>
-        <div class="panel-body" data-sample><div style="font:600 24px/30px var(--font-display);padding:16px 0 4px">${inline(s.plan.name, lang)}</div>${kv(s.plan.rows)}</div>
-        <div class="panel-foot"><span>${inline(s.plan.foot, lang)}</span><span class="row"><a class="btn secondary sm" href="pricing.html">${inline(s.plan.change, lang)}</a><a class="btn primary sm" href="checkout.html">${inline(s.plan.renew, lang)}</a></span></div></section>
-      <section class="panel"><div class="panel-head"><div><h2>${inline(r.title, lang)}</h2><p>${inline(r.lead, lang)}</p></div></div>
-        <div class="panel-body pad" style="display:grid;gap:12px">${r.points.map(([ic, t]) => `<div style="display:grid;grid-template-columns:16px minmax(0,1fr);gap:10px;align-items:start;font-size:15px;line-height:22px">${icon(ic, 16)}<span>${inline(t, lang)}</span></div>`).join('')}</div>
-        <div class="panel-foot"><span></span><span class="row"><a class="btn secondary sm" href="checkout.html">${icon('wallet', 14)}${inline(r.month, lang)}</a><a class="btn secondary sm" href="checkout.html">${icon('calendar', 14)}${inline(r.year, lang)}</a></span></div></section>`;
+  if (state === 'overview') {
+    const o = c.overview;
+    content = `<h1 class="acc-title">${inline(o.title, lang)}</h1>
+      <section class="acc-card plan" data-sample>
+        <div class="plan-top"><div class="plan-name">${inline(o.plan, lang)}</div><span class="tag ok">${icon('check', 12)}${inline(o.status, lang)}</span></div>
+        <p class="plan-meta">${inline(o.meta, lang)}</p>
+        <div class="plan-until"><span class="k">${inline(o.untilLabel, lang)}</span><span class="v">${inline(o.until, lang)}</span></div>
+        <div class="plan-bar" aria-hidden="true"><i style="width:94%"></i></div>
+        <p class="plan-left">${inline(o.left, lang)}</p>
+        <div class="plan-actions"><a class="btn primary" href="checkout.html">${icon('wallet', 15)}${inline(o.renew, lang)}</a><a class="btn ghost" href="pricing.html">${inline(o.change, lang)}</a></div>
+      </section>
+      <p class="acc-hint">${icon('envelope', 14)}<span>${inline(o.hint, lang)}</span></p>
+      <section class="acc-card acc-offer"><div><div class="t">${icon('calendar', 15)}${inline(o.year.t, lang)}</div><p>${inline(o.year.d, lang)}</p></div><a class="btn secondary sm" href="checkout.html">${inline(o.year.action, lang)}</a></section>
+      <ul class="acc-list">${o.rows.map(([href, ic, k, v]) => row(href, ic, k, v)).join('')}</ul>`;
   } else if (state === 'devices') {
-    const d = c.devices;
-    content = head(d.title, d.lead) + `
-      <section class="panel"><div class="panel-head"><h2 data-sample>${inline(d.count, lang)}</h2></div>
-        <div class="panel-body" data-sample>${d.list.map((m) => `<div class="device"><span class="dicon">${icon('laptop', 18)}</span>
-          <div><div class="dn">${esc(d.mac)} <span class="caption">${esc(d.codeLabel)}</span> <span class="code-badge">${esc(m.code)}</span>${m.current ? `<span class="tag accent">${esc(d.thisMac)}</span>` : ''}</div>
-          <div class="dm">${inline(m.added, lang)} · ${inline(m.seen, lang)} · ${esc(d.ipLabel)} <span class="mono">${esc(m.ip)}</span></div></div>
-          <span class="dact">${m.current ? '' : `<a class="btn danger sm" href="account-devices.html">${inline(d.revoke, lang)}</a>`}</span></div>`).join('')}</div>
-        <div class="panel-foot"><span style="display:flex;gap:8px;align-items:flex-start">${icon('infoCircle', 14)}<span>${inline(d.note, lang)}</span></span></div></section>`;
-  } else if (state === 'sync') {
-    const s = c.sync;
-    content = head(s.title, s.lead) + `
-      <section class="panel"><div class="stats c3" style="border:0;background:transparent" data-sample>${s.stats.map(([k, v]) => `<div class="stat"><div class="t" style="margin:0 0 6px">${inline(k, lang)}</div><div class="n" style="font-size:28px;line-height:34px">${inline(v, lang)}</div></div>`).join('')}</div></section>
-      <section class="panel"><div class="panel-head"><div><h2>${inline(s.objectsTitle, lang)}</h2><p>${inline(s.objectsLead, lang)}</p></div></div>
-        <div class="table-scroll" data-sample><table class="table compact stack-mobile"><thead><tr>${s.head.map((h, i) => `<th${i === 1 || i === 2 ? ' class="num"' : ''}>${esc(h)}</th>`).join('')}</tr></thead>
-        <tbody>${s.rows.map((r) => `<tr><td data-label="${esc(s.head[0])}"><span class="mono" style="color:var(--text-primary)">${esc(r[0])}</span></td><td class="num" data-label="${esc(s.head[1])}">${esc(r[1])}</td><td class="num" data-label="${esc(s.head[2])}">${esc(r[2])}</td><td data-label="${esc(s.head[3])}">${esc(r[3])}</td></tr>`).join('')}</tbody></table></div>
-        <div class="panel-foot"><span data-sample>${inline(s.more, lang)}</span><span>${inline(s.names, lang)}</span></div></section>
-      <div class="note" style="margin-top:20px">${icon('infoCircle', 18)}<div><p>${inline(s.headerNote, lang)}</p></div></div>
-      <section class="panel danger-zone" style="margin-top:20px"><div class="panel-head"><div><h2>${inline(s.danger.title, lang)}</h2><p>${inline(s.danger.text, lang)}</p></div><a class="btn danger sm" href="account-sync.html">${inline(s.danger.action, lang)}</a></div></section>`;
+    const d = c.devices, s = d.sync;
+    content = `<h1 class="acc-title">${inline(d.title, lang)}</h1>
+      <h2 class="acc-h">${inline(d.macs, lang)} · <span data-sample>${inline(d.count, lang)}</span></h2>
+      <ul class="acc-list" data-sample>${d.list.map((m) => `<li><div class="acc-row tall"><span class="ic">${icon('laptop', 16)}</span><span class="k">${esc(d.mac)} <span class="code-badge">${esc(m.code)}</span>${m.current ? ` <span class="tag accent">${esc(d.thisMac)}</span>` : ''}<span class="sub">${inline(m.seen, lang)} · IP <span class="mono">${esc(m.ip)}</span></span></span>${m.current ? '' : `<a class="btn ghost sm danger-text" href="account-devices.html">${inline(d.revoke, lang)}</a>`}</div></li>`).join('')}</ul>
+      <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(d.note, lang)}</span></p>
+      <h2 class="acc-h" id="sync" style="margin-top:36px">${inline(s.title, lang)}</h2>
+      <div class="acc-stats" data-sample>${s.stats.map(([k, v]) => `<div><div class="n">${inline(v, lang)}</div><div class="k">${inline(k, lang)}</div></div>`).join('')}</div>
+      <section class="acc-card server">
+        <div class="t">${icon('lockFill', 15)}${inline(s.serverTitle, lang)}</div>
+        <p class="lead-s">${inline(s.serverLead, lang)}</p>
+        <ul class="server-list" data-sample>${s.rows.map(([n, z]) => `<li><span class="mono">${esc(n)}</span><span>${esc(z)}</span></li>`).join('')}<li class="more">${inline(s.more, lang)}</li></ul>
+        <p class="server-names">${inline(s.names, lang)}</p>
+      </section>
+      <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(s.headerNote, lang)}</span></p>
+      <div class="acc-danger"><a class="btn ghost sm danger-text" href="account-devices.html">${inline(s.danger.action, lang)}</a><span>${inline(s.danger.text, lang)}</span></div>`;
   } else if (state === 'invoices') {
     const v = c.invoices;
-    content = head(v.title, v.lead) + `
-      <section class="panel"><div class="table-scroll" data-sample><table class="table stack-mobile"><thead><tr>${v.head.map((h, i) => `<th${i === 2 ? ' class="num"' : ''}>${esc(h)}</th>`).join('')}</tr></thead>
-        <tbody>${v.rows.map((r) => `<tr><td data-label="${esc(v.head[0])}">${esc(r[0])}</td><td data-label="${esc(v.head[1])}"><span class="mono">${esc(r[1])}</span></td><td class="num strong" data-label="${esc(v.head[2])}">${inline(r[2], lang)}</td><td data-label="${esc(v.head[3])}">${icon('wallet', 13)} ${esc(r[3])}</td><td data-label="${esc(v.head[4])}">${result('same', r[4], lang)}</td><td class="num"><a class="btn ghost sm" href="account-invoices.html">${icon('download', 13)}${esc(v.pdf)}</a></td></tr>`).join('')}</tbody></table></div>
-        <div class="panel-foot"><span>${inline(v.note, lang)}</span></div></section>`;
+    content = `<h1 class="acc-title">${inline(v.title, lang)}</h1>
+      <ul class="acc-list" data-sample>${v.rows.map(([date, no, sum, coin, status]) => `<li><div class="acc-row tall"><span class="ic">${icon('wallet', 16)}</span><span class="k">${esc(date)}<span class="sub"><span class="mono">${esc(no)}</span> · ${esc(coin)} · <span class="ok-text">${icon('check', 11)}${esc(status)}</span></span></span><span class="sum">${inline(sum, lang)}</span><a class="btn ghost sm icon-only" href="account-invoices.html" title="${esc(v.pdf)}" aria-label="${esc(v.pdf)}">${icon('download', 15)}</a></div></li>`).join('')}</ul>
+      <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(v.note, lang)}</span></p>`;
   } else {
     const s = c.settings;
-    content = head(s.title, s.lead) + `
-      <section class="panel"><div class="panel-head"><h2>${inline(s.signin.title, lang)}</h2><a class="btn secondary sm" href="account-settings.html">${inline(s.signin.change, lang)}</a></div>
-        <div class="panel-body" data-sample>${kv(s.signin.rows)}</div>
-        <div class="panel-foot"><span>${inline(s.signin.toKeyText, lang)}</span><a class="btn ghost sm" href="login-key.html">${icon('key', 14)}${inline(s.signin.toKey, lang)}</a></div></section>
-      <section class="panel"><div class="panel-head"><h2>${inline(s.email.title, lang)}</h2></div>
-        <div class="panel-body pad" style="display:grid;gap:14px">${s.email.items.map(([t, on, locked]) => `<label class="check" style="justify-content:space-between;align-items:center;font-size:15px;color:var(--text-primary)"><span>${inline(t, lang)}</span><input class="switch" type="checkbox"${on ? ' checked' : ''}${locked ? ' disabled' : ''}></label>`).join('')}
-          <div class="row" style="justify-content:space-between"><span style="font-size:15px">${inline(s.email.lang, lang)}</span><span class="seg"><a aria-current="${lang === 'ru'}">RU</a><a aria-current="${lang === 'en'}">EN</a></span></div></div></section>
-      <section class="panel"><div class="panel-head"><h2>${inline(s.sessions.title, lang)}</h2><a class="btn secondary sm" href="login.html">${inline(s.sessions.all, lang)}</a></div>
-        <div class="panel-body pad"><div class="row">${icon('globe', 15)}<span>${inline(s.sessions.current, lang)}</span></div></div></section>
-      <section class="panel danger-zone"><div class="panel-head"><div><h2>${inline(s.danger.title, lang)}</h2><p>${inline(s.danger.text, lang)}</p></div><a class="btn danger sm" href="account-settings.html">${inline(s.danger.action, lang)}</a></div></section>`;
+    content = `<h1 class="acc-title">${inline(s.title, lang)}</h1>
+      <h2 class="acc-h">${inline(s.signin.title, lang)}</h2>
+      <ul class="acc-list" data-sample>${s.signin.rows.map(([k, v], i) => `<li><div class="acc-row"><span class="k">${inline(k, lang)}</span><span class="v">${inline(v, lang)}</span>${i === 0 ? `<a class="btn ghost sm" href="account-settings.html">${inline(s.signin.change, lang)}</a>` : ''}</div></li>`).join('')}
+        <li><a class="acc-row" href="login-key.html"><span class="ic">${icon('key', 16)}</span><span class="k">${inline(s.signin.toKey, lang)}<span class="sub">${inline(s.signin.toKeyText, lang)}</span></span>${icon('chevronRight', 14)}</a></li></ul>
+      <h2 class="acc-h">${inline(s.email.title, lang)}</h2>
+      <ul class="acc-list">${s.email.items.map(([t, on, locked]) => `<li><label class="acc-row"><span class="k">${inline(t, lang)}</span><input class="switch" type="checkbox"${on ? ' checked' : ''}${locked ? ' disabled' : ''}></label></li>`).join('')}
+        <li><div class="acc-row"><span class="k">${inline(s.email.lang, lang)}</span><span class="seg"><a aria-current="${lang === 'ru'}">RU</a><a aria-current="${lang === 'en'}">EN</a></span></div></li></ul>
+      <h2 class="acc-h">${inline(s.sessions.title, lang)}</h2>
+      <ul class="acc-list"><li><div class="acc-row"><span class="ic">${icon('globe', 16)}</span><span class="k">${inline(s.sessions.current, lang)}</span></div></li>
+        <li><a class="acc-row" href="login.html"><span class="ic">${icon('logout', 16)}</span><span class="k">${inline(s.sessions.all, lang)}</span>${icon('chevronRight', 14)}</a></li></ul>
+      <div class="acc-danger" style="margin-top:36px"><a class="btn ghost sm danger-text" href="account-settings.html">${inline(s.danger.action, lang)}</a><span>${inline(s.danger.text, lang)}</span></div>
+      <a class="acc-out phone" href="index.html">${icon('logout', 16)}${esc(c.logout)}</a>`;
   }
-  return { title: c.title, body: `<div class="container"><div class="account">${nav}<div>${content}</div></div></div>`, bodyClass: 'page-account', hideFooter: true };
+  return { title: c.title, body: `<div class="container"><div class="acc">${side}<div class="acc-main">${content}</div></div></div>${tabs}`, bodyClass: 'page-account', hideFooter: true };
 }

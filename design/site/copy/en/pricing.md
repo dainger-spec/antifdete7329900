@@ -109,7 +109,7 @@ Seats
 
 ### Payment
 
-- **In crypto.** ⟦q13: USDT, BTC or ETH⟧, on our own payment page: the address, a QR code, the amount and a timer. Your period starts when the network confirms the payment.
+- **In crypto.** ⟦q13: USDT, BTC or ETH⟧, on Lumen Pay, our own payment page: the address, a QR code, the amount and a timer. Your period starts when the network confirms the payment.
 - **A year at once.** One payment instead of twelve, at the price of ten months.
 - **No email.** You can skip the email: you get a licence key, and it becomes your account.
 

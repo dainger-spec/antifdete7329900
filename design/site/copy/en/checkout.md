@@ -8,9 +8,11 @@ Search description: Pay for Lumen in crypto: the address, a QR code, the amount,
 
 ---
 
-Plan and payment
+Account
 
 # Payment
+
+Pay
 
 Professional plan
 

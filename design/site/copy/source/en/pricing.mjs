@@ -39,7 +39,7 @@ export default {
   payment: {
     title: 'Payment',
     items: [
-      { icon: 'wallet', t: 'In crypto', d: '{{tbd:q13:USDT, BTC or ETH}}, on our own payment page: the address, a QR code, the amount and a timer. Your period starts when the network confirms the payment.' },
+      { icon: 'wallet', t: 'In crypto', d: '{{tbd:q13:USDT, BTC or ETH}}, on Lumen Pay, our own payment page: the address, a QR code, the amount and a timer. Your period starts when the network confirms the payment.' },
       { icon: 'calendar', t: 'A year at once', d: 'One payment instead of twelve, at the price of ten months.' },
       { icon: 'key', t: 'No email', d: 'You can skip the email: you get a licence key, and it becomes your account.' },
     ],

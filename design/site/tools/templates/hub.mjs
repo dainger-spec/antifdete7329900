@@ -22,7 +22,7 @@ export function hub({ pages, tbdIndex, unvIndex = {} }) {
     index: 'Главная', features: 'Возможности', 'how-it-works': 'Как устроено', verification: 'Как мы проверяем', pricing: 'Цены', download: 'Скачать',
     docs: 'Документация — оглавление', 'docs-install': 'Док.: установка и первый запуск', 'docs-vault': 'Док.: хранилище и мастер-пароль', 'docs-updates': 'Док.: обновления', 'docs-profile': 'Док.: создание профиля', 'docs-multiple': 'Док.: несколько профилей сразу', 'docs-mobile': 'Док.: мобильные профили', 'docs-proxy': 'Док.: прокси и его отказ', 'docs-cookies': 'Док.: импорт и экспорт cookies', 'docs-trouble': 'Док.: что делать при сбое', blog: 'Обновления — список', 'blog-no-noise': 'Обновления — запись',
     login: 'Вход по email', 'login-code': 'Вход: код из письма', 'login-key': 'Вход по ключу', signup: 'Регистрация',
-    account: 'Кабинет: тариф и оплата', 'account-devices': 'Кабинет: устройства', 'account-sync': 'Кабинет: синхронизация', 'account-invoices': 'Кабинет: платежи', 'account-settings': 'Кабинет: настройки', checkout: 'Оплата криптовалютой',
+    account: 'Кабинет: обзор', 'account-devices': 'Кабинет: Mac и синхронизация', 'account-invoices': 'Кабинет: платежи', 'account-settings': 'Кабинет: настройки', checkout: 'Оплата криптовалютой',
     privacy: 'Политика конфиденциальности', terms: 'Условия использования', refunds: 'Правила возврата', support: 'Поддержка и контакты', 404: 'Страница 404',
   };
   const rows = groups.map((g) => `<tr><th colspan="4" style="padding-top:24px;color:var(--text-secondary)">${esc(g)}</th></tr>` +

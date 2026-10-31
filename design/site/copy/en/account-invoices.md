@@ -4,7 +4,7 @@
 
 Window title: Account — Lumen
 
-Search description: Your Lumen account: plan and paid period, devices, sync, payments and account settings.
+Search description: Your Lumen account: plan and paid period, Macs and sync, payments and account settings.
 
 ---
 
@@ -12,21 +12,19 @@ you@example.com
 
 Professional plan
 
-- Plan and payment
-- Devices
-- Sync
+- Overview
+- Macs
 - Payments
 - Settings
-- Sign out
+
+Sign out
 
 # Payments
 
-Every payment on the account. The PDF receipt is for your records.
+- 29 October 2026`LMN-0003` · USDT · Received $59 []
+- 29 September 2026`LMN-0002` · BTC · Received $59 []
+- 29 August 2026`LMN-0001` · USDT · Received $19 []
 
-| Date | Number | Amount | Paid in | Status |  |
-| --- | --- | --- | --- | --- | --- |
-| 29 October 2026 | `LMN-0003` | $59 | USDT | Received | [PDF] |
-| 29 September 2026 | `LMN-0002` | $59 | BTC | Received | [PDF] |
-| 29 August 2026 | `LMN-0001` | $19 | USDT | Received | [PDF] |
+A receipt shows the amount in dollars, the coin, how much of it, and the transaction. Refunds go by it: the same coin, the same amount.
 
-A receipt shows the amount in dollars, the coin and how much of it, and the network transaction. Refunds go by it: the same coin, the same amount.
+OverviewMacsPaymentsSettings

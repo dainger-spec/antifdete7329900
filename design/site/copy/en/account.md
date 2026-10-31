@@ -4,7 +4,7 @@
 
 Window title: Account — Lumen
 
-Search description: Your Lumen account: plan and paid period, devices, sync, payments and account settings.
+Search description: Your Lumen account: plan and paid period, Macs and sync, payments and account settings.
 
 ---
 
@@ -12,44 +12,42 @@ you@example.com
 
 Professional plan
 
-- Plan and payment
-- Devices
-- Sync
+- Overview
+- Macs
 - Payments
 - Settings
-- Sign out
 
-# Plan and payment
+Sign out
 
-Your plan, the period you’ve paid for, and renewing.
-
-## Plan
-
-Paid
+# Overview
 
 Professional
 
-- **Price** — $59 per month
-- **Paid until** — 29 November 2026
-- **Macs in the account** — 2 of 3
-- **Profiles** — up to 50 — counted by the app on your Mac
+Paid
 
-The server doesn’t know how many profiles you have or what they’re called — so neither does this page. The app on your Mac checks the plan’s limit.
+$59 per month · up to 50 profiles · 3 Macs
 
-[Change plan]
+Paid until
+
+29 November 2026
+
+29 days left
 
 [Renew]
 
-## Renewing
+[Change plan]
 
-Crypto can’t be charged automatically: your period simply ends. You renew yourself, when it suits you.
+We remind you by email in advance. If you don’t renew, profiles open for export only — your data is never deleted.
 
-We remind you by email in advance that your period is ending.
+A year at once
 
-If you don’t renew, the app opens your profiles for data export only. Your data is never deleted.
+One payment instead of twelve, at the price of ten months.
 
-A year at once: one payment instead of twelve, at the price of ten months.
+[Renew for a year — $590]
 
-[One month — $59]
+- Macs 2 of 3
+- Sync 12 minutes ago
+- Last payment $59 · 29 October
+- Sign-in you@example.com
 
-[One year — $590]
+OverviewMacsPaymentsSettings

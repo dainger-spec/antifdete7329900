@@ -23,6 +23,8 @@ export function header(ctx) {
     ? `<a class="hlang" href="../en/${other}" hreflang="en" lang="en" title="English" aria-label="English">${icon('globe', 15)}<span>EN</span></a>`
     : `<a class="hlang" href="../ru/${other}" hreflang="ru" lang="ru" title="Русский" aria-label="Русский">${icon('globe', 15)}<span>RU</span></a>`;
   const account = slug.startsWith('login') || slug.startsWith('account') || slug === 'signup';
+  // Signed in (the account and the payment page): the account in the header, not «Sign in» and «Try it»
+  const signedIn = slug.startsWith('account') || slug === 'checkout';
   const menuLinks = c.nav.map(([href, label]) =>
     `<a href="${href}.html"${navCurrent(slug, href) ? ' aria-current="page"' : ''}>${esc(label)}${icon('chevronRight', 16)}</a>`).join('');
   // The logo on the left, the sections in a capsule of glass in the middle, the actions on the right. The bar
@@ -33,15 +35,16 @@ export function header(ctx) {
     <nav class="nav glass" aria-label="${esc(c.a11y.mainNav)}">${nav}</nav>
     <div class="header-end">
       ${otherLang}
-      <a class="hlogin" href="login.html"${account ? ' aria-current="page"' : ''}>${esc(c.header.login)}</a>
-      <a class="btn primary sm" href="download.html"><span class="long">${esc(c.header.download)}</span><span class="short">${esc(c.header.downloadShort)}</span></a>
+      ${signedIn ? `<a class="havatar" href="account.html" title="${esc(c.header.account)}" aria-label="${esc(c.header.account)}" data-sample>Y</a>` : `<a class="hlogin" href="login.html"${account ? ' aria-current="page"' : ''}>${esc(c.header.login)}</a>
+      <a class="btn primary sm" href="download.html"><span class="long">${esc(c.header.download)}</span><span class="short">${esc(c.header.downloadShort)}</span></a>`}
       <details class="menu">
         <summary aria-label="${esc(c.a11y.menu)}">${icon('chevronDown', 18, 'open')}${icon('xmark', 16, 'close')}</summary>
         <div class="menu-panel">
           <nav aria-label="${esc(c.a11y.mainNav)}">${menuLinks}</nav>
           <div class="menu-foot">
-            <a class="btn primary lg block" href="download.html">${icon('download', 16)}${esc(c.header.downloadLong)}</a>
-            <div class="menu-row"><a class="btn secondary" href="login.html">${esc(c.header.login)}</a>${langSwitch.replace('class="lang"', 'class="lang seg"')}</div>
+            ${signedIn ? `<a class="btn secondary lg block" href="account.html">${esc(c.header.account)}</a>
+            <div class="menu-row"><a class="btn secondary" href="index.html">${esc(c.header.logout)}</a>${langSwitch.replace('class="lang"', 'class="lang seg"')}</div>` : `<a class="btn primary lg block" href="download.html">${icon('download', 16)}${esc(c.header.downloadLong)}</a>
+            <div class="menu-row"><a class="btn secondary" href="login.html">${esc(c.header.login)}</a>${langSwitch.replace('class="lang"', 'class="lang seg"')}</div>`}
           </div>
         </div>
       </details>

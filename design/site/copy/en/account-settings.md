@@ -4,7 +4,7 @@
 
 Window title: Account — Lumen
 
-Search description: Your Lumen account: plan and paid period, devices, sync, payments and account settings.
+Search description: Your Lumen account: plan and paid period, Macs and sync, payments and account settings.
 
 ---
 
@@ -12,48 +12,36 @@ you@example.com
 
 Professional plan
 
-- Plan and payment
-- Devices
-- Sync
+- Overview
+- Macs
 - Payments
 - Settings
-- Sign out
 
-# Account settings
+Sign out
 
-Signing in, emails, and deleting the account.
+# Settings
 
-## Signing in
+## Sign-in
 
-[Change]
-
-- **Email** — you@example.com
-- **Method** — One-time code by email
-
-We delete your email and give you a licence key. Without the key, access cannot be recovered, and there will be no email reminders when a period ends.
-
-[Switch to a licence key]
+- Email you@example.com [Change]
+- Method One-time code by email
+- Switch to a licence keyWe delete your email and give you a licence key. Without the key, access can’t be recovered, and there are no email reminders.
 
 ## Emails
 
-Receipts, and a reminder before your paid period ends
-
-New releases — at most once a month
-
-Email language
-
-RU
-
-EN
+- Receipts, and a reminder before a period ends
+- New releases — at most once a month
+- Email language RUEN
 
 ## Sessions
 
-[Sign out everywhere]
-
-This browser — now
-
-## Delete account
-
-We delete the account and all encrypted sync data from the server. The profiles on your Macs stay — encrypted, as they were.
+- This browser — now
+- Sign out everywhere
 
 [Delete account…]
+
+We delete the account and the encrypted sync data from the server. The profiles on your Macs stay.
+
+Sign out
+
+OverviewMacsPaymentsSettings

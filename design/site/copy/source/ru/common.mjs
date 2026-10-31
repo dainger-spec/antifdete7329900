@@ -18,6 +18,8 @@ export default {
     download: 'Попробовать бесплатно',
     downloadShort: 'Попробовать',
     downloadLong: 'Скачать для Mac',
+    account: 'Аккаунт',
+    logout: 'Выйти',
   },
   footer: {
     about: 'Браузер для macOS: каждый профиль — настоящая Safari в своём процессе, данные на диске зашифрованы.',

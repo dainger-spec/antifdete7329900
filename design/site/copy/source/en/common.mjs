@@ -18,6 +18,8 @@ export default {
     download: 'Try it free',
     downloadShort: 'Try it',
     downloadLong: 'Download for Mac',
+    account: 'Account',
+    logout: 'Sign out',
   },
   footer: {
     about: 'A macOS browser where every profile is real Safari in a process of its own, with its data encrypted on disk.',

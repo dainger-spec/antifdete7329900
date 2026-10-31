@@ -6,7 +6,8 @@
 export default {
   title: 'Payment',
   description: 'Pay for {{name}} in crypto: the address, a QR code, the amount, a timer and the payment status, on our own page.',
-  back: 'Plan and payment',
+  back: 'Account',
+  brand: 'Pay',
   plan: 'Professional plan',
   periods: [['Month', '$59', 'Your period runs until 29 December 2026'], ['Year', '$590', 'The price of ten months · your period runs until 29 November 2027']],
   coinLabel: 'Coin and network',
