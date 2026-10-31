@@ -121,6 +121,17 @@ if [[ "$NE" == "1" || "$NE" == "check" ]]; then
   fi
 fi
 
+# DEBUGGABLE=1 adds get-task-allow so lldb can attach. Under the hardened runtime a signature
+# without it refuses the debugger ("Not allowed to attach to process"), and hosting Safari's chrome
+# is debugged by stopping inside Safari's own code. Never for a build that goes anywhere.
+if [[ "${DEBUGGABLE:-0}" == "1" ]]; then
+  [[ "$NE" != "1" ]] || { echo "error: DEBUGGABLE=1 does not belong in an NE build" >&2; exit 1; }
+  ENTITLEMENTS_DEBUG="$(mktemp -t pbdebug).entitlements"
+  cp "$ENTITLEMENTS" "$ENTITLEMENTS_DEBUG"
+  /usr/libexec/PlistBuddy -c "Add :com.apple.security.get-task-allow bool true" "$ENTITLEMENTS_DEBUG"
+  ENTITLEMENTS="$ENTITLEMENTS_DEBUG"
+fi
+
 TIMESTAMP="--timestamp=none"
 [[ "$NE" != "1" ]] || TIMESTAMP="--timestamp"   # notarization needs a secure timestamp
 codesign --force --options runtime "$TIMESTAMP" \

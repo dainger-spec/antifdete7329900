@@ -57,6 +57,8 @@ struct ProfileIndex: Codable, Equatable {
 /// profiles/<uuid>/history.bin      AEAD(historyKey, HistoryDocument JSON)
 /// profiles/<uuid>/bookmarks.bin    AEAD(bookmarksKey, BookmarkDocument JSON)
 /// profiles/<uuid>/webdata.pbsa     encrypted archive of the WebKit data store (app layer)
+/// profiles/<uuid>/safarihome.pbsa  encrypted archive of Safari's own state in a profile hosting its
+///                                  chrome (app layer, `SafariHomeVault`)
 /// profiles/<uuid>/cookies-import.bin AEAD(cookieImportKey, [ImportedCookie] JSON): imported while
 ///                                  the profile was stopped, applied at its next launch (not synced)
 /// profiles/<uuid>/cookies.bin      AEAD(cookiesKey, CookieJarDocument JSON): the persistent cookies,
@@ -65,18 +67,41 @@ struct ProfileIndex: Codable, Equatable {
 ///                                  store held at the last record or apply (this device only)
 /// profiles/<uuid>/warmup.bin       AEAD(warmUpKey, WarmUpPlan JSON): the last session warm-up plan
 ///                                  (this device only)
+/// profiles/<uuid>/warmup-schedule.bin AEAD(warmUpScheduleKey, WarmUpSchedule JSON): "warm up every
+///                                  N hours" and when it last ran (this device only, not exported)
 /// ```
 /// Profile names are only readable after unlock. Profile configurations are only
 /// decrypted when launched or edited.
+///
+/// On a vault opened for one profile (`ProfileGrant`, in that profile's own process) the
+/// repository holds that profile only: its index is the grant's one entry, the index on disk is
+/// neither read nor written (it is the manager's, and this process has no key for it), and
+/// anything about another profile or the whole vault is refused.
 public final class ProfileRepository: @unchecked Sendable {
     public let vault: UnlockedVault
     private let lock = NSLock()
     private var index: ProfileIndex
 
+    /// In a repository on a granted vault: the profile's settings were saved. The manager's index
+    /// counts that as a new revision of the profile (sync's merge of the index goes by it), and
+    /// only the manager writes the index — so it is told, through this, instead.
+    public var onRevisionBump: ((UUID) -> Void)?
+
     public init(vault: UnlockedVault) throws {
         self.vault = vault
         self.index = ProfileIndex()
-        self.index = try loadIndex()
+        if let grant = vault.grant {
+            index.entries = [ProfileIndexEntry(summary: grant.summary, wrappedKey: Data())]
+        } else {
+            self.index = try loadIndex()
+        }
+    }
+
+    /// What the profile's own process is given to run it: its summary and its key, not the
+    /// vault's master key (`ProfileGrant`). Only a repository on the whole vault grants.
+    public func grant(for id: UUID) throws -> ProfileGrant {
+        guard vault.grant == nil else { throw CoreError.notGranted("granting a profile") }
+        return ProfileGrant(summary: try summary(for: id), key: try profileKey(for: id))
     }
 
     // MARK: Paths
@@ -91,6 +116,9 @@ public final class ProfileRepository: @unchecked Sendable {
 
     func configURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("config.bin") }
     public func webDataArchiveURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("webdata.pbsa") }
+    /// Safari's own state of the profile, for a profile whose window is Safari's chrome (the
+    /// app's `SafariHomeVault` seals and restores it).
+    public func safariHomeArchiveURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("safarihome.pbsa") }
 
     // MARK: Queries
 
@@ -130,10 +158,17 @@ public final class ProfileRepository: @unchecked Sendable {
     }
 
     public func markLaunched(_ id: UUID) throws {
+        // In the profile's own process: the manager marked the launch when it started the process.
+        if vault.grant != nil { _ = try summary(for: id); return }
         try mutateSummary(id) { $0.lastLaunchedAt = Date() }
     }
 
     public func bumpRevision(_ id: UUID) throws {
+        if vault.grant != nil {
+            _ = try summary(for: id)
+            onRevisionBump?(id)
+            return
+        }
         try mutateSummary(id) { $0.revision += 1 }
     }
 
@@ -158,6 +193,8 @@ public final class ProfileRepository: @unchecked Sendable {
 
     /// Deletes profile directories that are not referenced by the index.
     public func removeOrphanedDirectories() {
+        // A granted vault's index is one profile: every other profile's directory would look orphaned.
+        guard vault.grant == nil else { return }
         let known = Set(list().map { $0.id.uuidString })
         let contents = (try? FileManager.default.contentsOfDirectory(atPath: profilesDirectory.path)) ?? []
         for name in contents where !known.contains(name) && UUID(uuidString: name) != nil {
@@ -170,6 +207,10 @@ public final class ProfileRepository: @unchecked Sendable {
     /// Unwraps the profile key. Call only when launching/editing the profile and drop the
     /// returned key when done.
     public func profileKey(for id: UUID) throws -> SymmetricKey {
+        if let grant = vault.grant {
+            guard grant.profileID == id else { throw CoreError.profileNotFound(id) }
+            return grant.key
+        }
         let wrapped = try lock.withLock { try entry(for: id).wrappedKey }
         let raw = try AEAD.open(wrapped, key: vault.profileKeyWrappingKey, aad: Self.keyAAD(id))
         guard raw.count == 32 else { throw CoreError.corruptData("profile key length") }
@@ -303,6 +344,25 @@ public final class ProfileRepository: @unchecked Sendable {
 
     public func saveWarmUpPlan(_ plan: WarmUpPlan, for id: UUID) throws {
         try warmUpPlanFile(for: id).save(plan)
+    }
+
+    // MARK: Warm-up schedule (this Mac only)
+
+    func warmUpScheduleURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("warmup-schedule.bin") }
+
+    private func warmUpScheduleFile(for id: UUID) throws -> EncryptedDocumentFile<WarmUpSchedule> {
+        EncryptedDocumentFile(url: warmUpScheduleURL(for: id),
+                              key: try profileKey(for: id).derive(info: "warm-up-schedule", salt: id.rawBytes),
+                              aad: "warm-up-schedule:v1:\(id.uuidString)")
+    }
+
+    /// The profile's warm-up schedule (`WarmUpSchedule`), or nil when none was ever set.
+    public func warmUpSchedule(for id: UUID) throws -> WarmUpSchedule? {
+        try warmUpScheduleFile(for: id).load()
+    }
+
+    public func saveWarmUpSchedule(_ schedule: WarmUpSchedule, for id: UUID) throws {
+        try warmUpScheduleFile(for: id).save(schedule)
     }
 
     // MARK: Sync support (raw encrypted files; see SyncEngine)

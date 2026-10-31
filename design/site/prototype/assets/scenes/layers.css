@@ -1,0 +1,196 @@
+/* Home scene "layers" (tools/templates/pages/home/layers.mjs): an exploded view of one profile.
+   Scoped to .sc-layers; the engine and the shared type are in site.css.
+
+   Geometry. The rig is a 420 × 250 slab stack turned rotateX(--ax) rotateZ(--az) with no perspective
+   (an orthographic, technical-drawing view), so every point's place on screen is plain arithmetic.
+   Desktop and tablet: 60° / -30°. A layer lifted by z moves up by z · sin 60° = 0.866 z; a slab's right
+   corner sits 244 px right of its centre and 1.6 px below it; the stack's middle is 1.732 G above the
+   bottom slab (--cy). The labels use the same arithmetic, so they ride with their layers. A lower slab
+   shows its bottom ~140 px (in its own coordinates) between the slabs above it: that is where each
+   layer's content sits. Phone: one axis only (--az 0), so the words on each slab stay level.
+   --s scales the drawing per width, --dx moves it left to make room for the labels, --G is the gap
+   between layers (8 px closed → 8 + --gmax apart, with --et), --rt turns the window (0 front on, at
+   --open times its size → 1 the exploded view). Without scenes --rt and --et are 1: the finished view. */
+
+.sc-layers { overflow-x: clip; }
+.sc-layers .ly-wrap { display: flex; flex-direction: column; align-items: center; }
+.js-scenes .sc-layers .scene-pin { padding-top: 64px; } /* centre under the header, not behind it */
+.sc-layers .ly-head { text-align: center; max-width: 980px; }
+.sc-layers .ly-head .lead { margin: 14px auto 0; max-width: 720px; text-wrap: balance; }
+
+.sc-layers .ly-stage {
+  --s: 0.96; --dx: -176px; --ax: 60deg; --az: -30deg; --cy: 1.732; --open: 1.44; --gmax: 88px;
+  --et: var(--t, 1);
+  --G: calc(8px + var(--gmax) * var(--et));
+  position: relative; width: 100%; height: 530px; margin-top: 24px;
+}
+
+/* The rig: turned and scaled as one; a soft shadow below it, and the key's blue light on that shadow */
+.sc-layers .ly-rig {
+  --rt: var(--t, 1);
+  position: absolute; left: 50%; top: 50%; width: 420px; height: 250px; margin: -125px 0 0 -210px;
+  transform-style: preserve-3d;
+  transform: translate(calc(var(--dx) * var(--rt)), calc(var(--s) * var(--cy) * var(--G) * var(--rt)))
+             scale(calc(var(--s) * (var(--open) - (var(--open) - 1) * var(--rt))))
+             rotateX(calc(var(--ax) * var(--rt))) rotateZ(calc(var(--az) * var(--rt)));
+}
+.sc-layers .ly-ground {
+  position: absolute; inset: -60px -80px; transform: translateZ(-40px); border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(47, 107, 239, 0.20), rgba(47, 107, 239, 0.06) 50%, transparent),
+              radial-gradient(closest-side, rgba(0, 0, 0, 0.6), transparent);
+  opacity: calc(var(--rt) * var(--et));
+}
+.sc-layers .ly { position: absolute; inset: 0; transform-style: preserve-3d; transform: translateZ(calc(var(--k) * var(--G) + var(--lift, 0px))); }
+.sc-layers .ly-edge { position: absolute; inset: 0; border-radius: 20px; transform: translateZ(-5px); background: #060709; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.075); }
+.sc-layers .ly-face {
+  position: absolute; inset: 0; border-radius: 20px; overflow: hidden;
+  display: grid; align-content: end; padding: 18px 22px;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 42%), #111318;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 12px 26px -14px rgba(0, 0, 0, 0.55);
+  color: var(--text-primary); font: 500 15px/20px var(--font);
+}
+/* A layer's rim brightens while its label comes in */
+.sc-layers .ly-hi {
+  position: absolute; inset: 0; border-radius: 20px; transform: translateZ(0.5px); pointer-events: none;
+  box-shadow: inset 0 0 0 1.5px rgba(214, 226, 255, 0.5);
+  opacity: calc(clamp(0, min(var(--t, 0), 1 - var(--t, 0)) * 4, 1) * 0.85);
+}
+.sc-layers .ly-4 .ly-hi { box-shadow: inset 0 0 0 1.5px rgba(143, 178, 255, 0.75); }
+
+/* 1 — the Safari window */
+.sc-layers .lf-win { display: flex; flex-direction: column; padding: 0; background: #101216; }
+.sc-layers .lw-bar { flex: none; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 14px; background: linear-gradient(180deg, #25282F, #1D2026); box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.55); color: #9AA1AD; }
+.sc-layers .lw-tl { display: flex; gap: 7px; margin-right: 4px; }
+.sc-layers .lw-tl i { width: 11px; height: 11px; border-radius: 50%; background: #FF5F57; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.25); }
+.sc-layers .lw-tl i:nth-child(2) { background: #FEBC2E; }
+.sc-layers .lw-tl i:nth-child(3) { background: #28C840; }
+.sc-layers .lw-btn { display: inline-flex; gap: 6px; }
+.sc-layers .lw-url { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; height: 24px; margin: 0 4px; border-radius: 7px; background: rgba(255, 255, 255, 0.075); font: 500 12px/1 var(--font); color: #D3D7DF; }
+.sc-layers .lw-url .icon { color: #A9B0BC; }
+.sc-layers .lw-page { flex: 1; display: grid; align-content: start; gap: 6px; padding: 12px 22px; }
+.sc-layers .lw-top { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.sc-layers .lw-top b { flex: 1; font: 700 13px/1 var(--font); letter-spacing: 0.02em; color: #E9ECF1; }
+.sc-layers .lw-top i { width: 34px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.14); }
+.sc-layers .lw-h { margin-top: 2px; font: 600 21px/26px var(--font-display); letter-spacing: -0.01em; color: #F3F4F7; }
+.sc-layers .lw-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto; align-items: center; gap: 12px; height: 36px; border-top: 1px solid rgba(255, 255, 255, 0.055); font: 500 13px/1 var(--font); color: #DCE0E7; white-space: nowrap; }
+.sc-layers .lw-th { width: 28px; height: 28px; border-radius: 7px; background: linear-gradient(140deg, #48526A, #232836); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.sc-layers .lw-th.t1 { background: linear-gradient(140deg, #5A4E42, #2A251F); }
+.sc-layers .lw-th.t2 { background: linear-gradient(140deg, #3A5650, #1C2826); }
+.sc-layers .lw-row em { font: 500 11.5px/1 var(--font); font-style: normal; padding: 4px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.07); color: var(--text-secondary); }
+.sc-layers .lw-row .pr { min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; color: #F2F3F6; }
+
+/* 2 — the profiles' processes, this one selected */
+.sc-layers .lf-proc { padding-bottom: 16px; }
+.sc-layers .lp-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 11px; height: 40px; padding: 0 12px; border-radius: 10px; color: #C9CED8; }
+.sc-layers .lp-row.on { background: rgba(47, 107, 239, 0.92); color: #FFFFFF; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16); }
+.sc-layers .lp-row .avatar { display: inline-grid; place-items: center; font-weight: 600; }
+.sc-layers .lp-p { font: 500 12.5px/1 var(--font-mono); color: var(--text-tertiary); }
+.sc-layers .lp-row.on .lp-p { color: rgba(255, 255, 255, 0.9); }
+
+/* 3 — the profile's files, each sealed */
+.sc-layers .lf-data { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-bottom: 20px; }
+.sc-layers .ld-file { display: grid; grid-template-columns: 15px minmax(0, 1fr) 10px; align-items: center; gap: 9px; height: 44px; padding: 0 12px; border-radius: 11px; background: rgba(255, 255, 255, 0.045); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--text-tertiary); }
+.sc-layers .ld-file code { background: none; border: 0; padding: 0; font: 500 13.5px/1 var(--font-mono); color: #DADFE7; white-space: nowrap; }
+
+/* 4 — the profile's network: each setting with its value beside it */
+.sc-layers .lf-net { padding: 0 24px 14px; }
+.sc-layers .ln-row { display: grid; grid-template-columns: 92px auto; justify-content: start; align-items: center; gap: 14px; height: 40px; font: 400 14px/20px var(--font); color: var(--text-tertiary); }
+.sc-layers .ln-row + .ln-row { border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.sc-layers .ln-row b { display: inline-flex; align-items: center; gap: 8px; font: 500 15px/20px var(--font); color: #E4E7ED; white-space: nowrap; }
+.sc-layers .ln-row b .icon { color: var(--text-tertiary); }
+
+/* 5 — the key, lit from below in the brand blue */
+.sc-layers .lf-key {
+  gap: 10px; padding: 0 26px 24px;
+  background: radial-gradient(120% 90% at 30% 120%, rgba(47, 107, 239, 0.36), rgba(47, 107, 239, 0.07) 55%, transparent 78%), #0D1016;
+  box-shadow: inset 0 0 0 1px rgba(143, 178, 255, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.sc-layers .lf-key code { background: none; border: 0; padding: 0; }
+.sc-layers .lk-cap { display: inline-flex; align-items: center; gap: 8px; font: 500 13px/1 var(--font); color: #A9BCE8; }
+.sc-layers .lk-cap .icon { color: #8FB2FF; }
+.sc-layers .lk-alg { font: 600 38px/1 var(--font-mono); letter-spacing: -0.01em; color: #F2F5FF; }
+.sc-layers .lk-hex { font: 400 12px/1 var(--font-mono); letter-spacing: 0.08em; color: rgba(162, 178, 214, 0.55); }
+
+/* The labels: each on a hairline from its layer's right corner; the line meets the title */
+.sc-layers .ly-legend { list-style: none; margin: 0; padding: 0; }
+.sc-layers .ly-legend li {
+  position: absolute; width: 372px;
+  left: calc(50% + var(--dx) + var(--s) * 244px + 44px);
+  top: calc(50% + var(--s) * (1.732 * var(--G) + 1.6px - 0.866 * var(--k) * var(--G)) - 11px);
+}
+.sc-layers .ly-legend li::before { content: ""; position: absolute; right: calc(100% + 10px); top: 11px; width: 32px; height: 1px; background: rgba(255, 255, 255, 0.34); transform-origin: left center; }
+.sc-layers .ly-legend b { display: block; font: 600 17px/22px var(--font); letter-spacing: -0.01em; color: var(--text-primary); }
+.sc-layers .ly-legend li > span { display: block; margin-top: 2px; font: 400 15px/21px var(--font); color: var(--text-secondary); text-wrap: pretty; }
+.js-scenes .sc-layers .ly-legend li { opacity: clamp(0, var(--t, 0) * 2.6, 1); }
+.js-scenes .sc-layers .ly-legend li > * { transform: translateX(calc((1 - clamp(0, var(--t, 0) * 2.6, 1)) * -10px)); }
+.js-scenes .sc-layers .ly-legend li::before { transform: scaleX(clamp(0, var(--t, 0) * 3, 1)); }
+
+@media (min-width: 1600px) and (min-height: 1000px) {
+  .sc-layers .ly-stage { --s: 1.14; --dx: -206px; height: 640px; margin-top: 32px; }
+}
+@media (max-height: 820px) and (min-width: 600px) {
+  .sc-layers .ly-stage { --s: 0.9; height: 500px; --open: 1.36; }
+}
+
+@media (max-width: 1099px) {
+  .sc-layers .ly-head .h-xl { font-size: 46px; line-height: 50px; }
+  .sc-layers .ly-head .h-xl .dim { display: block; }
+  .sc-layers .ly-stage { --s: 0.8; --dx: -160px; height: 480px; --open: 1.3; }
+  .sc-layers .ly-legend li { width: min(400px, calc(50% - var(--dx) - var(--s) * 244px - 60px)); left: calc(50% + var(--dx) + var(--s) * 244px + 36px); }
+}
+
+/* Phone: the stack turns about one axis, so each slab's words stay level and large; one band per slab
+   carries one readable thing. The labels go under the stack: all of them without scenes, one at a time
+   with scenes (the layer it names lifts a little). */
+@media (max-width: 599px) {
+  .js-scenes .sc-layers .scene-pin { padding-top: 58px; }
+  .sc-layers .ly-head { text-align: left; align-self: stretch; }
+  .sc-layers .ly-head .h-xl { font-size: 34px; line-height: 39px; }
+  .sc-layers .ly-head .lead { margin: 12px 0 0; font-size: 17px; line-height: 25px; text-wrap: balance; }
+  .sc-layers .ly-stage { --s: 0.8; --dx: 0px; --ax: 52deg; --az: -9deg; --cy: 1.576; --open: 1.08; --gmax: 100px; height: auto; margin-top: 0; }
+  .sc-layers .ly-rig { top: 262px; }
+  .sc-layers .ly-edge { transform: translateZ(-9px); background: linear-gradient(180deg, #1B1E25, #0C0E12); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.09); }
+  .sc-layers .ly-legend { display: grid; padding-top: 500px; }
+  .sc-layers .ly-legend li { position: static; width: auto; padding: 14px 0; border-top: 1px solid var(--divider); }
+  .sc-layers .ly-legend li::before { display: none; }
+  .sc-layers .ly-legend li > span { font-size: 16px; line-height: 23px; }
+
+  /* The faces, set for the phone: bigger words, one thing per visible band */
+  .sc-layers .ly-face { padding: 18px 20px; }
+  .sc-layers .lw-bar { height: 42px; }
+  .sc-layers .lw-url { height: 26px; font-size: 14px; }
+  .sc-layers .lw-page { padding: 14px 20px; gap: 4px; }
+  .sc-layers .lw-top { display: none; }
+  .sc-layers .lw-h { font-size: 27px; line-height: 34px; margin-bottom: 4px; }
+  .sc-layers .lw-row { grid-template-columns: 30px minmax(0, 1fr) auto; height: 42px; font-size: 16px; }
+  .sc-layers .lw-row em { display: none; }
+  .sc-layers .lw-row:nth-of-type(n+5) { display: none; }
+  .sc-layers .lw-th { width: 30px; height: 30px; }
+  .sc-layers .lf-proc { padding-bottom: 22px; }
+  .sc-layers .lp-row:not(.on) { display: none; }
+  .sc-layers .lp-row { grid-template-columns: 28px minmax(0, 1fr) auto; height: 60px; padding: 0 16px; border-radius: 14px; font-size: 19px; }
+  .sc-layers .lp-row .avatar { width: 28px !important; height: 28px !important; font-size: 13px !important; border-radius: 7px !important; }
+  .sc-layers .lp-p { font-size: 16px; }
+  .sc-layers .lf-data { gap: 10px; padding-bottom: 24px; }
+  .sc-layers .ld-file:nth-child(n+3) { display: none; }
+  .sc-layers .ld-file { grid-template-columns: minmax(0, 1fr) 12px; height: 58px; padding: 0 14px; border-radius: 14px; }
+  .sc-layers .ld-file > .icon:first-child { display: none; }
+  .sc-layers .ld-file code { font-size: 17px; }
+  .sc-layers .lf-net { padding: 0 20px 24px; }
+  .sc-layers .ln-row:nth-child(n+2) { display: none; }
+  .sc-layers .ln-row { grid-template-columns: auto auto; gap: 16px; height: 54px; font-size: 18px; }
+  .sc-layers .ln-row b { font-size: 19px; gap: 10px; }
+  .sc-layers .ln-row b .flag { width: 18px; height: 18px; }
+  .sc-layers .lf-key { padding: 0 22px 26px; gap: 12px; }
+  .sc-layers .lk-cap { font-size: 16px; }
+  .sc-layers .lk-alg { font-size: 44px; }
+  .sc-layers .lk-hex { display: none; }
+
+  .js-scenes .sc-layers .ly-legend { grid-template-areas: "c"; padding-top: 494px; }
+  /* One caption at a time: each is gone before the next comes (their windows overlap by 0.015 of --p) */
+  .js-scenes .sc-layers .ly-legend li { grid-area: c; border: 0; padding: 0; text-align: center; opacity: clamp(0, min(var(--t, 0) - 0.15, 0.85 - var(--t, 0)) * 8, 1); }
+  .js-scenes .sc-layers .ly-legend li.last { opacity: clamp(0, (var(--t, 0) - 0.15) * 8, 1); }
+  .js-scenes .sc-layers .ly-legend li > * { transform: none; }
+  .js-scenes .sc-layers .ly-legend li > span { text-wrap: balance; }
+  .js-scenes .sc-layers .ly { --lift: calc(clamp(0, min(var(--t, 0), 1 - var(--t, 0)) * 4, 1) * 22px); }
+}

@@ -77,12 +77,63 @@ final class WarmUpRobot: ObservableObject {
     var onProgress: (() -> Void)?
 
     var isRunning: Bool { state == .running }
+
+    /// The run as the screens show it — the same value a profile in its own process sends back
+    /// over the channel, so that both ways of running look alike to the UI.
+    var status: WarmUpStatus {
+        let visited = visits.filter { $0.outcome != nil }.count
+        let failed = visits.filter { if case .failed? = $0.outcome { return true } else { return false } }.count
+        let phase: WarmUpStatus.Phase
+        switch state {
+        case .running: phase = .running
+        case .finished: phase = .finished
+        case .idle, .stopped: phase = .stopped
+        }
+        return WarmUpStatus(phase: phase, visited: visited, total: pageCount, failed: failed,
+                            cookies: cookiesCollected, secondsRemaining: secondsRemaining,
+                            currentHost: isRunning ? visits.last?.url.host : nil,
+                            sites: isRunning ? nil : cookieSites)
+    }
+
+    /// Roughly how much of the run is left: from what its pages have actually taken so far, and
+    /// before the first one is over, from the plan. Nil once the run is over.
+    var secondsRemaining: TimeInterval? {
+        guard isRunning, pageCount > 0 else { return nil }
+        let done = visits.filter { $0.outcome != nil }.count
+        let left = max(0, pageCount - done)
+        guard left > 0 else { return 0 }
+        let perPage: TimeInterval
+        if done > 0, let startedAt {
+            perPage = max(1, Date().timeIntervalSince(startedAt) / Double(done))
+        } else {
+            perPage = plannedSecondsPerPage
+        }
+        return Double(left) * perPage
+    }
+
     /// The robot's tab, while it runs (self-test hook).
     var currentTab: BrowserTab? { isRunning ? tab : nil }
 
     static let world = WKContentWorld.world(name: "PrivacyBrowser.WarmUp")
     private weak var session: BrowserSession?
     private weak var tab: BrowserTab?
+    /// The window this run browses in, off every screen (`BrowserSession.openOffscreenWindow`).
+    private var offscreenWindow: BrowserWindowController?
+    /// The profile's cookies when the run began (`WarmUpCookieCount.Cookie`: one per name, domain
+    /// and path); nil until the store has answered.
+    private var cookiesBefore: Set<WarmUpCookieCount.Cookie>?
+    /// Cookies the profile has gained since this run began: the store is read before the first
+    /// page and again after each one, and a cookie counts when it was not there at the start —
+    /// which is what "collected" means on the warm-up screen.
+    @Published private(set) var cookiesCollected = 0
+    /// Once the run is over: the profile's cookies per site and how many of them the run added —
+    /// the report the warm-up screen shows (`WarmUpStatus.sites`). Taken from the same reads of
+    /// the store, in the process the profile runs in, so it crosses to the manager in the status.
+    private(set) var cookieSites: [WarmUpCookieSite]?
+    /// When the run began, and what one of its pages was expected to cost: together they say how
+    /// much of the run is left.
+    private var startedAt: Date?
+    private var plannedSecondsPerPage: TimeInterval = 20
     private var task: Task<Void, Never>?
     private var run = 0
     private let log = Logger(subsystem: "PrivacyBrowser", category: "WarmUp")
@@ -93,15 +144,25 @@ final class WarmUpRobot: ObservableObject {
 
     // MARK: Start and stop
 
-    /// Starts a run of `plan` in a new tab of `session`'s front window. False when it is already
-    /// running, the plan has no page, or the profile has no window.
+    /// Starts a run of `plan` for `session`, in a window of its own that is placed off every
+    /// screen: the user keeps browsing, or keeps doing something else entirely, while the profile
+    /// is warmed. False when it is already running or the plan has no page.
     @discardableResult
     func start(_ plan: WarmUpPlan, in session: BrowserSession) -> Bool {
         guard !isRunning, session.dataStore != nil else { return false }
         let pages = plan.pages().pages
-        guard !pages.isEmpty, let controller = session.frontmostWindow,
-              let tab = controller.addTab(url: URL(string: "about:blank"), select: true) else { return false }
-        controller.window?.makeKeyAndOrderFront(nil)
+        guard !pages.isEmpty else { return false }
+        let controller = session.openOffscreenWindow()
+        guard let tab = controller.tabs.first else {
+            log.error("Warm-up could not open its own window")
+            return false
+        }
+        offscreenWindow = controller
+        cookiesBefore = nil
+        cookiesCollected = 0
+        cookieSites = nil
+        startedAt = Date()
+        plannedSecondsPerPage = plan.secondsPerPage
         tab.refusesDownloads = true
         run += 1
         let current = run
@@ -112,7 +173,7 @@ final class WarmUpRobot: ObservableObject {
         scrollInput = nil
         clickInput = nil
         setState(.running)
-        log.notice("Warm-up of \(pages.count) pages started")
+        log.notice("Warm-up of \(pages.count) pages started, out of sight")
         task = Task { [weak self] in
             await self?.perform(plan.normalized, pages, run: current)
         }
@@ -126,14 +187,81 @@ final class WarmUpRobot: ObservableObject {
         task = nil
         release()
         setState(.stopped(reason))
-        log.notice("Warm-up stopped: \(String(describing: reason), privacy: .public)")
+        log.notice("Warm-up stopped: \(String(describing: reason), privacy: .private)")
     }
 
-    /// Gives the tab back to the user (downloads as usual) and lets go of it.
+    /// Closes the warm-up's own window and lets go of everything it held.
     private func release() {
         tab?.refusesDownloads = false
+        countCookiesSoFar()
+        startedAt = nil
         tab = nil
+        offscreenWindow?.tearDown()
+        offscreenWindow?.close()
+        offscreenWindow = nil
         session = nil
+    }
+
+    /// Counts the profile's cookies and reports how many the run has added so far. Called after
+    /// each page, so the screen can show the count growing rather than only a total at the end.
+    /// The count a stop asks for (`release()`) comes back once the run is over: it brings the
+    /// report of a run that was stopped part-way.
+    private func countCookiesSoFar() {
+        countCookies { [weak self] cookies in
+            guard let self else { return }
+            guard let before = self.cookiesBefore else {
+                // The first count has not come back yet: take this one as the run's starting point.
+                self.cookiesBefore = Set(cookies)
+                return
+            }
+            let collected = WarmUpCookieCount.added(before: before, after: cookies)
+            let sites = self.isRunning ? nil : WarmUpCookieCount.sites(before: before, after: cookies)
+            guard collected != self.cookiesCollected || (sites != nil && sites != self.cookieSites) else { return }
+            self.cookiesCollected = collected
+            if let sites { self.cookieSites = sites }
+            self.onProgress?()
+        }
+    }
+
+    /// The same, waited for: used once, at the end of a run, so that the run is reported as over
+    /// with its whole count and its report, not before the last page's cookies are in.
+    private func countCookiesAndWait() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            guard let store = session?.dataStore else {
+                continuation.resume()
+                return
+            }
+            store.httpCookieStore.getAllCookies { cookies in
+                MainActor.assumeIsolated {
+                    if let before = self.cookiesBefore {
+                        let after = cookies.map { Self.identity($0) }
+                        self.cookiesCollected = WarmUpCookieCount.added(before: before, after: after)
+                        self.cookieSites = WarmUpCookieCount.sites(before: before, after: after)
+                    }
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    /// The profile's cookies before the run's first page, waited for.
+    private func takeStartingPoint() async {
+        guard cookiesBefore == nil, let store = session?.dataStore else { return }
+        let cookies = await store.httpCookieStore.allCookies()
+        if cookiesBefore == nil { cookiesBefore = Set(cookies.map { Self.identity($0) }) }
+    }
+
+    /// The cookies the profile holds right now, as `WarmUpCookieCount` tells them apart.
+    private func countCookies(_ answer: @escaping @MainActor ([WarmUpCookieCount.Cookie]) -> Void) {
+        guard let store = session?.dataStore else { return }
+        store.httpCookieStore.getAllCookies { cookies in
+            MainActor.assumeIsolated { answer(cookies.map { Self.identity($0) }) }
+        }
+    }
+
+    /// A cookie of the store, by what tells it apart from the others (name, domain, path).
+    nonisolated private static func identity(_ cookie: HTTPCookie) -> WarmUpCookieCount.Cookie {
+        WarmUpCookieCount.Cookie(name: cookie.name, domain: cookie.domain, path: cookie.path)
     }
 
     /// Changes visit `index` of run `run`; nothing once that run has ended (its last awaits can
@@ -151,6 +279,11 @@ final class WarmUpRobot: ObservableObject {
     // MARK: The run
 
     private func perform(_ plan: WarmUpPlan, _ pages: [WarmUpPlan.Page], run: Int) async {
+        // The run's starting point, read before its first page: a cookie that page sets is the
+        // run's, not one the profile had (read before the session was set, it never came back,
+        // and the store as it was after the first page became the starting point).
+        await takeStartingPoint()
+        guard isCurrent(run) else { return }
         var generator = SystemRandomNumberGenerator()
         for (index, page) in pages.enumerated() {
             guard await waitUntilShown(run) else { return }
@@ -172,16 +305,22 @@ final class WarmUpRobot: ObservableObject {
                     guard await follow(on: page, visit: index, plan: plan, run: run, using: &generator) else { return }
                 }
             }
+            countCookiesSoFar()
             if index < pages.count - 1 {
                 let pause = limits.pauseOverride.map { Double.random(in: $0, using: &generator) } ?? WarmUpTiming.pause(using: &generator)
                 guard await wait(pause, run: run) else { return }
             }
         }
         guard isCurrent(run) else { return }
+        // The count the screen is left with is the whole run's, so the last page's cookies are
+        // waited for rather than arriving after the run is reported as over.
+        await countCookiesAndWait()
+        guard isCurrent(run) else { return }
         task = nil
         release()
         setState(.finished)
-        log.notice("Warm-up finished")
+        let sitesAdded = cookieSites?.filter { $0.added > 0 }.count ?? 0
+        log.notice("Warm-up finished: \(self.cookiesCollected, privacy: .public) cookies collected on \(sitesAdded, privacy: .public) sites")
     }
 
     private func isFailure(_ outcome: WarmUpVisit.Outcome) -> Bool {

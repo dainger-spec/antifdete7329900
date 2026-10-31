@@ -425,6 +425,277 @@ not measured here; this project's own match with Safari was measured separately
 - Research hosts some subagents could not reach (eclecticlight.co, support.apple.com, webkit.org)
   were read through search excerpts; claims that rest on them are marked by their links.
 
+## 9. What a shipping competitor does: BlackBird 2.5.19 (measured)
+
+BlackBird (`cc.blckbrd.BlackBirdMac`, Team ID `DC2528FGSC`) is an anti-detect browser for macOS that
+looks, to a user, as if it opened Safari's own window per profile. It does not run Safari, and it does
+not run one of Safari's Apple-signed siblings (§1). It hosts **Safari's private UI frameworks inside
+its own process**, one such process per profile. Measured on macOS (Apple silicon) with the app
+running and one profile open: `pgrep`, `sudo launchctl procinfo`, `sudo lsof`, `ps -Eww`,
+`codesign -d --entitlements`, `nm -mu` and `strings` over the bundle.
+
+**One process per profile.** The manager process (`.../MacOS/BlackBird`, no arguments) spawns the same
+executable again per profile:
+
+```
+BlackBird --session-id=<profile UUID> --native-storage-proof=<base64 JSON> \
+          -AppleLanguages ("de-DE") -AppleLocale de-DE
+```
+
+Every WebKit helper of that profile reports `responsible pid` = the child and
+`responsible path = /Applications/BlackBird.app/Contents/MacOS/BlackBird`, so the `WebContent`,
+`Networking` and `GPU` processes seen while it runs are plain WKWebView helpers of the child, not
+Safari's. The base64 argument is a licence binding (`"purpose":
+"blackbird.native-profile-storage-binding"`, an account ID, a profile ID and a digest) and names the
+scheme `"construction": "safari-profile-v2"`; passing it in `argv` makes it readable by any process of
+the user.
+
+**Why the separate process.** It buys what a single process cannot: `AppleLanguages`, `AppleLocale`
+and `TZ` are read once per process, by WebKit for `Accept-Language`, `navigator.language(s)` and
+`Intl`/`Date` — the limitation this project documents in `HostIdentity.swift` (`WebContentLanguage`),
+where the first profile launched decides for the whole run. A process per profile makes each profile's
+language and time zone native rather than a script override.
+
+**Safari's own UI, by `dlopen`.** The profile process has
+`/System/Library/PrivateFrameworks/Safari.framework` and `SafariShared.framework` open, down to
+Safari's nibs (`StartPageCollectionSectionTitleView.nib`, `StartPageEmptyFolderItem.nib`,
+`StartPagePasswordBreachWarningCollectionViewItem.nib`) and Safari's localized strings for the
+profile's language (`de.lproj/Localizable.strings`), plus `PasswordManagerUI.framework`. The binaries
+carry `" SafariShared not loaded?"` as a diagnostic, so this is the normal path, not a fallback.
+
+**Private WebKit API.** `strings` over the main binary and `BBNativeNoiseSafari.framework` shows
+`_WKWebsiteDataStoreConfiguration`, `_WKProcessPoolConfiguration`, `setInjectedBundleURL:`,
+`setInjectedBundlePath:`, `injectedBundleInitializationUserData`, `_WKInspector`,
+`_WKIconLoadingDelegate`, `_WKResourceLoadInfo`, and a path to Safari's injected bundle
+(`Safari.framework/.../PlugIns/Safari.wkbundle`). None of these appear in `nm -mu`: they are loaded by
+name at runtime. **The injected bundle was not in use when measured** — `lsof` over the profile's
+`WebContent` processes shows no `.wkbundle` and nothing of BlackBird's mapped into them, so the web
+processes run stock WebKit.
+
+**Profile state in Safari's own file formats.** Under
+`~/Library/Application Support/BlackBird/SafariFullGraph/<profile UUID>/`: `Bookmarks.plist`,
+`History/History.db`, and a `PrivateSafariState/` directory holding `PerSitePreferences.db`,
+`TabSnapshots/Metadata.db`, `BlockedBannerHighlights.db`, `Embeddings.db`,
+`IgnoredSiriSuggestedSites.db`, `UserDefinedContentBlockers.db` — the databases Safari keeps in its
+container, written per profile by Safari's frameworks pointed at that directory. Favicon and link
+metadata caches (`Cache/favicons.db`, `Cache/LPLinkMetadata.db`) sit alongside.
+
+**Everything is configured by environment variable** on the child process (`ps -Eww`), which is also
+how the feature set reads:
+
+```
+BB_WK_DATASTORE_MODE=safari-profile-v2     BB_WK_DATASTORE_MODE_SOURCE=default
+BB_SAFARI_CHROME=1                         BB_FULL_SAFARI_APPGRAPH=1
+BB_FULLGRAPH_APPLE_HISTORY_VIEW=0           BB_FULLGRAPH_BLACKBIRD_HISTORY_WINDOW=1
+BB_FULLGRAPH_KEEP_APPLE_HISTORY_MENU=1      BB_FULLGRAPH_ALLOW_NATIVE_BOOKMARKS_VISUALS=1
+BB_FULLGRAPH_ALLOW_NATIVE_SIDEBAR_UPDATE=1  BB_FULLGRAPH_FAST_STARTUP=1
+BB_OVERRIDE_LANGUAGES=de-DE                 BB_OVERRIDE_TIMEZONE=Europe/Berlin
+BB_APP_LANGUAGE=1                           BB_UPDATE_USER_AGENT_AUTOMATICALLY=1
+BB_NATIVE_AUTOFILL_ENABLED=1                BB_SEARCH_ENGINE=google
+BB_ALLOW_QUIC=1                             BB_QUIC_FULL_TRANSPORT=0
+BB_STORE_BROWSER_CACHE=1                    BB_SHOW_IP_CHANGE_WARNING=0
+BB_RANDOMIZE_NEW_PROFILE_WINDOW_SIZE=1
+DYLD_INSERT_LIBRARIES=/Applications/BlackBird.app/Contents/Frameworks/SafariZoomFix.dylib
+```
+
+So: Safari's chrome with their own history window over it, per-profile language and time zone at the
+process level, a per-profile randomized window size, and a dylib of their own inserted into each
+profile process to patch Safari's zoom behaviour.
+
+**No special entitlements.** The signature carries only Developer ID keys, and notably **no
+`com.apple.security.app-sandbox`**:
+
+```
+com.apple.security.cs.disable-library-validation       com.apple.security.cs.allow-jit
+com.apple.security.cs.allow-dyld-environment-variables com.apple.security.cs.allow-unsigned-executable-memory
+com.apple.developer.authentication-services.autofill-credential-provider
+com.apple.developer.system-extension.install           com.apple.security.automation.apple-events
+com.apple.security.network.client / .server            com.apple.security.device.camera / .audio-input / .microphone
+com.apple.security.personal-information.location       keychain-access-groups: <team>.cc.blckbrd.BlackBirdMac,
+                                                                               <team>.cc.blckbrd.vault.autofill
+```
+
+Its provisioning profile ("BlackBird Host") adds the NetworkExtension provider types, including
+`packet-tunnel-provider-systemextension` — the same mechanism as this project's
+`PacketTunnelExtension`. Nothing in the list is Apple-granted private entitlement: the whole of the
+above follows from **not being sandboxed** plus `disable-library-validation` and
+`allow-dyld-environment-variables`, which is what lets an unsandboxed process `dlopen` the private
+Safari frameworks and insert its own dylib. This project signs its default build **with** App Sandbox
+(`Resources/PrivacyBrowser.entitlements`) and treats `PrivacyBrowser-NoSandbox.entitlements` as a
+debugging build, so this route is closed in the shipping configuration as it stands.
+
+**What is worth taking, in order.** (1) One process per profile, for native per-profile
+`AppleLanguages`/`AppleLocale`/`TZ` — the only item here that removes a limitation this project has
+documented rather than adding surface. Keys must not travel in `argv`, where BlackBird puts its
+licence blob. (2) `_WKWebsiteDataStoreConfiguration` for explicit per-profile WebKit directories,
+alongside the public `WKWebsiteDataStore(forIdentifier:)` already used, in the style of
+`WebKitPreferences.setBool`. (3) Per-profile window-size randomization. Hosting Safari's private UI
+frameworks is a separate decision with a different risk profile: it requires giving up the App
+Sandbox, and Apple can change or remove those frameworks in any update.
+
+### 9.1 Hosting Safari's own window: measured, and what each blocker was
+
+Safari's window class does run in a foreign process. On macOS 27.0.1 (Safari 26, framework build
+22625), from an ad-hoc signed probe (`scripts/safari_chrome_probe.swift`), `BrowserWindowController`
+was created, its window nib read, and the window shown on screen. Getting there meant four
+blockers, each named by its own crash:
+
+1. **A missing singleton.** `-windowDidLoad` sends new-window telemetry, which reads
+   `WBSFeatureAvailability` and asserts: *"sharedSearchEngineObserver" in
+   `+[WBSSearchEnginePreferenceObserver sharedObserver]`*. The frame under it in the trace names the
+   cure, `+setUpSharedObserverWithSearchProviderContext:`, and it accepts `nil` — no context object
+   is needed. In Safari this call comes from its app delegate.
+2. **Safari's preferences are unreadable.** Its frameworks read the `com.apple.Safari` domain,
+   which in a foreign process resolves to Safari's own container and is refused: *"accessing these
+   preferences requires user-preference-read or file-read-data sandbox access"*. Everything they
+   would have read comes back `nil`, and the first `-addAttribute:value:range:` with a `nil`
+   `NSColor` (the address bar's "Not Secure" badge) is turned into a crash by
+   `+[NSApplication _crashOnException:]`. `CFFIXED_USER_HOME` moves the domain into a directory of
+   ours (§9, and `--paths` confirms `NSHomeDirectory()`, Application Support and Caches all follow),
+   which is both the fix and the per-profile layout; a seeded `com.apple.Safari.plist` there is what
+   supplies the values rather than skipping them.
+3. **The main bundle is not Safari's.** Its chrome asks the main bundle for icons by name — CoreUI
+   says so: *"unable to find a bundle 'NSBundle </tmp>' with identifier '(null)'"* — so icons are
+   `nil` and an array built from one throws, in
+   `-[UnifiedField _assistantButtonIconForContentOption:withSparkle:]`. Falling back to the private
+   frameworks' own bundles in `+[NSImage imageNamed:]` was not enough for that button, which fetches
+   its icon another way; stubbing that one method cleared the address bar entirely.
+4. **Swift preconditions in features that need Safari's services.** Past layout,
+   `-windowDidLoad` calls `autoTabClusteringEnabledDidChange` →
+   `_setUpClusterManagerIfNeeded`, whose Swift code traps (SIGTRAP, `__swift__destructor` in the
+   frames). Stubbing that method got the window on screen.
+
+5. **A delayed trap, after the window is already up.** About five seconds after the page loads, a
+   timer in `-[BrowserNavigationDelegate _cachePageTextSoon]` donates the page's text to Siri
+   intelligence, which asks `+[WBSHistoryController existingSharedHistoryController]` and traps
+   (`EXC_BREAKPOINT`, `SIGKILL`, `termination namespace FOUNDATION`), because this process never
+   built Safari's history controller. Nothing visible uses it, and stubbing the donation keeps the
+   window alive. Worth noting as a kind: a hosted chrome can be killed by something that runs on a
+   timer, so "the window opened" is not the end of the measurement.
+
+6. **A new tab.** The start page's onboarding section
+   (`-[StartPageOnboardingSectionProvider reloadData]`) traps the same way the tab clusters do, and
+   takes every new tab with it. Stubbed.
+
+**`CFFIXED_USER_HOME` is the one that matters.** Blockers 2 and the rest of the nil values are the
+same fact seen from different places: without a home of its own the process is refused Safari's
+preferences and databases, so colours, text metrics and the autofill store all come back empty — the
+address bar draws its text on top of itself and the search field does nothing. Give the process a
+directory of its own at launch (it is read once, at process start, so this means `execv`-ing into a
+process that has it, which is what `SafariChrome.relaunchWithProfileHomeIfNeeded` does) and those go
+away on their own; the nil-tolerance patch that stood in for them was then removed, and nothing
+needed it. Hosting Safari's chrome therefore *requires* the per-profile process, rather than merely
+benefiting from it (§9 item 1).
+
+**The second wave: the menu bar.** Nothing on the keyboard worked at first — no ⌘T, no ⌘N, no ⌘L —
+and not because those commands failed: on macOS the shortcuts live in the menu bar, and this process
+had none. Safari's is in `MainMenu.nib` inside Safari.app; loaded with `NSApplication.shared` as the
+nib's owner (which works precisely because `NSApp` is Safari's own `BrowserApplication`), it comes up
+with eight menus, and its items reach Safari's window controller through the responder chain by
+themselves. Installing it also starts the rest of Safari's application, which brought four more
+blockers, each closed in one line:
+
+7. **WebKit's own "Safari only" check.** Safari's web-extension configuration calls
+   `-[WKWebViewConfiguration _setShouldRelaxThirdPartyCookieBlocking:]`, and WebKit refuses anyone
+   else: *"may only be used by Safari"* (`NSObjectNotAvailableException`). Not the sandbox and not
+   the signature — a check inside WebKit on who the caller is. Made to do nothing, which is also
+   what we want: that switch relaxes third-party cookie blocking.
+8. **Safari's web extensions.** Their SQLite store migrator walks a directory derived from Safari's
+   container. Stubbed, and not only to stop the throw: extensions installed in Safari have no place
+   in a profile here, and one set of them would be shared by every profile.
+9. **Directories Safari has no path for.** Several of its background services list directories that
+   do not exist in this process, and `-[NSFileManager enumeratorAtURL:…]` and
+   `-contentsOfDirectoryAtURL:…` throw on a nil URL. Both answer "nothing" now. The lesson that
+   saved the round: patch the method that *throws*, not the one that is at fault — the latter may
+   live in a framework that is not loaded yet, and a class that is not registered cannot be patched.
+10. **A keyless dictionary write.** Something scheduled on the main queue stores under a nil key.
+    The block tail-calls `-setObject:forKeyedSubscript:`, so it never appears in a backtrace and no
+    debugger can name it; the write is dropped and logged.
+
+Two things about method: every stack logged through `os_log` was cut off after about seven frames,
+which hid the callers that mattered for three rounds — log one frame per line. And an exception has
+no `callStackSymbols` before it is raised, so the preprocessor reads the live stack with
+`backtrace()` instead.
+
+What the hosted chrome does once all of that is in place, measured by hand: the window with Safari's
+toolbar, tab bar and address bar; our `WKWebView` rendering in its tab; the sidebar, built from
+`LibraryViewController.nib` out of Safari.app; the start page; new tabs and new windows; tab groups;
+the keyboard; and the address bar searching and completing with Google as the engine — the providers
+come up loaded (six of them, with both a search and a suggestions template), once
+`+[WBSSearchProvidersController shared]` is made to hand out the instance that was loaded rather than
+the bare one the base class creates.
+
+The working invocation of the probe, as a record of what each piece answers:
+```
+CFFIXED_USER_HOME=<profile dir> ./sprobe \
+  --prepare \                      # +[WBSSearchEnginePreferenceObserver setUpSharedObserver…:nil]
+  --tolerate-nil-attributes \      # skip nil values in -addAttribute:value:range:
+  --bridge-images \                # +[NSImage imageNamed:] falls back to the Safari bundles
+  --stub image/UnifiedField/_assistantButtonIconForContentOption:withSparkle: \
+  --stub nil/BrowserWindowController/_setUpClusterManagerIfNeeded \
+  --try-init BrowserWindowController --show-window
+```
+
+Two things this does not tell us. The window was reached with telemetry and two features stubbed and
+`nil` attribute values dropped, so what it draws is Safari's chrome minus whatever those supplied;
+and the list is specific to this Safari build — each of the four is a private method or an
+undocumented singleton, and any macOS update can add to it. That is the cost the competitor pays
+with its own patch dylib and its `BB_FULLGRAPH_*` switches, and it is the reason items 1-3 of §9's
+"what is worth taking" do not depend on any of this.
+
+### 9.2 A profile in Safari's chrome: how the two halves join
+
+Hosting Safari's window is one thing; making the pages in it belong to a profile is another, and the
+way that looked obvious is the wrong one. Putting a `WKWebView` of ours into Safari's tab works
+visually and achieves nothing: Safari's address bar, bookmarks, links and menu all navigate through
+`-[BrowserViewController _loadURLRequest:tabLabel:lifetime:…]`, which drives Safari's *own* web
+view, with Safari's data store and no proxy of ours, while our view sits underneath (measured: the
+window looked blank, and the page that did load came from Safari's engine). Taking that method over
+is worse: it also writes the pending navigation, the tab's label and the back-forward bookkeeping,
+so skipping it crashes the chrome on the next thing that reads any of them — on typing an address
+and on every new tab.
+
+The seam is one factory. Every web view Safari's chrome creates for page content comes from
+`+[WebKitPreferencesManager contentWebViewConfigurationForBrowsingMode:profileIdentifier:…]` (with a
+`jitEnabled:` variant and a `readerWebViewConfigurationForBrowsingMode:…` sibling). Patched, it
+returns Safari's own configuration — its preferences, its process pool, its content controller —
+with the profile's `WKWebsiteDataStore` in it, which carries the profile's proxy because that is
+where this project sets proxies, plus the profile's scripts. Measured: three factories patched, and
+one line in the log per web view Safari builds, each naming the profile whose data it got; the
+chrome navigates, opens tabs, keeps its history and draws its start page as Safari does, and the
+pages load as the profile.
+
+One trap worth naming: those three factories do not share a signature — one takes a `BOOL` where the
+others take an object. Typing that argument as `AnyObject?` in the replacement had ARC retain the
+value `1`, and no profile would start at all. The arguments are passed through as opaque pointers and
+the return is `Unmanaged`; only the configuration that comes back is touched.
+
+**The factories are not enough (measured).** On the CI runner's macOS 26 the hosted chrome's web
+view reached `-[WKWebView initWithFrame:configuration:]` with a configuration *not* built by the
+patched factories: only the patch on the initializer gave it the profile's store. A patch on the
+factories alone is therefore a chrome that loads as this Mac — the most likely cause of the leak
+the owner saw. The whole set of measures that hold a profile's process to its proxy since then —
+every web view at its initializers, every other store closed, the process's own connections
+through the proxy, preferences pinned against Safari re-applying its own, Safari's and the system's
+services that would fetch from another process refused, Handoff off — is `ProfileNetworkGuard`,
+described in ISOLATION_AND_LIMITATIONS.md §4a together with the capture that checks it on every
+push. The process's network report counts the web views only the initializer caught
+(`webViewsCaughtByNet`), so the same measurement can be read on any Mac without taking the net away.
+
+AutoFill is installed into Safari's content controller with its handlers when the profile is
+applied to it (`BrowserSession.applyProfile`), and Safari's own state in the profile's home is
+sealed between runs like everything else (`SafariHomeVault`).
+
+**Which private pieces this needs.** `SafariChrome.expectedPieces` lists every class and method
+reached for by name. `PrivacyBrowser --check-safari-chrome` prints which this macOS has (CI runs it;
+it loads Safari's frameworks in a temporary home of its own, held to a closed proxy, as a profile's
+process does, and removes the home afterwards);
+a missing structural piece means the profile opens our own window, a missing network piece is a lock
+of the guard that is not there, and both are shown to the user; a stubbed method a Safari build
+does not have is only listed (on macOS 26, `+[WBSSearchProvidersController shared]` and
+`-[BrowserWindowController _setUpClusterManagerIfNeeded]` are not there — they are in the Safari of
+macOS 27.0.1, where they crashed a hosted chrome).
+
 ## Sources
 
 Primary: Apple developer documentation and DTS answers linked above; WebKit source

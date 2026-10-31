@@ -17,18 +17,22 @@ public struct WarmUpPlan: Codable, Equatable, Sendable {
     /// Before leaving a page, follow one plain link on it: on the same site, or, on the search
     /// results, to a result. Never a sign-out, purchase, deletion or download link.
     public var followLinks: Bool
+    /// Where this plan came from, so the screen opens where it was left. Absent in plans saved
+    /// before the screen had ready-made lists, and in those written by hand.
+    public var choice: WarmUpChoice?
 
     public static let dwellLimits: ClosedRange<TimeInterval> = 2...300
     public static let maximumPages = 50
 
     public init(addresses: String = "", searchQuery: String = "", minimumDwell: TimeInterval = 5, maximumDwell: TimeInterval = 15,
-                scroll: Bool = true, followLinks: Bool = false) {
+                scroll: Bool = true, followLinks: Bool = false, choice: WarmUpChoice? = nil) {
         self.addresses = addresses
         self.searchQuery = searchQuery
         self.minimumDwell = minimumDwell
         self.maximumDwell = maximumDwell
         self.scroll = scroll
         self.followLinks = followLinks
+        self.choice = choice
     }
 
     public struct Page: Equatable, Sendable {

@@ -30,6 +30,14 @@ jobs:
         with:
           bun-version: 1.2.23
       - run: TZ=America/New_York bun scripts/test-shims.mjs
+      # ru and en hold the same keys with the same format specifiers, every L("key") exists, and no
+      # text a user reads is written into the code (scripts/check_localization.py).
+      - name: Localization is complete in both languages
+        run: python3 scripts/check_localization.py
+      # Nothing of the user's (profile names, proxy hosts, addresses, paths, error texts) is
+      # written to the system log in clear (scripts/check_log_privacy.py).
+      - name: Log lines keep the user's data private
+        run: python3 scripts/check_log_privacy.py
 
   macos:
     name: macOS build, core tests, WebKit self-test
@@ -67,21 +75,55 @@ jobs:
           if-no-files-found: ignore
       - name: Self-test against real WebKit (sandboxed and unsandboxed)
         run: |
-          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 &
+          set -o pipefail
+          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
+            --tls-control 18086 --canary 18087 --silent 18088 &
           PROXY_PID=$!
-          sleep 1
+          # The proxy makes its TLS certificates before it listens.
+          for attempt in $(seq 1 40); do nc -z 127.0.0.1 18081 && break; sleep 0.5; done
           export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
           export PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
+          export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088
+          mkdir -p build/egress
           status=0
           for variant in sandboxed unsandboxed; do
             echo "::group::self-test ($variant)"
             # The surface dump goes to the repository folder, which only the unsandboxed build may write.
-            if [ "$variant" = unsandboxed ]; then export PB_SELFTEST_SURFACE_OUT="$PWD/build/surface-$variant"; fi
-            build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test || status=1
+            if [ "$variant" = unsandboxed ]; then
+              export PB_SELFTEST_SURFACE_OUT="$PWD/build/surface-$variant"
+              # Everything that leaves this machine while the unsandboxed self-test runs, with the
+              # process each packet belongs to (pktap): scripts/egress_check.py reads it below.
+              sudo tcpdump -i pktap,all -k NP -n -tt -l 'not host 127.0.0.1 and not host ::1' \
+                > build/egress/capture.txt 2> build/egress/tcpdump.err &
+              # And every file-system call of the app's processes and of WebKit's, for
+              # scripts/disk_check.py: nothing may be written where the real Safari keeps its data.
+              # One fs_usage for all three (the kernel trace is exclusive: a second one gets
+              # "ktrace_start: Resource busy" and sees nothing).
+              sudo fs_usage -w -f filesys PrivacyBrowser com.apple.WebKit cfprefsd > build/egress/fs.txt 2>&1 &
+              sleep 2
+            fi
+            build/$variant/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test | tee "build/egress/selftest-$variant.txt" || status=1
             echo "::endgroup::"
           done
+          sudo pkill -INT -f "tcpdump -i pktap" || true
+          sudo pkill -INT -f "fs_usage -w" || true
+          sleep 2
           kill $PROXY_PID || true
+          echo "::group::egress capture around the Safari-chrome check"
+          python3 scripts/egress_check.py --capture build/egress/capture.txt \
+            --selftest-log build/egress/selftest-unsandboxed.txt --tcpdump-errors build/egress/tcpdump.err || status=1
+          echo "::endgroup::"
+          echo "::group::files written while a profile ran in Safari's chrome"
+          python3 scripts/disk_check.py --trace build/egress/fs.txt \
+            --selftest-log build/egress/selftest-unsandboxed.txt || status=1
+          echo "::endgroup::"
           exit $status
+      - name: Safari's private classes and methods the hosted chrome relies on
+        # SafariChrome.expectedPieces: a macOS whose Safari renamed or removed one fails here, by name,
+        # instead of a profile's window quietly degrading on a user's Mac. After the self-test, so
+        # that a missing piece never hides what the self-test would have measured.
+        if: always()
+        run: build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --check-safari-chrome
       - name: Compare the fingerprint surface with this Mac's real Safari (safaridriver)
         run: |
           sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
@@ -114,6 +156,7 @@ jobs:
             build/safari-surface.json
             build/live
             build/leaks
+            build/egress
           if-no-files-found: ignore
       - name: App Sandbox container migration (unsandboxed data → sandboxed first launch)
         run: |

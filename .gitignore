@@ -6,3 +6,6 @@ DerivedData/
 .DS_Store
 Package.resolved
 __pycache__/
+
+# Working copies of background agents (Claude Code worktrees)
+.claude/worktrees/

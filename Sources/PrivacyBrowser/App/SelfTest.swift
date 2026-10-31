@@ -31,10 +31,14 @@ final class SelfTest {
 
     static func start() {
         setvbuf(stdout, nil, _IOLBF, 0)
+        // Every check but the Safari-chrome one drives sessions of this process; that one asks for a
+        // process of its own explicitly.
+        setenv("PB_PROFILE_PROCESS", "0", 1)
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
-            print("SELFTEST TIMEOUT after 300 s")
+        // A hung check must not hold CI; the whole run takes about five minutes on the runner.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 600) {
+            print("SELFTEST TIMEOUT after 600 s")
             exit(3)
         }
         Task { @MainActor in
@@ -117,25 +121,39 @@ final class SelfTest {
 
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
+        // scripts/disk_check.py: what is written in here is the self-test's own.
+        info("vault \(root.path)")
         do {
             let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
             try await firstWebKitUse(repository) // must run before anything else touches WebKit
+            // A profile with a proxy does not start without the proxied profile's rule list (ContentRules).
+            await ContentRules.prepare()
+            info("WebKit \(WebKitBuild.version)")
+            debugSwitchesStayDebugSwitches()
             try await storageIsolationAndShims(repository)
             try await deviceGenerations(repository)
             try await fingerprintSurface(repository)
             try await recoverySealing(repository)
             try await deleteProfiles(repository)
             try await proxies(repository)
+            try await certificatesWithoutFetching(repository)
+            try await handOffsInOurWindows(repository)
+            try await workersInOurWindows(repository)
             try await proxyLocationAtLaunch(repository)
             try await socksProfilesSideBySide(repository)
             try await proxyLookupAndExitIP(repository)
+            try await proxyChecker(repository)
             try await tabsAndLibrary(repository)
             try await windowLifecycle(repository)
             try await dialogTeardown(repository)
             try await passwordAutoFill(repository)
             try await cookieImport(repository)
+            try await profileTransfer(repository)
+            try await automationAPI(repository)
             try await profileSync(repository)
             try await warmUp(repository)
+            try await warmUpQueue(repository)
+            try await safariChromeThroughTheProxy(repository)
             try await lockDuringLaunch(repository)
             try await quitFromFocusedPage(repository)
             try await forcedSealAtQuit(repository)
@@ -391,10 +409,11 @@ final class SelfTest {
         check("proxy: a bracketed IPv6 proxy address is split into host and port",
               (try? ProxyHostField.parse("[::1]:1080")) == ProxyHostField(host: "::1", port: 1080))
 
-        // Every proxied session carries the ping-load blocker (dns-prefetch would resolve outside
+        // Every proxied session carries the proxied profile's rule list (dns-prefetch would resolve outside
         // the proxy; see ContentRules).
         await ContentRules.prepare()
-        check("proxy: the ping-load blocker compiled", ContentRules.dnsPrefetchBlocker != nil)
+        check("proxy: the rule list of profiles with a proxy compiled (pings, dns-prefetch, this Mac)", ContentRules.proxiedProfileRules != nil,
+              ContentRules.compileErrors.joined(separator: " | "))
 
         let environment = ProcessInfo.processInfo.environment
         guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init),
@@ -441,7 +460,7 @@ final class SelfTest {
                                                     url: URL(string: "http://example.com/")!)
         check("proxy: fail-closed when the proxy host does not resolve", unresolved == nil, "page loaded: \(unresolved ?? "")")
 
-        // What WebKit would send outside the proxy is blocked by the ping-load blocker: an
+        // What WebKit would send outside the proxy is blocked by the proxied profile's rule list: an
         // <a ping> (the same load type as a dns-prefetch) never reaches the proxy, a fetch does.
         let served = try await servedPathsAfterPing(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort))
         check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
@@ -537,6 +556,650 @@ final class SelfTest {
             return nil
         }
         return try await js(webView, script) as? String
+    }
+
+
+    // MARK: Certificates, checked without this Mac fetching for them
+
+    /// The certificate of a site whose server sent its chain incomplete is completed by the
+    /// system's trust service, which downloads the missing certificate from the address the
+    /// certificate names — as this Mac, outside every proxy (`ServerTrust`). The self-test proxy
+    /// answers every TLS handshake in its tunnels with such a certificate, naming
+    /// `pbaiacanary.leak.example.com`: a DNS query for that name anywhere in the capture is a
+    /// fetch made for a profile with a proxy (scripts/egress_check.py). Its control is the same
+    /// kind of certificate, naming `pbaiacontrol`, loaded in a profile without a proxy, where the
+    /// system's default handling does fetch: the capture has to see that one.
+    private func certificatesWithoutFetching(_ repository: ProfileRepository) async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("certificate checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        info("egress-token pbaiacanary")
+        info("egress-token pbocspcanary")
+        func load(_ url: URL, in configuration: ProfileConfiguration) async throws {
+            let profile = try repository.create(name: "Certificates", configuration: configuration)
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            defer { session.shutDown() }
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            defer { tab.tearDown() }
+            tab.webView.load(URLRequest(url: url))
+            _ = await waitUntil(timeout: 20) { !tab.isLoading }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
+        if let controlPort = environment["PB_SELFTEST_TLS_CONTROL_PORT"].flatMap(Int.init) {
+            try await load(URL(string: "https://localhost:\(controlPort)/pb-aia-control")!, in: ProfileConfiguration(ephemeral: true))
+            info("egress-control pbaiacontrol")
+        }
+
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let before = ServerTrust.tally.counts
+        try await load(URL(string: "https://aia-\(run).leak.example.com/pb-leak/aia?run=\(run)")!,
+                       in: ProfileConfiguration(proxy: proxy, ephemeral: true))
+        let after = ServerTrust.tally.counts
+        let log = try await loadThroughProxy(repository, proxy, url: URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!) ?? ""
+        guard log.contains("(tls handshake)") else {
+            check("certificates: the self-test proxy answers HTTPS with its certificate", false,
+                  "no TLS handshake in its log (no openssl on this Mac?): \(log.prefix(300))")
+            return
+        }
+        check("certificates: with a proxy, a certificate whose chain needs a fetch is checked without one, and refused",
+              after.refused > before.refused, "evaluations \(before) → \(after)")
+        check("certificates: the browser refused it at the handshake, through the proxy",
+              log.contains("tls refused by the client"), String(log.prefix(400)))
+    }
+
+    // MARK: Nothing of a page handed outside the profile
+
+    /// A profile's tab in a window of ours: no link preview (Quick Look fetches the link outside
+    /// the profile, and a click opens it in the default browser), no Services for the selection,
+    /// and a context menu without the items that send the page's content elsewhere (`HandOffs`).
+    private func handOffsInOurWindows(_ repository: ProfileRepository) async throws {
+        HandOffs.closeForWebViews()
+        // (And the plaintext of profiles running in this process is out of backups.)
+        let excluded = WebDataStoreVault.layout.searchRoots.allSatisfy {
+            (try? $0.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup == true
+        }
+        let backupDetail = WebDataStoreVault.layout.searchRoots.map(\.path).joined(separator: ", ")
+            + " — ran: \(WebDataStoreVault.rootsExclusionRan), failures: \(WebDataStoreVault.exclusionFailures)"
+        if AppEnvironment.isSandboxed && !excluded {
+            // Measured (CI runs 383–384): in the App Sandbox the mark is set without an error and
+            // does not stay on the container's folders. A limitation of the sandboxed build
+            // (docs/ISOLATION_AND_LIMITATIONS.md §3), reported here with what writing it directly did.
+            info("backups: in the sandboxed build WebKit's directories of this app cannot be excluded from Time Machine: \(backupDetail)")
+        } else {
+            check("backups: WebKit's directories of this app are excluded from Time Machine", excluded, backupDetail)
+        }
+        let profile = try repository.create(name: "Hand-offs", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+        defer { tab.tearDown() }
+        tab.webView.allowsLinkPreview = true
+        check("hand-offs: a profile's web view shows no link preview, and cannot be given one", !tab.webView.allowsLinkPreview)
+        check("hand-offs: a profile's page offers its selection to no Service",
+              tab.webView.validRequestor(forSendType: .string, returnType: nil) == nil)
+        let menu = NSMenu()
+        let kept = ["WKMenuItemIdentifierCopy", "WKMenuItemIdentifierOpenLinkInNewWindow"]
+        for identifier in kept + HandOffs.refusedMenuItems.sorted() {
+            let item = NSMenuItem(title: identifier, action: nil, keyEquivalent: "") // l10n: not text
+            item.identifier = NSUserInterfaceItemIdentifier(identifier)
+            menu.addItem(item)
+            menu.addItem(.separator())
+        }
+        var stripped: NSMenu?
+        tab.webView(tab.webView, contextMenuFromProposedMenu: menu, forElement: nil, userInfo: nil) { stripped = $0 }
+        check("hand-offs: the context menu keeps Copy and the link items, and loses Search with Google, Look Up, Translate, Share, Quick Note and Writing Tools, and Services",
+              stripped?.items.compactMap(\.identifier?.rawValue) == kept && stripped?.allowsContextMenuPlugIns == false,
+              "\(stripped?.items.map(\.title) ?? [])")
+    }
+
+    // MARK: Workers of a profile with a proxy, in this process
+
+    /// Shared and service workers take their preferences from the process, not from the page that
+    /// starts them: WebKit copies the first web view's (`ProfileNetworkGuard.ensureWorkerTemplate`).
+    /// The manager's process makes no template (it kept stopped profiles' sessions alive), so here
+    /// the workers of a profile with a proxy are measured in a window of ours, after profiles
+    /// without one have had theirs: on a page of this Mac (a secure context, where WebTransport
+    /// exists at all), in the page, a dedicated, a shared and a service worker.
+    private func workersInOurWindows(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("worker checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        // `connect`: whether the page and its service worker, where WebTransport exists, try a
+        // connection to a documentation address — which the capture counts anywhere in the run.
+        // The control without a proxy only says what exists (it would go straight out, as it
+        // should); the profile with a proxy tries, so that one that could would be seen.
+        func reports(_ configuration: ProfileConfiguration, connect: Bool) async throws -> (page: [String: Any], serviceWorker: [String: Any]) {
+            let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+            let profile = try repository.create(name: "Workers \(run)", configuration: configuration)
+            defer { try? repository.delete(profile.id) }
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            defer { session.shutDown() }
+            let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
+            try? await PageLoader.load(webView, url: URL(string: "http://127.0.0.1:\(httpPort)/pb-leak/secure?run=\(run)&connect=\(connect ? 1 : 0)")!)
+            let logURL = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            var page: [String: Any] = [:], serviceWorker: [String: Any] = [:]
+            for _ in 0..<12 {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard let text = try await loadThroughProxy(repository, proxy, url: logURL),
+                      let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { continue }
+                let found = object["reports"] as? [[String: Any]] ?? []
+                page = found.first { $0["secure"] != nil } ?? page
+                serviceWorker = found.first { $0["sw"] as? Bool == true && $0["secure"] == nil } ?? serviceWorker
+                if !page.isEmpty && !serviceWorker.isEmpty { break }
+            }
+            return (page, serviceWorker)
+        }
+        let open = try await reports(ProfileConfiguration(ephemeral: true), connect: false)
+        info("workers: a profile without a proxy has WebTransport in its page \(open.page["webTransport"] ?? "nil"), shared worker \(open.page["shared"] ?? "nil"), service worker \(open.serviceWorker["webTransport"] ?? "nil")")
+        let proxied = try await reports(ProfileConfiguration(proxy: proxy, ephemeral: true), connect: true)
+        check("workers: a profile with a proxy, after profiles without one, has no WebTransport in its page, a dedicated, a shared or a service worker (each answered)",
+              proxied.page["secure"] as? Bool == true && proxied.page["webTransport"] as? String == "undefined"
+                && proxied.page["worker"] as? String == "undefined" && proxied.page["shared"] as? String == "undefined"
+                && proxied.serviceWorker["webTransport"] as? String == "undefined",
+              "page \(proxied.page), service worker \(proxied.serviceWorker.isEmpty ? "no report" : "\(proxied.serviceWorker)")")
+    }
+
+    // MARK: The local automation API
+
+    /// A script on this Mac drives a profile through the API (`AutomationServer`) as the app's own
+    /// buttons do — list, start out of sight, cookies in and out, stop — and nothing else gets in:
+    /// no token, a wrong one, a web page's request, a name pointed at 127.0.0.1. What it answers
+    /// never holds a proxy's credentials. Requests go over a plain socket, so that their headers
+    /// are exactly the ones written here.
+    private func automationAPI(_ repository: ProfileRepository) async throws {
+        let manager = ProfileManager(repository: repository)
+        manager.onError = { _ in }
+        let token = AutomationSettings.newToken()
+        let handler = AutomationHandler(manager: manager, repository: repository)
+        let server = AutomationServer(settings: AutomationSettings(isEnabled: true, port: 0, token: token), handler: handler)
+        server.start()
+        defer { server.stop() }
+        guard AutomationServer.isAvailable else {
+            check("automation: the sandboxed build does not listen, and says why",
+                  server.state == .failed(L("automation.error.sandboxed")), "\(server.state)")
+            return
+        }
+        _ = await waitUntil(timeout: 10) { if case .listening = server.state { return true } else { return false } }
+        guard case .listening(let port) = server.state else {
+            check("automation: the API listens on the loopback address", false, "\(server.state)")
+            return
+        }
+        let run = String(UUID().uuidString.prefix(8)).lowercased()
+        let secret = "api-secret-\(run)"
+        let profile = try repository.create(name: "API \(run)", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9, username: "api-user-\(run)", password: secret),
+            ephemeral: true))
+        defer { try? repository.delete(profile.id) }
+
+        func call(_ method: String, _ path: String, token given: String? = nil, host: String? = nil,
+                  extra: [String: String] = [:], body: String = "") async -> (status: Int, body: String) {
+            var head = "\(method) \(path) HTTP/1.1\r\nHost: \(host ?? "127.0.0.1:\(port)")\r\n"
+            head += "Authorization: Bearer \(given ?? token)\r\n"
+            for (name, value) in extra { head += "\(name): \(value)\r\n" }
+            head += "Content-Length: \(body.utf8.count)\r\n\r\n"
+            let request = Data((head + body).utf8)
+            let answer = await Task.detached { Self.rawHTTP(port: port, request) }.value
+            guard let answer, let text = String(data: answer, encoding: .utf8),
+                  let statusText = text.split(separator: " ", maxSplits: 2).dropFirst().first, let status = Int(statusText) else {
+                return (0, "")
+            }
+            return (status, text.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n"))
+        }
+        let base = "/v1/profiles/\(profile.id.uuidString)"
+        check("automation: a request without the token is refused", await call("GET", "/v1/profiles", token: "").status == 401)
+        check("automation: a request with a wrong token is refused", await call("GET", "/v1/profiles", token: token + "x").status == 401)
+        check("automation: a web page's request is refused, with the token too",
+              await call("GET", "/v1/profiles", extra: ["Origin": "https://attacker.example"]).status == 403)
+        check("automation: a name pointed at 127.0.0.1 is refused (DNS rebinding)",
+              await call("GET", "/v1/profiles", host: "attacker.example:\(port)").status == 403)
+
+        let list = await call("GET", "/v1/profiles")
+        check("automation: the profiles are listed, with their proxy but not its credentials",
+              list.status == 200 && list.body.contains(profile.id.uuidString) && list.body.contains("http://127.0.0.1:9")
+                && !list.body.contains(secret) && !list.body.contains("api-user-\(run)"),
+              "\(list.status) \(list.body.prefix(300))")
+        check("automation: an unknown profile is not found", await call("GET", "/v1/profiles/nobody-\(run)").status == 404)
+
+        let started = await call("POST", base + "/start", body: "{\"window\": false}")
+        check("automation: a profile starts out of sight", started.status == 200 && manager.isRunning(profile.id),
+              "\(started.status) \(started.body.prefix(200))")
+        let expiry = Int(Date().addingTimeInterval(3600).timeIntervalSince1970)
+        let cookieFile = "api-\(run).test\tFALSE\t/\tFALSE\t\(expiry)\tpbapi\t\(run)\n"
+        let imported = await call("POST", base + "/cookies", body: cookieFile)
+        check("automation: cookies go into the running profile", imported.status == 200 && imported.body.contains("\"applied\" : 1"),
+              "\(imported.status) \(imported.body.prefix(200))")
+        let exported = await call("GET", base + "/cookies?format=netscape")
+        check("automation: the profile's cookies come back out", exported.status == 200 && exported.body.contains("\tpbapi\t\(run)"),
+              "\(exported.status) \(exported.body.prefix(300))")
+        check("automation: only an http or https address is opened",
+              await call("POST", base + "/open", body: "{\"url\": \"file:///etc/passwd\"}").status == 400)
+        let stopped = await call("POST", base + "/stop")
+        check("automation: the profile stops", stopped.status == 200 && !manager.isRunning(profile.id), "\(stopped.status)")
+
+        server.stop()
+        let afterStop = await Task.detached { Self.rawHTTP(port: port, Data("GET / HTTP/1.1\r\n\r\n".utf8)) }.value
+        check("automation: nothing answers once the API is off", afterStop == nil || afterStop?.isEmpty == true)
+    }
+
+    /// One request on a plain socket to 127.0.0.1:`port`, and everything that comes back until the
+    /// other side closes; nil when no connection could be made.
+    nonisolated private static func rawHTTP(port: Int, _ request: Data) -> Data? {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return nil }
+        defer { close(descriptor) }
+        var timeout = timeval(tv_sec: 60, tv_usec: 0)
+        setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(port).bigEndian)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        guard connected == 0 else { return nil }
+        let sent = request.withUnsafeBytes { send(descriptor, $0.baseAddress, $0.count, 0) }
+        guard sent == request.count else { return nil }
+        var response = Data()
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let count = recv(descriptor, &buffer, buffer.count, 0)
+            if count <= 0 { break }
+            response.append(contentsOf: buffer[0..<count])
+        }
+        return response
+    }
+
+    // MARK: Safari's chrome, in a profile's own process, through that profile's proxy
+
+    /// The check this product cannot do without: a profile whose window is Safari's own chrome
+    /// sends nothing outside the profile's proxy — not its pages, not anything in them, not
+    /// Safari's own clients in its process.
+    ///
+    /// Every other proxy check here runs in a window of ours, where the web view is built from our
+    /// own configuration. In Safari's chrome the web views are Safari's to build, with Safari's
+    /// preferences, next to Safari's own network clients; so this runs the real thing: a profile in
+    /// a process of its own (`ProfileProcess`), its window Safari's, its start page the leak page
+    /// of the self-test proxy (`/pb-leak`), on a host that only the proxy answers. That page makes
+    /// every kind of request a page can make, to addresses in the documentation ranges and to host
+    /// names carrying this run's id, and says what it could see. Here it is checked that each of
+    /// those requests reached the proxy, and what the page and the profile's process report; the
+    /// other half — that nothing went around the proxy — is a capture of the machine's traffic
+    /// around this check (scripts/egress_check.py, in CI), for which the lines `egress-*` below
+    /// say when this check ran and which run id to look for.
+    private func safariChromeThroughTheProxy(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("Safari-chrome proxy check skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        // A process per profile, and Safari's frameworks inside it, is a feature of the
+        // unsandboxed build (it needs library validation off); the sandboxed one cannot do it.
+        guard !AppEnvironment.isSandboxed else {
+            info("Safari-chrome proxy check skipped (the sandboxed build runs no process per profile)")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        // The port the leak page asks for on loopback, where the proxy's canary listener notes any
+        // connection that comes straight to it (1 when the proxy runs without one).
+        let canaryPort = ProcessInfo.processInfo.environment["PB_SELFTEST_CANARY_PORT"].flatMap(Int.init) ?? 1
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        // An ordinary name rather than ".invalid": the system resolver would really ask the network
+        // about it (and the capture would see the run id), where ".invalid" may be answered on the Mac.
+        let domain = "leak.example.com"
+        let startPath = "/pb-leak?run=\(run)"
+        // A time zone the runner is not in, to tell the profile's from the Mac's in workers.
+        let zone = "Pacific/Chatham"
+        let profile = try repository.create(name: "Safari chrome", configuration: ProfileConfiguration(
+            startURL: URL(string: "http://start-\(run).\(domain)\(startPath)"), proxy: proxy, timeZoneIdentifier: zone,
+            matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        var networkReport: ProfileNetworkReport?
+        manager.onNetworkReport = { _, report in networkReport = report }
+
+        info("egress-token \(run)")
+        info("egress-window begin \(Date().timeIntervalSince1970)")
+        // The per-profile process is off by default; this one check is what it is for.
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        // Variables of the manager's own that a profile's process must not inherit: one of the
+        // manager's, and one that would change what the process does (it would open no window).
+        setenv("PB_INHERIT_CANARY", run, 1)
+        setenv("PB_WARM_UP_ONLY", "1", 1)
+        let managerEnvironment = Set(ProcessInfo.processInfo.environment.keys)
+        defer {
+            unsetenv("PB_INHERIT_CANARY")
+            unsetenv("PB_WARM_UP_ONLY")
+        }
+        do {
+            try await manager.launch(profile.id)
+        } catch {
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            check("Safari chrome: the profile's own process started", false, String(describing: error))
+            return
+        }
+        setenv("PB_PROFILE_PROCESS", "0", 1)
+        unsetenv("PB_INHERIT_CANARY")
+        unsetenv("PB_WARM_UP_ONLY")
+        if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+        let started = await waitUntil(timeout: 90) { hostsChrome != nil }
+        check("Safari chrome: the profile's own process started and reported its window",
+              started, "no 'running' came back (the process may have died; see its own log)")
+        check("Safari chrome: the window is Safari's own chrome", hostsChrome == true,
+              "the profile opened our own window: this Mac would not host Safari's chrome")
+
+        // What the proxy answered for this run, and what the page reported, asked through the same
+        // proxy from a window of ours. Polled: the chrome's page loads are on their own schedule.
+        struct Entry { let via: String; let target: String; let path: String; let cookie: String; let userAgent: String; let language: String }
+        func leakLog() async -> (targets: [Entry], reports: [[String: Any]], canary: [String]) {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            let text = try? await loadThroughProxy(repository, proxy, url: url)
+            guard let data = text?.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], [], []) }
+            let targets = (object["targets"] as? [[String: Any]] ?? []).map {
+                Entry(via: $0["via"] as? String ?? "", target: ($0["target"] as? String ?? "").lowercased(),
+                      path: $0["path"] as? String ?? "", cookie: $0["cookie"] as? String ?? "",
+                      userAgent: $0["userAgent"] as? String ?? "", language: $0["language"] as? String ?? "")
+            }
+            let canary = (object["canary"] as? [[String: Any]] ?? []).map { "\($0["listener"] ?? "?") \($0["request"] ?? "")" }
+            return (targets, object["reports"] as? [[String: Any]] ?? [], canary)
+        }
+        // The leak page's own report, not its frame's or its secure half's.
+        func isPage(_ report: [String: Any]) -> Bool { report["frame"] == nil && report["secure"] == nil && report["sw"] == nil }
+        var log = (targets: [Entry](), reports: [[String: Any]](), canary: [String]())
+        for _ in 0..<25 {
+            log = await leakLog()
+            if log.reports.contains(where: isPage) && log.reports.contains(where: { $0["frame"] != nil }) { break }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+        // WebKit names an IPv6 address in its CONNECT line without brackets.
+        func reached(_ target: String, _ path: String) -> Bool {
+            let forms = [target.lowercased(), target.lowercased().replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")]
+            return log.targets.contains { forms.contains($0.target) && $0.path.hasPrefix(path) }
+        }
+        check("Safari chrome: a profile in its own process loads its pages through its own proxy",
+              reached("start-\(run).\(domain):80", startPath),
+              "the proxy answered: \(log.targets.map { "\($0.target)\($0.path.prefix(40))" }.joined(separator: " "))")
+        // The profile's User-Agent, not one of Safari's choosing (`ProfileNetworkGuard.pinUserAgent`).
+        let startAgent = log.targets.first { $0.path.hasPrefix(startPath) }?.userAgent ?? ""
+        let wantedAgent = ProfileConfiguration(proxy: proxy).userAgent(hostSafariVersion: HostSafari.version)
+        check("Safari chrome: the start page goes out with the profile's User-Agent",
+              startAgent == wantedAgent, "sent \(startAgent), wanted \(wantedAgent)")
+        check("Safari chrome: an iPhone or iPad profile gets our own window, not Safari's desktop chrome",
+              !SafariChromeHost.canHost(ProfileConfiguration(deviceGenerationID: "ios-26"))
+                && SafariChromeHost.canHost(ProfileConfiguration()))
+        let page = log.reports.first(where: isPage) ?? [:]
+        let frame = log.reports.first { $0["frame"] != nil } ?? [:]
+        check("Safari chrome: the leak page ran and reported", !page.isEmpty, "no report from the page")
+        info("Safari chrome: the leak page reported \(page)")
+        // WebRTC opens its sockets outside the data store's proxy: in a proxied profile without
+        // the tunnel it must not exist at all, in the page, in a frame of another site and in an
+        // about:blank frame (where a script-only removal is classically got round).
+        check("Safari chrome: WebRTC is off in Safari's web views (page, frame, about:blank frame)",
+              page["rtc"] as? String == "undefined" && frame["rtc"] as? String == "undefined"
+                && page["rtcBlankFrame"] as? String == "undefined",
+              "page \(page["rtc"] ?? "nil"), frame \(frame["rtc"] ?? "nil"), blank frame \(page["rtcBlankFrame"] ?? "nil")")
+        // WebTransport is QUIC, which an HTTP or SOCKS5 proxy cannot carry.
+        check("Safari chrome: WebTransport is off in a proxied profile",
+              page["webTransport"] as? String == "undefined" && frame["webTransport"] as? String == "undefined",
+              "page \(page["webTransport"] ?? "nil"), frame \(frame["webTransport"] ?? "nil")")
+        for (what, target, path) in [
+            ("a fetch to an IPv4 address", "192.0.2.10:8080", "/pb-leak/fetch4"),
+            ("a fetch to an IPv6 address", "[2001:db8::10]:8080", "/pb-leak/fetch6"),
+            ("a fetch to a host name", "fetch-\(run).\(domain):80", "/pb-leak/fetchname"),
+            ("a WebSocket", "192.0.2.11:8080", "/pb-leak/ws"),
+            ("a worker's fetch", "192.0.2.15:8080", "/pb-leak/worker"),
+            ("an image", "img-\(run).\(domain):80", "/pb-leak/img.png"),
+            ("a frame of another site", "frame-\(run).\(domain):80", "/pb-leak/frame"),
+            // The local network is not an exception to the proxy.
+            ("a fetch to a .local name", "lan-\(run).local:80", "/pb-leak/lan"),
+        ] {
+            check("Safari chrome: \(what) goes through the profile's proxy", reached(target, path),
+                  "not seen by the proxy: \(target)\(path)")
+        }
+        // This Mac itself: the system never sends loopback through a proxy (measured in run 382: the
+        // page's fetches reached the canary listener directly), so a proxied profile's pages are
+        // refused it — a fetch, a frame and a worker's fetch (`ProxiedContentRules`).
+        let refusedHere = ["loopback4", "loopbackName", "loopback6", "loopbackAny", "loopbackWorker"]
+        check("Safari chrome: a page cannot reach this Mac (127.0.0.1, localhost, ::1, 0.0.0.0, from the page and from a worker): each is refused",
+              refusedHere.allSatisfy { page[$0] as? String == "rejected" },
+              refusedHere.map { "\($0)=\(page[$0] ?? "nil")" }.joined(separator: " "))
+        // Measured through the proxy in run 383; kept that way.
+        check("Safari chrome: a fetch to a private-network address (10.255.255.1) goes through the profile's proxy",
+              reached("10.255.255.1:8080", "/pb-leak/lan10"), "not seen by the proxy (\(page["lan10"] ?? "nil"))")
+        // The proxied profile's rule list (dns-prefetch, <a ping>) reaches the web views Safari builds.
+        check("Safari chrome: <a ping> is blocked in Safari's web views (and dns-prefetch with it)",
+              !log.targets.contains { $0.path.hasPrefix("/pb-leak/ping") }, "the ping reached the proxy")
+        for (what, path) in [("the font", "/pb-leak/font.woff"), ("the video", "/pb-leak/media.mp4"), ("the beacon", "/pb-leak/beacon")] {
+            info("Safari chrome: \(what) \(log.targets.contains { $0.path.hasPrefix(path) } ? "reached" : "did not reach") the proxy")
+        }
+
+        // The profile's process, from inside: where its web views are, what WebRTC their engines
+        // have, and a request made by each of the process's own ways of making one — to a host
+        // that only the proxy answers.
+        // https: App Transport Security refuses plain http to the app's own URLSession. The test
+        // proxy cannot speak TLS, so each request fails after its CONNECT — and the CONNECT, at the
+        // proxy, is the proof of where it went.
+        let probePath = "/pb-leak/urlsession?run=\(run)"
+        _ = manager.checkNetwork(profile.id, probe: URL(string: "https://probe-\(run).\(domain)\(probePath)"))
+        _ = await waitUntil(timeout: 40) { networkReport != nil }
+        if let report = networkReport {
+            info("Safari chrome: the profile's process reports \(report)")
+            check("Safari chrome: every web view of the process is on the profile's store, with its proxy",
+                  report.webViews > 0 && report.webViewsOffProfile == 0, "\(report.webViewsOffProfile) of \(report.webViews) are not")
+            check("Safari chrome: no web view of the process has WebRTC in its engine",
+                  report.webViewsWithWebRTC == 0, "\(report.webViewsWithWebRTC) of \(report.webViews) have")
+            check("Safari chrome: WebKit's own default store is closed", report.defaultStoreClosed)
+            check("Safari chrome: the process's own connections carry the profile's proxy", report.processProxy)
+            check("Safari chrome: the process made its three probe requests", report.probes.count == 3, "\(report.probes)")
+            check("Safari chrome: this Safari has every class and method the chrome relies on",
+                  report.missing.isEmpty, report.missing.joined(separator: ", "))
+            check("Safari chrome: Safari's own services are set as the profile needs them",
+                  report.safariPreferences["UniversalSearchEnabled"] == "0"
+                    && report.safariPreferences["AutoFillPasswords"] == "0",
+                  "\(report.safariPreferences)")
+            info("Safari chrome: WebKit \(report.webKitVersion)")
+            // The preference decides dns-prefetch only before WebKit 7621; from then on the
+            // content rules do (checked above with <a ping>), so this is a check only there.
+            info("Safari chrome: web views whose dns-prefetch preference is on: \(report.webViewsWithDNSPrefetch) of \(report.webViews)")
+            check("Safari chrome: no web view of the process has a feature on that leaves the proxy (WebTransport, PCM, WebAuthn…)",
+                  report.webViewsWithFeatureOn.values.allSatisfy { $0 == 0 }, "\(report.webViewsWithFeatureOn)")
+            check("Safari chrome: nothing the profile has off can be turned on again by another setter",
+                  report.pinBypasses.isEmpty, report.pinBypasses.joined(separator: ", "))
+            check("Safari chrome: the profile's service workers have the profile's preferences",
+                  report.workerPreferences != false, "this WebKit has no service-worker preferences of a store's own")
+            check("Safari chrome: nothing of a page is handed outside the profile (no link preview, no address opened in another app, no sharing service, no password kept in the keychain, copies local)",
+                  report.webViewsWithLinkPreview == 0 && !report.openedInAnotherApp && report.sharingServices == 0
+                    && !report.credentialsKept && (report.handOffsRefused["clipboard"] ?? 0) > 0,
+                  "link previews \(report.webViewsWithLinkPreview), opened \(report.openedInAnotherApp), sharing \(report.sharingServices), credentials kept \(report.credentialsKept), refused \(report.handOffsRefused)")
+            check("Safari chrome: the real Safari's places are closed to the profile's process",
+                  report.safariPlacesClosed, "no sandbox over ~/Library/Safari and the rest")
+            info("Safari chrome: \(report.safariPathsRedirected.count) path getters of Safari's frameworks answer with the profile's home: \(report.safariPathsRedirected.prefix(80).joined(separator: " "))")
+            check("Safari chrome: UDP is closed to the profile's process (QUIC cannot go around the proxy)",
+                  report.udpClosed && !report.udp.values.contains { $0 == "sent" || $0.hasPrefix("ready") },
+                  "closed=\(report.udpClosed) \(report.udp)")
+            let inherited = Set(report.environmentNames).intersection(managerEnvironment.subtracting(ProfileProcess.environmentNames))
+            check("Safari chrome: the profile's process has only its own environment, not the manager's",
+                  inherited.isEmpty && !report.environmentNames.contains { $0.hasPrefix("PB_SELFTEST_") },
+                  "inherited \(inherited.sorted()), names \(report.environmentNames)")
+            let home = report.places["CFFIXED_USER_HOME"] ?? ""
+            check("Safari chrome: HOME and TMPDIR of the profile's process are in the profile's home",
+                  !home.isEmpty && report.places["HOME"] == home && (report.places["TMPDIR"] ?? "").hasPrefix(home + "/"),
+                  "\(report.places)")
+            info("Safari chrome: Foundation's temporary directory in the profile's process is \(report.places["temporaryDirectory"] ?? "?")")
+            check("Safari chrome: certificates are checked without fetching, and the leak page's were refused",
+                  report.trustEvaluated > 0 && report.trustRefused > 0,
+                  "evaluated \(report.trustEvaluated), refused \(report.trustRefused)")
+        } else {
+            check("Safari chrome: the profile's process reported where its traffic goes", false, "no report in 40 s")
+        }
+
+        // Each of those requests reached the proxy as itself — one proxy, not the profile's proxy
+        // reached through the process's own (a request whose session names its proxy explicitly,
+        // as the proxy lookup's does, must not be sent through the process-wide one as well).
+        log = await leakLog()
+        let probes = log.targets.filter { $0.target.hasPrefix("probe-") || $0.path.contains("probe-") }
+        check("Safari chrome: each of the process's own requests (shared, ephemeral and explicit URLSession) went to the proxy itself, not through another proxy",
+              probes.count >= 3 && probes.allSatisfy { $0.target == "probe-\(run).\(domain):443" },
+              probes.map { "\($0.target) \($0.path.prefix(40))" }.joined(separator: " | "))
+
+        // Cookies imported while the profile runs in its own process go into its store at once,
+        // and its next request carries them (the second window's start page, below).
+        let imported = ImportedCookie(name: "pbimported", value: run, domain: "start-\(run).\(domain)", hostOnly: true)
+        let importOutcome = try? await manager.importCookies([imported], into: profile.id)
+        check("Safari chrome: cookies imported into the running profile go into its own process's store",
+              importOutcome == .applied(stored: 1, refused: []), String(describing: importOutcome))
+        let exportedCookies = (try? await manager.exportCookies(of: profile.id)) ?? []
+        check("Safari chrome: the profile's own process exports its cookies, the imported one with them",
+              exportedCookies.contains { $0.name == "pbimported" && $0.value == run }, exportedCookies.map(\.name).joined(separator: " "))
+
+        // Another window, as ⌘N opens one: Safari builds a new web view for it, and its start page
+        // goes through the proxy as well.
+        let before = log.targets.filter { $0.path.hasPrefix(startPath) }.count
+        manager.openNewWindow(profile.id)
+        var after = before
+        for _ in 0..<10 {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            log = await leakLog()
+            after = log.targets.filter { $0.path.hasPrefix(startPath) }.count
+            if after > before { break }
+        }
+        check("Safari chrome: a second window of the profile loads through its proxy", after > before,
+              "start page requests: \(before) before, \(after) after")
+        check("Safari chrome: the second window's request carries the cookie imported meanwhile",
+              log.targets.contains { $0.path.hasPrefix(startPath) && $0.cookie.contains("pbimported=\(run)") },
+              log.targets.filter { $0.path.hasPrefix(startPath) }.map(\.cookie).joined(separator: " | "))
+
+        // The secure-context half of the leak page, on loopback (a secure context): WebTransport
+        // and WebRTC exist only in secure contexts, so only there does their absence — in the
+        // page, a dedicated, a shared and a service worker — mean something.
+        let securePath = "/pb-leak/secure?run=\(run)"
+        manager.openWindow(profile.id, url: URL(string: "http://127.0.0.1:\(httpPort)\(securePath)")!)
+        var secure: [String: Any] = [:]
+        var worker: [String: Any] = [:]
+        for _ in 0..<15 {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            log = await leakLog()
+            secure = log.reports.first { $0["secure"] != nil } ?? [:]
+            // The service worker's own report (`"sw": true`), not the page's (`"sw": "registered"`).
+            worker = log.reports.first { $0["sw"] as? Bool == true && $0["secure"] == nil } ?? [:]
+            if !secure.isEmpty && !worker.isEmpty { break }
+        }
+        // A page opened on this Mac is loaded from this Mac (the system never proxies loopback); it
+        // is the user's own machine, and its own loads stay there (`ProxiedContentRules`).
+        info("Safari chrome: the page on this Mac was loaded \(log.targets.filter { $0.path.hasPrefix(securePath) }.map { "\($0.via) \($0.target)" }.joined(separator: " | "))")
+        info("Safari chrome: the secure page reported \(secure), its service worker \(worker)")
+        if secure["secure"] as? Bool == true {
+            // Each worker answered, and without it: a worker that never answered proves nothing.
+            check("Safari chrome: WebTransport and WebRTC are absent in a secure context (page, worker, shared worker)",
+                  secure["webTransport"] as? String == "undefined" && secure["rtc"] as? String == "undefined"
+                    && secure["worker"] as? String == "undefined" && secure["shared"] as? String == "undefined",
+                  "\(secure)")
+            check("Safari chrome: WebTransport is absent in a service worker (which reported)",
+                  worker["webTransport"] as? String == "undefined", worker.isEmpty ? "no report from the service worker" : "\(worker)")
+            // The profile's time zone is the engine's own in the profile's process, workers
+            // included: a worker no script of ours reaches says what WebKit's process was given.
+            check("Safari chrome: the profile's time zone in the page, a dedicated worker and a service worker",
+                  secure["tz"] as? String == zone && secure["workerTZ"] as? String == zone
+                    && worker["tz"] as? String == zone,
+                  "page \(secure["tz"] ?? "nil"), worker \(secure["workerTZ"] ?? "nil"), service worker \(worker["tz"] ?? "nil")")
+        } else {
+            check("Safari chrome: the secure half of the leak page ran in a secure context", false, "\(secure)")
+        }
+
+        // Long enough for what Safari's chrome does on a timer (the page-text donation runs about
+        // five seconds after a load) to happen while the capture is still looking.
+        try? await Task.sleep(nanoseconds: 8_000_000_000)
+        // What Safari's frameworks keep in the profile's home (its history, bookmarks, snapshots…):
+        // listed, for the record of where a hosted chrome puts its own state.
+        let home = repository.directory(for: profile.id).appendingPathComponent("home.noindex")
+        // Plaintext while the profile runs: out of Spotlight (the name) and out of Time Machine.
+        check("Safari chrome: the profile's home is kept out of backups and Spotlight while it runs",
+              (try? home.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup == true,
+              home.path)
+        if let files = FileManager.default.enumerator(at: home, includingPropertiesForKeys: [.fileSizeKey]) {
+            var listed: [String] = []
+            for case let file as URL in files where listed.count < 80 {
+                let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                if size > 0 { listed.append("\(file.path.replacingOccurrences(of: home.path, with: "~")) \(size)") }
+            }
+            info("Safari chrome: the profile's home holds \(listed.joined(separator: ", "))")
+        }
+        // The page's https request is answered by WebKit's own timing, which can be after the page
+        // reported: looked for last.
+        log = await leakLog()
+        check("Safari chrome: an HTTPS request goes through the proxy too (as a CONNECT)",
+              log.targets.contains { $0.target == "192.0.2.14:443" })
+        check("Safari chrome: an HTTPS image whose certificate needs a fetch reached the proxy, and its certificate was refused",
+              log.targets.contains { $0.target == "aia-\(run).\(domain):443" && $0.path.hasPrefix("(tls refused") },
+              log.targets.filter { $0.target.hasPrefix("aia-") }.map(\.path).joined(separator: " | "))
+        check("Safari chrome: nothing reached this Mac directly (the canary listener took no connection: no fetch, frame or worker)",
+              log.canary.isEmpty, log.canary.joined(separator: " | "))
+        // Whether Safari fetches these is Safari's business; where it does, it is through the proxy
+        // (https: the CONNECT is the proof), and anything it fetched another way is in the capture.
+        for (what, host) in [("the page's icon", "icon-"), ("its touch icon", "touchicon-"), ("its OpenSearch description", "osd-")] {
+            info("Safari chrome: \(what) \(log.targets.contains { $0.target.hasPrefix(host + run) } ? "was fetched through the proxy" : "was not fetched (not exercised)")")
+        }
+        try? await manager.stop(profile.id)
+        // What Safari's window visited is in the profile's own, encrypted history (`HostedPageHistory`).
+        let visited = (try? repository.historyStore(for: profile.id, key: repository.profileKey(for: profile.id)).entries().map(\.url)) ?? []
+        check("Safari chrome: the pages Safari's window visited are in the profile's own encrypted history",
+              visited.contains { $0.contains("start-\(run).\(domain)/pb-leak") }, visited.prefix(10).joined(separator: " "))
+
+        // Again, as an owner's profile usually runs: its second launch, on the home restored from
+        // its archive, through SOCKS5, following its proxy's location (the lookup goes through
+        // the proxy from the profile's process). Still inside the capture's window.
+        if let socksPort = ProcessInfo.processInfo.environment["PB_SELFTEST_SOCKS_PROXY_PORT"].flatMap(Int.init) {
+            var again = try repository.loadConfiguration(profile.id)
+            again.proxy = ProxySettings(kind: .socks5, host: "127.0.0.1", port: socksPort)
+            again.matchProxyLocation = true
+            again.timeZoneIdentifier = nil
+            try repository.saveConfiguration(again, for: profile.id)
+            // The manager looks the new proxy up before the process starts (nothing is remembered
+            // for it): the self-test proxy's answer is Germany, so the process starts in German.
+            let services = ProxyGeoLookup.services
+            ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json")!,
+                                             timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+            defer { ProxyGeoLookup.services = services }
+            hostsChrome = nil
+            networkReport = nil
+            let before = (await leakLog()).targets.filter { $0.path.hasPrefix(startPath) }.count
+            setenv("PB_PROFILE_PROCESS", "1", 1)
+            do { try await manager.launch(profile.id) } catch {
+                check("Safari chrome, second launch: the profile's process started", false, String(describing: error))
+            }
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+            let restarted = await waitUntil(timeout: 90) { hostsChrome != nil }
+            var arrived: [Entry] = []
+            for _ in 0..<15 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                arrived = (await leakLog()).targets.filter { $0.path.hasPrefix(startPath) }
+                if arrived.count > before { break }
+            }
+            check("Safari chrome, second launch on the restored home through SOCKS5: Safari's window again, its start page through the proxy, by name",
+                  restarted && hostsChrome == true && arrived.dropFirst(before).contains { $0.via == "via=socks5" },
+                  "chrome \(String(describing: hostsChrome)), start page requests \(arrived.map(\.via))")
+            check("Safari chrome, a new proxy's first launch: the page is asked for in the proxy's country's language",
+                  arrived.dropFirst(before).contains { $0.language.hasPrefix("de") },
+                  arrived.dropFirst(before).map(\.language).joined(separator: " | "))
+            _ = manager.checkNetwork(profile.id, probe: URL(string: "https://probe-\(run).\(domain)/pb-leak/second?run=\(run)"))
+            _ = await waitUntil(timeout: 40) { networkReport != nil }
+            check("Safari chrome, second launch: every web view on the profile's store, none with WebRTC, the kernel's closures in place",
+                  networkReport.map { $0.webViews > 0 && $0.webViewsOffProfile == 0 && $0.webViewsWithWebRTC == 0 && $0.udpClosed && $0.safariPlacesClosed } == true,
+                  String(describing: networkReport))
+            try? await manager.stop(profile.id)
+        }
+        await manager.shutDown()
+        info("egress-window end \(Date().timeIntervalSince1970)")
+        check("Safari chrome: nothing went wrong while it ran", messages.isEmpty, messages.joined(separator: " | "))
     }
 
     // MARK: Tabs, history, bookmarks
@@ -1066,12 +1729,319 @@ final class SelfTest {
         try repository.delete(unwatched.id)
     }
 
+    // MARK: The proxy list's checker
+
+    /// The proxy list's checker (`ProxyChecker`) against the self-test proxy, whose stand-in
+    /// geolocation service (`/pb-geo.json`) only answers through it:
+    ///   * the probe tells every listener of the self-test proxy apart, step by step: HTTP CONNECT
+    ///     and SOCKS5 each found whatever type the settings say, the login not needed, missing,
+    ///     wrong or taken (HTTP and SOCKS5), on IPv6 too, a port that takes the connection and never
+    ///     answers (silent), a closed port (refused), a host name that does not exist;
+    ///   * a working proxy is alive, with the exit IP, country, time zone, city and network the
+    ///     service saw through it, and the probe's median latency;
+    ///   * an unreachable proxy, and one whose host does not resolve, are dead — and a real website
+    ///     among the services, which a request made directly would reach, did not answer either, nor
+    ///     was any connection made but to the proxy: a dead proxy is never gone around;
+    ///   * a proxy that wants credentials it was not given is dead for that reason, and settings
+    ///     that cannot be applied are not checked at all (no request is made);
+    ///   * the list's model checks several at a time and keeps each result with its proxy,
+    ///     encrypted, finds the type of a line without a scheme and corrects a wrong one; a profile
+    ///     given a checked proxy knows at once where it exits;
+    ///   * a profile started with a silent proxy says so (`ProfileManager.onProxyProblem`), one with
+    ///     a working proxy says nothing, and Check from what it said is the same check.
+    /// All of it but the host name that does not resolve (this Mac's resolver is asked for the
+    /// proxy's own name: there is nothing else to reach a proxy by) runs inside an egress window:
+    /// scripts/egress_check.py fails on any packet of this process past loopback during it, and on
+    /// any DNS question for the geolocation service's name, which carries the run's id. The host
+    /// name that does not resolve is the capture's control for such questions (`egress-control`).
+    private func proxyChecker(_ repository: ProfileRepository) async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("proxy checker checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        func port(_ name: String) -> Int? { environment[name].flatMap(Int.init) }
+        let loopback = "127.0.0.1"
+        let services = ProxyGeoLookup.services
+        let timeout = ProxyChecker.timeout
+        let concurrentChecks = ProxyChecker.concurrentChecks
+        defer {
+            ProxyGeoLookup.services = services
+            ProxyChecker.timeout = timeout
+            ProxyChecker.concurrentChecks = concurrentChecks
+        }
+        // The service's name carries the run's id: asked of this Mac's resolver instead of named to
+        // the proxy, it is in the capture (scripts/egress_check.py). Under selftest.invalid, the one
+        // name the app's App Transport Security lets a URLSession ask over plain HTTP.
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        ProxyGeoLookup.services = [
+            .init(url: URL(string: "http://geo-\(run).selftest.invalid/pb-geo.json?ip=203.0.113.21")!,
+                  timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"],
+                  cityKeyPath: ["city"], asnKeyPath: ["org"], organizationKeyPath: ["org"]),
+            // A real website, as the fail-closed checks above use one: a request made directly would
+            // reach it and be answered, so any answer through a dead proxy would have gone around it.
+            .init(url: URL(string: "https://example.com/")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
+        ]
+        ProxyChecker.timeout = 8
+
+        // Before the window: the proxy's own name is asked of this Mac's resolver. It is a control
+        // for the capture: seen there, a question this Mac asks for a .invalid name reaches the
+        // network, and one for the service's name inside the window would have been caught too.
+        let control = "pbinvalid\(run.prefix(6))"
+        info("egress-control \(control)")
+        let unknownHost = "proxy-\(control).selftest.invalid"
+        let unresolvedProbe = await ProxyChecker.probe(latencySamples: 1).run(ProxySettings(kind: .socks5, host: unknownHost, port: 1080))
+        check("proxy probe: a proxy whose host name does not exist is told apart (host not found)",
+              unresolvedProbe.verdict == .hostNotFound, String(describing: unresolvedProbe))
+        let unresolved = ProxyChecker.result(of: await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: unknownHost, port: 1080)))
+        check("proxy checker: a proxy whose host does not resolve is dead (nothing goes direct)",
+              unresolved.failure == .noAnswer, String(describing: unresolved))
+
+        info("egress-token \(run)")
+        info("egress-window begin \(Date().timeIntervalSince1970)")
+        defer { info("egress-window end \(Date().timeIntervalSince1970)") }
+
+        // Every listener, told apart. Each working one is listed as the other type: the type is
+        // found, not taken from the settings.
+        struct ProbeCase {
+            let name: String
+            let proxy: ProxySettings
+            let verdict: ProxyDiagnosis.Verdict
+            var kind: ProxySettings.Kind?
+            var authentication: ProxyDiagnosis.Authentication?
+        }
+        var cases = [
+            ProbeCase(name: "HTTP CONNECT, listed as SOCKS5", proxy: ProxySettings(kind: .socks5, host: loopback, port: httpPort),
+                      verdict: .works, kind: .httpConnect, authentication: .notRequired),
+            ProbeCase(name: "a closed port", proxy: ProxySettings(kind: .socks5, host: loopback, port: 9), verdict: .refused),
+        ]
+        if let socksPort = port("PB_SELFTEST_SOCKS_PROXY_PORT") {
+            cases.append(ProbeCase(name: "SOCKS5, listed as HTTP", proxy: ProxySettings(kind: .httpConnect, host: loopback, port: socksPort),
+                                   verdict: .works, kind: .socks5, authentication: .notRequired))
+        }
+        if let authPort = port("PB_SELFTEST_HTTP_AUTH_PROXY_PORT") {
+            cases += [
+                ProbeCase(name: "HTTP with a login, none given", proxy: ProxySettings(kind: .httpConnect, host: loopback, port: authPort),
+                          verdict: .credentialsNeeded, kind: .httpConnect, authentication: .missing),
+                ProbeCase(name: "HTTP with a login, a wrong one",
+                          proxy: ProxySettings(kind: .httpConnect, host: loopback, port: authPort, username: "pb-user", password: "wrong"),
+                          verdict: .credentialsRejected, kind: .httpConnect, authentication: .rejected),
+                ProbeCase(name: "HTTP with a login, the right one",
+                          proxy: ProxySettings(kind: .httpConnect, host: loopback, port: authPort, username: "pb-user", password: "pb-pass"),
+                          verdict: .works, kind: .httpConnect, authentication: .accepted),
+            ]
+        }
+        if let socksAuthPort = port("PB_SELFTEST_SOCKS_AUTH_PROXY_PORT") {
+            cases += [
+                ProbeCase(name: "SOCKS5 with a login, none given", proxy: ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort),
+                          verdict: .credentialsNeeded, kind: .socks5, authentication: .missing),
+                ProbeCase(name: "SOCKS5 with a login, a wrong one",
+                          proxy: ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort, username: "pb-user2", password: "wrong"),
+                          verdict: .credentialsRejected, kind: .socks5, authentication: .rejected),
+                ProbeCase(name: "SOCKS5 with a login, the right one",
+                          proxy: ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort, username: "pb-user2", password: "pb-pass2"),
+                          verdict: .works, kind: .socks5, authentication: .accepted),
+            ]
+        }
+        if let http6Port = port("PB_SELFTEST_HTTP6_PROXY_PORT") {
+            cases.append(ProbeCase(name: "HTTP CONNECT on the IPv6 loopback", proxy: ProxySettings(kind: .httpConnect, host: "::1", port: http6Port),
+                                   verdict: .works, kind: .httpConnect, authentication: .notRequired))
+        }
+        let silentPort = port("PB_SELFTEST_SILENT_PROXY_PORT")
+        if let silentPort {
+            cases.append(ProbeCase(name: "a port that takes the connection and never answers",
+                                   proxy: ProxySettings(kind: .socks5, host: loopback, port: silentPort), verdict: .silent))
+        } else {
+            info("proxy probe: the silent listener's checks skipped (PB_SELFTEST_SILENT_PROXY_PORT not set)")
+        }
+        let probe = ProxyChecker.probe()
+        // All at once: the silent one alone takes the probe's whole answer timeout.
+        let diagnoses = await withTaskGroup(of: (Int, ProxyDiagnosis).self) { group -> [Int: ProxyDiagnosis] in
+            for (index, item) in cases.enumerated() {
+                let proxy = item.proxy
+                group.addTask { (index, await probe.run(proxy)) }
+            }
+            var found: [Int: ProxyDiagnosis] = [:]
+            for await (index, diagnosis) in group { found[index] = diagnosis }
+            return found
+        }
+        for (index, item) in cases.enumerated() {
+            let diagnosis = diagnoses[index]
+            var expected = item.verdict.rawValue
+            if let kind = item.kind { expected += ", \(kind.rawValue)" }
+            if let authentication = item.authentication { expected += ", login \(authentication.rawValue)" }
+            check("proxy probe: \(item.name) — \(expected)",
+                  diagnosis?.verdict == item.verdict && (item.kind == nil || diagnosis?.kinds.first == item.kind)
+                      && (item.authentication == nil || diagnosis?.authentication == item.authentication)
+                      && (item.verdict != .works || diagnosis?.latencies.count == probe.latencySamples),
+                  String(describing: diagnosis))
+        }
+
+        // End to end through a working proxy listed with the wrong type: where it exits.
+        let full = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: httpPort))
+        check("proxy checker: a working proxy listed with the wrong type is checked as the type that answered, end to end — exit IP, country, city, network, and the probe's median latency",
+              full.isAlive && full.exitIP == "203.0.113.21" && full.countryCode == "DE" && full.timeZoneIdentifier == "Europe/Berlin"
+                  && full.city == "Berlin" && full.asn == "AS64500" && full.organization == "Example Networks"
+                  && full.diagnosis?.kinds.first == .httpConnect && full.latencyMilliseconds != nil
+                  && full.latencyMilliseconds == full.diagnosis?.medianLatency,
+              String(describing: full))
+        // And through each other listener that works: the exit the service saw came back through it.
+        var throughEach: [(String, ProxySettings)] = []
+        if let socksPort = port("PB_SELFTEST_SOCKS_PROXY_PORT") {
+            throughEach.append(("SOCKS5 listed as HTTP", ProxySettings(kind: .httpConnect, host: loopback, port: socksPort)))
+        }
+        if let socksAuthPort = port("PB_SELFTEST_SOCKS_AUTH_PROXY_PORT") {
+            throughEach.append(("SOCKS5 with its login", ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort,
+                                                                       username: "pb-user2", password: "pb-pass2")))
+        }
+        if let http6Port = port("PB_SELFTEST_HTTP6_PROXY_PORT") {
+            throughEach.append(("HTTP CONNECT on ::1", ProxySettings(kind: .httpConnect, host: "::1", port: http6Port)))
+        }
+        for (name, proxy) in throughEach {
+            let result = await ProxyChecker.check(proxy)
+            check("proxy checker: through \(name), end to end — the exit IP, country and city the service saw",
+                  result.isAlive && result.exitIP == "203.0.113.21" && result.countryCode == "DE" && result.city == "Berlin",
+                  String(describing: result))
+        }
+        if let silentPort {
+            let silent = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: silentPort))
+            check("proxy checker: the silent proxy fails as silent, and nothing came back from anywhere",
+                  silent.failure == .noAnswer && silent.diagnosis?.verdict == .silent && silent.exitIP == nil,
+                  String(describing: silent))
+        }
+
+        let working = ProxySettings(kind: .httpConnect, host: loopback, port: httpPort)
+        let alive = await ProxyChecker.lookUp(working)
+        let aliveResult = ProxyChecker.result(of: alive)
+        info("proxy checker: through the working proxy \(aliveResult), on \(alive?.connections.map(\.description) ?? [])")
+        check("proxy checker: a working proxy is alive, with the exit IP, country and time zone the service saw through it, and a latency",
+              aliveResult.isAlive && aliveResult.exitIP == "203.0.113.21" && aliveResult.countryCode == "DE"
+                  && aliveResult.timeZoneIdentifier == "Europe/Berlin" && (aliveResult.latencyMilliseconds ?? 0) > 0,
+              String(describing: aliveResult))
+        // How the URL loading system reports a proxied connection's peer is not documented: said, not checked.
+        info("proxy checker: the working proxy's check was made on connections "
+             + ((alive?.connections ?? []).allSatisfy { ($0.port ?? httpPort) == httpPort } ? "to the proxy only" : "NOT all to the proxy"))
+
+        // Port 9 (discard) on localhost is closed on CI runners, as in the fail-closed check above.
+        let unreachable = await ProxyChecker.lookUp(ProxySettings(kind: .httpConnect, host: loopback, port: 9))
+        let unreachableResult = ProxyChecker.result(of: unreachable)
+        check("proxy checker: an unreachable proxy is dead, and nothing answered — not the website a direct request would reach either",
+              unreachableResult.failure == .noAnswer && unreachable?.answered == false && unreachableResult.exitIP == nil,
+              String(describing: unreachableResult))
+        check("proxy checker: checking the unreachable proxy connected to nothing but it",
+              unreachable?.connections.allSatisfy { ($0.port ?? 9) == 9 } == true,
+              unreachable?.connections.map(\.description).joined(separator: ", ") ?? "no lookup")
+        let notApplicable = await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: "127.0.0.1:1080", port: 1080))
+        check("proxy checker: settings that cannot be applied are not checked at all (no request without the proxy)",
+              notApplicable == nil && ProxyChecker.result(of: notApplicable).failure == .invalidSettings)
+        if let authPort = port("PB_SELFTEST_HTTP_AUTH_PROXY_PORT") {
+            let noCredentials = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: loopback, port: authPort))
+            check("proxy checker: a proxy that wants credentials it was not given is dead for that reason",
+                  noCredentials.failure == .needsCredentials && noCredentials.diagnosis?.verdict == .credentialsNeeded,
+                  String(describing: noCredentials))
+            let withCredentials = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: loopback, port: authPort,
+                                                                         username: "pb-user", password: "pb-pass"))
+            info("proxy checker: the HTTP proxy that wants credentials, given them: \(withCredentials)")
+        }
+
+        // The list's model: an import, a check of all of it two at a time, the results kept with
+        // their proxies in the encrypted file.
+        var lines = "http://127.0.0.1:\(httpPort)  # working\n127.0.0.1:9  # unreachable\n"
+        let socksAuthPort = port("PB_SELFTEST_SOCKS_AUTH_PROXY_PORT")
+        if let socksAuthPort { lines += "socks5://pb-user2:pb-pass2@127.0.0.1:\(socksAuthPort)  # socks with credentials\n" }
+        var messages: [String] = []
+        let model = ProxyListModel(vault: repository.vault) { messages.append($0) }
+        let added = model.add(ProxyListImport.read(lines, defaultKind: .httpConnect).proxies)
+        ProxyChecker.concurrentChecks = 2
+        model.check()
+        let finished = await waitUntil(timeout: 40) { !model.isChecking }
+        let stored = try ProxyList.load(from: repository.vault)
+        let found = Dictionary(stored.entries.compactMap { entry in entry.lastCheck.map { (entry.label, $0) } },
+                               uniquingKeysWith: { first, _ in first })
+        check("proxy list: several proxies checked at a time, each result kept with its proxy and saved encrypted",
+              finished && added?.added.count == (socksAuthPort == nil ? 2 : 3)
+                  && found["working"]?.isAlive == true && found["unreachable"]?.failure == .noAnswer
+                  && found["unreachable"]?.diagnosis?.verdict == .refused
+                  && (socksAuthPort == nil || found["socks with credentials"]?.isAlive == true) && messages.isEmpty,
+              "\(found) \(messages)")
+
+        // The type found by the check: a line without a scheme gets the one that answered, and an
+        // entry listed with the wrong one is corrected.
+        if let socksPort = port("PB_SELFTEST_SOCKS_PROXY_PORT"), let socks2Port = port("PB_SELFTEST_SOCKS2_PROXY_PORT") {
+            let kindLines = "127.0.0.1:\(socksPort)  # no scheme\nhttp://127.0.0.1:\(socks2Port)  # SOCKS5 listed as HTTP\n"
+            let kindIDs = model.add(ProxyListImport.read(kindLines).proxies)?.added ?? []
+            let unknownBefore = kindIDs.first.flatMap { model.list.entry($0) }.map { !$0.kindKnown } ?? false
+            model.check(Set(kindIDs))
+            let kindsFinished = await waitUntil(timeout: 30) { !model.isChecking }
+            let entries = kindIDs.compactMap { model.list.entry($0) }
+            check("proxy list: a line without a scheme gets the type the check found, and a wrong type is corrected",
+                  kindsFinished && unknownBefore && entries.count == 2 && entries.allSatisfy { $0.kindKnown && $0.proxy.kind == .socks5 }
+                      && entries[0].lastCheck?.kindFinding == .found && entries[1].lastCheck?.kindFinding == .corrected(from: .httpConnect)
+                      && entries.allSatisfy { $0.lastCheck?.isAlive == true },
+                  entries.map { "\($0.label): \($0.proxy.kind.rawValue) known=\($0.kindKnown) \(String(describing: $0.lastCheck?.kindFinding))" }
+                      .joined(separator: " | "))
+        }
+
+        // Given that checked proxy, a profile has it, and where it exits, before any launch.
+        let profile = try repository.create(name: "Proxy from the list", configuration: ProfileConfiguration(ephemeral: true))
+        if let entry = stored.entries.first(where: { $0.label == "working" }) {
+            let outcome = repository.assign(ProxyList.rotation(of: [entry], over: [profile.id]))
+            let configuration = try repository.loadConfiguration(profile.id)
+            check("proxy list: a profile given a checked proxy has it, and knows where it exits without a launch",
+                  outcome.changed == [profile.id] && configuration.proxy == entry.proxy
+                      && configuration.rememberedProxyLocation?.countryCode == "DE"
+                      && configuration.rememberedProxyLocation?.timeZoneIdentifier == "Europe/Berlin",
+                  String(describing: configuration.lastProxyLocation))
+        }
+        try repository.delete(profile.id)
+
+        // A profile started with a proxy that takes the connection and never answers says so, in
+        // the checker's words; one whose proxy works says nothing.
+        if let silentPort {
+            let manager = ProfileManager(repository: repository)
+            var reported: [(id: UUID, diagnosis: ProxyDiagnosis)] = []
+            manager.onProxyProblem = { id, _, diagnosis in reported.append((id, diagnosis)) }
+            let silentProfile = try repository.create(name: "Silent proxy", configuration: ProfileConfiguration(
+                proxy: ProxySettings(kind: .socks5, host: loopback, port: silentPort), ephemeral: true, matchProxyLocation: false))
+            let workingProfile = try repository.create(name: "Working proxy", configuration: ProfileConfiguration(
+                proxy: working, ephemeral: true, matchProxyLocation: false))
+            try await manager.launch(workingProfile.id)
+            try await manager.launch(silentProfile.id)
+            let said = await waitUntil(timeout: 25) { !reported.isEmpty }
+            check("launch: a profile whose proxy takes the connection and never answers says why (silent), and one whose proxy works says nothing",
+                  said && reported.map { $0.id } == [silentProfile.id] && reported.first?.diagnosis.verdict == .silent,
+                  reported.map { "\($0.id == silentProfile.id ? "silent" : "working"): \($0.diagnosis.verdict.rawValue)" }.joined(separator: ", "))
+            // Check, as what the profile said offers it: the same check, of the profile's own proxy.
+            let fromProblem = await model.checkProfileProxy(ProxySettings(kind: .socks5, host: loopback, port: silentPort))
+            check("launch: Check from what the profile said is the list's check of its proxy (silent), kept in the list",
+                  fromProblem.diagnosis?.verdict == .silent && !fromProblem.isAlive
+                      && model.list.entry(for: ProxySettings(kind: .socks5, host: loopback, port: silentPort))?.lastCheck?.diagnosis?.verdict == .silent,
+                  String(describing: fromProblem))
+            await manager.shutDown()
+            try repository.delete(silentProfile.id)
+            try repository.delete(workingProfile.id)
+        }
+        try? FileManager.default.removeItem(at: repository.root.appendingPathComponent("proxies.bin"))
+    }
+
     // MARK: Profile deletion (regression for the delete crash)
 
     /// `remove(forIdentifier:)` and `WKWebsiteDataStore.nonPersistent()` crash (EXC_BAD_ACCESS on a
     /// nil `RunLoop::main()`) when they are the first WebKit use in the process — e.g. "unlock,
     /// then delete a profile" or "unlock, then open an ephemeral profile". Must run before anything
     /// else touches WebKit.
+    /// The tunnel's all-interfaces switch (hardware checks only) is not turned on by a command-line
+    /// argument: only by the app's own saved settings (`DebugSwitches`).
+    private func debugSwitchesStayDebugSwitches() {
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        var withSwitch = arguments
+        withSwitch["PBTunnelAllInterfaces"] = true
+        UserDefaults.standard.setVolatileDomain(withSwitch, forName: UserDefaults.argumentDomain)
+        let turnedOn = DebugSwitches.tunnelAllInterfaces
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        check("the tunnel's all-interfaces switch is not turned on by a command-line argument", !turnedOn)
+    }
+
     private func firstWebKitUse(_ repository: ProfileRepository) async throws {
         let vault = WebDataStoreVault(repository: repository)
         let removalsBefore = WebDataStoreVault.removeCallCount
@@ -1569,14 +2539,88 @@ final class SelfTest {
               "\(live) \(second)")
 
         info("cookie import: WebKit can write cookies to disk on request: \(CookieStoreImport.canFlush)")
+        // Exported from the running profile: the file holds what the store holds, the session
+        // cookie included, and this app's own import reads it back.
+        let exported = (try? await manager.exportCookies(of: profile.id)) ?? []
+        let exportedFile = CookieExport.data(exported, format: .netscape)
+        let readBack = CookieImporter.read(exportedFile).cookies
+        check("cookie export: a running profile's cookies, session ones too, in a cookies.txt this app reads back",
+              exported.contains { $0.name == "live" && $0.value == "imported-live-value" }
+                  && exported.contains { $0.name == "session" && $0.expires == nil }
+                  && readBack.count == CookieExport.count(exported, format: .netscape) && !readBack.isEmpty,
+              exported.map { "\($0.name)=\($0.value)" }.joined(separator: " "))
         // Stop (sealed) and launch: persistent imported cookies kept, the session cookie gone.
+        // WebKit lets go of a stopped profile's store: one still alive is handed back at the next
+        // launch (`WKWebsiteDataStore(forIdentifier:)`), session cookies and all.
+        weak var storeBeforeStop = manager.session(for: profile.id)?.dataStore
         try await manager.stop(profile.id)
+        let storeReleased = await waitUntil(timeout: 10) { storeBeforeStop == nil }
+        check("cookie import: WebKit lets go of a stopped profile's data store", storeReleased, "still alive 10 s after the stop")
+        // Exported while stopped: started without a window, read, and stopped again.
+        let fromStopped = (try? await manager.exportCookies(of: profile.id)) ?? []
+        let stoppedAgain = await waitUntil(timeout: 30) { !manager.isRunning(profile.id) && !manager.busyProfileIDs.contains(profile.id) }
+        check("cookie export: a stopped profile's cookies are read and the profile is stopped again",
+              fromStopped.contains { $0.name == "live" } && !fromStopped.contains { $0.name == "session" } && stoppedAgain,
+              "\(fromStopped.map(\.name)) running=\(manager.isRunning(profile.id))")
         try await manager.launch(profile.id)
         let third = await pageText()
         check("cookie import: imported persistent cookies survive a stop and a launch; the session cookie does not",
               third.contains("hostonly=imported-hostonly-value") && third.contains("live=imported-live-value")
                   && !third.contains("session="), third)
         try await manager.delete(profile.id)
+    }
+
+    // MARK: Profile export and import
+
+    /// A profile carried in a `.pbprofile` file arrives with its website data: a cookie the
+    /// original had in its (sealed) WebKit store is sent by the imported profile's first request.
+    /// That is what proves the website data was restored where WebKit looks for the new profile's
+    /// store — the archive's directories are renamed after the new profile on the way.
+    private func profileTransfer(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("profile transfer checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let start = URL(string: "http://transfer.selftest.invalid/pb-cookies")!
+        let original = try repository.create(name: "Carried", configuration: ProfileConfiguration(
+            startURL: start, proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        func pageText(_ id: UUID) async -> String {
+            guard let tab = manager.session(for: id)?.windowControllers.first?.selectedTab else { return "" }
+            _ = await waitUntil(timeout: 15) { !tab.isLoading && tab.url == start }
+            return (try? await js(tab.webView, "return document.body ? document.body.innerText : '';")) as? String ?? ""
+        }
+        // Into the original's WebKit store (queued, applied at launch), then sealed with it at stop.
+        let cookie = ImportedCookie(name: "carried", value: "carried-value", domain: "transfer.selftest.invalid", hostOnly: true,
+                                    expires: Date().addingTimeInterval(30 * 86_400))
+        _ = try await manager.importCookies([cookie], into: original.id)
+        try await manager.launch(original.id)
+        let before = await pageText(original.id)
+        try await manager.stop(original.id)
+        check("profile transfer: the original profile has the cookie", before.contains("carried=carried-value"), before)
+
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("pb-transfer-\(UUID().uuidString).\(ProfileTransfer.fileExtension)")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let manifest = try ProfileTransfer.export(original.id, from: repository, to: file, password: "transfer pw",
+                                                  kdf: .generate(iterations: 10_000))
+        let bytes = (try? Data(contentsOf: file)) ?? Data()
+        check("profile transfer: the export carries the website data, and nothing of it is readable in the file",
+              manifest.hasWebsiteData && !bytes.isEmpty && bytes.range(of: Data("carried-value".utf8)) == nil
+                && bytes.range(of: Data("Carried".utf8)) == nil, "\(manifest.hasWebsiteData) \(bytes.count) bytes")
+        check("profile transfer: a wrong password opens nothing",
+              (try? ProfileTransfer.manifest(of: file, password: "wrong")) == nil)
+
+        let imported = try ProfileTransfer.importProfile(from: file, password: "transfer pw", into: repository, name: "Carried (imported)")
+        try await manager.launch(imported.id)
+        let after = await pageText(imported.id)
+        check("profile transfer: the imported profile — a new profile — sends the original's cookie from its first request",
+              imported.id != original.id && after.contains("carried=carried-value"), after)
+        try await manager.stop(imported.id)
+        check("profile transfer: nothing went wrong", messages.isEmpty, messages.joined(separator: " | "))
+        try await manager.delete(imported.id)
+        try await manager.delete(original.id)
     }
 
     // MARK: Profile sync (cookies and settings between two devices)
@@ -1815,9 +2859,14 @@ final class SelfTest {
         robot.limits.pauseOverride = 0.2...0.2
         let jumpStarted = Date()
         manager.startWarmUp(profile.id, plan: jump)
-        let jumped = await waitUntil(timeout: 20) { robot.state != .running }
+        // The address the robot's own tab last showed, read while the run is on: the warm-up
+        // browses in a window of its own that is closed when the run ends.
+        var jumpShown: URL?
+        let jumped = await waitUntil(timeout: 20) {
+            if let url = robot.currentTab?.url { jumpShown = url }
+            return robot.state != .running
+        }
         let jumpTime = Date().timeIntervalSince(jumpStarted)
-        let jumpShown = manager.session(for: profile.id)?.frontmostWindow?.selectedTab?.url
         check("warm-up: an address that only jumps within the page shown counts as visited at once (no new page comes for it), also when the page rewrites the fragment",
               jumped && robot.state == .finished && robot.visits.map(\.outcome) == [.loaded, .loaded] && jumpTime < 10
                   && jumpShown?.fragment == "/part",
@@ -1841,7 +2890,7 @@ final class SelfTest {
         // Its tab closed by the user.
         manager.startWarmUp(profile.id, plan: long)
         _ = await waitUntil(timeout: 20) { robot.visits.first?.outcome == .loaded }
-        if let tab = robot.currentTab, let controller = manager.session(for: profile.id)?.frontmostWindow,
+        if let tab = robot.currentTab, let controller = manager.session(for: profile.id)?.window(of: tab),
            let index = controller.tabs.firstIndex(where: { $0 === tab }) {
             controller.closeTab(at: index)
         }
@@ -1872,6 +2921,101 @@ final class SelfTest {
                   && !webKitDataDirectoriesExist(profile.id) && messages.isEmpty,
               "stoppedFirst=\(stoppedFirst) state=\(robot.state) seal=\(sealError ?? "ok") messages=\(messages)")
         try await manager.delete(profile.id)
+    }
+
+    /// Two profiles warmed up through the queue (`WarmUpCoordinator`), as "Warm Up Several…" does:
+    /// each started without a window, warmed up through the self-test proxy, stopped and sealed
+    /// again, and only then the next — never both at once. Each run's report counts the profile's
+    /// cookies per site (registrable domain) in its own store, telling the cookies the run added
+    /// from one the profile already had; and a run from the queue counts as the profile's last
+    /// run for its schedule.
+    private func warmUpQueue(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            info("warm-up queue checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            return
+        }
+        let run = String(UUID().uuidString.prefix(8)).lowercased()
+        func page(_ host: String, _ name: String) -> String { "http://\(host)/pb-warmup/\(name)?run=\(run)" }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let first = try repository.create(name: "Queue 1", configuration: ProfileConfiguration(proxy: proxy, matchProxyLocation: false))
+        let second = try repository.create(name: "Queue 2", configuration: ProfileConfiguration(proxy: proxy, matchProxyLocation: false))
+        // The second profile already holds a cookie of the site it is going to visit: the report
+        // has to tell it from the one the run adds.
+        try repository.queueImportedCookies([ImportedCookie(name: "pbwarm_before", value: run, domain: "warmup.selftest.invalid",
+                                                            hostOnly: true, expires: Date().addingTimeInterval(86_400))],
+                                            for: second.id)
+        // The first repeats on a schedule (not due for a day): its run from the queue counts.
+        let queued = Date()
+        try repository.saveWarmUpSchedule(WarmUpSchedule(everyHours: 24, since: queued), for: first.id)
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        // As AppModel.startWarmUp: a stopped profile is launched without a window for its run.
+        let coordinator = WarmUpCoordinator(manager: manager, repository: repository) { plan, id in
+            if !manager.isRunning(id) {
+                do {
+                    try await manager.launch(id, openingWindow: false)
+                } catch {
+                    manager.onError?(String(describing: error))
+                    return false
+                }
+            }
+            guard manager.isRunning(id) else { return false }
+            manager.warmUpRobot(for: id).limits = .init(loadTimeout: 15, startTimeout: 8, scriptTimeout: 5,
+                                                         dwellOverride: 1...1.2, pauseOverride: 0.2...0.3)
+            return manager.startWarmUp(id, plan: plan)
+        }
+        defer { coordinator.shutDown() }
+        let policy = NSApp.activationPolicy()
+        NSApp.setActivationPolicy(.accessory)
+        defer { NSApp.setActivationPolicy(policy) }
+
+        let plans: [UUID: WarmUpPlan] = [
+            first.id: WarmUpPlan(addresses: [page("warmup.selftest.invalid", "qa"), page("www.queue-site.invalid", "qb")].joined(separator: "\n"),
+                                 scroll: false, followLinks: false),
+            second.id: WarmUpPlan(addresses: page("warmup.selftest.invalid", "qc"), scroll: false, followLinks: false),
+        ]
+        coordinator.enqueue([first.id, second.id]) { plans[$0] ?? WarmUpPlan() }
+        // Watched every tenth of a second while the queue goes.
+        var bothRunning = false
+        var windowShown = false
+        var order: [UUID] = []
+        let done = await waitUntil(timeout: 120) {
+            for id in [first.id, second.id] where manager.isRunning(id) {
+                if order.last != id { order.append(id) }
+                if manager.session(for: id)?.hasVisibleWindow == true { windowShown = true }
+            }
+            if manager.isRunning(first.id) && manager.isRunning(second.id) { bothRunning = true }
+            return !coordinator.queue.isActive
+        }
+        let entries = coordinator.queue.entries
+        func report(_ id: UUID) -> WarmUpStatus? {
+            guard let entry = entries.first(where: { $0.profileID == id }), case let .done(status) = entry.state else { return nil }
+            return status
+        }
+        let firstReport = report(first.id), secondReport = report(second.id)
+        check("warm-up queue: two profiles warmed up one after the other, each started without a window, then stopped and sealed before the next began",
+              done && !bothRunning && !windowShown && order == [first.id, second.id]
+                  && firstReport?.phase == .finished && secondReport?.phase == .finished
+                  && !manager.isRunning(first.id) && !manager.isRunning(second.id)
+                  && !webKitDataDirectoriesExist(first.id) && !webKitDataDirectoriesExist(second.id) && messages.isEmpty,
+              "done=\(done) both=\(bothRunning) window=\(windowShown) order=\(order.map { $0 == first.id ? 1 : 2 }) "
+                  + "states=\(entries.map(\.state)) messages=\(messages)")
+        func counts(_ status: WarmUpStatus?, _ site: String) -> [Int] {
+            guard let found = status?.sites?.first(where: { $0.site == site }) else { return [] }
+            return [found.cookies, found.added]
+        }
+        check("warm-up report: the profile's cookies per site (registrable domain) after the run, the run's own told from those it had",
+              counts(firstReport, "selftest.invalid") == [1, 1] && counts(firstReport, "queue-site.invalid") == [1, 1]
+                  && firstReport?.cookies == 2
+                  && counts(secondReport, "selftest.invalid") == [2, 1] && secondReport?.cookies == 1,
+              "first=\(firstReport?.sites ?? []) (\(firstReport?.cookies ?? -1)) second=\(secondReport?.sites ?? []) (\(secondReport?.cookies ?? -1))")
+        let stored = try repository.warmUpSchedule(for: first.id)
+        check("warm-up schedule: a run from the queue counts as the profile's last run, stored with its schedule",
+              (stored?.lastRunAt ?? .distantPast) >= queued && (coordinator.nextRun(of: first.id) ?? .distantPast) > Date().addingTimeInterval(23 * 3600),
+              "lastRunAt=\(String(describing: stored?.lastRunAt)) next=\(String(describing: coordinator.nextRun(of: first.id)))")
+        try await manager.delete(first.id)
+        try await manager.delete(second.id)
     }
 
     /// The profile's WebKit data is not on disk in plain form (sealed).

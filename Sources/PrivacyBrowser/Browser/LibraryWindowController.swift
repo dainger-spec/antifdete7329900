@@ -19,6 +19,8 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
         window.setContentSize(NSSize(width: 680, height: 540))
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
+        // Its title names the profile: not kept in the saved application state, outside the vault.
+        window.isRestorable = false
         super.init(window: window)
         window.delegate = self
         Theme.applyChrome(to: window)

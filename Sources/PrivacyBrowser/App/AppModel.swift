@@ -19,6 +19,9 @@ final class AppModel: ObservableObject {
     @Published var errorMessage: String?
     /// A profile whose password manager should open (from "Passwords…" in a browser window).
     @Published var passwordsRequest: ProfileSummary?
+    /// Profiles that were started with a proxy that does not work, and what the probe found
+    /// (`ProfileManager.onProxyProblem`): the Profiles window says it in words, with Check.
+    @Published var proxyProblems: [ProxyProblem] = []
     /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
     /// vault it tried).
     @Published private(set) var unlockFailed = false
@@ -28,6 +31,10 @@ final class AppModel: ObservableObject {
 
     private(set) var repository: ProfileRepository?
     private(set) var manager: ProfileManager?
+    /// The warm-up queue and schedule of this unlock (`WarmUpCoordinator`).
+    private(set) var warmUps: WarmUpCoordinator?
+    /// The proxy list of the unlocked vault (`ProxyListModel`); nil while locked.
+    private(set) var proxyList: ProxyListModel?
     private var managerObservation: AnyCancellable?
     private var lockTask: Task<Void, Never>?
 
@@ -39,8 +46,13 @@ final class AppModel: ObservableObject {
     let root: URL
 
     init() {
+        // Before the vault is looked for: a vault a sandboxed build of this app left in its
+        // container is this build's to use (an unsandboxed build hosts Safari's chrome).
+        AppEnvironment.adoptSandboxedDataIfNeeded()
         root = AppEnvironment.vaultDirectory
         phase = MasterVault.exists(in: root) ? .locked : .setup
+        // No profile's page is handed to Quick Look, Services or another app (`HandOffs`).
+        HandOffs.closeForWebViews()
     }
 
     var hasRunningProfiles: Bool { manager?.hasRunningProfiles ?? false }
@@ -86,7 +98,7 @@ final class AppModel: ObservableObject {
                             log.notice("Vault key derivation upgraded from PBKDF2 to Argon2id")
                         }
                     } catch {
-                        log.error("Vault key derivation upgrade failed: \(String(describing: error), privacy: .public)")
+                        log.error("Vault key derivation upgrade failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
                     }
                     return vault
                 }.value
@@ -161,7 +173,23 @@ final class AppModel: ObservableObject {
         managerObservation = manager.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         self.repository = repository
         self.manager = manager
+        // Queued and scheduled warm-ups start the way the warm-up screen does (startWarmUp).
+        let warmUps = WarmUpCoordinator(manager: manager, repository: repository) { [weak self] plan, id in
+            await self?.startWarmUp(plan, for: id) ?? false
+        }
+        warmUps.forwardChanges(to: self)
+        self.warmUps = warmUps
+        warmUps.begin()
+        let proxyList = ProxyListModel(vault: vault) { [weak self] message in self?.showError(message) }
+        // The proxies typed into profiles before there was a list are in it from now on (once).
+        proxyList.takeIn(profileProxies: repository.profileProxies())
+        proxyList.onEntryChanged = { [weak self] entry, previous in self?.followProxyEntry(entry, previous: previous) }
+        self.proxyList = proxyList
+        manager.onProxyProblem = { [weak self] id, proxy, diagnosis in
+            self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis)
+        }
         deviceSettings = (try? DeviceSettings.load(from: vault)) ?? DeviceSettings()
+        restartAutomation()
         phase = .unlocked
         refresh()
         Task { await manager.recoverUnsealedProfiles() }
@@ -194,7 +222,17 @@ final class AppModel: ObservableObject {
     var hasActivity: Bool { lockTask != nil || (manager?.hasActivity ?? false) }
 
     private func performLock() async {
+        // First: no script may start a profile while they are being stopped and sealed.
+        automationServer?.stop()
+        automationServer = nil
+        automationState = .stopped
+        // Before the profiles stop: nothing waiting in the warm-up queue may launch one again.
+        warmUps?.shutDown()
+        warmUps = nil
         await manager?.shutDown()
+        proxyList?.stopChecking()
+        proxyList = nil
+        proxyProblems = []
         managerObservation = nil
         manager = nil
         repository = nil
@@ -253,15 +291,51 @@ final class AppModel: ObservableObject {
         refresh()
     }
 
+    // MARK: Profile export and import (ProfileTransfer)
+
+    /// Writes the profile to `url`, encrypted with `password`. A running profile is stopped first,
+    /// and anything a crash left unsealed is sealed: the export must hold the profile whole.
+    func exportProfile(_ id: UUID, to url: URL, password: String) async throws -> ProfileTransfer.Manifest {
+        guard let manager, let repository else { throw CoreError.vaultNotFound }
+        if manager.isRunning(id) { try await manager.stop(id) }
+        try await manager.sealLeftovers(of: id)
+        return try await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            return try ProfileTransfer.export(id, from: repository, to: url, password: password)
+        }.value
+    }
+
+    /// What a profile export holds, opened with its password (nothing is imported).
+    func readProfileExport(_ url: URL, password: String) async throws -> ProfileTransfer.Manifest {
+        try await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            return try ProfileTransfer.manifest(of: url, password: password)
+        }.value
+    }
+
+    /// Imports a profile export as a new profile named `name`.
+    func importProfile(from url: URL, password: String, name: String?) async throws -> ProfileSummary {
+        guard let repository else { throw CoreError.vaultNotFound }
+        let summary = try await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            return try ProfileTransfer.importProfile(from: url, password: password, into: repository, name: name)
+        }.value
+        refresh()
+        return summary
+    }
+
     func deleteProfile(_ id: UUID) async {
         await perform { try await self.manager?.delete(id) }
         refresh()
     }
 
-    func launch(_ id: UUID) async {
+    func launch(_ id: UUID, openingWindow: Bool = true) async {
         // A launch reads the files sync replaces (settings, synced cookies): after the sync.
         while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
-        await perform { try await self.manager?.launch(id) }
+        await perform { try await self.manager?.launch(id, openingWindow: openingWindow) }
         refresh()
     }
 
@@ -296,6 +370,12 @@ final class AppModel: ObservableObject {
         return try await manager.importCookies(cookies, into: id)
     }
 
+    /// Every cookie of a profile, for an export (`ProfileManager.exportCookies`).
+    func exportCookies(of id: UUID) async throws -> [ImportedCookie] {
+        guard let manager else { throw CoreError.vaultNotFound }
+        return try await manager.exportCookies(of: id)
+    }
+
     // MARK: Session warm-up
 
     /// The profile's last warm-up plan, or a new one.
@@ -314,7 +394,10 @@ final class AppModel: ObservableObject {
         }
         // Starting or being encrypted (a launch or a stop under way): let that finish first.
         while manager.busyProfileIDs.contains(id) { try? await Task.sleep(nanoseconds: 100_000_000) }
-        if !manager.isRunning(id) { await launch(id) }
+        // A profile that is not running is started for the warm-up alone: no window of its own
+        // appears, the robot browses in one the user never sees, and when the run ends the profile
+        // stops and seals again. This is what "warm up without a window in my face" means.
+        if !manager.isRunning(id) { await launch(id, openingWindow: false) }
         // The manager of this unlock: a Lock while the profile started ends it.
         guard let current = self.manager, current === manager, current.isRunning(id) else { return false }
         guard current.startWarmUp(id, plan: plan) else {
@@ -323,6 +406,11 @@ final class AppModel: ObservableObject {
             return false
         }
         return true
+    }
+
+    /// Stops the profile's warm-up; the profile keeps running.
+    func stopWarmUp(_ id: UUID) {
+        manager?.stopWarmUp(id)
     }
 
     /// Whether `password` is the master password (asked before saved passwords are shown).
@@ -432,6 +520,65 @@ final class AppModel: ObservableObject {
         refresh()
     }
 
+    // MARK: Automation API (optional)
+
+    /// Whether the local automation API listens, and where (`AutomationServer`).
+    @Published private(set) var automationState: AutomationServer.State = .stopped
+    private var automationServer: AutomationServer?
+
+    /// The API's settings: off, with a token of its own, until set (`ensureAutomationSettings`).
+    var automationSettings: AutomationSettings? { deviceSettings.automation }
+
+    /// Makes and saves the API's settings (off, a new token) the first time they are shown, so
+    /// that the token shown is the one kept.
+    func ensureAutomationSettings() {
+        guard deviceSettings.automation == nil else { return }
+        try? updateDeviceSettings { $0.automation = AutomationSettings() }
+    }
+
+    func setAutomation(enabled: Bool, port: Int) {
+        var settings = deviceSettings.automation ?? AutomationSettings()
+        settings.isEnabled = enabled
+        settings.port = port
+        saveAutomation(settings)
+    }
+
+    /// A new token: scripts holding the old one are refused from now on.
+    func renewAutomationToken() {
+        var settings = deviceSettings.automation ?? AutomationSettings()
+        settings.token = AutomationSettings.newToken()
+        saveAutomation(settings)
+    }
+
+    private func saveAutomation(_ settings: AutomationSettings) {
+        do {
+            try updateDeviceSettings { $0.automation = settings }
+        } catch {
+            showError(String(format: L("automation.error.save"), error.localizedDescription))
+            return
+        }
+        restartAutomation()
+    }
+
+    /// Listens with the saved settings when the API is on (and the vault unlocked), else not.
+    private func restartAutomation() {
+        automationServer?.stop()
+        automationServer = nil
+        guard let settings = deviceSettings.automation, settings.isEnabled, let manager, let repository else {
+            automationState = .stopped
+            return
+        }
+        let handler = AutomationHandler(manager: manager, repository: repository)
+        handler.waitForSync = { [weak self] in
+            while self?.isSyncing == true { try? await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        handler.onChange = { [weak self] in self?.refresh() }
+        let server = AutomationServer(settings: settings, handler: handler)
+        server.onStateChange = { [weak self] state in self?.automationState = state }
+        automationServer = server
+        server.start()
+    }
+
     private func updateDeviceSettings(_ change: (inout DeviceSettings) -> Void) throws {
         guard let vault = repository?.vault else { return }
         var updated = deviceSettings
@@ -468,6 +615,8 @@ final class AppModel: ObservableObject {
 struct ProfileDetails: Equatable {
     /// "host:port" of its proxy; nil when it connects directly.
     var proxyEndpoint: String?
+    /// Which proxy of the list it uses (`ProxyList.identity(of:)`): the Proxies sheet counts them.
+    var proxyIdentity: String?
     /// Where the proxy was last seen exiting (ISO 3166-1 alpha-2), when a lookup found it.
     var exitCountryCode: String?
     var ephemeral: Bool
@@ -475,6 +624,7 @@ struct ProfileDetails: Equatable {
 
     init(_ configuration: ProfileConfiguration) {
         proxyEndpoint = configuration.proxy.map { "\($0.host):\($0.port)" }
+        proxyIdentity = configuration.proxy.map(ProxyList.identity(of:))
         exitCountryCode = configuration.rememberedProxyLocation?.countryCode
         ephemeral = configuration.ephemeral
         deviceGeneration = configuration.deviceGeneration

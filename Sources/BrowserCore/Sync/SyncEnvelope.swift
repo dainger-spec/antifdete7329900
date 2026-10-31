@@ -49,10 +49,10 @@ public struct SyncCodec: @unchecked Sendable {
     let envelopeKey: SymmetricKey
     let objectIDKey: SymmetricKey
 
-    public init(vault: UnlockedVault) {
+    public init(vault: UnlockedVault) throws {
         self.vaultID = vault.vaultID
-        self.envelopeKey = vault.syncEnvelopeKey
-        self.objectIDKey = vault.syncObjectIDKey
+        self.envelopeKey = try vault.syncEnvelopeKey
+        self.objectIDKey = try vault.syncObjectIDKey
     }
 
     public func objectID(for logicalName: String) -> String {

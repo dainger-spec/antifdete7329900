@@ -16,6 +16,9 @@ public enum CoreError: Error, Equatable, CustomStringConvertible {
     /// The sync server answered with an unexpected HTTP status (401/403 = bad token).
     case syncServer(status: Int, message: String)
     case io(String)
+    /// Asked of a vault opened for one profile only (`ProfileGrant`, in that profile's own
+    /// process): what is named needs the whole vault.
+    case notGranted(String)
 
     public var description: String {
         switch self {
@@ -33,6 +36,7 @@ public enum CoreError: Error, Equatable, CustomStringConvertible {
         case .syncServer(let status, let message):
             return "Sync server error \(status)\(message.isEmpty ? "" : ": \(message)")"
         case .io(let detail): return "I/O error: \(detail)"
+        case .notGranted(let detail): return "Not available to a single profile's process: \(detail)"
         }
     }
 }

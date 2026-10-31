@@ -95,6 +95,13 @@ public enum MasterVault {
         return UnlockedVault(root: root, header: header, masterKey: SymmetricKey(data: raw))
     }
 
+    /// Opens the vault for one profile, without a password: the vault a profile's own process
+    /// works in (`ProfileGrant`, which the app hands to that process over a pipe). It reads and
+    /// writes that profile's files and refuses everything else the vault holds.
+    public static func open(in root: URL, grant: ProfileGrant) throws -> UnlockedVault {
+        UnlockedVault(root: root, header: try readHeader(in: root), grant: grant)
+    }
+
     /// Moves the whole vault folder aside — nothing is deleted — so that a new vault can be created
     /// in `root`: the way out when the master password is unknown. The backup is a sibling folder
     /// named `<root>-backup-<yyyy-MM-dd-HHmmss>` (with a counter if that exists); renaming it back
@@ -131,25 +138,45 @@ public enum MasterVault {
     }
 }
 
-/// An unlocked vault: holds the vault master key in memory until released.
+/// An unlocked vault: holds the vault master key in memory until released — or, in a profile's
+/// own process, only that profile's key (`grant`).
 public final class UnlockedVault: @unchecked Sendable {
     public let root: URL
     public private(set) var header: VaultHeader
-    private let masterKey: SymmetricKey
+    /// Nil in a vault opened for one profile.
+    private let masterKey: SymmetricKey?
+    /// The one profile this vault was opened for (`MasterVault.open(in:grant:)`); nil when it was
+    /// opened with the master password and holds the whole vault.
+    public let grant: ProfileGrant?
 
     init(root: URL, header: VaultHeader, masterKey: SymmetricKey) {
         self.root = root
         self.header = header
         self.masterKey = masterKey
+        self.grant = nil
+    }
+
+    init(root: URL, header: VaultHeader, grant: ProfileGrant) {
+        self.root = root
+        self.header = header
+        self.masterKey = nil
+        self.grant = grant
     }
 
     public var vaultID: UUID { header.vaultID }
 
-    var indexKey: SymmetricKey { masterKey.derive(info: "profile-index", salt: vaultSalt) }
-    var profileKeyWrappingKey: SymmetricKey { masterKey.derive(info: "profile-key-wrap", salt: vaultSalt) }
-    var syncEnvelopeKey: SymmetricKey { masterKey.derive(info: "sync-envelope", salt: vaultSalt) }
-    var syncObjectIDKey: SymmetricKey { masterKey.derive(info: "sync-object-id", salt: vaultSalt) }
-    var settingsKey: SymmetricKey { masterKey.derive(info: "device-settings", salt: vaultSalt) }
+    var indexKey: SymmetricKey { get throws { try vaultKey("profile-index") } }
+    var profileKeyWrappingKey: SymmetricKey { get throws { try vaultKey("profile-key-wrap") } }
+    var syncEnvelopeKey: SymmetricKey { get throws { try vaultKey("sync-envelope") } }
+    var syncObjectIDKey: SymmetricKey { get throws { try vaultKey("sync-object-id") } }
+    var settingsKey: SymmetricKey { get throws { try vaultKey("device-settings") } }
+    /// The proxy list (`proxies.bin`, `ProxyList`): this Mac's, never synced, like the settings.
+    var proxyListKey: SymmetricKey { get throws { try vaultKey("proxy-list") } }
+
+    private func vaultKey(_ purpose: String) throws -> SymmetricKey {
+        guard let masterKey else { throw CoreError.notGranted(purpose) }
+        return masterKey.derive(info: purpose, salt: vaultSalt)
+    }
 
     private var vaultSalt: Data { withUnsafeBytes(of: header.vaultID.uuid) { Data($0) } }
 
@@ -182,6 +209,7 @@ public final class UnlockedVault: @unchecked Sendable {
     }
 
     private func rewrap(password: String, kdf: KDFParameters) throws {
+        guard let masterKey else { throw CoreError.notGranted("master password") }
         let kek = try KeyDerivation.deriveKey(password: password, parameters: kdf)
         var raw = masterKey.rawBytes
         defer { wipe(&raw) }

@@ -128,8 +128,58 @@ final class WebDataStoreVault {
     /// `WKWebsiteDataStore(forIdentifier:)` directly, so `deleteData` knows it may remove it.
     static func makeStore(for profileID: UUID) -> WKWebsiteDataStore {
         registeredStoreIDs.insert(profileID)
+        excludeRootsFromCopies()
         return WKWebsiteDataStore(forIdentifier: profileID)
     }
+
+    private static var rootsExcluded = false
+
+    /// WebKit's directories of this app hold a running profile's data in plaintext: excluded from
+    /// Time Machine and its local snapshots, which would keep that plaintext after the seal. The
+    /// exclusion is an attribute of the folder, which the app never removes (only the profiles'
+    /// directories inside it), so once per process is enough.
+    private static func excludeRootsFromCopies() {
+        guard !rootsExcluded else { return }
+        rootsExcluded = true
+        for root in layout.searchRoots {
+            do {
+                try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                var values = URLResourceValues()
+                values.isExcludedFromBackup = true
+                var url = root
+                try url.setResourceValues(values)
+                // Read back from a URL of its own (no cached value): set, or only said to be.
+                let readBack = try URL(fileURLWithPath: root.path).resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
+                if readBack != true {
+                    // Measured in the sandboxed build (CI run 384): set without an error, read back
+                    // false. The same mark written as the attribute it is, and what that does.
+                    exclusionFailures.append("\(root.lastPathComponent): set without error, reads back \(String(describing: readBack)); \(markExcludedDirectly(root))")
+                }
+            } catch {
+                exclusionFailures.append("\(root.lastPathComponent): \(error.logKind) \(error.localizedDescription)")
+                Logger(subsystem: "PrivacyBrowser", category: "WebDataStoreVault")
+                    .error("Could not keep \(root.path, privacy: .private) out of backups: \(error.logKind, privacy: .public)")
+            }
+        }
+    }
+
+    /// Time Machine's exclusion mark written directly (the extended attribute the resource value
+    /// stands for), and what came of it.
+    private static func markExcludedDirectly(_ root: URL) -> String {
+        guard let value = try? PropertyListSerialization.data(fromPropertyList: "com.apple.backupd", format: .binary, options: 0) else {
+            return "no attribute value"
+        }
+        let name = "com.apple.metadata:com_apple_backup_excludeItem"
+        let result = value.withUnsafeBytes { setxattr(root.path, name, $0.baseAddress, $0.count, 0, 0) }
+        if result != 0 { return "setxattr: \(String(cString: strerror(errno)))" }
+        let readBack = try? URL(fileURLWithPath: root.path).resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
+        return "setxattr: done, reads back \(String(describing: readBack))"
+    }
+
+    /// The roots `excludeRootsFromCopies` could not mark, and why (the self-test shows them).
+    private(set) static var exclusionFailures: [String] = []
+    /// Whether `excludeRootsFromCopies` has run in this process (the self-test shows it).
+    static var rootsExclusionRan: Bool { rootsExcluded }
 
     // MARK: Launch
 
@@ -211,14 +261,14 @@ final class WebDataStoreVault {
                 return result
             } catch {
                 lastError = error
-                log.notice("Seal attempt \(result.attempts) for \(profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                log.notice("Seal attempt \(result.attempts) for \(profileID.uuidString, privacy: .public) failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             }
         }
         if activeStore && forceSealWhenStoreStaysInUse {
-            log.error("WebKit kept the data store of \(profileID.uuidString, privacy: .public) in use through \(result.attempts) attempts (\(String(describing: lastError), privacy: .public)); forcing the seal before quitting")
+            log.error("WebKit kept the data store of \(profileID.uuidString, privacy: .public) in use through \(result.attempts) attempts (\(lastError.map { $0.logKind } ?? "no error", privacy: .public) \(String(describing: lastError), privacy: .private)); forcing the seal before quitting")
             return try await forceSeal(profileID: profileID, key: key, result: result)
         }
-        log.error("Giving up sealing \(profileID.uuidString, privacy: .public): \(String(describing: lastError), privacy: .public)")
+        log.error("Giving up sealing \(profileID.uuidString, privacy: .public): \(lastError.map { $0.logKind } ?? "no error", privacy: .public) \(String(describing: lastError), privacy: .private)")
         throw VaultError.storeStillInUse(profileID)
     }
 
@@ -250,14 +300,14 @@ final class WebDataStoreVault {
                         try FileManager.default.removeItem(at: directory)
                     } catch {
                         // Left for the next launch or unlock to discard (the marker is in place).
-                        log.error("Forced seal of \(profileID.uuidString, privacy: .public) could not delete \(directory.path, privacy: .public): \(String(describing: error), privacy: .public)")
+                        log.error("Forced seal of \(profileID.uuidString, privacy: .public) could not delete \(directory.path, privacy: .private): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
                     }
                 }
                 result.forced = true
                 log.error("Force-sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes")
                 return result
             } catch {
-                log.error("Forced seal attempt for \(profileID.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                log.error("Forced seal attempt for \(profileID.uuidString, privacy: .public) failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             }
         }
         throw VaultError.storeStillInUse(profileID)
@@ -272,7 +322,7 @@ final class WebDataStoreVault {
         let marker = forcedSealMarkerURL(for: profileID)
         guard FileManager.default.fileExists(atPath: marker.path) else { return false }
         for directory in Self.discoverDirectories(for: profileID) {
-            log.notice("Discarding WebKit data written after the forced seal of \(profileID.uuidString, privacy: .public): \(directory.path, privacy: .public)")
+            log.notice("Discarding WebKit data written after the forced seal of \(profileID.uuidString, privacy: .public): \(directory.path, privacy: .private)")
             try FileManager.default.removeItem(at: directory)
         }
         try FileManager.default.removeItem(at: marker)
@@ -290,7 +340,7 @@ final class WebDataStoreVault {
             do {
                 try await Self.removeStore(for: profileID)
             } catch {
-                log.notice("remove(forIdentifier:) for \(profileID.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+                log.notice("remove(forIdentifier:) for \(profileID.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             }
         }
         for directory in Self.discoverDirectories(for: profileID) {

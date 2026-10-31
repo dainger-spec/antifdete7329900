@@ -1,0 +1,304 @@
+/* Home scene "sites" (tools/templates/pages/home/sites.mjs): one Safari window, the same site in three
+   profiles; the page re-sets itself line by line as the profile changes. Everything is scoped to .sc-sites.
+   Progress: --t of each [data-r] part (the engine), --x of each roll and of the list (assets/scenes/sites.js:
+   0 = the first profile, 1 = the second, 2 = the third). Without the script: --t 1, --x 0, finished.
+   The window is as tall as its page: blocks the screen has no room for are left out whole (never cut). */
+
+/* The sample site's serif where the system has none of its own before it in the stack (Linux shots): Bitstream
+   Charter, converted to WOFF2 (sites/LICENSE-charter.txt). On a Mac New York / Iowan Old Style / Charter
+   come first and these files are never fetched. */
+@font-face { font-family: "Charter Web"; src: url("sites/charter-regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Charter Web"; src: url("sites/charter-bold.woff2") format("woff2"); font-weight: 600 700; font-style: normal; font-display: block; }
+
+.sc-sites { --row: 104px; }
+
+/* MARK: Layout — the headline; the window; beside it, what the site sees */
+.sc-sites .sit {
+  display: grid; grid-template-columns: minmax(0, 1fr) 288px; grid-template-areas: "head head" "stage side";
+  column-gap: 64px; row-gap: 44px; align-items: center;
+}
+.sc-sites .sit-head { grid-area: head; }
+.sc-sites .sit-stage { grid-area: stage; position: relative; }
+.sc-sites .sit-side { grid-area: side; position: relative; z-index: 1; }
+.js-scenes .sc-sites .sit { padding-top: 40px; }
+
+/* MARK: The window's shadow — a physical one, neutral: a bright window resting over a dark page */
+.sc-sites .sit-light {
+  position: absolute; inset: 0; z-index: 0; border-radius: 20px; pointer-events: none;
+  box-shadow: 0 40px 90px -10px rgba(0, 0, 0, 0.7), 0 0 80px -24px rgba(255, 255, 255, 0.06);
+  opacity: var(--t, 1);
+}
+
+/* MARK: The Safari window — macOS 26, light appearance, one tab (the chrome is 52 px, as in Safari 26) */
+.sc-sites .sw {
+  position: relative; z-index: 1; border-radius: 20px; overflow: hidden; background: #FFFFFF; color: #1D1D1F;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif; letter-spacing: 0;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+  isolation: isolate; container: sw / inline-size;
+}
+.sc-sites .sw-bar {
+  position: relative; z-index: 2; height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 18px;
+  background: #FFFFFF; box-shadow: 0 1px 0 rgba(0, 0, 0, 0.055);
+}
+.sc-sites .sw-lights { display: flex; gap: 8px; margin-right: 8px; }
+.sc-sites .sw-lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.14); }
+.sc-sites .sw-lights i:nth-child(1) { background: #FF5F57; }
+.sc-sites .sw-lights i:nth-child(2) { background: #FEBC2E; }
+.sc-sites .sw-lights i:nth-child(3) { background: #28C840; }
+/* Liquid Glass controls over a light page: near-white capsules, a rim of light, a soft shadow */
+.sc-sites .sw-cap, .sc-sites .sw-addr {
+  height: 32px; display: inline-flex; align-items: center; gap: 2px; padding: 0 8px; border-radius: 999px; color: #3A3A3F;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 246, 248, 0.94));
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.11), 0 1px 2px rgba(0, 0, 0, 0.06), 0 3px 10px rgba(0, 0, 0, 0.05), inset 0 1px 0 #FFFFFF;
+}
+.sc-sites .sw-cap svg { display: block; flex: none; }
+.sc-sites .sw-side { gap: 1px; padding: 0 9px; }
+.sc-sites .sw-side svg:last-child { opacity: 0.6; }
+.sc-sites .sw-hist { gap: 10px; padding: 0 10px; }
+.sc-sites .sw-hist svg:last-child { opacity: 0.32; }
+.sc-sites .sw-tools { gap: 14px; padding: 0 12px; margin-left: auto; }
+.sc-sites .sw-prof { padding: 0 12px 0 10px; font: 500 13px/16px var(--font); color: #1D1D1F; }
+.sc-sites .sw-who .rv { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; justify-self: center; }
+.sc-sites .sw .flag circle:last-child { stroke: rgba(0, 0, 0, 0.12); }
+.sc-sites .sw-addr {
+  position: relative; flex: 0 1 380px; min-width: 0; margin-left: auto; justify-content: center; gap: 8px; padding: 0 16px; overflow: hidden;
+  font: 500 13px/16px var(--font); color: #1D1D1F;
+}
+.sc-sites .sw-pg { position: absolute; left: 12px; top: 8px; color: #8E8E93; }
+.sc-sites .sw-url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Safari's loading line along the foot of the address field (only while a profile's page sets) */
+.sc-sites .sw-load {
+  position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: #2F6BEF;
+  transform-origin: left; transform: scaleX(var(--l, 0)); opacity: var(--lo, 0);
+}
+
+/* MARK: The site — Meridian, a news site with an edition per country; monochrome and typographic */
+.sc-sites .sw-page { position: relative; z-index: 1; color: #111214; background: #FFFFFF; padding-bottom: 30px; }
+.sc-sites .mp-logo, .sc-sites .mp-title, .sc-sites .mp-most li, .sc-sites .mp-n, .sc-sites .mp-more {
+  font-family: ui-serif, "New York", "Iowan Old Style", Charter, "Charter Web", Georgia, serif;
+}
+.sc-sites .sw-page [lang="ja"] { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans CJK JP", "IPAPGothic", sans-serif; word-break: auto-phrase; }
+.sc-sites .mp-title [lang="ja"], .sc-sites .mp-most li [lang="ja"], .sc-sites .mp-more [lang="ja"] { font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif CJK JP", "IPAPGothic", serif; }
+
+.sc-sites .mp-util {
+  display: flex; align-items: center; justify-content: space-between; height: 38px; padding: 0 28px;
+  font: 500 12.5px/16px var(--font); color: #4A4B50; border-bottom: 1px solid #EDEDEF;
+}
+.sc-sites .mp-ed .rv { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sc-sites .mp-ed svg { opacity: 0.55; }
+.sc-sites .mp-acct { display: inline-flex; align-items: center; gap: 16px; }
+.sc-sites .mp-in .rv, .sc-sites .mp-subs .rv, .sc-sites .mp-wx .rv { justify-self: end; }
+.sc-sites .mp-sub { display: inline-flex; align-items: center; height: 26px; padding: 0 13px; border-radius: 999px; background: #111214; color: #FFFFFF; font-weight: 600; white-space: nowrap; }
+
+.sc-sites .mp-mast { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 24px; padding: 20px 28px 16px; }
+.sc-sites .mp-logo { font-size: 48px; line-height: 1; font-weight: 700; letter-spacing: -0.02em; color: #0B0B0C; }
+.sc-sites .mp-when, .sc-sites .mp-wx { display: grid; gap: 3px; font: 400 12.5px/16px var(--font); color: #6A6B70; }
+.sc-sites .mp-date, .sc-sites .mp-city { color: #111214; font-weight: 600; }
+.sc-sites .mp-wx { justify-items: end; text-align: right; }
+.sc-sites .sw-page .rl.mp-datel { display: none; }
+
+.sc-sites .mp-nav {
+  display: flex; flex-direction: column; justify-content: center; margin: 0 28px; height: 43px; border-top: 3px double #16171A; border-bottom: 1px solid #E6E6E9;
+  font: 500 13px/16px var(--font); color: #2A2B30;
+}
+.sc-sites .mp-nav .rv { display: flex; justify-content: center; gap: 30px; white-space: nowrap; }
+
+.sc-sites .mp-main { display: grid; grid-template-columns: minmax(0, 1fr) 236px; padding: 26px 28px 0; }
+.sc-sites .mp-story { padding-right: 30px; border-right: 1px solid #EDEDEF; min-width: 0; }
+.sc-sites .mp-kick { font: 700 11px/14px var(--font); letter-spacing: 0.09em; text-transform: uppercase; color: #111214; }
+.sc-sites .mp-kick [lang="ja"] { letter-spacing: 0.04em; }
+.sc-sites .rl.mp-title { margin-top: 12px; font-size: 38px; line-height: 41px; font-weight: 700; letter-spacing: -0.012em; color: #0B0B0C; }
+.sc-sites .mp-title [lang="ja"] { font-size: 31px; letter-spacing: 0.01em; font-weight: 700; }
+.sc-sites .rl.mp-dek { margin-top: 14px; font: 400 16px/24px var(--font); color: #4A4B50; max-width: 34em; text-wrap: pretty; }
+.sc-sites .sw-page .rl.mp-dek-s { display: none; }
+.sc-sites .rl.mp-by { margin-top: 14px; font: 400 12px/16px var(--font); color: #8A8B90; }
+.sc-sites .mp-most { padding-left: 24px; min-width: 0; }
+.sc-sites .mp-mt { font: 700 11px/14px var(--font); letter-spacing: 0.09em; text-transform: uppercase; color: #111214; padding-bottom: 10px; border-bottom: 1px solid #111214; }
+.sc-sites .mp-most ol { list-style: none; margin: 0; padding: 0; }
+.sc-sites .mp-most li { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; padding: 12px 0; border-bottom: 1px solid #EDEDEF; font-size: 16px; line-height: 21px; font-weight: 400; color: #16171A; }
+.sc-sites .mp-most li:last-child { border-bottom: 0; }
+.sc-sites .mp-n { font-size: 20px; line-height: 21px; font-weight: 700; color: #B4B5BA; }
+.sc-sites .mp-more { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin: 24px 28px 0; padding-top: 18px; border-top: 1px solid #E6E6E9; font-size: 18px; line-height: 23px; font-weight: 700; color: #16171A; }
+.sc-sites .mp-more b { display: block; margin-bottom: 6px; font: 700 11px/14px var(--font); letter-spacing: 0.09em; text-transform: uppercase; color: #6A6B70; }
+
+/* The site is responsive to its window, as a real one is to its viewport: narrower windows set the lead story
+   smaller and the column beside it narrower (phones have their own layout below) */
+@container sw (max-width: 779px) {
+  .sc-sites .mp-main { grid-template-columns: minmax(0, 1fr) 204px; }
+  .sc-sites .mp-story { padding-right: 24px; }
+  .sc-sites .mp-most { padding-left: 20px; }
+  .sc-sites .rl.mp-title { font-size: 32px; line-height: 35px; }
+  .sc-sites .mp-title [lang="ja"] { font-size: 26px; }
+  .sc-sites .mp-most li { font-size: 15px; line-height: 20px; }
+  .sc-sites .mp-more { font-size: 16px; line-height: 21px; gap: 24px; }
+  .sc-sites .mp-nav .rv { gap: 22px; }
+  .sc-sites .mp-logo { font-size: 44px; }
+}
+
+/* MARK: Rolls — three variants in one cell (the cell takes the largest); the one at --x shows. As the profile
+   changes, the old line lifts a little and goes, then the new one rises into place: the two never share a
+   pixel, and down the page the lines set one after another, like a page laying itself out. */
+.sc-sites .rl { display: inline-grid; vertical-align: top; }
+.sc-sites .rl.b { display: grid; }
+.sc-sites .rv {
+  grid-area: 1 / 1; --v: calc(var(--x, 0) - var(--k));
+  opacity: clamp(0, calc(1 - 2.2 * max(var(--v), -1 * var(--v))), 1);
+  transform: translateY(calc(var(--v) * -0.5em));
+}
+
+/* MARK: What the site sees. The marker follows the profile in the window; at the end it spans all three and
+   every row lights (--all, 0 → 1): one moment, three countries, all at once. */
+.sc-sites .sit-k { font: 600 14px/20px var(--font); color: var(--text-tertiary); }
+.sc-sites .sit-track { position: relative; margin-top: 16px; }
+.sc-sites .sit-list { list-style: none; margin: 0; padding: 0 0 0 22px; }
+.sc-sites .sit-track::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, 0.12); }
+.sc-sites .sit-bar {
+  position: absolute; left: -0.5px; top: 0; width: 2px; height: var(--row); border-radius: 2px; background: var(--text-primary);
+  transform-origin: 50% 0; transform: translateY(calc(var(--x, 0) * (1 - var(--all, 0)) * var(--row))) scaleY(calc(1 + 2 * var(--all, 0)));
+}
+.sc-sites .sit-it {
+  --v: calc(var(--x, 0) - var(--k)); --w: max(var(--all, 0), clamp(0, calc(1 - max(var(--v), -1 * var(--v))), 1));
+  height: var(--row); display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "who who" "c t" "m m";
+  align-content: center; row-gap: 3px; column-gap: 12px;
+}
+.sc-sites .sit-who { grid-area: who; display: inline-flex; align-items: center; gap: 8px; font: 500 14px/20px var(--font); color: var(--text-secondary); }
+.sc-sites .sit-who .flag { opacity: calc(0.7 + 0.3 * var(--w)); }
+.sc-sites .sit-c, .sc-sites .sit-t {
+  font: 600 26px/32px var(--font-display); letter-spacing: -0.02em;
+  color: color-mix(in srgb, var(--text-primary) calc(var(--w) * 100%), var(--text-tertiary));
+}
+.sc-sites .sit-c { grid-area: c; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-sites .sit-t { grid-area: t; font-weight: 500; font-variant-numeric: tabular-nums; }
+.sc-sites .sit-m { grid-area: m; font-size: 13.5px; line-height: 20px; color: var(--text-tertiary); white-space: nowrap; }
+.sc-sites .sit-lead { margin-top: 30px; font: 400 17px/26px var(--font); color: var(--text-secondary); text-wrap: pretty; }
+
+/* MARK: Arrival (scenes only): the window lifts into place as the scene settles */
+.js-scenes .sc-sites .sw, .js-scenes .sc-sites .sit-light { transform: translateY(calc((1 - var(--t)) * 72px)) scale(calc(0.94 + 0.06 * var(--t))); transform-origin: 50% 0; }
+.js-scenes .sc-sites .sit-side { transform: translateY(calc((1 - var(--t)) * 36px)); opacity: var(--t); }
+
+/* MARK: Short desktop screens (scenes only): the page in the window loses whole blocks, from the bottom up */
+@media (min-width: 1100px) and (max-height: 859px) {
+  .js-scenes .sc-sites .mp-more { display: none; }
+}
+@media (min-width: 1100px) and (max-height: 739px) {
+  .js-scenes .sc-sites .sit { row-gap: 32px; padding-top: 48px; }
+  .js-scenes .sc-sites .mp-mast { padding-block: 14px 12px; }
+  .js-scenes .sc-sites .rl.mp-by, .js-scenes .sc-sites .mp-most li:nth-child(3) { display: none; }
+  .js-scenes .sc-sites .mp-most li:nth-child(2) { border-bottom: 0; }
+  .js-scenes .sc-sites .sit-lead { display: none; }
+}
+/* Big screens: a closer shot — the composition widens and the window comes nearer (the whole window scales) */
+@media (min-width: 1600px) and (min-height: 960px) {
+  .sc-sites .sit { max-width: 1520px; grid-template-columns: minmax(0, 1fr) 320px; column-gap: 80px; }
+  .sc-sites .sit-stage { zoom: 1.14; }
+}
+
+/* MARK: Tablets: the list goes under the window, in a row */
+@media (max-width: 1099px) {
+  .sc-sites { --row: 92px; }
+  .sc-sites .sit { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "stage" "side"; row-gap: 34px; }
+  .js-scenes .sc-sites .sit { padding-top: 64px; row-gap: 28px; }
+  .sc-sites .sit-track { margin-top: 10px; }
+  .sc-sites .sit-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 28px; padding: 14px 0 0; }
+  .sc-sites .sit-track::before { left: 0; right: 0; top: 0; bottom: auto; width: auto; height: 1px; }
+  .sc-sites .sit-bar {
+    top: -0.5px; height: 2px; transform: none;
+    left: calc(var(--x, 0) * (1 - var(--all, 0)) * ((100% - 56px) / 3 + 28px)); width: calc((100% - 56px) / 3 + var(--all, 0) * ((100% - 56px) * 2 / 3 + 56px));
+  }
+  .sc-sites .sit-it { height: auto; }
+  .sc-sites .sit-c, .sc-sites .sit-t { font-size: 22px; line-height: 28px; }
+  .sc-sites .sit-lead { max-width: 640px; margin-top: 24px; }
+  .js-scenes .sc-sites .sit-lead { display: none; }
+  .js-scenes .sc-sites .mp-more { display: none; }
+}
+@media (min-width: 600px) and (max-width: 1099px) {
+  .sc-sites .sit-head { font-size: 48px; line-height: 52px; letter-spacing: -0.03em; }
+}
+@media (min-width: 600px) and (max-width: 1099px) and (max-height: 819px) {
+  .js-scenes .sc-sites .rl.mp-by, .js-scenes .sc-sites .mp-most li:nth-child(3) { display: none; }
+  .js-scenes .sc-sites .mp-most li:nth-child(2) { border-bottom: 0; }
+  .js-scenes .sc-sites .sit-k { display: none; }
+}
+@media (min-width: 600px) and (max-width: 1099px) and (min-height: 1000px) {
+  .js-scenes .sc-sites .mp-more { display: grid; }
+}
+
+/* MARK: Phones: a portrait composition — the headline, a narrow window with the site's narrow layout, the list.
+   The window is as tall as its page (the standfirst keeps two lines); the list has room around it. */
+@media (max-width: 599px) {
+  .sc-sites { --row: 62px; }
+  .sc-sites .sit { row-gap: 22px; }
+  .js-scenes .sc-sites .sit { padding-top: 56px; }
+  .sc-sites .sw, .sc-sites .sit-light { border-radius: 16px; }
+  .sc-sites .sw-bar { height: 46px; gap: 7px; padding: 0 8px 0 13px; }
+  .sc-sites .sw-lights { gap: 6px; margin-right: 2px; }
+  .sc-sites .sw-lights i { width: 10px; height: 10px; }
+  .sc-sites .sw-side, .sc-sites .sw-hist, .sc-sites .sw-tools { display: none; }
+  .sc-sites .sw-cap, .sc-sites .sw-addr { height: 30px; }
+  .sc-sites .sw-prof { padding: 0 10px 0 8px; }
+  .sc-sites .sw-addr { flex: 1 1 auto; padding: 0 10px; }
+  .sc-sites .sw-pg { display: none; }
+  .sc-sites .sw-page { padding-bottom: 20px; }
+
+  .sc-sites .mp-util { height: 34px; padding: 0 16px; }
+  .sc-sites .mp-in { display: none; }
+  .sc-sites .mp-sub { height: 24px; padding: 0 11px; }
+  .sc-sites .mp-mast { grid-template-columns: minmax(0, 1fr); justify-items: center; padding: 14px 16px 4px; }
+  .sc-sites .mp-when, .sc-sites .mp-wx { display: none; }
+  .sc-sites .mp-logo { font-size: 36px; }
+  .sc-sites .sw-page .rl.mp-datel { display: grid; margin: 0 16px 6px; font: 500 14px/20px var(--font); color: #111214; }
+  .sc-sites .mp-datel .rv { justify-self: center; white-space: nowrap; }
+  .sc-sites .mp-datel i { font-style: normal; color: #8A8B90; }
+  .sc-sites .mp-nav { margin: 0 16px; height: 37px; }
+  .sc-sites .mp-nav .rv { justify-content: flex-start; gap: 18px; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, #000 80%, transparent); mask-image: linear-gradient(90deg, #000 80%, transparent); }
+  .sc-sites .mp-main { grid-template-columns: minmax(0, 1fr); padding: 16px 16px 0; }
+  .sc-sites .mp-story { padding-right: 0; border-right: 0; }
+  .sc-sites .mp-most, .sc-sites .mp-more, .sc-sites .rl.mp-by { display: none; }
+  .sc-sites .rl.mp-title { font-size: 25px; line-height: 28px; margin-top: 9px; }
+  .sc-sites .mp-title [lang="ja"] { font-size: 21px; }
+  .sc-sites .rl.mp-dek { font-size: 15px; line-height: 22px; margin-top: 10px; }
+  .sc-sites .sw-page .rl.mp-dek-l { display: none; }
+  .sc-sites .sw-page .rl.mp-dek-s { display: grid; }
+
+  .sc-sites .sit-k { font-size: 15px; }
+  .sc-sites .sit-track { margin-top: 6px; }
+  .sc-sites .sit-list { display: block; padding: 0 0 0 18px; }
+  .sc-sites .sit-track::before { left: 0; top: 0; bottom: 0; right: auto; width: 1px; height: auto; }
+  .sc-sites .sit-bar { left: -0.5px; top: 0; width: 2px; height: var(--row); transform: translateY(calc(var(--x, 0) * (1 - var(--all, 0)) * var(--row))) scaleY(calc(1 + 2 * var(--all, 0))); }
+  .sc-sites .sit-it { height: var(--row); grid-template-columns: 24px minmax(0, 1fr) auto; grid-template-areas: "who c t" ". m m"; row-gap: 2px; column-gap: 0; align-items: center; }
+  .sc-sites .sit-who > span { display: none; }
+  .sc-sites .sit-who .flag { width: 16px; height: 16px; }
+  .sc-sites .sit-c, .sc-sites .sit-t { font-size: 19px; line-height: 24px; letter-spacing: -0.01em; }
+  .sc-sites .sit-c { font-weight: 600; }
+  .sc-sites .sit-m { font-size: 15px; line-height: 20px; }
+  .sc-sites .sit-lead { margin-top: 18px; font-size: 17px; line-height: 25px; }
+  .js-scenes .sc-sites .sit-side { transform: none; opacity: var(--t, 1); }
+  .js-scenes .sc-sites .sit-lead { display: none; }
+}
+/* Shorter phones (and phones in Safari, whose toolbars take a share of the screen — the pin is 100svh tall):
+   whole blocks leave, never a cut line. Under 800 px the list's label goes; under 740 the window drops its
+   edition bar and standfirst; under 620 (an iPhone SE in Safari) the nav and the list's mono line go too. */
+@media (max-width: 599px) and (max-height: 799px) {
+  .js-scenes .sc-sites { --row: 56px; }
+  .js-scenes .sc-sites .sit { row-gap: 16px; }
+  .js-scenes .sc-sites .sit-k { display: none; }
+}
+@media (max-width: 599px) and (max-height: 739px) {
+  .js-scenes .sc-sites { --row: 54px; }
+  .js-scenes .sc-sites .mp-util, .js-scenes .sc-sites .sw-page .rl.mp-dek-s { display: none; }
+  .js-scenes .sc-sites .mp-mast { padding-top: 16px; }
+}
+@media (max-width: 599px) and (max-height: 619px) {
+  .js-scenes .sc-sites { --row: 36px; }
+  .js-scenes .sc-sites .sit { row-gap: 14px; }
+  .js-scenes .sc-sites .sit-head { font-size: 30px; line-height: 34px; }
+  .js-scenes .sc-sites .mp-nav { height: 0; border-bottom: 0; overflow: hidden; }
+  .js-scenes .sc-sites .mp-main { padding-top: 14px; }
+  .js-scenes .sc-sites .sit-it { grid-template-areas: "who c t"; }
+  .js-scenes .sc-sites .sit-m { display: none; }
+}
+@media (max-width: 374px) {
+  .sc-sites .sit-head { font-size: 31px; line-height: 36px; }
+  .sc-sites .rl.mp-title { font-size: 22px; line-height: 26px; }
+  .sc-sites .mp-title [lang="ja"] { font-size: 19px; }
+}
