@@ -140,6 +140,16 @@ enum SafariMenuWalk {
                 }
             }
         }
+        // Every method of Safari's input delegate about forms, whether or not it is one of the four:
+        // a callback WebKit added would not be replaced.
+        if let delegate = NSClassFromString("BrowserInputDelegate") {
+            var count: UInt32 = 0
+            if let methods = class_copyMethodList(delegate, &count) {
+                let names = (0..<Int(count)).map { NSStringFromSelector(method_getName(methods[$0])) }
+                free(methods)
+                found.append("BrowserInputDelegate's form methods: " + names.filter { $0.localizedCaseInsensitiveContains("form") || $0.localizedCaseInsensitiveContains("submit") }.sorted().joined(separator: " "))
+            }
+        }
         return found.sorted().joined(separator: "; ")
     }
 
