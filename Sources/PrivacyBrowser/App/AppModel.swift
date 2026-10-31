@@ -183,6 +183,18 @@ final class AppModel: ObservableObject {
         return path
     }
 
+    /// This app's Settings window, from outside SwiftUI's views (a profile's ⌘, arrives over its
+    /// channel): the app menu's Settings… item — SwiftUI's own, ⌘, — is chosen as a click would.
+    /// The private `showSettingsWindow:` action this used did nothing on macOS 26 (the owner's Mac,
+    /// 31 October: the Profiles window came forward, Settings did not open).
+    static func openSettingsWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        guard let appMenu = NSApp.mainMenu?.items.first?.submenu,
+              let index = appMenu.items.firstIndex(where: { $0.keyEquivalent == "," && $0.keyEquivalentModifierMask == .command })
+        else { return }
+        appMenu.performActionForItem(at: index)
+    }
+
     private func didUnlock(_ vault: UnlockedVault) throws {
         let repository = try ProfileRepository(vault: vault)
         repository.removeOrphanedDirectories()
@@ -194,10 +206,7 @@ final class AppModel: ObservableObject {
         }
         manager.onConfigurationChanged = { [weak self] _ in self?.refresh() }
         // ⌘, in a profile's window: this app's Settings, in front.
-        manager.onShowSettings = {
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        }
+        manager.onShowSettings = { Self.openSettingsWindow() }
         manager.onShowPasswords = { [weak self] id in
             guard let self, let summary = self.profiles.first(where: { $0.id == id }) else { return }
             self.activateProfilesWindow()

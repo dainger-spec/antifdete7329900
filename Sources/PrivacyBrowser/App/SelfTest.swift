@@ -215,6 +215,7 @@ final class SelfTest {
         await group("exceptions") { try await exceptionChecks() }
         await group("Safari's nibs") { try await safariNibChecks() }
         await group("nested Safari homes") { try nestedSafariHomes() }
+        await group("saved window frame") { savedWindowFrame() }
         await group("storage isolation and shims") { try await storageIsolationAndShims(repository) }
         await group("device generations") { try await deviceGenerations(repository) }
         await group("fingerprint surface") { try await fingerprintSurface(repository) }
@@ -1387,6 +1388,9 @@ final class SelfTest {
                   report.safariPreferences["UniversalSearchEnabled"] == "0"
                     && report.safariPreferences["AutoFillPasswords"] == "0",
                   "\(report.safariPreferences)")
+            check("Safari chrome: History › Home opens a blank page in a profile without a start page, not Apple's site",
+                  SafariChrome.homePage(for: ProfileConfiguration()) == "about:blank",
+                  SafariChrome.homePage(for: ProfileConfiguration()))
             check("Safari chrome: Safari's home page, which History › Home opens, is the profile's start page",
                   report.safariPreferences[SafariChrome.homePageKey] == "http://start-\(run).\(domain)\(startPath)",
                   "\(report.safariPreferences[SafariChrome.homePageKey] ?? "unset")")
@@ -1872,6 +1876,34 @@ final class SelfTest {
                   && SafariPaths.moved(profileHome + "/Library/Safari/History.db", realHome: realHome, home: profileHome) == nil
                   && SafariPaths.moved(profileHome, realHome: realHome, home: profileHome) == nil
                   && SafariPaths.moved("/tmp/elsewhere", realHome: realHome, home: profileHome) == nil)
+    }
+
+    /// Where a profile's first window opens (`SavedWindowFrame`): the frame the user left, kept with
+    /// the window size it was saved under — the profile's size again once that was changed in the
+    /// editor — and never larger than the screen, or hanging outside it. On a defaults suite of its
+    /// own; the window itself moved and reopened is not shown here.
+    private func savedWindowFrame() {
+        let suite = "PrivacyBrowser.SelfTest.Frame-\(UUID().uuidString.prefix(8))"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            check("saved window frame: a defaults suite of the check's own", false)
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let size = WindowSize.custom(width: 1324, height: 940)
+        let frame = NSRect(x: 246, y: 112, width: 1054, height: 795)
+        let nothingYet = SavedWindowFrame.read(for: size, in: defaults)
+        SavedWindowFrame.save(frame, for: size, in: defaults)
+        check("saved window frame: the first window opens where the user left one, and at the profile's size until then",
+              nothingYet == nil && SavedWindowFrame.read(for: size, in: defaults) == frame,
+              "before \(String(describing: nothingYet)), after \(String(describing: SavedWindowFrame.read(for: size, in: defaults)))")
+        check("saved window frame: a window size changed in the editor since is used again, not the frame kept under the old one",
+              SavedWindowFrame.read(for: .custom(width: 1440, height: 900), in: defaults) == nil && SavedWindowFrame.read(for: nil, in: defaults) == nil)
+        let visible = NSRect(x: 0, y: 0, width: 1470, height: 920)
+        let huge = SavedWindowFrame.fitted(NSRect(x: -400, y: 700, width: 3000, height: 2000), in: visible)
+        let away = SavedWindowFrame.fitted(NSRect(x: 2500, y: 1500, width: 800, height: 600), in: visible)
+        check("saved window frame: a kept frame is never larger than the screen, and never hangs outside it",
+              huge == visible && visible.contains(away) && away.size == NSSize(width: 800, height: 600),
+              "\(huge) \(away)")
     }
 
     /// This build's executable with `arguments`, in a process of its own: what it printed, and how it

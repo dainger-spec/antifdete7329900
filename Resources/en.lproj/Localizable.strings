@@ -972,7 +972,7 @@
 "recovery.homeNotSealed" = "Could not encrypt Safari's state of profile “%1$@” again: %2$@";
 "recovery.webDataNotSealed" = "Could not encrypt the data of profile “%1$@” again: %2$@";
 "profile.homeNotSealed" = "Could not encrypt Safari's state of profile “%1$@”: %2$@. It is encrypted again at the next unlock.";
-"profile.crashed" = "Profile “%@” ended unexpectedly. Its data is encrypted; its next launch carries on from where it stopped.";
+"profile.crashed" = "Profile “%@” ended unexpectedly. Its data is encrypted: its next launch has its sign-ins and cookies, but not the tabs it had open.";
 "profile.crashedUnsealed" = "Profile “%@” ended unexpectedly, and its data is not encrypted yet: that happens at the next unlock.";
 
 /* Warm-up: several profiles in a queue, a schedule, what a run left per site */

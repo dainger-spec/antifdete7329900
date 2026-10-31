@@ -131,9 +131,17 @@ enum SafariChromeHost {
             log.error("Safari's chrome did not open a window for \(session.profileName, privacy: .private); using ours")
             return false
         }
-        // The profile's window size on the first window; one Safari opens later (⌘N) is Safari's.
-        if let size = session.configuration.windowSize, let window = controller.window {
-            WindowSizing.apply(size, to: window)
+        // The first window opens where the user last left one of the profile's (`SavedWindowFrame`);
+        // the first time, or once its window size was changed in the editor, at that size. One
+        // Safari opens later (⌘N) is Safari's.
+        if let window = controller.window {
+            let size = session.configuration.windowSize
+            savedFrameSize = size
+            if let saved = SavedWindowFrame.read(for: size), let visible = (window.screen ?? NSScreen.main)?.visibleFrame {
+                window.setFrame(SavedWindowFrame.fitted(saved, in: visible), display: false)
+            } else if let size {
+                WindowSizing.apply(size, to: window)
+            }
         }
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
@@ -157,6 +165,9 @@ enum SafariChromeHost {
         _ = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { note in
             guard let closing = note.object as? NSWindow else { return }
             MainActor.assumeIsolated {
+                // Where it was, for the profile's next first window — closed by the user, or by a
+                // stop or a quit before the seal.
+                if isBrowserWindow(closing) { SavedWindowFrame.save(closing.frame, for: savedFrameSize) }
                 guard !isClosingEveryWindow, isBrowserWindow(closing) else { return }
                 let others = NSApp.windows.filter { $0 !== closing && $0.isVisible && isBrowserWindow($0) }
                 if others.isEmpty {
@@ -166,6 +177,9 @@ enum SafariChromeHost {
             }
         }
     }
+
+    /// The profile's window size the frames of this run are saved under.
+    private static var savedFrameSize: WindowSize?
 
     /// A browser window of Safari's: its controller is Safari's `BrowserWindowController` (ours,
     /// of the same name, lives in this module and is named with it).
@@ -225,5 +239,43 @@ enum HostedPageHistory {
 
     private static func isRecorded(_ webView: WKWebView, _ url: URL) -> Bool {
         !(webView.navigationDelegate is BrowserTab) && ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+    }
+}
+
+/// Where a profile's first window opens: where the user last left a window of it, as Safari does —
+/// kept in the profile's own defaults (in its home, sealed with it, beside Safari's own sidebar and
+/// toolbar state). The profile's window size is used the first time, and again once it has been
+/// changed in the editor: a frame is kept with the size it was saved under. Up to 1 November the
+/// window size was put on every launch, over what the user had made of the window (the owner's
+/// Mac, 31 October: moved and resized, it came back at the profile's size, centred).
+enum SavedWindowFrame {
+    static let frameKey = "PBProfileWindowFrame"
+    static let sizeKey = "PBProfileWindowFrameSize"
+
+    /// The window size a frame is kept with, as text: "none" for a profile without one.
+    nonisolated static func marker(_ size: WindowSize?) -> String {
+        guard let size else { return "none" }
+        return "\(size.frame.width)x\(size.frame.height)"
+    }
+
+    /// The frame kept for `size`, or nil — none kept, or kept under another window size.
+    static func read(for size: WindowSize?, in defaults: UserDefaults = .standard) -> NSRect? {
+        guard defaults.string(forKey: sizeKey) == marker(size), let text = defaults.string(forKey: frameKey) else { return nil }
+        let frame = NSRectFromString(text)
+        return frame.width >= 200 && frame.height >= 150 ? frame : nil
+    }
+
+    static func save(_ frame: NSRect, for size: WindowSize?, in defaults: UserDefaults = .standard) {
+        defaults.set(NSStringFromRect(frame), forKey: frameKey)
+        defaults.set(marker(size), forKey: sizeKey)
+    }
+
+    /// `frame` on the screen whose visible area is `visible`: never larger than it (a page could
+    /// measure that), moved in where it would hang outside.
+    nonisolated static func fitted(_ frame: NSRect, in visible: NSRect) -> NSRect {
+        let width = min(frame.width, visible.width), height = min(frame.height, visible.height)
+        let x = min(max(frame.minX, visible.minX), visible.maxX - width)
+        let y = min(max(frame.minY, visible.minY), visible.maxY - height)
+        return NSRect(x: x, y: y, width: width, height: height)
     }
 }

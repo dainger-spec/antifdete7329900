@@ -398,18 +398,23 @@ enum SafariChrome {
         }
         servicePreferenceKeys = servicePreferenceValues(for: configuration).map(\.0)
         // History › Home (⇧⌘H) goes to the profile's start page: Safari's own home page setting,
-        // which its own action reads (the owner's decision; Safari's default, apple.com/startpage,
-        // for a profile without one). Run 488 has Safari taking it from the argument domain.
-        if let start = configuration.startURL {
-            arguments[homePageKey] = start.absoluteString
-            servicePreferenceKeys.append(homePageKey)
-        }
+        // which its own action reads (the owner's decision). Run 488 has Safari taking it from the
+        // argument domain.
+        arguments[homePageKey] = homePage(for: configuration)
+        servicePreferenceKeys.append(homePageKey)
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         log.notice("Safari's own services are set for this profile (\(servicePreferenceKeys.count, privacy: .public) keys)")
     }
 
     /// Safari's home page, which History › Home opens.
     static let homePageKey = "HomePage"
+
+    /// What History › Home opens in a profile: its start page, or a blank page for a profile
+    /// without one — not Safari's own default, which took a profile's window to Apple's site
+    /// (support.apple.com: the owner's Mac, 31 October).
+    nonisolated static func homePage(for configuration: ProfileConfiguration) -> String {
+        configuration.startURL?.absoluteString ?? "about:blank"
+    }
 
     private static var servicePreferenceKeys: [String] = []
 
