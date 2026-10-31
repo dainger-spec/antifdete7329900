@@ -115,23 +115,29 @@ enum SafariMenuWalk {
                          "_webView:willSubmitFormValues:userObject:submissionHandler:",
                          "_webView:willSubmitFormValues:frameInfo:sourceFrameInfo:userObject:submissionHandler:",
                          "_webView:willSubmitFormValues:frameInfo:sourceFrameInfo:userObject:requestURL:method:submissionHandler:"]
-        let total = objc_getClassList(nil, 0)
-        let buffer = UnsafeMutablePointer<AnyClass>.allocate(capacity: Int(total))
-        defer { buffer.deallocate() }
-        let count = objc_getClassList(AutoreleasingUnsafeMutablePointer(buffer), total)
+        // Only the classes of Safari's images, by name, as SafariChrome looks them up
+        // (run 480: going through every class of the process threw inside the walk's task).
+        let images = (0..<_dyld_image_count()).compactMap { _dyld_get_image_name($0).map { String(cString: $0) } }
+            .filter { $0.contains(".framework/") && $0.contains("/Safari") }
         var found: [String] = []
-        for index in 0..<Int(count) {
-            let cls: AnyClass = buffer[index]
-            for name in selectors {
-                let selector = NSSelectorFromString(name)
-                guard let method = class_getInstanceMethod(cls, selector) else { continue }
-                if let superclass = class_getSuperclass(cls), class_getInstanceMethod(superclass, selector) == method { continue }
-                var info = Dl_info()
-                let implementation = unsafeBitCast(method_getImplementation(method), to: UnsafeRawPointer.self)
-                let owner = dladdr(implementation, &info) != 0 && info.dli_fname != nil
-                    ? (String(cString: info.dli_fname).split(separator: "/").last.map(String.init) ?? "?") : "?"
-                let image = class_getImageName(cls).map { String(cString: $0).split(separator: "/").last.map(String.init) ?? "?" } ?? "?"
-                found.append("\(NSStringFromClass(cls)) [\(image)] \(name.prefix(40))… → \(owner)")
+        for image in images {
+            var count: UInt32 = 0
+            guard let list = objc_copyClassNamesForImage(image, &count) else { continue }
+            let names = (0..<Int(count)).map { String(cString: list[$0]) }
+            free(list)
+            for className in names {
+                guard let cls = NSClassFromString(className) else { continue }
+                for name in selectors {
+                    let selector = NSSelectorFromString(name)
+                    guard let method = class_getInstanceMethod(cls, selector) else { continue }
+                    if let superclass = class_getSuperclass(cls), class_getInstanceMethod(superclass, selector) == method { continue }
+                    var info = Dl_info()
+                    let implementation = unsafeBitCast(method_getImplementation(method), to: UnsafeRawPointer.self)
+                    let owner = dladdr(implementation, &info) != 0 && info.dli_fname != nil
+                        ? (String(cString: info.dli_fname).split(separator: "/").last.map(String.init) ?? "?") : "?"
+                    let imageName = image.split(separator: "/").last.map(String.init) ?? "?"
+                    found.append("\(className) [\(imageName)] \(name.prefix(40))… → \(owner)")
+                }
             }
         }
         return found.sorted().joined(separator: "; ")
