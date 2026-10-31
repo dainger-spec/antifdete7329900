@@ -84,6 +84,23 @@ enum SafariPaths {
         return isSafariImage(String(cString: image))
     }
 
+    /// Where `path` goes in the profile's home: a path under the real ~/Library comes back under
+    /// `home`, with the rest of it as it was; nil for a path that stays as it is — one outside the
+    /// real ~/Library, and one already in the profile's home.
+    ///
+    /// THE PROFILE'S HOME IS UNDER THE REAL ~/Library on a user's Mac (the vault is in
+    /// ~/Library/Application Support): moved again, a path the frameworks had built from the home
+    /// they were given went one home deeper each time a getter built on another's answer — the
+    /// owner's Mac, 31 October: Safari's databases three homes deep,
+    /// `home.noindex/Library/Application Support/PrivacyBrowser/profiles/<id>/home.noindex/…`.
+    /// CI's self-test had its vault in a temporary folder, outside ~/Library, where this never
+    /// happens; its vault is in ~/Library/Application Support now, as a user's is.
+    static func moved(_ path: String, realHome: String, home: String) -> String? {
+        guard (path + "/").hasPrefix(realHome + "/Library/") else { return nil }
+        if path == home || path.hasPrefix(home + "/") { return nil }
+        return home + path.dropFirst(realHome.count)
+    }
+
     private static func redirect(_ method: Method, of owner: AnyClass, library: String, realHome: String, home: String) {
         typealias Getter = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
         let selector = method_getName(method)
@@ -91,12 +108,13 @@ enum SafariPaths {
         let replacement: @convention(block) (AnyObject) -> Unmanaged<AnyObject>? = { receiver in
             let result = original(receiver, selector)
             guard let value = result?.takeUnretainedValue() else { return result }
-            if let url = value as? NSURL, url.isFileURL, let path = url.path, (path + "/").hasPrefix(library) {
-                let moved = NSURL(fileURLWithPath: home + path.dropFirst(realHome.count), isDirectory: url.hasDirectoryPath)
+            if let url = value as? NSURL, url.isFileURL, let path = url.path,
+               let target = SafariPaths.moved(path, realHome: realHome, home: home) {
+                let moved = NSURL(fileURLWithPath: target, isDirectory: url.hasDirectoryPath)
                 return Unmanaged.passRetained(moved as AnyObject).autorelease()
             }
-            if let string = value as? NSString, (string as String).hasPrefix(library) {
-                let moved = NSString(string: home + (string as String).dropFirst(realHome.count))
+            if let string = value as? NSString, let target = SafariPaths.moved(string as String, realHome: realHome, home: home) {
+                let moved = NSString(string: target)
                 return Unmanaged.passRetained(moved as AnyObject).autorelease()
             }
             return result

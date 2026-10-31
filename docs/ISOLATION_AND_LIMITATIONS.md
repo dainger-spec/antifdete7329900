@@ -929,6 +929,23 @@ launch (one that would make the process windowless) are not in the process, and 
 `TMPDIR` are in the profile's home. Foundation's own temporary directory is reported, not
 checked: where it reads it from is the system's.
 
+**Safari's own paths, moved once.** Safari's frameworks find their folders from the account's real
+home, not the one the process is given, so their path getters are patched to answer with the
+profile's home (`SafariPaths`). A user's vault — and so a profile's home — is itself under the
+real ~/Library (Application Support): up to 1 November a path the frameworks had already built in
+the profile's home was moved into it again, one home deeper each time a getter built on another's
+answer (the owner's Mac, 31 October: Safari's databases three homes deep,
+`home.noindex/Library/Application Support/PrivacyBrowser/profiles/<id>/home.noindex/…`, growing).
+A path already in the home now stays where it is (`SafariPaths.moved`), and before a profile's
+process starts the manager brings what earlier builds nested back into the home
+(`SafariHomeVault.flattenNested`: where two levels hold a file the newer stays, an SQLite database
+goes with its own journal files and never meets another level's, and the nested folders go).
+CI never saw it: the self-test's vault was in a temporary folder, outside ~/Library; it is in
+Application Support now, as a user's is. **Checked by the self-test**: in Safari's window, Safari's
+own files are in the home's `Library/Safari` and no home is nested in it (skipped, and said, where
+the home is not under ~/Library or Safari wrote nothing of its own); the flattening and the moving
+on a home made for the purpose.
+
 **Preferences.** `CFFIXED_USER_HOME` moves what asks the process for its home; it does not move
 where cfprefsd keeps a preferences domain, which stays the account's real `~/Library/Preferences`
 (measured by the menu walk, CI run 457, macOS 26 and 27: no preferences file in a profile's home).

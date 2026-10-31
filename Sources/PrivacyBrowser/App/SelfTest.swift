@@ -189,7 +189,12 @@ final class SelfTest {
         WebContentLanguage.decide("de-DE")
         info("web content languages: \(WebContentLanguage.decided ?? [])")
 
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-\(UUID().uuidString)")
+        // Where a user's vault is — in Application Support, under the account's ~/Library — not in a
+        // temporary folder: a profile's home is then under ~/Library too, as on a user's Mac, which
+        // is where Safari's paths were once moved into the home twice (`SafariPaths.moved`), out of
+        // CI's sight while its vault was in a temporary folder.
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("pb-selftest-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         // scripts/disk_check.py: what is written in here is the self-test's own.
         info("vault \(root.path)")
@@ -209,6 +214,7 @@ final class SelfTest {
         // run goes on with the next, so that one error never hides the checks after it.
         await group("exceptions") { try await exceptionChecks() }
         await group("Safari's nibs") { try await safariNibChecks() }
+        await group("nested Safari homes") { try nestedSafariHomes() }
         await group("storage isolation and shims") { try await storageIsolationAndShims(repository) }
         await group("device generations") { try await deviceGenerations(repository) }
         await group("fingerprint surface") { try await fingerprintSurface(repository) }
@@ -1541,6 +1547,23 @@ final class SelfTest {
             }
             info("Safari chrome: the profile's home holds \(listed.joined(separator: ", "))")
         }
+        // Safari's state in the home itself, never in a home nested in it: a path Safari's frameworks
+        // built from the home they were given is not moved into the home a second time
+        // (`SafariPaths.moved`; the owner's Mac, 31 October, three homes deep). Shown where the home
+        // is under the account's ~/Library, as a user's is, and Safari wrote its own there.
+        let nestingName = "Safari chrome: Safari's own state is in the profile's home itself, not in a home nested in it"
+        if let realHome = SafariPaths.realHome, (home.path + "/").hasPrefix(realHome + "/Library/") {
+            let nested = home.path + String(home.path.dropFirst(realHome.count))
+            let safarisOwn = (try? FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent("Library/Safari").path)) ?? []
+            if FileManager.default.fileExists(atPath: nested) || !safarisOwn.isEmpty {
+                check(nestingName, !FileManager.default.fileExists(atPath: nested) && !safarisOwn.isEmpty,
+                      "nested home there: \(FileManager.default.fileExists(atPath: nested)); in the home's Library/Safari: \(safarisOwn.sorted().prefix(8))")
+            } else {
+                skip(nestingName, "Safari wrote nothing of its own in the home in this run, so where it writes is not shown")
+            }
+        } else {
+            skip(nestingName, "the profile's home is not under the account's ~/Library here (\(home.path)), where the nesting happened")
+        }
         // The canary listener's control: a connection of the self-test's own, straight to it, under
         // this run's id. A listener that does not list it (none started, its log unread) would not
         // have listed the page's either: then nothing is shown about this Mac being reached.
@@ -1800,6 +1823,55 @@ final class SelfTest {
               !run.signaled && run.status == 0 && made.count == held.count && bridged >= held.count
                   && run.output.contains("; exceptions: 0"),
               detail.isEmpty ? run.output.trimmingCharacters(in: .whitespacesAndNewlines) : detail)
+    }
+
+    /// Safari's state that earlier builds put homes deep in a profile's home (`SafariPaths.moved`)
+    /// comes back up into the home at launch (`SafariHomeVault.flattenNested`): where two levels hold
+    /// a file the newer stays, a database comes with its own journal files and never meets another
+    /// level's, and the nested folders are gone. On a home made here, under a stand-in account home.
+    private func nestedSafariHomes() throws {
+        let account = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-nested-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: account) }
+        let home = account.appendingPathComponent("Library/Application Support/PrivacyBrowser/profiles/ID/home.noindex")
+        let suffix = String(home.path.dropFirst(account.path.count))
+        let firstLevel = URL(fileURLWithPath: home.path + suffix), secondLevel = URL(fileURLWithPath: home.path + suffix + suffix)
+        func write(_ base: URL, _ path: String, _ text: String, secondsAgo: TimeInterval) throws {
+            let file = base.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: file)
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-secondsAgo)], ofItemAtPath: file.path)
+        }
+        // The home's own: the preferences written last, and an old history with its journal.
+        try write(home, "Library/Preferences/com.apple.Safari.plist", "the home's preferences", secondsAgo: 10)
+        try write(home, "Library/Safari/History.db", "the home's history", secondsAgo: 3000)
+        try write(home, "Library/Safari/History.db-wal", "the home's journal", secondsAgo: 3000)
+        // One home deep: older preferences, and a database only it has.
+        try write(firstLevel, "Library/Preferences/com.apple.Safari.plist", "older preferences", secondsAgo: 2000)
+        try write(firstLevel, "Library/Safari/Bookmarks.db", "the bookmarks", secondsAgo: 1000)
+        // Two homes deep, where Safari worked last: the history with its journal, and a journal
+        // whose database is not there.
+        try write(secondLevel, "Library/Safari/History.db", "the latest history", secondsAgo: 100)
+        try write(secondLevel, "Library/Safari/History.db-wal", "the latest journal", secondsAgo: 100)
+        try write(secondLevel, "Library/Safari/Orphan.db-shm", "a journal without its database", secondsAgo: 50)
+        let flattened = SafariHomeVault.flattenNested(home: home, realHome: account.path)
+        func read(_ path: String) -> String? { try? String(contentsOf: home.appendingPathComponent(path), encoding: .utf8) }
+        check("Safari's home: the homes nested in a profile's home by earlier builds come up into it at launch, and are gone",
+              flattened.levels == 2 && !FileManager.default.fileExists(atPath: firstLevel.path)
+                  && !FileManager.default.fileExists(atPath: home.appendingPathComponent("Library/Application Support").path),
+              "levels \(flattened.levels), files \(flattened.files)")
+        check("Safari's home: where two levels hold a file the newer stays, and a database comes with its own journal, never another level's",
+              read("Library/Preferences/com.apple.Safari.plist") == "the home's preferences"
+                  && read("Library/Safari/History.db") == "the latest history" && read("Library/Safari/History.db-wal") == "the latest journal"
+                  && read("Library/Safari/Bookmarks.db") == "the bookmarks" && read("Library/Safari/Orphan.db-shm") == nil,
+              ["Library/Preferences/com.apple.Safari.plist", "Library/Safari/History.db", "Library/Safari/History.db-wal",
+               "Library/Safari/Bookmarks.db", "Library/Safari/Orphan.db-shm"].map { "\($0): \(read($0) ?? "none")" }.joined(separator: "; "))
+        // And a path moved into the home is moved once: one in the home stays where it is.
+        let realHome = account.path, profileHome = home.path
+        check("Safari's home: a path under ~/Library is moved into the profile's home once; one already in it stays",
+              SafariPaths.moved(realHome + "/Library/Safari/History.db", realHome: realHome, home: profileHome) == profileHome + "/Library/Safari/History.db"
+                  && SafariPaths.moved(profileHome + "/Library/Safari/History.db", realHome: realHome, home: profileHome) == nil
+                  && SafariPaths.moved(profileHome, realHome: realHome, home: profileHome) == nil
+                  && SafariPaths.moved("/tmp/elsewhere", realHome: realHome, home: profileHome) == nil)
     }
 
     /// This build's executable with `arguments`, in a process of its own: what it printed, and how it

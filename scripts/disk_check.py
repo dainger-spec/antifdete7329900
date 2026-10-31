@@ -140,7 +140,9 @@ def main():
     log = open(args.selftest_log, encoding="utf-8", errors="replace").read()
     begins = [float(t) for t in re.findall(r"INFO egress-window begin ([\d.]+)", log)]
     ends = [float(t) for t in re.findall(r"INFO egress-window end ([\d.]+)", log)]
-    vaults = set(re.findall(r"(/\S*pb-selftest-[0-9A-Fa-f-]+)", log))
+    # The self-test's vault, as its "INFO vault <path>" line names it (in Application Support since
+    # 1 November: the path has a space in it), and any other folder of its own it names.
+    vaults = set(re.findall(r"^INFO vault (.+?)\s*$", log, re.M)) | set(re.findall(r"(/\S*pb-selftest-[0-9A-Fa-f-]+)", log))
     # A check with nothing to look at, or no trace to look in, is never a pass: SKIPPED, and it fails.
     if not begins:
         print("::error::disk check SKIPPED: the self-test did not run its Safari-chrome check, so there was no window to look in")
