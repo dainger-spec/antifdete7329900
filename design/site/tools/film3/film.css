@@ -191,3 +191,5 @@ html.film, html.film body { margin: 0; width: 1920px; height: 1080px; overflow: 
 .vert .end-btn { left: 540px; top: 1290px; }
 /* the light's seam, long enough for the tall frame */
 .vert .fx-seam { top: -300px; height: 2520px; }
+/* the proxy's status line: kept whole above the window (the shot is framed on the sign-in form, right of centre) */
+.vert .sc-proxy .px-status { max-width: 960px; position: relative; left: 270px; }
