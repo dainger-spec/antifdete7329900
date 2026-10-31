@@ -46,10 +46,12 @@ enum LoaderInventory {
             unsafeBitCast(method_getImplementation($0), to: IsEnabled.self)
         }
         print("LOADER features: \(list.count) in all")
+        // Every feature with --all-features: which of them the SDK's behaviors change, by a diff.
+        let all = CommandLine.arguments.contains("--all-features")
         for feature in list {
             let key = kvc(feature, "key") as? String ?? "?"
             let name = kvc(feature, "name") as? String ?? "?"
-            guard matches(key) || matches(name) else { continue }
+            guard all || matches(key) || matches(name) else { continue }
             let status = (kvc(feature, "status") as? NSNumber)?.intValue ?? -1
             let byDefault = (kvc(feature, "defaultValue") as? NSNumber)?.boolValue
             let here = check.map { $0(preferences, isEnabled, feature) }
