@@ -483,6 +483,56 @@ and equally in Safari 26 on the same Mac: its canvas test accepts only PNG data 
 row sets the resistance verdict (`me()` in its script). Nothing in the profile causes it, and
 nothing a profile could do short of rewriting `toDataURL` (which would be a real lie) changes it.
 
+**The ceiling for a profile with a proxy, in this architecture.** Full parity with Safari is not
+reachable for a profile with an HTTP or SOCKS5 proxy, and this says why, so that nobody has to work
+out again why the count is not Safari's. In Safari's window, a page of such a profile sees 1005 of
+the window's own properties where Safari has 1044 (macOS 26.6.2; CI runs 430 and 501, by name). Each
+group was measured with WebKit's own switch for it on, against this Mac's Safari, on one page that
+measures itself (`scripts/payments_check.py`, variant `parity`; CI runs 514 and 515, measurement
+branch `claude/measure-parity`, macOS 26 and 27):
+
+- **WebRTC, 23** — off with a proxy, decided; they can come back only through the packet tunnel,
+  which carries WebRTC itself (relay candidates over SOCKS5, [TUNNEL.md](TUNNEL.md)).
+- **WebTransport, 8** — HTTP/3, QUIC over UDP, which no HTTP CONNECT or SOCKS5 proxy carries. On
+  macOS 26 a profile with its proxy and WebTransport on sent the QUIC handshake to the page's
+  address over UDP from this Mac's address, outside the proxy (ten packets from the profile's WebKit
+  networking process, retried at 1, 2, 4 and 8 seconds): a leak. On macOS 27 WebKit refused it at
+  once (`WebTransportError` after 4 ms, no UDP), where Safari waits on QUIC and has no answer in 60
+  seconds: told apart at once. They stay off.
+- **Web Authentication and Credential Management, 6** — `PublicKeyCredential`, the three
+  `Authenticator…Response`s, `Credential`, `CredentialsContainer` (and `navigator.credentials`).
+  Their ceremonies are the system's — iCloud Keychain passkeys shared with Safari and every profile,
+  Touch ID, a phone's hybrid sign-in from this Mac's address, attestation — and in this app there is
+  no ceremony to take: WebKit refuses every one at once (`NotAllowedError`, "The request is not
+  allowed by the user agent or the platform…", in 4 to 24 ms, with a user gesture or without), shows
+  no sheet, and never asks the app — the web authentication panel's delegate method
+  (`_webView:runWebAuthenticationPanel:initiatedByFrame:completionHandler:`) was never called. Safari's
+  ceremony stays open, its sheet up, until the person answers (no answer within 10 seconds on the
+  runner). `PublicKeyCredential.isConditionalMediationAvailable()` answers false where Safari answers
+  true. So the owner's proposal — the interfaces in place, the profile's own question before the
+  system's sheet, a cancel the way a person cancels — has nothing to stand on here: holding the
+  request open while the person decides would take a JavaScript wrapper, which the rule above rules
+  out. The one other road is Apple's managed entitlement for browsers
+  (`com.apple.developer.web-browser.public-key-credential`), with which WebKit takes the system's
+  ceremony as it does for Safari — a matter of signing and of Apple's approval, not measured. They
+  stay off with a proxy. (Without a proxy a profile has them today and answers as above.)
+- **DigitalCredential, 1** — absent without a proxy too: WebKit turns it on for an app with the
+  `com.apple.developer.web-browser` entitlement (WebKit's `defaultDigitalCredentialsEnabled`), which
+  Safari has and this app has not. With WebKit's switch on, a request for an mDL over OpenID4VP is
+  answered otherwise than in Safari (`TypeError`, no supported request, where Safari answers
+  `NotAllowedError`, the document not focused). It stays off.
+- **MediaSessionCoordinator, 1** — absent without a proxy too, for the same reason (the SharePlay
+  entitlement, `com.apple.developer.group-session.urlactivity`). With WebKit's switch on it answers
+  as Safari does with no SharePlay session — the coordinator there, its prototype the same, `join()`
+  refused with `InvalidStateError`, "Unable to join when state is closed", with a user gesture or
+  without — and no session can start without the entitlement. It could come back; the owner decides.
+
+So, measured: a profile with a proxy reaches 1006 of 1044 with the MediaSession coordinator, 1029
+with WebRTC carried by the tunnel as well; WebTransport's 8, Web Authentication's 6 and
+DigitalCredential are out of reach in this architecture. Until then it is 1005. A profile without a
+proxy has 1019: WebRTC's 23 by the default policy (`relayOnly` and `unrestricted` keep them) and the
+two entitlements' own.
+
 So a page that fingerprints *feature support* can still tell "Safari" from "a WKWebView app on the
 same Mac" by Apple Pay and Web Push, the same way it tells Safari from a Safari View Controller or
 a Mail or Slack preview. It cannot tell two profiles of this app apart by any of this: they are the
