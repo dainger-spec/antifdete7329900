@@ -170,6 +170,12 @@ def main():
         json.dump(steps, handle, indent=1, ensure_ascii=False)
     text = report(steps)
     crashes = crash_reports(started, out)
+    for path in sorted(glob.glob(os.path.join(out, "stuck-*.txt"))):
+        lines = open(path, errors="replace").read().splitlines()
+        start = next((i for i, line in enumerate(lines) if "main-thread" in line), None)
+        if start is not None:
+            text += (f"\n**A profile's process with no window, where its main thread was** ({os.path.basename(path)}):\n\n"
+                     + "\n".join("    " + line[:160] for line in lines[start:start + 40]) + "\n")
     if crashes:
         text += f"\n**The app's processes that crashed during the check:** {len(crashes)}\n\n" + "\n".join(
             "    " + "\n    ".join(lines) + "\n" for lines in crashes)

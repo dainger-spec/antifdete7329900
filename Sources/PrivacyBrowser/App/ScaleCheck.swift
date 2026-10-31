@@ -212,6 +212,18 @@ enum ScaleCheck {
                 }
                 return "profile \(index): no process"
             }
+            // Where the first two that run without a window are: their stacks, by `sample` (into the
+            // run's artifact, `stuck-<pid>.txt`).
+            let stuck = group.filter { running[$0] == nil && exits[$0] == nil }.compactMap { manager.processIdentifier(of: $0) }
+            for pid in stuck.prefix(2) {
+                let sampler = Process()
+                sampler.executableURL = URL(fileURLWithPath: "/usr/bin/sample")
+                sampler.arguments = [String(pid), "2", "-mayDie", "-file", out.appendingPathComponent("stuck-\(pid).txt").path]
+                sampler.standardOutput = FileHandle.nullDevice
+                sampler.standardError = FileHandle.nullDevice
+                try? sampler.run()
+                sampler.waitUntilExit()
+            }
             let startTimes = group.compactMap { id in running[id].map { $0.timeIntervalSince(launchCalls[id] ?? batchStart) * 1000 } }
             let windowsUp = group.compactMap { id in running[id].map { $0.timeIntervalSince(batchStart) * 1000 } }
             // The pages load and the machine settles; then what they take.
