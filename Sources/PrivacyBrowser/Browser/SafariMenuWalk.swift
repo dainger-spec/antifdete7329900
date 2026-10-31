@@ -78,6 +78,7 @@ enum SafariMenuWalk {
             }
         }
         Task { @MainActor in
+            emit(["event": "info", "text": "form submission handlers at the walk's start: " + formSubmissionHandlers()])
             probePreferences()
             let list = entries()
             // The AutoFill items' actions, sent as a key or a context menu sends them: whether
@@ -94,6 +95,7 @@ enum SafariMenuWalk {
                 index += 1
             }
             WalkRecorder.uninstall()
+            emit(["event": "info", "text": "form submission handlers at the walk's end: " + formSubmissionHandlers()])
             emit(["event": "info", "text": "replaced once loaded: " + SafariChrome.lateStubsMade.sorted().joined(separator: ", ")])
             emit(["event": "info", "text": "XPC services this process connected to (NSXPCConnection): "
                   + ProfileNetworkGuard.connectedServices.joined(separator: ", ")])
@@ -105,6 +107,36 @@ enum SafariMenuWalk {
     /// Where this process's preferences go (measurement branch): Safari's code writes its own
     /// keys into this app's preferences domain, which run 456 found in the account's real home.
     /// Whether a domain named by a path in the profile's home is kept there instead.
+    /// Which classes implement WebKit's ways of telling a form was submitted, from which image,
+    /// and whether their method is still their own (measurement branch: run 479, macOS 27, the
+    /// self-test's login form reached none of the replaced ones).
+    private static func formSubmissionHandlers() -> String {
+        let selectors = ["webView:willSubmitForm:submissionHandler:",
+                         "_webView:willSubmitFormValues:userObject:submissionHandler:",
+                         "_webView:willSubmitFormValues:frameInfo:sourceFrameInfo:userObject:submissionHandler:",
+                         "_webView:willSubmitFormValues:frameInfo:sourceFrameInfo:userObject:requestURL:method:submissionHandler:"]
+        let total = objc_getClassList(nil, 0)
+        let buffer = UnsafeMutablePointer<AnyClass>.allocate(capacity: Int(total))
+        defer { buffer.deallocate() }
+        let count = objc_getClassList(AutoreleasingUnsafeMutablePointer(buffer), total)
+        var found: [String] = []
+        for index in 0..<Int(count) {
+            let cls: AnyClass = buffer[index]
+            for name in selectors {
+                let selector = NSSelectorFromString(name)
+                guard let method = class_getInstanceMethod(cls, selector) else { continue }
+                if let superclass = class_getSuperclass(cls), class_getInstanceMethod(superclass, selector) == method { continue }
+                var info = Dl_info()
+                let implementation = unsafeBitCast(method_getImplementation(method), to: UnsafeRawPointer.self)
+                let owner = dladdr(implementation, &info) != 0 && info.dli_fname != nil
+                    ? (String(cString: info.dli_fname).split(separator: "/").last.map(String.init) ?? "?") : "?"
+                let image = class_getImageName(cls).map { String(cString: $0).split(separator: "/").last.map(String.init) ?? "?" } ?? "?"
+                found.append("\(NSStringFromClass(cls)) [\(image)] \(name.prefix(40))… → \(owner)")
+            }
+        }
+        return found.sorted().joined(separator: "; ")
+    }
+
     private static func probePreferences() {
         guard let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] else { return }
         let realHome = SafariPaths.realHome ?? ""
