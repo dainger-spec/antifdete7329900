@@ -1,0 +1,204 @@
+/* Home scene "bento" (tools/templates/pages/home/bento.mjs): tiles of what Safari users expect, each a
+   title and a sentence over a piece of the app's interface. Scoped to .sc-bento; the shared type is in
+   site.css. The pictures use the app's dark tokens (Theme.swift): windows #16181E with a hairline rim,
+   13 px system text, the one blue for the default button and a selection; colour only where macOS
+   would put it (traffic lights, a success tick). */
+
+.sc-bento { padding: 136px 0 48px; }
+.sc-bento .bx-head { text-align: center; }
+.sc-bento .bx-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 64px; }
+.sc-bento .bx {
+  position: relative; display: flex; flex-direction: column; height: 468px; overflow: hidden; border-radius: 28px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018) 70%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.075), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.sc-bento .bx.w2 { grid-column: span 2; }
+.sc-bento .bx-copy { position: relative; z-index: 1; padding: 32px 34px 0; max-width: 500px; font: 600 21px/28px var(--font-display); letter-spacing: -0.014em; text-wrap: pretty; }
+.sc-bento .bx-copy h3, .sc-bento .bx-copy p { display: inline; margin: 0; font: inherit; letter-spacing: inherit; }
+.sc-bento .bx-copy h3 { color: var(--text-primary); }
+.sc-bento .bx-copy p { color: var(--text-tertiary); }
+.sc-bento .bx-art { position: relative; flex: 1; margin-top: 28px; font: 400 13px/18px var(--font); color: #E6E8EC; }
+.sc-bento .bx-more { margin-top: 44px; text-align: center; }
+.sc-bento .bx-more .link-arrow { font: 500 17px/22px var(--font); color: #8FB2FF; }
+.js .sc-bento .bx.reveal:not(.in) { transform: translateY(36px); }
+.js .sc-bento .bx.reveal { transition-duration: 700ms; }
+
+/* The app's pieces: windows, sheets, buttons */
+.sc-bento .mw, .sc-bento .pw-win, .sc-bento .hs-win, .sc-bento .ck-sheet, .sc-bento .sy-mac, .sc-bento .ex-sheet, .sc-bento .ep-win, .sc-bento .ep-row {
+  background: #16181E; border-radius: 13px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 28px 60px -18px rgba(0, 0, 0, 0.75);
+}
+.sc-bento .mw-bar { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 14px; background: linear-gradient(180deg, #25282E, #1E2127); box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.5); color: #9AA1AD; }
+.sc-bento .mw-tl { display: flex; gap: 8px; flex: none; }
+.sc-bento .mw-tl i { width: 12px; height: 12px; border-radius: 50%; background: #FF5F57; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.3); }
+.sc-bento .mw-tl i:nth-child(2) { background: #FEBC2E; }
+.sc-bento .mw-tl i:nth-child(3) { background: #28C840; }
+.sc-bento .mw-nav { display: inline-flex; gap: 8px; }
+.sc-bento .mw-url { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; height: 26px; border-radius: 8px; background: rgba(255, 255, 255, 0.07); font: 500 13px/1 var(--font); color: #D6DAE1; }
+.sc-bento .mw-url .icon { color: #A2A9B6; }
+.sc-bento .mw-key { display: grid; place-items: center; width: 30px; height: 26px; border-radius: 7px; background: rgba(47, 107, 239, 0.24); color: #B4C8FF; }
+.sc-bento .mw-title { flex: 1; text-align: center; margin-right: 52px; font: 600 13px/1 var(--font); color: #D8DCE3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-bento .sh-title { display: block; font: 600 15px/20px var(--font); color: #EEF0F3; }
+.sc-bento .sh-act { display: flex; justify-content: flex-end; }
+.sc-bento .mb { display: inline-flex; align-items: center; height: 30px; padding: 0 14px; border-radius: 8px; background: rgba(255, 255, 255, 0.10); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06); font: 500 13px/1 var(--font); color: #ECEEF2; white-space: nowrap; }
+.sc-bento .mb.pri { background: #2F6BEF; color: #FFFFFF; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18); }
+
+/* Passwords: a sign-in page in the profile's Safari, and the prompt from the toolbar's key */
+.sc-bento .pw-wrap { position: absolute; left: max(34px, calc(50% - 368px)); top: 0; width: 480px; height: 360px; }
+.sc-bento .pw-win { position: absolute; inset: 0; overflow: hidden; }
+.sc-bento .pw-page { display: grid; justify-items: center; align-content: start; padding-top: 34px; height: 100%; background: #0E0F13; }
+.sc-bento .pw-form { display: grid; gap: 10px; width: 250px; }
+.sc-bento .pw-form b { font: 600 22px/28px var(--font-display); letter-spacing: -0.01em; color: #F3F4F7; margin-bottom: 8px; }
+.sc-bento .pw-in { display: flex; align-items: center; height: 38px; padding: 0 12px; border-radius: 9px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); font: 400 14px/1 var(--font); color: #E6E8EC; }
+.sc-bento .pw-dots { letter-spacing: 2px; box-shadow: inset 0 0 0 1px #2F6BEF, 0 0 0 3px rgba(47, 107, 239, 0.35); }
+.sc-bento .pw-go { display: grid; place-items: center; height: 38px; margin-top: 4px; border-radius: 9px; background: #F2F3F5; font: 600 14px/1 var(--font); color: #0B0C0F; }
+.sc-bento .pw-pop {
+  position: absolute; left: 432px; top: 50px; width: 300px; display: grid; z-index: 1; gap: 8px; padding: 18px 18px 16px; border-radius: 14px;
+  background: rgba(38, 41, 48, 0.94); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 30px 70px -10px rgba(0, 0, 0, 0.75);
+}
+.sc-bento .pw-pop::before { content: ""; position: absolute; left: 12px; top: -7px; width: 14px; height: 14px; transform: rotate(45deg); background: rgba(38, 41, 48, 0.98); box-shadow: -1px -1px 0 0 rgba(255, 255, 255, 0.13); border-radius: 3px 0 0 0; }
+.sc-bento .pw-ic { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(180deg, #3A3F4A, #2A2E37); color: #B4C8FF; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12); }
+.sc-bento .pw-pop b { margin-top: 4px; font: 600 15px/20px var(--font); color: #F2F3F6; }
+.sc-bento .pw-pop p { margin: 0; font: 400 13px/18px var(--font); color: var(--text-secondary); }
+.sc-bento .pw-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+/* History: the profile's own History window */
+.sc-bento .hs-win { position: absolute; left: 30px; right: -36px; top: 0; height: 380px; overflow: hidden; }
+.sc-bento .hs-body { display: grid; gap: 2px; padding: 12px 14px; }
+.sc-bento .hs-search { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; margin-bottom: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.06); color: var(--text-tertiary); }
+.sc-bento .hs-day { padding: 6px 8px 4px; font: 600 12px/16px var(--font); color: var(--text-tertiary); }
+.sc-bento .hs-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 11px; height: 48px; padding: 0 8px; border-radius: 8px; }
+.sc-bento .hs-row:nth-child(3) { background: rgba(255, 255, 255, 0.06); }
+.sc-bento .hs-row .fav { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; font: 600 12px/1 var(--font); font-style: normal; color: #D9DFEA; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.sc-bento .hs-row b { display: block; font: 500 14px/18px var(--font); color: #ECEEF2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-bento .hs-row em { display: block; font: 400 12px/16px var(--font); font-style: normal; color: var(--text-tertiary); }
+.sc-bento .hs-row time { font: 400 12px/1 var(--font); color: var(--text-tertiary); font-variant-numeric: tabular-nums; padding-right: 36px; }
+
+/* Cookie import: the app's sheet, with the file read before anything is imported */
+.sc-bento .ck-sheet { position: absolute; left: 30px; right: 30px; top: 0; display: grid; gap: 12px; padding: 18px; }
+.sc-bento .ck-file { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.05); }
+.sc-bento .ck-doc { color: #B4C8FF; }
+.sc-bento .ck-file b { display: block; font: 600 14px/18px var(--font); color: #ECEEF2; }
+.sc-bento .ck-file em { display: block; font: 400 12px/16px var(--font); font-style: normal; color: var(--text-tertiary); }
+.sc-bento .ck-pre { display: block; overflow: hidden; white-space: pre; tab-size: 2; padding: 10px 12px; border-radius: 9px; border: 0; background: #0D0F13; font: 400 11.5px/18px var(--font-mono); color: #8E97A8; -webkit-mask-image: linear-gradient(90deg, #000 76%, transparent 98%); mask-image: linear-gradient(90deg, #000 76%, transparent 98%); }
+.sc-bento .ck-sum { display: flex; align-items: center; gap: 7px; font: 400 13px/18px var(--font); color: var(--text-secondary); }
+.sc-bento .ck-sum .icon { color: #4CC38A; }
+
+/* Sync: the same profiles on two Macs; between them only ciphertext */
+.sc-bento .bx-sy .bx-art { display: flex; align-items: center; justify-content: center; padding: 0 34px 34px; }
+.sc-bento .sy-mac { flex: none; width: 236px; display: grid; gap: 2px; padding: 10px; }
+.sc-bento .sy-head { display: flex; align-items: center; gap: 10px; padding: 4px 6px 10px; margin-bottom: 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+.sc-bento .sy-head b { display: block; font: 600 13px/18px var(--font); color: #E2E5EA; }
+.sc-bento .sy-head em { display: flex; align-items: center; gap: 4px; font: 400 12px/16px var(--font); font-style: normal; color: var(--text-tertiary); }
+.sc-bento .sy-head em .icon { color: #4CC38A; }
+.sc-bento .sy-head .icon { color: var(--text-tertiary); }
+.sc-bento .sy-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 42px; padding: 0 6px; }
+.sc-bento .sy-row .avatar { display: grid; place-items: center; font-weight: 600; }
+.sc-bento .sy-row b { font: 500 14px/18px var(--font); color: #ECEEF2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-bento .sy-row > .icon { color: #4CC38A; }
+.sc-bento .sy-wire { position: relative; flex: 1; min-width: 0; max-width: 250px; text-align: center; }
+.sc-bento .sy-wire code { display: block; white-space: pre; overflow: hidden; border: 0; padding: 0; background: none; font: 400 11.5px/19px var(--font-mono); letter-spacing: 0.06em; color: rgba(143, 178, 255, 0.62); -webkit-mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent); mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent); }
+.sc-bento .sy-lock { position: absolute; left: 50%; top: 50%; display: grid; place-items: center; width: 38px; height: 38px; margin: -19px 0 0 -19px; border-radius: 50%; background: #0F1218; color: #A9C2FF; box-shadow: 0 0 0 1px rgba(143, 178, 255, 0.38), 0 0 0 7px rgba(6, 7, 9, 0.9); }
+
+/* Export: the sheet, and the one file it makes */
+.sc-bento .bx-ex .bx-art { display: flex; align-items: center; justify-content: center; gap: 72px; padding: 0 34px 34px; }
+.sc-bento .ex-sheet { flex: none; width: 360px; display: grid; gap: 10px; padding: 18px; }
+.sc-bento .ex-sheet p { margin: 0 0 4px; font: 400 13px/18px var(--font); color: var(--text-secondary); }
+.sc-bento .ex-label { font: 500 12px/16px var(--font); color: var(--text-tertiary); }
+.sc-bento .ex-field { display: flex; align-items: center; height: 34px; padding: 0 11px; border-radius: 8px; letter-spacing: 2px; box-shadow: inset 0 0 0 1px #2F6BEF, 0 0 0 3px rgba(47, 107, 239, 0.32); color: #ECEEF2; }
+.sc-bento .ex-file { flex: none; display: grid; justify-items: center; gap: 14px; filter: drop-shadow(0 22px 26px rgba(0, 0, 0, 0.55)); }
+.sc-bento .ex-doc {
+  position: relative; display: grid; place-items: center; width: 118px; height: 148px; border-radius: 7px;
+  background: linear-gradient(180deg, #F6F7F9, #DFE2E8);
+  clip-path: polygon(0 0, calc(100% - 30px) 0, 100% 30px, 100% 100%, 0 100%);
+}
+.sc-bento .ex-doc .fold { position: absolute; right: 0; top: 0; width: 30px; height: 30px; background: linear-gradient(225deg, transparent 50%, #C3C8D1 50%); border-bottom-left-radius: 5px; }
+.sc-bento .ex-mark { display: grid; place-items: center; width: 58px; height: 58px; border-radius: 15px; background: #E9EBEF; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06); }
+.sc-bento .ex-lock { position: absolute; right: 12px; bottom: 12px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #2F6BEF; color: #FFFFFF; }
+.sc-bento .ex-name { font: 500 13px/18px var(--font); color: #ECEEF2; }
+
+/* Ephemeral: the guest's History window as it closes — its visits go one by one, the window dims and
+   draws back, the app's notice stays; in front, the profile's row as the list labels it. --x (bento.js,
+   scenes only) runs 0 → 1 as the tile rises; without scenes it is 1: closed. */
+.sc-bento .bx-ep .bx-art { padding: 0; }
+.sc-bento .ep-win {
+  position: absolute; left: 30px; right: 30px; top: 0; height: 320px; overflow: hidden; transform-origin: 50% 0;
+  opacity: calc(1 - 0.4 * var(--x, 1)); transform: scale(calc(1 - 0.045 * var(--x, 1)));
+}
+.sc-bento .ep-body { position: relative; display: grid; gap: 2px; padding: 12px 14px; }
+.sc-bento .ep-note { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 8px; align-items: start; margin-bottom: 6px; padding: 10px 12px; border-radius: 9px; background: rgba(255, 255, 255, 0.05); font: 400 12.5px/17px var(--font); color: var(--text-secondary); }
+.sc-bento .ep-note .icon { margin-top: 3px; color: var(--text-tertiary); }
+.sc-bento .ep-visit { display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: center; gap: 11px; height: 46px; padding: 0 8px; opacity: calc(1 - clamp(0, (var(--x, 1) - var(--i) * 0.18) / 0.34, 1)); }
+.sc-bento .ep-visit .fav { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: #262B36; font: 600 12px/1 var(--font); font-style: normal; color: #D9DFEA; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.sc-bento .ep-visit b { display: block; font: 500 14px/18px var(--font); color: #ECEEF2; }
+.sc-bento .ep-visit em { display: block; font: 400 12px/16px var(--font); font-style: normal; color: var(--text-tertiary); }
+.sc-bento .ep-empty { position: absolute; left: 0; right: 0; top: 118px; text-align: center; font: 400 14px/20px var(--font); color: var(--text-tertiary); opacity: clamp(0, (var(--x, 1) - 0.66) / 0.3, 1); }
+.sc-bento .ep-row { position: absolute; left: 52px; right: 52px; bottom: 30px; z-index: 1; display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 12px; padding: 12px 14px; }
+.sc-bento .ep-row .avatar { display: grid; place-items: center; font-weight: 600; }
+.sc-bento .ep-row b { display: block; font: 600 15px/20px var(--font); color: #ECEEF2; }
+.sc-bento .ep-row em { display: flex; align-items: center; gap: 6px; font: 400 12.5px/17px var(--font); font-style: normal; color: var(--text-tertiary); }
+
+@media (max-width: 1099px) {
+  .sc-bento .bx-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sc-bento .bx.w2 { grid-column: span 2; }
+  /* Export takes one column here, beside Ephemeral: the sheet, and the file it made at its corner */
+  .sc-bento .bx.bx-ex { grid-column: auto; }
+  .sc-bento .bx-ex .bx-art { display: block; padding: 0; }
+  .sc-bento .ex-sheet { position: absolute; left: 30px; right: 104px; top: 0; width: auto; }
+  .sc-bento .ex-file { position: absolute; right: 22px; bottom: 30px; gap: 10px; }
+  .sc-bento .ex-doc { width: 84px; height: 106px; clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%); }
+  .sc-bento .ex-doc .fold { width: 22px; height: 22px; }
+  .sc-bento .ex-mark { width: 44px; height: 44px; border-radius: 11px; }
+  .sc-bento .ex-mark svg { width: 26px; height: 26px; }
+  .sc-bento .ex-lock { width: 22px; height: 22px; right: 8px; bottom: 8px; }
+  .sc-bento .ex-lock svg { width: 11px; height: 11px; }
+  .sc-bento .ex-name { max-width: 120px; text-align: center; font-size: 12px; line-height: 16px; }
+}
+
+/* Phone: one column; each picture is recomposed for a narrow tile rather than squeezed */
+@media (max-width: 599px) {
+  .sc-bento { padding: 96px 0 32px; }
+  .sc-bento .bx-head { text-align: left; }
+  .sc-bento .bx-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 40px; }
+  .sc-bento .bx.w2 { grid-column: auto; }
+  .sc-bento .bx { height: auto; min-height: 0; border-radius: 26px; }
+  .sc-bento .bx-copy { padding: 26px 24px 0; font-size: 20px; line-height: 26px; }
+  .sc-bento .bx-art { flex: none; margin-top: 24px; }
+
+  /* The prompt hangs from the key at the right; the sign-in it answers shows below it */
+  .sc-bento .bx-pw .bx-art { height: 420px; }
+  .sc-bento .pw-wrap { left: 20px; right: 20px; width: auto; height: 460px; }
+  .sc-bento .pw-page { padding-top: 0; }
+  .sc-bento .pw-form { width: 220px; justify-self: start; margin: 226px 0 0 22px; }
+  .sc-bento .pw-pop { left: auto; right: 8px; top: 50px; width: calc(100% - 24px); padding: 16px 14px 14px; }
+  .sc-bento .pw-pop .pw-ic { display: none; }
+  .sc-bento .pw-pop b { margin-top: 0; }
+  .sc-bento .pw-pop::before { left: auto; right: 14px; }
+  .sc-bento .bx-hs .bx-art { height: 300px; }
+  .sc-bento .hs-win { left: 20px; right: -40px; }
+  .sc-bento .bx-ck .bx-art { height: 320px; }
+  .sc-bento .ck-sheet { left: 16px; right: 16px; }
+  .sc-bento .ck-pre { font-size: 11px; }
+
+  .sc-bento .bx-sy .bx-art { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; align-content: start; gap: 0; height: 410px; padding: 0 20px; overflow: hidden; }
+  .sc-bento .sy-mac { width: auto; }
+  .sc-bento .sy-wire { max-width: none; height: 132px; display: grid; align-content: center; }
+  .sc-bento .sy-wire code { line-height: 16px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent); mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent); }
+
+  .sc-bento .bx-ex .bx-art { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; gap: 22px; padding: 0 16px 26px; }
+  .sc-bento .ex-sheet { position: static; width: auto; }
+  .sc-bento .ex-file { position: static; }
+  .sc-bento .ex-name { max-width: none; text-align: left; }
+  .sc-bento .ex-file { grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: center; gap: 16px; padding-left: 8px; }
+  .sc-bento .ex-doc { width: 64px; height: 80px; clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
+  .sc-bento .ex-doc .fold { width: 18px; height: 18px; }
+  .sc-bento .ex-mark { width: 34px; height: 34px; border-radius: 9px; }
+  .sc-bento .ex-mark svg { width: 20px; height: 20px; }
+  .sc-bento .ex-lock { width: 20px; height: 20px; right: 6px; bottom: 6px; }
+  .sc-bento .ex-lock svg { width: 10px; height: 10px; }
+  .sc-bento .ex-name { font-size: 15px; }
+  .sc-bento .bx-ep .bx-art { height: 330px; }
+  .sc-bento .ep-win { left: 16px; right: 16px; }
+  .sc-bento .ep-row { left: 34px; right: 34px; bottom: 26px; }
+}

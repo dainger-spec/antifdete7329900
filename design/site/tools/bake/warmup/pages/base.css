@@ -1,0 +1,5 @@
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%}
+body{font-family:Inter,"Liberation Sans",sans-serif;-webkit-font-smoothing:antialiased}
+img{display:block;width:100%;height:100%;object-fit:cover}
+.ph{overflow:hidden;background:#555}
