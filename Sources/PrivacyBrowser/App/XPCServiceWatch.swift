@@ -32,9 +32,14 @@ final class XPCServiceWatch: @unchecked Sendable {
     private var stopped = false
     private let since: Date
     private let realHome: String
+    /// Besides an executable in an `.xpc` bundle, what else in its path makes a process one to
+    /// watch: the menu walk adds "Safari", for Safari's agents, which launchd starts from bundles
+    /// of their own rather than `.xpc` ones (its bookmarks sync, its password breach checks).
+    private let alsoMatching: [String]
 
-    init(realHome: String) {
+    init(realHome: String, alsoMatching: [String] = []) {
         self.realHome = realHome
+        self.alsoMatching = alsoMatching
         since = Date().addingTimeInterval(-1)
         let thread = Thread { [self] in
             while !lock.withLock({ stopped }) {
@@ -58,7 +63,7 @@ final class XPCServiceWatch: @unchecked Sendable {
         for pid in Self.allProcesses() {
             let known = lock.withLock { services[pid] != nil }
             if !known {
-                guard let path = Self.executable(of: pid), path.contains(".xpc/"),
+                guard let path = Self.executable(of: pid), path.contains(".xpc/") || alsoMatching.contains(where: { path.contains($0) }),
                       let started = Self.start(of: pid), started >= since else { continue }
                 lock.withLock { services[pid] = Service(pid: pid, path: path, responsible: Self.responsible(for: pid)) }
             }

@@ -31,6 +31,8 @@ enum SafariMenuWalkCheck {
         var begin: Double
         var end: Double?
         var xpc: [String] = []
+        /// Safari's agents that started meanwhile, whoever asked for them (`XPCServiceWatch`).
+        var agents: [String] = []
         /// What the manager was asked for meanwhile (its Settings).
         var asked: [String] = []
         init(fields: [String: Any], begin: Double) {
@@ -123,14 +125,19 @@ enum SafariMenuWalkCheck {
                 let item = Item(fields: fields, begin: fields["time"] as? Double ?? Date().timeIntervalSince1970)
                 walk.current = item
                 walk.items[index] = item
-                walk.services = SafariPaths.realHome.map { XPCServiceWatch(realHome: $0) }
+                walk.services = SafariPaths.realHome.map { XPCServiceWatch(realHome: $0, alsoMatching: ["Safari"]) }
             case "end":
                 guard let item = walk.current else { return }
                 for (key, value) in fields where key != "time" && key != "event" { item.fields[key] = value }
                 item.end = fields["time"] as? Double ?? Date().timeIntervalSince1970
                 let pid = manager.processIdentifier(of: profile.id)
-                for (service, opened) in walk.services?.stop() ?? [] where service.responsible == nil || service.responsible == pid {
-                    item.xpc.append(service.bundleName + (opened.isEmpty ? "" : " (held open in the real Safari's places: \(opened.joined(separator: ", ")))"))
+                for (service, opened) in walk.services?.stop() ?? [] {
+                    let held = opened.isEmpty ? "" : " (held open in the real Safari's places: \(opened.joined(separator: ", ")))"
+                    if service.path.contains(".xpc/") {
+                        if service.responsible == nil || service.responsible == pid { item.xpc.append(service.bundleName + held) }
+                    } else {
+                        item.agents.append(service.bundleName + held)
+                    }
                 }
                 walk.services = nil
                 walk.current = nil
@@ -232,6 +239,7 @@ enum SafariMenuWalkCheck {
             item.fields["realSafari"] = realSafari.sorted()
             item.fields["outside"] = outside.sorted()
             item.fields["xpc"] = item.xpc
+            item.fields["agents"] = item.agents
             item.fields["effects"] = (item.fields["effects"] as? [String] ?? []) + item.asked
             item.fields["begin"] = item.begin
             guard let data = try? JSONSerialization.data(withJSONObject: item.fields, options: [.sortedKeys]) else { continue }

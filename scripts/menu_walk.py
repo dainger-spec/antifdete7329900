@@ -223,9 +223,9 @@ def table(items):
         details = [effect for effect in item.get("effects", [])] + item.get("exceptions", [])[:2]
         if details:
             did += "<br><sub>" + " · ".join(text.replace("|", "/")[:200] for text in details[:4]) + "</sub>"
-        wrote = ", ".join(reduced["writes"]) or "—"
+        wrote = ", ".join(writes(item)) or "—"
         lines.append(f"| {item.get('index', '?')} | {item.get('path', '?').replace('|', '/')} | {item.get('keys', '-')} "
-                     f"| {did} | {wrote} | {', '.join(reduced['xpc']) or '—'} |")
+                     f"| {did} | {wrote} | {', '.join(reduced['xpc'] + [a + ' (agent)' for a in item.get('agents', [])]) or '—'} |")
     return "\n".join(lines) + "\n"
 
 

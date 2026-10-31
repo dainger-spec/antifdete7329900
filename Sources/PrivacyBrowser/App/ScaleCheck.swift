@@ -199,7 +199,9 @@ enum ScaleCheck {
                 do { try await manager.launch(id) } catch { errors.append("launch: \(error)") }
             }
             let allIssued = milliseconds(since: batchStart)
-            let deadline = Date().addingTimeInterval(60 + Double(groupSize) * 6)
+            // Long enough for a slow start to be measured as one rather than as a window that never
+            // came (run 460, macOS 27: with 20 and 30 at once, most windows came minutes late).
+            let deadline = Date().addingTimeInterval(60 + Double(groupSize) * 15)
             while running.count < group.count, Date() < deadline { try? await Task.sleep(nanoseconds: 250_000_000) }
             // A profile whose window did not come up: whether its process ended, or runs without one.
             let notUp = group.filter { running[$0] == nil }.map { id -> String in

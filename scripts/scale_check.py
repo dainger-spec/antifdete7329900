@@ -10,6 +10,7 @@ window drawn with every profile (`profiles-<N>.png`), and prints the main figure
 measurement: exit 0 when every step ran (whatever the figures), 1 when one could not.
 """
 import argparse
+import glob
 import json
 import os
 import socket
@@ -35,6 +36,20 @@ def wait_for_port(port, seconds=20):
                 return True
         time.sleep(0.5)
     return False
+
+
+def crash_reports(since, out):
+    """Summaries of this app's crash reports written since `since` (scripts/crash_summary.py)."""
+    found = []
+    for path in sorted(glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/PrivacyBrowser*.ips"))):
+        if os.path.getmtime(path) < since:
+            continue
+        summary = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "crash_summary.py"), path],
+                                 capture_output=True, text=True).stdout
+        with open(os.path.join(out, os.path.basename(path) + ".txt"), "w") as handle:
+            handle.write(summary)
+        found.append(summary.strip().splitlines()[:14])
+    return found
 
 
 def report(steps):
@@ -130,6 +145,7 @@ def main():
         proxy.kill()
         return 1
     environment = dict(os.environ, PB_SELFTEST_HTTP_PROXY_PORT=str(PROXY_PORT), PRIVACYBROWSER_LANG="en")
+    started = time.time()
     with open(os.path.join(out, "scale.txt"), "w") as log:
         try:
             result = subprocess.run([os.path.join(args.app, BINARY), "--scale-check", "--profiles", args.profiles,
@@ -153,6 +169,10 @@ def main():
     with open(os.path.join(out, "scale.json"), "w") as handle:
         json.dump(steps, handle, indent=1, ensure_ascii=False)
     text = report(steps)
+    crashes = crash_reports(started, out)
+    if crashes:
+        text += f"\n**The app's processes that crashed during the check:** {len(crashes)}\n\n" + "\n".join(
+            "    " + "\n    ".join(lines) + "\n" for lines in crashes)
     with open(os.path.join(out, "scale.md"), "w") as handle:
         handle.write(text)
     print(text, flush=True)
