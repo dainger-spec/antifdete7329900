@@ -270,6 +270,10 @@ enum ProfileSessionHost {
             case .preferences(let preferences):
                 BrowsingPreferences.current = preferences
                 DockIcon.show(initials: preferences.dockInitials, of: profileName)
+            case .walkMenu(let from):
+                SafariMenuWalk.start(from: from, session: manager?.session(for: profileID)) { line in
+                    ProfileSessionHost.send(.menuWalk(line))
+                }
             case .startWarmUp(let plan):
                 if manager?.startWarmUp(profileID, plan: plan) != true {
                     ProfileSessionHost.log.error("Warm-up of \(self.profileID.uuidString, privacy: .public) did not start")

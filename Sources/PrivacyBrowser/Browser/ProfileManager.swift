@@ -47,6 +47,11 @@ final class ProfileManager: ObservableObject {
     var onShowSettings: (() -> Void)?
     /// A profile's WebKit data was sealed here, and how (a profile's process tells its manager).
     var onSealed: ((UUID, ProfileSealReport) -> Void)?
+    /// A step of the menu walk a profile's process was asked for (`walkMenu`; `--menu-walk`).
+    var onMenuWalk: ((UUID, String) -> Void)?
+    /// A profile's process ended on its own (a quit of its own, or a crash: `status` is not 0),
+    /// after its home was sealed. Not called for a stop asked for from here (`--menu-walk`).
+    var onChildExited: ((UUID, Int32) -> Void)?
     /// A profile's process told how it sealed its data, just before it exited (the self-test).
     var onChildSealed: ((UUID, ProfileSealReport) -> Void)?
     /// Profiles whose proxy's exit no geolocation service could tell at their last launch (they
@@ -400,6 +405,8 @@ final class ProfileManager: ObservableObject {
             case .sealed(let report):
                 self.log.notice("Profile \(id.uuidString, privacy: .public) sealed its data in \(Int(report.seconds), privacy: .public) s, attempts \(report.attempts, privacy: .public), forced \(report.forced, privacy: .public), pages closed \(report.pagesClosed, privacy: .public)")
                 self.onChildSealed?(id, report)
+            case .menuWalk(let line):
+                self.onMenuWalk?(id, line)
             }
         }
         child.onExit = { [weak self] status in
@@ -437,6 +444,7 @@ final class ProfileManager: ObservableObject {
                 self.onError?(String(format: L(sealed ? "profile.crashed" : "profile.crashedUnsealed"), summary.name))
             }
             self.onReturnToProfiles?()
+            self.onChildExited?(id, status)
         }
         children[id] = child
         runningProfileIDs.insert(id)
@@ -659,6 +667,15 @@ final class ProfileManager: ObservableObject {
     func checkNetwork(_ id: UUID, probe: URL? = nil) -> Bool {
         guard let child = children[id] else { return false }
         child.send(.checkNetwork(probe: probe))
+        return true
+    }
+
+    /// Asks a profile running in its own process to walk Safari's menu bar from item `from` on;
+    /// each step comes back through `onMenuWalk`. False when it does not run in a process of its own.
+    @discardableResult
+    func walkMenu(_ id: UUID, from: Int) -> Bool {
+        guard let child = children[id] else { return false }
+        child.send(.walkMenu(from: from))
         return true
     }
 

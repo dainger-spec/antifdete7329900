@@ -151,6 +151,9 @@ enum ExceptionLog {
     /// Called after the event in which the run loop caught an exception, with that event's type: a
     /// profile's process tells the user (`SafariChrome.installUnavailableNotice`).
     static var onCaughtInRunLoop: ((NSException, NSEvent.EventType?) -> Void)?
+    /// Every exception as it is thrown — its name, its reason cut as the log has it, and the frames
+    /// of the throw — for the menu walk, which says which item threw (`SafariMenuWalk`).
+    static var onThrown: ((String, String, [String]) -> Void)?
 
     // MARK: The check
 
@@ -243,7 +246,13 @@ private var previousUncaughtHandler: (@convention(c) (NSException) -> Void)?
 private let loggingPreprocessor: ExceptionLog.Preprocessor = { thrown in
     let exception = previousPreprocessor?(thrown) ?? thrown
     if !ExceptionLog.isProbing {
-        ExceptionLog.write(exception, when: "thrown", frames: ExceptionLog.liveFrames())
+        let frames = ExceptionLog.liveFrames()
+        ExceptionLog.write(exception, when: "thrown", frames: frames)
+        if let onThrown = ExceptionLog.onThrown {
+            let thrownException = exception as? NSException
+            onThrown(thrownException?.name.rawValue ?? String(describing: type(of: exception)),
+                     LogRedaction.exceptionReason(thrownException?.reason ?? ""), frames)
+        }
     }
     return exception
 }

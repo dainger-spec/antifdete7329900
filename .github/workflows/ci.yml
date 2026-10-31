@@ -135,6 +135,19 @@ jobs:
           grep -E '^XPC [^ ]*Safari' build/egress27/safari-inventory.txt | head -10 | cut -c1-600 | sed 's/^/::notice title=macOS 27 - XPC services of Safari frameworks::/'
           echo "::group::the inventory"; cat build/egress27/safari-inventory.txt; echo "::endgroup::"
           exit 0
+      - name: Safari 27's menu, every item chosen in a profile's own process (docs/SAFARI_MENU.md)
+        # What each item of the menu bar does there: a crash, an exception, a window, a panel, a
+        # request to open something outside, a service started, a write in the real Safari's places
+        # (scripts/menu_walk.py, compared with docs/menu-walk/safari-<major>.json when there is one).
+        # This job fails nothing.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          major="$(defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString | cut -d. -f1)"
+          python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/egress27/menu-walk \
+            --title "macOS 27 - Safari's menu" --record "docs/menu-walk/safari-$major.json" \
+            --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners"
       - name: Safari 27's question about the default browser — as built, and declared a browser (a measurement)
         if: always()
         continue-on-error: true
@@ -350,6 +363,24 @@ jobs:
             | sed 's/^/::notice title=Safari inventory - menu::/'
           echo "::group::the inventory"; cat build/safari-inventory.txt; echo "::endgroup::"
           exit 0
+      - name: Safari's menu, every item chosen in a profile's own process (docs/SAFARI_MENU.md)
+        # What each item of the menu bar does there: a crash, an exception, a window, a panel, a
+        # request to open something outside, a service started, a write in the real Safari's places
+        # (scripts/menu_walk.py, compared with docs/menu-walk/safari-<major>.json when there is one).
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          major="$(defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString | cut -d. -f1)"
+          python3 scripts/menu_walk.py --app build/unsandboxed/PrivacyBrowser.app --out build/menu-walk \
+            --title "Safari's menu" --record "docs/menu-walk/safari-$major.json" \
+            --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: menu-walk
+          path: build/menu-walk
+          if-no-files-found: ignore
       - name: Safari's question about the default browser — as built, and declared a browser (a measurement)
         # Whether -[GeneralPreferences _defaultWebBrowserMayHaveChanged], which threw on a nil when ⌘,
         # opened Safari's settings in a profile's window, throws because the app is no http/https

@@ -173,6 +173,7 @@ enum SafariChrome {
         Piece(className: "UnifiedField", selector: "_assistantButtonIconForContentOption:withSparkle:", kind: .instanceMethod, role: .stub),
         Piece(className: "BrowserDocument", selector: "fileType", kind: .instanceMethod, role: .stub),
         Piece(className: "NSFileManager", selector: "safari_topLevelDirectoriesAtURL:", kind: .instanceMethod, role: .stub),
+        Piece(className: "WBTabGroupSyncAgentProxy", selector: "scheduleSyncIfNeeded", kind: .instanceMethod, role: .stub),
     ]
 
     /// The structural and network pieces this macOS does not have, by name. Meaningful once
@@ -833,6 +834,13 @@ enum SafariChrome {
             // The start page's onboarding section: Swift code that traps when it cannot reach
             // Safari's own services, and it takes every new tab down with it.
             ("StartPageOnboardingSectionProvider", "reloadData"),
+            // Tab groups sync through iCloud by an agent of Safari's, which a profile's process is
+            // refused (`ProfileNetworkGuard`: "SyncAgent"). When a tab of a tab group changed, the
+            // manager asked the agent to sync through its refused connection, and the process
+            // ended there (`_objc_fatal` in `objc_storeWeak` under -[NSXPCConnection
+            // _sendInvocation:…]): the menu walk, CI run 461, macOS 26, a page loaded in a window
+            // with a tab group. A profile's tab groups are its own and stay in its home.
+            ("WBTabGroupSyncAgentProxy", "scheduleSyncIfNeeded"),
         ]
         for (className, selectorName) in nothing {
             replaceWithConstant(className, selectorName) { nil }
@@ -931,6 +939,53 @@ enum SafariChrome {
         // NO: nothing of Safari's to fill a field with.
         replaceWithConstant("BrowserViewController", "_shouldOfferAnyTypeOfAutoFill") { nil }
         replaceWithConstant("FormDataController", "shouldOfferAddressBookAutoFillInTextField:formMetadata:") { nil }
+        closeAutoFillInsertActions()
+    }
+
+    /// The actions of the Edit menu's AutoFill items (Contact…, Passwords…, Credit Card…): the
+    /// system's AutoFill, filling a page from the account's own contact card, passwords and cards.
+    static let autoFillInsertActions = ["_handleInsertFromContactsCommand:", "_handleInsertFromPasswordsCommand:",
+                                        "_handleInsertFromCreditCardsCommand:"]
+
+    /// Those actions say they are off, however they are sent — the Edit menu (whose items are taken
+    /// out as well), a context menu, a key. On macOS 26, Passwords… in a profile's window had
+    /// Safari's helper (SafariPlatformSupport) write into the real Safari's container and
+    /// ~/Library/Safari and fetch over its own connection, as this Mac (the menu walk, CI run 452).
+    ///
+    /// Replacing the implementations AppKit and WebKit have was not all of it: with a page's field
+    /// focused, something else in the responder chain took the actions and our notice never came
+    /// (the menu walk on a page, CI run 463, macOS 26 and 27). So they are stopped where every
+    /// action sent to a responder passes, the application's `sendAction:to:from:` — Safari's
+    /// application object's, which is the one sending.
+    private static func closeAutoFillInsertActions() {
+        var replaced: Set<UInt> = []
+        let notice: @convention(block) (AnyObject, AnyObject?) -> Void = { _, _ in
+            MainActor.assumeIsolated { SafariChrome.presentNotice(L("safari.autofill.closed.title"), L("safari.autofill.closed.text")) }
+        }
+        for owner in [NSResponder.self, NSView.self, NSTextView.self, WKWebView.self] as [AnyClass] {
+            for name in autoFillInsertActions {
+                guard let method = class_getInstanceMethod(owner, NSSelectorFromString(name)),
+                      replaced.insert(UInt(bitPattern: method)).inserted else { continue }
+                method_setImplementation(method, imp_implementationWithBlock(notice))
+            }
+        }
+        let sendAction = #selector(NSApplication.sendAction(_:to:from:))
+        let closed = Set(autoFillInsertActions)
+        for owner in [NSClassFromString("BrowserApplication"), NSApplication.self].compactMap({ $0 }) {
+            guard let method = class_getInstanceMethod(owner, sendAction),
+                  replaced.insert(UInt(bitPattern: method)).inserted else { continue }
+            typealias Send = @convention(c) (AnyObject, Selector, Selector?, AnyObject?, AnyObject?) -> Bool
+            let original = unsafeBitCast(method_getImplementation(method), to: Send.self)
+            let replacement: @convention(block) (AnyObject, Selector?, AnyObject?, AnyObject?) -> Bool = { application, action, target, sender in
+                if let action, closed.contains(NSStringFromSelector(action)) {
+                    MainActor.assumeIsolated { SafariChrome.presentNotice(L("safari.autofill.closed.title"), L("safari.autofill.closed.text")) }
+                    return true
+                }
+                return original(application, sendAction, action, target, sender)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+        log.notice("The AutoFill insert actions are off: \(replaced.count, privacy: .public) implementation(s) replaced")
     }
 
     /// A form went on without Safari's AutoFill seeing it.
@@ -1054,7 +1109,9 @@ enum SafariChrome {
         removePrivateWindowItems(from: menu)
         removeAutoFillInsertItems(from: menu)
         addPasteAsTyped(to: menu)
+        retargetNewWindow(in: menu)
         NSApplication.shared.mainMenu = menu
+        keepAutoFillInsertItemsOut()
         log.notice("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
         return true
     }
@@ -1080,6 +1137,21 @@ enum SafariChrome {
         item.target = PasteAsTypedItem.shared
         edit.insertItem(item, at: lastPaste + 1)
         pasteAsTypedInMenu = true
+    }
+
+    /// File › New Window (⌘N) opens another window of the profile. Safari's own action
+    /// (`_newWindowWithDefaultProfile:`) opens one for Safari's own profiles, which this process
+    /// does not have, and its menu kept it disabled: no ⌘N in a profile's window (the menu walk, CI
+    /// run 452, macOS 26 and 27). The item keeps its place and its key.
+    private static func retargetNewWindow(in menu: NSMenu) {
+        for item in menu.items {
+            if let submenu = item.submenu {
+                retargetNewWindow(in: submenu)
+            } else if let action = item.action, NSStringFromSelector(action) == "_newWindowWithDefaultProfile:" {
+                item.target = NewWindowItem.shared
+                item.action = #selector(NewWindowItem.newWindow(_:))
+            }
+        }
     }
 
     /// "New Private Window" goes: a private window of Safari's would be built, like every web view
@@ -1119,6 +1191,27 @@ enum SafariChrome {
         }
         return removed
     }
+
+    /// AppKit adds the Edit menu's system items itself once the menu bar is up — AutoFill among
+    /// them — so the items taken out above came back: the menu walk found Edit › AutoFill ›
+    /// Contact… and Passwords… there, enabled, in a profile's window (CI run 452). They are taken
+    /// out again whenever a menu gets an item, and as a menu opens.
+    private static func keepAutoFillInsertItemsOut() {
+        guard !isKeepingAutoFillOut else { return }
+        isKeepingAutoFillOut = true
+        for name in [NSMenu.didAddItemNotification, NSMenu.didBeginTrackingNotification] {
+            _ = NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { note in
+                guard let menu = note.object as? NSMenu else { return }
+                // Not while AppKit is still adding to the menu: once it is done.
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { _ = SafariChrome.removeAutoFillInsertItems(from: menu) }
+                }
+            }
+        }
+        if let menu = NSApplication.shared.mainMenu { removeAutoFillInsertItems(from: menu) }
+    }
+
+    private static var isKeepingAutoFillOut = false
 
     // MARK: Opening a window
 
@@ -1283,6 +1376,18 @@ private final class PasteAsTypedItem: NSObject {
     static let shared = PasteAsTypedItem()
 
     @objc func pasteAsTyped(_ sender: Any?) { HumanPaste.pasteIntoKeyWindow() }
+}
+
+/// What File › New Window calls in a profile's process (`SafariChrome.retargetNewWindow`): a window
+/// of Safari's for the profile, on its start page, as one the manager asks for.
+@MainActor
+private final class NewWindowItem: NSObject {
+    static let shared = NewWindowItem()
+
+    @objc func newWindow(_ sender: Any?) {
+        guard let session = ProfileNetworkGuard.session else { return }
+        _ = SafariChromeHost.open(session: session, url: nil)
+    }
 }
 
 /// Makes one of `--nib-check`'s nibs, from a timer of AppKit's run loop.

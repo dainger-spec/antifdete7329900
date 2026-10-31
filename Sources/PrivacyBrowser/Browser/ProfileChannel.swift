@@ -36,6 +36,9 @@ enum ProfileCommand: Codable {
     /// The app's settings for browsing (Settings → Behavior, Downloads), sent when the process
     /// starts and whenever they change; they apply at once.
     case preferences(BrowsingPreferences)
+    /// Choose every item of Safari's menu bar in turn, from item `from` on, and say what each did
+    /// (`SafariMenuWalk`). Sent by the `--menu-walk` check only, never by the app.
+    case walkMenu(from: Int)
 }
 
 enum ProfileEvent: Codable {
@@ -71,6 +74,8 @@ enum ProfileEvent: Codable {
     /// No geolocation service answered through the profile's proxy: where it exits is not known,
     /// and the profile runs in the last known location's time zone and language, or this Mac's.
     case proxyLocationUnknown
+    /// One step of `walkMenu`, as a line of JSON (`SafariMenuWalk`).
+    case menuWalk(String)
 }
 
 /// How a profile's WebKit data was sealed as its process quit: whether WebKit let the store go
