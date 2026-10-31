@@ -1,6 +1,5 @@
-/* The promo film v3's stage (tools/film3/build.mjs → video/stage3/<lang>.html): one 1920 × 1080 frame that holds
-   every shot. v1's cut, with what read as cheap taken out: no glows, halos or flashes, no blur on the words, a
-   graphite studio behind every shot instead of black, soft shadows under the windows. film.js puts the stage at any moment of the film; nothing here moves by itself, so transitions
+/* The promo film's stage (tools/film3/build.mjs → video/stage3/<lang>.html): one 1920 × 1080 frame that holds
+   every shot. film.js puts the stage at any moment of the film; nothing here moves by itself, so transitions
    and animations are off on the whole stage. Type is Inter Display, the font the film is rendered with (SF Pro
    is not available where it is rendered), set large and bold: this is an advertisement, read in a glance. */
 
@@ -9,20 +8,14 @@ html.film, html.film body { margin: 0; width: 1920px; height: 1080px; overflow: 
 .film .reveal { opacity: 1; transform: none; }   /* film.js may still move a part the site reveals */
 .film { --fd: "Inter Display", "Inter", var(--font-display); --white: #F6F7F9; --grey: #9099A8; --blue: #2F6BEF; }
 
-.reel { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #0E0F11; isolation: isolate; }
+.reel { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #050608; isolation: isolate; }
 /* An unseen shot is both: hidden (not painted) and transparent (a part that sets its own visibility stays unseen) */
-.shot { position: absolute; inset: 0; overflow: hidden; opacity: 0; visibility: hidden; background: #0E0F11; }
-/* The studio: a graphite cyc out of focus, a little larger than the frame so it can follow the camera a little */
-.studio { position: absolute; left: -96px; top: -54px; width: 2112px !important; height: 1188px !important; max-width: none !important; display: block; transform-origin: 1056px 594px; pointer-events: none; user-select: none; }
+.shot { position: absolute; inset: 0; overflow: hidden; opacity: 0; visibility: hidden; background: #050608; }
 .shot.on { opacity: 1; visibility: visible; }
 .shot > .cam { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
 
-/* The home page's scenes, each pinned to the frame (on the site they pin to the window while it scrolls), with
-   no ground of their own: they stand in the studio */
-.film .scene { height: 1080px !important; min-height: 0 !important; background: transparent !important; }
-.film .scene-pin, .film .scene-stage, .film .scene > div { background-color: transparent !important; }
-/* the 448 stands in the studio, not on a wall of code */
-.film .sc-numbers .nm-macro { display: none !important; }
+/* The home page's scenes, each pinned to the frame (on the site they pin to the window while it scrolls) */
+.film .scene { height: 1080px !important; min-height: 0 !important; }
 .film .scene-pin { position: absolute !important; left: 0; top: 0; width: 1920px; height: 1080px !important; }
 /* What the film says in its own words, and the scenes' small print, is not shown */
 .film .mi-head, .film .sit-head, .film .sit-lead, .film .sit-side, .film .ly-head, .film .ly-legend, .film .px-head,
@@ -35,8 +28,8 @@ html.film, html.film body { margin: 0; width: 1920px; height: 1080px; overflow: 
 .hero-cv { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; display: block; }
 .brand { position: absolute; inset: 0; display: grid; place-items: center; }
 .brand-in { display: flex; align-items: center; gap: 46px; transform-origin: 50% 50%; margin-top: -60px; }
-.brand-in > svg { flex: none; }
-.brand-word svg { display: block; }
+.brand-in > svg { flex: none; filter: drop-shadow(0 0 30px rgba(79, 123, 240, 0.35)); }
+.brand-word svg { display: block; filter: drop-shadow(0 0 40px rgba(170, 196, 255, 0.25)); }
 
 /* MARK: Titles — big and bold; each line a mask the words rise into */
 .titles { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
@@ -76,8 +69,8 @@ html.film, html.film body { margin: 0; width: 1920px; height: 1080px; overflow: 
 .vs-book { position: absolute; inset: 0; transform-style: preserve-3d; }
 .vs-page {
   position: absolute; top: 372px; width: 640px; height: 520px; box-sizing: border-box; padding: 34px 40px; border-radius: 30px;
-  background: linear-gradient(180deg, #23262C, #1B1D22);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 50px 90px -20px rgba(0, 0, 0, 0.6), 0 12px 24px rgba(0, 0, 0, 0.3);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.1), inset 0 1.5px 0 rgba(255, 255, 255, 0.16), 0 40px 120px rgba(0, 0, 0, 0.6);
   font-family: var(--fd); color: var(--white);
 }
 .vs-l { left: 200px; transform-origin: 100% 50%; }
@@ -88,20 +81,22 @@ html.film, html.film body { margin: 0; width: 1920px; height: 1080px; overflow: 
 .vs-t { display: block; font-weight: 600; font-size: 30px; line-height: 38px; letter-spacing: -0.016em; color: #D4D8E0; }
 .vs-code { position: relative; display: block; margin-top: 16px; width: 420px; height: 40px; }
 .vs-bars { position: absolute; left: 0; top: 0; fill: rgba(255, 255, 255, 0.22); }
-.vs-bars.vs-lit { fill: #F2F4F8; clip-path: inset(0 calc((1 - var(--s, 0)) * 100%) 0 0); }
-.vs-scan { display: none; }
+.vs-bars.vs-lit { fill: #E9EEFF; filter: drop-shadow(0 0 6px rgba(120, 160, 255, 0.9)); clip-path: inset(0 calc((1 - var(--s, 0)) * 100%) 0 0); }
+.vs-scan { position: absolute; left: -40px; right: -40px; top: 46px; height: 60px; opacity: 0; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(150, 185, 255, 0.55), rgba(79, 123, 240, 0.12) 60%, transparent); }
 .vs-mid { position: absolute; left: 840px; width: 240px; top: 372px; height: 520px; }
 .vs-eq {
   position: absolute; left: 50%; width: max-content; display: flex; align-items: baseline; gap: 4px; padding: 12px 18px 12px 24px; border-radius: 40px; white-space: nowrap;
-  transform: translateX(-50%); background: #16181D; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 18px 40px rgba(0, 0, 0, 0.45);
+  transform: translateX(-50%); background: rgba(14, 18, 28, 0.92); box-shadow: inset 0 0 0 1.5px rgba(120, 160, 255, 0.4), 0 10px 40px rgba(47, 107, 239, 0.35);
   font-family: var(--fd); color: var(--white);
 }
 .vs-eq b { font-weight: 700; font-size: 54px; line-height: 58px; letter-spacing: -0.035em; }
 .vs-eq span { font-weight: 600; font-size: 32px; color: var(--grey); margin-right: 12px; }
 .vs-eq svg { flex: none; align-self: center; width: 36px; height: 36px; }
 .vs-eq[data-i="0"] { top: 100px; } .vs-eq[data-i="1"] { top: 238px; } .vs-eq[data-i="2"] { top: 376px; }
-.vs-spine { position: absolute; left: 959px; top: 330px; width: 2px; height: 600px; opacity: 0;
-  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.28) 20%, rgba(255, 255, 255, 0.28) 80%, transparent); }
+.vs-spine { position: absolute; left: 958px; top: 330px; width: 4px; height: 600px; border-radius: 2px; opacity: 0;
+  background: linear-gradient(180deg, transparent, #fff 20%, #fff 80%, transparent);
+  box-shadow: 0 0 16px 3px rgba(150, 180, 255, 0.85), 0 0 70px 18px rgba(79, 123, 240, 0.5); }
 
 /* MARK: Isolation: the layers named one by one */
 .lw { position: absolute; left: 1330px; top: 300px; margin: 0; padding: 0; list-style: none; font-family: var(--fd); }
@@ -112,46 +107,87 @@ html.film, html.film body { margin: 0; width: 1920px; height: 1080px; overflow: 
 .cn i { width: 2px; height: 54px; background: rgba(255, 255, 255, 0.25); }
 .cn span:last-child { color: var(--grey); }
 
-/* MARK: The features: the bento grid as a plane tilted back, under the title; it fades out towards the top (a
-   mask in the frame, so the studio shows through) */
+/* MARK: The features: the bento grid as a plane tilted back, under the title; it fades out towards the top */
 .shot-features { perspective: 1700px; perspective-origin: 960px 380px; }
-.shot-features > .cam-mask { position: absolute; inset: 0; perspective: 1700px; perspective-origin: 960px 380px;
-  -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.06) 25%, #000 52%, #000 80%, rgba(0, 0, 0, 0.35) 100%);
-  mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.06) 25%, #000 52%, #000 80%, rgba(0, 0, 0, 0.35) 100%); }
-.shot-features .cam { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+.shot-features::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, #050608 0%, rgba(5, 6, 8, 0.94) 25%, rgba(5, 6, 8, 0) 50%), linear-gradient(0deg, rgba(5, 6, 8, 0.7) 0%, rgba(5, 6, 8, 0) 22%);
+}
 /* the scenes the film turns in 3D */
 .shot-mission > .cam, .shot-sites > .cam, .shot-layers > .cam, .shot-encryption > .cam, .shot-warmup > .cam, .shot-proxy > .cam { perspective: 2200px; perspective-origin: 960px 540px; }
 
 /* MARK: The end card: the mark in code, the name, what it is, the button */
-.shot-end { background: #0E0F11; }
+.shot-end { background: #030405; }
 .end-mark { position: absolute; left: 960px; top: 340px; width: 420px; height: 420px; margin: -210px 0 0 -210px; --q: 1; --d: 200px; }
 .end-mark canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.end-l, .end-r { filter: brightness(1.5); }
+.end-l, .end-r { filter: brightness(1.35) saturate(1.1); }
+.end-glow {
+  position: absolute; inset: -55%; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(47, 107, 239, 0.26), rgba(47, 107, 239, 0.07) 48%, transparent 74%);
+}
 /* The seam's normal is (3, 1)/√10: the left half comes from up and left, the right half from down and right */
 .end-l { transform: translate(calc(var(--d) * -0.949 * (1 - var(--q))), calc(var(--d) * -0.316 * (1 - var(--q)))); }
 .end-r { transform: translate(calc(var(--d) * 0.949 * (1 - var(--q))), calc(var(--d) * 0.316 * (1 - var(--q)))); }
 .end-name, .end-line { position: absolute; left: 0; right: 0; display: flex; justify-content: center; text-align: center; }
 .end-name { top: 600px; }
-
+.end-name svg { filter: drop-shadow(0 0 30px rgba(170, 196, 255, 0.18)); }
 .end-line { top: 748px; font: 600 40px/50px var(--fd); letter-spacing: -0.018em; color: var(--grey); }
 .end-btn {
   position: absolute; left: 960px; top: 836px; transform: translateX(-50%); white-space: nowrap;
   height: 84px; padding: 0 50px; border-radius: 42px; background: var(--blue); color: #fff;
   font: 700 34px/84px "Inter", var(--font); letter-spacing: -0.015em;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  box-shadow: 0 20px 70px rgba(47, 107, 239, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
-/* MARK: Over everything: a quiet vignette; the hairline that wipes one shot into the next (the mark's seam,
-   leaning 1 : 3 — a line, not a light); black for the cuts that go through it */
+/* MARK: Over everything: a quiet vignette; the seam of light that wipes one shot into the next; a flash of
+   light on the big moments; black for the cuts that go through it */
 .fx { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
 .fx > i { position: absolute; display: block; }
-.fx-vignette { inset: 0; background: radial-gradient(ellipse 80% 76% at 50% 48%, transparent 55%, rgba(0, 0, 0, 0.3) 100%); }
+.fx-vignette { inset: 0; background: radial-gradient(ellipse 78% 74% at 50% 48%, transparent 58%, rgba(0, 0, 0, 0.34) 100%); }
 .fx-black { inset: 0; background: #000; opacity: 0; }
+.fx-flash { inset: -20%; opacity: 0; mix-blend-mode: screen; background: radial-gradient(closest-side, rgba(170, 196, 255, 0.55), rgba(79, 123, 240, 0.18) 45%, transparent 75%); }
 .fx-seam {
-  left: 0; top: -200px; width: 2px; height: 1480px; opacity: 0; transform-origin: 50% 50%;
-  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.55) 25%, rgba(255, 255, 255, 0.7) 50%, rgba(255, 255, 255, 0.55) 75%, transparent);
+  left: 0; top: -200px; width: 6px; height: 1480px; opacity: 0; transform-origin: 50% 50%; border-radius: 3px;
+  background: linear-gradient(180deg, transparent, #E8EEFF 18%, #FFFFFF 50%, #E8EEFF 82%, transparent);
+  box-shadow: 0 0 18px 4px rgba(150, 180, 255, 0.85), 0 0 80px 22px rgba(79, 123, 240, 0.55), 0 0 220px 70px rgba(47, 107, 239, 0.28);
 }
 
-/* MARK: Soft shadows: the windows stand off the studio (a long soft shadow under, a short one close) */
-.film .sc-mission .mi-frame, .film .sc-sites .sw, .film .sc-proxy .pxw, .film .sc-encryption .enc-card, .film .sc-warmup .wu-win,
-.film .sc-bento .bx { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 60px 110px -30px rgba(0, 0, 0, 0.75), 0 18px 36px -8px rgba(0, 0, 0, 0.45) !important; }
+/* MARK: The vertical cut (9:16, for Stories; tools/film3/build.mjs → video/stage3/<lang>-v.html). The window stays
+   1920 × 1080 (the home page's scenes lay out by the window), the 1080 × 1920 frame sits in its corner at 0.5625
+   and is filmed at a device scale 1/0.5625 higher (capture.mjs --vert). Each shot's 16:9 composition is re-framed
+   by film.js (VF); the words that sit over the shots are set again here: large, centred, and inside the part of a
+   Story that no button or name covers (about 250 px from the top, 340 px from the bottom). */
+.vert .reel { width: 1080px; height: 1920px; transform: scale(0.5625); transform-origin: 0 0; }
+.vert .hero-cv { -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%); mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%); }
+.vert .ttl { left: 60px; right: 60px; top: 270px; text-align: center; font-size: 92px; line-height: 96px; }
+.vert .ttl-hero { top: 300px; font-size: 92px; line-height: 96px; }
+.vert .ttl-mission { top: 290px; left: 60px; right: 60px; text-align: center; font-size: 124px; line-height: 124px; }
+.vert .ttl-safari { top: 290px; font-size: 96px; line-height: 100px; }
+.vert .ttl-probe { top: 1110px; left: 90px; right: 90px; font-size: 50px; line-height: 62px; }
+.vert .ttl-layers { top: 290px; left: 60px; right: 60px; text-align: center; font-size: 104px; line-height: 106px; }
+.vert .ttl-proxy { top: 280px; }
+.vert .ttl-proxy .ln3 { font-size: 42px; line-height: 52px; margin-top: 26px; }
+.vert .ttl-encryption { top: 290px; font-size: 100px; line-height: 104px; }
+.vert .ttl-warmup { top: 290px; left: 60px; right: 60px; text-align: center; font-size: 88px; line-height: 92px; }
+.vert .ttl-features { top: 280px; font-size: 84px; line-height: 88px; }
+/* each profile from its own country: under the window */
+.vert .cty { left: 100px; top: 1180px; width: 880px; }
+.vert .cty-k { font-size: 36px; line-height: 44px; }
+.vert .cty-roll { margin-top: 24px; height: 380px; }
+.vert .cty-n { font-size: 92px; line-height: 100px; }
+.vert .cty-t { font-size: 180px; line-height: 172px; margin-top: 14px; }
+/* the layers named one by one: beside the stack */
+.vert .lw { left: 720px; top: 780px; }
+.vert .lw li { font-size: 66px; line-height: 96px; }
+/* the cipher's names under the lock */
+.vert .cn { top: 1440px; font-size: 54px; gap: 30px; }
+.vert .cn i { height: 48px; }
+/* the features' plane */
+.vert .shot-features { perspective-origin: 540px 760px; }
+/* the end card, in a column */
+.vert .end-mark { left: 540px; top: 760px; }
+.vert .end-name { top: 1030px; left: 0; right: auto; width: 1080px; }
+.vert .end-line { top: 1180px; left: 0; right: auto; width: 1080px; padding: 0 60px; box-sizing: border-box; font-size: 42px; line-height: 52px; }
+.vert .end-btn { left: 540px; top: 1290px; }
+/* the light's seam, long enough for the tall frame */
+.vert .fx-seam { top: -300px; height: 2520px; }

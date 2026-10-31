@@ -1,6 +1,5 @@
-// The promo film v3 (tools/film3): v1's 30 seconds — its cut, its cameras, its 3D — without what read as cheap
-// (the glows, the flashes, the blurred words), each shot in a graphite studio. Every frame is a function of the
-// film's clock. The stage (video/stage3/<lang>.html) holds every shot; FILM.seek(t) puts it at moment t — which shots are seen, where
+// The promo film (tools/film3): 30 seconds in which every frame is a function of the film's clock. The stage
+// (video/stage3/<lang>.html) holds every shot; FILM.seek(t) puts it at moment t — which shots are seen, where
 // their camera is, how they are turned in 3D, how far each home-page scene has played (site.js drives a scene by
 // the progress it is given here instead of by the scroll), the titles, the transitions. Nothing depends on the
 // frame before, so any frame can be filmed on its own (capture.mjs films ranges of frames in parallel).
@@ -9,6 +8,10 @@
 (function () {
   'use strict';
   const TL = window.FILM_TIMELINE, FPS = TL.fps, DUR = TL.duration, CUE = TL.cues;
+  // The vertical cut (9:16, Stories): the same shots, each 16:9 composition re-framed in a 1080 × 1920 frame (VF)
+  const VERT = document.documentElement.classList.contains('vert');
+  const FW = VERT ? 1080 : 1920, FH = VERT ? 1920 : 1080;
+  let NOW = 0;
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
   const clamp01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x);
@@ -18,23 +21,39 @@
     lin: (x) => x,
     out: (x) => 1 - Math.pow(1 - x, 3),
     in: (x) => x * x * x,
+    in2: (x) => x * x,
     inOut: (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2),
     expo: (x) => (x >= 1 ? 1 : 1 - Math.pow(2, -10 * x)),
     expoIn: (x) => (x <= 0 ? 0 : Math.pow(2, 10 * x - 10)),
     smooth: (x) => x * x * (3 - 2 * x),
     sine: (x) => 0.5 - 0.5 * Math.cos(Math.PI * x),
   };
-  /// Keys [[t, v, ease?], …]: v at t, eased between keys by the later key's ease (default inOut).
+  /// Keys [[t, v, ease?], …] → one smooth curve through them (a monotone cubic, Fritsch–Carlson): it never
+  /// overshoots a key and its speed never jumps, so a move flows through its keys instead of stopping at each
+  /// (v1 eased every segment on its own: the camera halted at every key — the jerks). It starts from rest and comes
+  /// to rest at the last key; E.lin on the first key starts it at speed, on the last key keeps its speed (into a cut).
+  /// Neighbouring equal values hold.
   function keys(k, t) {
-    if (t <= k[0][0]) return k[0][1];
-    for (let i = 1; i < k.length; i++) {
-      if (t <= k[i][0]) return lerp(k[i - 1][1], k[i][1], (k[i][2] || E.inOut)(span(t, k[i - 1][0], k[i][0])));
+    const n = k.length;
+    if (n === 1 || t <= k[0][0]) return k[0][1];
+    if (t >= k[n - 1][0]) return k[n - 1][1];
+    const d = [];
+    for (let i = 0; i < n - 1; i++) d.push((k[i + 1][1] - k[i][1]) / (k[i + 1][0] - k[i][0]));
+    const m = new Array(n).fill(0);
+    for (let i = 1; i < n - 1; i++) {
+      if (d[i - 1] * d[i] <= 0) continue;
+      const h0 = k[i][0] - k[i - 1][0], h1 = k[i + 1][0] - k[i][0];
+      m[i] = (3 * (h0 + h1)) / ((2 * h1 + h0) / d[i - 1] + (h1 + 2 * h0) / d[i]);
     }
-    return k[k.length - 1][1];
+    if (k[0][2] === E.lin) m[0] = d[0];
+    if (k[n - 1][2] === E.lin) m[n - 1] = d[n - 2];
+    let i = 0;
+    while (t > k[i + 1][0]) i++;
+    const h = k[i + 1][0] - k[i][0], u = (t - k[i][0]) / h, u2 = u * u, u3 = u2 * u;
+    return (2 * u3 - 3 * u2 + 1) * k[i][1] + (u3 - 2 * u2 + u) * h * m[i] + (-2 * u3 + 3 * u2) * k[i + 1][1] + (u3 - u2) * h * m[i + 1];
   }
   const shotEl = (n) => $(`[data-shot="${n}"]`);
-  const camEl = (n) => $(`[data-shot="${n}"] .cam`);
-  const studioEl = (n) => $(`[data-shot="${n}"] > .studio`);
+  const camEl = (n) => $(`[data-shot="${n}"] > .cam`);
   const drive = (name, p) => window.LumenFilm && window.LumenFilm.play(name, p);
   const css = (el, props) => { for (const k in props) el.style.setProperty(k, props[k]); };
 
@@ -55,13 +74,38 @@
   const then = (A, B) => Cam(A.k * B.k, A.tx + A.k * B.tx, A.ty + A.k * B.ty);
   /// Where rect r (stage px: centre, width, height) is seen through camera A.
   const seen = (A, r) => ({ cx: A.tx + A.k * r.cx, cy: A.ty + A.k * r.cy, w: A.k * r.w, h: A.k * r.h });
+  const LAST = {};
   function cam(n, A) {
+    if (VERT) A = then(VF(n, NOW), A);
+    LAST[n] = A;
     camEl(n).style.transform = `translate(${A.tx.toFixed(2)}px, ${A.ty.toFixed(2)}px) scale(${A.k.toFixed(5)})`;
-    // the studio is far behind: it follows the camera a quarter of the way (a dive through a window still
-    // moves it, but never off the frame)
-    const k = Math.min(1.6, Math.max(0.94, Math.pow(A.k, 0.25)));
-    const dx = (A.tx + A.k * 960 - 960) * 0.18, dy = (A.ty + A.k * 540 - 540) * 0.18;
-    studioEl(n).style.transform = `translate(${Math.max(-90, Math.min(90, dx)).toFixed(2)}px, ${Math.max(-50, Math.min(50, dy)).toFixed(2)}px) scale(${k.toFixed(5)})`;
+  }
+  /// The vertical cut: where a shot's 16:9 composition sits in the 9:16 frame — its frame point (cx, cy) seen at
+  /// (X, Y), k times larger. Two shots that dive one into the other share one framing through the dive, so the
+  /// window still turns into the window.
+  const fitV = (k, cx, cy, X, Y) => Cam(k, X - k * cx, Y - k * cy);
+  const mixV = (A, B, u) => Cam(A.k * Math.pow(B.k / A.k, u), lerp(A.tx, B.tx, u), lerp(A.ty, B.ty, u));
+  const VSHOT = {
+    // the Mac: whole while it is closed and wide, closer as it opens (a slow push in), followed as it turns
+    hero: (t) => fitV(keys([[0, 0.86], [2.2, 1.0], [4.05, 1.08]], t), keys([[1.0, 960], [2.6, 985], [4.05, 1100]], t), 640, 540, 1130),
+    mission: () => fitV(1.08, 1086, 766, 540, 1100),
+    sites: () => fitV(0.95, 644, 608, 540, 740),
+    safari: () => fitV(0.6, 960, 632, 540, 1120),
+    numbers: () => fitV(1.0, 960, 430, 540, 820),
+    layers: () => fitV(0.92, 760, 700, 430, 1080),
+    // close on the sign-in form while it loads, then back to the whole window as it fails
+    proxy: (t) => fitV(0.9, 960, 560, keys([[15.5, 298], [17.25, 298], [18.0, 540]], t), keys([[15.5, 810], [17.25, 810], [18.0, 1110]], t)),
+    encryption: () => fitV(0.95, 960, 600, 540, 1080),
+    warmup: () => fitV(0.72, 988, 700, 540, 1110),
+  };
+  function VF(n, t) {
+    if (n === 'hero' || (n === 'mission' && t < CUE.dive[1])) {
+      return t >= CUE.dive[0] ? mixV(VSHOT.hero(CUE.dive[0]), VSHOT.mission(CUE.dive[1]), E.inOut(span(t, CUE.dive[0], CUE.dive[1]))) : VSHOT.hero(t);
+    }
+    if (n === 'mission' || (n === 'sites' && t < CUE.through[1])) {
+      return t >= CUE.through[0] ? mixV(VSHOT.mission(CUE.through[0]), VSHOT.sites(CUE.through[1]), E.inOut(span(t, CUE.through[0], CUE.through[1]))) : VSHOT.mission(t);
+    }
+    return VSHOT[n] ? VSHOT[n](t) : Cam();
   }
   /// A dive through a window, u 0 → 1: the leaving shot (its camera `base`) zooms into rect `from` until it
   /// covers rect `to` as the arriving shot frames it (camera `base2`); the arriving shot starts with `to` seen
@@ -81,19 +125,23 @@
     el.style.transform = rx || ry || rz || z ? `translateZ(${z.toFixed(1)}px) rotateX(${rx.toFixed(3)}deg) rotateY(${ry.toFixed(3)}deg) rotateZ(${rz.toFixed(3)}deg)` : '';
   }
 
-  // MARK: The hairline that wipes (the mark's own seam, leaning 1 : 3), and black
-  const seam = $('.fx-seam'), black = $('.fx-black');
+  // MARK: Light: the seam that wipes (the mark's own line, leaning 1 : 3), flashes, black
+  const seam = $('.fx-seam'), flash = $('.fx-flash'), black = $('.fx-black');
   const LEAN = Math.atan(1 / 3) * 180 / Math.PI;
   /// The polygon of the frame left of the seam when its middle is at x = xc.
-  const leftOf = (xc) => `polygon(-10px -10px, ${(xc + 540 / 3).toFixed(1)}px -10px, ${(xc - 540 / 3).toFixed(1)}px 1090px, -10px 1090px)`;
+  const leftOf = (xc) => `polygon(-10px -10px, ${(xc + FH / 6).toFixed(1)}px -10px, ${(xc - FH / 6).toFixed(1)}px ${FH + 10}px, -10px ${FH + 10}px)`;
+  /// The same, for a part inside a camera C: the seam's line taken into the part's own coordinates.
+  const leftOfIn = (xc, C) => {
+    const c = (xc - C.tx + (FH / 2 - C.ty) / 3) / C.k;
+    return `polygon(-4000px -2000px, ${(c + 2000 / 3).toFixed(1)}px -2000px, ${(c - 4000 / 3).toFixed(1)}px 4000px, -4000px 4000px)`;
+  };
   function wipe(t, a, b) {
     const u = E.inOut(span(t, a, b));
-    return { u, xc: lerp(-420, 2340, u), glow: Math.sin(Math.PI * span(t, a, b)), on: t >= a && t <= b };
+    return { u, xc: lerp(-(FH / 6 + 240), FW + FH / 6 + 240, u), glow: Math.sin(Math.PI * span(t, a, b)), on: t >= a && t <= b };
   }
   function clipShot(n, w) { shotEl(n).style.clipPath = w && w.u < 1 ? leftOf(w.xc) : ''; }
 
-  // MARK: Titles — big; each word rises into its line from below, and on out of it at the end (sharp: the mask
-  // and the shutter are the only softness)
+  // MARK: Titles — big; each word rises into its line from below, and on out of it at the end
   const TITLES = Object.fromEntries($$('.ttl').map((el) => [el.dataset.title, { el, words: $$('.w', el).map((w) => ({ w, l3: !!w.closest('.ln3') })) }]));
   function title(name, t, a, b, { l3 = a + 0.35, stagger = 0.06 } = {}) {
     const T = TITLES[name];
@@ -106,12 +154,14 @@
       const u = E.expo(span(t, start, start + 0.75));
       const v = E.in(span(t, b + k * 0.025, b + k * 0.025 + 0.34));
       const y = (1 - u) * 118 - v * 118;
+      const blur = (1 - u) * 7 + v * 9;
       x.w.style.transform = `translateY(${y.toFixed(2)}%)`;
       x.w.style.opacity = (Math.min(1, u * 1.4) * (1 - v)).toFixed(3);
+      x.w.style.filter = blur > 0.05 ? `blur(${blur.toFixed(2)}px)` : 'none';
     });
   }
 
-  // MARK: The opening: the MacBook's frames (tools/film3/hero.mjs — v1's frames in video/.cache/hero — 60 a second from t = 0) under the name
+  // MARK: The opening: the MacBook's frames (tools/film/hero.mjs, 60 a second from t = 0) under the name
   const HERO_N = Math.round(4.4 * FPS) + 1;
   const heroCv = $('.hero-cv'), hctx = heroCv.getContext('2d');
   let heroShown = -1;
@@ -132,6 +182,8 @@
   const M = {};
   function measure() {
     const rect = (sel) => { const r = $(sel).getBoundingClientRect(); return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: r.width, h: r.height, x: r.left, y: r.top }; };
+    const reel = $('.reel');
+    if (VERT) reel.style.transform = 'none';             // measured at the stage's own size
     const shots = ['mission', 'sites', 'features', 'numbers', 'encryption', 'layers'];
     shots.forEach((n) => { shotEl(n).classList.add('on'); shotEl(n).style.opacity = '0'; camEl(n).style.transform = ''; });
     drive('mission', 0); M.store0 = rect('.shot-mission .mi-win.focus');
@@ -143,6 +195,7 @@
     drive('encryption', 0.05); M.card = rect('.shot-encryption .enc-card');
     drive('layers', 0.7); M.stack = rect('.shot-layers .ly-2');
     shots.forEach((n) => { shotEl(n).classList.remove('on'); shotEl(n).style.opacity = ''; });
+    reel.style.transform = '';
   }
   // The shots' cameras at rest (the dives are laid over them)
   // after the name the Mac settles a little lower, under the title
@@ -168,11 +221,11 @@
     paintHalves(surfaces[1], L, { which: [1], tokens });
     paintSeam(surfaces[2], L, 1, 1);
   }
-  /// A part that comes in: up, and in.
-  function rise(el, t, a, { dy = 40, dur = 0.7, blur = 0, scale = 0, x = '' } = {}) {
+  /// A part that comes in: up out of a blur.
+  function rise(el, t, a, { dy = 40, dur = 0.7, blur = 12, scale = 0, x = '' } = {}) {
     const v = span(t, a, a + dur), u = E.expo(v);
     el.style.opacity = E.out(clamp01(v * 1.6)).toFixed(3);
-    el.style.filter = blur && v < 1 ? `blur(${((1 - E.out(v)) * blur).toFixed(2)}px)` : 'none';
+    el.style.filter = v < 1 ? `blur(${((1 - E.out(v)) * blur).toFixed(2)}px)` : 'none';
     el.style.transform = `${x}translateY(${((1 - u) * dy).toFixed(2)}px)${scale ? ` scale(${(1 - scale * (1 - u)).toFixed(4)})` : ''}`;
   }
 
@@ -180,23 +233,23 @@
   const SHOTS = [
     { name: 'hero', from: 0, to: 4.56, async frame(t) {
       await heroFrame(Math.round(t * FPS));
-      const ud = E.in(span(t, CUE.dive[0], CUE.dive[1]));
+      const ud = E.inOut(span(t, CUE.dive[0], CUE.dive[1]));
       cam('hero', ud > 0 ? dive(ud, heroBase(t), DISPLAY, missionBase(4.55), M.store0).leave : heroBase(t));
       show('hero', true, 1 - E.smooth(span(t, CUE.dive[1] - 0.2, CUE.dive[1])));
       // the name: revealed by the seam of light, held, then it flies at the camera as the lid opens
       const w = wipe(t, CUE.brand[0], CUE.brand[1]);
       const out = span(t, CUE.brandOut[0], CUE.brandOut[1]);
       brand.style.visibility = t < CUE.brandOut[1] ? 'visible' : 'hidden';
-      brand.style.clipPath = w.u < 1 ? leftOf(w.xc) : '';
+      brand.style.clipPath = w.u < 1 ? (VERT ? leftOfIn(w.xc, LAST.hero) : leftOf(w.xc)) : '';
       const grow = 1 + 0.035 * span(t, CUE.brand[1], CUE.brandOut[0]) + 1.1 * E.expoIn(out);
       brandIn.style.transform = `scale(${grow.toFixed(4)})`;
       brandIn.style.opacity = (1 - E.in(out)).toFixed(3);
-      brandIn.style.filter = out > 0.02 ? `blur(${(5 * E.in(out)).toFixed(2)}px)` : 'none';
+      brandIn.style.filter = out > 0 ? `blur(${(16 * E.in(out)).toFixed(2)}px)` : 'none';
       title('hero', t, 2.15, 3.92);
     } },
     { name: 'mission', from: 4.3, to: 7.1, frame(t) {
       drive('mission', keys([[4.55, 0], [4.75, 0.03], [6.35, 0.97], [6.6, 1, E.out]], t));
-      const ud = E.in(span(t, CUE.dive[0], CUE.dive[1])), uo = E.in(span(t, CUE.through[0], CUE.through[1]));
+      const ud = E.inOut(span(t, CUE.dive[0], CUE.dive[1])), uo = E.inOut(span(t, CUE.through[0], CUE.through[1]));
       if (t < CUE.dive[1]) cam('mission', dive(ud, heroBase(t), DISPLAY, missionBase(4.55), M.store0).enter);
       else if (uo > 0) cam('mission', dive(uo, missionBase(t), M.store1, sitesBase(CUE.through[1]), M.sites).leave);
       else cam('mission', missionBase(t));
@@ -207,7 +260,7 @@
     } },
     { name: 'sites', from: 6.86, to: 9.56, frame(t) {
       drive('sites', keys([[7.0, 0.2], [7.55, 0.29, E.lin], [7.85, 0.405, E.lin], [8.3, 0.59, E.lin], [8.6, 0.705, E.lin], [9.0, 0.8, E.lin], [9.45, 0.9, E.out]], t));
-      const uo = E.in(span(t, CUE.through[0], CUE.through[1]));
+      const uo = E.inOut(span(t, CUE.through[0], CUE.through[1]));
       const out = E.in(span(t, 9.34, 9.54));
       cam('sites', t < CUE.through[1] ? dive(uo, missionBase(t), M.store1, sitesBase(CUE.through[1]), M.sites).enter : then(about(1 + 0.25 * out, 960, 560), sitesBase(t)));
       tilt('sites', { ry: keys([[7.04, 0], [7.7, 16], [9.5, 11, E.lin]], t), rx: keys([[7.04, 0], [7.7, 5], [9.5, 3, E.lin]], t), ox: M.sites.cx, oy: M.sites.cy });
@@ -219,6 +272,7 @@
       const enter = E.expo(span(t, 7.1, 7.6));
       $$('.shot-sites .cty-i').forEach((el, i) => {
         el.style.transform = `translateY(${((i - cur) * 420 + (1 - enter) * 160).toFixed(2)}px)`;
+        el.style.filter = vel > 0.02 || enter < 1 ? `blur(${Math.min(14, vel * 6 + (1 - enter) * 12).toFixed(2)}px)` : 'none';
         el.style.opacity = (i === 0 ? Math.min(1, enter * 1.4) : 1).toFixed(3);
       });
       rise($('.shot-sites .cty-k'), t, 7.1, { dy: 30 });
@@ -226,7 +280,7 @@
     { name: 'safari', from: 9.36, to: 11.8, frame(t) {
       // an open book swings in from the edge; the same fingerprint is read on both pages, row by row
       const open = E.out(span(t, CUE.vsIn[0] - 0.12, CUE.vsIn[1]));
-      const ry = lerp(80, 26, open) - 8 * span(t, CUE.vsIn[1], CUE.fly[0]);
+      const ry = keys([[CUE.vsIn[0] - 0.12, 80, E.lin], [CUE.vsIn[1], 26], [CUE.fly[0], 18, E.lin]], t);
       $('.vs-l').style.transform = `rotateY(${ry.toFixed(3)}deg)`;
       $('.vs-r').style.transform = `rotateY(${(-ry).toFixed(3)}deg)`;
       CUE.rows.forEach((r, i) => {
@@ -237,7 +291,7 @@
           $('.vs-scan', row).style.opacity = (Math.sin(Math.PI * s) * 0.9).toFixed(3);
         });
         const eq = $(`.vs-eq[data-i="${i}"]`);
-        rise(eq, t, r + 0.3, { dy: 0, dur: 0.45, scale: 0.35, x: 'translateX(-50%) ' });
+        rise(eq, t, r + 0.3, { dy: 0, dur: 0.45, blur: 10, scale: 0.35, x: 'translateX(-50%) ' });
       });
       $('.vs-spine').style.opacity = (0.35 * open + 0.65 * span(t, CUE.rows[0], CUE.rows[2] + 0.4)).toFixed(3);
       // then into the spine: through the book to the number
@@ -247,9 +301,11 @@
       title('safari', t, 9.56, 11.1);
     } },
     { name: 'numbers', from: 11.6, to: 13.68, frame(t) {
+      const img = $('.shot-numbers .nm-macro img');
+      css(img, { '--on': E.out(span(t, 11.62, 12.0)).toFixed(3), '--k': lerp(0.12, 0.6, span(t, 11.6, 13.7)).toFixed(4) });
       $$('.shot-numbers .nm-hero .nm-fig').forEach((f) => css(f, { '--v': E.out(span(t, CUE.slam - 0.04, CUE.slam + 0.25)).toFixed(3) }));
       const slam = E.expo(span(t, CUE.slam - 0.05, CUE.slam + 0.55));
-      cam('numbers', about(lerp(1.75, 1.22, slam) + 0.05 * span(t, 12.3, 13.7), M.fig.cx, M.fig.cy, 960 - M.fig.cx, 430 - M.fig.cy));
+      cam('numbers', about(lerp(1.75, 1.22, slam) + 0.05 * E.in2(span(t, 12.1, 13.7)), M.fig.cx, M.fig.cy, 960 - M.fig.cx, 430 - M.fig.cy));
       show('numbers', true, E.smooth(span(t, 11.62, 11.76)));
       title('probe', t, 11.98, 12.98, { stagger: 0.04 });
     } },
@@ -263,14 +319,14 @@
       title('layers', t, 13.62, 15.3);
       $$('.shot-layers .lw li').forEach((li, i) => {
         const a = CUE.words[i];
-        rise(li, t, a, { dy: 50, dur: 0.5 });
+        rise(li, t, a, { dy: 50, dur: 0.5, blur: 10 });
         li.style.color = t < (CUE.words[i + 1] ?? 99) + 0.05 ? '#F6F7F9' : '#9099A8';
       });
     } },
     { name: 'proxy', from: 15.5, to: 18.62, frame(t) {
       drive('proxy', keys([[15.5, 0], [15.6, 0.05, E.lin], [15.84, 0.125, E.lin], [16.25, 0.34, E.out], [16.5, 0.4, E.lin], [16.8, 0.43, E.lin], [16.95, 0.468, E.lin], [17.25, 0.5, E.lin], [17.8, 0.665, E.inOut], [18.6, 0.74, E.lin]], t));
       tilt('proxy', { rx: keys([[17.3, 0], [18.6, 13, E.out]], t), ry: keys([[17.3, 0], [18.6, -8, E.out]], t), ox: 960, oy: 640 });
-      cam('proxy', about(1 + 0.03 * E.sine(span(t, 15.5, 17.0)) - 0.06 * span(t, 17.3, 18.6), 960, 600, 0, 46 * E.inOut(span(t, 17.25, 17.9))));
+      cam('proxy', about(1 + 0.03 * E.sine(span(t, 15.5, 17.0)) - 0.06 * E.in2(span(t, 17.3, 18.6)), 960, 600, 0, 46 * E.inOut(span(t, 17.25, 17.9))));
       show('proxy', true, 1 - E.smooth(span(t, 18.36, 18.52)));
       title('proxy', t, 17.3, 18.3, { l3: 17.72 });
     } },
@@ -298,13 +354,15 @@
       // the grid of tiles as a plane tilted back, gliding up and away under the title
       const u = span(t, 23.0, 25.6), g = M.grid;
       const rx = lerp(40, 30, E.out(u)), rz = lerp(-13, -8, E.out(u)), yc = lerp(800, 560, E.out(u));
-      camEl('features').style.transform = `translate(960px, ${yc.toFixed(2)}px) rotateX(${rx.toFixed(3)}deg) rotateZ(${rz.toFixed(3)}deg) scale(0.98) translate(${(-g.cx).toFixed(1)}px, ${(-g.cy).toFixed(1)}px)`;
+      const fx = VERT ? 540 : 960, fy = VERT ? lerp(1560, 1200, E.out(u)) : yc, fk = VERT ? 0.66 : 0.98;
+      camEl('features').style.transform = `translate(${fx}px, ${fy.toFixed(2)}px) rotateX(${rx.toFixed(3)}deg) rotateZ(${rz.toFixed(3)}deg) scale(${fk}) translate(${(-g.cx).toFixed(1)}px, ${(-g.cy).toFixed(1)}px)`;
       M.tiles.forEach((el, i) => {
         // a head start, so the plane is there on the cut; each tile lands on its note
         const a = CUE.tiles[Math.min(i, CUE.tiles.length - 1)] - 0.16;
         const v = span(t, a, a + 0.55);
         el.style.opacity = E.out(clamp01(v * 1.5)).toFixed(3);
         el.style.transform = `translateY(${((1 - E.expo(v)) * 110).toFixed(2)}px)`;
+        el.style.filter = v < 1 ? `blur(${((1 - E.out(v)) * 10).toFixed(2)}px)` : 'none';
       });
       const ep = $('.shot-features .ep-win');
       if (ep) ep.style.setProperty('--x', E.inOut(span(t, 23.9, 24.6)).toFixed(3));
@@ -317,22 +375,25 @@
       const hv = (0.12 + 0.88 * E.out(span(t, 25.55, 26.1))).toFixed(3);
       $('.end-l').style.opacity = hv; $('.end-r').style.opacity = hv;
       $('.end-seam').style.opacity = E.out(span(t, CUE.meet - 0.08, CUE.meet + 0.2)).toFixed(3);
+      $('.end-glow').style.opacity = (0.25 + 0.75 * E.out(span(t, CUE.meet - 0.1, CUE.meet + 0.5)) - 0.25 * E.sine(span(t, CUE.meet + 0.5, 30))).toFixed(3);
       rise($('.end-name'), t, CUE.name, { dy: 36 });
       rise($('.end-line'), t, CUE.name + 0.3, { dy: 30 });
       rise($('.end-btn'), t, CUE.name + 0.6, { dy: 24, x: 'translateX(-50%) ' });
       // the mark rises a little as the words come in under it
       endMark.style.transform = `translateY(${(-36 * E.inOut(span(t, CUE.name - 0.2, CUE.name + 0.8))).toFixed(2)}px)`;
-      cam('end', about(1 + 0.035 * E.sine(span(t, 25.5, 30)), 960, 520));
+      cam('end', about(1 + 0.035 * E.sine(span(t, 25.5, 30)), VERT ? 540 : 960, VERT ? 900 : 520));
       show('end', true, E.smooth(span(t, 25.5, 25.66)));
     } },
   ];
 
-  // MARK: Over everything: the hairline, black
+  // MARK: Over everything: the seam, the flashes, black
   function fx(t) {
     const ws = [wipe(t, CUE.brand[0], CUE.brand[1]), wipe(t, CUE.wipe1[0], CUE.wipe1[1]), wipe(t, CUE.wipe2[0], CUE.wipe2[1])];
     const w = ws.find((x) => x.on);
-    seam.style.opacity = w ? Math.min(1, w.glow * 1.6).toFixed(3) : '0';
-    seam.style.transform = `translate(${((w ? w.xc : -200) - 1).toFixed(1)}px, 0) rotate(${LEAN.toFixed(3)}deg)`;
+    seam.style.opacity = w ? w.glow.toFixed(3) : '0';
+    seam.style.transform = `translate(${((w ? w.xc : -200) - 3).toFixed(1)}px, 0) rotate(${LEAN.toFixed(3)}deg)`;
+    const pulse = (a, k, len = 0.5) => (t < a - 0.06 ? 0 : t < a ? k * span(t, a - 0.06, a) : k * Math.pow(1 - span(t, a, a + len), 2));
+    flash.style.opacity = Math.max(pulse(CUE.brand[1] - 0.1, 0.3, 0.7), pulse(CUE.dive[1], 0.35), pulse(CUE.slam, 0.6, 0.6), pulse(CUE.meet, 0.6, 0.9)).toFixed(3);
     const dip = (a, b) => Math.sin(Math.PI * span(t, a, b));
     black.style.opacity = Math.max(dip(18.34, 18.7) * 0.97, dip(25.34, 25.7)).toFixed(3);
   }
@@ -341,6 +402,7 @@
   let ready = null;
   async function seek(t) {
     await ready;
+    NOW = t;
     for (const s of SHOTS) {
       if (t >= s.from && t < s.to) await s.frame(t);
       else { show(s.name, false); shotEl(s.name).style.clipPath = ''; }
@@ -353,14 +415,17 @@
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     return t;
   }
-  /// How many moments of the shutter (180°) a frame at t averages: more where things move fast.
+  /// How many moments of the shutter (180°) a frame at t averages: every frame that moves gets motion blur (3
+  /// moments), the fast moves more; the shutter never spans a hard cut.
   function blurAt(t) {
     const near = (a, b) => t >= a && t <= b;
+    const cuts = [9.36, 11.6, 15.5, 23.0, 25.5];
+    if (cuts.some((c) => Math.abs(t - c) < 0.5 / FPS)) return 1;
     if (near(CUE.dive[0], CUE.dive[1] + 0.05) || near(CUE.through[0], CUE.through[1] + 0.02) || near(CUE.fly[0], CUE.fly[1] + 0.05)) return 6;
-    if (near(CUE.brandOut[0], CUE.brandOut[1]) || near(9.34, 9.95) || near(CUE.slam, CUE.slam + 0.3) || near(CUE.wipe1[0], CUE.wipe1[1]) || near(CUE.wipe2[0], CUE.wipe2[1]) || near(25.6, CUE.meet + 0.05)) return 4;
-    if (near(7.6, 8.0) || near(8.35, 8.75)) return 6;   // the countries roll: no blur on the words, the shutter's own
-    if (near(23.02, 24.0)) return 4;   // never across a hard cut
-    return 1;
+    if (near(CUE.brandOut[0], CUE.brandOut[1]) || near(9.34, 9.95) || near(CUE.slam, CUE.slam + 0.3) || near(CUE.wipe1[0], CUE.wipe1[1]) || near(CUE.wipe2[0], CUE.wipe2[1]) || near(25.6, CUE.meet + 0.05)) return 5;
+    if (near(7.6, 8.0) || near(8.35, 8.75) || near(23.02, 24.0)) return 5;
+    if (t > 27.6) return 2;                   // the end card barely moves
+    return 3;
   }
 
   ready = (async () => {

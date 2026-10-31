@@ -1,12 +1,10 @@
-// The promo film v3's stage (v1's cut and motion, without its glows, in a graphite studio): one page,
-// 1920 × 1080, that holds every shot of the film — the opening MacBook (a canvas for v1's frames of
-// tools/film3/hero.mjs) under the name, the home page's scenes (their own HTML, CSS and scripts, rearranged by
-// the film in 3D), and the film's own shots: the comparison with Safari, the titles, the transitions, the end
-// card (film.css, film.js). Every shot stands in the studio (video/.cache/studio/studio.png, from studio.py).
-// Nothing on it moves by itself: film.js puts the whole stage at any moment t of the film, and capture.mjs films
-// it frame by frame.
+// The promo film's stage: one page, 1920 × 1080, that holds every shot of the film — the opening MacBook (a
+// canvas for the frames of tools/film3/hero.mjs) under the name, the home page's scenes (their own HTML, CSS and
+// scripts, rearranged by the film in 3D), and the film's own shots: the comparison with Safari, the titles,
+// the transitions, the end card (film.css, film.js). Nothing on it moves by itself: film.js puts the whole stage
+// at any moment t of the film, and capture.mjs films it frame by frame.
 //
-//   python3 tools/film3/studio.py && node tools/film3/build.mjs   # → video/stage3/ru.html, video/stage3/en.html
+//   node tools/film3/build.mjs         # → video/stage3/{ru,en}.html, and the vertical cut (9:16, Stories) {ru,en}-v.html
 //
 // Open a stage in a browser to look at it: ?t=12.3 shows that moment, the arrow keys step through the film.
 import fs from 'node:fs';
@@ -54,10 +52,8 @@ for (const lang of ['ru', 'en']) {
   const styles = [...new Set(parts.flatMap((p) => p.styles))];
   const scripts = [...new Set(parts.flatMap((p) => p.scripts))];
   // a shot: what its camera films, and what stays put over it (words that must not move with the camera)
-  // (each in the studio: a backdrop that moves a little with the camera, behind it)
-  // (mask: the camera inside a mask laid in the frame — the features fade out towards the top, over the studio)
-  const shot = (name, body, over = '', mask = false) => `<div class="shot shot-${name}" data-shot="${name}"><img class="studio" src="../.cache/studio/studio.png" alt="">${mask ? '<div class="cam-mask">' : ''}<div class="cam">${body}</div>${mask ? '</div>' : ''}${over}</div>`;
-  const sceneShot = (name, as = name, over = '', mask = false) => shot(as, parts.find((p) => p.name === name).html, over, mask);
+  const shot = (name, body, over = '') => `<div class="shot shot-${name}" data-shot="${name}"><div class="cam">${body}</div>${over}</div>`;
+  const sceneShot = (name, as = name, over = '') => shot(as, parts.find((p) => p.name === name).html, over);
 
   // The opening: the name over the dark, then the MacBook (its frames on the canvas)
   const brand = `<div class="brand"><div class="brand-in">${glyph(176)}<span class="brand-word">${wordmark(132, '#F5F6F8')}</span></div></div>`;
@@ -81,13 +77,14 @@ for (const lang of ['ru', 'en']) {
     title('warmup', f.warmup, lang),
     title('features', f.features, lang),
   ].join('\n');
-  const end = `<div class="end-mark"><canvas class="end-l"></canvas><canvas class="end-r"></canvas><canvas class="end-seam"></canvas></div>
+  const end = `<div class="end-mark"><i class="end-glow"></i><canvas class="end-l"></canvas><canvas class="end-r"></canvas><canvas class="end-seam"></canvas></div>
     <div class="end-name">${wordmark(104, '#F5F6F8')}</div>
     <div class="end-line">${inline(f.platform, lang)}</div>
     <div class="end-btn">${inline(f.cta, lang)}</div>`;
+  for (const vert of [false, true]) {
   const html = `<!doctype html>
-<!-- The promo film v3's stage, built by tools/film3/build.mjs from the home page's scenes. Not part of the site. -->
-<html lang="${lang}" class="js film">
+<!-- The promo film's stage${vert ? ' (vertical, 9:16, for Stories)' : ''}, built by tools/film3/build.mjs from the home page's scenes. Not part of the site. -->
+<html lang="${lang}" class="js film${vert ? ' vert' : ''}">
 <head>
 <meta charset="utf-8">
 <title>Lumen — film stage (${lang})</title>
@@ -107,12 +104,12 @@ ${sceneShot('layers', 'layers', words)}
 ${sceneShot('proxy')}
 ${sceneShot('encryption', 'encryption', cipher)}
 ${sceneShot('warmup')}
-${sceneShot('bento', 'features', '', true)}
+${sceneShot('bento', 'features')}
 ${shot('end', end)}
 <div class="titles">
 ${titles}
 </div>
-<div class="fx"><i class="fx-vignette"></i><i class="fx-seam"></i><i class="fx-black"></i></div>
+<div class="fx"><i class="fx-vignette"></i><i class="fx-seam"></i><i class="fx-flash"></i><i class="fx-black"></i></div>
 </main>
 <script>window.FILM_TIMELINE = ${JSON.stringify(TIMELINE)}; window.FILM_LANG = ${JSON.stringify(lang)};</script>
 ${scripts.map((x) => `<script src="../../prototype/assets/${x}"></script>`).join('\n')}
@@ -121,7 +118,8 @@ ${scripts.map((x) => `<script src="../../prototype/assets/${x}"></script>`).join
 </body>
 </html>
 `.replace(/(src|href)="\.\.\/assets\//g, '$1="../../prototype/assets/').replace(/url\(\.\.\/assets\//g, 'url(../../prototype/assets/');
-  const file = path.join(OUT, `${lang}.html`);
+  const file = path.join(OUT, `${lang}${vert ? '-v' : ''}.html`);
   fs.writeFileSync(file, html);
   console.log(`WROTE ${path.relative(SITE, file)}`);
+  }
 }
