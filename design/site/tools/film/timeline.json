@@ -28,10 +28,10 @@
   {"id": "S21", "name": "black", "from": 29.5, "to": 30, "frames": [1770, 1799], "beats": [59, 60], "kind": "black", "what": "Tail on #000, 30 frames."}
  ],
  "shot": {
-  "S02": {"render": "R1", "lid": [1.8, 2.9], "wake": [2.6, 3.1], "lift": [3.4, 4.5]},
+  "S02": {"render": "R1", "cuts": [1.5, 2.5, 3.5], "frames": [0, 96, 162]},
   "S03": {"line2": 5},
   "S04": {"cuts": [5.5, 5.75, 6, 6.25, 6.5, 6.75], "chip": [560, 300], "scale": 2.4, "drift": -16, "sub": 8, "order": [1, 4, 5, 2, 3, 0], "orderLuminance": [0.024, 0.034, 0.701, 0.719, 0.733, 0.737], "orderNote": "the windows (mission.mjs SITES indices) by the measured mean relative luminance of their cut, darkest first, so the burst cannot strobe: Реклама, Продажи, then Блог, Поддержка, Тесты, Магазин"},
-  "S05": {"render": "R2", "land": 8.3, "reflect": [7, 7.4], "sub": 8},
+  "S05": {"render": "R2", "land": 8.3, "frame": 78},
   "S06": {"line2": 9},
   "S07": {"changes": [9.5, 10.5, 11], "roll": 8, "sub": 16},
   "S08": {"close": [11.5, 12], "gap": 140, "seam": 12, "push": [12, 13.5, 1.025], "sub": 8},
@@ -44,7 +44,7 @@
   "S16": {"spec": 22.5},
   "S17": {"pages": [23, 23.25, 23.5, 23.75, 24, 24.25], "first": 4, "total": 12, "cookies": [61, 66, 70, 75, 79, 84], "cookieLag": 0.1, "scroll": 50},
   "S18": {"focus": [24.5, 25, 25.5, 26], "rack": 8, "dolly": [0, -180]},
-  "S19": {"render": "R3", "seat": 27, "fill": [27, 27.17]},
+  "S19": {"render": "R3", "seat": 27, "frames": [0, 30]},
   "S20": {"lines": 28}
  },
  "events": [
@@ -120,5 +120,5 @@
   {"t": 29.5, "beat": 59, "bar": "15:4", "frame": 1770, "shot": "S21", "event": "cut", "sync": "hard"},
   {"t": 29.5, "beat": 59, "bar": "15:4", "frame": 1770, "shot": "S21", "event": "audio-end", "sync": "hard"}
  ],
- "cues": {"lid": [1.8, 2.9], "settle": 2.9, "click": 16.5, "zero": [18.5, 19], "seat": 27, "end": 29.5, "room": [[0, 18.5], [19, 29.5]], "roomFadeIn": 0.25, "roomReturnFade": 0.3}
+ "cues": {"lid": [1.95, 2.48], "settle": 2.5, "click": 16.5, "zero": [18.5, 19], "seat": 27, "end": 29.5, "room": [[0, 18.5], [19, 29.5]], "roomFadeIn": 0.25, "roomReturnFade": 0.3}
 }

@@ -246,7 +246,9 @@ ${shot('S21', '')}
 </html>
 `.replace(/(src|href|srcset)="\.\.\/assets\//g, '$1="../../prototype/assets/').replace(/url\(\.\.\/assets\//g, 'url(../../prototype/assets/')
     // the film shows no domain other than *.example (spec v2 §2 BANNED); the home page's Tokyo checkout has one
-    .replace(/hanako@example\.jp/g, 'hanako@mail.example');
+    .replace(/hanako@example\.jp/g, 'hanako@mail.example')
+    // the film has one em dash (S03): the readable UI headlines get a comma instead
+    .replace(/Eine Stunde zurück\s*(?:&nbsp;|\u00a0)?—/g, 'Eine Stunde zurück,').replace(/Clocks fall back Sunday\s*(?:&nbsp;|\u00a0)?—/g, 'Clocks fall back Sunday,');
   const file = path.join(OUT, `${lang}.html`);
   fs.writeFileSync(file, html);
   console.log(`WROTE ${path.relative(SITE, file)} (plates: ${Object.keys(plates).join(', ') || 'none yet — post.py uses the graphite placeholder'})`);

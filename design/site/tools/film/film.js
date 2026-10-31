@@ -82,11 +82,20 @@
       el.style.top = `${(+el.dataset.base - off).toFixed(3)}px`;
     }
     // S04: each window's chip centre in its own (unscaled) coordinates
-    M.chips = $$('[data-shot="S04"] .cut').map((cut) => {
+    const chipOf = (cut) => {
       const w = $('.mi-win', cut); w.style.transform = 'none';
       const r = w.getBoundingClientRect(), c = $('.mi-prof', w).getBoundingClientRect();
       return [c.left + c.width / 2 - r.left, c.top + c.height / 2 - r.top];
+    };
+    // every window wide and tall enough to run off the right and bottom edges through the whole drift
+    $$('[data-shot="S04"] .cut').forEach((cut) => {
+      const w = $('.mi-win', cut), [cx, cy] = chipOf(cut), S = SH.S04.scale, [X, Y] = SH.S04.chip;
+      const needW = (1920 + 40 - SH.S04.drift - X) / S + cx, needH = (1080 + 40 - Y) / S + cy;
+      const r = w.getBoundingClientRect();
+      if (r.width < needW) w.style.setProperty('--w', Math.ceil(needW));
+      if (r.height < needH) w.style.setProperty('--h', Math.ceil(needH));
     });
+    M.chips = $$('[data-shot="S04"] .cut').map(chipOf);
     // S11/S12: «Weiter», the chip, the address field, in the window's own coordinates
     const kw = $('.kwin'); const K = 1.35;
     const kr = kw.getBoundingClientRect();
@@ -179,7 +188,13 @@
   const plateFrame = (id, t, from) => Math.round(t * FPS) - (PL[id] ? PL[id].filmFrom : Math.round(from * FPS));
   const DO = {
     S01(t) { cutins('S01', t); return { plate: CARD }; },
-    S02(t) { return { plate: { id: 'R1', frame: plateFrame('R1', t, byId.S02.from) }, layers: [] }; },
+    // Three still angles of the Mac, cut on the beat (closed; open with the mark; the half out), each with a
+    // slow push: the studio stills of tools/film/plates.mjs R1, frames 0, 96 and 162.
+    S02(t) {
+      const k = SH.S02.cuts.findLastIndex((c) => t >= c - 1e-9), a = SH.S02.cuts[k], b = SH.S02.cuts[k + 1] ?? byId.S02.to;
+      const s = 1 + 0.03 * sine(span(t, a, b));
+      return { plate: { id: 'R1', frame: SH.S02.frames[k] }, push: [s, 960, 560], layers: [] };
+    },
     S03(t) { cutins('S03', t); return { plate: CARD }; },
     S04(t) {
       const cuts = SH.S04.cuts, k = Math.max(0, cuts.findLastIndex((c) => t >= c - 1e-9));
@@ -190,10 +205,15 @@
       $(`[data-shot="S04"] .cut[data-k="${k}"] .mi-win`).style.transform = `translate(${(X - S * cx + dx).toFixed(3)}px, ${(Y - S * cy).toFixed(3)}px) scale(${S})`;
       return { plate: CARD, cut: k };
     },
+    // All six windows on one Mac: the still end pose of R2 (frame 78) with the desktop laid on its display,
+    // and a slow push towards the display, on the plate and the screen alike.
     S05(t) {
-      const g = putScreen(secOf('S05'), displayAt('R2', t));
-      const k = sine(span(t, SH.S05.reflect[0], SH.S05.reflect[1]));
-      return { plate: { id: 'R2', frame: plateFrame('R2', t, byId.S05.from) }, reflect: +k.toFixed(4), display: g };
+      const D = plateGeom('R2', SH.S05.frame) || displayAt('R2', SH.S05.land);
+      const g = putScreen(secOf('S05'), D);
+      const c = [0, 1].map((j) => (g.quad[0][j] + g.quad[1][j] + g.quad[2][j] + g.quad[3][j]) / 4);
+      const s = 1 + 0.035 * sine(span(t, byId.S05.from, byId.S05.to));
+      cam('S05', s, c[0], c[1]);
+      return { plate: { id: 'R2', frame: SH.S05.frame }, push: [s, c[0], c[1]], reflect: 1, display: g };
     },
     S06(t) { cutins('S06', t); return { plate: CARD }; },
     S07(t) {
@@ -275,7 +295,12 @@
       const zs = [[0, 0], [1568, 0], [1568, 1088], [0, 1088]].map(([u, v]) => depth(u, v));
       return { plate: { id: 'PL-FLOOR', frame: 0 }, dof: { m: Array.from(m.toFloat64Array()), P, o: [960, 540], zf: +zf.toFixed(3), zfar: +Math.max(...zs).toFixed(3), znear: +Math.min(...zs).toFixed(3), coc: 12, bins: 8, focus: k } };
     },
-    S19(t) { return { plate: { id: 'R3', frame: plateFrame('R3', t, byId.S19.from) }, layers: [] }; },
+    // The half outside the glass, then — cut on the seat — the two halves together (R3 frames 0 and 30), pushing in.
+    S19(t) {
+      const k = t >= SH.S19.seat - 1e-9 ? 1 : 0;
+      const s = 1 + 0.03 * sine(span(t, byId.S19.from, byId.S19.to));
+      return { plate: { id: 'R3', frame: SH.S19.frames[k] }, push: [s, 960, 560], layers: [] };
+    },
     S20(t) { cutins('S20', t); return { plate: CARD }; },
     S21() { return { ground: 'black', vignette: false, grain: 0.5, layers: [] }; },
   };
@@ -299,12 +324,11 @@
       cam('S11', s, ox, oy);
       return { plate: CARD, push: [s, ox, oy] };
     }
-    // S12: 2.4× overall, framed from the chip to Safari's stop «×»; the toolbar's middle at y = 300 (as S04's
-    // chip) or lower, so that the sign-in heading under it is wholly out of frame, never sliced by the edge
+    // S12: 2.4× overall, framed from the chip to Safari's stop «×»: a full-bleed macro, the window's top edge just
+    // above the frame, the white page filling the rest
     const Z = 2.4 / K;
     const a = frame([(M.chip.x + M.rl.x + M.rl.w) / 2, M.chip.cy]);
-    const head = frame([0, M.head.y])[1];
-    const yc = Math.max(300, 1080 + 6 - Z * (head - a[1]));
+    const yc = Z * (a[1] - M.kwin.top) - 4;
     const s = 1 + (SH.S12.push - 1) * sine(span(t, byId.S12.from, byId.S12.to));
     const tx = 960 - Z * a[0], ty = yc - Z * a[1];
     camOf('S12').style.transform = `translate(${(960 - s * (960 - tx)).toFixed(3)}px, ${(yc - s * (yc - ty)).toFixed(3)}px) scale(${(Z * s).toFixed(6)})`;
@@ -336,7 +360,7 @@
   /// How many 180° shutter subframes frame f averages (more only where something moves fast).
   function subframes(f) {
     const t = f / FPS, s = shotAt(t);
-    if (s.id === 'S04' || s.id === 'S05') return SH[s.id].sub;
+    if (s.id === 'S04') return SH.S04.sub;
     if (s.id === 'S07') return SH.S07.changes.slice(1).some((c) => t >= c - 1e-9 && t < c + SH.S07.roll / FPS - 1e-9) ? SH.S07.sub : 1;
     if (s.id === 'S08') return t < SH.S08.close[1] - 1e-9 ? SH.S08.sub : 1;
     if (s.id === 'S11') return t >= SH.S11.pointer[0] && t < SH.S11.pointer[1] + 1 / FPS ? SH.S11.sub : 1;
