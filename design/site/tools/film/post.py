@@ -273,12 +273,19 @@ def depth_of_field(D, dof):
     coc4 = np.asarray(Image.fromarray(coc, 'F').resize((W4, H4), Image.BILINEAR))
     pos = coc4 / cmax * (nb - 1)
     out = np.zeros_like(D)
+    # the bins cascade: each is blurred from the one before by the σ still missing (Gaussians add in quadrature),
+    # so every pass is small and fast
+    cur, cur_s = D, 0.0
     for b in range(nb):
-        wgt = np.clip(1 - np.abs(pos - b), 0, 1)
-        if not wgt.any():
-            continue
         sigma4 = (cmax * b / (nb - 1)) / 2
-        out += (blur(D, sigma4) if sigma4 > 0.05 else D) * wgt[:, :, None]
+        if sigma4 > cur_s + 1e-6:
+            inc = (sigma4 * sigma4 - cur_s * cur_s) ** 0.5
+            if inc > 0.05:
+                cur = blur(cur, inc)
+            cur_s = sigma4
+        wgt = np.clip(1 - np.abs(pos - b), 0, 1)
+        if wgt.any():
+            out += cur * wgt[:, :, None]
     return out
 
 
