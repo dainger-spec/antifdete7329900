@@ -24,16 +24,23 @@ enum SafariPathsCheck {
         let started = Date()
         watchEmptyFilePaths()
         watchGroupContainers()
+        // As --export-check opens it (CI run 530: with no menu and the activation policy
+        // .prohibited, Safari's window factory gave nothing, and this measured nothing).
+        SafariChrome.installMainMenu()
         let application = NSApplication.shared
-        application.setActivationPolicy(.prohibited)
+        application.setActivationPolicy(.regular)
         ExceptionLog.onCaughtInRunLoop = { exception, _ in
             print("PATHS-CHECK threw \(exception.name.rawValue): \(LogRedaction.exceptionReason(exception.reason ?? ""))")
         }
         ExceptionLog.onNotCaught = { name, thread in print("PATHS-CHECK not caught, on \(thread): \(name)") }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             MainActor.assumeIsolated {
-                let opened = SafariChrome.openWindow(address: URL(string: "about:blank")) != nil
-                print("PATHS-CHECK Safari's window \(opened ? "is open" : "did not open")")
+                let controller = SafariChrome.openWindow(address: URL(string: "about:blank"))
+                controller?.showWindow(nil)
+                controller?.window?.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                windowOpened = controller != nil
+                print("PATHS-CHECK Safari's window \(windowOpened ? "is open" : "did not open")")
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
@@ -41,6 +48,11 @@ enum SafariPathsCheck {
                 printOwnLog(since: started)
                 print("PATHS-CHECK file URLs asked for with no path: \(emptyPaths); app group containers asked for: \(groupRequests)")
                 SafariChrome.removeCheckHome()
+                // Without Safari's window, nothing of what it asks for was seen: never a clean result.
+                if !windowOpened {
+                    print("PATHS-CHECK SKIPPED: Safari's window did not open, so what its code asks for in a profile's process was not seen")
+                    exit(1)
+                }
                 exit(0)
             }
         }
@@ -49,6 +61,7 @@ enum SafariPathsCheck {
     }
 
     nonisolated(unsafe) private static var emptyPaths = 0
+    private static var windowOpened = false
     nonisolated(unsafe) private static var groupRequests = 0
     nonisolated private static let lock = NSLock()
 
@@ -121,7 +134,8 @@ enum SafariPathsCheck {
             print("PATHS-CHECK this process's log could not be read")
             return
         }
-        let words = ["bookmark", "tab collection", "download", "(null)", "sqlite"]
+        // And Safari's window factory's own lines (SafariChrome), which say why a window did not open.
+        let words = ["bookmark", "tab collection", "download", "(null)", "sqlite", "window factory", "safari's chrome is up"]
         var shown = 0
         for case let entry as OSLogEntryLog in entries where shown < 80 {
             let message = entry.composedMessage

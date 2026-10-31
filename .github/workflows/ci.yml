@@ -228,6 +228,11 @@ jobs:
           build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --paths-check > build/egress27/paths-check.txt 2>/dev/null
           echo "exit $?"; cat build/egress27/paths-check.txt
           grep '^PATHS-CHECK' build/egress27/paths-check.txt | grep -v '^PATHS-CHECK log ' | head -16 | cut -c1-900 | sed 's/^/::notice title=macOS 27 - paths in a profile process::/'
+          # A run that saw nothing (Safari's window did not open) says so: SKIPPED, on the job's page and in its summary.
+          if grep -q '^PATHS-CHECK SKIPPED' build/egress27/paths-check.txt; then
+            grep '^PATHS-CHECK SKIPPED' build/egress27/paths-check.txt | sed 's/^/::warning title=macOS 27 - paths in a profile process - SKIPPED::/'
+            grep '^PATHS-CHECK SKIPPED' build/egress27/paths-check.txt | sed 's/^/### macOS 27 - paths in a profile process: /' >> "$GITHUB_STEP_SUMMARY"
+          fi
           exit 0
       - name: Safari 27's history inside a profile's process (a measurement)
         if: always()
@@ -566,6 +571,11 @@ jobs:
           build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --paths-check > build/paths-check.txt 2>/dev/null
           echo "exit $?"; cat build/paths-check.txt
           grep '^PATHS-CHECK' build/paths-check.txt | grep -v '^PATHS-CHECK log ' | head -16 | cut -c1-900 | sed 's/^/::notice title=paths in a profile process::/'
+          # A run that saw nothing (Safari's window did not open) says so: SKIPPED, on the job's page and in its summary.
+          if grep -q '^PATHS-CHECK SKIPPED' build/paths-check.txt; then
+            grep '^PATHS-CHECK SKIPPED' build/paths-check.txt | sed 's/^/::warning title=paths in a profile process - SKIPPED::/'
+            grep '^PATHS-CHECK SKIPPED' build/paths-check.txt | sed 's/^/### paths in a profile process: /' >> "$GITHUB_STEP_SUMMARY"
+          fi
           exit 0
       - name: Safari's history inside a profile's process (a measurement)
         # Whether Safari's History service's own code runs in a profile's process, with its database
