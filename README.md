@@ -169,6 +169,12 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   canaries in the capture, its control seen; a run that cannot tell runs the certificate check
   again alone, and one that still cannot fails too). In every run each group of the self-test stands on its own: an
   error a group did not expect fails that group by name, and the run goes on;
+- WebKit's features in a profile's web views as Safari has them (`scripts/engine_features_check.py`):
+  the four the SDK's behaviors change for a build declaring 14.0 — Trusted Types on, mutation events,
+  the legacy `FontFaceSet` constructor and near-suspended assertions off (`SafariEngineFeatures`) —
+  for the build as made and a copy declaring 14.0, the releases' SDK; fails the build on macOS 26
+  when one is not as Safari has it or a page in a profile's web view differs from one with every
+  behavior on, and reports the same on macOS 27;
 - `--check-safari-chrome`: the private Safari classes and methods the hosted chrome relies on
   (loaded in a temporary home, held to a closed proxy, as in a profile's process);
 - "What sites see" (`--what-sites-see-check`): a new profile's snapshot next to the runner's
