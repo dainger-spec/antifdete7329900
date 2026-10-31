@@ -854,6 +854,12 @@ enum SafariChrome {
         for (className, selectorName) in nothing {
             replaceWithConstant(className, selectorName) { nil }
         }
+        // Classes whose framework loads after this runs are replaced as soon as their image is
+        // loaded: here they are not there yet, and replacing them did nothing (CI run 475).
+        stubLateFeatures()
+        _dyld_register_func_for_add_image { _, _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { SafariChrome.stubLateFeatures() } }
+        }
         replaceWithConstant("UnifiedField", "_assistantButtonIconForContentOption:withSparkle:") {
             NSImage(size: NSSize(width: 1, height: 1))
         }
@@ -877,6 +883,31 @@ enum SafariChrome {
         // pane any more, and nothing needs to know which browser is the default.
         // Its own implementation is kept for `--default-browser-check`, which calls it to see why.
         defaultBrowserQuestion = replaceWithConstant("GeneralPreferences", "_defaultWebBrowserMayHaveChanged") { nil }
+    }
+
+    /// Methods of classes that load after `stubChromeFeatures` runs, replaced with nothing once
+    /// they are there.
+    ///
+    /// SafariPlatformSupport's completion list is the view of a service of Safari's, which the
+    /// kernel refuses a profile's process (`ProfileNetworkGuard`: com.apple.Safari*). Each time
+    /// that view's service ended, -[SPSafariPlatformSupport viewServiceDidTerminateWithError:]
+    /// asked for the view again (-_setUpCompletionListViewControllerWithSetUpCompletionListViewController:),
+    /// and, refused, it ended at once: from a few seconds after its start, the process's main
+    /// thread did little else, and it logged "…endpoint for listener 'com.apple.view-bridge':
+    /// Connection invalid" about a million times in a menu walk (measurement runs 468 to 475,
+    /// macOS 26 and 27; the loop in a sample, run 473). Replaced, twenty times (run 476).
+    private static let lateStubs: [(String, String)] = [
+        ("SPSafariPlatformSupport", "viewServiceDidTerminateWithError:"),
+    ]
+    private static var lateStubsMade: Set<String> = []
+
+    /// Replaces the late stubs whose classes are loaded by now; called again as images load.
+    static func stubLateFeatures() {
+        for (className, selectorName) in lateStubs where !lateStubsMade.contains(className + " " + selectorName) {
+            guard NSClassFromString(className) != nil else { continue }
+            replaceWithConstant(className, selectorName) { nil }
+            lateStubsMade.insert(className + " " + selectorName)
+        }
     }
 
     /// Safari's own `-[GeneralPreferences _defaultWebBrowserMayHaveChanged]`, before

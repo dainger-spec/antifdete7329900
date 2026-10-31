@@ -111,12 +111,15 @@ Where it gave out:
   profiles' processes logged, from several threads, "+[NSXPCSharedListener
   endpointForReply:withListenerName:replyErrorCode:]: an error occurred while attempting to obtain
   endpoint for listener 'com.apple.view-bridge': Connection invalid" 320,000 to 2,100,000 times
-  each, for four to nine minutes (AppKit's ViewBridge, which hosts views of other processes, such as
-  the open and save panel's, in an app's windows); in the three where every window came, at most
-  90,000 times, for seconds to three minutes. Every process of a profile logs the same for another
-  listener ('SandboxBroker') three or four times at its start. What the spinning processes try to
-  reach, and whether they are what holds the window server, is not measured yet (the menu walk's own
-  profile does the same for its whole walk: next, a sample of it).
+  each, for four to nine minutes; in the three where every window came, at most 90,000 times. A
+  sample of the menu walk's profile process, which logs the same from its start (run 473), has its
+  main thread in a loop: SafariPlatformSupport's completion list is the view of a service of
+  Safari's, which the kernel refuses a profile's process, and each time that view's service ended,
+  -[SPSafariPlatformSupport viewServiceDidTerminateWithError:] asked for the view again, and it
+  ended at once. That method does nothing in a profile now (`SafariChrome.stubLateFeatures`,
+  replaced once its framework is loaded): in the run since (476) no process logged it, and on macOS
+  27 all thirty came up within 108 s — one run, so whether the loop was what held the window server
+  is likely, not proven.
 - **Stopping** grows past ten: from about 5 to 9 s for up to ten to 6–35 s for twenty or thirty.
 
 **Quitting with ten running** took 5.1 to 13.6 s until every one was sealed; every seal was forced
@@ -141,8 +144,8 @@ What gives out first is **the processor at launch**: a profile's start takes sev
 processor time (Safari's frameworks and window, WebKit's processes, Metal compiling shaders), the
 list's Launch starts all of a selection at once, and the runner's three processors stay busy from
 the first launch to the last window. On macOS 27, **the window server** comes next: twenty or
-thirty first windows asked for at once are answered in minutes, while one to three processes repeat
-a ViewBridge error as fast as they can (above). **Memory** comes after: about 150 MB a profile on a
+thirty first windows asked for at once were answered in minutes, while one to three processes asked
+for a refused view again as fast as they could (above, fixed since). **Memory** comes after: about 150 MB a profile on a
 nearly empty page, thirty in 4 to 5 GB (when all were up) without pressure on 7 GB; a real site adds
 what it adds in Safari, often hundreds of megabytes a tab, so with real pages memory is what bounds
 the number that can keep running. **Disk** and **our own code** are not near a limit. Starting a

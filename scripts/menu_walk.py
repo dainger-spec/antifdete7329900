@@ -325,6 +325,12 @@ def main():
         elif line.startswith(("MENUWALK-INFO", "MENUWALK-ERROR")):
             print(line, flush=True)
     finished = "the walk got to the end" in output
+    # A view whose service the profile is refused, asked for again each time that service ends, is
+    # this line each time: SafariPlatformSupport's completion list did so about a million times a
+    # walk until it was stopped (measurement runs 468 to 475), twenty times since (run 476).
+    with open(os.path.join(out, "walk.txt"), encoding="utf-8", errors="replace") as handle:
+        refused_views = sum(1 for line in handle if "listener 'com.apple.view-bridge'" in line)
+    print(f"MENU-WALK views asked for again after their service was refused: {refused_views}", flush=True)
     reports = crash_reports(started, out)
     for item in items:
         if "exit" in item:
@@ -365,7 +371,10 @@ def main():
         with open(target, "w") as handle:
             json.dump(current, handle, indent=1, ensure_ascii=False, sort_keys=True)
         print(f"MENU-WALK record written: {target}", flush=True)
-    failed = args.check and (not finished or bool(by_profile))
+    if refused_views > 1000:
+        notice("error" if args.check else "warning", args.title,
+               f"the profile's process asked {refused_views} times for a view whose service it is refused: a loop")
+    failed = args.check and (not finished or bool(by_profile) or refused_views > 1000)
     if args.record and os.path.exists(args.record):
         with open(args.record) as handle:
             recorded = json.load(handle)

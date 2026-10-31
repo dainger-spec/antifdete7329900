@@ -67,8 +67,10 @@ on every run, in both macOS jobs, and with `--check`:
 
 - **fails** when the walk does not get to the end, when an item does something else than its
   record says (a crash or a hang, a new exception, a panel, an alert or a request to open
-  something that was not there, our notice gone), or when `fs_usage` puts a write in the real
-  Safari's places on the profile (the app's, WebKit's and cfprefsd's processes);
+  something that was not there, our notice gone), when `fs_usage` puts a write in the real
+  Safari's places on the profile (the app's, WebKit's and cfprefsd's processes), or when the
+  profile's process asked more than a thousand times for a view whose service it is refused (the
+  loop below);
 - **says**, without failing, which items came or went — which items a menu has follows the
   window's state and, on Safari 27, the runner — and what FSEvents saw written in the real Safari's
   places by any process (macOS's own daemons and Safari's agents write there on their own).
@@ -85,7 +87,7 @@ items walked on each, every one chosen on the page, in one launch each (CI run 4
 measurement branch: this walk, which there also chose Window › Full Screen Tile's two items; earlier
 runs as named).
 
-**Fixed** (each in the commit that brought the walk, with the walk as its proof):
+**Fixed** (each with the walk as its proof):
 
 - **Edit › AutoFill › Contact… / Passwords… / Credit Card…** (run 452). AppKit adds these system
   items to any Edit menu once the menu bar is up, after `installMainMenu` had removed them, and in a
@@ -111,6 +113,15 @@ runs as named).
   domain. They now live in the process's argument domain only (docs/ISOLATION_AND_LIMITATIONS.md,
   "Preferences"; checked by the self-test); in run 468 the file was absent before the walk and after
   it, on both.
+- **The profile's process did little but ask for a view it is refused**, from a few seconds after
+  its start (every walk read, both macOS: "…endpoint for listener 'com.apple.view-bridge':
+  Connection invalid" about a million times a walk). SafariPlatformSupport's completion list is the
+  view of a service of Safari's, which the kernel refuses a profile's process; each time that
+  view's service ended, `-[SPSafariPlatformSupport viewServiceDidTerminateWithError:]` asked for it
+  again, on the main thread (a sample, measurement run 473). It does nothing in a profile, replaced
+  once SafariPlatformSupport is loaded — replacing it with the others did nothing, since that
+  framework loads later (run 475): twenty times a walk since (run 476), and the walk fails above a
+  thousand.
 
 **Found, and for the owner to decide** (the table's "the owner decides"):
 
