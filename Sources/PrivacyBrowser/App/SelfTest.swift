@@ -785,6 +785,12 @@ final class SelfTest {
     /// among them is not read: reading one can have it evaluated, fetching allowed (`ServerTrust`).
     private func describeFailure(_ error: NSError?) -> String {
         guard let error else { return "no failure" }
+        if CommandLine.arguments.contains("--measure-no-error-read") {
+            return "\(error.domain) \(error.code); its userInfo not read (measurement)"
+        }
+        if CommandLine.arguments.contains("--measure-times") {
+            print(String(format: "INFO measure: the error's userInfo read at %.6f", Date().timeIntervalSince1970))
+        }
         var parts = ["\(error.domain) \(error.code)", "keys [\(error.userInfo.keys.sorted().joined(separator: ", "))]"]
         if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
             parts.append("underlying \(underlying.domain) \(underlying.code) keys [\(underlying.userInfo.keys.sorted().joined(separator: ", "))]")

@@ -145,12 +145,11 @@ def main():
     built_minos, built_sdk = declared_sdk(os.path.join(args.app, BINARY))
     # The measurement branch's variants: WebKit's network loader set explicitly, as built and
     # with every behavior on (BrowserSession.applyMeasuredFeatures).
-    loader = "--measure-feature=CFNetworkNetworkLoaderEnabled="
-    variants = [("as built", None, []),
-                ("as built, network loader on", None, [loader + "on"]),
-                ("every behavior on", None, ["--sdk-everything"]),
-                ("every behavior on, network loader off", None, ["--sdk-everything", loader + "off"]),
-                ("every behavior on, network loader on", None, ["--sdk-everything", loader + "on"])]
+    times = "--measure-times"
+    variants = [("as built", None, [times]),
+                ("every behavior on", None, ["--sdk-everything", times]),
+                ("every behavior on, the error not read", None, ["--sdk-everything", times, "--measure-no-error-read"]),
+                ("every behavior on, again", None, ["--sdk-everything", times])]
     variants += [(f"declaring SDK {sdk}", sdk, []) for sdk in
                  [value.strip() for value in args.sdk.split(",") if value.strip()]]
     results = []
@@ -189,7 +188,7 @@ def main():
                 continue
             for kind in asked:
                 if f"pbaia{kind}{tag}.leak.example.com" in line:
-                    asked[kind].append(match.group(2))
+                    asked[kind].append(f"{match.group(2)} at {match.group(1)}")
         canary, control = asked["canary"], asked["control"]
         if canary:
             verdict = "LEAKS" + ("" if control else " (the control was not asked for)")

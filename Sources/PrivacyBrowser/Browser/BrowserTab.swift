@@ -306,6 +306,10 @@ extension BrowserTab: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         if let navigation { abandonedNavigations.add(navigation) }
         let nsError = error as NSError
+        if CommandLine.arguments.contains("--measure-times") {
+            print(String(format: "INFO measure: provisional failure %@ %ld at %.6f (%@)", nsError.domain, nsError.code,
+                         Date().timeIntervalSince1970, NSStringFromClass(type(of: nsError))))
+        }
         lastProvisionalError = nsError
         if let reason = proxyAuthFailure {
             // The load was cancelled by this tab itself, at the proxy's challenge (fail-closed).

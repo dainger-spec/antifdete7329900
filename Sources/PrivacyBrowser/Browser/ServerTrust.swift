@@ -55,6 +55,9 @@ enum ServerTrust {
                 log.notice("The certificate of \(host, privacy: .private) does not hold without fetching from the network: refused")
             }
             DispatchQueue.main.async {
+                if CommandLine.arguments.contains("--measure-times") {
+                    print(String(format: "INFO measure: %@ answered %@ at %.6f", host, trusted ? "use" : "cancel", Date().timeIntervalSince1970))
+                }
                 answer(trusted ? .useCredential : .cancelAuthenticationChallenge, trusted ? URLCredential(trust: box.trust) : nil)
             }
         }
