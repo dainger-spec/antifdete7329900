@@ -143,7 +143,14 @@ def main():
     time.sleep(2)
 
     built_minos, built_sdk = declared_sdk(os.path.join(args.app, BINARY))
-    variants = [("as built", None, []), ("as built, every behavior on", None, ["--sdk-everything"])]
+    # The measurement branch's variants: WebKit's network loader set explicitly, as built and
+    # with every behavior on (BrowserSession.applyMeasuredFeatures).
+    loader = "--measure-feature=CFNetworkNetworkLoaderEnabled="
+    variants = [("as built", None, []),
+                ("as built, network loader on", None, [loader + "on"]),
+                ("every behavior on", None, ["--sdk-everything"]),
+                ("every behavior on, network loader off", None, ["--sdk-everything", loader + "off"]),
+                ("every behavior on, network loader on", None, ["--sdk-everything", loader + "on"])]
     variants += [(f"declaring SDK {sdk}", sdk, []) for sdk in
                  [value.strip() for value in args.sdk.split(",") if value.strip()]]
     results = []
@@ -193,7 +200,7 @@ def main():
         verdicts.append((name, sdk, extra, verdict))
         checks = [line for line in output.splitlines()
                   if line.startswith(("PASS certificates", "FAIL certificates", "SELFTEST", "INFO WebKit's behaviors",
-                                      "INFO certificates"))]
+                                      "INFO certificates", "INFO measure"))]
         summary = (f"AIA-VARIANT {name} (declares minos {minos}, sdk {sdk}; names tagged {tag}): {verdict} — "
                    f"the canary asked of this Mac's resolver {len(canary)} time(s)"
                    f"{' by ' + '; '.join(sorted(set(canary))) if canary else ''}, "

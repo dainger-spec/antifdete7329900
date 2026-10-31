@@ -1,37 +1,29 @@
 name: CI
 
-# A measurement branch only: what WebKit and CFNetwork offer about the network loader WebKit uses
-# from SDK 15.0 on, and about the check of a server's certificate (PrivacyBrowser
-# --loader-inventory), as built and with every behavior on. Never merged.
+# A measurement branch only: from which declared SDK, and with WebKit's network loader on or off,
+# this Mac fetches a certificate's missing intermediate outside a profile's proxy on macOS 27
+# (scripts/aia_variants.py, BrowserSession.applyMeasuredFeatures). Never merged.
 on:
   push:
 
 jobs:
-  inventory:
-    name: The loader and trust inventory on ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [macos-26, xcode-27]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+  aia-27:
+    name: The AIA canary with the network loader set, on macOS 27
+    runs-on: xcode-27
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - name: Build the app without the App Sandbox
         run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
-      - name: As built, and with every behavior on
+      - name: The variants
         continue-on-error: true
+        timeout-minutes: 25
         run: |
-          mkdir -p build/inventory
-          app=build/unsandboxed/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser
-          "$app" --loader-inventory > build/inventory/as-built.txt 2> build/inventory/as-built.err; echo "exit $?"
-          "$app" --loader-inventory --sdk-everything > build/inventory/everything.txt 2> build/inventory/everything.err; echo "exit $?"
-          cat build/inventory/as-built.txt
-          echo "== differences with every behavior on"
-          diff build/inventory/as-built.txt build/inventory/everything.txt || true
+          python3 scripts/aia_variants.py --app build/unsandboxed/PrivacyBrowser.app --sdk "" \
+            --out build/measure/aia-variants --title "macOS 27 - AIA, network loader"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: loader-inventory-${{ matrix.runner }}
-          path: build/inventory
+          name: aia-loader-27
+          path: build/measure
           if-no-files-found: ignore

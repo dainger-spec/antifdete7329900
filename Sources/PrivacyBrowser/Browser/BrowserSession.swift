@@ -283,7 +283,38 @@ final class BrowserSession {
         // page sees as document.fullscreenEnabled === undefined).
         webConfiguration.preferences.isElementFullscreenEnabled = true
         applyPrivacyPreferences(to: webConfiguration.preferences)
+        Self.applyMeasuredFeatures(to: webConfiguration.preferences)
         return webConfiguration
+    }
+
+    /// A measurement branch only: WebKit features set as `--measure-feature=<key>=on|off` says.
+    static func applyMeasuredFeatures(to preferences: WKPreferences) {
+        let wanted = CommandLine.arguments.compactMap { argument -> (String, Bool)? in
+            guard argument.hasPrefix("--measure-feature=") else { return nil }
+            let parts = argument.dropFirst("--measure-feature=".count).split(separator: "=")
+            guard parts.count == 2 else { return nil }
+            return (String(parts[0]), parts[1] == "on")
+        }
+        guard !wanted.isEmpty else { return }
+        let features = NSSelectorFromString("_features")
+        let set = NSSelectorFromString("_setEnabled:forFeature:")
+        let type: AnyObject = WKPreferences.self
+        guard type.responds(to: features), preferences.responds(to: set),
+              let list = type.perform(features)?.takeUnretainedValue() as? [NSObject],
+              let method = class_getInstanceMethod(WKPreferences.self, set) else {
+            print("INFO measure: WebKit's features cannot be set here")
+            return
+        }
+        typealias SetEnabled = @convention(c) (AnyObject, Selector, Bool, AnyObject) -> Void
+        let setEnabled = unsafeBitCast(method_getImplementation(method), to: SetEnabled.self)
+        for (key, on) in wanted {
+            guard let feature = list.first(where: { ($0.value(forKey: "key") as? String) == key }) else {
+                print("INFO measure: no WebKit feature \(key)")
+                continue
+            }
+            setEnabled(preferences, set, on, feature)
+            print("INFO measure: WebKit feature \(key) set \(on ? "on" : "off")")
+        }
     }
 
     // MARK: Windows
