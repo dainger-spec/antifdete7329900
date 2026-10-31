@@ -212,6 +212,18 @@ enum SafariMenuWalkCheck {
         }
         if manager.isRunning(profile.id) { try? await manager.stop(profile.id) }
         try? await Task.sleep(nanoseconds: 1_000_000_000)
+        // Measurement: anything in the profile's home after its seal — a write cfprefsd made late.
+        if SafariUIStateMeasure.isOn {
+            for wait in [0, 10, 20] {
+                if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait) * 1_000_000_000) }
+                for name in profileHomes {
+                    let home = root.path + "/profiles/" + name + "/home.noindex"
+                    let left = FileManager.default.enumerator(atPath: home)?.compactMap { $0 as? String } ?? []
+                    print("MENUWALK-INFO the profile's home \(wait == 0 ? "at" : "\(wait) s more after") its seal: "
+                          + (FileManager.default.fileExists(atPath: home) ? "THERE, holding \(left.prefix(20))" : "absent"))
+                }
+            }
+        }
 
         // The files written while each item ran (FSEvents tells them a moment after).
         let changes = files.stop()

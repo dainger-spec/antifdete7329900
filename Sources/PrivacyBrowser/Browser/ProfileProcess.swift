@@ -168,6 +168,8 @@ final class ProfileProcess {
     static let inheritedEnvironment: Set<String> = [
         "USER", "LOGNAME", "SHELL", "__CF_USER_TEXT_ENCODING", "COMMAND_MODE",
         "APP_SANDBOX_CONTAINER_ID", "PRIVACYBROWSER_LANG", "PB_SAFARI_CHROME",
+        // Measurement only: SafariUIState's.
+        "PB_MEASURE_UI_STATE",
     ]
 
     /// Every name a profile's process can find in its environment (the self-test checks it).
