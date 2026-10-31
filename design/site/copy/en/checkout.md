@@ -12,25 +12,15 @@ Plan and payment
 
 # Payment
 
-## Order
-
 Professional plan
 
-Month · $59
+$59$590
 
-Year · $590 the price of 10 months
+Month
 
-- **Paid until now** — 29 November 2026
-- **After this payment** — 29 December 2026
-- **To pay** — $59
+Year
 
-Your period starts when the network confirms the payment. When it’s close to ending, we remind you by email in advance.
-
-## Pay in crypto
-
-⟦q13: USDT, BTC or ETH — and on which networks⟧
-
-Coin
+Your period runs until 29 December 2026The price of ten months · your period runs until 29 November 2027
 
 USDT
 
@@ -38,29 +28,16 @@ BTC
 
 ETH
 
-QR code: the address and the amount
+59.00 USDT590.00 USDT
 
-- **Network** — Tron (TRC-20)
-- **Amount** — 59.00 USDT
-
-Address to send to
+Tron network (TRC-20)
 
 TLumenExampLeAddr3ssQ7nS4yE9wq2Xb8u
 
-[Copy]
+Waiting for your transferOut of time. Get a new address
 
-This address is valid for
+Address valid for
 
 14:59
 
-Send exactly this amount on this network, in one transfer. Sent on another network or in another coin, the payment won’t arrive.
-
-Status
-
-1. Waiting for your transfer
-2. Transfer seen — waiting for confirmations
-3. Paid — your period is extended
-
-No need to reload: the status changes by itself. The receipt comes by email once the payment is confirmed.
-
-Out of time? Get a new address — the coin amount is recalculated at the current rate; the dollar amount stays the same. [New address]
+Send exactly this amount on this network, in one transfer. No need to reload: the status changes by itself, and the receipt comes by email.

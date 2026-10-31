@@ -3,12 +3,14 @@ import { icon } from '../../lib/kit.mjs';
 
 // The payment page: our own, not the processor's (q8). The server gets an address from the processor's API; the
 // page shows it with a QR code, the amount, a timer and the status, and the person never leaves the site. The
-// processor's name appears nowhere. Everything in the payment panel is sample data (data-sample): the address is
-// not a real one, and the QR code is a drawing for the mock-up (on the real page the code is made from the address).
+// processor's name appears nowhere. Minimal on purpose: one narrow column — what you pay and for how long, then a
+// single card with the transfer (coin, QR, amount, address, status and timer), then two short lines. Everything in
+// the card is sample data (data-sample): the address is not a real one, and the QR code is a drawing for the mock-up
+// (on the real page it is made from the address and the amount). The month / year switch is two radios and CSS.
 
 /// A QR-like drawing for the mock-up: 25 × 25 modules with the three finder squares, the timing lines and modules
 /// from a seeded generator — deterministic, so every build draws the same picture.
-function qrDrawing(seed, size = 196) {
+function qrDrawing(seed, size) {
   const N = 25, Q = 2, M = N + 2 * Q;
   let s = 0;
   for (const ch of seed) s = (s * 31 + ch.charCodeAt(0)) >>> 0;
@@ -26,56 +28,77 @@ function qrDrawing(seed, size = 196) {
   for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!fixed[y][x]) on[y][x] = rnd() < 0.48;
   let rects = '';
   for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (on[y][x]) rects += `<rect x="${x + Q}" y="${y + Q}" width="1" height="1"/>`;
-  return `<svg class="qr" width="${size}" height="${size}" viewBox="0 0 ${M} ${M}" shape-rendering="crispEdges" role="img"><rect width="${M}" height="${M}" fill="#fff"/><g fill="#0B0C0F">${rects}</g></svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${M} ${M}" shape-rendering="crispEdges" aria-hidden="true"><rect width="${M}" height="${M}" fill="#fff"/><g fill="#0B0C0F">${rects}</g></svg>`;
 }
 
 export default function checkout(c, { lang }) {
-  const o = c.order, p = c.pay;
-  const kv = (rows) => `<dl class="kv">${rows.map(([k, v]) => `<dt>${inline(k, lang)}</dt><dd>${inline(v, lang)}</dd>`).join('')}</dl>`;
-  const order = `<section class="panel"><div class="panel-head"><div><h2>${inline(o.title, lang)}</h2><p>${inline(o.plan, lang)}</p></div></div>
-    <div class="panel-body pad" style="display:grid;gap:16px">
-      <div class="seg" role="group" aria-label="${lang === 'ru' ? 'Период' : 'Period'}">${o.periods.map(([t, v, note], i) => `<a${i === 0 ? ' aria-current="true"' : ''}>${inline(t, lang)} · ${inline(v, lang)}${note ? ` <span class="caption">${inline(note, lang)}</span>` : ''}</a>`).join('')}</div>
-      <div data-sample>${kv(o.rows)}</div>
+  const [m, y] = c.periods;
+  const both = (a, b, cls = '') => `<span class="p-m${cls}">${a}</span><span class="p-y${cls}">${b}</span>`;
+  const tbd = (q, html) => `<span class="tbd" data-q="${q}" title="Решение владельца: вопрос ${q.slice(1)}">${html}</span>`;
+  const style = `<style>
+    .pay { max-width: 440px; margin: 0 auto; padding: 32px 0 112px; text-align: center; }
+    #pay-month:checked ~ .container .pay label[for="pay-month"], #pay-year:checked ~ .container .pay label[for="pay-year"] { background: rgba(255, 255, 255, 0.12); color: var(--text-primary); }
+    #pay-month:focus-visible ~ .container .pay label[for="pay-month"], #pay-year:focus-visible ~ .container .pay label[for="pay-year"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .pay-back { display: inline-flex; align-items: center; gap: 6px; font: var(--t-small); color: var(--text-tertiary); }
+    .pay-back:hover { color: var(--text-primary); text-decoration: none; }
+    .pay-head { margin-top: 40px; display: grid; justify-items: center; gap: 6px; }
+    .pay-plan { font: var(--t-small); color: var(--text-secondary); }
+    .pay-sum { font: 600 56px/60px var(--font-display); letter-spacing: -0.025em; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+    .pay-head .seg { margin-top: 14px; }
+    .pay-until { margin-top: 10px; font: 400 13px/18px var(--font); color: var(--text-tertiary); }
+    .pay-card { margin-top: 36px; padding: 24px; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 18px; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--r-card); }
+    .pay-qr { padding: 10px; border-radius: 14px; background: #fff; line-height: 0; }
+    .pay-amount { font: 600 22px/28px var(--font-display); letter-spacing: -0.01em; color: var(--text-primary); }
+    .pay-net { margin-top: -14px; font: 400 13px/18px var(--font); color: var(--text-tertiary); }
+    .pay-addr { width: 100%; display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 14px; border-radius: 10px; background: var(--control-fill); border: 1px solid var(--hairline); text-align: left; }
+    .pay-addr span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 13px/20px var(--font-mono); color: var(--text-primary); }
+    .pay-addr button { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+    .pay-addr button:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); }
+    .pay-status { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid var(--hairline); font: var(--t-small); color: var(--text-secondary); white-space: nowrap; }
+    .pay-status .dot { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
+    .pay-status .t { display: inline-flex; align-items: center; gap: 6px; color: var(--text-tertiary); }
+    .pay-status .t b { font: 500 13px/20px var(--font-mono); color: var(--text-secondary); }
+    .pay-status .gone, .pay.expired .pay-status .live { display: none; }
+    .pay.expired .pay-status .gone { display: inline; }
+    .pay-note { margin-top: 18px; font: 400 13px/20px var(--font); color: var(--text-tertiary); }
+    /* month or year: two radios, no script */
+    .pay .p-y, #pay-year:checked ~ .container .pay .p-m { display: none; }
+    #pay-year:checked ~ .container .pay .p-y { display: inline; }
+    @media (max-width: 599px) { .pay-status .lbl { display: none; } .pay-sum { font-size: 48px; line-height: 52px; } }
+  </style>`;
+  const body = `${style}
+  <input type="radio" name="pay-period" id="pay-month" class="visually-hidden" checked>
+  <input type="radio" name="pay-period" id="pay-year" class="visually-hidden">
+  <div class="container"><div class="pay" data-pay>
+    <a class="pay-back" href="account.html">${icon('arrowLeft', 13)}${inline(c.back, lang)}</a>
+    <h1 class="visually-hidden">${inline(c.title, lang)}</h1>
+    <div class="pay-head">
+      <p class="pay-plan">${inline(c.plan, lang)}</p>
+      <div class="pay-sum">${both(inline(m[1], lang), inline(y[1], lang))}</div>
+      <div class="seg" role="group" aria-label="${lang === 'ru' ? 'Период' : 'Period'}"><label for="pay-month">${inline(m[0], lang)}</label><label for="pay-year">${inline(y[0], lang)}</label></div>
+      <p class="pay-until" data-sample>${both(inline(m[2], lang), inline(y[2], lang))}</p>
     </div>
-    <div class="panel-foot"><span style="display:flex;gap:8px;align-items:flex-start">${icon('envelope', 14)}<span>${inline(o.note, lang)}</span></span></div></section>`;
-  const steps = p.steps.map((t, i) => `<li class="row" style="gap:10px;align-items:center;${i === 0 ? 'color:var(--text-primary)' : 'color:var(--text-tertiary)'}">${i === 0 ? icon('hourglass', 15) : icon(i === 1 ? 'syncArrows' : 'check', 15)}<span>${inline(t, lang)}</span></li>`).join('');
-  const pay = `<section class="panel"><div class="panel-head"><div><h2>${inline(p.title, lang)}</h2><p>${inline(p.coinsNote, lang)}</p></div></div>
-    <div class="panel-body pad" style="display:grid;gap:20px">
-      <div class="row" style="gap:12px;flex-wrap:wrap"><span class="caption">${inline(p.coinLabel, lang)}</span><div class="seg" role="group">${p.coins.map((x, i) => `<a${i === 0 ? ' aria-current="true"' : ''}>${esc(x)}</a>`).join('')}</div></div>
-      <div class="pay-grid" data-sample>
-        <figure class="pay-qr">${qrDrawing(p.address)}<figcaption class="caption">${inline(p.qr, lang)}</figcaption></figure>
-        <div style="display:grid;gap:14px;min-width:0">
-          ${kv(p.rows)}
-          <div><div class="caption" style="margin-bottom:6px">${inline(p.addressLabel, lang)}</div>
-            <div class="row" style="gap:8px;align-items:center;min-width:0"><code class="mono pay-addr">${esc(p.address)}</code><button class="btn secondary sm" type="button" data-copy="${esc(p.address)}">${icon('copy', 14)}${inline(p.copy, lang)}</button></div></div>
-          <div class="row" style="gap:8px;align-items:center">${icon('clock', 15)}<span>${inline(p.timerLabel, lang)}</span> <strong class="mono" data-timer>${esc(p.timer)}</strong></div>
-        </div>
-      </div>
-      <div class="note">${icon('exclamationTriangle', 18)}<div><p>${inline(p.exact, lang)}</p></div></div>
-      <div><div class="caption" style="margin-bottom:10px">${inline(p.statusTitle, lang)}</div><ol class="pay-steps" style="list-style:none;margin:0;padding:0;display:grid;gap:10px">${steps}</ol></div>
-    </div>
-    <div class="panel-foot"><span>${inline(p.stay, lang)}</span></div></section>
-    <p class="caption" style="margin-top:14px;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap"><span>${inline(p.expired, lang)}</span><a class="btn ghost sm" href="checkout.html">${icon('refresh', 14)}${inline(p.newAddress, lang)}</a></p>`;
+    <section class="pay-card" aria-label="${esc(c.qr)}">
+      ${tbd('q13', `<span class="seg">${c.coins.map((x, i) => `<a${i === 0 ? ' aria-current="true"' : ''}>${esc(x)}</a>`).join('')}</span>`)}
+      <div class="pay-qr" data-sample role="img" aria-label="${esc(c.qr)}">${qrDrawing(c.address, 168)}</div>
+      <div class="pay-amount" data-sample>${both(esc(m[3]), esc(y[3]))}</div>
+      <div class="pay-net" data-sample>${inline(c.network, lang)}</div>
+      <div class="pay-addr" data-sample><span>${esc(c.address)}</span><button type="button" data-copy="${esc(c.address)}" aria-label="${esc(c.copy)}" title="${esc(c.copy)}">${icon('copy', 15)}</button></div>
+      <div class="pay-status"><span><span class="live"><i class="dot"></i>${inline(c.status, lang)}</span><span class="gone">${inline(c.expired, lang)} <a href="checkout.html">${inline(c.newAddress, lang)}</a></span></span><span class="t live" data-sample>${icon('clock', 13)}<span class="lbl">${inline(c.timerLabel, lang)}</span> <b data-timer>${esc(c.timer)}</b></span></div>
+    </section>
+    <p class="pay-note">${inline(c.exact, lang)}<br>${inline(c.after, lang)}</p>
+  </div></div>`;
   // The timer counts down in the prototype (not in screenshots, ?shot=1, which stay as they are).
   const script = `<script>(function () {
-    if (/[?&]shot=1/.test(location.search)) return;
-    var el = document.querySelector('[data-timer]'); if (!el) return;
-    var left = 14 * 60 + 59;
-    setInterval(function () { left = Math.max(0, left - 1); el.textContent = String(Math.floor(left / 60)).padStart(2, '0') + ':' + String(left % 60).padStart(2, '0'); }, 1000);
     document.querySelectorAll('[data-copy]').forEach(function (b) { b.addEventListener('click', function () { if (navigator.clipboard) navigator.clipboard.writeText(b.getAttribute('data-copy')); }); });
+    if (/[?&]shot=1/.test(location.search)) return;
+    var el = document.querySelector('[data-timer]'), pay = document.querySelector('[data-pay]'); if (!el) return;
+    var left = 14 * 60 + 59;
+    var t = setInterval(function () {
+      left = Math.max(0, left - 1);
+      el.textContent = String(Math.floor(left / 60)).padStart(2, '0') + ':' + String(left % 60).padStart(2, '0');
+      if (!left) { clearInterval(t); pay.classList.add('expired'); }
+    }, 1000);
   })();</script>`;
-  const style = `<style>
-    .checkout { display: grid; grid-template-columns: minmax(0, 430px) minmax(0, 1fr); gap: 24px; align-items: start; padding: 40px 0 96px; }
-    .checkout .seg { max-width: 100%; flex-wrap: wrap; }
-    .pay-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px; align-items: start; }
-    .pay-qr { margin: 0; display: grid; gap: 8px; justify-items: center; }
-    .pay-qr .qr { border-radius: 10px; display: block; }
-    .pay-addr { display: block; min-width: 0; overflow-wrap: anywhere; padding: 8px 10px; border-radius: 8px; background: var(--card); box-shadow: inset 0 0 0 1px var(--hairline); color: var(--text-primary); font-size: 13px; line-height: 18px; }
-    @media (max-width: 899px) { .checkout { grid-template-columns: minmax(0, 1fr); } }
-    @media (max-width: 599px) { .pay-grid { grid-template-columns: minmax(0, 1fr); justify-items: center; } .pay-grid > div { width: 100%; } }
-  </style>`;
-  const body = `${style}<div class="container"><p style="padding-top:28px"><a class="link-arrow" href="account.html">${icon('arrowLeft', 14)} ${inline(c.back, lang)}</a></p>
-    <h1 class="h1" style="margin-top:12px">${inline(c.title, lang)}</h1>
-    <div class="checkout">${order}<div>${pay}</div></div></div>${script}`;
-  return { body, bodyClass: 'page-checkout', hideFooter: true };
+  return { body: body + script, bodyClass: 'page-checkout', hideFooter: true };
 }
