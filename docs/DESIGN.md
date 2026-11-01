@@ -56,13 +56,21 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   search, inspector toggle, ⋯, New profile — `ProfilesScreen.headerTop/headerHeight/headerTrailing`,
   which the self-test's clicks use too), the list in three groups, the floating selection bar
   (`ProfileBulkBar`), the inspector (`ProfileInspector.swift`, 320 pt; beside the list when the rows
-  keep their columns, over it when not).
+  keep their columns, over the list — never the header — when not). An inspector's content starts
+  under the title bar's band (`ProfilesScreen.inspectorTop`): a scroll view reaching under the title
+  bar gets macOS 26's edge effect there, which a window's picture does not draw. In the narrowest
+  window the state column narrows first, so that a name keeps its 200 pt.
 - Proxies section (`ProxyListView.swift`, `ProxyInspector.swift`): the same header, the design's
-  table, the proxy's inspector with its check step by step.
+  table (its selected row in the design's tone: the system's highlight is off), the proxy's
+  inspector with its check step by step.
 - Settings (`SettingsView.swift`, `SettingsPages.swift`): sidebar with search and three groups;
   `SettingsPage` (title, sentence, `isNew`), `SettingsCaption`, `SettingRow` (title, what it does,
-  when it takes effect, control at the right). A sheet's form can be a section too (`embedded`).
-- Lock and first launch (`VaultViews.swift`): `LockBackdrop`, `LockScreen`, `LockPasswordField`.
+  when it takes effect, control at the right), `SettingCustomRow` (more than a sentence under the
+  title). No section is the system's form: Sync, WebRTC and Automation are pages of rows, and the
+  sheets that open them from the Profiles window show the same rows (`embedded`).
+- Lock and first launch (`VaultViews.swift`): `LockBackdrop`, `LockScreen`, `LockPasswordField` (one
+  field per screen takes the cursor: `takesFocus`), the master password's facts first and large,
+  `PasswordRequirement`. Changing the master password uses the same fields and requirements.
 - Editor (`ProfileEditorForm.swift`): header with the context in capitals, one screen of parts with
   an index.
 
