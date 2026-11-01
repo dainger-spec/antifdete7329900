@@ -1020,6 +1020,7 @@ enum ProfileNetworkGuard {
     /// its answer to mean anything (the self-test uses a host that resolves nowhere else).
     static func report(probe: URL?) async -> ProfileNetworkReport {
         var report = ProfileNetworkReport()
+        report.stubsReached = SafariStubCount.snapshot
         let profileProxies = proxies ?? []
         report.hasProxy = !profileProxies.isEmpty
         let views = webViews.allObjects
@@ -1258,6 +1259,10 @@ struct ProfileNetworkReport: Codable, Equatable {
     var credentialsKept = false
     /// What `HandOffs` refused, by kind ("open", "share", "clipboard").
     var handOffsRefused: [String: Int] = [:]
+    /// Safari's methods replaced by a counted stub, by "-[Class selector]", and how often each was
+    /// reached in this process (`SafariStubCount`): Safari's app-banner tracker's `-load`, once a
+    /// page with a Smart App Banner has been shown.
+    var stubsReached: [String: Int] = [:]
     /// The names in the process's environment (`ProfileProcess.childEnvironment`), and where its
     /// home and temporary files go: `HOME`, `TMPDIR`, `CFFIXED_USER_HOME` and Foundation's
     /// temporary directory, by those names.

@@ -358,6 +358,7 @@ final class SelfTest {
         await group("warm-up") { try await warmUp(repository) }
         await group("warm-up queue") { try await warmUpQueue(repository) }
         await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
+        await group("Safari's app banners") { try await safariAppBanner(repository) }
         await group("a mobile view in its own process") { try await mobileViewInItsOwnProcess(repository) }
         await group("lock during launch") { try await lockDuringLaunch(repository) }
         await group("quit") { try await quitFromFocusedPage(repository) }
@@ -4701,6 +4702,84 @@ final class SelfTest {
     /// Safari's chrome is hosted. Here an iPhone view runs in its own process, its page loaded; once
     /// it settles, its processor time over eight seconds, against a control that keeps this process
     /// busy, read the same way.
+    /// A page with a Smart App Banner (`<meta name="apple-itunes-app">`, as youtube.com has one)
+    /// opened in a profile's own process, in Safari's window, through the profile's proxy: Safari's
+    /// chrome brings its app-banner tracker up, and the tracker's `-load` asked for a file URL with
+    /// no path and ended the process (the owner's Mac, 31 October and 1 November).
+    ///
+    /// MEASUREMENT BRANCH: three launches, by `PB_MEASURE_BANNER` — "watch" (as a user's profile
+    /// had it: no fix), "nil" (a file URL with no path answered with nil, to see what follows),
+    /// "fix" (the candidate fix) — each watched from inside (`BannerMeasure`).
+    private func safariAppBanner(_ repository: ProfileRepository) async throws {
+        let name = "app banner: a page with a Smart App Banner, in Safari's window, leaves the profile's process running"
+        guard !AppEnvironment.isSandboxed else {
+            skip(name, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        for mode in ["watch", "nil", "fix"] {
+            let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+            let host = "banner-\(run).selftest.invalid"
+            let profile = try repository.create(name: "App banner \(mode)", configuration: ProfileConfiguration(
+                startURL: URL(string: "http://\(host)/pb-app-banner?run=\(run)"), proxy: proxy, matchProxyLocation: false))
+            let manager = ProfileManager(repository: repository)
+            var hostsChrome: Bool?
+            manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+            var exited: Int32?
+            manager.onChildExited = { _, status in exited = status }
+            var report: ProfileNetworkReport?
+            manager.onNetworkReport = { _, received in report = received }
+            setenv("PB_MEASURE_BANNER", mode, 1)
+            setenv("PB_PROFILE_PROCESS", "1", 1)
+            var launched = true
+            do {
+                try await manager.launch(profile.id)
+            } catch {
+                launched = false
+                info("app banner [\(mode)]: the process did not start: \(error)")
+            }
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            unsetenv("PB_MEASURE_BANNER")
+            if launched {
+                if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+                _ = await waitUntil(timeout: 90) { hostsChrome != nil || exited != nil }
+                // The page, as the proxy saw it asked for.
+                var served = false
+                for _ in 0..<15 where !served {
+                    let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+                    if let text = try? await loadThroughProxy(repository, proxy, url: url),
+                       text.contains("\"/pb-app-banner?run=\(run)\"") {
+                        served = true
+                    } else {
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    }
+                }
+                // The tracker reads on a queue of its own, soon after the page.
+                _ = await waitUntil(timeout: 14) { exited != nil }
+                if exited == nil {
+                    _ = manager.checkNetwork(profile.id)
+                    _ = await waitUntil(timeout: 30) { report != nil || exited != nil }
+                }
+                info("app banner [\(mode)]: \(hostsChrome.map { $0 ? "Safari's window" : "our own window" } ?? "no window reported"); "
+                     + "the page \(served ? "was" : "was NOT") asked for through the proxy; the process "
+                     + "\(exited.map { "ENDED with status \($0)" } ?? "is running"); stubs reached \(report?.stubsReached ?? [:])")
+                if mode == "fix" {
+                    check(name, hostsChrome == true && served && exited == nil && report != nil,
+                          "window \(String(describing: hostsChrome)), page served \(served), ended \(exited.map(String.init) ?? "no"), report \(report != nil)")
+                    check("app banner: the page reached Safari's banner tracker, whose reading of a file it has no path for is closed",
+                          (report?.stubsReached.filter { $0.key.hasSuffix(" load]") }.values.reduce(0, +) ?? 0) >= 1,
+                          "stubs reached \(report?.stubsReached ?? [:]): the page did not bring the tracker up, so this run proves nothing about it")
+                }
+            }
+            await manager.shutDown()
+            try? repository.delete(profile.id)
+        }
+    }
+
     private func mobileViewInItsOwnProcess(_ repository: ProfileRepository) async throws {
         let name = "mobile view process: an iPhone view in its own process, idle, does not keep it busy"
         guard !AppEnvironment.isSandboxed else {

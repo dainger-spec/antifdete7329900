@@ -938,6 +938,45 @@ enum SafariChrome {
             replaceWithConstant(className, selectorName) { nil }
             lateStubsMade.insert(className + " " + selectorName)
         }
+        // MEASUREMENT BRANCH: the fix is left out where the measurement asks to see the tracker as
+        // a user's profile had it ("watch", "nil").
+        if !["watch", "nil"].contains(ProcessInfo.processInfo.environment["PB_MEASURE_BANNER"] ?? "") {
+            closeAppBannerTrackers()
+        }
+    }
+
+    // MARK: Safari's app-banner tracker
+
+    /// Safari's trackers of the app banners it has shown (SafariShared). A page with a Smart App
+    /// Banner (`<meta name="apple-itunes-app">`, youtube.com) has Safari's chrome bring its
+    /// tracker up, and the tracker's `-load` reads its file on a queue of its own
+    /// (com.apple.WBSAppLinkBannerTracker) — from a path that is empty in a profile's process:
+    /// -[NSURL initFileURLWithPath:isDirectory:] threw there, nothing caught it, and the profile's
+    /// process ended (the owner's Mac, 31 October and 1 November). Replaced by nothing, counted.
+    private static let bannerTrackers = ["WBSBannerTracker", "WBSAppLinkBannerTracker"]
+    private static var bannerTrackersSeen: Set<String> = []
+
+    /// The trackers' `-load`, wherever a tracker class implements its own, replaced by a counted
+    /// nothing; again as images load (`stubLateFeatures`).
+    static func closeAppBannerTrackers() {
+        for name in bannerTrackers where !bannerTrackersSeen.contains(name) {
+            guard let cls = NSClassFromString(name) else { continue }
+            bannerTrackersSeen.insert(name)
+            let selector = NSSelectorFromString("load")
+            guard implementsOwn(cls, selector), let method = class_getInstanceMethod(cls, selector) else { continue }
+            let key = "-[\(name) load]"
+            let replacement: @convention(block) (AnyObject) -> Void = { _ in SafariStubCount.reached(key) }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+            log.notice("Replaced -[\(name, privacy: .public) load]: a profile's process keeps no record of Safari's app banners")
+        }
+    }
+
+    /// Whether `cls` has an implementation of `selector` of its own, not only its superclass's.
+    private static func implementsOwn(_ cls: AnyClass, _ selector: Selector) -> Bool {
+        var count: UInt32 = 0
+        guard let methods = class_copyMethodList(cls, &count) else { return false }
+        defer { free(methods) }
+        return (0..<Int(count)).contains { method_getName(methods[$0]) == selector }
     }
 
     /// Safari's own `-[GeneralPreferences _defaultWebBrowserMayHaveChanged]`, before

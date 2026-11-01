@@ -84,11 +84,14 @@ enum ProfileSessionHost {
         // again each time its service ended: in our own window, an iPhone view's, for ever. Its
         // stub is made here for every profile, not only where Safari's chrome is hosted.
         SafariChrome.stopRefusedServiceLoops()
+        // MEASUREMENT BRANCH: Safari's app-banner tracker, watched (PB_MEASURE_BANNER).
+        BannerMeasure.install()
         // Before NSApplication exists: hosting Safari's chrome means this process has to *be* the
         // kind of application its chrome expects, starting with NSApp itself.
         if SafariChromeHost.prepareForChildProcess(configuration: stored) {
             log.notice("Safari's chrome is hosted in this process")
         }
+        BannerMeasure.watchGetters()
         // ⌘, and Settings… in Safari's menu: the manager's Settings, not Safari's.
         SafariChrome.onShowSettings = { ProfileSessionHost.send(.showSettings) }
         // The app's browsing settings as this process starts: its first window opens by them.
