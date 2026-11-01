@@ -344,6 +344,7 @@ final class SelfTest {
         await group("restoring tabs") { try await restoreTabs(repository) }
         await group("window lifecycle") { try await windowLifecycle(repository) }
         await group("simplified mode") { try await simplifiedMode(repository) }
+        await group("a page whose process keeps ending") { try await endedPageProcess(repository) }
         await group("errors in the person's language") { errorsInThePersonsLanguage() }
         await group("dates in the person's language") { datesInThePersonsLanguage() }
         await group("dialogs") { try await dialogTeardown(repository) }
@@ -4580,6 +4581,124 @@ final class SelfTest {
         check("simplified mode: each of the nine reasons is said in words of its own, the missing pieces by name",
               texts.allSatisfy { $0.count > 20 && !$0.contains("simplified.") } && Set(texts).count == reasons.count
                 && texts[6].contains("BrowserWindowController"), texts.joined(separator: " | "))
+    }
+
+    // MARK: A page whose process keeps ending
+
+    /// The owner, 1 November: an iPhone view kept the app, the window server, launchd and logd
+    /// busy until the session was restarted. Our window reloaded a page every time its process
+    /// ended — a page that ends it at every load was reloaded for ever, a new process each time.
+    /// Here, in an iPhone view's window of ours: the page's process is ended from outside, as a
+    /// crash ends it, four times. Reloaded twice, then left: no new process, the window says so
+    /// over the tab, and Reload asks for the page again. Before that, the same window, idle, with
+    /// its page: how busy this process and the window server are (an iPhone view's window is
+    /// narrower than its toolbar asks for), against a control that keeps this process busy.
+    private func endedPageProcess(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("ended page: a page whose process keeps ending is reloaded twice, then left",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
+            return
+        }
+        let profile = try repository.create(name: "Ended page", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), ephemeral: true, deviceGenerationID: "ios-26"))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let page = URL(string: "http://proxied.selftest.invalid/one")!
+        let controller = session.openWindow(url: page)
+        defer {
+            controller.close()
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        guard let tab = controller.selectedTab else {
+            check("ended page: the iPhone view's window has a tab", false, "no tab")
+            return
+        }
+        func pid() -> pid_t { (tab.webView.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value ?? 0 }
+        let loaded = await waitUntil(timeout: 20) { !tab.isLoading && tab.webView.title?.hasPrefix("PB proxied") == true && pid() > 0 }
+        guard loaded else {
+            check("ended page: the iPhone view's page loads", false, "title \(tab.webView.title ?? "nil"), process \(pid())")
+            return
+        }
+
+        // Idle: this process and the window server, over four seconds, against a control. Only
+        // with the window on screen: off it, AppKit lays out no toolbar to be busy with.
+        func cpuSeconds() -> Double {
+            var usage = rusage()
+            getrusage(RUSAGE_SELF, &usage)
+            return Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1_000_000
+                + Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1_000_000
+        }
+        let controlStart = Date(), controlCPU = cpuSeconds()
+        var spin = 0.0
+        while Date().timeIntervalSince(controlStart) < 0.6 { spin += sin(spin + 1) }
+        let control = (cpuSeconds() - controlCPU) / Date().timeIntervalSince(controlStart)
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        let serverBefore = await windowServerCPUSeconds()
+        let idleStart = Date(), idleCPU = cpuSeconds()
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        let idle = (cpuSeconds() - idleCPU) / Date().timeIntervalSince(idleStart)
+        let serverAfter = await windowServerCPUSeconds()
+        let server = zip2(serverBefore, serverAfter).map { ($0.1 - $0.0) / 4 }
+        info("ended page: an iPhone view's window, idle: this process \(Int(idle * 100)) %, the window server "
+             + "\(server.map { "\(Int($0 * 100)) %" } ?? "not measured"); the control (this process kept busy) \(Int(control * 100)) % (\(spin > 0 ? "+" : "-"))")
+        if controller.window?.isVisible != true {
+            skip("ended page: an iPhone view's window, idle, does not keep this process busy",
+                 "the window is not on screen here, so its toolbar is not laid out")
+        } else if control < 0.5 {
+            skip("ended page: an iPhone view's window, idle, does not keep this process busy",
+                 "the control, this process kept busy for 0.6 s, read \(Int(control * 100)) %: the measure cannot be trusted")
+        } else {
+            check("ended page: an iPhone view's window, idle, does not keep this process busy",
+                  idle < 0.4, "\(Int(idle * 100)) % of a core over 4 s (the control read \(Int(control * 100)) %)")
+        }
+
+        // The page's process ended from outside, four times at most.
+        var ended = 0
+        var started: [pid_t] = []
+        var last: pid_t = 0
+        for _ in 0..<4 {
+            let current = pid()
+            guard current > 0, current != last else { break }
+            last = current
+            kill(current, SIGKILL)
+            ended += 1
+            _ = await waitUntil(timeout: 10) { tab.terminationCount >= ended && (tab.pageStopped || (pid() > 0 && pid() != current)) }
+            if tab.pageStopped { break }
+            started.append(pid())
+        }
+        check("ended page: a page whose process keeps ending is reloaded twice, then left",
+              tab.pageStopped && ended == 3 && tab.terminationCount == 3 && started.count == 2,
+              "ended \(ended), reported \(tab.terminationCount), new processes \(started.count), stopped \(tab.pageStopped)")
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        let after = pid()
+        check("ended page: once left, no new process is started for it",
+              tab.pageStopped && (after == 0 || after == last), "the page's process now \(after), the one ended last \(last)")
+        check("ended page: its window says so over the tab", controller.showsStoppedPage)
+        info("ended page: WebKit said why the last time: \(tab.lastTerminationReason)")
+
+        controller.reload()
+        let back = await waitUntil(timeout: 20) { !tab.pageStopped && !tab.isLoading && pid() > 0 && pid() != last }
+        check("ended page: Reload asks for the page again", back && !controller.showsStoppedPage,
+              "stopped \(tab.pageStopped), process \(pid()), cover shown \(controller.showsStoppedPage)")
+    }
+
+    /// The window server's processor time so far, in seconds (`ps`); nil where it cannot be read.
+    private func windowServerCPUSeconds() async -> Double? {
+        let (output, status, _) = await runOwnExecutable(URL(fileURLWithPath: "/bin/ps"), ["-A", "-o", "comm=,time="], timeout: 10)
+        guard status == 0 else { return nil }
+        for line in output.split(separator: "\n") where line.trimmingCharacters(in: .whitespaces).hasPrefix("/System/Library/PrivateFrameworks/SkyLight.framework")
+            || line.contains("WindowServer") {
+            guard let time = line.split(separator: " ").last else { continue }
+            // [[dd-]hh:]mm:ss.ss
+            let parts = time.split(separator: ":").map { Double($0.split(separator: "-").last ?? "") ?? 0 }
+            return parts.reduce(0) { $0 * 60 + $1 }
+        }
+        return nil
+    }
+
+    private func zip2<A, B>(_ a: A?, _ b: B?) -> (A, B)? {
+        guard let a, let b else { return nil }
+        return (a, b)
     }
 
     // MARK: Window lifecycle (regression test for the close/quit crash)

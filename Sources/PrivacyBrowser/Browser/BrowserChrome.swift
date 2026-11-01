@@ -105,6 +105,42 @@ struct ProfileChipView: View {
     }
 }
 
+// MARK: - A page that stopped
+
+/// Over a tab whose page's process kept ending (`BrowserTab.pageStopped`): what happened, and
+/// Reload. Native, like the start page: nothing of it is web content, and showing it needs no
+/// process of the page's — the one thing that keeps failing.
+struct StoppedPageView: View {
+    var reload: () -> Void = {}
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 28, weight: .regular))
+                .foregroundStyle(Theme.warning)
+                .accessibilityHidden(true)
+            Text(L("tab.stopped.title"))
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .multilineTextAlignment(.center)
+            Text(L("tab.stopped.body"))
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 420)
+            // ⌘R is the menu's Reload, which does the same (BrowserWindowController.reload).
+            Button(L("tab.stopped.reload"), action: reload)
+                .padding(.top, 4)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.surface)
+        .environment(\.colorScheme, .dark)
+        .accessibilityElement(children: .contain)
+    }
+}
+
 // MARK: - Start page
 
 /// What an empty tab shows instead of a blank page: the Lumen lockup, a search field, the

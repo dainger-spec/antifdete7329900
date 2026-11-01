@@ -87,6 +87,24 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
     /// (a response WebKit cannot show fails as a load), so a run never saves a file.
     var refusesDownloads = false
 
+    /// When the page's process ended lately (`processEnded`). WebKit, left to itself, reloads such a
+    /// page once and then leaves it; a delegate that answers the call takes that over — this one
+    /// reloaded every time, and a page whose process ends at every load was reloaded for ever, a new
+    /// process each time: on the owner's Mac an iPhone view kept the app, the window server, launchd
+    /// and logd busy until the session was restarted (1 November). Reloaded automatically at most
+    /// `automaticReloads` times within `terminationWindow`; after that the tab loads nothing — not
+    /// even an error page, which needs a process too — and its window says so (`pageStopped`).
+    private var recentTerminations: [Date] = []
+    static let automaticReloads = 2
+    static let terminationWindow: TimeInterval = 60
+    /// The page's process ended more often than it is reloaded for: nothing loads until the person
+    /// asks (Reload, or another address), and the window covers the page with why.
+    private(set) var pageStopped = false
+    /// How many times the page's process ended in this tab, and why the last time, as WebKit said
+    /// (the self-test reads them).
+    private(set) var terminationCount = 0
+    private(set) var lastTerminationReason = "-"
+
     /// Password AutoFill in this tab: suggestions, filling, the save question.
     private(set) lazy var passwords = TabPasswordAutoFill(host: self, vault: context.passwordVault,
                                                           settings: context.passwordSettings)
@@ -130,7 +148,17 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
     @discardableResult
     func load(_ url: URL) -> WKNavigation? {
         startsEmpty = false
+        resumeAfterStop()
         return webView.load(URLRequest(url: url))
+    }
+
+    /// The person asked for the page again after it stopped (`pageStopped`): the count of ended
+    /// processes starts afresh.
+    func resumeAfterStop() {
+        guard pageStopped || !recentTerminations.isEmpty else { return }
+        pageStopped = false
+        recentTerminations.removeAll()
+        host?.tabDidChange(self)
     }
 
     /// The page of `navigation` has committed (replaced the one before).
@@ -396,7 +424,42 @@ extension BrowserTab: WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        log.error("Web content process terminated; reloading")
+        processEnded(reason: "not said")
+    }
+
+    /// WebKit's own call with the reason, made instead of the one above when a delegate has it
+    /// (`WKNavigationDelegatePrivate`); the reason goes to the log, by name.
+    @objc(_webView:webContentProcessDidTerminateWithReason:)
+    func webView(_ webView: WKWebView, webContentProcessDidTerminateWithReason reason: Int) {
+        processEnded(reason: Self.terminationReason(reason))
+    }
+
+    /// `_WKProcessTerminationReason`, by name.
+    static func terminationReason(_ code: Int) -> String {
+        switch code {
+        case 0: return "exceeded the memory limit"
+        case 1: return "exceeded the CPU limit"
+        case 2: return "ended by the app"
+        case 3: return "crashed"
+        default: return "reason \(code)"
+        }
+    }
+
+    /// The page's process ended: reloaded, as Safari does, unless it already ended
+    /// `automaticReloads` times within `terminationWindow` — then the tab stops (`pageStopped`).
+    func processEnded(reason: String) {
+        terminationCount += 1
+        lastTerminationReason = reason
+        let now = Date()
+        recentTerminations = recentTerminations.filter { now.timeIntervalSince($0) < Self.terminationWindow } + [now]
+        let within = recentTerminations.count
+        guard within <= Self.automaticReloads, !pageStopped else {
+            log.error("The page's process ended again (\(self.lastTerminationReason, privacy: .public)), \(Int(within), privacy: .public) times within \(Int(Self.terminationWindow), privacy: .public) s: not reloaded; the tab waits for the person")
+            pageStopped = true
+            host?.tabDidChange(self)
+            return
+        }
+        log.error("The page's process ended (\(self.lastTerminationReason, privacy: .public)); reloading (\(Int(within), privacy: .public) of \(Int(Self.automaticReloads), privacy: .public) within \(Int(Self.terminationWindow), privacy: .public) s)")
         webView.reload()
     }
 

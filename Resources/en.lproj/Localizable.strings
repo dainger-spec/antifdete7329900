@@ -870,6 +870,9 @@
 "sync.title" = "Sync";
 "sync.to" = "Sync to";
 "tab.newTab" = "New Tab";
+"tab.stopped.title" = "This page stopped working";
+"tab.stopped.body" = "This page's process ended several times in a row, so the tab no longer reloads it by itself, to spare your Mac. Reload when you're ready, or go to another address.";
+"tab.stopped.reload" = "Reload";
 "toolbar.back" = "Back";
 "toolbar.forward" = "Forward";
 "toolbar.reload" = "Reload";
