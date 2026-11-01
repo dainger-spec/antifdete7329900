@@ -233,13 +233,16 @@ struct ProfileListView: View {
     @ViewBuilder
     private var screen: some View {
         if let proxyList = model.proxyList {
-            ObservingProxyList(proxies: proxyList) { list in profilesScreen(proxyCount: list.entries.count) }
+            ObservingProxyList(proxies: proxyList) { list in
+                profilesScreen(proxyCount: list.entries.count,
+                               proxyAlerts: list.entries.filter { $0.lastCheck?.failure != nil }.count)
+            }
         } else {
             profilesScreen(proxyCount: nil)
         }
     }
 
-    private func profilesScreen(proxyCount: Int?) -> ProfilesScreen {
+    private func profilesScreen(proxyCount: Int?, proxyAlerts: Int = 0) -> ProfilesScreen {
         ProfilesScreen(rows: rows, isWorking: model.isWorking, sync: syncLine,
                        filter: $filter, search: $search, actions: actions,
                        section: $section, proxyCount: proxyCount,
@@ -248,7 +251,8 @@ struct ProfileListView: View {
                        keptDeleted: model.keptDeletedProfiles,
                        bringBack: { id in Task { await model.bringBackDeletedProfile(id) } },
                        removeForGood: { removingDeleted = $0 },
-                       revealKeptDeleted: { model.revealProfileFolder($0) })
+                       revealKeptDeleted: { model.revealProfileFolder($0) },
+                       proxyAlerts: proxyAlerts)
     }
 
     /// The window's Proxies section; with `ids`, those proxies selected (else the selection it had).
@@ -299,6 +303,7 @@ struct ProfileListView: View {
             let details = model.details[profile.id]
             let activity: ProfileRowItem.Activity = busy ? (running ? .starting : .sealing) : (running ? .running : .stopped)
             let warmUp = model.manager?.warmUpStatus(of: profile.id)
+            let problem = model.proxyProblems.first { $0.profileID == profile.id }
             // No details: its settings could not be read (`AppModel.refresh`) — not "Direct" (R1).
             var exit = ProfileExit.unreadable
             if let details {
@@ -314,7 +319,12 @@ struct ProfileListView: View {
                 warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
                 warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false,
                 exitUnconfirmed: model.manager?.proxyLocationUnknown.contains(profile.id) ?? false,
-                tags: details?.tags ?? [], notes: details?.notes ?? "", avatar: details?.avatar)
+                tags: details?.tags ?? [], notes: details?.notes ?? "", avatar: details?.avatar,
+                problem: problem.map {
+                    String(format: $0.notStarted ? L("proxyProblem.subtitle.notStarted") : L("proxyProblem.subtitle"),
+                           $0.proxy.displayAddress)
+                },
+                deviceSymbol: details.flatMap { ProfileRowItem.deviceSymbol($0.deviceGeneration) })
         }
     }
 
@@ -408,17 +418,34 @@ struct ProfileRowItem: Identifiable {
     var tags: [String] = []
     var notes = ""
     var avatar: ProfileAvatarStyle?
+    /// Why it did not start, when its last launch failed (a proxy that did not answer): the row is
+    /// among "Need attention" and says so.
+    var problem: String?
+    /// The device it presents as, by its symbol, when not a Mac ("iphone", "ipad").
+    var deviceSymbol: String?
 
     var isRunning: Bool { activity == .running }
+    /// Grouped under "Need attention": its last launch failed, or its settings cannot be read (R1).
+    var needsAttention: Bool { problem != nil || exit == .unreadable }
     var isBusy: Bool { activity == .starting || activity == .sealing }
     /// Grouped under "Running" (also while it starts or seals).
     var isActive: Bool { activity != .stopped }
     var usesProxy: Bool { if case .proxy = exit { return true } else { return false } }
+    var connectsDirectly: Bool { exit == .direct }
     /// Under the profile's commands in the palette (⌘K): the country it exits in, then its tags.
     var paletteDetail: String {
         var parts: [String] = []
         if case let .proxy(_, code?) = exit { parts.append(CountryNames.name(for: code)) }
         return (parts + tags).joined(separator: " · ")
+    }
+
+    /// The symbol of the device the profile presents as, when not a Mac.
+    static func deviceSymbol(_ generation: DeviceGeneration) -> String? {
+        switch generation.platform {
+        case .macOS: return nil
+        case .iOS: return "iphone"
+        case .iPadOS: return "ipad"
+        }
     }
 
     /// "Mac · Safari 26", "iPhone · Safari 26": the device the profile presents as.
@@ -444,7 +471,7 @@ enum ProfileExit: Equatable {
 }
 
 enum ProfileFilter: Hashable {
-    case all, running, proxied, ephemeral
+    case all, running, proxied, direct, ephemeral
     /// The profiles with this tag, whatever its case.
     case tag(String)
 
@@ -453,6 +480,7 @@ enum ProfileFilter: Hashable {
         case .all: return L("profiles.filter.all")
         case .running: return L("profiles.filter.running")
         case .proxied: return L("profiles.filter.proxied")
+        case .direct: return L("profiles.filter.direct")
         case .ephemeral: return L("profiles.filter.ephemeral")
         case .tag(let tag): return tag
         }
@@ -462,9 +490,10 @@ enum ProfileFilter: Hashable {
         switch self {
         case .all: return "person.2"
         case .running: return "play.circle"
-        case .proxied: return "network"
+        case .proxied: return "globe"
+        case .direct: return "arrow.right"
         case .ephemeral: return "hourglass"
-        case .tag: return "tag"
+        case .tag: return "number"
         }
     }
 
@@ -473,6 +502,7 @@ enum ProfileFilter: Hashable {
         case .all: return true
         case .running: return row.isActive
         case .proxied: return row.usesProxy
+        case .direct: return row.connectsDirectly
         case .ephemeral: return row.ephemeral
         case .tag(let tag): return ProfileTags.contains(row.tags, tag)
         }
@@ -536,9 +566,11 @@ struct ProfileActions {
 
 // MARK: - The screen
 
-/// The Profiles window: a sidebar (lockup, filters, sync state, Lock) and a table of profiles in
-/// two groups — running ones first, then the ones ready to launch. Pure presentation: everything
-/// it shows comes in `rows`, everything it does goes out through `actions`.
+/// The Profiles window (the design's main screen): over the window's black and its two dimmed
+/// eclipses, a sidebar (lockup, Profiles and Proxies, the collections, the tags, sync, Lock and
+/// Settings), and the profiles in three groups — those that need attention, the running ones,
+/// the ones ready to launch. Pure presentation: everything it shows comes in `rows`, everything
+/// it does goes out through `actions`.
 struct ProfilesScreen: View {
     let rows: [ProfileRowItem]
     var isWorking = false
@@ -560,52 +592,101 @@ struct ProfilesScreen: View {
     var bringBack: (UUID) -> Void = { _ in }
     var removeForGood: (ProfileRepository.KeptDeletedProfile) -> Void = { _ in }
     var revealKeptDeleted: (UUID) -> Void = { _ in }
-    /// Rows selected with ⌘- and ⇧-click; with two or more, `ProfileBulkBar` acts on them all.
+    /// Proxies whose last check failed: said in red beside Proxies.
+    var proxyAlerts = 0
+    /// Rows selected with ⌘- and ⇧-click or their checkboxes; with two or more, `ProfileBulkBar`
+    /// acts on them all.
     @State private var selection = ProfileSelection()
+    @State private var appeared = false
+    @ObservedObject private var appearance = AppearancePreferences.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.lumenStillFrame) private var stillFrame
 
-    static let sidebarWidth: CGFloat = 208
-    /// The table's columns drop "Appears as", then "Last used", below these content widths.
+    static let sidebarWidth: CGFloat = 232
+    /// The table drops "Appears as" below these content widths.
     static let minimumWindowWidth: CGFloat = 920
 
     var body: some View {
         HStack(spacing: 0) {
-            ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount, actions: actions)
+            ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
+                            proxyAlerts: proxyAlerts, actions: actions)
                 .frame(width: Self.sidebarWidth)
-            Rectangle().fill(Theme.hairline).frame(width: 1)
-            if section.wrappedValue == .proxies, let proxies {
-                proxies
-            } else {
-                VStack(spacing: 0) {
-                    header
-                    Rectangle().fill(Theme.divider).frame(height: 1)
-                    if let indexNotice {
-                        IndexNoticeBox(notice: indexNotice, reveal: revealVault)
+                .lumenFrost()
+                .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
+                .opacity(appeared ? 1 : 0)
+            Group {
+                if section.wrappedValue == .proxies, let proxies {
+                    proxies
+                } else {
+                    VStack(spacing: 0) {
+                        header
+                        if let indexNotice {
+                            IndexNoticeBox(notice: indexNotice, reveal: revealVault)
+                        }
+                        if !keptDeleted.isEmpty {
+                            KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack,
+                                           removeForGood: removeForGood, reveal: revealKeptDeleted)
+                        }
+                        if selectedRows.count >= 2 {
+                            ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
+                                           selectAll: { selection.select(displayOrder.map(\.id)) },
+                                           clear: { selection.clear() })
+                                .transition(.opacity)
+                        }
+                        content
                     }
-                    if !keptDeleted.isEmpty {
-                        KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack, removeForGood: removeForGood,
-                                       reveal: revealKeptDeleted)
-                    }
-                    if selectedRows.count >= 2 {
-                        ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
-                                       selectAll: { selection.select(displayOrder.map(\.id)) },
-                                       clear: { selection.clear() })
-                            .transition(.opacity)
-                    }
-                    content
+                    .animation(Theme.hoverAnimation, value: selectedRows.count >= 2)
                 }
-                .background(Theme.surface)
-                .animation(Theme.hoverAnimation, value: selectedRows.count >= 2)
             }
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared || Motion.isReduced(reduceMotion) ? 0 : 10)
         }
-        .background(Theme.surface)
+        .background {
+            ZStack {
+                Theme.backdrop
+                if appearance.entryLight {
+                    EclipseLight(place: .profiles, brightness: 0.55)
+                }
+            }
+            .ignoresSafeArea()
+        }
         .ignoresSafeArea(.container, edges: .top)
         .environment(\.colorScheme, .dark)
         .onChange(of: rows.map(\.id)) { _, ids in selection.keep(only: Set(ids)) }
+        .onAppear(perform: enter)
     }
 
-    /// The rows in the order the list shows them: running ones first, then the others.
+    /// The window comes in: the sidebar fades in, the list rises 10 pt (the design's 0.9 s); under
+    /// Reduce Motion only the fade.
+    private func enter() {
+        guard !appeared else { return }
+        if stillFrame {
+            appeared = true
+            return
+        }
+        withAnimation(Motion.isReduced(reduceMotion) ? .easeOut(duration: 0.3) : Motion.entry(duration: 0.9).delay(0.2)) {
+            appeared = true
+        }
+    }
+
+    /// The rows in the order the list shows them: those needing attention, the running ones, the others.
     private var displayOrder: [ProfileRowItem] {
-        visibleRows.filter(\.isActive) + visibleRows.filter { !$0.isActive }
+        groups.flatMap(\.rows)
+    }
+
+    private enum GroupKind: Hashable { case attention, running, ready }
+
+    private struct RowGroup: Identifiable {
+        let kind: GroupKind
+        let rows: [ProfileRowItem]
+        var id: GroupKind { kind }
+    }
+
+    private var groups: [RowGroup] {
+        [RowGroup(kind: .attention, rows: visibleRows.filter(\.needsAttention)),
+         RowGroup(kind: .running, rows: visibleRows.filter { !$0.needsAttention && $0.isActive }),
+         RowGroup(kind: .ready, rows: visibleRows.filter { !$0.needsAttention && !$0.isActive })]
+            .filter { !$0.rows.isEmpty }
     }
 
     /// The selected rows the list shows (a row the filter or the search hides is never acted on unseen).
@@ -628,26 +709,26 @@ struct ProfilesScreen: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    title
-                    Text(countLine)
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textSecondary)
-                        .monospacedDigit()
-                }
-                title
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L("profiles.title"))
+                    .lumenPageTitle()
+                    .foregroundStyle(Theme.textPrimary)
+                Text(countLine)
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textSecondary)
+                    .monospacedDigit()
             }
             .lineLimit(1)
+            .fixedSize()
             Spacer(minLength: 12)
             if isWorking {
                 ProgressView().controlSize(.small).transition(.opacity)
             }
-            LumenSearchField(text: $search, prompt: L("profiles.search"))
-                .frame(width: 200)
-            // Only what is done rarely, in groups: the proxies are in the sidebar, Settings is ⌘,
-            // in the app's menu, and warming up several profiles is the selection's (and ⌘K's).
+            LumenSearchField(text: $search, prompt: L("profiles.search"), shortcut: "⌘K")
+                .frame(maxWidth: 280)
+            // Only what is done rarely, in groups: import, sync, the tunnel, automation and the
+            // master password (they are in Settings and ⌘K too).
             Menu {
                 Button(L("profiles.menu.import"), action: actions.importProfile)
                 Divider()
@@ -666,7 +747,7 @@ struct ProfilesScreen: View {
             .menuIndicator(.hidden)
             .tint(Theme.textSecondary)
             .fixedSize()
-            .frame(width: 28, height: 28)
+            .frame(width: 30, height: 30)
             .hoverHighlight(cornerRadius: Theme.controlRadius)
             .help(L("profiles.menu.more"))
             .accessibilityLabel(L("profiles.menu.more"))
@@ -676,19 +757,11 @@ struct ProfilesScreen: View {
             .buttonStyle(.lumenPrimary)
             .keyboardShortcut("n")
         }
-        .padding(.leading, 24)
-        .padding(.trailing, 16)
-        .frame(height: 52)
-        .background(Theme.surface)
+        .padding(.leading, 28)
+        .padding(.trailing, 28)
+        .padding(.top, 36)
+        .padding(.bottom, 16)
         .animation(Theme.hoverAnimation, value: isWorking)
-    }
-
-    private var title: some View {
-        Text(L("profiles.title"))
-            .font(.lumenTitle)
-            .kerning(-0.2)
-            .foregroundStyle(Theme.textPrimary)
-            .fixedSize()
     }
 
     private var countLine: String {
@@ -719,17 +792,16 @@ struct ProfilesScreen: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
                         columnHeader(columns)
-                        let active = visibleRows.filter(\.isActive)
-                        let ready = visibleRows.filter { !$0.isActive }
-                        if !active.isEmpty { group(L("profiles.group.running"), active, columns) }
-                        if !ready.isEmpty { group(L("profiles.group.ready"), ready, columns) }
+                        ForEach(groups) { group in
+                            groupView(group.kind, group.rows, columns)
+                        }
                         footnote
                     }
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 24)
                 }
                 .scrollIndicators(.automatic)
-                .animation(Theme.appearAnimation, value: visibleRows.filter(\.isActive).map(\.id))
+                .animation(Motion.isReduced(reduceMotion) ? nil : Motion.reflow, value: displayOrder.map(\.id))
             }
             .transition(.opacity)
         }
@@ -737,76 +809,76 @@ struct ProfilesScreen: View {
 
     private func columnHeader(_ columns: ProfileColumns) -> some View {
         HStack(spacing: ProfileColumns.gap) {
-            Text(L("profiles.column.name")).frame(maxWidth: .infinity, alignment: .leading)
+            Text(L("profiles.column.name")).lumenCaps().frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, ProfileColumns.nameInset)
-            Text(L("profiles.column.exit")).frame(width: ProfileColumns.exit, alignment: .leading)
+            Text(L("profiles.column.exit")).lumenCaps().frame(width: ProfileColumns.exit, alignment: .leading)
             if columns.showsAppearsAs {
-                Text(L("profiles.column.appearsAs")).frame(width: ProfileColumns.appearsAs, alignment: .leading)
+                Text(L("profiles.column.appearsAs")).lumenCaps().frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
-            if columns.showsLastUsed {
-                Text(L("profiles.column.lastUsed")).frame(width: ProfileColumns.lastUsed, alignment: .leading)
-            }
+            Text(L("profiles.column.state")).lumenCaps().frame(width: ProfileColumns.state, alignment: .leading)
             Color.clear.frame(width: ProfileColumns.actions, height: 1)
         }
-        .font(.lumenColumn)
-        .foregroundStyle(Theme.textTertiary)
         .lineLimit(1)
         .padding(.horizontal, ProfileColumns.rowPadding)
-        .frame(height: 32)
+        .frame(height: 30)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.divider).frame(height: 1) }
-        .padding(.top, 8)
     }
 
-    private func group(_ title: String, _ rows: [ProfileRowItem], _ columns: ProfileColumns) -> some View {
+    private func groupView(_ kind: GroupKind, _ rows: [ProfileRowItem], _ columns: ProfileColumns) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.textSecondary)
-                Text(verbatim: "·").foregroundStyle(Theme.textTertiary)
-                Text(verbatim: "\(rows.count)").font(.lumenSecondary).foregroundStyle(Theme.textTertiary).monospacedDigit()
+            HStack(spacing: 8) {
+                Text(groupTitle(kind)).lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
+                Text(verbatim: "\(rows.count)").lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
+                    .monospacedDigit()
             }
-            .padding(.horizontal, ProfileColumns.rowPadding)
-            .frame(height: 36, alignment: .bottomLeading)
-            .padding(.bottom, 4)
+            .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset)
+            .frame(height: 42, alignment: .bottomLeading)
+            .padding(.bottom, 6)
+            .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             ForEach(rows) { row in
                 ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
+                           showsCheckbox: selectedRows.count >= 1, height: appearance.density.rowHeight,
                            onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) })
-                    .overlay(alignment: .bottom) {
-                        Rectangle().fill(Theme.divider).frame(height: 1).padding(.leading, ProfileColumns.nameInset + ProfileColumns.rowPadding)
-                    }
             }
+        }
+    }
+
+    private func groupTitle(_ kind: GroupKind) -> String {
+        switch kind {
+        case .attention: return L("profiles.group.attention")
+        case .running: return L("profiles.group.running")
+        case .ready: return L("profiles.group.ready")
         }
     }
 
     private var footnote: some View {
         Label(L("profiles.footnote.sealed"), systemImage: "lock")
-            .font(.lumenSecondary)
+            .font(.system(size: 12))
             .foregroundStyle(Theme.textTertiary)
-            .padding(.horizontal, ProfileColumns.rowPadding)
-            .padding(.top, 16)
+            .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset)
+            .padding(.top, 18)
     }
 }
 
-/// Column widths, and which optional columns fit (the name column takes what is left).
+/// Column widths, and whether "Appears as" fits (the name column takes what is left).
 struct ProfileColumns {
     static let gap: CGFloat = 12
-    static let rowPadding: CGFloat = 12
-    /// The status dot's slot plus the avatar: where names start.
-    static let nameInset: CGFloat = 7 + 8 + 28 + 10
-    static let exit: CGFloat = 184
-    static let appearsAs: CGFloat = 128
-    static let lastUsed: CGFloat = 96
-    static let actions: CGFloat = 236
+    static let rowPadding: CGFloat = 8
+    /// The checkbox's slot plus the letters' circle: where names start.
+    static let nameInset: CGFloat = 20 + 12 + 30 + 12
+    static let exit: CGFloat = 170
+    static let appearsAs: CGFloat = 150
+    static let state: CGFloat = 196
+    static let actions: CGFloat = 68
     static let minimumName: CGFloat = 200
 
     let showsAppearsAs: Bool
-    let showsLastUsed: Bool
 
     init(contentWidth: CGFloat) {
         // 20 pt page margins and the rows' own padding on both sides.
-        let fixed = 2 * 20 + 2 * Self.rowPadding + Self.exit + Self.actions + 2 * Self.gap + Self.minimumName
-        showsLastUsed = contentWidth >= fixed + Self.lastUsed + Self.gap
-        showsAppearsAs = contentWidth >= fixed + Self.lastUsed + Self.appearsAs + 2 * Self.gap
+        let fixed = 2 * 20 + 2 * Self.rowPadding + Self.exit + Self.state + Self.actions + 3 * Self.gap + Self.minimumName
+        showsAppearsAs = contentWidth >= fixed + Self.appearsAs + Self.gap
     }
 }
 
@@ -819,102 +891,133 @@ private struct ProfilesSidebar: View {
     @Binding var section: ProfilesSection
     /// Nil: the window has no Proxies section (no list model).
     let proxyCount: Int?
+    var proxyAlerts = 0
     let actions: ProfileActions
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 2) {
             // The window's traffic lights sit in this band.
-            Color.clear.frame(height: 40)
+            Color.clear.frame(height: 44)
             LumenLockup.sidebar
-                .padding(.leading, 10)
-                .padding(.bottom, 22)
-            item(.all)
-            item(.running)
+                .padding(.leading, 8)
+                .padding(.bottom, 20)
+            item(.all, title: L("profiles.title"))
             if let proxyCount { proxiesItem(proxyCount) }
-            Text(L("profiles.filters"))
-                .font(.lumenColumn)
-                .foregroundStyle(Theme.textTertiary)
-                .padding(.leading, 10)
-                .padding(.top, 18)
-                .padding(.bottom, 6)
-                .accessibilityAddTraits(.isHeader)
+            caption(L("profiles.filters"))
+            item(.running)
             item(.proxied)
+            item(.direct)
             item(.ephemeral)
             let tags = ProfileFilter.tags(of: rows)
             if !tags.isEmpty {
-                Text(L("profiles.tags"))
-                    .font(.lumenColumn)
-                    .foregroundStyle(Theme.textTertiary)
-                    .padding(.leading, 10)
-                    .padding(.top, 18)
-                    .padding(.bottom, 6)
-                    .accessibilityAddTraits(.isHeader)
+                caption(L("profiles.tags"))
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 2) {
                         ForEach(tags, id: \.self) { tag in item(.tag(tag)) }
                     }
                 }
                 .scrollIndicators(.automatic)
                 // Eight rows, then the rest scrolls.
-                .frame(height: CGFloat(min(tags.count, 8)) * 28)
+                .frame(height: CGFloat(min(tags.count, 8)) * 32)
             }
             Spacer(minLength: 16)
             SyncStatusButton(sync: sync, action: actions.openSync)
                 .padding(.bottom, 8)
-            Button(action: actions.lock) {
-                Label(L("profiles.action.lock"), systemImage: "lock")
+            HStack(spacing: 8) {
+                Button(action: actions.lock) {
+                    Label(L("profiles.action.lock"), systemImage: "lock")
+                }
+                .buttonStyle(LumenButtonStyle(kind: .secondary, fullWidth: true))
+                .help(L("profiles.action.lock.help"))
+                Button(action: actions.openSettings) {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(LumenIconButtonStyle(size: 30))
+                .help(L("profiles.menu.settings"))
+                .accessibilityLabel(L("profiles.menu.settings"))
             }
-            .buttonStyle(LumenButtonStyle(kind: .secondary, fullWidth: true))
-            .help(L("profiles.action.lock.help"))
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 12)
         .padding(.bottom, 14)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Theme.sidebar)
     }
 
-    private func item(_ value: ProfileFilter) -> some View {
-        sidebarButton(symbol: value.symbol, title: value.title, count: rows.filter(value.includes).count,
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .lumenCaps()
+            .padding(.leading, 10)
+            .padding(.top, 20)
+            .padding(.bottom, 6)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func item(_ value: ProfileFilter, title: String? = nil) -> some View {
+        sidebarButton(symbol: value.symbol, title: title ?? value.title, count: rows.filter(value.includes).count,
                       selected: section == .profiles && filter == value) {
             filter = value
             section = .profiles
         }
     }
 
-    /// The proxy list: a section of the window, beside the profiles.
+    /// The proxy list: a section of the window, beside the profiles. Proxies whose last check
+    /// failed are counted in red.
     private func proxiesItem(_ count: Int) -> some View {
-        sidebarButton(symbol: "network", title: L("proxies.title"), count: count, selected: section == .proxies) {
+        sidebarButton(symbol: "globe", title: L("proxies.title"), count: proxyAlerts > 0 ? proxyAlerts : count,
+                      alert: proxyAlerts > 0, selected: section == .proxies) {
             section = .proxies
         }
     }
 
-    private func sidebarButton(symbol: String, title: String, count: Int, selected: Bool, choose: @escaping () -> Void) -> some View {
-        Button {
+    private func sidebarButton(symbol: String, title: String, count: Int, alert: Bool = false, selected: Bool,
+                               choose: @escaping () -> Void) -> some View {
+        SidebarItem(symbol: symbol, title: title, count: count, alert: alert, selected: selected) {
             withAnimation(Theme.appearAnimation) { choose() }
-        } label: {
-            HStack(spacing: 8) {
+        }
+    }
+}
+
+/// One of the sidebar's items (the design's `nav`): `t2`, white under the pointer and when chosen
+/// (on 6.5 % white); its count at the end, in red with a dot when it is an alert.
+private struct SidebarItem: View {
+    let symbol: String
+    let title: String
+    let count: Int
+    var alert = false
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
                 Image(systemName: symbol)
                     .font(.system(size: 13))
-                    .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
+                    .foregroundStyle(selected || hovered ? Theme.textPrimary : Theme.textTertiary)
                     .frame(width: 18)
                 Text(title)
-                    .font(.system(size: 13, weight: selected ? .medium : .regular))
-                    .foregroundStyle(Theme.textPrimary)
+                    .font(.lumenBody)
+                    .foregroundStyle(selected || hovered ? Theme.textPrimary : Theme.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text(verbatim: "\(count)")
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textTertiary)
-                    .monospacedDigit()
+                HStack(spacing: 6) {
+                    if alert {
+                        Circle().fill(Theme.danger).frame(width: 5, height: 5)
+                    }
+                    Text(verbatim: "\(count)")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(alert ? Theme.danger : Theme.textTertiary)
+                        .monospacedDigit()
+                }
             }
-            .padding(.horizontal, 8)
-            .frame(height: 28)
-            .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                .fill(selected ? Color.white.opacity(0.08) : .clear))
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(selected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .hoverHighlight(cornerRadius: Theme.controlRadius, isOn: !selected)
+        .onHover { hovered = $0 }
+        .animation(Motion.hover(hovered), value: hovered)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -925,7 +1028,7 @@ private struct SyncStatusButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: symbol)
                     .font(.system(size: 12))
                     .foregroundStyle(sync == .failed ? Theme.warning : Theme.textTertiary)
@@ -937,13 +1040,13 @@ private struct SyncStatusButton: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .frame(minHeight: 26)
+            .frame(minHeight: 28)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .hoverHighlight(cornerRadius: Theme.controlRadius)
+        .hoverHighlight(cornerRadius: 8)
         .help(L("profiles.menu.sync"))
     }
 
@@ -970,53 +1073,45 @@ private struct SyncStatusButton: View {
 
 // MARK: - Row
 
+/// One profile (the design's `row`): a checkbox (under the pointer, or while some are selected),
+/// its letters with the running dot, its name and tags; where it exits; how sites see it; its
+/// state; and, under the pointer or selected, Launch or Stop and the ⋯ menu.
 private struct ProfileRow: View {
     let row: ProfileRowItem
     let columns: ProfileColumns
     let actions: ProfileActions
     var isSelected = false
+    /// Some rows are selected: every row shows its checkbox.
+    var showsCheckbox = false
+    var height: CGFloat = 52
     /// A click on the row itself (not on its buttons or menu): selects it (`ProfileSelection`).
     var onClick: (ProfileSelection.Click) -> Void = { _ in }
+    @State private var hovered = false
 
     var body: some View {
         HStack(spacing: ProfileColumns.gap) {
+            checkbox
             nameCell.frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 6) {
-                ExitLabel(exit: row.exit)
-                if row.exitUnconfirmed {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.warning)
-                        .help(L("profiles.exit.lookupFailed"))
-                        .accessibilityLabel(L("profiles.exit.lookupFailed"))
-                }
-            }
-            .frame(width: ProfileColumns.exit, alignment: .leading)
+            exitCell.frame(width: ProfileColumns.exit, alignment: .leading)
             if columns.showsAppearsAs {
-                Text(row.appearsAs)
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                    .frame(width: ProfileColumns.appearsAs, alignment: .leading)
+                seenCell.frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
-            if columns.showsLastUsed {
-                Text(lastUsed)
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textSecondary)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .frame(width: ProfileColumns.lastUsed, alignment: .leading)
-            }
+            stateCell.frame(width: ProfileColumns.state, alignment: .leading)
             actionsCell.frame(width: ProfileColumns.actions, alignment: .trailing)
         }
         .padding(.horizontal, ProfileColumns.rowPadding)
-        .frame(height: 48)
-        .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-            .fill(isSelected ? Theme.rowSelected : .clear))
+        .frame(height: height)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(isSelected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.divider).frame(height: 1)
+                .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset - 18)
+        }
         .contentShape(Rectangle())
         // The row's buttons and ⋯ menu take their own clicks; a click anywhere else selects.
         .onTapGesture { onClick(.current) }
-        .hoverHighlight(cornerRadius: Theme.controlRadius)
+        .onHover { hovered = $0 }
+        .animation(Motion.hover(hovered), value: hovered)
         .opacity(row.activity == .sealing ? 0.6 : 1)
         .contextMenu { ProfileMenuItems(row: row, actions: actions) }
         .accessibilityElement(children: .contain)
@@ -1024,90 +1119,175 @@ private struct ProfileRow: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var nameCell: some View {
-        HStack(spacing: 0) {
-            ZStack {
-                if row.isRunning { RunningDot().transition(.opacity) }
-            }
-            .frame(width: 7)
-            .padding(.trailing, 8)
-            ProfileAvatar(name: row.name, id: row.id, size: 28, style: row.avatar)
-                .padding(.trailing, 10)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(row.name)
-                        .font(.lumenLabel)
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .layoutPriority(1)
-                    if !row.notes.isEmpty {
-                        Image(systemName: "note.text")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.textTertiary)
-                            .accessibilityLabel(L("profiles.row.hasNotes"))
+    private var checkbox: some View {
+        Button {
+            onClick(.toggle)
+        } label: {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(isSelected ? Theme.textPrimary : Color.clear)
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(isSelected ? Theme.textPrimary : Theme.strongBorder, lineWidth: 1.5))
+                .overlay {
+                    if isSelected {
+                        Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.backdrop)
                     }
-                    TagChips(tags: row.tags, limit: 3)
                 }
-                subtitle
+                .frame(width: 16, height: 16)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(isSelected || showsCheckbox || hovered ? 1 : 0)
+        .accessibilityLabel(String(format: L("profiles.row.select"), row.name))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var nameCell: some View {
+        HStack(spacing: 12) {
+            ProfileAvatar(name: row.name, id: row.id, size: 30, style: row.avatar, running: row.isRunning)
+            HStack(spacing: 8) {
+                Text(row.name)
+                    .font(.lumenLabel)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+                if !row.notes.isEmpty {
+                    Image(systemName: "note.text")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.textTertiary)
+                        .accessibilityLabel(L("profiles.row.hasNotes"))
+                }
+                if !row.tags.isEmpty || row.ephemeral {
+                    Text((row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : [])).joined(separator: " · "))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                }
             }
         }
         .help(row.notes)
-        .animation(Theme.hoverAnimation, value: row.activity)
     }
 
-    @ViewBuilder
-    private var subtitle: some View {
-        switch row.activity {
-        case .starting:
-            busyLine(L("profiles.row.starting"))
-        case .sealing:
-            busyLine(L("profiles.row.encrypting"))
-        case .running:
-            if let warmUp = row.warmUp {
-                WarmUpLine(status: warmUp)
-            } else if row.warmUpQueued {
-                secondaryLine(L("profiles.row.warmUpQueued"))
-            } else {
-                secondaryLine(L("profiles.row.running"))
-            }
-        case .stopped:
-            if row.warmUpQueued {
-                secondaryLine(L("profiles.row.warmUpQueued"))
-            } else if row.ephemeral {
-                secondaryLine(L("profiles.row.ephemeral"))
+    private var exitCell: some View {
+        HStack(spacing: 6) {
+            ExitLabel(exit: row.exit, showsFlag: false)
+            if row.exitUnconfirmed {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.warning)
+                    .help(L("profiles.exit.lookupFailed"))
+                    .accessibilityLabel(L("profiles.exit.lookupFailed"))
             }
         }
     }
 
+    private var seenCell: some View {
+        HStack(spacing: 6) {
+            if let symbol = row.deviceSymbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+                    .accessibilityHidden(true)
+            }
+            Text(row.appearsAs)
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var stateCell: some View {
+        if let problem = row.problem, row.activity == .stopped {
+            Text(L("profiles.row.failed"))
+                .font(.lumenBody)
+                .foregroundStyle(Theme.danger)
+                .lineLimit(1)
+                .help(problem)
+        } else {
+            switch row.activity {
+            case .starting:
+                busyLine(L("profiles.row.starting"))
+            case .sealing:
+                busyLine(L("profiles.row.encrypting"))
+            case .running:
+                if let warmUp = row.warmUp {
+                    WarmUpLine(status: warmUp)
+                } else if row.warmUpQueued {
+                    secondaryLine(L("profiles.row.warmUpQueued"))
+                } else {
+                    HStack(spacing: 8) {
+                        RunningDot()
+                        Text(L("profiles.row.running")).font(.lumenBody).foregroundStyle(Theme.textPrimary)
+                        if let since = row.lastUsed {
+                            Text(Self.runningFor(since))
+                                .font(.lumenBody)
+                                .foregroundStyle(Theme.textTertiary)
+                                .monospacedDigit()
+                        }
+                    }
+                    .lineLimit(1)
+                }
+            case .stopped:
+                if row.warmUpQueued {
+                    secondaryLine(L("profiles.row.warmUpQueued"))
+                } else {
+                    Text(lastUsed)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textTertiary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    /// "1 h 12 min": how long the profile has run, in the interface's language.
+    static func runningFor(_ since: Date) -> String {
+        var calendar = Calendar.current
+        let formatter = DateComponentsFormatter(); calendar.locale = Localization.locale
+        formatter.calendar = calendar
+        formatter.unitsStyle = .abbreviated
+        formatter.allowedUnits = since.timeIntervalSinceNow < -3600 ? [.hour, .minute] : [.minute]
+        formatter.zeroFormattingBehavior = .dropLeading
+        return formatter.string(from: max(60, -since.timeIntervalSinceNow)) ?? ""
+    }
+
     private func secondaryLine(_ text: String) -> some View {
-        Text(text).font(.lumenSecondary).foregroundStyle(Theme.textSecondary).lineLimit(1)
+        Text(text).font(.lumenBody).foregroundStyle(Theme.textSecondary).lineLimit(1)
     }
 
     private func busyLine(_ text: String) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             ProgressView().controlSize(.mini)
             secondaryLine(text)
         }
     }
 
     private var lastUsed: String {
-        if row.isActive { return L("profiles.lastUsed.now") }
         guard let date = row.lastUsed else { return L("profiles.lastUsed.never") }
         return date.shownRelative
     }
 
     private var actionsCell: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             switch row.activity {
             case .running:
-                Button(L("profiles.row.newWindow")) { actions.newWindow(row.id) }
-                    .buttonStyle(.lumenGhost)
-                Button(L("profiles.row.stop")) { actions.stop(row.id) }
-                    .buttonStyle(.lumenSecondary)
+                Button { actions.stop(row.id) } label: {
+                    Image(systemName: "stop.fill").font(.system(size: 9))
+                }
+                .buttonStyle(LumenRingButtonStyle())
+                .help(L("profiles.row.stop"))
+                .accessibilityLabel(String(format: L("profiles.row.stopFor"), row.name))
             case .stopped:
-                Button(L("profiles.row.launch")) { actions.launch(row.id) }
-                    .buttonStyle(.lumenSecondary)
+                Button { actions.launch(row.id) } label: {
+                    Image(systemName: "play.fill").font(.system(size: 9))
+                }
+                .buttonStyle(LumenRingButtonStyle())
+                .help(L("profiles.row.launch"))
+                .accessibilityLabel(String(format: L("profiles.row.launchFor"), row.name))
+                .disabled(row.exit == .unreadable)
             case .starting, .sealing:
                 EmptyView()
             }
@@ -1124,6 +1304,34 @@ private struct ProfileRow: View {
             .hoverHighlight(cornerRadius: Theme.controlRadius)
             .disabled(row.isBusy)
             .accessibilityLabel(String(format: L("profiles.row.moreFor"), row.name))
+        }
+        .opacity(hovered || isSelected ? 1 : 0)
+    }
+}
+
+/// The round icon button of a row (the design's `ib.ring`): 28 pt, a 16 % ring, brighter under the pointer.
+struct LumenRingButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        RingButton(configuration: configuration)
+    }
+
+    private struct RingButton: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @State private var hovered = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(hovered ? Theme.raisedInset : Color.clear))
+                .overlay(Circle().strokeBorder(hovered ? Theme.edgeStrong : Theme.strongBorder, lineWidth: 1))
+                .contentShape(Circle())
+                .scaleEffect(configuration.isPressed && !Motion.isReduced(reduceMotion) ? 0.94 : 1)
+                .opacity(isEnabled ? 1 : 0.4)
+                .onHover { hovered = isEnabled && $0 }
+                .animation(Motion.hover(hovered), value: hovered)
         }
     }
 }
@@ -1155,6 +1363,8 @@ private struct ProfileMenuItems: View {
 struct ExitLabel: View {
     let exit: ProfileExit
     var flagSize: CGFloat = 14
+    /// The country's flag beside its name (the list's rows show the name alone).
+    var showsFlag = true
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1168,7 +1378,9 @@ struct ExitLabel: View {
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textSecondary)
             case let .proxy(endpoint, code?):
-                CountryFlag(code: code, size: flagSize)
+                if showsFlag {
+                    CountryFlag(code: code, size: flagSize)
+                }
                 Text(CountryNames.name(for: code))
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textPrimary)
@@ -1426,14 +1638,17 @@ private struct NoMatchesView: View {
     }
 }
 
-/// A search field in Lumen's field style, with its magnifier and a clear button.
+/// A search field (the design's `search`): 32 pt, radius 10, 3.5 % white with a 6 % edge; focused,
+/// a little lighter with a 16 % edge. Its magnifier, a clear button, and the shortcut that opens
+/// the command palette (`shortcut`), when given.
 struct LumenSearchField: View {
     @Binding var text: String
     let prompt: String
+    var shortcut: String?
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textTertiary)
@@ -1442,6 +1657,7 @@ struct LumenSearchField: View {
             }
             .textFieldStyle(.plain)
             .font(.lumenBody)
+            .foregroundStyle(Theme.textPrimary)
             .focused($focused)
             .overlay(alignment: .leading) {
                 if text.isEmpty {
@@ -1463,13 +1679,18 @@ struct LumenSearchField: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.textTertiary)
                 .accessibilityLabel(L("profiles.search.clear"))
+            } else if let shortcut {
+                KeyCap(keys: shortcut, small: true)
+                    .accessibilityHidden(true)
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 28)
-        .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.field))
-        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-            .strokeBorder(focused ? Theme.accent : Theme.fieldBorder, lineWidth: 1))
+        .padding(.leading, 11)
+        .padding(.trailing, 8)
+        .frame(height: 32)
+        .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
+            .fill(Color.white.opacity(focused ? 0.05 : 0.035)))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
+            .strokeBorder(focused ? Theme.strongBorder : Theme.divider, lineWidth: 1))
         .animation(Theme.hoverAnimation, value: focused)
     }
 }

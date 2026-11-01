@@ -807,7 +807,7 @@ enum UISnapshots {
             ProfileRowItem(id: id(4), name: "Research", activity: .stopped,
                            exit: .proxy(endpoint: "nl.gateway.example:1080", countryCode: "NL"), ephemeral: false,
                            appearsAs: iPhone, lastUsed: now.addingTimeInterval(-86_400),
-                           tags: ["warm-up", "Q4 campaign", "NL", "mobile"]),
+                           tags: ["warm-up", "Q4 campaign", "NL", "mobile"], deviceSymbol: "iphone"),
             ProfileRowItem(id: id(5), name: "Travel", activity: .sealing,
                            exit: .proxy(endpoint: "lisbon.example:1080", countryCode: "PT"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-60)),
@@ -820,6 +820,11 @@ enum UISnapshots {
             // Its settings could not be read: not "Direct", and it does not start (R1).
             ProfileRowItem(id: id(8), name: "Archive", activity: .stopped, exit: .unreadable, ephemeral: false,
                            appearsAs: "—", lastUsed: now.addingTimeInterval(-30 * 86_400)),
+            // Its last launch failed, its proxy not answering: among "Need attention".
+            ProfileRowItem(id: id(9), name: "Marketplace US", activity: .stopped,
+                           exit: .proxy(endpoint: "us-dal.proxy.example:1080", countryCode: "US"), ephemeral: false,
+                           appearsAs: mac, lastUsed: now.addingTimeInterval(-2 * 3_600), tags: ["clients"],
+                           problem: "us-dal.proxy.example:1080"), // l10n: not text
         ]
     }
 }
