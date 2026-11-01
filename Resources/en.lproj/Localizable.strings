@@ -490,6 +490,7 @@
 "profiles.delete.confirm" = "Delete Profile and All Its Data";
 "profiles.delete.message" = "Cookies, site data, cache, settings, history, bookmarks and saved passwords of this profile are deleted.";
 "profiles.delete.title" = "Delete profile “%@”?";
+"profiles.delete.unreadable" = "The profile's folder holds files Lumen could not read and set aside (%1$ld): %2$@. They are deleted too.";
 "profiles.kept.title" = "Deleted profiles whose data is kept here";
 "profiles.kept.text" = "These profiles were deleted — on another device, or earlier on this Mac — but their data is kept here and is not removed by itself. A profile can be brought back: it appears as a new one, with its settings, passwords, bookmarks, history and website data. Its old folder stays until you remove it: open tabs, the warm-up schedule and kept versions of the settings are not carried over to the new profile.";
 "profiles.kept.broughtBack" = "brought back as a new profile; the old folder is kept";
@@ -779,6 +780,7 @@
 "profiles.bulk.delete.title" = "Delete the selected profiles (%ld)?";
 "profiles.bulk.delete.confirm" = "Delete Profiles and All Their Data";
 "profiles.bulk.delete.message" = "Cookies, site data, cache, settings, history, bookmarks and saved passwords of these profiles are deleted: %@.";
+"profiles.bulk.delete.unreadable" = "Files Lumen could not read and set aside are in the folders of %1$@ (%2$ld). They are deleted too.";
 "profiles.bulk.namesAndMore" = "%1$@ and %2$ld more";
 "proxies.title.closed" = "The proxy closes the connection without a word";
 "proxies.title.connectTimeout" = "The connection to the proxy gets no answer";

@@ -95,8 +95,8 @@ struct ProfileListView: View {
                 Button(L("profiles.delete.confirm"), role: .destructive) {
                     Task { await model.deleteProfile(profile.id) }
                 }
-            } message: { _ in
-                Text(L("profiles.delete.message"))
+            } message: { profile in
+                Text(Self.deletionMessage(L("profiles.delete.message"), unreadable: model.unreadableFiles(for: profile.id)))
             }
             .confirmationDialog(removingDeleted.map(KeptDeletedBox.removeTitle) ?? "",
                                 isPresented: Binding(get: { removingDeleted != nil }, set: { if !$0 { removingDeleted = nil } }),
@@ -105,7 +105,8 @@ struct ProfileListView: View {
                     model.removeDeletedProfileForGood(profile.id)
                 }
             } message: { profile in
-                Text(profile.broughtBack ? L("profiles.kept.removeMessage.broughtBack") : L("profiles.kept.removeMessage"))
+                Text(Self.deletionMessage(profile.broughtBack ? L("profiles.kept.removeMessage.broughtBack") : L("profiles.kept.removeMessage"),
+                                          unreadable: model.unreadableFiles(for: profile.id)))
             }
             .sheet(item: $proxySheet, onDismiss: showProxyProblems) { _ in
                 ProxyProblemView { id in showProxies(selecting: [id]) }
@@ -134,7 +135,10 @@ struct ProfileListView: View {
                     Task { await model.deleteProfiles(ids) }
                 }
             } message: { ids in
-                Text(String(format: L("profiles.bulk.delete.message"), names(ids)))
+                Text(Self.bulkDeletionMessage(String(format: L("profiles.bulk.delete.message"), names(ids)),
+                                              unreadable: ids.compactMap { id in
+                                                  summary(id).map { (name: $0.name, files: model.unreadableFiles(for: id)) }
+                                              }))
             }
     }
 
@@ -233,9 +237,30 @@ struct ProfileListView: View {
 
     /// "Northwind, Harbor, Atlas and 2 more".
     private func names(_ ids: [UUID]) -> String {
-        let names = ids.compactMap { summary($0)?.name }
-        guard names.count > 5 else { return names.joined(separator: ", ") }
-        return String(format: L("profiles.bulk.namesAndMore"), names.prefix(5).joined(separator: ", "), names.count - 5)
+        Self.listed(ids.compactMap { summary($0)?.name })
+    }
+
+    /// At most five, then "and N more".
+    static func listed(_ items: [String]) -> String {
+        guard items.count > 5 else { return items.joined(separator: ", ") }
+        return String(format: L("profiles.bulk.namesAndMore"), items.prefix(5).joined(separator: ", "), items.count - 5)
+    }
+
+    /// A deletion's confirmation; when the folder it deletes holds files set aside as unreadable
+    /// (`ProfileRepository.unreadableFiles`), it says that they go too, by name. The person decides,
+    /// knowing (the owner, 1 November): the rule that nothing unreadable is deleted is against
+    /// silent loss, not against the person's own decision.
+    static func deletionMessage(_ message: String, unreadable: [String]) -> String {
+        guard !unreadable.isEmpty else { return message }
+        return message + "\n\n" + String(format: L("profiles.delete.unreadable"), unreadable.count, listed(unreadable))
+    }
+
+    /// The same for several profiles: which of them hold such files, and how many in all.
+    static func bulkDeletionMessage(_ message: String, unreadable: [(name: String, files: [String])]) -> String {
+        let holding = unreadable.filter { !$0.files.isEmpty }
+        guard !holding.isEmpty else { return message }
+        return message + "\n\n" + String(format: L("profiles.bulk.delete.unreadable"), listed(holding.map(\.name)),
+                                          holding.reduce(0) { $0 + $1.files.count })
     }
 
     private var rows: [ProfileRowItem] {

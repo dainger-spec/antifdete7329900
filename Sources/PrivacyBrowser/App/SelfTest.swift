@@ -3507,6 +3507,10 @@ final class SelfTest {
         let profile = try repository.create(name: "Kept deleted", configuration: ProfileConfiguration(
             proxy: ProxySettings(kind: .socks5, host: "127.0.0.1", port: 9)))
         let folder = repository.directory(for: profile.id)
+        // A file set aside as unreadable: a deletion's confirmation says it goes too (the owner, 1 November).
+        try Data([0x42]).write(to: folder.appendingPathComponent("config.bin.unreadable"))
+        let said = String(format: L("profiles.delete.unreadable"), 1, "config.bin.unreadable")
+        let asked = ProfileListView.deletionMessage(L("profiles.delete.message"), unreadable: repository.unreadableFiles(for: profile.id))
         let copy = repository.root.appendingPathComponent("kept-deleted-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.copyItem(at: folder, to: copy)
         defer { try? FileManager.default.removeItem(at: copy) }
@@ -3516,6 +3520,10 @@ final class SelfTest {
         defer { try? FileManager.default.removeItem(at: folder) }
         repository.removeOrphanedDirectories() // the sweep an unlock and a sync run
         let kept = repository.keptDeletedProfiles().first { $0.id == profile.id }
+        let askedAgain = ProfileListView.deletionMessage(L("profiles.kept.removeMessage"), unreadable: repository.unreadableFiles(for: profile.id))
+        check("kept deleted profiles: a deletion's confirmation names the files set aside as unreadable, which go too",
+              asked.hasPrefix(L("profiles.delete.message")) && asked.contains(said) && askedAgain.contains(said),
+              "\(asked) | \(askedAgain)")
         check("kept deleted profiles: a deleted profile's folder put back is not removed by the sweep, and is listed by its name",
               goneAfterDeletion && FileManager.default.fileExists(atPath: folder.path) && kept?.name == "Kept deleted" && kept?.isReadable == true,
               "gone after the deletion: \(goneAfterDeletion); listed: \(kept.map { "\($0)" } ?? "no")")

@@ -529,6 +529,11 @@ final class AppModel: ObservableObject {
         refresh()
     }
 
+    /// The files in a profile's folder set aside as unreadable: its deletion's confirmation names them.
+    func unreadableFiles(for id: UUID) -> [String] {
+        repository?.unreadableFiles(for: id) ?? []
+    }
+
     /// The versions of the profile's settings kept beside them (R4, R2).
     func keptSettings(for id: UUID) -> [KeptSettings] {
         repository?.keptSettings(for: id) ?? []

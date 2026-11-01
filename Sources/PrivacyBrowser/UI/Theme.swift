@@ -432,12 +432,8 @@ struct ProfileAvatar: View {
         (0x3D2630, 0xEAB8C8), // rose
         (0x34361F, 0xD6D9A0), // olive
     ]
-    private static let idColors = 5
-
     static func colors(for id: UUID) -> (fill: UInt32, text: UInt32) {
-        // A stable index from the UUID's bytes (hashValue is seeded per launch).
-        let sum = withUnsafeBytes(of: id.uuid) { $0.reduce(0) { $0 &+ Int($1) } }
-        return palette[sum % idColors]
+        palette[ProfileAvatarStyle.color(for: id)]
     }
 
     static func colors(for id: UUID, style: ProfileAvatarStyle?) -> (fill: UInt32, text: UInt32) {
@@ -447,7 +443,7 @@ struct ProfileAvatar: View {
 
     /// The same palette for anything named by a string (a site's host).
     static func colors(forKey key: String) -> (fill: UInt32, text: UInt32) {
-        palette[key.utf8.reduce(0) { $0 &+ Int($1) } % idColors]
+        palette[key.utf8.reduce(0) { $0 &+ Int($1) } % ProfileAvatarStyle.idColorCount]
     }
 
     var body: some View {

@@ -41,6 +41,15 @@ public struct ProfileAvatarStyle: Codable, Equatable, Sendable {
     public static let colorCount = 8
     public static let maximumLetters = 2
 
+    /// How many of the palette's colours a profile's id picks among (as before there was a choice).
+    public static let idColorCount = 5
+
+    /// The colour a profile's id gives when none was chosen: an index into the palette, the same at
+    /// every launch (from the id's bytes; `hashValue` is seeded per launch).
+    public static func color(for id: UUID) -> Int {
+        withUnsafeBytes(of: id.uuid) { $0.reduce(0) { $0 &+ Int($1) } } % idColorCount
+    }
+
     /// An index into the palette; nil: the colour the profile's id gives.
     public var color: Int?
     /// Shown instead of the first letter of the name; nil: that letter.

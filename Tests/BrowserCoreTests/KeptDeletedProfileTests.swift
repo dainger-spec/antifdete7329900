@@ -134,10 +134,19 @@ final class KeptDeletedProfileTests: XCTestCase {
         let unlocked = try unlock("v")
         let before = try FileManager.default.contentsOfDirectory(atPath: unlocked.directory(for: id).path).sorted()
 
+        let made = try XCTUnwrap(unlocked.readKeyCopy(id)?.createdAt)
+        let later = try unlocked.create(name: "Q", configuration: proxied)
+
         let back = try ProfileTransfer.bringBack(id, in: unlocked)
         XCTAssertNotEqual(back.id, id)
+        // As the person saw it: its name, when it was made — and so its place in the list, before a
+        // profile made after it — and the colour its old id gave, kept as chosen.
         XCTAssertEqual(back.name, "P")
-        XCTAssertEqual(unlocked.list().map(\.id), [back.id])
+        XCTAssertEqual(back.createdAt, made)
+        XCTAssertEqual(unlocked.list().map(\.id), [back.id, later.id])
+        XCTAssertEqual(try unlocked.loadConfiguration(back.id).avatar, ProfileAvatarStyle(color: ProfileAvatarStyle.color(for: id)))
+        XCTAssertEqual(unlocked.readKeyCopy(back.id)?.createdAt, made, "its key copy says so too")
+        try unlocked.delete(later.id)
         let newKey = try unlocked.profileKey(for: back.id)
         XCTAssertEqual(try unlocked.loadConfiguration(back.id).proxy?.host, "proxy.example")
         XCTAssertEqual(try unlocked.passwordVault(for: back.id).allEntries().map(\.password), ["s3cret"])
@@ -162,6 +171,68 @@ final class KeptDeletedProfileTests: XCTestCase {
         try again.removeKeptDeletedProfile(id)
         XCTAssertFalse(FileManager.default.fileExists(atPath: again.directory(for: id).path))
         XCTAssertEqual(again.list().map(\.id), [back.id])
+    }
+
+    /// A colour or letters the person chose are kept as they were.
+    func testBringingBackKeepsAChosenLook() throws {
+        let repository = try vault("v")
+        var configuration = proxied
+        configuration.avatar = ProfileAvatarStyle(color: 7, letters: "XY")
+        let id = try repository.create(name: "P", configuration: configuration).id
+        let copy = root.appendingPathComponent("copy")
+        try FileManager.default.copyItem(at: repository.directory(for: id), to: copy)
+        try repository.delete(id)
+        try FileManager.default.copyItem(at: copy, to: repository.directory(for: id))
+        let unlocked = try unlock("v")
+        let back = try ProfileTransfer.bringBack(id, in: unlocked)
+        XCTAssertEqual(try unlocked.loadConfiguration(back.id).avatar, ProfileAvatarStyle(color: 7, letters: "XY"))
+    }
+
+    /// When the brought-back mark cannot be written, the new profile goes, and the folder stays as it
+    /// was, offered again: unmarked, kept with the new profile, it would be brought back twice.
+    func testABringBackWhoseMarkCannotBeWrittenLeavesNothingOfIt() throws {
+        let (id, _) = try keptProfile(in: "v")
+        let unlocked = try unlock("v")
+        // A directory where the mark (a file) goes: the mark cannot be written there.
+        let inTheWay = unlocked.broughtBackMarkURL(for: id)
+        try FileManager.default.createDirectory(at: inTheWay.appendingPathComponent("something"), withIntermediateDirectories: true)
+        let before = try FileManager.default.contentsOfDirectory(atPath: unlocked.directory(for: id).path).sorted()
+        let folders = Set(unlocked.profileFolderIDs())
+
+        XCTAssertThrowsError(try ProfileTransfer.bringBack(id, in: unlocked))
+        XCTAssertEqual(unlocked.list(), [], "the new profile goes")
+        XCTAssertEqual(Set(unlocked.profileFolderIDs()), folders, "and nothing of it is left")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: unlocked.directory(for: id).path).sorted(), before)
+        XCTAssertEqual(unlocked.keptDeletedProfiles().map(\.broughtBack), [false], "offered again")
+
+        try FileManager.default.removeItem(at: inTheWay)
+        XCTAssertNoThrow(try ProfileTransfer.bringBack(id, in: unlocked))
+        XCTAssertEqual(unlocked.list().count, 1)
+        XCTAssertEqual(unlocked.keptDeletedProfiles().map(\.broughtBack), [true])
+    }
+
+    /// The files a profile's folder holds set aside as unreadable, which its deletion deletes too:
+    /// named so by `SecureFile.moveAside`, and nothing else.
+    func testTheFilesSetAsideAsUnreadableAreNamed() throws {
+        let repository = try vault("v")
+        let id = try repository.create(name: "P", configuration: proxied).id
+        XCTAssertEqual(repository.unreadableFiles(for: id), [])
+        let folder = repository.directory(for: id)
+        let aside = try SecureFile.moveAside(repository.keyCopyURL(for: id), suffix: "unreadable")
+        try Data([1]).write(to: repository.keyCopyURL(for: id))
+        let second = try SecureFile.moveAside(repository.keyCopyURL(for: id), suffix: "unreadable")
+        for name in ["passwords.bin.unreadable-1", "notes.unreadablex", ".unreadable", "config.bin.conflict"] {
+            try Data([2]).write(to: folder.appendingPathComponent(name))
+        }
+        XCTAssertEqual(repository.unreadableFiles(for: id), [aside.lastPathComponent, second.lastPathComponent])
+        XCTAssertEqual(repository.unreadableFiles(for: id), ["key.bin.unreadable", "key.bin.unreadable-2"])
+    }
+
+    /// The colour a profile's id gives, held: the app draws it, and a profile brought back keeps it.
+    func testTheColourAnIdGives() {
+        XCTAssertEqual(ProfileAvatarStyle.color(for: UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1))), 1)
+        XCTAssertEqual(ProfileAvatarStyle.color(for: UUID(uuid: (255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255))), 0)
+        XCTAssertEqual(ProfileAvatarStyle.color(for: UUID(uuidString: "E621E1F8-C36C-495A-93FC-0C247A3E6E5F")!), 3)
     }
 
     /// While a folder is being brought back, a second bring-back of it at once is refused.

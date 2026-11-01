@@ -193,12 +193,18 @@ public final class ProfileRepository: @unchecked Sendable {
 
     @discardableResult
     public func create(name: String, configuration: ProfileConfiguration) throws -> ProfileSummary {
+        try create(name: name, configuration: configuration, createdAt: Date())
+    }
+
+    /// `create`, made at `createdAt`: a deleted profile brought back keeps when it was made, and with
+    /// it its place in the list, which is in that order (`ProfileTransfer.bringBack`).
+    func create(name: String, configuration: ProfileConfiguration, createdAt: Date) throws -> ProfileSummary {
         try configuration.validate()
         let cleanName = try Self.validatedName(name)
         let id = UUID()
         let profileKey = SymmetricKey(size: .bits256)
         let wrapped = try AEAD.seal(profileKey.rawBytes, key: vault.profileKeyWrappingKey, aad: Self.keyAAD(id))
-        let summary = ProfileSummary(id: id, name: cleanName, createdAt: Date(), lastLaunchedAt: nil, revision: 1)
+        let summary = ProfileSummary(id: id, name: cleanName, createdAt: createdAt, lastLaunchedAt: nil, revision: 1)
 
         // Nothing of a new profile is written beside an index that is not written over.
         if case .unreadable = indexState {
@@ -352,8 +358,10 @@ public final class ProfileRepository: @unchecked Sendable {
             .filter { deleted.contains($0) && !listed.contains($0) && !FileManager.default.fileExists(atPath: deletionMarkURL(for: $0).path) }
             .map { id in
                 let copy = readKeyCopy(id)
-                return KeptDeletedProfile(id: id, name: copy?.name, createdAt: copy?.createdAt,
-                                          broughtBack: FileManager.default.fileExists(atPath: broughtBackMarkURL(for: id).path))
+                var isDirectory: ObjCBool = false
+                let marked = FileManager.default.fileExists(atPath: broughtBackMarkURL(for: id).path, isDirectory: &isDirectory)
+                    && !isDirectory.boolValue
+                return KeptDeletedProfile(id: id, name: copy?.name, createdAt: copy?.createdAt, broughtBack: marked)
             }
     }
 
@@ -370,8 +378,24 @@ public final class ProfileRepository: @unchecked Sendable {
     /// Written in a profile's folder by `delete` before the index: the deletion is this Mac's own.
     func deletionMarkURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("deleted-here") }
 
-    /// Written in a kept deleted profile's folder once it was brought back (the new profile's id).
+    /// Written in a kept deleted profile's folder once it was brought back: a file, holding the new
+    /// profile's id (a directory by its name is not the mark).
     func broughtBackMarkURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("brought-back") }
+
+    /// The files in a profile's folder set aside because they could not be read — `<file>.unreadable`,
+    /// then `-2`, `-3`… (`SecureFile.moveAside`) — by name. A deletion of the profile by the person
+    /// deletes them too, and its confirmation says so (the owner, 1 November: the person decides,
+    /// knowing). Of a listed profile or of a kept deleted one alike.
+    public func unreadableFiles(for id: UUID) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: directory(for: id).path)) ?? [])
+            .filter(Self.isSetAsideAsUnreadable).sorted()
+    }
+
+    static func isSetAsideAsUnreadable(_ name: String) -> Bool {
+        guard let range = name.range(of: ".unreadable", options: .backwards), range.lowerBound > name.startIndex else { return false }
+        let rest = name[range.upperBound...]
+        return rest.isEmpty || (rest.hasPrefix("-") && Int(rest.dropFirst()).map { $0 >= 2 } == true)
+    }
 
     /// One bring-back of a folder at a time in this process (`ProfileTransfer.bringBack`): a second
     /// one at once would make the profile twice.

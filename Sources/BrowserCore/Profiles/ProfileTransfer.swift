@@ -173,6 +173,13 @@ public enum ProfileTransfer {
     @discardableResult
     public static func importProfile(from url: URL, password: String, into repository: ProfileRepository,
                                      name: String? = nil) throws -> ProfileSummary {
+        try importProfile(from: url, password: password, into: repository, name: name, createdAt: Date(), adjusting: { _ in })
+    }
+
+    /// `importProfile`, the profile made at `createdAt`, its settings adjusted by `adjust` before
+    /// they are written (a deleted profile brought back: `bringBack`).
+    static func importProfile(from url: URL, password: String, into repository: ProfileRepository, name: String?,
+                              createdAt: Date, adjusting adjust: (inout ProfileConfiguration) -> Void) throws -> ProfileSummary {
         let parsed = try parse(url)
         let keys = try Keys(password: password, kdf: parsed.header.kdf)
         let manifest = try JSONCoding.decoder.decode(Manifest.self, from: AEAD.open(parsed.header.manifest, key: keys.manifest, aad: manifestAAD))
@@ -182,7 +189,8 @@ public enum ProfileTransfer {
         // What was learnt about the proxy on the other Mac is not this one's to trust.
         configuration.lastProxyLocation?.exitIP = nil
         configuration.webRTCRelay = nil
-        let summary = try repository.create(name: name ?? manifest.name, configuration: configuration)
+        adjust(&configuration)
+        let summary = try repository.create(name: name ?? manifest.name, configuration: configuration, createdAt: createdAt)
         let id = summary.id
         do {
             let key = try repository.profileKey(for: id)
@@ -218,7 +226,8 @@ public enum ProfileTransfer {
 
     /// Brings back a deleted profile whose folder is kept (`ProfileRepository.keptDeletedProfiles`)
     /// as a new profile — its own id and key — with everything an export carries: settings,
-    /// passwords, bookmarks, history, the warm-up plan, website data and Safari's state. The
+    /// passwords, bookmarks, history, the warm-up plan, website data and Safari's state; with its
+    /// name, when it was made, and its colour, as the person saw them. The
     /// deletion stays recorded for the old id, everywhere (it is permanent, and sync merges it), so
     /// the profile cannot come back under it.
     ///
@@ -244,7 +253,16 @@ public enum ProfileTransfer {
         let password = UUID().uuidString + UUID().uuidString
         try export(id, key: key, name: copy.name, createdAt: copy.createdAt, from: repository, to: file, password: password,
                    kdf: .generate(iterations: 1_000))
-        let summary = try importProfile(from: file, password: password, into: repository, name: copy.name)
+        // As the person saw it: its name, when it was made (its place in the list), and its colour —
+        // one never chosen came from the old id, and is kept as chosen.
+        let summary = try importProfile(from: file, password: password, into: repository, name: copy.name,
+                                        createdAt: copy.createdAt) { configuration in
+            if configuration.avatar?.color == nil {
+                var style = configuration.avatar ?? ProfileAvatarStyle()
+                style.color = ProfileAvatarStyle.color(for: id)
+                configuration.avatar = style
+            }
+        }
         do {
             try SecureFile.write(Data(summary.id.uuidString.utf8), to: repository.broughtBackMarkURL(for: id))
         } catch {
