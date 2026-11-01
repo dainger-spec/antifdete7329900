@@ -61,3 +61,9 @@ jobs:
           chrome -AppleLanguages "(ru)" --sites-languages en-US,en
           chrome -AppleLanguages "(en)" --sites-languages ru-RU,ru
           chrome -AppleLanguages "(ru)" --sites-languages de-DE,de
+          # The way a profile's process would do it: started with the websites' list, the
+          # interface's language fixed first thing, the websites' list given back.
+          chrome -AppleLanguages "(en-US, en)" --pin-interface ru
+          chrome -AppleLanguages "(ru-RU, ru)" --pin-interface en
+          chrome -AppleLanguages "(de-DE, de)" --pin-interface ru
+          chrome -AppleLanguages "(de-DE, de)"

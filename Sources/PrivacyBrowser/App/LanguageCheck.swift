@@ -40,6 +40,20 @@ enum LanguageCheck {
     /// the menus are made and before any web process starts.
     static func runChrome(arguments: [String]) -> Never {
         setvbuf(stdout, nil, _IOLBF, 0)
+        if let index = arguments.firstIndex(of: "--pin-interface"), index + 1 < arguments.count {
+            // The interface's language fixed first, then the argument domain given back as the
+            // command line had it (the websites' list): what a profile's process would do.
+            let saved = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+            var pinned = saved
+            pinned["AppleLanguages"] = [arguments[index + 1]]
+            UserDefaults.standard.setVolatileDomain(pinned, forName: UserDefaults.argumentDomain)
+            let main = Bundle.main.preferredLocalizations
+            _ = Bundle.main.localizedString(forKey: "settings.section.about", value: nil, table: nil)
+            _ = Bundle.main.path(forResource: "Localizable", ofType: "strings")
+            UserDefaults.standard.setVolatileDomain(saved, forName: UserDefaults.argumentDomain)
+            print("CHROME-LANG pinned \(arguments[index + 1]): main bundle preferred=\(main); argument domain back to \(String(describing: saved["AppleLanguages"]))")
+        }
+        nibFiles()
         guard SafariChrome.prepareForCheck(arguments: arguments) else {
             print("CHROME-LANG Safari's chrome cannot be hosted in this build")
             exit(2)
@@ -51,6 +65,20 @@ enum LanguageCheck {
         if let safariClass = NSClassFromString("BrowserWindowController") {
             let safari = Bundle(for: safariClass)
             print("CHROME-LANG Safari.framework \(safari.bundleIdentifier ?? "?") preferred=\(Array(safari.preferredLocalizations.prefix(3))) has ru=\(safari.localizations.contains("ru")) en=\(safari.localizations.contains("en") || safari.localizations.contains("English"))")
+        }
+        print("CHROME-LANG AppKit preferred after install=\(Array(Bundle(for: NSApplication.self).preferredLocalizations.prefix(3))) WebKit preferred=\(Array(Bundle(for: WKWebView.self).preferredLocalizations.prefix(3)))")
+        for path in safariApps {
+            guard let app = Bundle(path: path) else { continue }
+            print("CHROME-LANG \(path) answers MainMenu.nib: \(app.url(forResource: "MainMenu", withExtension: "nib")?.path ?? "nil") preferred=\(Array(app.preferredLocalizations.prefix(2))) localizations=\(app.localizations.count)")
+            let nib = NSNib(nibNamed: "MainMenu", bundle: app)
+            var objects: NSArray?
+            if let nib, nib.instantiate(withOwner: nil, topLevelObjects: &objects),
+               let menu = (objects as? [Any])?.compactMap({ $0 as? NSMenu }).first {
+                print("CHROME-LANG NSNib(nibNamed: MainMenu, bundle: Safari.app) titles: \(menu.items.map(\.title).joined(separator: " | ")); second menu: \(menu.items.dropFirst().first?.submenu?.items.prefix(6).map(\.title).joined(separator: " | ") ?? "-")")
+            } else {
+                print("CHROME-LANG NSNib(nibNamed: MainMenu, bundle: Safari.app): \(nib == nil ? "nil" : "did not instantiate")")
+            }
+            break
         }
         if let index = arguments.firstIndex(of: "--sites-languages"), index + 1 < arguments.count {
             let sites = arguments[index + 1].split(separator: ",").map(String.init)
@@ -87,5 +115,33 @@ enum LanguageCheck {
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { exit(3) }
         NSApplication.shared.run()
         exit(0)
+    }
+
+    static let safariApps = ["/Applications/Safari.app", "/System/Applications/Safari.app",
+                             "/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app"]
+
+    /// Which of Safari's bundles carry a nib per language, and which a Base nib with strings.
+    static func nibFiles() {
+        let frameworks = ["Safari", "SafariShared", "SafariSharedUI", "SafariCore"].flatMap { name in
+            ["/System/Library/PrivateFrameworks", "/System/Volumes/Preboot/Cryptexes/OS/System/Library/PrivateFrameworks"]
+                .map { "\($0)/\(name).framework" }
+        }
+        let fm = FileManager.default
+        for root in safariApps.map({ $0 + "/Contents/Resources" }) + frameworks.flatMap({ [$0 + "/Resources", $0 + "/Versions/A/Resources"] }) {
+            guard fm.fileExists(atPath: root) else { continue }
+            var line: [String] = []
+            for lproj in ["Base.lproj", "en.lproj", "English.lproj", "ru.lproj", "de.lproj"] {
+                let files = (try? fm.contentsOfDirectory(atPath: root + "/" + lproj)) ?? []
+                guard !files.isEmpty else { continue }
+                let nibs = files.filter { $0.hasSuffix(".nib") }.count
+                let strings = files.filter { $0.hasSuffix(".strings") || $0.hasSuffix(".loctable") || $0.hasSuffix(".stringsdict") }.count
+                let menu = files.filter { $0.hasPrefix("MainMenu") }
+                line.append("\(lproj) nibs=\(nibs) strings=\(strings) MainMenu=\(menu)")
+            }
+            let top = ((try? fm.contentsOfDirectory(atPath: root)) ?? [])
+            let loose = top.filter { $0.hasSuffix(".nib") }.count
+            let tables = top.filter { $0.hasSuffix(".loctable") }
+            print("CHROME-LANG files \(root): top nibs=\(loose) loctables=\(tables.prefix(4)) | \(line.joined(separator: " ; "))")
+        }
     }
 }
