@@ -9,3 +9,9 @@ __pycache__/
 
 # Working copies of background agents (Claude Code worktrees)
 .claude/worktrees/
+
+# Signing material: never in this repository (it is public). docs/IDENTITY.md runs the release
+# with the provisioning profiles beside the checkout; certificates and keys stay in the keychain.
+*.provisionprofile
+*.p12
+*.pem
