@@ -20,6 +20,7 @@ struct AutomationSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if AutomationServer.isAvailable {
                     Toggle(L("automation.enabled"), isOn: $enabled)
+                        .toggleStyle(.lumenSwitch)
                         .onChange(of: enabled) { _, on in apply(enabled: on) }
                     LabeledContent(L("automation.port")) {
                         HStack {

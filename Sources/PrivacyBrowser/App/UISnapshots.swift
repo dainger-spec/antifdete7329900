@@ -343,6 +343,11 @@ enum UISnapshots {
         problems += await Shot(name: "brand", size: CGSize(width: 900, height: 560), titled: false) {
             BrandSheet()
         }.capture(into: folder)
+        // The design system ("Eclipse"): the black scale, text, states, every control, profile
+        // letters, rows, and the light — what every window is built from.
+        problems += await Shot(name: "design-system", size: CGSize(width: 1240, height: 980), titled: false) {
+            DesignSystemSheet()
+        }.capture(into: folder)
         problems += await Shot(name: "flags", size: CGSize(width: 900, height: 620), titled: false) {
             FlagSheet()
         }.capture(into: folder)
@@ -839,10 +844,12 @@ private struct Shot {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         Theme.applyChrome(to: window)
-        window.backgroundColor = NSColor(hex: 0x161920)
+        window.backgroundColor = Theme.NS.backdrop
+        // The state a window settles in: no entry animation is caught half-way.
         let host = NSHostingView(rootView: content()
             .frame(width: size.width, height: size.height)
             .environment(\.colorScheme, .dark)
+            .environment(\.lumenStillFrame, true)
             .tint(Theme.accentFill))
         window.contentView = host
         window.setContentSize(size)
@@ -945,6 +952,149 @@ private struct ProfilesPreview: View {
 }
 
 // MARK: - Brand and flags sheets
+
+/// The design system on one sheet (the design's "Palette and components").
+private struct DesignSystemSheet: View {
+    @State private var segment = 1
+    @State private var on = true
+    @State private var off = false
+    @State private var text = "de-fra.proxy.example"
+    @State private var wrong = "108000"
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 40) {
+            VStack(alignment: .leading, spacing: 22) {
+                Text(verbatim: "Lumen").lumenPageTitle().foregroundStyle(Theme.textPrimary)
+                part("Black scale") {
+                    HStack(spacing: 8) {
+                        ForEach(Array([Theme.backdrop, Theme.sidebar, Theme.card, Theme.raisedInset, Theme.field].enumerated()), id: \.offset) { _, color in
+                            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(color)
+                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+                                .frame(width: 56, height: 40)
+                        }
+                    }
+                }
+                part("Text") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(verbatim: "t1 Northwind · Хранилище заблокировано").foregroundStyle(Theme.textPrimary)
+                        Text(verbatim: "t2 Пояснения, счётчики").foregroundStyle(Theme.textSecondary)
+                        Text(verbatim: "t3 Подписи разделов, мета").foregroundStyle(Theme.textTertiary)
+                        Text(verbatim: "t4 Только неактивное").foregroundStyle(Theme.textDisabled)
+                    }
+                    .font(.lumenBody)
+                }
+                part("States") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) { RunningDot(); Text(verbatim: "Работает").foregroundStyle(Theme.textPrimary) }
+                        HStack(spacing: 8) { Text(verbatim: "Прогрев 4/12").foregroundStyle(Theme.textPrimary); LumenProgressBar(fraction: 0.33, width: 48) }
+                        Text(verbatim: "Нужен логин").foregroundStyle(Theme.warning)
+                        Text(verbatim: "Не запустился").foregroundStyle(Theme.danger)
+                        Text(verbatim: "вчера").foregroundStyle(Theme.textTertiary)
+                    }
+                    .font(.lumenBody)
+                }
+                part("Light") {
+                    ZStack {
+                        Theme.backdrop
+                        EclipseLight(place: .thumbnail)
+                        Text(verbatim: "Хранилище заблокировано").font(.lumenSection).foregroundStyle(Theme.textPrimary)
+                    }
+                    .frame(width: 400, height: 230)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+                }
+            }
+            VStack(alignment: .leading, spacing: 22) {
+                part("Buttons") {
+                    HStack(spacing: 10) {
+                        Button {} label: { Label { Text(verbatim: "Новый профиль") } icon: { Image(systemName: "plus") } }
+                            .buttonStyle(.lumenPrimary)
+                        Button(String("Открыть список")) {}.buttonStyle(.lumenSecondary)
+                        Button(String("Отмена")) {}.buttonStyle(.lumenGhost)
+                        Button(String("Удалить…")) {}.buttonStyle(.lumenDestructive)
+                        Button(String("Неактивна")) {}.buttonStyle(.lumenPrimary).disabled(true)
+                    }
+                }
+                part("Switches, checkboxes, choices") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 18) {
+                            Toggle(String("off"), isOn: $off).toggleStyle(LumenSwitchStyle(showsLabel: false))
+                            Toggle(String("on"), isOn: $on).toggleStyle(LumenSwitchStyle(showsLabel: false))
+                            Toggle(String("Только отличия"), isOn: $off).toggleStyle(.lumenCheckbox)
+                            Toggle(String("Выбран"), isOn: $on).toggleStyle(.lumenCheckbox)
+                        }
+                        HStack(spacing: 18) {
+                            LumenRadio(title: "Запускать и говорить почему", isOn: true) {} // l10n: not text
+                            LumenRadio(title: "Не запускать", isOn: false) {} // l10n: not text
+                        }
+                        LumenSegmented(selection: $segment, options: [(0, "Без прокси"), (1, "Из списка"), (2, "Новый")])
+                    }
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textPrimary)
+                }
+                part("Fields") {
+                    HStack(spacing: 10) {
+                        TextField("", text: $text).lumenField().frame(width: 220)
+                        TextField("", text: $wrong).lumenField(error: true).frame(width: 120)
+                        KeyCap(keys: "⌘K", small: true)
+                        KeyCap(keys: "⇧⌘T")
+                    }
+                }
+                part("Profiles") {
+                    HStack(spacing: 14) {
+                        ProfileAvatar(name: "Личный", id: UUID(), size: 30, running: true)
+                        ProfileAvatar(name: "Northwind", id: UUID(), size: 30)
+                        ProfileAvatar(name: "QA", id: UUID(), size: 30, style: ProfileAvatarStyle(letters: "QA"))
+                        ProfileAvatar(name: "Northwind", id: UUID(), size: 56, running: true)
+                        TagChips(tags: ["Работа", "QA"])
+                    }
+                }
+                part("Rows") {
+                    VStack(spacing: 2) {
+                        designRow("Northwind", detail: "Работа", state: "Прогрев 4/12", fill: .clear)
+                        designRow("Atlas · клиент", detail: "выбрана", state: "Работает 38 мин", fill: Theme.rowSelected)
+                        designRow("Исследование", detail: "наведение", state: "вчера", fill: Theme.rowHover)
+                    }
+                    .frame(width: 560)
+                }
+                part("Type") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(verbatim: "Хранилище заблокировано").lumenDisplayTitle()
+                        Text(verbatim: "Профили").lumenPageTitle()
+                        Text(verbatim: "Northwind").lumenHeadingTitle()
+                        Text(verbatim: "Восстанавливать вкладки").font(.lumenRowTitle)
+                        Text(verbatim: "Запущенные · подборки · сеть").lumenCaps()
+                        Text(verbatim: "203.0.113.47 · de-fra.proxy.example:1080").font(.lumenMono).foregroundStyle(Theme.textSecondary)
+                    }
+                    .foregroundStyle(Theme.textPrimary)
+                }
+            }
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.backdrop)
+    }
+
+    private func part<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(verbatim: title).lumenCaps()
+            content()
+        }
+    }
+
+    private func designRow(_ name: String, detail: String, state: String, fill: Color) -> some View {
+        HStack(spacing: 10) {
+            ProfileAvatar(name: name, id: UUID(), size: 22)
+            Text(verbatim: name).font(.lumenLabel).foregroundStyle(Theme.textPrimary)
+            Text(verbatim: detail).font(.lumenSecondary).foregroundStyle(Theme.textTertiary)
+            Spacer()
+            Text(verbatim: state).font(.lumenBody).foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 40)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(fill))
+    }
+}
 
 private struct BrandSheet: View {
     var body: some View {

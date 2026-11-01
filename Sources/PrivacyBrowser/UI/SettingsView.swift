@@ -235,8 +235,7 @@ struct SettingSwitch: View {
 
     var body: some View {
         Toggle(label, isOn: $isOn)
-            .toggleStyle(.switch)
-            .labelsHidden()
+            .toggleStyle(LumenSwitchStyle(showsLabel: false))
             .controlSize(.small)
     }
 }

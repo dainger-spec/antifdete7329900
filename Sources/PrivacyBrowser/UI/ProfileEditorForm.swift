@@ -1180,7 +1180,7 @@ private struct EditorToggle: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .toggleStyle(.switch)
+        .toggleStyle(.lumenSwitch)
         .controlSize(.small)
     }
 }

@@ -149,7 +149,7 @@ private struct WarmUpPanel: View {
             Toggle(isOn: Binding(get: { repeats }, set: { setSchedule(enabled: $0, hours: repeatHours) })) {
                 Text(L("warmup.schedule.repeat")).font(.lumenLabel).foregroundStyle(Theme.textPrimary)
             }
-            .toggleStyle(.switch)
+            .toggleStyle(.lumenSwitch)
             .controlSize(.small)
             .disabled(reading.pages.isEmpty && !repeats)
             if repeats {
@@ -574,9 +574,9 @@ struct WarmUpPlanChooser: View {
                 Text(L("warmup.seconds")).foregroundStyle(.secondary)
             }
             Toggle(L("warmup.scroll"), isOn: $manualPlan.scroll)
-                .toggleStyle(.switch).controlSize(.small)
+                .toggleStyle(.lumenSwitch).controlSize(.small)
             Toggle(L("warmup.followLinks"), isOn: $manualPlan.followLinks)
-                .toggleStyle(.switch).controlSize(.small)
+                .toggleStyle(.lumenSwitch).controlSize(.small)
             Text(L("warmup.note")).font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
