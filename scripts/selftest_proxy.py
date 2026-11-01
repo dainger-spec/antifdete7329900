@@ -38,6 +38,8 @@ can tell which requests reached the proxy, e.g. that a beacon did not).
 `/pb-login` is a sign-in form for the password AutoFill checks (`?signup=1`: a new password and
 its confirmation; `?spa=1`: no form, a button whose script removes the fields, as a sign-in by
 fetch does; `?autofocus=1`), and `/pb-frame?src=<url>` a page with that URL in an iframe.
+`/pb-app-banner` is a page with a Smart App Banner (`<meta name="apple-itunes-app">`): the start page of
+the self-test's app-link tracker check (measured: it brings no banner tracker up by itself).
 `/pb-cookies` shows the request's `Cookie` header (`PB-COOKIES cookie=...`), for the cookie import
 checks.
 
@@ -544,6 +546,14 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
             cookie_name = "".join(c if c.isalnum() else "_" for c in name)
             extra_headers = f"Set-Cookie: pbwarm_{cookie_name}={run or 'x'}; Max-Age=86400; Path=/\r\n"
             body, content_type = warmup_page(name, run), "text/html; charset=utf-8"
+    elif plain_path == "/pb-app-banner":
+        # A Smart App Banner, as youtube.com has one. Measured (CI 564): Safari's chrome brings no
+        # banner tracker up for it; the tracker that ended profiles belongs to the app-link banner
+        # (SelfTest's `safariAppLinkTracker`).
+        body = ('<!doctype html><html><head><meta charset="utf-8">'
+                '<meta name="apple-itunes-app" content="app-id=544007664, app-argument=https://selftest.invalid/app">'
+                '<title>PB app banner</title></head><body>PB-APP-BANNER</body></html>').encode()
+        content_type = "text/html; charset=utf-8"
     elif plain_path == "/pb-frame":
         src = parse_qs(query).get("src", ["about:blank"])[0].replace('"', "%22")
         body = (f'<!doctype html><html><head><title>PB frame</title></head><body>'

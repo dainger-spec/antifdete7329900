@@ -215,11 +215,13 @@ jobs:
         continue-on-error: true
         timeout-minutes: 4
         run: scripts/default_browser_check.sh build/unsandboxed/Lumen.app build/egress27/default-browser "macOS 27 - default browser"
-      - name: Safari 27's paths in a profile's process — empty paths, app groups, bookmarks (a measurement)
-        # The owner's Mac, 31 October: Safari's bookmarks database "at (null)", and an empty path
-        # handed to -[NSURL initFileURLWithPath:] by WBSBannerTracker. Who asks for a file URL with
-        # no path, with the frames that asked; the app groups asked for; Safari's own log about
-        # bookmarks, its tab collection and downloads (SafariPathsCheck). Never fails the build.
+      - name: Safari 27's paths at its start and on about:blank — empty paths, app groups, bookmarks (a measurement)
+        # The owner's Mac, 31 October: Safari's bookmarks database "at (null)". Who asks for a file
+        # URL with no path at Safari's start and on about:blank, with the frames that asked; the app
+        # groups asked for; Safari's own log about bookmarks, its tab collection and downloads
+        # (SafariPathsCheck). Never fails the build. It does not reach Safari's app-link banner
+        # tracker (no page loads in it): that one is the self-test's "Safari's app-link banner
+        # tracker" group, in a profile's own process.
         if: always()
         continue-on-error: true
         timeout-minutes: 3
@@ -588,11 +590,13 @@ jobs:
         continue-on-error: true
         timeout-minutes: 4
         run: scripts/default_browser_check.sh build/unsandboxed/Lumen.app build/default-browser "default browser"
-      - name: Safari's paths in a profile's process — empty paths, app groups, bookmarks (a measurement)
-        # The owner's Mac, 31 October: Safari's bookmarks database "at (null)", and an empty path
-        # handed to -[NSURL initFileURLWithPath:] by WBSBannerTracker. Who asks for a file URL with
-        # no path, with the frames that asked; the app groups asked for; Safari's own log about
-        # bookmarks, its tab collection and downloads (SafariPathsCheck). Never fails the build.
+      - name: Safari's paths at its start and on about:blank — empty paths, app groups, bookmarks (a measurement)
+        # The owner's Mac, 31 October: Safari's bookmarks database "at (null)". Who asks for a file
+        # URL with no path at Safari's start and on about:blank, with the frames that asked; the app
+        # groups asked for; Safari's own log about bookmarks, its tab collection and downloads
+        # (SafariPathsCheck). Never fails the build. It does not reach Safari's app-link banner
+        # tracker (no page loads in it): that one is the self-test's "Safari's app-link banner
+        # tracker" group, in a profile's own process.
         if: always()
         continue-on-error: true
         timeout-minutes: 3

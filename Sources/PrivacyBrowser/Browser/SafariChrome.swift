@@ -938,6 +938,67 @@ enum SafariChrome {
             replaceWithConstant(className, selectorName) { nil }
             lateStubsMade.insert(className + " " + selectorName)
         }
+        for (className, selectorName) in countedLateStubs where !lateStubsMade.contains(className + " " + selectorName) {
+            guard let cls = NSClassFromString(className),
+                  let method = class_getInstanceMethod(cls, NSSelectorFromString(selectorName)) else { continue }
+            let key = "-[\(className) \(selectorName)]"
+            let replacement: @convention(block) (AnyObject) -> AnyObject? = { _ in
+                SafariStubCount.reached(key)
+                return nil
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+            lateStubsMade.insert(className + " " + selectorName)
+        }
+    }
+
+    /// Late stubs that count how often they are reached (`SafariStubCount`, in the network report):
+    /// what a check of them reads back, so that it shows the stub was reached — by the page that
+    /// needs it — and not only that nothing went wrong. Each returns nothing (nil, NO, 0), and is
+    /// made only on a method that returns void, an object or a BOOL.
+    ///
+    /// Safari's tracker of the app-link banners a person dismissed (`WBSBannerTracker`, SafariShared;
+    /// its app-link subclass is in SafariSharedUI) reads and writes its file from -_filePath, which
+    /// in a profile's process is nil (measured, CI 571): the first time the banner asked it anything,
+    /// -load's block called -[NSURL initFileURLWithPath:isDirectory:] with that nil on the tracker's
+    /// own queue (com.apple.WBSAppLinkBannerTracker), which threw "nil string parameter"; nothing
+    /// caught it, and the profile's process ended (the owner's Mac, 31 October and 1 November,
+    /// youtube.com). Answered with nil instead, the next call in the same block
+    /// (+[NSData dataWithContentsOfURL:options:error:]) threw on the nil URL. So the tracker keeps
+    /// no file in a profile: what a person dismisses is remembered while the profile runs.
+    private static let countedLateStubs: [(String, String)] = [
+        ("WBSBannerTracker", "load"),
+        ("WBSBannerTracker", "_saveOnInteralQueue"),
+    ]
+
+    /// Safari's app-link banner tracker asked whether the banner for an identifier is blocked, as
+    /// the banner asks it before it shows itself (`-[WBSBannerTracker
+    /// isBannerBlockedForIdentifier:completion:]` on `+[WBSAppLinkBannerTracker sharedTracker]`):
+    /// the self-test's probe of the tracker in a profile's process (`ProfileNetworkGuard.report`).
+    /// The tracker reads its file first (`-load`), from a path this process does not have; with
+    /// its file reading and writing replaced (`countedLateStubs`) it answers from memory.
+    static func askAppLinkBannerTracker() async -> String {
+        guard let trackerClass: AnyObject = NSClassFromString("WBSAppLinkBannerTracker"),
+              let tracker = trackerClass.perform(NSSelectorFromString("sharedTracker"))?.takeUnretainedValue() else {
+            return "no tracker"
+        }
+        let selector = NSSelectorFromString("isBannerBlockedForIdentifier:completion:")
+        guard let method = class_getInstanceMethod(type(of: tracker), selector) else { return "no tracker" }
+        typealias Ask = @convention(c) (AnyObject, Selector, NSString, Any?) -> Void
+        let ask = unsafeBitCast(method_getImplementation(method), to: Ask.self)
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            let lock = NSLock()
+            var pending: CheckedContinuation<String, Never>? = continuation
+            func finish(_ answer: String) {
+                let waiting = lock.withLock { () -> CheckedContinuation<String, Never>? in
+                    defer { pending = nil }
+                    return pending
+                }
+                waiting?.resume(returning: answer)
+            }
+            let completion: @convention(block) (Bool) -> Void = { blocked in finish(blocked ? "blocked" : "not blocked") }
+            ask(tracker, selector, "selftest.invalid" as NSString, completion)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { finish("no answer") }
+        }
     }
 
     /// Safari's own `-[GeneralPreferences _defaultWebBrowserMayHaveChanged]`, before

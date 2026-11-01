@@ -6,13 +6,19 @@ import OSLog
 ///
 /// The owner's Mac, 31 October: Safari's bookmarks database "at (null)" (SQLite error 11, "Couldn't
 /// create bookmarks database at (null)", "Failed to instantiate tab collection") from a profile's
-/// first launch, and Safari's `WBSBannerTracker` handing an empty path to `-[NSURL
-/// initFileURLWithPath:isDirectory:]` on a background queue, which ended the process. In a process
-/// like a profile's — a home of its own, held to a closed proxy, Safari's chrome prepared — with
-/// Safari's window open, this prints every file URL asked for with an empty or missing path, with
-/// the frames that asked (and answers nil instead of throwing, so that the run goes on), every app
-/// group container asked for and what it answered, and the lines of this process's own log about
-/// bookmarks, Safari's tab collection, downloads and paths that are "(null)". A measurement.
+/// first launch. In a process like a profile's — a home of its own, held to a closed proxy,
+/// Safari's chrome prepared — with Safari's window open on about:blank, this prints every file URL
+/// asked for with an empty or missing path, with the frames that asked (and answers nil instead of
+/// throwing, so that the run goes on), every app group container asked for and what it answered,
+/// and the lines of this process's own log about bookmarks, Safari's tab collection, downloads and
+/// paths that are "(null)". A measurement of what Safari asks for at its start and on a blank page.
+///
+/// WHAT IT DOES NOT SEE: Safari's app-link banner tracker (`WBSAppLinkBannerTracker`), whose nil
+/// path ended profiles' processes, comes up only when a page an app or web app of the Mac opens is
+/// shown — never on about:blank, and no page loads here at all (Safari's web views get the guard's
+/// closed store: this process has no profile's session). This check said "no empty path" for weeks
+/// while the tracker went on ending profiles (owner, 1 November). The tracker is checked by the
+/// self-test's "Safari's app-link banner tracker" group, in a profile's own process.
 @MainActor
 enum SafariPathsCheck {
     static func run(arguments: [String]) -> Never {

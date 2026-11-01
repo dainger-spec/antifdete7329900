@@ -615,6 +615,18 @@ blockers, each closed in one line:
     The block tail-calls `-setObject:forKeyedSubscript:`, so it never appears in a backtrace and no
     debugger can name it; the write is dropped and logged.
 
+11. **The app-link banner's tracker.** A page that an app or a web app of the Mac opens (the
+    owner's: youtube.com) has Safari offer "Open in …" in a banner, which first asks
+    `+[WBSAppLinkBannerTracker sharedTracker]` whether it was dismissed. The tracker reads its file
+    lazily, on a queue of its own, from `-_filePath` — nil in a profile's process — and
+    `-[NSURL initFileURLWithPath:isDirectory:]` threw "nil string parameter" there; nothing caught it,
+    and the process ended (31 October, 1 November). Its `-load` and `-_saveOnInteralQueue` do nothing
+    in a profile's process now: dismissals are remembered while the profile runs. A page with a Smart
+    App Banner (`apple-itunes-app`) never brings this tracker up — measured, branch
+    claude/measure-banner — and a CI runner has no app for any address, so the self-test asks the
+    tracker as the banner does, in a profile's own process; without the change the process ends
+    there, with the owner's exception (CI 571, macOS 26 and 27).
+
 Two things about method: every stack logged through `os_log` was cut off after about seven frames,
 which hid the callers that mattered for three rounds — log one frame per line. And an exception has
 no `callStackSymbols` before it is raised, so the preprocessor reads the live stack with

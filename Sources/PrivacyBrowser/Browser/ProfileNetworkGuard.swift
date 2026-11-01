@@ -1118,6 +1118,13 @@ enum ProfileNetworkGuard {
             report.udp["udp"] = await datagram(to: "192.0.2.16", using: .udp)
             report.udp["quic"] = await datagram(to: "192.0.2.17", using: NWParameters(quic: NWProtocolQUIC.Options(alpn: ["h3"])))
         }
+        if probe != nil {
+            // Safari's app-link banner tracker, asked as its banner asks it: its file read from a
+            // path the process does not have ended the profile's process (SafariChrome).
+            report.appLinkTrackerAnswer = await SafariChrome.askAppLinkBannerTracker()
+        }
+        // Last: what the probes above reached is counted too.
+        report.stubsReached = SafariStubCount.snapshot
         return report
     }
 
@@ -1258,6 +1265,13 @@ struct ProfileNetworkReport: Codable, Equatable {
     var credentialsKept = false
     /// What `HandOffs` refused, by kind ("open", "share", "clipboard").
     var handOffsRefused: [String: Int] = [:]
+    /// Safari's methods replaced by a counted stub, by "-[Class selector]", and how often each was
+    /// reached in this process (`SafariStubCount`): Safari's app links and the tracker of their
+    /// banner, once a page an app of this Mac opens has been shown.
+    var stubsReached: [String: Int] = [:]
+    /// What Safari's app-link banner tracker answered when the self-test's probe asked it whether a
+    /// banner is blocked, as the banner asks it ("blocked", "not blocked", "no answer", "no tracker").
+    var appLinkTrackerAnswer = ""
     /// The names in the process's environment (`ProfileProcess.childEnvironment`), and where its
     /// home and temporary files go: `HOME`, `TMPDIR`, `CFFIXED_USER_HOME` and Foundation's
     /// temporary directory, by those names.

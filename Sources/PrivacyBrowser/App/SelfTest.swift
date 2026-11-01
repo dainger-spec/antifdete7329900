@@ -358,6 +358,7 @@ final class SelfTest {
         await group("warm-up") { try await warmUp(repository) }
         await group("warm-up queue") { try await warmUpQueue(repository) }
         await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
+        await group("Safari's app-link banner tracker") { try await safariAppLinkTracker(repository) }
         await group("a mobile view in its own process") { try await mobileViewInItsOwnProcess(repository) }
         await group("lock during launch") { try await lockDuringLaunch(repository) }
         await group("quit") { try await quitFromFocusedPage(repository) }
@@ -4701,6 +4702,74 @@ final class SelfTest {
     /// Safari's chrome is hosted. Here an iPhone view runs in its own process, its page loaded; once
     /// it settles, its processor time over eight seconds, against a control that keeps this process
     /// busy, read the same way.
+    /// Safari's app-link banner tracker in a profile's own process, in Safari's window. The banner
+    /// ("Open in …", shown for a page an app or a web app of this Mac opens) asks the tracker
+    /// whether it is blocked; the tracker first reads its file (-load), whose path (-_filePath) is
+    /// nil in a profile's process: -[NSURL initFileURLWithPath:isDirectory:] threw "nil string
+    /// parameter" on the tracker's own queue, nothing caught it, and the profile's process ended
+    /// (the owner's Mac, 31 October and 1 November, youtube.com).
+    ///
+    /// A runner has no app or web app for any address (measured, branch claude/measure-banner, CI
+    /// 566: none for Music's, the App Store's, News', Podcasts', TV's or YouTube's addresses — Safari
+    /// asked, and nothing came back), so no page brings the banner up here. The profile's process is
+    /// asked to ask the tracker as the banner asks it (the network report's probe). Measured the same
+    /// way on both macOS (CI 571): without the fix the process ends there, with the owner's
+    /// exception; with it, the tracker answers and its file reading, closed, says it was reached.
+    ///
+    /// The start page is one with a Smart App Banner (`<meta name="apple-itunes-app">`), as the
+    /// owner asked: measured, it brings no tracker up (CI 564), so nothing here rests on it.
+    private func safariAppLinkTracker(_ repository: ProfileRepository) async throws {
+        let name = "app links: Safari's app-link banner tracker, asked in a profile's own process as its banner asks it, answers, and the process lives"
+        guard !AppEnvironment.isSandboxed else {
+            skip(name, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        let profile = try repository.create(name: "App links", configuration: ProfileConfiguration(
+            startURL: URL(string: "http://banner-\(run).selftest.invalid/pb-app-banner?run=\(run)"), proxy: proxy,
+            matchProxyLocation: false))
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        var exited: Int32?
+        manager.onChildExited = { _, status in exited = status }
+        var report: ProfileNetworkReport?
+        manager.onNetworkReport = { _, received in report = received }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        do {
+            try await manager.launch(profile.id)
+        } catch {
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            check(name, false, "its process did not start: \(error)")
+            return
+        }
+        setenv("PB_PROFILE_PROCESS", "0", 1)
+        if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+        let up = await waitUntil(timeout: 90) { hostsChrome != nil || exited != nil }
+        guard up, hostsChrome == true, exited == nil else {
+            check(name, false, "Safari's window did not come up in the profile's process (running \(String(describing: hostsChrome)), ended \(exited.map(String.init) ?? "no"))")
+            await manager.shutDown()
+            return
+        }
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        _ = manager.checkNetwork(profile.id, probe: URL(string: "https://probe-\(run).selftest.invalid/pb-leak/applinks?run=\(run)"))
+        _ = await waitUntil(timeout: 40) { report != nil || exited != nil }
+        // The tracker reads on its own queue: the process is looked at again a little later.
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        let reads = report?.stubsReached["-[WBSBannerTracker load]"] ?? 0
+        check(name, exited == nil && report?.appLinkTrackerAnswer.hasSuffix("blocked") == true,
+              "the tracker answered \(report.map { "\"\($0.appLinkTrackerAnswer)\"" } ?? "nothing (no report)"), the process \(exited.map { "ENDED with status \($0)" } ?? "is running")")
+        check("app links: the tracker went to read its file, and that reading — from a path a profile's process does not have — was closed",
+              reads >= 1, "-[WBSBannerTracker load] reached \(reads) times: the probe did not get the tracker to its file, so this run says nothing about the reading that ended the profiles")
+        await manager.shutDown()
+    }
+
     private func mobileViewInItsOwnProcess(_ repository: ProfileRepository) async throws {
         let name = "mobile view process: an iPhone view in its own process, idle, does not keep it busy"
         guard !AppEnvironment.isSandboxed else {
