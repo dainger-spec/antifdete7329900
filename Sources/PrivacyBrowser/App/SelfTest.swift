@@ -3412,7 +3412,8 @@ final class SelfTest {
         let profile = try repository.create(name: "Unreadable settings", configuration: ProfileConfiguration(
             proxy: ProxySettings(kind: .socks5, host: "127.0.0.1", port: 9)))
         defer { try? repository.delete(profile.id) }
-        let url = repository.configURL(for: profile.id)
+        // The core's configURL is its own: the file is named here by the profile's folder.
+        let url = repository.directory(for: profile.id).appendingPathComponent("config.bin")
         var damaged = try Data(contentsOf: url)
         damaged[damaged.count - 1] ^= 0x01
         try damaged.write(to: url)
