@@ -466,6 +466,10 @@ final class KeySpy: NSDictionary {
         nil
     }
 
+    required convenience init(dictionaryLiteral elements: (Any, Any)...) {
+        self.init()
+    }
+
     override var count: Int { 0 }
     override func object(forKey key: Any) -> Any? {
         let name = "\(path).\(key)"
