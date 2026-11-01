@@ -5,60 +5,96 @@ import SwiftUI
 /// its state, the Enable button (system prompts), where to allow it in System Settings, and what
 /// happens while it is off.
 struct TunnelSettingsView: View {
-    /// Shown as a section of Settings: the form alone, without the sheet's title and Done.
+    /// Shown as a section of Settings: the page alone, without the sheet's title and Done.
     var embedded = false
     @ObservedObject private var tunnel = TunnelManager.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         if embedded {
-            form
-                .onAppear { tunnel.refresh() }
+            SettingsPage(title: L("settings.section.webRTC"), subtitle: L("settings.webRTC.subtitle")) {
+                rows
+            }
+            .onAppear { tunnel.refresh() }
         } else {
             VStack(alignment: .leading, spacing: 0) {
-                SheetHeader(title: L("tunnel.title"))
-                form
+                SheetHeader(title: L("tunnel.title"), subtitle: L("settings.webRTC.subtitle"))
+                ScrollView {
+                    rows
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 18)
+                }
+                .scrollBounceBehavior(.basedOnSize)
                 SheetFooter {
                     Button(L("common.done")) { dismiss() }
                         .buttonStyle(.lumenPrimary)
                         .keyboardShortcut(.defaultAction)
                 }
             }
-            .sheetFrame(width: 560)
+            .sheetFrame(width: 600, height: 620)
             .background(Theme.raised)
             .onAppear { tunnel.refresh() }
         }
     }
 
-    /// The form, as the sheet shows it and as Settings shows it (`embedded`).
-    private var form: some View {
-        Form {
-            Text(L("tunnel.intro")).fixedSize(horizontal: false, vertical: true)
-
-            Section(L("tunnel.status")) {
-                Label(statusText, systemImage: statusSymbol).foregroundStyle(statusColor)
-                if tunnel.state != .notBuilt {
-                    HStack {
-                        Button(L("tunnel.enable")) { tunnel.enable() }
-                            .disabled(tunnel.state == .checking || tunnel.canCarryWebRTC)
-                        Button(L("tunnel.openSettings")) { tunnel.openSystemSettings() }
-                        Button(L("tunnel.refresh")) { tunnel.refresh() }
-                    }
-                    Text(L("tunnel.instructions")).font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text(L("tunnel.notBuilt.note")).font(.caption).foregroundStyle(.secondary)
+    /// The design's page: the state, with what can be done about it, then how it works and its
+    /// limits. The same buttons as ever — the extension itself is not touched here.
+    private var rows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCaption(L("tunnel.status"))
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(dotColor)
+                        .frame(width: 7, height: 7)
+                        .accessibilityHidden(true)
+                    Text(statusText)
+                        .font(.lumenRowTitle)
+                        .foregroundStyle(Theme.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if !tunnel.canCarryWebRTC {
+                    Text(L("tunnel.warning.off"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 17)
+                }
+                if tunnel.state != .notBuilt {
+                    HStack(spacing: 8) {
+                        Button(L("tunnel.enable")) { tunnel.enable() }
+                            .buttonStyle(.lumenSecondary)
+                            .disabled(tunnel.state == .checking || tunnel.canCarryWebRTC)
+                        Button(L("tunnel.openSettings")) { tunnel.openSystemSettings() }
+                            .buttonStyle(.lumenGhost)
+                        Button(L("tunnel.refresh")) { tunnel.refresh() }
+                            .buttonStyle(.lumenGhost)
+                    }
+                    .padding(.leading, 17)
+                    .padding(.top, 4)
+                    Text(L("tunnel.instructions"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 17)
+                        .padding(.top, 2)
+                } else {
+                    Text(L("tunnel.notBuilt.note"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 17)
+                }
             }
+            .padding(.vertical, 18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
+            .accessibilityElement(children: .contain)
 
-            if !tunnel.canCarryWebRTC {
-                Label(L("tunnel.warning.off"), systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(Theme.warning).fixedSize(horizontal: false, vertical: true)
-            }
-            Text(L("tunnel.limits")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            SettingsCaption(L("settings.webRTC.how"))
+            SettingRow(L("tunnel.relay.title"), detail: L("tunnel.intro"), effect: nil) { EmptyView() }
+            SettingRow(L("tunnel.limits.title"), detail: L("tunnel.limits"), effect: nil) { EmptyView() }
         }
-        .lumenForm()
     }
 
     private var statusText: String {
@@ -74,21 +110,14 @@ struct TunnelSettingsView: View {
         }
     }
 
-    private var statusSymbol: String {
-        switch tunnel.state {
-        case .ready, .connected: return "checkmark.shield.fill"
-        case .awaitingApproval, .needsConfiguration, .checking: return "hourglass"
-        case .failed: return "xmark.octagon.fill"
-        case .notBuilt, .off: return "shield.slash"
-        }
-    }
-
-    private var statusColor: Color {
+    /// The state's dot (the design's): green when WebRTC can go through the proxies, amber while it
+    /// cannot (it is then off in proxied profiles), red on an error; the words beside it say which.
+    private var dotColor: Color {
         switch tunnel.state {
         case .ready, .connected: return Theme.running
         case .failed: return Theme.danger
-        case .awaitingApproval, .needsConfiguration: return Theme.warning
-        default: return .secondary
+        case .checking: return Theme.textTertiary
+        case .notBuilt, .off, .awaitingApproval, .needsConfiguration: return Theme.warning
         }
     }
 }

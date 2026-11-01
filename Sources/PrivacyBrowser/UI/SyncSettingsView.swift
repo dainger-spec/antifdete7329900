@@ -7,7 +7,7 @@ import SwiftUI
 /// Folder = local-only transport (works today, no server). Server = client for
 /// docs/SYNC_SERVER_API.md (ready for a future server; none is included).
 struct SyncSettingsView: View {
-    /// Shown as a section of Settings: the form alone, without the sheet's title and Done.
+    /// Shown as a section of Settings: the page alone, without the sheet's title and Done.
     var embedded = false
     enum Mode: String, CaseIterable, Identifiable {
         case off, folder, server
@@ -30,29 +30,39 @@ struct SyncSettingsView: View {
 
     var body: some View {
         if embedded {
-            form
-                .onAppear(perform: load)
+            SettingsPage(title: L("settings.section.sync"), subtitle: L("settings.sync.subtitle")) {
+                rows
+            }
+            .onAppear(perform: load)
         } else {
             VStack(alignment: .leading, spacing: 0) {
-                SheetHeader(title: L("sync.title"))
-                form
+                SheetHeader(title: L("sync.title"), subtitle: L("settings.sync.subtitle"))
+                ScrollView {
+                    rows
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 18)
+                }
+                .scrollBounceBehavior(.basedOnSize)
                 SheetFooter {
                     Button(L("common.done")) { dismiss() }
                         .buttonStyle(.lumenPrimary)
                         .keyboardShortcut(.defaultAction)
                 }
             }
-            .sheetFrame(width: 540)
+            .sheetFrame(width: 620, height: 640)
             .background(Theme.raised)
             .onAppear(perform: load)
         }
     }
 
-    /// The form, as the sheet shows it and as Settings shows it (`embedded`).
-    private var form: some View {
-        Form {
-            Picker(L("sync.to"), selection: $mode) {
-                ForEach(Mode.allCases) { Text(L($0.labelKey)).tag($0) }
+    /// The design's page: where to (off, a folder, a server) and its place, the last sync with
+    /// "Sync now", and what is synced. The same actions as ever.
+    private var rows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingRow(L("sync.to"), detail: modeDetail, effect: .now) {
+                LumenSegmented(selection: $mode, options: Mode.allCases.map { (value: $0, title: L($0.labelKey)) })
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(L("sync.to"))
             }
             .onChange(of: mode) { _, newValue in
                 if newValue == .off, model.syncTarget != nil { model.clearSyncTarget() }
@@ -60,37 +70,85 @@ struct SyncSettingsView: View {
 
             switch mode {
             case .off:
-                Text(L("sync.off.note")).foregroundStyle(.secondary)
+                EmptyView()
             case .folder:
-                LabeledContent(L("sync.folder.label")) {
-                    HStack {
-                        Text(folderPath ?? L("sync.folder.none")).lineLimit(1).truncationMode(.middle)
+                SettingsCaption(L("sync.folder.label"))
+                SettingRow(L("sync.folder.row"), detail: L("sync.folder.row.detail"), effect: nil) {
+                    HStack(spacing: 10) {
+                        Text(folderPath ?? L("sync.folder.none"))
+                            .font(.lumenBody)
+                            .foregroundStyle(folderPath == nil ? Theme.textTertiary : Theme.textPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 220, alignment: .trailing)
+                            .help(folderPath ?? "")
                         Button(L("sync.folder.choose"), action: chooseFolder)
+                            .buttonStyle(.lumenSecondary)
                     }
                 }
-                Text(L("sync.folder.note")).font(.caption).foregroundStyle(.secondary)
+                Text(L("sync.folder.note"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 6)
             case .server:
-                TextField(L("sync.server.url"), text: $serverURL, prompt: Text(verbatim: "https://sync.example.com"))
-                SecureField(L("sync.server.token"), text: $token)
-                Button(L("sync.server.save")) { model.setSyncServer(baseURL: serverURL, token: token) }
-                    .disabled(serverURL.isEmpty)
-                Text(L("sync.server.note")).font(.caption).foregroundStyle(.secondary)
+                SettingsCaption(L("sync.mode.server"))
+                SettingRow(L("sync.server.url"), detail: nil, effect: nil) {
+                    TextField(L("sync.server.url"), text: $serverURL, prompt: Text(verbatim: ""))
+                        .lumenField("https://sync.example.com", isEmpty: serverURL.isEmpty) // l10n: not text
+                        .frame(width: 280)
+                }
+                SettingRow(L("sync.server.token"), detail: nil, effect: nil) {
+                    SecureField(L("sync.server.token"), text: $token, prompt: Text(verbatim: ""))
+                        .lumenField()
+                        .frame(width: 280)
+                }
+                HStack(alignment: .top, spacing: 16) {
+                    Text(L("sync.server.note"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button(L("sync.server.save")) { model.setSyncServer(baseURL: serverURL, token: token) }
+                        .buttonStyle(.lumenSecondary)
+                        .disabled(serverURL.isEmpty)
+                }
+                .padding(.bottom, 6)
             }
 
-            Section(L("sync.status")) {
-                Text(statusText).foregroundStyle(model.lastSyncStatus?.error == nil ? Color.secondary : Theme.danger)
-                HStack {
-                    Button(L("sync.now")) { Task { await model.syncNow() } }
-                        .disabled(model.syncTarget == nil || model.isWorking || model.hasRunningProfiles)
+            SettingsCaption(L("sync.status"))
+            SettingCustomRow(L("sync.status.row")) {
+                Text(statusText)
+                    .font(.lumenBody)
+                    .foregroundStyle(model.lastSyncStatus?.error == nil ? Theme.textSecondary : Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.hasRunningProfiles {
+                    Text(L("sync.stopFirst"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .padding(.top, 2)
+                }
+            } control: {
+                HStack(spacing: 8) {
                     if model.isWorking { ProgressView().controlSize(.small) }
-                    if model.hasRunningProfiles {
-                        Text(L("sync.stopFirst")).font(.caption).foregroundStyle(.secondary)
-                    }
+                    Button(L("sync.now")) { Task { await model.syncNow() } }
+                        .buttonStyle(.lumenSecondary)
+                        .disabled(model.syncTarget == nil || model.isWorking || model.hasRunningProfiles)
                 }
             }
-            Text(L("sync.footer")).font(.caption).foregroundStyle(.secondary)
+
+            SettingsCaption(L("sync.what"))
+            SettingRow(L("sync.what.row"), detail: L("sync.footer"), effect: nil) { EmptyView() }
         }
-        .lumenForm()
+    }
+
+    /// What the chosen place is, under "Sync to".
+    private var modeDetail: String {
+        switch mode {
+        case .off: return L("sync.off.note")
+        case .folder: return L("sync.to.folder.detail")
+        case .server: return L("sync.to.server.detail")
+        }
     }
 
     private var folderPath: String? {

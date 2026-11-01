@@ -23,26 +23,12 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             sidebar
             Rectangle().fill(Theme.divider).frame(width: 1)
-            Group {
-                if section.scrollsItself {
-                    // A form that scrolls on its own, under the page's title.
-                    VStack(alignment: .leading, spacing: 0) {
-                        SettingsPageHeader(section: section)
-                            .padding(.horizontal, 56)
-                            .padding(.top, 40)
-                        pane
-                            .padding(.horizontal, 40)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    }
-                } else {
-                    ScrollView {
-                        pane
-                            .frame(maxWidth: 640, alignment: .leading)
-                            .padding(.horizontal, 56)
-                            .padding(.vertical, 40)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
+            ScrollView {
+                pane
+                    .frame(maxWidth: 640, alignment: .leading)
+                    .padding(.horizontal, 56)
+                    .padding(.vertical, 40)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .id(section)
         }
@@ -202,9 +188,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     /// New in this design: said beside it.
     var isNew: Bool { self == .appearance }
 
-    /// A form of its own that scrolls (the sheets' content, shown here): no scroll view around it.
-    var scrollsItself: Bool { self == .webRTC || self == .sync || self == .automation }
-
     var titleKey: String {
         switch self {
         case .startup: return "settings.section.startup"
@@ -224,16 +207,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The sentence under the title of a section whose page is a form of its own.
-    var subtitleKey: String? {
-        switch self {
-        case .webRTC: return "settings.webRTC.subtitle"
-        case .sync: return "settings.sync.subtitle"
-        case .automation: return "settings.automation.subtitle"
-        default: return nil
-        }
-    }
-
     var symbol: String {
         switch self {
         case .startup: return "power"
@@ -250,27 +223,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shortcuts: return "keyboard"
         case .diagnostics: return "stethoscope"
         case .about: return "info.circle"
-        }
-    }
-}
-
-/// The title of a section whose page is a form of its own, with its sentence.
-private struct SettingsPageHeader: View {
-    let section: SettingsSection
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L(section.titleKey))
-                .lumenPageTitle()
-                .foregroundStyle(Theme.textPrimary)
-                .accessibilityAddTraits(.isHeader)
-            if let key = section.subtitleKey {
-                Text(L(key))
-                    .font(.system(size: 14))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 640, alignment: .leading)
-            }
         }
     }
 }
@@ -373,11 +325,11 @@ struct SettingsCaption: View {
 /// and its control at the right.
 struct SettingRow<Control: View>: View {
     let title: String
-    let detail: String
+    let detail: String?
     let effect: SettingEffect?
     let control: Control
 
-    init(_ title: String, detail: String, effect: SettingEffect?, @ViewBuilder control: () -> Control) {
+    init(_ title: String, detail: String?, effect: SettingEffect?, @ViewBuilder control: () -> Control) {
         self.title = title
         self.detail = detail
         self.effect = effect
@@ -391,10 +343,52 @@ struct SettingRow<Control: View>: View {
                     .font(.lumenRowTitle)
                     .foregroundStyle(Theme.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(detail)
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textSecondary)
+                if let detail {
+                    Text(detail)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let effect {
+                    Label(effect.text, systemImage: effect.symbol)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .padding(.top, 4)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            control
+        }
+        .padding(.vertical, 18)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// The same row with more under its title than a sentence (a token, a state in its colour, buttons
+/// of their own): the design's row, its line above it, its control at the right.
+struct SettingCustomRow<Detail: View, Control: View>: View {
+    let title: String
+    let effect: SettingEffect?
+    let detail: Detail
+    let control: Control
+
+    init(_ title: String, effect: SettingEffect? = nil, @ViewBuilder detail: () -> Detail,
+         @ViewBuilder control: () -> Control) {
+        self.title = title
+        self.effect = effect
+        self.detail = detail()
+        self.control = control()
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 24) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.lumenRowTitle)
+                    .foregroundStyle(Theme.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
+                detail
                 if let effect {
                     Label(effect.text, systemImage: effect.symbol)
                         .font(.lumenSecondary)

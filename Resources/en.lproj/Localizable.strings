@@ -13,6 +13,7 @@
 "automation.example.copy" = "Copy Command";
 "automation.note" = "Start and stop profiles, open pages in them, and read or write their cookies from a script on this Mac — curl, Python or scripts/pbctl. Only this Mac can connect (127.0.0.1), only with the token, and never a web page. Anyone who has the token can start your profiles and read their cookies: keep it like a password.";
 "automation.port" = "Port";
+"automation.port.detail" = "Scripts connect to 127.0.0.1 on this port.";
 "automation.port.apply" = "Apply";
 "automation.state" = "Status";
 "automation.state.failed" = "Not listening: %@";
@@ -851,7 +852,7 @@
 "sync.folder.note" = "Encrypted blobs are written to this folder (a NAS share, an external disk). Use one folder per vault. Concurrent writes from two Macs through a file-syncing service can produce conflict copies, which are ignored.";
 "sync.folder.panel" = "Choose a folder to use as the encrypted sync store.";
 "sync.footer" = "Synced, end-to-end encrypted: profile list, settings, saved passwords, bookmarks, history. Not synced: website data (cookies, storage, cache). The sync location can see object counts, sizes, timing, and the vault header needed to unlock with the master password.";
-"sync.mode.folder" = "Folder (local-only)";
+"sync.mode.folder" = "Folder";
 "sync.mode.off" = "Off";
 "sync.mode.server" = "Server";
 "sync.now" = "Sync Now";
@@ -874,6 +875,13 @@
 "sync.status.uploaded" = "%ld uploaded";
 "sync.stopFirst" = "Stop all profiles first.";
 "sync.title" = "Sync";
+"sync.status.row" = "Last sync";
+"sync.what" = "What is synced";
+"sync.what.row" = "End-to-end encrypted";
+"sync.folder.row" = "Encrypted blocks are written to";
+"sync.folder.row.detail" = "A network drive or an external disk.";
+"sync.to.folder.detail" = "One folder on a storage device — a network drive or a disk; no server.";
+"sync.to.server.detail" = "A server with the sync API, over HTTPS only.";
 "sync.to" = "Sync to";
 "tab.newTab" = "New Tab";
 "toolbar.back" = "Back";
@@ -909,6 +917,8 @@
 "tunnel.state.reboot" = "a restart of the Mac is needed";
 "tunnel.status" = "Status";
 "tunnel.title" = "WebRTC through proxies";
+"tunnel.relay.title" = "A relay at the proxy's address";
+"tunnel.limits.title" = "Limits";
 "tunnel.warning.off" = "While the extension is off, WebRTC is off in profiles with a proxy: otherwise its UDP (STUN, TURN, media) would go around the proxy, from this Mac's real IP.";
 "unlock.action.unlock" = "Unlock";
 "unlock.reset.action" = "Forgot password…";
@@ -1414,6 +1424,7 @@
 "settings.section.security" = "Security";
 "settings.section.automation" = "Automation API";
 "settings.webRTC.subtitle" = "The network extension that carries the WebRTC of profiles with a SOCKS5 proxy through that proxy.";
+"settings.webRTC.how" = "How it works";
 "settings.sync.subtitle" = "Where this Mac syncs its profiles to, and a sync now.";
 "settings.automation.subtitle" = "A local API for scripts on this Mac: off until you turn it on.";
 "settings.appearance.subtitle" = "Dark monochrome, the light at entry and the list's density — for the app's own windows. Pages follow macOS, as in Safari.";
