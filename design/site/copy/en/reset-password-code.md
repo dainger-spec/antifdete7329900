@@ -14,7 +14,7 @@ RU
 
 # Check your email
 
-If there is an account with **you@example.com**, we sent a code to it. Enter it and a new password. The code is valid for 15 minutes; you have 5 attempts to enter it.
+If there is an account with **you@example.com**, we sent a code to it. Enter it and a new password. The code works for 15 minutes, and you can enter it 5 times.
 
 Code from the email
 

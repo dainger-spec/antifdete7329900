@@ -35,11 +35,11 @@ export default {
   },
   code: {
     title: 'Check your email',
-    lead: 'We sent an email to **you@example.com**. If there is no account with this address yet, the email has a six-digit code. If there already is one, the email tells you how to sign in.',
+    lead: 'We sent an email to **you@example.com**. If there is no account with that email yet, it has a six-digit code. If there is one, the email tells you how to sign in.',
     label: 'Code from the email',
     action: 'Confirm',
     change: 'Another email',
-    hint: 'The code is valid for 15 minutes; you have 5 attempts to enter it. No email? Check your spam folder.',
+    hint: 'The code works for 15 minutes, and you can enter it 5 times. After that, start the registration again. No email? Check your spam folder.',
   },
   reset: {
     title: 'Reset your password',
@@ -51,7 +51,7 @@ export default {
   },
   resetCode: {
     title: 'Check your email',
-    lead: 'If there is an account with **you@example.com**, we sent a code to it. Enter it and a new password. The code is valid for 15 minutes; you have 5 attempts to enter it.',
+    lead: 'If there is an account with **you@example.com**, we sent a code to it. Enter it and a new password. The code works for 15 minutes, and you can enter it 5 times.',
     label: 'Code from the email',
     password: 'New password',
     repeat: 'Repeat new password',

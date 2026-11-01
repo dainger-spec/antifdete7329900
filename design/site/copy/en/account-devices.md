@@ -32,6 +32,6 @@ Sign out
 
 We have no computer names and no IP addresses: a device is known by its code and label. The app shows the code in Settings → Account.
 
-An unlinked Mac without internet can keep working for 7 more days. So the next unlink can be made 7 days after the previous one.
+An unlinked Mac without internet can keep working for up to 7 days. So the next unlink can be made 7 days after the previous one.
 
 OverviewDevicesSyncPaymentsTeamSettings
