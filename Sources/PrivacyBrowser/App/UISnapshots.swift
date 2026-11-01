@@ -797,7 +797,7 @@ enum UISnapshots {
                            appearsAs: mac, lastUsed: nil, exitUnconfirmed: true, tags: ["ads"]),
             // Its settings could not be read: not "Direct", and it does not start (R1).
             ProfileRowItem(id: id(8), name: "Archive", activity: .stopped, exit: .unreadable, ephemeral: false,
-                           appearsAs: mac, lastUsed: now.addingTimeInterval(-30 * 86_400)),
+                           appearsAs: "—", lastUsed: now.addingTimeInterval(-30 * 86_400)),
         ]
     }
 }

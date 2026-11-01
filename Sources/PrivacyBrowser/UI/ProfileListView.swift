@@ -239,7 +239,8 @@ struct ProfileListView: View {
                 id: profile.id, name: profile.name, activity: activity,
                 exit: exit,
                 ephemeral: details?.ephemeral ?? false,
-                appearsAs: ProfileRowItem.appearsAs(details?.deviceGeneration ?? DeviceGenerations.resolved(id: nil)),
+                // Settings that could not be read say nothing of how it appears: no default shown for them.
+                appearsAs: details.map { ProfileRowItem.appearsAs($0.deviceGeneration) } ?? "—",
                 lastUsed: profile.lastLaunchedAt,
                 warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
                 warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false,
