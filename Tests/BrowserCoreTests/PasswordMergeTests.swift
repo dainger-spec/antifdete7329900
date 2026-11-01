@@ -14,6 +14,7 @@ final class PasswordMergeTests: XCTestCase {
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: root)
+        PasswordVault.deviceName = nil
     }
 
     private let base = PasswordEntry(origin: "https://site.example", username: "me", password: "first",
@@ -169,6 +170,155 @@ final class PasswordMergeTests: XCTestCase {
         try vault.upsert(PasswordEntry(origin: "https://new.example", username: "u", password: "new"))
         XCTAssertEqual(try repository.passwordVault(for: id).allEntries().map(\.password), ["new", "p1", "p2", "p3"],
                        "the logins read before the file went were dropped")
+    }
+
+    // MARK: Conflicts: which device, when, and never one copy over another
+
+    /// Two devices change the same login between syncs: both versions stay, each saying which Mac
+    /// made it and when (by that Mac's clock, shown, never trusted to drop either).
+    func testEachVersionSaysWhichMacMadeItAndWhen() async throws {
+        let (transport, a, b, id) = try await twoDevices()
+        PasswordVault.deviceName = "Mac A"
+        try a.passwordVault(for: id).upsert(PasswordEntry(origin: "https://site.example", username: "me", password: "first"))
+        try await sync(a, transport)
+        try await sync(b, transport)
+        XCTAssertEqual(try b.passwordVault(for: id).allEntries().first?.device, "Mac A")
+        try a.passwordVault(for: id).upsert(PasswordEntry(origin: "https://site.example", username: "me", password: "from A"))
+        PasswordVault.deviceName = "Mac B"
+        try b.passwordVault(for: id).upsert(PasswordEntry(origin: "https://site.example", username: "me", password: "from B"))
+        try await sync(a, transport)
+        try await sync(b, transport)
+        try await sync(a, transport)
+        for device in [a, b] {
+            let entries = try device.passwordVault(for: id).allEntries()
+            XCTAssertEqual(Set(entries.map { "\($0.password)@\($0.device ?? "?")" }), ["from A@Mac A", "from B@Mac B"])
+            XCTAssertEqual(entries.filter(\.isConflictVersion).count, 1)
+        }
+    }
+
+    /// Three devices change the same login between syncs: the login and two versions beside it,
+    /// each its own (none written over another), whichever order the copies meet in.
+    func testVersionsKeptAfterConflictsNeverWriteOverEachOther() {
+        let onA = changed(base, password: "from A", at: 1_800_000_100)
+        let onB = changed(base, password: "from B", at: 1_800_000_200)
+        let onC = changed(base, password: "from C", at: 1_800_000_300)
+        let orders = [[onA, onB, onC], [onC, onB, onA], [onB, onA, onC], [onC, onA, onB]]
+        let results = orders.map { order in order.dropFirst().reduce(document([order[0]])) { PasswordDocument.merge($0, document([$1])) } }
+        for result in results {
+            XCTAssertEqual(result, results[0], "the order the copies met in changed the result")
+        }
+        let merged = results[0]
+        XCTAssertEqual(passwords(merged), ["from A", "from B", "from C"])
+        XCTAssertEqual(Set(merged.entries.map(\.id)).count, 3, "a version kept after a conflict was written over by another")
+        XCTAssertEqual(merged.entries.filter { $0.conflictOf == self.base.id }.count, 2)
+        // A third conflict on top of the first two: one more beside them, none gone.
+        let onD = changed(base, password: "from D", at: 1_800_000_050)
+        XCTAssertEqual(passwords(PasswordDocument.merge(merged, document([onD]))), ["from A", "from B", "from C", "from D"])
+    }
+
+    // MARK: The same login saved apart on two devices
+
+    /// Two devices each save a login for the same website and user name before they sync: two ids,
+    /// one account. After a merge it is one login; the other's password, when it differs, is kept
+    /// beside it; neither device brings the second login back, and the login can be edited.
+    func testTheSameLoginSavedApartOnTwoDevicesIsOneLoginWithNothingLost() throws {
+        let onA = PasswordEntry(origin: "https://site.example", username: "me", password: "pa",
+                                updatedAt: Date(timeIntervalSince1970: 1_800_000_100), version: UUID(), ancestors: [])
+        let onB = PasswordEntry(origin: "https://site.example", username: "me", password: "pb",
+                                updatedAt: Date(timeIntervalSince1970: 1_800_000_200), version: UUID(), ancestors: [])
+        let merged = PasswordDocument.merge(document([onA]), document([onB]))
+        let live = merged.entries.filter { !$0.isConflictVersion }
+        XCTAssertEqual(live.count, 1, "two logins for one account")
+        XCTAssertEqual(live.first?.password, "pb", "the later one (a hint) is the login")
+        XCTAssertEqual(passwords(merged), ["pa", "pb"], "a password was dropped")
+        XCTAssertEqual(merged.entries.first { $0.isConflictVersion }?.conflictOf, live.first?.id)
+        // The same whichever copy is which; once only; and each device's own copy brings nothing back.
+        XCTAssertEqual(PasswordDocument.merge(document([onB]), document([onA])), merged)
+        XCTAssertEqual(PasswordDocument.merge(merged, merged), merged)
+        XCTAssertEqual(PasswordDocument.merge(merged, document([onA])), merged, "A's copy brought its login back")
+        XCTAssertEqual(PasswordDocument.merge(merged, document([onB])), merged)
+        // A change A made meanwhile to its own (folded) login is not lost: it comes back beside the login.
+        let changedOnA = changed(onA, password: "pa2", at: 1_800_000_150)
+        let later = PasswordDocument.merge(merged, document([changedOnA]))
+        XCTAssertEqual(later.entries.filter { !$0.isConflictVersion }.count, 1)
+        XCTAssertTrue(passwords(later).contains("pa2"), "a change of the folded login was lost")
+        XCTAssertTrue(passwords(later).contains("pb"))
+        // The same password on both: one login, nothing beside it, the last use kept.
+        var sameOnA = onA
+        sameOnA.password = "pb"
+        sameOnA.lastUsedAt = Date(timeIntervalSince1970: 1_800_000_900)
+        let same = PasswordDocument.merge(document([sameOnA]), document([onB]))
+        XCTAssertEqual(same.entries.count, 1)
+        XCTAssertEqual(same.entries.first?.lastUsedAt, Date(timeIntervalSince1970: 1_800_000_900))
+    }
+
+    func testTheLoginTwoDevicesSavedApartCanBeEditedAfterTheMerge() throws {
+        let (vault, repository, id) = try vault()
+        let onA = PasswordEntry(origin: "https://site.example", username: "me", password: "pa",
+                                updatedAt: Date(timeIntervalSince1970: 1_800_000_100), version: UUID(), ancestors: [])
+        let onB = PasswordEntry(origin: "https://site.example", username: "me", password: "pb",
+                                updatedAt: Date(timeIntervalSince1970: 1_800_000_200), version: UUID(), ancestors: [])
+        let key = try repository.profileKey(for: id)
+        try SecureFile.write(AEAD.seal(JSONCoding.encoder.encode(PasswordDocument.merge(document([onA]), document([onB]))),
+                                       key: PasswordVault.fileKey(profileID: id, profileKey: key), aad: PasswordVault.aad(profileID: id)),
+                             to: repository.passwordsURL(for: id))
+        _ = vault
+        let reopened = try repository.passwordVault(for: id)
+        var login = try XCTUnwrap(reopened.allEntries().first { !$0.isConflictVersion })
+        login.password = "edited"
+        XCTAssertNoThrow(try reopened.update(login), "the login was refused as a duplicate of the one folded into it")
+        // The other device's version, chosen: it becomes the login's password, one login stays.
+        let kept = try XCTUnwrap(reopened.conflictVersions().first)
+        try reopened.keepConflictVersion(kept.id)
+        XCTAssertEqual(reopened.allEntries().map(\.password), ["pa"])
+    }
+
+    // MARK: The copy a sync before format 2 set aside
+
+    private func seal(_ entries: [PasswordEntry], _ repository: ProfileRepository, _ id: UUID) throws -> Data {
+        try AEAD.seal(JSONCoding.encoder.encode(entries), key: PasswordVault.fileKey(profileID: id, profileKey: repository.profileKey(for: id)),
+                      aad: PasswordVault.aad(profileID: id))
+    }
+
+    /// `passwords.bin.conflict`, which a sync before format 2 wrote beside the file and nothing in
+    /// the app could open: what it holds is shown as versions kept after a conflict, and the copy
+    /// goes only once the file holds all of it.
+    func testTheCopyAnEarlierSyncSetAsideIsShownAndNothingInItIsLost() throws {
+        let (_, repository, id) = try vault()
+        let login = PasswordEntry(origin: "https://site.example", username: "me", password: "main", updatedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        var lost = login
+        lost.password = "lost in the conflict"
+        let onlyThere = PasswordEntry(origin: "https://other.example", username: "u", password: "only in the copy",
+                                      updatedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        try seal([login], repository, id).write(to: repository.passwordsURL(for: id))
+        let copyURL = repository.passwordsURL(for: id).appendingPathExtension("conflict")
+        try seal([lost, onlyThere], repository, id).write(to: copyURL)
+
+        let vault = try repository.passwordVault(for: id)
+        XCTAssertEqual(vault.allEntries().filter { !$0.isConflictVersion }.map(\.password), ["main"])
+        let kept = vault.conflictVersions()
+        XCTAssertEqual(Set(kept.map(\.password)), ["lost in the conflict", "only in the copy"])
+        XCTAssertEqual(kept.first { $0.password == "lost in the conflict" }?.conflictOf, login.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: copyURL.path), "the copy stayed though the file holds it")
+        let origin = try XCTUnwrap(WebOrigin("https://other.example"))
+        XCTAssertEqual(vault.candidates(for: origin), [], "a version kept after a conflict was offered to a page")
+        // Chosen, the one whose login is not here becomes a login.
+        try vault.keepConflictVersion(try XCTUnwrap(kept.first { $0.password == "only in the copy" }).id)
+        XCTAssertEqual(vault.candidates(for: origin).map(\.password), ["only in the copy"])
+        // Opened again: nothing taken in twice.
+        XCTAssertEqual(try repository.passwordVault(for: id).allEntries().count, 3)
+    }
+
+    func testACopyAnEarlierSyncSetAsideThatCannotBeReadIsKept() throws {
+        let (vault, repository, id) = try vault()
+        try vault.upsert(PasswordEntry(origin: "https://site.example", username: "me", password: "main"))
+        let copyURL = repository.passwordsURL(for: id).appendingPathExtension("conflict")
+        let damaged = Data(repeating: 3, count: 90)
+        try damaged.write(to: copyURL)
+        let before = try Data(contentsOf: repository.passwordsURL(for: id))
+        XCTAssertEqual(try repository.passwordVault(for: id).allEntries().map(\.password), ["main"])
+        XCTAssertEqual(try Data(contentsOf: copyURL), damaged)
+        XCTAssertEqual(try Data(contentsOf: repository.passwordsURL(for: id)), before)
     }
 
     // MARK: Two devices

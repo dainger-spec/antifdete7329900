@@ -31,10 +31,14 @@ public struct PasswordEntry: Codable, Equatable, Identifiable, Sendable {
     /// kept beside it until the person chooses (`PasswordVault.keepConflictVersion`, or deleting
     /// it), and never offered to a page.
     public var conflictOf: UUID?
+    /// The device this version was made on (its name, `PasswordVault.deviceName`), so that the
+    /// password manager can say where a version kept after a conflict came from. Nil in a version
+    /// made before it was written, or where no name was known.
+    public var device: String?
 
     public init(id: UUID = UUID(), origin: String, username: String, password: String,
                 note: String? = nil, updatedAt: Date = Date(), lastUsedAt: Date? = nil,
-                version: UUID? = nil, ancestors: [UUID]? = nil, conflictOf: UUID? = nil) {
+                version: UUID? = nil, ancestors: [UUID]? = nil, conflictOf: UUID? = nil, device: String? = nil) {
         self.id = id
         self.origin = origin
         self.username = username
@@ -45,6 +49,7 @@ public struct PasswordEntry: Codable, Equatable, Identifiable, Sendable {
         self.version = version
         self.ancestors = ancestors
         self.conflictOf = conflictOf
+        self.device = device
     }
 
     /// The version a merge goes by: `version`, or for a login saved before versions, one derived
@@ -150,7 +155,71 @@ struct PasswordDocument: Codable, Equatable {
                 tombstones[id] = nil
             }
         }
-        return PasswordDocument(entries: Array(logins.values), deleted: Array(tombstones.values)).normalized()
+        return foldingDuplicates(PasswordDocument(entries: Array(logins.values), deleted: Array(tombstones.values))).normalized()
+    }
+
+    /// Logins for the same website and user name that two devices made apart, each with an id of
+    /// its own (the merge above goes by id, and would keep both as logins: a page offered two for
+    /// one account, and an edit of either refused as a duplicate). One stays the login: the one
+    /// changed last by the devices' clocks — a hint for which to show first, never a reason to drop
+    /// the other; ties by id. Each other one is folded into it:
+    /// - what it holds is kept beside the login as a version of its own (`conflictOf`), unless it
+    ///   holds the same password and note (then it adds nothing, but when it was last used);
+    /// - its id is tombstoned with the versions it had, so that a device still holding it does not
+    ///   bring it back as a login (a change made there since, which that tombstone did not see,
+    ///   does come back, and is folded in again);
+    /// - the versions kept beside it go with the login it was folded into.
+    /// The same whichever copy is which, as the merge: the result depends only on the logins.
+    static func foldingDuplicates(_ document: PasswordDocument) -> PasswordDocument {
+        var document = document
+        let live = document.entries.filter { !$0.isConflictVersion }
+        let groups = Dictionary(grouping: live) { [$0.origin, $0.username] }
+        for group in groups.values where group.count > 1 {
+            guard let login = group.max(by: { ($0.updatedAt, $0.id.uuidString) < ($1.updatedAt, $1.id.uuidString) }) else { continue }
+            for other in group where other.id != login.id {
+                let versions = sortedUnique((other.ancestors ?? []) + [other.currentVersion])
+                if let seen = document.deleted.firstIndex(where: { $0.id == other.id }) {
+                    document.deleted[seen].versions = sortedUnique(document.deleted[seen].versions + versions)
+                    document.deleted[seen].deletedAt = max(document.deleted[seen].deletedAt, other.updatedAt)
+                } else {
+                    // Its own time, not this device's clock: two devices folding it write the same.
+                    document.deleted.append(PasswordTombstone(id: other.id, versions: versions, deletedAt: other.updatedAt))
+                }
+                document.entries.removeAll { $0.id == other.id }
+                for index in document.entries.indices where document.entries[index].conflictOf == other.id {
+                    document.entries[index].conflictOf = login.id
+                }
+                if let index = document.entries.firstIndex(where: { $0.id == login.id }), let used = other.lastUsedAt {
+                    document.entries[index].lastUsedAt = max(document.entries[index].lastUsedAt ?? used, used)
+                }
+                guard other.password != login.password || (other.note ?? "") != (login.note ?? "") else { continue }
+                let beside = kept(other, beside: login.id)
+                if !document.entries.contains(where: { $0.id == beside.id }) { document.entries.append(beside) }
+            }
+        }
+        return document
+    }
+
+    /// A `passwords.bin.conflict` taken in: the copy a sync before format 2 set aside when both
+    /// devices had changed the file — out of the app's reach, and written over by the next such
+    /// sync. Each version it holds that this file neither has nor descends from, nor deleted, is
+    /// kept beside its login as a version of its own (`conflictOf`; one whose login is not here
+    /// is kept beside its own id, and choosing it makes it a login): the password manager shows it,
+    /// and the person chooses. Nil when it adds nothing.
+    static func takingIn(_ copy: PasswordDocument, into document: PasswordDocument) -> PasswordDocument? {
+        var result = document
+        for entry in copy.entries {
+            let version = entry.currentVersion
+            let login = entry.conflictOf ?? entry.id
+            let had = result.entries.contains { candidate in
+                (candidate.id == entry.id || candidate.id == login || candidate.conflictOf == login)
+                    && (candidate.currentVersion == version || (candidate.ancestors ?? []).contains(version))
+            }
+            let deleted = result.deleted.contains { ($0.id == entry.id || $0.id == login) && $0.versions.contains(version) }
+            guard !had, !deleted, !result.entries.contains(where: { $0.id == conflictID(of: version) }) else { continue }
+            result.entries.append(kept(entry, beside: login))
+        }
+        return result == document ? nil : result.normalized()
     }
 
     /// Two versions of one login.
@@ -171,12 +240,22 @@ struct PasswordDocument: Codable, Equatable {
         // Changed on both devices at the same time: the later change stays, the other beside it.
         let xIsLater = x.updatedAt != y.updatedAt ? x.updatedAt > y.updatedAt : vx.uuidString > vy.uuidString
         let (later, earlier) = xIsLater ? (x, y) : (y, x)
-        var conflict = earlier
-        conflict.id = conflictID(of: earlier.currentVersion)
-        conflict.version = earlier.currentVersion
-        conflict.ancestors = sortedUnique(earlier.ancestors ?? [])
-        conflict.conflictOf = later.conflictOf ?? later.id
-        return (taking(later, adding: [earlier.currentVersion]), conflict)
+        return (taking(later, adding: [earlier.currentVersion]), kept(earlier, beside: later.conflictOf ?? later.id))
+    }
+
+    /// `version` kept beside the login `login` after a conflict: its own id (made from the version)
+    /// and what it holds — no history, no last use. A version that was the login for a while
+    /// carries the history it took from others then; kept that way, the same version would be
+    /// written differently depending on the order the copies met in, and two devices would never
+    /// agree. The login keeps the history; the kept version is what it says.
+    static func kept(_ version: PasswordEntry, beside login: UUID) -> PasswordEntry {
+        var kept = version
+        kept.id = conflictID(of: version.currentVersion)
+        kept.version = version.currentVersion
+        kept.ancestors = []
+        kept.lastUsedAt = nil
+        kept.conflictOf = login
+        return kept
     }
 
     /// The id of the version kept beside a login after a conflict: made from that version.
@@ -221,6 +300,11 @@ public enum PasswordVaultError: Error, Equatable, Sendable {
 /// WKWebView hosts). The app layer detects sign-ins and fills logins with a script in an isolated
 /// JavaScript world (`PasswordAutoFill`), and answers HTTP Basic/Digest challenges from this vault.
 public final class PasswordVault: @unchecked Sendable {
+    /// This device's name, written on every version of a login made here (`PasswordEntry.device`).
+    /// Set by the app first thing in each of its processes; nil (tests, or no name known): the
+    /// versions made here carry none.
+    nonisolated(unsafe) public static var deviceName: String?
+
     private let fileURL: URL
     private let profileID: UUID
     private let key: SymmetricKey
@@ -235,6 +319,26 @@ public final class PasswordVault: @unchecked Sendable {
         self.key = Self.fileKey(profileID: profileID, profileKey: profileKey)
         self.stored = PasswordDocument()
         try reloadIfChanged()
+        takeInTheCopyAnEarlierSyncSetAside()
+    }
+
+    /// `passwords.bin.conflict`, which a sync before `passwords.bin` format 2 wrote beside the file
+    /// when both devices had changed it (the other device's copy won, this one's went there): its
+    /// versions are taken into the file as versions kept after a conflict (`PasswordDocument.
+    /// takingIn`), where the password manager shows them. The copy is removed only once the file,
+    /// read back, holds every one of them; one that cannot be read, or taken in, stays as it is.
+    private func takeInTheCopyAnEarlierSyncSetAside() {
+        let copyURL = fileURL.appendingPathExtension("conflict")
+        guard FileManager.default.fileExists(atPath: copyURL.path),
+              let copy = try? PasswordDocument.decode(AEAD.open(SecureFile.read(copyURL), key: key, aad: aad)) else { return }
+        do {
+            try change { PasswordDocument.takingIn(copy, into: $0) }
+            let written = try PasswordDocument.decode(AEAD.open(SecureFile.read(fileURL), key: key, aad: aad))
+            guard PasswordDocument.takingIn(copy, into: written) == nil else { return }
+            try FileManager.default.removeItem(at: copyURL)
+        } catch {
+            // Kept: taken in at the next opening.
+        }
     }
 
     /// The logins as the file holds them now, the versions kept after a conflict among them. Call
@@ -381,6 +485,7 @@ public final class PasswordVault: @unchecked Sendable {
                 added.version = UUID()
                 added.ancestors = []
                 added.conflictOf = nil
+                added.device = Self.deviceName
                 updated.entries.append(added)
             }
             return updated
@@ -412,7 +517,9 @@ public final class PasswordVault: @unchecked Sendable {
             }
             var updated = document
             let chosen = document.entries[index]
-            if let original = document.entries.firstIndex(where: { $0.id == of }) {
+            // Its login, or (folded into another since) the login for the same website and user name.
+            if let original = document.entries.firstIndex(where: { $0.id == of })
+                ?? document.entries.firstIndex(where: { !$0.isConflictVersion && $0.origin == chosen.origin && $0.username == chosen.username }) {
                 var replacing = document.entries[original]
                 replacing.password = chosen.password
                 replacing.note = chosen.note
@@ -449,6 +556,7 @@ public final class PasswordVault: @unchecked Sendable {
         stamped.version = UUID()
         stamped.ancestors = (old.ancestors ?? []) + [old.currentVersion] + more
         stamped.conflictOf = old.conflictOf
+        stamped.device = deviceName
         // A change keeps when the login was last used.
         stamped.lastUsedAt = new.lastUsedAt ?? old.lastUsedAt
         return stamped

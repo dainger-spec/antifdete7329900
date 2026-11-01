@@ -379,8 +379,9 @@
 "menu.showPreviousTab" = "Show Previous Tab";
 "passwords.add" = "Add Password";
 "passwords.addTitle" = "New password";
-"passwords.conflict.badge" = "Other version";
-"passwords.conflict.explanation" = "This password was changed on two devices between syncs. This is the version that did not become the main one; the main one is the other row with the same website and user name. Both are kept, nothing is lost. Keep the right one: Use This Version replaces the main one with it, Delete removes this one.";
+"passwords.conflict.badgeNumbered" = "Other version %ld";
+"passwords.conflict.explanation" = "This password was changed on two devices between syncs, or saved for the same website and user name on both. This is a version that did not become the main one; the main one is the row with the same website and user name without this mark. Below it says on which Mac and when this version was made, by that Mac's clock. Both are kept, nothing is lost. Keep the right one: Use This Version makes it the main one, Delete removes this one.";
+"passwords.updatedOn" = "Changed on %1$@, %2$@";
 "passwords.conflict.keep" = "Use This Version";
 "passwords.copy" = "Copy";
 "passwords.delete.message" = "The password for “%1$@” on “%2$@” will be deleted from this profile.";

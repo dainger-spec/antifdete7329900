@@ -280,6 +280,23 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
   versions get one derived from what they hold, so two devices holding the same login agree. Until
   then a concurrent edit kept the remote file and moved the local one to `passwords.bin.conflict`,
   which the next conflict replaced (`PasswordMergeTests`).
+  - Which version stays the login is decided by the devices' clocks (`updatedAt`, ties by
+    version): a hint for which to show first, never a reason to drop the other — clocks of two
+    Macs need not agree. Each version says which Mac made it (`device`, the Mac's name) and when
+    (by that Mac's clock); the password manager shows both, and numbers the versions kept beside
+    one login. A kept version holds only what it is (its id comes from its version; no history,
+    no last use), so two devices write it alike whatever order the copies met in, and no kept
+    version is ever written over by another.
+  - The same website and user name saved apart on two devices (two ids, one account) is folded
+    into one login after a merge: the one changed last (a hint, ties by id) stays the login; the
+    other is kept beside it as a version when its password or note differs, and its id is
+    tombstoned with the versions it had, so a device still holding it does not bring it back (a
+    change it made there since comes back, and is folded again).
+  - A `passwords.bin.conflict` left by an earlier sync is taken in when the vault opens: each
+    version in it that the file neither has, descends from, nor deleted becomes a version kept
+    beside its login (one whose login is not there is kept beside its own id; choosing it makes
+    it a login). The copy goes only once the file, read back, holds all of it; one that cannot be
+    read stays as it is.
 - The warm-up plan (`warmup.bin`) is not synced; the cookies and history its visits leave are,
   with the profile's.
 - `cookies-import.bin` (cookies imported into a stopped profile, until its next launch) is not

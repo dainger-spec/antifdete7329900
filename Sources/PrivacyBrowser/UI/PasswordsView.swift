@@ -143,7 +143,8 @@ struct PasswordListView: View {
                             Text(entry.username.isEmpty ? L("passwords.noUsername") : entry.username)
                                 .font(.caption).foregroundStyle(.secondary)
                             if entry.isConflictVersion {
-                                Label(L("passwords.conflict.badge"), systemImage: "exclamationmark.triangle.fill")
+                                Label(String(format: L("passwords.conflict.badgeNumbered"), conflictNumber(of: entry)),
+                                      systemImage: "exclamationmark.triangle.fill")
                                     .font(.caption).foregroundStyle(Theme.warning)
                             }
                         }
@@ -236,7 +237,10 @@ struct PasswordListView: View {
             }
             if let note = entry.note, !note.isEmpty { row(L("passwords.field.note"), note, copy: nil) }
             Divider()
-            Text(String(format: L("passwords.updated"), entry.updatedAt.formatted(date: .abbreviated, time: .shortened)))
+            // Which Mac made this version, and when by that Mac's clock: beside a version kept after a
+            // conflict, what the person tells the two apart by.
+            Text(entry.device.map { String(format: L("passwords.updatedOn"), $0, entry.updatedAt.formatted(date: .abbreviated, time: .shortened)) }
+                 ?? String(format: L("passwords.updated"), entry.updatedAt.formatted(date: .abbreviated, time: .shortened)))
                 .font(.caption).foregroundStyle(.secondary)
             if let used = entry.lastUsedAt {
                 Text(String(format: L("passwords.lastUsed"), used.formatted(date: .abbreviated, time: .shortened)))
@@ -365,6 +369,14 @@ struct PasswordListView: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    /// "Other version 2": the versions kept beside one login, numbered by when they were made (by the
+    /// clocks of the Macs that made them: an order to tell them apart by, nothing more).
+    private func conflictNumber(of entry: PasswordEntry) -> Int {
+        let kept = entries.filter { $0.isConflictVersion && $0.conflictOf == entry.conflictOf }
+            .sorted { ($0.updatedAt, $0.id.uuidString) < ($1.updatedAt, $1.id.uuidString) }
+        return (kept.firstIndex { $0.id == entry.id } ?? 0) + 1
     }
 
     /// The version kept after a conflict becomes the login's password (the other version goes).

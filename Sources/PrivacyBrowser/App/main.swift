@@ -1,4 +1,6 @@
 import AppKit
+import BrowserCore
+import SystemConfiguration
 
 // Entry point. `--self-test` runs headless end-to-end checks against the real WebKit, and the
 // `--selftest-*-vault` pair checks App Sandbox container migration (see SelfTest.swift);
@@ -25,6 +27,9 @@ MainActor.assumeIsolated {
     // Every exception of every process in the log, readable, with CoreFoundation's own
     // preprocessor kept in the chain (ExceptionLog.swift says why that matters).
     ExceptionLog.install()
+    // Every version of a saved password made in this process says which Mac it was made on: the
+    // password manager names it beside a version kept after a conflict (PasswordEntry.device).
+    PasswordVault.deviceName = SCDynamicStoreCopyComputerName(nil, nil) as String?
     if arguments.contains("--self-test") {
         SelfTest.start()
     } else if arguments.contains("--selftest-write-vault") {
