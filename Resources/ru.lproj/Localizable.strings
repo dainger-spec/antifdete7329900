@@ -1386,3 +1386,9 @@
 "proxyProblem.more.short" = "и ещё %ld";
 "profiles.noMatches.query" = "По запросу «%@» в этой подборке профилей нет.";
 "profiles.noMatches.filter" = "В этой подборке профилей нет.";
+"palette.group.actions" = "Действия";
+"palette.group.profiles" = "Профили";
+"palette.group.settings" = "Настройки";
+"palette.hint.choose" = "выбрать";
+"palette.hint.run" = "выполнить";
+"palette.hint.close" = "закрыть";

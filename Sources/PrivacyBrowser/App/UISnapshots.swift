@@ -802,17 +802,18 @@ enum UISnapshots {
 
     /// The palette's commands for the sample rows, as the Profiles window builds them.
     static func paletteSample(_ rows: [ProfileRowItem]) -> [CommandPaletteView.Command] {
-        var commands = [CommandPaletteView.Command(id: "new", title: L("palette.newProfile"), symbol: "plus", run: {})]
+        var commands = [CommandPaletteView.Command(id: "new", title: L("palette.newProfile"), symbol: "plus", shortcut: "⌘N", run: {})]
         for row in rows {
             let detail = row.paletteDetail
             let key = row.isRunning ? "palette.newWindow" : "palette.launch"
             commands.append(CommandPaletteView.Command(id: "row-\(row.id)", title: String(format: L(key), row.name),
-                                                       detail: detail, symbol: row.isRunning ? "macwindow.badge.plus" : "play.circle", run: {}))
+                                                       detail: detail, symbol: row.isRunning ? "macwindow.badge.plus" : "play.circle",
+                                                       group: .profiles, run: {}))
         }
         commands.append(CommandPaletteView.Command(id: "proxies", title: L("palette.proxies"), symbol: "network", run: {}))
         for section in SettingsSection.allCases.prefix(4) {
             commands.append(CommandPaletteView.Command(id: section.rawValue, title: String(format: L("palette.settings"), L(section.titleKey)),
-                                                       symbol: section.symbol, run: {}))
+                                                       symbol: section.symbol, group: .settings, run: {}))
         }
         return commands
     }

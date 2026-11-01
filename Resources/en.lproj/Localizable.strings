@@ -1386,3 +1386,9 @@
 "proxyProblem.more.short" = "and %ld more";
 "profiles.noMatches.query" = "No profile in this collection matches “%@”.";
 "profiles.noMatches.filter" = "This collection has no profiles.";
+"palette.group.actions" = "Actions";
+"palette.group.profiles" = "Profiles";
+"palette.group.settings" = "Settings";
+"palette.hint.choose" = "choose";
+"palette.hint.run" = "run";
+"palette.hint.close" = "close";

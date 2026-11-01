@@ -176,27 +176,27 @@ struct ProfileListView: View {
     private var paletteCommands: [CommandPaletteView.Command] {
         typealias Command = CommandPaletteView.Command
         let actions = self.actions
-        var commands = [Command(id: "new", title: L("palette.newProfile"), symbol: "plus", run: actions.newProfile)]
+        var commands = [Command(id: "new", title: L("palette.newProfile"), symbol: "plus", shortcut: "⌘N", run: actions.newProfile)]
         for row in rows {
             let detail = row.paletteDetail
             switch row.activity {
             case .running:
                 commands.append(Command(id: "window-\(row.id)", title: String(format: L("palette.newWindow"), row.name),
-                                        detail: detail, symbol: "macwindow.badge.plus", run: { actions.newWindow(row.id) }))
+                                        detail: detail, symbol: "macwindow.badge.plus", group: .profiles, run: { actions.newWindow(row.id) }))
                 commands.append(Command(id: "stop-\(row.id)", title: String(format: L("palette.stop"), row.name),
-                                        detail: detail, symbol: "stop.circle", run: { actions.stop(row.id) }))
+                                        detail: detail, symbol: "stop.circle", group: .profiles, run: { actions.stop(row.id) }))
             case .stopped:
                 commands.append(Command(id: "launch-\(row.id)", title: String(format: L("palette.launch"), row.name),
-                                        detail: detail, symbol: "play.circle", run: { actions.launch(row.id) }))
+                                        detail: detail, symbol: "play.circle", group: .profiles, run: { actions.launch(row.id) }))
             case .starting, .sealing:
                 break
             }
             commands.append(Command(id: "edit-\(row.id)", title: String(format: L("palette.edit"), row.name),
-                                    detail: detail, symbol: "slider.horizontal.3", run: { actions.edit(row.id) }))
+                                    detail: detail, symbol: "slider.horizontal.3", group: .profiles, run: { actions.edit(row.id) }))
             commands.append(Command(id: "warm-\(row.id)", title: String(format: L("palette.warmUp"), row.name),
-                                    detail: detail, symbol: "flame", run: { actions.warmUp(row.id) }))
+                                    detail: detail, symbol: "flame", group: .profiles, run: { actions.warmUp(row.id) }))
             commands.append(Command(id: "see-\(row.id)", title: String(format: L("palette.whatSitesSee"), row.name),
-                                    detail: detail, symbol: "eye", run: { actions.whatSitesSee(row.id) }))
+                                    detail: detail, symbol: "eye", group: .profiles, run: { actions.whatSitesSee(row.id) }))
         }
         commands.append(Command(id: "proxies", title: L("palette.proxies"), symbol: "network", run: actions.openProxies))
         commands.append(Command(id: "warmQueue", title: L("profiles.menu.warmUpSeveral"), symbol: "flame", run: actions.warmUpQueue))
@@ -206,7 +206,7 @@ struct ProfileListView: View {
         commands.append(Command(id: "lock", title: L("profiles.action.lock"), symbol: "lock", run: actions.lock))
         for section in SettingsSection.allCases {
             commands.append(Command(id: "settings-\(section.rawValue)", title: String(format: L("palette.settings"), L(section.titleKey)),
-                                    symbol: section.symbol, run: {
+                                    symbol: section.symbol, group: .settings, run: {
                 model.settingsSection = section
                 openSettings()
             }))
