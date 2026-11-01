@@ -239,9 +239,45 @@ enum BannerMeasure {
     /// says which keys it was asked for, and answers each with another such dictionary, handed to
     /// -[WBSAppLink _scopeURLFromInfoDictionary:] on a bare instance (no initializer run).
     private static func probeWebAppLookup() {
-        // A dictionary that says which keys it is asked for cannot be made in Swift (NSDictionary's
-        // literal initializer cannot be given by a subclass): the next round makes one at run time.
-        say("web app: the key probe is not in this round")
+        guard let linkClass = NSClassFromString("WBSAppLink"), let created = class_createInstance(linkClass, 0) else { return }
+        let bare = created as AnyObject
+        let scopeSelector = NSSelectorFromString("_scopeURLFromInfoDictionary:")
+        guard bare.responds(to: scopeSelector), let spy = makeSpy(path: "Info") else {
+            say("web app: no -_scopeURLFromInfoDictionary:, or no spy")
+            return
+        }
+        let answer = bare.perform(scopeSelector, with: spy)?.takeUnretainedValue()
+        say("web app: -_scopeURLFromInfoDictionary: read \(keysAsked) and answered \(answer.map { String(describing: $0) } ?? "nil")")
+    }
+
+    private static var keysAsked: [String] = []
+    nonisolated(unsafe) private static var spyPathKey: UInt8 = 0
+
+    /// A subclass of NSDictionary made at run time (Swift cannot write one: NSDictionary's literal
+    /// initializer cannot be given by a subclass) whose -objectForKey: notes the key asked for, by
+    /// path, and answers with another such dictionary.
+    private static let spyClass: AnyClass? = {
+        guard let cls = objc_allocateClassPair(NSDictionary.self, "PBMeasureKeySpy", 0) else { return nil }
+        let count: @convention(block) (AnyObject) -> Int = { _ in 0 }
+        class_addMethod(cls, NSSelectorFromString("count"), imp_implementationWithBlock(count), "Q16@0:8")
+        let object: @convention(block) (AnyObject, AnyObject?) -> AnyObject? = { spy, key in
+            let path = (objc_getAssociatedObject(spy, &spyPathKey) as? String) ?? "?"
+            let name = "\(path).\(key.map { String(describing: $0) } ?? "nil")"
+            MainActor.assumeIsolated { keysAsked.append(name) }
+            return MainActor.assumeIsolated { makeSpy(path: name) }
+        }
+        class_addMethod(cls, NSSelectorFromString("objectForKey:"), imp_implementationWithBlock(object), "@24@0:8@16")
+        let keys: @convention(block) (AnyObject) -> AnyObject = { _ in NSArray().objectEnumerator() }
+        class_addMethod(cls, NSSelectorFromString("keyEnumerator"), imp_implementationWithBlock(keys), "@16@0:8")
+        objc_registerClassPair(cls)
+        return cls
+    }()
+
+    private static func makeSpy(path: String) -> AnyObject? {
+        guard let cls = spyClass, let created = class_createInstance(cls, 0) else { return nil }
+        let spy = created as AnyObject
+        objc_setAssociatedObject(spy, &spyPathKey, path, .OBJC_ASSOCIATION_RETAIN)
+        return spy
     }
 
     /// Folders listed by anyone in this process whose path names applications or web apps, with
