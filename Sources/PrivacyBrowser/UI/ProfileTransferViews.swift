@@ -189,7 +189,7 @@ struct ProfileImportView: View {
             Text(manifest.configuration.proxy.map { String(format: L("transfer.import.proxy"), "\($0.host):\($0.port)") }
                  ?? L("transfer.import.direct"))
             Text(String(format: L("transfer.import.exportedAt"),
-                        manifest.exportedAt.formatted(date: .abbreviated, time: .shortened)))
+                        manifest.exportedAt.shown(date: .abbreviated, time: .shortened)))
         }
         .font(.lumenSecondary)
         .foregroundStyle(Theme.textSecondary)

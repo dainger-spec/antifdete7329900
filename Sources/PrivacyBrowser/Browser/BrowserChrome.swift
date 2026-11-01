@@ -292,8 +292,8 @@ private struct RecentRow: View {
     /// The time today, else how long ago.
     static func when(_ date: Date) -> String {
         Calendar.current.isDateInToday(date)
-            ? date.formatted(date: .omitted, time: .shortened)
-            : date.formatted(.relative(presentation: .named))
+            ? date.shown(date: .omitted, time: .shortened)
+            : date.shownRelative
     }
 }
 

@@ -342,6 +342,7 @@ final class SelfTest {
         await group("window lifecycle") { try await windowLifecycle(repository) }
         await group("simplified mode") { try await simplifiedMode(repository) }
         await group("errors in the person's language") { errorsInThePersonsLanguage() }
+        await group("dates in the person's language") { datesInThePersonsLanguage() }
         await group("dialogs") { try await dialogTeardown(repository) }
         await group("password AutoFill") { try await passwordAutoFill(repository) }
         await group("cookie import") { try await cookieImport(repository) }
@@ -3555,6 +3556,27 @@ final class SelfTest {
               wrong.isEmpty, wrong.joined(separator: " | "))
         check("errors in the person's language: the sync messages are the interface's",
               !L("sync.error.failed").hasPrefix("sync.") && !L("sync.error.profilesRunning").hasPrefix("sync."))
+    }
+
+    /// Dates the app's own windows show are in the interface's language (`Localization.locale`,
+    /// `Date.shown`), whatever this Mac's: a Russian interface on a Mac set to English said
+    /// "yesterday" and "Oct 31" among Russian words (CI run 541's snapshots).
+    private func datesInThePersonsLanguage() {
+        let name = "dates in the person's language: \"yesterday\" and a date are said in the interface's language"
+        let thisMac = Locale.autoupdatingCurrent.language.languageCode?.identifier ?? "?"
+        guard Localization.languageCode != "en" else {
+            skip(name, "the interface is English here (this Mac's language: \(thisMac)): English dates tell nothing apart")
+            return
+        }
+        let yesterday = Date(timeIntervalSinceNow: -86_400)
+        let english = Locale(identifier: "en_US")
+        let shown = [yesterday.shownRelative, yesterday.shown(date: .abbreviated, time: .omitted)]
+        let inEnglish = [yesterday.formatted(.relative(presentation: .named).locale(english)),
+                         yesterday.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, locale: english))]
+        check("\(name) (\(Localization.languageCode); this Mac's: \(thisMac))",
+              Localization.locale.language.languageCode?.identifier == Localization.languageCode
+                  && zip(shown, inEnglish).allSatisfy { $0 != $1 },
+              "\(Localization.locale.identifier): \(shown.joined(separator: " · ")) — in English: \(inEnglish.joined(separator: " · "))")
     }
 
     // MARK: Update gate (docs/UPDATES.md §3)

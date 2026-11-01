@@ -419,7 +419,7 @@ private struct BehaviorSettings: View {
             SettingRow(L("settings.behavior.zoom"), detail: L("settings.behavior.zoom.detail"), effect: .newTabs) {
                 Picker(L("settings.behavior.zoom"), selection: $settings.browsing.pageZoom) {
                     ForEach(BrowsingPreferences.zoomChoices, id: \.self) { zoom in
-                        Text(zoom.formatted(.percent.precision(.fractionLength(0)))).tag(zoom)
+                        Text(zoom.formatted(.percent.precision(.fractionLength(0)).locale(Localization.locale))).tag(zoom)
                     }
                 }
                 .labelsHidden()

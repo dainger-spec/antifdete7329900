@@ -868,7 +868,7 @@ private struct SyncStatusButton: View {
         case .syncing: return L("profiles.sync.syncing")
         case .failed: return L("profiles.sync.failed")
         case .synced(let date):
-            return String(format: L("profiles.sync.synced"), date.formatted(.relative(presentation: .named)))
+            return String(format: L("profiles.sync.synced"), date.shownRelative)
         }
     }
 }
@@ -999,7 +999,7 @@ private struct ProfileRow: View {
     private var lastUsed: String {
         if row.isActive { return L("profiles.lastUsed.now") }
         guard let date = row.lastUsed else { return L("profiles.lastUsed.never") }
-        return date.formatted(.relative(presentation: .named))
+        return date.shownRelative
     }
 
     private var actionsCell: some View {

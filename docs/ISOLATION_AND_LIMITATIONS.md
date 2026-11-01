@@ -1614,6 +1614,12 @@ it is updated when a lookup finishes after launch.
   deterministic within a launch. Setting `AppleLanguages` makes AppKit's own menus and
   panels follow too.
 - `PRIVACYBROWSER_LANG=en` switches the UI to English.
+- Dates, times, sizes and numbers in the app's own windows are written in the interface's
+  language with this Mac's region (`Localization.locale`, `Date.shown`), not in the Mac's
+  language: a Russian interface on a Mac set to English said "yesterday" and "Oct 31" among
+  Russian words. When the Mac's language is the interface's, the Mac's own locale is used, with
+  its preferences. `scripts/check_localization.py` fails on formatting that takes the system's
+  locale; the self-test checks "yesterday" in the interface's language.
 - Run outside the app bundle (`swift run`, or Xcode's SwiftPM scheme), the strings tables
   are missing and keys are shown instead.
 - Pluralisation is simplified ("Профилей: 3"); there is no `.stringsdict` yet.

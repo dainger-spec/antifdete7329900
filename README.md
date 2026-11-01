@@ -196,7 +196,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   new profiles with a proxy — as they ship, in this app's window and in Safari's, and with WebKit's
   own switches for them on, the profile's scripts in the page's world, in a world of their own, or
   none (for the parity rule, `docs/ISOLATION_AND_LIMITATIONS.md` §2);
-- `scripts/check_localization.py`: ru and en hold the same keys, and no UI text is written into the code;
+- `scripts/check_localization.py`: ru and en hold the same keys, no UI text is written into the code, and
+  dates and numbers are written in the interface's language;
 - `scripts/check_log_privacy.py`: nothing of the user's is written to the system log in clear;
 - a container-migration check.
 

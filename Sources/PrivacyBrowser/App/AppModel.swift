@@ -170,7 +170,7 @@ final class AppModel: ObservableObject {
     /// password set in one of them is "wrong" in another.
     var vaultCreatedDescription: String {
         guard let header = try? MasterVault.readHeader(in: root) else { return "?" }
-        return header.createdAt.formatted(date: .abbreviated, time: .shortened)
+        return header.createdAt.shown(date: .abbreviated, time: .shortened)
     }
 
     /// The vault folder, with the real home directory shown as `~` (inside the App Sandbox

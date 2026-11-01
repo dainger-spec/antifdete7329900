@@ -48,10 +48,38 @@ enum Localization {
         // key itself rather than an empty string.
         bundle.localizedString(forKey: key, value: key, table: nil)
     }
+
+    /// The interface's locale: its language, with this Mac's region and preferences. Dates, times,
+    /// sizes and lists in the app's own windows are written with it (`Date.shown`). The system's
+    /// locale follows the Mac's language, not the interface's: a Russian interface on a Mac set to
+    /// English said "yesterday" and "Oct 31" among Russian words (CI run 541's snapshots). The
+    /// system's own locale, untouched, when its language is the interface's. Only the app's own
+    /// text uses it: what a page sees of languages and formats is WebContentLanguage's.
+    static let locale: Locale = {
+        let current = Locale.autoupdatingCurrent
+        if current.language.languageCode?.identifier == languageCode { return current }
+        var components = Locale.Components(locale: current)
+        components.languageComponents = Locale.Language.Components(languageCode: Locale.LanguageCode(languageCode),
+                                                                   script: nil, region: current.region)
+        return Locale(components: components)
+    }()
 }
 
 /// Shorthand used throughout the UI and AppKit call sites.
 func L(_ key: String) -> String { Localization.string(key) }
+
+extension Date {
+    /// This date as the interface says it (`Localization.locale`): `formatted(date:time:)` in the
+    /// interface's language.
+    func shown(date: Date.FormatStyle.DateStyle, time: Date.FormatStyle.TimeStyle) -> String {
+        formatted(Date.FormatStyle(date: date, time: time, locale: Localization.locale))
+    }
+
+    /// "yesterday", "in 2 hours", as the interface says it (`Localization.locale`).
+    var shownRelative: String {
+        formatted(.relative(presentation: .named).locale(Localization.locale))
+    }
+}
 
 /// The text shown for `error`, in the person's language (`translatedErrorText`, which the core's
 /// errors also give as their `localizedDescription` once `installErrorTranslation` has run).
@@ -101,8 +129,8 @@ func translatedErrorText(_ error: Error) -> String? {
         case .unknownKey(let id): return String(format: L("error.update.unknownKey"), id)
         case .badSignature(let what): return L(what == "appcast" ? "error.update.badSignature.appcast" : "error.update.badSignature.archive")
         case .staleAppcast(let generated, let newest):
-            return String(format: L("error.update.staleAppcast"), generated.formatted(date: .abbreviated, time: .shortened),
-                          newest.formatted(date: .abbreviated, time: .shortened))
+            return String(format: L("error.update.staleAppcast"), generated.shown(date: .abbreviated, time: .shortened),
+                          newest.shown(date: .abbreviated, time: .shortened))
         case .invalidItem(let detail): return String(format: L("error.update.invalidItem"), detail)
         case .notNewer(let build, let running): return String(format: L("error.update.notNewer"), build, running)
         case .needsNewerSystem(let minimum): return String(format: L("error.update.needsNewerSystem"), minimum)

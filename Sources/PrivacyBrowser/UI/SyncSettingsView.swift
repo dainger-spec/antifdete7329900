@@ -88,7 +88,7 @@ struct SyncSettingsView: View {
 
     private var statusText: String {
         guard let status = model.lastSyncStatus else { return L("sync.status.never") }
-        let when = status.date.formatted(date: .abbreviated, time: .shortened)
+        let when = status.date.shown(date: .abbreviated, time: .shortened)
         if let error = status.error { return String(format: L("sync.status.failed"), when, error) }
         var parts = [String(format: L("sync.status.uploaded"), status.pushed),
                      String(format: L("sync.status.downloaded"), status.pulled)]

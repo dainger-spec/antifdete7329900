@@ -162,8 +162,8 @@ private struct WarmUpPanel: View {
     private var scheduleLine: String {
         let lastRun: Date? = schedule?.lastRunAt
         let nextRun: Date? = warmUps.nextRun(of: profile.id)
-        let last = lastRun.map { $0.formatted(.relative(presentation: .named)) } ?? L("warmup.schedule.never")
-        let next = nextRun.map { $0.formatted(.relative(presentation: .named)) } ?? "—"
+        let last = lastRun.map { $0.shownRelative } ?? L("warmup.schedule.never")
+        let next = nextRun.map { $0.shownRelative } ?? "—"
         return String(format: L("warmup.schedule.times"), last, next)
     }
 

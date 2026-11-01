@@ -260,7 +260,7 @@ private struct HistoryPane: View {
             }
             List(selection: $selection) {
                 ForEach(days) { day in
-                    SwiftUI.Section(day.id.formatted(date: .complete, time: .omitted)) {
+                    SwiftUI.Section(day.id.shown(date: .complete, time: .omitted)) {
                         ForEach(day.entries) { entry in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -268,7 +268,7 @@ private struct HistoryPane: View {
                                     Text(entry.url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                                 Spacer()
-                                Text(entry.lastVisitedAt.formatted(date: .omitted, time: .shortened))
+                                Text(entry.lastVisitedAt.shown(date: .omitted, time: .shortened))
                                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                             }
                             .tag(entry.url)

@@ -85,7 +85,7 @@ struct WhatSitesSeeView: View {
         case .measuringSafari: return L("whatSites.step.safari")
         case .failed(let reason): return reason
         case .done:
-            let taken = snapshot.takenAt.map { $0.formatted(date: .omitted, time: .standard) } ?? ""
+            let taken = snapshot.takenAt.map { $0.shown(date: .omitted, time: .standard) } ?? ""
             return String(format: L(snapshot.comparedWithSafari ? "whatSites.done" : "whatSites.doneWithoutSafari"), taken)
         }
     }

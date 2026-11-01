@@ -239,11 +239,11 @@ struct PasswordListView: View {
             Divider()
             // Which Mac made this version, and when by that Mac's clock: beside a version kept after a
             // conflict, what the person tells the two apart by.
-            Text(entry.device.map { String(format: L("passwords.updatedOn"), $0, entry.updatedAt.formatted(date: .abbreviated, time: .shortened)) }
-                 ?? String(format: L("passwords.updated"), entry.updatedAt.formatted(date: .abbreviated, time: .shortened)))
+            Text(entry.device.map { String(format: L("passwords.updatedOn"), $0, entry.updatedAt.shown(date: .abbreviated, time: .shortened)) }
+                 ?? String(format: L("passwords.updated"), entry.updatedAt.shown(date: .abbreviated, time: .shortened)))
                 .font(.caption).foregroundStyle(.secondary)
             if let used = entry.lastUsedAt {
-                Text(String(format: L("passwords.lastUsed"), used.formatted(date: .abbreviated, time: .shortened)))
+                Text(String(format: L("passwords.lastUsed"), used.shown(date: .abbreviated, time: .shortened)))
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()

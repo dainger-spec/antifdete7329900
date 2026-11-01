@@ -466,13 +466,13 @@ private struct ProxyRow: View {
                 .lineLimit(1)
                 .frame(width: ProxyColumns.latency, alignment: .trailing)
             if columns.showsChecked {
-                Text(entry.lastCheck.map { $0.checkedAt.formatted(.relative(presentation: .named)) } ?? "")
+                Text(entry.lastCheck.map { $0.checkedAt.shownRelative } ?? "")
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
                     .frame(width: ProxyColumns.checked, alignment: .leading)
             }
-            Text(profiles.formatted())
+            Text(profiles.formatted(.number.locale(Localization.locale)))
                 .font(.lumenBody)
                 .foregroundStyle(profiles > 0 ? Theme.textSecondary : Theme.textTertiary)
                 .monospacedDigit()
@@ -539,7 +539,7 @@ extension ProxyListEntry {
 
     /// Where the proxy came from, and since when, for its report.
     var originLine: String {
-        let date = addedAt.timeIntervalSince1970 > 0 ? addedAt.formatted(date: .long, time: .omitted) : nil
+        let date = addedAt.timeIntervalSince1970 > 0 ? addedAt.shown(date: .long, time: .omitted) : nil
         switch origin {
         case .user: return date.map { String(format: L("proxies.origin.user.since"), $0) } ?? L("proxies.origin.user")
         case .service: return date.map { String(format: L("proxies.origin.service.since"), $0) } ?? L("proxies.origin.service")

@@ -119,7 +119,7 @@ struct UpdatesPane: View {
     private var stateText: String {
         switch updater.state {
         case .idle: return L(updater.automaticChecks ? "updates.state.idle" : "updates.state.idleManual")
-        case .upToDate(let date): return String(format: L("updates.state.upToDate"), date.formatted(date: .abbreviated, time: .shortened))
+        case .upToDate(let date): return String(format: L("updates.state.upToDate"), date.shown(date: .abbreviated, time: .shortened))
         case .checking: return L("updates.state.checking")
         case .available(let item): return String(format: L("updates.state.available"), item.version)
         case .downloading(let item): return String(format: L("updates.state.downloading"), item.version)
@@ -142,6 +142,6 @@ struct UpdatesPane: View {
     /// After an update: which one this launch is the result of.
     private var installedNotice: String? {
         guard case .outcome(let outcome)? = updater.notice, outcome.result == .installed else { return nil }
-        return String(format: L("updates.installed"), outcome.version, outcome.at.formatted(date: .abbreviated, time: .shortened))
+        return String(format: L("updates.installed"), outcome.version, outcome.at.shown(date: .abbreviated, time: .shortened))
     }
 }

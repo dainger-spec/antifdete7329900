@@ -1025,7 +1025,7 @@ private struct ProxyLocationCard: View {
                         .font(.lumenLabel)
                         .foregroundStyle(Theme.textPrimary)
                     Text(verbatim: location.timeZoneIdentifier + " · "
-                         + String(format: L("editor.location.checked"), location.resolvedAt.formatted(.relative(presentation: .named))))
+                         + String(format: L("editor.location.checked"), location.resolvedAt.shownRelative))
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textSecondary)
                 }

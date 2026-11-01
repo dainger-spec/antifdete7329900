@@ -434,7 +434,7 @@ struct ProxyReportView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 if let checkedAt {
-                    Text(String(format: L("proxies.report.checkedAt"), checkedAt.formatted(.relative(presentation: .named))))
+                    Text(String(format: L("proxies.report.checkedAt"), checkedAt.shownRelative))
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)

@@ -201,7 +201,7 @@ enum Diagnostics {
 
     /// "Lumen-Diagnostics-2026-10-30-1015.zip".
     static func suggestedFileName(at date: Date = Date()) -> String {
-        let formatter = DateFormatter()
+        let formatter = DateFormatter() // l10n: not text — a file name, in a fixed format
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd-HHmm"
         return "Lumen-Diagnostics-\(formatter.string(from: date)).zip"
