@@ -442,7 +442,9 @@ struct WarmUpPlanChooser: View {
                 .fill(selected ? Theme.accentFill : Theme.controlFill))
             .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .strokeBorder(selected ? Color.clear : Theme.hairline, lineWidth: 1))
-            .foregroundStyle(selected ? Color.white : Theme.textPrimary)
+            // White, its words dark: the white fill under white words left them unreadable
+            // (the owner's "Poland", 1 November — the accent turned white with the design).
+            .foregroundStyle(selected ? Theme.backdrop : Theme.textPrimary)
         }
         .buttonStyle(.plain)
     }
@@ -497,7 +499,9 @@ struct WarmUpPlanChooser: View {
                 .fill(selected ? Theme.accentFill : Theme.controlFill))
             .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .strokeBorder(selected ? Color.clear : Theme.hairline, lineWidth: 1))
-            .foregroundStyle(selected ? Color.white : Theme.textPrimary)
+            // White, its words dark: the white fill under white words left them unreadable
+            // (the owner's "Poland", 1 November — the accent turned white with the design).
+            .foregroundStyle(selected ? Theme.backdrop : Theme.textPrimary)
         }
         .buttonStyle(.plain)
     }

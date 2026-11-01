@@ -393,31 +393,6 @@ struct ProxyListPanel: View {
 
 // MARK: - Rows
 
-/// Turns off the system's selection highlight in the table a SwiftUI `List` is drawn with, so that
-/// its rows show the design's tone instead (`listRowBackground`): the system's was a grey bar of its
-/// own (CI run 555's proxies). The selection itself — a click, ⌘ and ⇧, the arrow keys, the context
-/// menu, Delete — is still the table's. Found no table (another way of drawing lists): nothing.
-private struct SystemListHighlightOff: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { Finder() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
-
-    private final class Finder: NSView {
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            guard window != nil else { return }
-            DispatchQueue.main.async { [weak self] in
-                var view = self?.superview
-                while let current = view {
-                    if let table = current as? NSTableView {
-                        if table.selectionHighlightStyle != .none { table.selectionHighlightStyle = .none }
-                        return
-                    }
-                    view = current.superview
-                }
-            }
-        }
-    }
-}
 
 /// Column widths of the proxy list (the design's table), and whether the exit IP fits (the name
 /// takes what is left).
@@ -881,12 +856,14 @@ struct ProxyExportView: View {
                 .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Theme.warning.opacity(0.12)))
                 .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).strokeBorder(Theme.warning.opacity(0.4), lineWidth: 1))
                 if !selection.isEmpty {
-                    Picker(L("proxies.export.which"), selection: $onlySelected) {
-                        Text(String(format: L("proxies.export.selected"), selection.count)).tag(true)
-                        Text(String(format: L("proxies.export.all"), proxies.entries.count)).tag(false)
-                    }
-                    .pickerStyle(.radioGroup)
-                    .disabled(saved != nil)
+                    // The design's segmented choice, not the system's radio buttons (drawn in the
+                    // app's white tint, their chosen dot white on white).
+                    LumenSegmented(selection: $onlySelected,
+                                   options: [(value: true, title: String(format: L("proxies.export.selected"), selection.count)),
+                                             (value: false, title: String(format: L("proxies.export.all"), proxies.entries.count))])
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel(L("proxies.export.which"))
+                        .disabled(saved != nil)
                 }
                 if let saved {
                     Label(String(format: L("proxies.export.done"), saved.lastPathComponent), systemImage: "checkmark.circle")

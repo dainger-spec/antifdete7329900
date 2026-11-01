@@ -992,6 +992,9 @@ private struct SavedProxyList: View {
                         SavedProxyRow(entry: entry)
                             .tag(entry.id)
                             .id(entry.id)
+                            .listRowBackground(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(selection == entry.id ? Theme.rowSelected : Color.clear))
+                            .background(SystemListHighlightOff().accessibilityHidden(true))
                     }
                 }
                 .overlay {
