@@ -307,7 +307,7 @@ struct ProxyListPanel: View {
                                     // The design's selected row, as the profiles' (the system's grey off).
                                     .listRowBackground(RoundedRectangle(cornerRadius: 10, style: .continuous)
                                         .fill(selection.contains(entry.id) ? Theme.rowSelected : Color.clear))
-                                    .background(SystemListHighlightOff())
+                                    .background(SystemListHighlightOff().accessibilityHidden(true))
                             }
                         }
                         .listStyle(.plain)
