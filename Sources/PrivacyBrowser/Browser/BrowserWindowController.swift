@@ -194,6 +194,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         startPage.appearance = Theme.chromeAppearance
         startPage.isHidden = true
         stoppedPage = NSHostingView(rootView: StoppedPageView(reload: { [weak self] in self?.reload() }))
+        // It fills the tab's place and asks for no size of its own: SwiftUI's minimum for it — its
+        // text wrapped at the narrowest width — held the web view some 2,700 pt tall even while it
+        // was hidden, and a page measured that (the self-test's window size, CI run 559).
+        stoppedPage.sizingOptions = []
         stoppedPage.appearance = Theme.chromeAppearance
         stoppedPage.isHidden = true
         for view in [tabStrip, webContainer, startPage, stoppedPage] as [NSView] {
