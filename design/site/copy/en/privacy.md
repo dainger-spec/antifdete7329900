@@ -108,11 +108,9 @@ Requests to the server pass through Cloudflare: it shields the server from overl
 
 ## How long
 
-- **Your account** is deleted 7 days after you ask (until then you can cancel), and your sync data with it. You ask in your account; the account is blocked at once.
-- **Payment records** are then kept without your email address for three full calendar years after the year of the payment, and deleted.
-- **The record of changes to your rights** goes on the same schedule: three full calendar years after the year of the entry.
-- **Database backups** are kept for up to 30 days: a deleted email disappears from them with the oldest copies.
-- **Messages with support** are kept for ⟦q12: [period]⟧.
+Your account is deleted 7 days after you ask (until then you can cancel), and your sync data with it. Payment records — an invoice, the payments on it and the entries about it in the record of changes to your rights — are kept for three full calendar years after the year of the invoice’s last event (its payment or refund), then deleted. Other entries in the record of changes to your rights are kept for three full calendar years after the year of the entry. This holds for every account; for a deleted one, without your email address. Database backups are kept for up to 30 days.
+
+You ask for deletion in your account; the account is blocked at once. A deleted email disappears from the backups with the oldest copies. Messages with support are kept for ⟦q12: [period]⟧.
 
 ## The app on your Mac
 
@@ -131,7 +129,7 @@ Requests to the server pass through Cloudflare: it shields the server from overl
 
 - **The payment service** (⟦q12: [name]⟧) receives from us only the amount in dollars, the coin, the invoice number and the plan’s name — not your email address, nothing else about you. It issues the address for the transfer.
 - **Cloudflare** — requests to the server pass through it; what it sees is under Cloudflare.
-- **The email service** — ⟦q12: [name]⟧ — to send codes, receipts and reminders.
+- **Email.** Letters — codes, invoices, reminders — are sent by Resend: it receives your address and the letter’s text. Open and click tracking are off.
 - **Hosting** — ⟦q12: [name and country]⟧ — where the servers run.
 
 We don’t sell data and don’t pass it to ad networks. On a lawful demand we can hand over only what we have — the lists above. Profile data is encrypted, and we can’t decrypt it.

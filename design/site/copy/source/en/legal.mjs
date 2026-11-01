@@ -4,10 +4,10 @@
 // automatic charges, reminders 7 days and 1 day before; data is never deleted; refunds within 14 days, and 7 days after a
 // renewal, in the same coin and the same amount. What the server keeps and doesn't, sync, the periods and the payment
 // service are the ready wording of lumen-api-server, docs/SITE_API.md §9, word for word (it may be rearranged for the
-// page, but no point may go and the paragraph on the number of profiles may not be softened); the rights log goes on the
-// payments' schedule (internal/core/retention.go). The Cloudflare paragraph (§9, 69169f0) stays only while Cloudflare
-// stands in front of the server: Cloudflare gone, the paragraph goes. Service names and how long support mail is kept:
-// question 12.
+// page, but no point may go and the paragraph on the number of profiles may not be softened). The Cloudflare paragraph
+// (§9, 69169f0) stays only while Cloudflare stands in front of the server: Cloudflare gone, the paragraph goes. «How long» and «Email» follow §9 at fb73064 (the rights
+// entries about an invoice live as long as the invoice; «tracking is off» holds while it is off in Resend). The payment
+// service's and the host's names and how long support mail is kept: question 12.
 export default {
   title: 'Legal',
   tabs: [['privacy.html', 'Privacy'], ['terms.html', 'Terms of use'], ['refunds.html', 'Refunds']],
@@ -62,11 +62,9 @@ Requests to the server pass through Cloudflare: it shields the server from overl
 
 ## How long {#terms}
 
-- **Your account** is deleted 7 days after you ask (until then you can cancel), and your sync data with it. You ask in your account; the account is blocked at once.
-- **Payment records** are then kept without your email address for three full calendar years after the year of the payment, and deleted.
-- **The record of changes to your rights** goes on the same schedule: three full calendar years after the year of the entry.
-- **Database backups** are kept for up to 30 days: a deleted email disappears from them with the oldest copies.
-- **Messages with support** are kept for {{tbd:q12:[period]}}.
+Your account is deleted 7 days after you ask (until then you can cancel), and your sync data with it. Payment records — an invoice, the payments on it and the entries about it in the record of changes to your rights — are kept for three full calendar years after the year of the invoice’s last event (its payment or refund), then deleted. Other entries in the record of changes to your rights are kept for three full calendar years after the year of the entry. This holds for every account; for a deleted one, without your email address. Database backups are kept for up to 30 days.
+
+You ask for deletion in your account; the account is blocked at once. A deleted email disappears from the backups with the oldest copies. Messages with support are kept for {{tbd:q12:[period]}}.
 
 ## The app on your Mac {#app}
 
@@ -85,7 +83,7 @@ Requests to the server pass through Cloudflare: it shields the server from overl
 
 - **The payment service** ({{tbd:q12:[name]}}) receives from us only the amount in dollars, the coin, the invoice number and the plan’s name — not your email address, nothing else about you. It issues the address for the transfer.
 - **Cloudflare** — requests to the server pass through it; what it sees is under [Cloudflare](#cloudflare).
-- **The email service** — {{tbd:q12:[name]}} — to send codes, receipts and reminders.
+- **Email.** Letters — codes, invoices, reminders — are sent by Resend: it receives your address and the letter’s text. Open and click tracking are off.
 - **Hosting** — {{tbd:q12:[name and country]}} — where the servers run.
 
 We don’t sell data and don’t pass it to ad networks. On a lawful demand we can hand over only what we have — the lists above. Profile data is encrypted, and we can’t decrypt it.
@@ -145,7 +143,7 @@ You follow the rules of the sites and services you use. If the seller learns of 
 
 ## Your data {#data}
 
-Profiles and everything in them are yours, kept encrypted on your Macs. We never delete them — not when a period ends, not when you stop paying. If you turned on sync, its encrypted copy on the server is deleted with the account — or earlier, when you ask in your account; the data on your Macs stays. How we handle account data is in the [privacy policy](privacy.html).
+Profiles and everything in them are yours, kept encrypted on your Macs. We never delete them — not when a period ends, not when you stop paying. If you turned on sync, its encrypted copy on the server is deleted with the account — or earlier, when you ask in your account; Macs with sync still on then upload their data again. The data on your Macs stays. How we handle account data is in the [privacy policy](privacy.html).
 
 ## Liability {#warranty}
 

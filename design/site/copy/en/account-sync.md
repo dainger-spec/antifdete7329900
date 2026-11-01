@@ -52,6 +52,6 @@ The server doesn’t keep which Mac synced when — only when the vault last cha
 
 [Delete sync data…]
 
-The server deletes every encrypted object. The data on your Macs stays.
+The server deletes every encrypted object. The data on your Macs stays. Macs with sync on upload their data again at the next sync — to leave nothing on the server, turn sync off on every Mac first.
 
 OverviewDevicesSyncPaymentsTeamSettings

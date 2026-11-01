@@ -44,7 +44,7 @@ We remind you by email 7 days and 1 day before the period ends. Renew early and 
 - Devices 4 of 10
 - ProfilesThe number from all the team’s devices — the server doesn’t know their names 38 of 200
 - Team 3 of 5
-- Sync 12 minutes ago
+- SyncWhen the vault last changed 12 minutes ago
 - Last payment $149 · 29 October
 - Sign-in you@example.com
 

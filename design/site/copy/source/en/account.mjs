@@ -33,7 +33,7 @@ export default {
       ['account-devices.html', 'laptop', 'Devices', '4 of 10'],
       ['', 'person2', 'Profiles', '38 of 200', 'The number from all the team’s devices — the server doesn’t know their names'],
       ['account-team.html', 'person', 'Team', '3 of 5'],
-      ['account-sync.html', 'syncArrows', 'Sync', '12 minutes ago'],
+      ['account-sync.html', 'syncArrows', 'Sync', '12 minutes ago', 'When the vault last changed'],
       ['account-invoices.html', 'doc', 'Last payment', '$149 · 29 October'],
       ['account-settings.html', 'gearshape', 'Sign-in', 'you@example.com'],
     ],
@@ -69,7 +69,7 @@ export default {
     more: '147 more objects',
     header: ['vault-header', '0.6 KB', 'The vault’s header: the salt, the Argon2id parameters and the encrypted key — no secrets.'],
     noTrace: 'The server doesn’t keep which Mac synced when — only when the vault last changed.',
-    danger: { action: 'Delete sync data…', text: 'The server deletes every encrypted object. The data on your Macs stays.' },
+    danger: { action: 'Delete sync data…', text: 'The server deletes every encrypted object. The data on your Macs stays. Macs with sync on upload their data again at the next sync — to leave nothing on the server, turn sync off on every Mac first.' },
   },
   invoices: {
     title: 'Payments',

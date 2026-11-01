@@ -98,7 +98,7 @@ You follow the rules of the sites and services you use. If the seller learns of 
 
 ## Your data
 
-Profiles and everything in them are yours, kept encrypted on your Macs. We never delete them — not when a period ends, not when you stop paying. If you turned on sync, its encrypted copy on the server is deleted with the account — or earlier, when you ask in your account; the data on your Macs stays. How we handle account data is in the privacy policy.
+Profiles and everything in them are yours, kept encrypted on your Macs. We never delete them — not when a period ends, not when you stop paying. If you turned on sync, its encrypted copy on the server is deleted with the account — or earlier, when you ask in your account; Macs with sync still on then upload their data again. The data on your Macs stays. How we handle account data is in the privacy policy.
 
 ## Liability
 
