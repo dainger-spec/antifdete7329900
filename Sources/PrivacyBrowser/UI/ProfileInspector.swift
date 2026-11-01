@@ -155,6 +155,14 @@ struct ProfileInspectorView: View {
         let check = info.proxyCheck.flatMap { $0.isAlive ? $0 : nil }
         return section(L("inspector.network")) {
             fact(L("inspector.exit"), exitText(check: check), help: exitHelp)
+            if case .proxy(_, nil) = row.exit, let note = row.exitNote {
+                // Why the country is not known, said, not only on hover.
+                Text(note)
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 4)
+            }
             if let ip = details.exitIP ?? check?.exitIP {
                 fact(L("inspector.exitIP"), ip, mono: true)
             }
@@ -196,7 +204,7 @@ struct ProfileInspectorView: View {
     }
 
     private var exitHelp: String? {
-        if case .proxy(_, nil) = row.exit { return L("profiles.exit.unknownCountry") }
+        if case .proxy(_, nil) = row.exit { return row.exitNote ?? L("profiles.exit.unknownCountry") }
         return nil
     }
 

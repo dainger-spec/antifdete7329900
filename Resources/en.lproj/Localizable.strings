@@ -515,6 +515,9 @@
 "profiles.empty.title" = "No profiles yet";
 "profiles.exit.direct" = "Direct";
 "profiles.exit.unknownCountry" = "The exit country shows after a launch that looks the proxy up (time zone from the proxy, or the exit-IP warning).";
+"profiles.exit.unknown.notChecked" = "Country unknown: this proxy has not been checked, and the profile has not launched through it looking up its location. Check it in Proxies.";
+"profiles.exit.unknown.checkFailed" = "Country unknown: the last check of this proxy failed. What failed is in Proxies.";
+"profiles.exit.unknown.noCountry" = "Country unknown: the proxy answers, but the geolocation service named no country for its address.";
 "profiles.exit.viaProxy" = "Through the proxy %@";
 "profiles.exit.unreadable" = "Settings unreadable";
 "profiles.exit.unreadable.help" = "This profile's settings could not be read, so where it goes online is not known. It does not start until they are back: from a backup, or with %1$@ in the %2$@ menu.";

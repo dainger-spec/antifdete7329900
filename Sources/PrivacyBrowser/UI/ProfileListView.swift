@@ -279,7 +279,7 @@ struct ProfileListView: View {
     }
 
     private func profilesScreen(proxyCount: Int?, proxyAlerts: Int = 0, proxyEntries: [ProxyListEntry] = []) -> ProfilesScreen {
-        ProfilesScreen(rows: rows, isWorking: model.isWorking, sync: syncLine,
+        ProfilesScreen(rows: rows(with: proxyEntries), isWorking: model.isWorking, sync: syncLine,
                        filter: $filter, search: $search, actions: actions,
                        section: $section, proxyCount: proxyCount,
                        proxies: AnyView(ProxyListView(selection: $proxySelection)),
@@ -360,7 +360,13 @@ struct ProfileListView: View {
                                           holding.reduce(0) { $0 + $1.files.count })
     }
 
-    private var rows: [ProfileRowItem] {
+    private var rows: [ProfileRowItem] { rows(with: model.proxyList?.entries ?? []) }
+
+    /// The rows, with where each profile exits by one rule (the owner, 1 November): the country,
+    /// with its flag, when it is known — from the profile's last launch through its proxy, else from
+    /// the proxy list's last check of that proxy; otherwise the proxy's address, with why its country
+    /// is not known; without a proxy, "Direct".
+    private func rows(with proxyEntries: [ProxyListEntry]) -> [ProfileRowItem] {
         model.profiles.map { profile in
             let running = model.isRunning(profile.id)
             let busy = model.isBusy(profile.id)
@@ -370,8 +376,19 @@ struct ProfileListView: View {
             let problem = model.proxyProblems.first { $0.profileID == profile.id }
             // No details: its settings could not be read (`AppModel.refresh`) — not "Direct" (R1).
             var exit = ProfileExit.unreadable
+            var exitNote: String?
+            let lookupFailed = model.manager?.proxyLocationUnknown.contains(profile.id) ?? false
             if let details {
-                exit = details.proxyEndpoint.map { ProfileExit.proxy(endpoint: $0, countryCode: details.exitCountryCode) } ?? .direct
+                if let endpoint = details.proxyEndpoint {
+                    let check = details.proxyIdentity.flatMap { identity in
+                        proxyEntries.first { ProxyList.identity(of: $0.proxy) == identity }?.lastCheck
+                    }
+                    let country = details.exitCountryCode ?? (check?.isAlive == true ? check?.countryCode : nil)
+                    exit = .proxy(endpoint: endpoint, countryCode: country)
+                    if country == nil { exitNote = ProfileRowItem.unknownCountryNote(check: check, lookupFailed: lookupFailed) }
+                } else {
+                    exit = .direct
+                }
             }
             return ProfileRowItem(
                 id: profile.id, name: profile.name, activity: activity,
@@ -384,7 +401,8 @@ struct ProfileListView: View {
                 lastUsed: profile.lastLaunchedAt,
                 warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
                 warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false,
-                exitUnconfirmed: model.manager?.proxyLocationUnknown.contains(profile.id) ?? false,
+                exitUnconfirmed: lookupFailed,
+                exitNote: exitNote,
                 tags: details?.tags ?? [], notes: details?.notes ?? "", avatar: details?.avatar,
                 problem: problem.map {
                     String(format: $0.notStarted ? L("proxyProblem.subtitle.notStarted") : L("proxyProblem.subtitle"),
@@ -489,6 +507,8 @@ struct ProfileRowItem: Identifiable {
     /// At its last launch no geolocation service answered through its proxy: where it exits is
     /// not confirmed (`ProfileManager.proxyLocationUnknown`).
     var exitUnconfirmed = false
+    /// Why its proxy's country is not known, when it is not (the row then shows the proxy's address).
+    var exitNote: String?
     /// The person's own tags and notes for the profile, and how its glyph looks.
     var tags: [String] = []
     var notes = ""
@@ -524,6 +544,15 @@ struct ProfileRowItem: Identifiable {
     }
 
     /// "Mac · Safari 26", "iPhone · Safari 26": the device the profile presents as.
+    /// Why a proxy's country is not known: the lookup at its last launch got no answer, the proxy
+    /// was never checked (and no launch looked it up), its last check failed, or the check that
+    /// passed got no country for its address.
+    static func unknownCountryNote(check: ProxyCheckResult?, lookupFailed: Bool) -> String {
+        if lookupFailed { return L("profiles.exit.lookupFailed") }
+        guard let check else { return L("profiles.exit.unknown.notChecked") }
+        return check.isAlive ? L("profiles.exit.unknown.noCountry") : L("profiles.exit.unknown.checkFailed")
+    }
+
     /// How it presents: the device, and the Safari it says it is. On a Mac that is the version its
     /// settings pin, else this Mac's own Safari — what its User-Agent declares
     /// (`DeviceGeneration.userAgent(hostSafariVersion:)`); the catalog's "26" went stale on a Mac
@@ -1504,7 +1533,7 @@ private struct ProfileRow: View {
 
     private var exitCell: some View {
         HStack(spacing: 6) {
-            ExitLabel(exit: row.exit, showsFlag: false)
+            ExitLabel(exit: row.exit, note: row.exitNote)
             if row.exitUnconfirmed {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
@@ -1696,8 +1725,10 @@ private struct ProfileMenuItems: View {
 struct ExitLabel: View {
     let exit: ProfileExit
     var flagSize: CGFloat = 14
-    /// The country's flag beside its name (the list's rows show the name alone).
+    /// The country's flag beside its name.
     var showsFlag = true
+    /// Why the country is not known, when it is not (`ProfileRowItem.unknownCountryNote`).
+    var note: String?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1711,13 +1742,22 @@ struct ExitLabel: View {
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textSecondary)
             case let .proxy(endpoint, code?):
+                // The flag to find it by eye, the words to say what it is — a flag alone tells the
+                // Netherlands from France poorly, and nothing to VoiceOver (the owner, 1 November).
+                // Short of room, the code ("NL"), never the flag alone.
                 if showsFlag {
                     CountryFlag(code: code, size: flagSize)
+                        .accessibilityHidden(true)
                 }
-                Text(CountryNames.name(for: code))
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textPrimary)
-                    .help(String(format: L("profiles.exit.viaProxy"), endpoint))
+                ViewThatFits(in: .horizontal) {
+                    Text(CountryNames.name(for: code))
+                    Text(verbatim: code.uppercased())
+                }
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textPrimary)
+                .help(String(format: L("profiles.exit.viaProxy"), endpoint))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(CountryNames.name(for: code))
             case let .proxy(endpoint, nil):
                 Image(systemName: "network")
                     .font(.system(size: 12))
@@ -1727,7 +1767,7 @@ struct ExitLabel: View {
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textPrimary)
                     .truncationMode(.middle)
-                    .help(L("profiles.exit.unknownCountry"))
+                    .help(note ?? L("profiles.exit.unknownCountry"))
             case .unreadable:
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
