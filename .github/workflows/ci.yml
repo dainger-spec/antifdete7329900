@@ -385,7 +385,7 @@ jobs:
         # fails the job at the end.
         id: ui
         continue-on-error: true
-        timeout-minutes: 8
+        timeout-minutes: 10
         run: |
           set -o pipefail
           status=0
