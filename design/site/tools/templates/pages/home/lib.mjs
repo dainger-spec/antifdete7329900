@@ -21,5 +21,5 @@ export function manifest(text, lang, cls = 'manifest') {
   });
   const sticky = STICKY[lang] || STICKY.en;
   return `<p class="${cls}" style="--n:${words.length}">${words.map((x, i) =>
-    `<span class="w${x.accent ? ' acc' : ''}" style="--i:${i}">${esc(x.word)}</span>${i < words.length - 1 ? (sticky.has(x.word.toLowerCase()) ? ' ' : ' ') : ''}`).join('')}</p>`;
+    `<span class="w${x.accent ? ' w-acc' : ''}" style="--i:${i}">${esc(x.word)}</span>${i < words.length - 1 ? (sticky.has(x.word.toLowerCase()) ? ' ' : ' ') : ''}`).join('')}</p>`;
 }

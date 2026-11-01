@@ -11,7 +11,8 @@
   font: 600 56px/66px var(--font-display); letter-spacing: -0.028em;
   color: #F5F6F8; font-kerning: normal; hanging-punctuation: first;
 }
-.sc-statement .acc {
+/* .w-acc, never a bare .acc: that is the account's layout in site.css (a grid with padding) */
+.sc-statement .w-acc {
   background: linear-gradient(180deg, #9DB8FF 10%, #7393EE 92%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }

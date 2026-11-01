@@ -38,7 +38,9 @@ function words(text, lang) {
 
 export default function statement(c, { lang }) {
   const ws = words(c.text, lang);
-  const body = ws.map((x, i) => `<span class="w${x.accent ? ' acc' : ''}" style="--i:${i}">${esc(x.w)}</span>${x.glue}`).join('');
+  // the accent words are .w-acc: a bare .acc is the account's layout (site.css), and it once turned these words
+  // into padded grid blocks — the paragraph grew taller than the screen and lost its first and last lines
+  const body = ws.map((x, i) => `<span class="w${x.accent ? ' w-acc' : ''}" style="--i:${i}">${esc(x.w)}</span>${x.glue}`).join('');
   return `<section class="scene sc-statement" data-scene="statement" data-title="${esc(c.title)}" style="--len:230vh">
   <div class="scene-pin"><div class="container">
     <p class="st-text" data-r="0.05 0.8" style="--n:${ws.length}">${body}</p>

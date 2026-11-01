@@ -68,6 +68,18 @@ const FORBIDDEN = [
 ];
 // Words that may appear nowhere in a page's source either: not in the meta tags, the alt texts or titles
 const FORBIDDEN_SOURCE = [/антидетект/i, /anti-?detect/i, /lumen\.example/i, /\bTeam\s*ID\b/i];
+// The home page's «idea» paragraph lights up word by word inside one pinned screen, so it has to fit that screen.
+// It once didn't: its accent words shared a class with the account's layout (.acc — a grid with padding), each
+// became a padded block, and the paragraph lost its first and last lines above and below the screen.
+async function statementFits(p, where) {
+  const r = await p.evaluate(() => {
+    const t = document.querySelector('.sc-statement .st-text');
+    return t ? { h: t.getBoundingClientRect().height, vh: innerHeight, blocks: [...t.querySelectorAll('.w')].filter((w) => getComputedStyle(w).display !== 'inline').length } : null;
+  });
+  if (!r) return fail('statement', `${where}: no .st-text`);
+  if (r.blocks) fail('statement', `${where}: ${r.blocks} words are not inline`);
+  if (r.h > r.vh * 0.7) fail('statement', `${where}: the paragraph is ${Math.round(r.h)} px tall in a ${r.vh} px screen`);
+}
 const browser = await chromium.launch();
 const ctx = await browser.newContext();
 await ctx.route((u) => !u.href.startsWith('file:'), (r) => { fail('network', `request ${r.request().url()}`); return r.abort(); });
@@ -83,6 +95,7 @@ for (const lang of LANGS) {
     await p.goto(pathToFileURL(file).href + '?shot=1');
     const wide = await p.evaluate(() => document.documentElement.scrollWidth);
     if (wide > 390) fail('phone', `${lang}/${page.slug}: the page is ${wide} px wide at 390`);
+    if (page.slug === 'index') await statementFits(p, `${lang}/index at 390`);
     await p.close();
   }
 }
@@ -93,6 +106,7 @@ for (const lang of LANGS) {
     if (!fs.existsSync(file)) { fail('build', `${lang}/${page.slug}.html is missing`); continue; }
     const p = await ctx.newPage();
     await p.goto(pathToFileURL(file).href + '?shot=1');
+    if (page.slug === 'index') await statementFits(p, `${lang}/index at ${p.viewportSize().width}`);
     const data = await p.evaluate(() => {
       const ids = new Set(Array.from(document.querySelectorAll('[id]')).map((e) => e.id));
       const links = Array.from(document.querySelectorAll('a[href]')).map((a) => a.getAttribute('href'));
