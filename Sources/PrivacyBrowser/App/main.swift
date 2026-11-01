@@ -73,6 +73,10 @@ MainActor.assumeIsolated {
         // app group containers asked for, and its own log about bookmarks, its tab collection and
         // downloads (SafariPathsCheck; CI). A measurement.
         SafariPathsCheck.run(arguments: arguments)
+    } else if arguments.contains("--language-check") {
+        LanguageCheck.run(arguments: arguments)
+    } else if arguments.contains("--chrome-language-check") {
+        LanguageCheck.runChrome(arguments: arguments)
     } else if arguments.contains("--history-check") {
         // Whether Safari's history can run inside a profile's process: its service's own code, in
         // this process, with its database in the profile's home (SafariHistoryCheck; CI).
