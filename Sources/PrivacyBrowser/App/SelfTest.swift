@@ -1,6 +1,7 @@
 import AppKit
 import BrowserCore
 import CryptoKit
+import Darwin
 import Network
 import os
 import WebKit
@@ -357,6 +358,7 @@ final class SelfTest {
         await group("warm-up") { try await warmUp(repository) }
         await group("warm-up queue") { try await warmUpQueue(repository) }
         await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
+        await group("a mobile view in its own process") { try await mobileViewInItsOwnProcess(repository) }
         await group("lock during launch") { try await lockDuringLaunch(repository) }
         await group("quit") { try await quitFromFocusedPage(repository) }
         await group("forced seal") { try await forcedSealAtQuit(repository) }
@@ -4689,6 +4691,86 @@ final class SelfTest {
         let back = await waitUntil(timeout: 20) { !tab.pageStopped && !tab.isLoading && pid() > 0 && pid() != last }
         check("ended page: Reload asks for the page again", back && !controller.showsStoppedPage,
               "stopped \(tab.pageStopped), process \(pid()), cover shown \(controller.showsStoppedPage)")
+    }
+
+    /// The owner, 1 November, a sample of the process: an iPhone view, in its own process as the
+    /// app starts one, spun in -[SPSafariPlatformSupport viewServiceDidTerminateWithError:] under
+    /// -[NSRemoteView invalidate] — Safari's completion list, which WebKit brings in, asking for its
+    /// view again each time the service refused to the profile's process ended it — and the window
+    /// server with it, until the session was restarted. The stub that stops it was made only where
+    /// Safari's chrome is hosted. Here an iPhone view runs in its own process, its page loaded; once
+    /// it settles, its processor time over eight seconds, against a control that keeps this process
+    /// busy, read the same way.
+    private func mobileViewInItsOwnProcess(_ repository: ProfileRepository) async throws {
+        let name = "mobile view process: an iPhone view in its own process, idle, does not keep it busy"
+        guard !AppEnvironment.isSandboxed else {
+            skip(name, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
+            return
+        }
+        let profile = try repository.create(name: "Mobile view process", configuration: ProfileConfiguration(
+            startURL: URL(string: "http://proxied.selftest.invalid/one"),
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort),
+            deviceGenerationID: "ios-26", matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        var exited: Int32?
+        manager.onChildExited = { _, status in exited = status }
+        defer { try? repository.delete(profile.id) }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        do {
+            try await manager.launch(profile.id)
+        } catch {
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            check(name, false, "its process did not start: \(error)")
+            return
+        }
+        setenv("PB_PROFILE_PROCESS", "0", 1)
+        guard let pid = manager.processIdentifier(of: profile.id) else {
+            check(name, false, "no process for it")
+            return
+        }
+        info("egress-pid \(pid)")
+        let up = await waitUntil(timeout: 90) { hostsChrome != nil || exited != nil }
+        check("mobile view process: it opens our own window, not Safari's", up && hostsChrome == false,
+              "running \(hostsChrome.map { $0 ? "in Safari's window" : "in our window" } ?? "not reported"), exited \(exited.map(String.init) ?? "no")")
+        if up && exited == nil {
+            // Its page loads, and the loop came within seconds of the start.
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            var timebase = mach_timebase_info_data_t()
+            mach_timebase_info(&timebase)
+            func cpuSeconds(_ process: pid_t) -> Double? {
+                var usage = rusage_info_v4()
+                let result = withUnsafeMutablePointer(to: &usage) { pointer in
+                    pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(process, RUSAGE_INFO_V4, $0) }
+                }
+                guard result == 0 else { return nil }
+                let ticks = Double(usage.ri_user_time + usage.ri_system_time)
+                return ticks * Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
+            }
+            // The control: this process kept busy for 0.6 s, read the same way.
+            let controlStart = Date(), controlCPU = cpuSeconds(getpid())
+            var spin = 0.0
+            while Date().timeIntervalSince(controlStart) < 0.6 { spin += sin(spin + 1) }
+            let control = zip2(controlCPU, cpuSeconds(getpid())).map { ($0.1 - $0.0) / Date().timeIntervalSince(controlStart) }
+            let start = Date(), before = cpuSeconds(pid)
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            let busy = zip2(before, cpuSeconds(pid)).map { ($0.1 - $0.0) / Date().timeIntervalSince(start) }
+            info("mobile view process: idle, its process \(busy.map { "\(Int($0 * 100)) %" } ?? "not read") over 8 s; "
+                 + "the control (this process kept busy) \(control.map { "\(Int($0 * 100)) %" } ?? "not read") (\(spin > 0 ? "+" : "-"))")
+            if let control, control >= 0.5, let busy {
+                check(name, busy < 0.3, "\(Int(busy * 100)) % of a core over 8 s (the control read \(Int(control * 100)) %)")
+            } else {
+                skip(name, "the processor time could not be read, or the control read \(control.map { "\(Int($0 * 100)) %" } ?? "nothing"): the measure cannot be trusted")
+            }
+        } else {
+            skip(name, "the iPhone view's process did not come up")
+        }
+        try? await manager.stop(profile.id)
     }
 
     /// The window server's processor time so far, in seconds (`ps`); nil where it cannot be read.

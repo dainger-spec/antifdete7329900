@@ -873,10 +873,7 @@ enum SafariChrome {
         }
         // Classes whose framework loads after this runs are replaced as soon as their image is
         // loaded: here they are not there yet, and replacing them did nothing (CI run 475).
-        stubLateFeatures()
-        _dyld_register_func_for_add_image { _, _ in
-            DispatchQueue.main.async { MainActor.assumeIsolated { SafariChrome.stubLateFeatures() } }
-        }
+        stopRefusedServiceLoops()
         replaceWithConstant("UnifiedField", "_assistantButtonIconForContentOption:withSparkle:") {
             NSImage(size: NSSize(width: 1, height: 1))
         }
@@ -917,6 +914,22 @@ enum SafariChrome {
         ("SPSafariPlatformSupport", "viewServiceDidTerminateWithError:"),
     ]
     private static var lateStubsMade: Set<String> = []
+    private static var lateStubsHooked = false
+
+    /// The late stubs, now and as their images load — in every profile's process, whichever
+    /// window it shows. SafariPlatformSupport comes in with WebKit too, not only with Safari's
+    /// chrome: an iPhone view, in our own window, never had the stub, and its process and the
+    /// window server spun until the session was restarted (the owner's Mac, 1 November: a sample
+    /// of the process showed -[SPSafariPlatformSupport viewServiceDidTerminateWithError:] under
+    /// -[NSRemoteView invalidate], over and over). Once per process.
+    static func stopRefusedServiceLoops() {
+        guard !lateStubsHooked else { return }
+        lateStubsHooked = true
+        stubLateFeatures()
+        _dyld_register_func_for_add_image { _, _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { SafariChrome.stubLateFeatures() } }
+        }
+    }
 
     /// Replaces the late stubs whose classes are loaded by now; called again as images load.
     static func stubLateFeatures() {
