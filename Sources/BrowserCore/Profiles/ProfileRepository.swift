@@ -507,7 +507,7 @@ public final class ProfileRepository: @unchecked Sendable {
     /// A saved plan that cannot be read is moved aside as `warmup.bin.unreadable`, never written
     /// over (R1b, docs/DESTRUCTIVE_PATHS.md).
     public func saveWarmUpPlan(_ plan: WarmUpPlan, for id: UUID) throws {
-        try warmUpPlanFile(for: id).saveKeepingUnreadable(plan)
+        try warmUpPlanFile(for: id).save(plan)
     }
 
     // MARK: Warm-up schedule (this Mac only)
@@ -528,7 +528,7 @@ public final class ProfileRepository: @unchecked Sendable {
     /// A saved schedule that cannot be read is moved aside as `warmup-schedule.bin.unreadable`,
     /// never written over (R1b).
     public func saveWarmUpSchedule(_ schedule: WarmUpSchedule, for id: UUID) throws {
-        try warmUpScheduleFile(for: id).saveKeepingUnreadable(schedule)
+        try warmUpScheduleFile(for: id).save(schedule)
     }
 
     // MARK: Open tabs (this Mac only)
@@ -583,8 +583,14 @@ public final class ProfileRepository: @unchecked Sendable {
 
     private func writeKeyCopy(_ copy: ProfileKeyCopy) throws {
         try SecureFile.ensureDirectory(directory(for: copy.id))
-        try SecureFile.write(AEAD.seal(JSONCoding.encoder.encode(copy), key: vault.indexKey, aad: keyCopyAAD(copy.id)),
-                             to: keyCopyURL(for: copy.id))
+        let url = keyCopyURL(for: copy.id)
+        // A copy there that this vault cannot read (damaged, another vault's) is moved aside as
+        // `key.bin.unreadable`, never written over (docs/DESTRUCTIVE_PATHS.md); the index is what
+        // the new one is written from.
+        if FileManager.default.fileExists(atPath: url.path), readKeyCopy(copy.id) == nil {
+            try SecureFile.moveAside(url, suffix: "unreadable")
+        }
+        try SecureFile.write(AEAD.seal(JSONCoding.encoder.encode(copy), key: vault.indexKey, aad: keyCopyAAD(copy.id)), to: url)
     }
 
     private func writeKeyCopy(for id: UUID) throws {

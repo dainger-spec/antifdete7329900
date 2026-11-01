@@ -12,6 +12,8 @@ import Foundation
 ///
 /// The format rule of the vault's files (`DocumentFormat`, docs/UPDATES.md §4): a document that
 /// declares a format newer than `supportedFormat` is refused when read, and never written over.
+/// And the owner's rule (docs/DESTRUCTIVE_PATHS.md): a document that does not open is never
+/// deleted or written over — a save or a removal moves it aside first (`makeWay`).
 struct EncryptedDocumentFile<Document: Codable> {
     let url: URL?
     let key: SymmetricKey
@@ -27,43 +29,36 @@ struct EncryptedDocumentFile<Document: Codable> {
         return try decode(SecureFile.read(url))
     }
 
+    /// Writes `document` — never over a newer version's file, nor over one that does not open
+    /// (moved aside first, `makeWay`).
     func save(_ document: Document) throws {
         guard let url else { return }
-        try DocumentFormat.guardOverwrite(of: url, supported: supportedFormat, what: what) {
-            try AEAD.open($0, key: key, aad: aad)
-        }
+        try makeWay(at: url)
         try SecureFile.write(encode(document), to: url)
     }
 
-    /// Saves `document` where a file that does not open may be: damaged, cut short, another key's —
-    /// not a newer version's, which `save` refuses. Such a file is moved aside first, as
-    /// `<file>.unreadable` (then `-2`, …), never written over (docs/DESTRUCTIVE_PATHS.md). Returns
-    /// where it went, when it was moved.
-    @discardableResult
-    func saveKeepingUnreadable(_ document: Document) throws -> URL? {
-        guard let url else { return nil }
-        var aside: URL?
-        if FileManager.default.fileExists(atPath: url.path) {
-            do {
-                _ = try load()
-            } catch CoreError.newerFormat {
-                // `save` refuses it below.
-            } catch {
-                aside = try SecureFile.moveAside(url, suffix: "unreadable")
-            }
-        }
-        try save(document)
-        return aside
-    }
-
-    /// Deletes the file — never one that declares a newer format than `supportedFormat`, which
-    /// is refused like a save over it.
+    /// Deletes the file — never a newer version's, which is refused like a save over it, nor one
+    /// that does not open, which is moved aside instead (`makeWay`).
     func remove() throws {
         guard let url else { return }
-        try DocumentFormat.guardOverwrite(of: url, supported: supportedFormat, what: what) {
-            try AEAD.open($0, key: key, aad: aad)
-        }
+        guard try makeWay(at: url) == nil else { return }
         try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Before a write or a removal, the file there: a newer version's refuses it
+    /// (`CoreError.newerFormat`, docs/UPDATES.md §4); one that does not open — damaged, cut short,
+    /// another key's — is moved aside as `<file>.unreadable` (then `-2`, …): nothing unreadable is
+    /// ever deleted or written over (docs/DESTRUCTIVE_PATHS.md). Returns where it went, when it was
+    /// moved. "Opens" is decrypted with this key: what decrypts but no longer decodes would only be
+    /// a writer's bug, and is not told apart here.
+    @discardableResult
+    func makeWay(at url: URL) throws -> URL? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard let sealed = try? SecureFile.read(url), let json = try? AEAD.open(sealed, key: key, aad: aad) else {
+            return try SecureFile.moveAside(url, suffix: "unreadable")
+        }
+        try DocumentFormat.check(json, supported: supportedFormat, what: what)
+        return nil
     }
 
     /// The JSON of a sealed copy, undecoded (sync looks at a remote copy's format first).

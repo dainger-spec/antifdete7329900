@@ -95,6 +95,51 @@ final class UnreadableKeptTests: XCTestCase {
         XCTAssertEqual(try repository.warmUpSchedule(for: id)?.everyHours, 12)
     }
 
+    // MARK: Every encrypted document: the rule in one place
+
+    /// The open tabs a stop keeps, written over an unreadable file or forgotten when "restore tabs"
+    /// is turned off: either way the unreadable file is moved aside, not written over or deleted.
+    func testUnreadableOpenTabsAreKeptAsideBySaveAndByRemoval() throws {
+        let tabs = OpenTabs(windows: [.init(tabs: [URL(string: "https://a.example/")!])])
+        try repository.saveOpenTabs(tabs, for: id)
+        let url = repository.openTabsURL(for: id)
+        let first = try damage(url)
+        try repository.saveOpenTabs(tabs, for: id)
+        XCTAssertEqual(try Data(contentsOf: aside(url)), first)
+        let second = try damage(url)
+        try repository.removeOpenTabs(for: id)
+        XCTAssertEqual(try Data(contentsOf: aside(url, "unreadable-2")), second, "removed, not kept")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        // A readable one is still removed when asked.
+        try repository.saveOpenTabs(tabs, for: id)
+        try repository.removeOpenTabs(for: id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: aside(url, "unreadable-3").path))
+    }
+
+    /// Cookie sync turned off empties the synced cookies and drops this Mac's baseline: unreadable
+    /// ones are moved aside instead (the audit had these as written over "by design").
+    func testTurningCookieSyncOffKeepsUnreadableCookieFilesAside() throws {
+        let jar = repository.cookieJarURL(for: id), baseline = repository.cookieBaselineURL(for: id)
+        try repository.saveCookieJar(CookieJarDocument(), for: id)
+        try repository.saveCookieBaseline(CookieBaseline(), for: id)
+        let damagedJar = try damage(jar), damagedBaseline = try damage(baseline)
+        try repository.clearSyncedCookies(for: id)
+        XCTAssertEqual(try Data(contentsOf: aside(jar)), damagedJar)
+        XCTAssertEqual(try Data(contentsOf: aside(baseline)), damagedBaseline)
+        XCTAssertEqual(try repository.cookieJar(for: id), CookieJarDocument())
+    }
+
+    /// The profile's key copy is written again from the index at unlock; one this vault cannot read
+    /// is moved aside first.
+    func testAnUnreadableKeyCopyIsKeptAsideWhenWrittenAgain() throws {
+        let url = repository.keyCopyURL(for: id)
+        let damaged = try damage(url)
+        let reopened = try ProfileRepository.openedAtUnlock(vault: repository.vault)
+        XCTAssertEqual(try Data(contentsOf: aside(url)), damaged)
+        XCTAssertNotNil(reopened.readKeyCopy(id), "a readable copy is written in its place")
+    }
+
     /// A plan saved over a readable one is no move: nothing beside it.
     func testSavingOverAReadablePlanLeavesNothingBeside() throws {
         try repository.saveWarmUpPlan(WarmUpPlan(addresses: "https://a.example/"), for: id)
