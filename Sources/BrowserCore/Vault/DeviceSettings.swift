@@ -21,6 +21,9 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
         public var conflicts: Int
         public var deferred: Int
         public var error: String?
+        /// Whose master password the sync location holds (`SyncReport.passwordHeader`); nil when
+        /// it is this Mac's, or in a status from before it was kept.
+        public var passwordHeader: SyncReport.PasswordHeader?
 
         public init(date: Date = Date(), report: SyncReport) {
             self.date = date
@@ -30,6 +33,7 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
             conflicts = report.resolvedConflicts.count
             deferred = report.deferred.count
             error = nil
+            passwordHeader = report.passwordHeader == .same ? nil : report.passwordHeader
         }
 
         public init(date: Date = Date(), error: String) {

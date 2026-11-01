@@ -27,6 +27,11 @@ public struct VaultHeader: Codable, Equatable, Sendable {
     /// AEAD(KEK, VMK), AAD = `"vault-master-key:v1:<vaultID>"`.
     public var wrappedMasterKey: Data
     public var createdAt: Date
+    /// How many times the master password was changed (`UnlockedVault.changePassword`); absent in a
+    /// header from before changes were counted (0). The sync location keeps the header with the
+    /// highest: a device puts its own there only when it is higher (SyncEngine), so a device still
+    /// on an older password never puts that one back, and a new device sets up with the latest.
+    public var passwordRevision: Int?
 
     static func aad(for vaultID: UUID) -> String { "vault-master-key:v1:\(vaultID.uuidString)" }
 
@@ -54,7 +59,9 @@ public struct VaultHeader: Codable, Equatable, Sendable {
 ///                                               ├─HKDF "passwords"       ▶ password vault key
 ///                                               └─HKDF "webdata-archive" ▶ per-archive WebKit data keys
 /// ```
-/// Changing the master password only re-wraps the VMK; no data is re-encrypted.
+/// Changing the master password only re-wraps the VMK; no data is re-encrypted. So a copy of
+/// `vault.json` from before the change still opens the vault with the old password — the data
+/// written after the change included (docs/ARCHITECTURE.md, Changing the master password).
 public enum MasterVault {
     public static func headerURL(in root: URL) -> URL { root.appendingPathComponent("vault.json") }
 
@@ -217,12 +224,16 @@ public final class UnlockedVault: @unchecked Sendable {
 
     /// Re-wraps the VMK under a key derived from `newPassword` (Argon2id, or PBKDF2 with
     /// `iterations` for tests). Data keys are unchanged.
-    public func changePassword(current: String, new newPassword: String, iterations: Int? = nil) throws {
+    ///
+    /// `passwordRevision` goes one above both this header's and `atLeast` — the sync location's, when
+    /// the caller knows it — so that the change is the newest there and goes to it at the next sync.
+    public func changePassword(current: String, new newPassword: String, iterations: Int? = nil, atLeast known: Int? = nil) throws {
         // Re-verify the current password: an unlocked session alone must not be
         // enough to change it (e.g. an unattended unlocked machine).
         _ = try MasterVault.unlock(header: header, root: root, password: current)
         guard !newPassword.isEmpty else { throw CoreError.invalidConfiguration("empty master password") }
-        try rewrap(password: newPassword, kdf: iterations.map { KDFParameters.generate(iterations: $0) } ?? .recommended())
+        try rewrap(password: newPassword, kdf: iterations.map { KDFParameters.generate(iterations: $0) } ?? .recommended(),
+                   passwordRevision: max(header.passwordRevision ?? 0, known ?? 0) + 1)
     }
 
     /// A vault from before Argon2id (PBKDF2): re-wraps the VMK under `kdf` (Argon2id) with the
@@ -237,13 +248,15 @@ public final class UnlockedVault: @unchecked Sendable {
         return true
     }
 
-    private func rewrap(password: String, kdf: KDFParameters) throws {
+    /// `passwordRevision`: a change of the password (an upgrade of the KDF keeps the header's).
+    private func rewrap(password: String, kdf: KDFParameters, passwordRevision: Int? = nil) throws {
         guard let masterKey else { throw CoreError.notGranted("master password") }
         let kek = try KeyDerivation.deriveKey(password: password, parameters: kdf)
         var raw = masterKey.rawBytes
         defer { wipe(&raw) }
         var updated = header
         updated.kdf = kdf
+        if let passwordRevision { updated.passwordRevision = passwordRevision }
         updated.wrappedMasterKey = try AEAD.seal(raw, key: kek, aad: VaultHeader.aad(for: header.vaultID))
         try MasterVault.writeHeader(updated, in: root)
         header = updated

@@ -402,12 +402,55 @@ final class AppModel: ObservableObject {
         phase = MasterVault.exists(in: root) ? .locked : .setup
     }
 
+    /// Changes the master password: the vault's key is wrapped anew under it, and nothing else
+    /// changes — a copy of `vault.json` from before still opens the vault with the old password,
+    /// the data saved after the change included (docs/ARCHITECTURE.md, Changing the master
+    /// password). With sync set up, the new header goes to the sync location right away, so that a
+    /// new device joins with the new password and not the old; out of reach, it goes at the next
+    /// sync, and the person is told so.
     func changePassword(current: String, new: String) async {
-        guard let vault = repository?.vault else { return }
+        guard let repository else { return }
+        let vault = repository.vault
+        let target = deviceSettings.syncTarget
+        var changed = false
         await perform {
+            // The count of changes the sync location's header has, when it can be read: this change
+            // is then the newest there (another Mac may have changed the password since this one synced).
+            let there = await self.passwordRevisionThere(target, repository: repository)
             try await Task.detached(priority: .userInitiated) {
-                try vault.changePassword(current: current, new: new)
+                try vault.changePassword(current: current, new: new, atLeast: there)
             }.value
+            changed = true
+        }
+        if changed, let target { await publishPasswordChange(target, repository: repository) }
+    }
+
+    private func passwordRevisionThere(_ target: DeviceSettings.SyncTarget?, repository: ProfileRepository) async -> Int? {
+        guard let target, !isSyncing else { return nil }
+        var folder: URL?
+        defer { folder?.stopAccessingSecurityScopedResource() }
+        do {
+            let (transport, scoped) = try syncTransport(for: target, vaultID: repository.vault.vaultID)
+            folder = scoped
+            return try await SyncEngine(repository: repository, transport: transport).passwordRevisionThere()
+        } catch {
+            return nil
+        }
+    }
+
+    /// The header of a change of the master password made here, to the sync location (header only:
+    /// no profile's files, so not held back by running profiles).
+    private func publishPasswordChange(_ target: DeviceSettings.SyncTarget, repository: ProfileRepository) async {
+        var folder: URL?
+        defer { folder?.stopAccessingSecurityScopedResource() }
+        do {
+            let (transport, scoped) = try syncTransport(for: target, vaultID: repository.vault.vaultID)
+            folder = scoped
+            if try await SyncEngine(repository: repository, transport: transport).publishVaultHeader() != .published {
+                showError(L("changepw.sync.notThere"))
+            }
+        } catch {
+            showError(String(format: L("changepw.sync.later"), errorText(error)))
         }
     }
 
@@ -659,19 +702,8 @@ final class AppModel: ObservableObject {
         defer { scopedFolder?.stopAccessingSecurityScopedResource() }
         let status: DeviceSettings.SyncStatus
         do {
-            let transport: SyncTransport
-            switch target {
-            case let .folder(bookmark, _):
-                var stale = false
-                let folder = try URL(resolvingBookmarkData: bookmark, options: .withSecurityScope,
-                                     relativeTo: nil, bookmarkDataIsStale: &stale)
-                if folder.startAccessingSecurityScopedResource() { scopedFolder = folder }
-                if stale { setSyncFolder(folder) }
-                transport = LocalDirectorySyncTransport(directory: folder)
-            case let .server(baseURL, token):
-                transport = try HTTPSyncTransport(configuration: .init(baseURL: baseURL, vaultID: repository.vault.vaultID,
-                                                                       bearerToken: token))
-            }
+            let (transport, folder) = try syncTransport(for: target, vaultID: repository.vault.vaultID)
+            scopedFolder = folder
             let report = try await SyncEngine(repository: repository, transport: transport).sync()
             for id in report.deletedProfileIDs {
                 await manager.removeWebData(for: id)
@@ -684,6 +716,22 @@ final class AppModel: ObservableObject {
         }
         try? updateDeviceSettings { $0.lastSync = status }
         refresh()
+    }
+
+    /// The sync location's transport, and the folder whose security scope it opened (to be closed
+    /// once done).
+    private func syncTransport(for target: DeviceSettings.SyncTarget, vaultID: UUID) throws -> (SyncTransport, URL?) {
+        switch target {
+        case let .folder(bookmark, _):
+            var stale = false
+            let folder = try URL(resolvingBookmarkData: bookmark, options: .withSecurityScope,
+                                 relativeTo: nil, bookmarkDataIsStale: &stale)
+            let scoped = folder.startAccessingSecurityScopedResource() ? folder : nil
+            if stale { setSyncFolder(folder) }
+            return (LocalDirectorySyncTransport(directory: folder), scoped)
+        case let .server(baseURL, token):
+            return (try HTTPSyncTransport(configuration: .init(baseURL: baseURL, vaultID: vaultID, bearerToken: token)), nil)
+        }
     }
 
     // MARK: Automation API (optional)

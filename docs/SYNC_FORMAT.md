@@ -94,7 +94,7 @@ never needs to parse a blob.
 
 | Object ID | Content | Encrypted |
 |---|---|---|
-| `vault-header` | `VaultHeader` JSON: vault ID, KDF params, salt, wrapped VMK | no, it contains nothing secret, and a new device needs it to derive the key |
+| `vault-header` | `VaultHeader` JSON: vault ID, KDF params, salt, wrapped VMK, `passwordRevision` (how many times the master password was changed) | no, it contains nothing secret, and a new device needs it to derive the key |
 | `HMAC(objectIDKey, "index")` | envelope → profile index | yes |
 | `HMAC(objectIDKey, "profile/<uuid>/config")` | envelope → the profile's `config.bin` bytes | yes (twice) |
 | `HMAC(objectIDKey, "profile/<uuid>/passwords")` | envelope → the profile's `passwords.bin` bytes | yes (twice) |
@@ -143,6 +143,11 @@ revision and the SHA-256 of the last synced bytes.
 1. Publish `vault-header` if it is absent. If the server's header has a different vault
    ID, refuse; if a newer version of the app wrote it (its `format`), stop with
    `CoreError.newerFormat` — this device needs that version first (docs/UPDATES.md §4).
+   Otherwise publish this device's header when it is the newer: more master-password changes
+   (`passwordRevision`), or as many with the same wrapped key and a higher `format` (R3). One
+   with fewer changes, or as many with another key (changed apart, or before changes were
+   counted), is never published over the server's; the report says which
+   (`SyncReport.passwordHeader`), and the sync goes on.
 2. **Index:** if the remote revision changed, fetch it and merge with the local index:
    the union by profile ID, the higher summary revision wins, and profiles in either
    side's `deletedProfileIDs` are dropped. Save the result locally, and push it if it
@@ -262,9 +267,15 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
   or a counter kept on a trusted device.
 - `LocalDirectorySyncTransport` CAS is atomic only within one process. File-syncing
   services can still produce conflict copies, which the transport ignores.
-- After a master-password change, call `publishVaultHeader()`. Devices still on the old
-  header keep working with the old password until they fetch the new one. The VMK
-  doesn't change.
+- A master-password change wraps the same VMK anew and counts the change in the header
+  (`passwordRevision`). The app puts the header on the sync location right after the change
+  (`publishVaultHeader()`), and every sync does when this device's is the newer (step 1): a new
+  device sets up with the new password, not the old. The location keeps the header with the most
+  changes; with as many, the first there stays (two changes made apart), and the other device says
+  so. The VMK doesn't change, so devices on an older header go on syncing, and each keeps its own
+  `vault.json`, which opens with the password it had: a copy of `vault.json` from before a change
+  (on such a device, in a backup) opens everything with the old password, the data written after
+  the change included (docs/ARCHITECTURE.md, Changing the master password).
 - Run sync only while no profile is running, because incoming settings replace files on
   disk, not live sessions. The app enforces this: a sync first waits for profiles still
   starting or being encrypted (they read and write their synced cookies), and a launch asked

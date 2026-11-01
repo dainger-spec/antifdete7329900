@@ -95,7 +95,14 @@ struct SyncSettingsView: View {
         if status.merged > 0 { parts.append(String(format: L("sync.status.merged"), status.merged)) }
         if status.conflicts > 0 { parts.append(String(format: L("sync.status.conflicts"), status.conflicts)) }
         if status.deferred > 0 { parts.append(String(format: L("sync.status.deferred"), status.deferred)) }
-        return String(format: L("sync.status.ok"), when, parts.joined(separator: ", "))
+        let synced = String(format: L("sync.status.ok"), when, parts.joined(separator: ", "))
+        // Whose master password a new device joins with (SyncReport.PasswordHeader).
+        switch status.passwordHeader {
+        case .published?: return synced + "\n" + L("sync.status.passwordPublished")
+        case .newerElsewhere?: return synced + "\n" + L("sync.status.passwordNewerElsewhere")
+        case .differentElsewhere?: return synced + "\n" + L("sync.status.passwordDifferentElsewhere")
+        case .same?, nil: return synced
+        }
     }
 
     private func load() {

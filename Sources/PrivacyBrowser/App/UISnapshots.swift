@@ -290,7 +290,7 @@ enum UISnapshots {
         problems += await Shot(name: "narrow-sheet-automation", size: narrow(CGSize(width: 560, height: 620)), titled: false) {
             AutomationSettingsView().environmentObject(model).environment(\.sheetRoom, narrowRoom)
         }.capture(into: folder)
-        problems += await Shot(name: "sheet-change-password", size: CGSize(width: 420, height: 330), titled: false) {
+        problems += await Shot(name: "sheet-change-password", size: CGSize(width: 420, height: 520), titled: false) {
             ChangePasswordView().environmentObject(model)
         }.capture(into: folder)
         problems += await settings(into: folder, model: model)

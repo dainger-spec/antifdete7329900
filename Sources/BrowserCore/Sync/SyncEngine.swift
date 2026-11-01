@@ -24,6 +24,23 @@ public struct SyncReport: Equatable, Sendable {
     /// Profiles deleted on another device and removed locally. The app layer must also
     /// remove their WebKit data stores.
     public var deletedProfileIDs: [UUID] = []
+    /// The sync location's vault header against this device's (`SyncEngine.publishVaultHeader`).
+    public var passwordHeader: PasswordHeader = .same
+
+    /// Whose master password a new device sets up with: the header the sync location keeps.
+    public enum PasswordHeader: String, Codable, Equatable, Sendable {
+        /// This device's.
+        case same
+        /// This device's, put there by this sync: newer than the one there (a change of the master
+        /// password made here, or the vault's generation raised here).
+        case published
+        /// Another device's, newer: the master password was changed there later. This device keeps
+        /// its own `vault.json`, which still opens with its own password.
+        case newerElsewhere
+        /// Another device's of the same count of changes: changed there and here apart, or before
+        /// changes were counted. The first one there stays; this device keeps its own.
+        case differentElsewhere
+    }
 }
 
 /// Client side of the optional encrypted sync.
@@ -84,23 +101,60 @@ public final class SyncEngine: @unchecked Sendable {
         return vault
     }
 
-    /// Uploads the current vault header (e.g. after a master-password change).
-    public func publishVaultHeader() async throws {
-        let remote = try await transport.listObjects().first { $0.objectID == Self.vaultHeaderObjectID }
-        if let remote, let blob = try await transport.fetch(objectID: Self.vaultHeaderObjectID) {
-            // A newer version's header is not written over (docs/UPDATES.md §4).
-            let existing = try VaultHeader.decodeChecked(blob)
-            guard existing.vaultID == repository.vault.vaultID else {
-                throw CoreError.corruptData("sync location holds a different vault")
-            }
-            if existing == repository.vault.header { return }
-            try await transport.store(objectID: Self.vaultHeaderObjectID, revision: remote.revision + 1,
-                                      data: JSONCoding.encoder.encode(repository.vault.header),
-                                      expectedRevision: remote.revision)
-        } else {
+    /// Puts this device's vault header on the sync location when it is the newer one there — after
+    /// a change of the master password here (`VaultHeader.passwordRevision`), or the vault's
+    /// generation raised here (R3), or when there is none — so that a new device sets up with this
+    /// device's password, and not with the one before. Never one over a newer: a header changed
+    /// later on another device (a higher count), or apart from this one (the same count, another
+    /// key), stays, and the result says so. A newer version's header stops here (docs/UPDATES.md
+    /// §4). `listed`: the sync location's objects, when the caller has them.
+    @discardableResult
+    public func publishVaultHeader(listed: [RemoteObjectInfo]? = nil) async throws -> SyncReport.PasswordHeader {
+        let objects: [RemoteObjectInfo]
+        if let listed { objects = listed } else { objects = try await transport.listObjects() }
+        let local = repository.vault.header
+        guard let remote = objects.first(where: { $0.objectID == Self.vaultHeaderObjectID }),
+              let blob = try await transport.fetch(objectID: Self.vaultHeaderObjectID) else {
             try await transport.store(objectID: Self.vaultHeaderObjectID, revision: 1,
-                                      data: JSONCoding.encoder.encode(repository.vault.header), expectedRevision: nil)
+                                      data: JSONCoding.encoder.encode(local), expectedRevision: nil)
+            return .published
         }
+        let existing = try VaultHeader.decodeChecked(blob)
+        guard existing.vaultID == local.vaultID else { throw CoreError.corruptData("sync location holds a different vault") }
+        switch Self.compare(local: local, remote: existing) {
+        case .same: return .same
+        case .remoteNewer: return .newerElsewhere
+        case .apart: return .differentElsewhere
+        case .localNewer:
+            // Compare-and-swap: a header another device put there meanwhile is not written over.
+            try await transport.store(objectID: Self.vaultHeaderObjectID, revision: remote.revision + 1,
+                                      data: JSONCoding.encoder.encode(local), expectedRevision: remote.revision)
+            return .published
+        }
+    }
+
+    /// How many times the master password was changed by the header the sync location holds (nil:
+    /// none there). A change made knowing it (`UnlockedVault.changePassword(atLeast:)`) is the
+    /// newest there, and goes there.
+    public func passwordRevisionThere() async throws -> Int? {
+        guard let blob = try await transport.fetch(objectID: Self.vaultHeaderObjectID) else { return nil }
+        let header = try VaultHeader.decodeChecked(blob)
+        guard header.vaultID == repository.vault.vaultID else { throw CoreError.corruptData("sync location holds a different vault") }
+        return header.passwordRevision ?? 0
+    }
+
+    enum HeaderOrder: Equatable { case same, localNewer, remoteNewer, apart }
+
+    /// Which of two headers of one vault is the newer. More changes of the master password is newer.
+    /// With as many: the same key (the same password, as it was wrapped then) is the same header,
+    /// but for the vault's generation, where the higher is newer (R3); another key is a change made
+    /// apart — or, at 0, one made before changes were counted — and neither is taken for newer.
+    static func compare(local: VaultHeader, remote: VaultHeader) -> HeaderOrder {
+        let mine = local.passwordRevision ?? 0, theirs = remote.passwordRevision ?? 0
+        if mine != theirs { return mine > theirs ? .localNewer : .remoteNewer }
+        guard local.wrappedMasterKey == remote.wrappedMasterKey, local.kdf == remote.kdf else { return .apart }
+        if local.format != remote.format { return local.format > remote.format ? .localNewer : .remoteNewer }
+        return .same
     }
 
     public func sync() async throws -> SyncReport {
@@ -109,16 +163,12 @@ public final class SyncEngine: @unchecked Sendable {
         defer { try? saveState(state) }
 
         let remoteObjects = try await transport.listObjects()
-        if !remoteObjects.contains(where: { $0.objectID == Self.vaultHeaderObjectID }) {
-            try await publishVaultHeader()
-        } else if let blob = try await transport.fetch(objectID: Self.vaultHeaderObjectID) {
-            // A newer version's vault on the sync location stops the sync here.
-            let remoteHeader = try VaultHeader.decodeChecked(blob)
-            guard remoteHeader.vaultID == repository.vault.vaultID else { throw CoreError.corruptData("sync location holds a different vault") }
-            // The vault's generation raised here and not yet there: raised there too, so that a
-            // version from before refuses the sync location as it refuses the vault (R3).
-            if remoteHeader.format < repository.vault.header.format { try await publishVaultHeader() }
-        }
+        // The vault's header there: this device's when it is the newer — a change of the master
+        // password made here, so that new devices set up with the new password and not the old,
+        // or the vault's generation raised here, so that a version from before refuses the sync
+        // location as it refuses the vault (R3). Never an older one over a newer. A newer version's
+        // vault there stops the sync here.
+        report.passwordHeader = try await publishVaultHeader(listed: remoteObjects)
         let remote = Dictionary(remoteObjects.map { ($0.objectID, $0.revision) }, uniquingKeysWith: max)
 
         let profilesBefore = Set(repository.list().map(\.id))

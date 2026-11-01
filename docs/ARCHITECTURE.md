@@ -110,9 +110,35 @@ opens with it derives none of the VMK's keys above (`CoreError.notGranted`). It 
 the profile's own files; the index stays the manager's (a settings change in the child is sent
 back as `ProfileEvent.configurationSaved` for the manager to record).
 
-Changing the master password re-wraps only the VMK. A new device unlocks with the same
-password because `vault.json` (salt, KDF parameters and wrapped VMK) is synced in
-plaintext.
+A new device unlocks with the master password because `vault.json` (salt, KDF parameters and
+wrapped VMK) is synced in plaintext.
+
+### Changing the master password: what it does, and what it does not
+
+**What it does.** The VMK is wrapped anew under a key derived from the new password, and written
+to `vault.json`; nothing else changes. The data and every key below the VMK stay as they are. The
+header counts the change (`passwordRevision`), and goes to the sync location right after the change
+(or at the next sync, when the location is out of reach): a new device then sets up with the new
+password and not with the old one. The sync location keeps the header with the most changes; a
+device whose header has fewer never puts it back (`SyncEngine.publishVaultHeader`), and says so in
+its sync status.
+
+**What it does not.**
+- A copy of `vault.json` made before the change — in a backup, in Time Machine, on another disk —
+  together with the old password still opens the vault: all of it, the data written after the
+  change included. The old password unwraps the same VMK, and the VMK opens everything.
+- A Mac that already syncs keeps its own `vault.json`: it still opens with the old password until
+  the password is changed on it too.
+- Data the sync location holds is under the same keys as before.
+
+So if an old copy of `vault.json` (or of the whole vault) may be in someone else's hands together
+with the old password — or the old password may have become known to someone who has such a copy —
+changing the password is not enough. Today the only protection is to move the profiles to a new
+vault: export each profile, create a new vault, import them (an import encrypts everything under
+the new vault's keys and a new key per profile), then delete the old vault and its copies, and its
+data on the sync location. Changing every key with the password is a project of its own: resumable
+after an interruption, the old data kept until the new is written and checked, proven by a test that
+stops the process at any point (until then it is not built).
 
 ## On-disk layout
 
