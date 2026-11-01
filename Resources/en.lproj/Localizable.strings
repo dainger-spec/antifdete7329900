@@ -295,6 +295,7 @@
 "gen.ios27" = "Mobile view: iPhone, Safari 27 (User-Agent only)";
 "gen.ipados26" = "iPad view: Safari 26, an iPad-sized window";
 "gen.macos26" = "Safari on macOS 26 (matches this engine)";
+"gen.macos.host" = "This Mac’s Safari, %@ (matches the engine)";
 "history.clear" = "Clear";
 "history.clear.all" = "All History…";
 "history.clear.hour" = "Last Hour";

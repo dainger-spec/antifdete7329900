@@ -1094,6 +1094,8 @@ struct ProfileDetails: Equatable {
     var exitCountryCode: String?
     var ephemeral: Bool
     var deviceGeneration: DeviceGeneration
+    /// The Safari version its settings pin (`ProfileConfiguration.safariVersion`); nil: this Mac's.
+    var safariVersion: String?
     /// The person's own tags and notes, and how the glyph looks.
     var tags: [String]
     var notes: String
@@ -1120,6 +1122,7 @@ struct ProfileDetails: Equatable {
         exitCountryCode = configuration.rememberedProxyLocation?.countryCode
         ephemeral = configuration.ephemeral
         deviceGeneration = configuration.deviceGeneration
+        safariVersion = configuration.safariVersion
         tags = configuration.tags
         notes = configuration.notes
         avatar = configuration.avatar

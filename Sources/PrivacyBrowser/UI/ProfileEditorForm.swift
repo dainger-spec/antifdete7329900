@@ -236,7 +236,8 @@ struct ProfileEditorForm: View {
             }
             // How sites see it: "Mac · Safari 26".
             Text(verbatim: "·").foregroundStyle(Theme.textTertiary)
-            Text(ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: draft.deviceGenerationID)))
+            Text(ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: draft.deviceGenerationID),
+                                          safariVersion: draft.safariVersion, hostSafariVersion: HostSafari.version))
         }
         .font(.lumenSecondary)
         .foregroundStyle(Theme.textSecondary)
@@ -380,7 +381,12 @@ struct ProfileEditorForm: View {
         return VStack(alignment: .leading, spacing: 14) {
             EditorRow(L("editor.generation")) {
                 Picker(L("editor.generation"), selection: $draft.deviceGenerationID) {
-                    ForEach(DeviceGenerations.all) { Text(L($0.nameKey)).tag($0.id) }
+                    // The Mac's generation is this Mac's Safari, by its version (its catalog name
+                    // said "macOS 26" on a Mac with Safari 27).
+                    ForEach(DeviceGenerations.all) { generation in
+                        Text(generation.matchesEngine ? String(format: L("gen.macos.host"), HostSafari.version) : L(generation.nameKey))
+                            .tag(generation.id)
+                    }
                 }
                 .labelsHidden()
                 .fixedSize()

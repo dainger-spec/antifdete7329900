@@ -378,7 +378,9 @@ struct ProfileListView: View {
                 exit: exit,
                 ephemeral: details?.ephemeral ?? false,
                 // Settings that could not be read say nothing of how it appears: no default shown for them.
-                appearsAs: details.map { ProfileRowItem.appearsAs($0.deviceGeneration) } ?? "—",
+                appearsAs: details.map {
+                    ProfileRowItem.appearsAs($0.deviceGeneration, safariVersion: $0.safariVersion, hostSafariVersion: HostSafari.version)
+                } ?? "—",
                 lastUsed: profile.lastLaunchedAt,
                 warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
                 warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false,
@@ -522,14 +524,26 @@ struct ProfileRowItem: Identifiable {
     }
 
     /// "Mac · Safari 26", "iPhone · Safari 26": the device the profile presents as.
-    static func appearsAs(_ generation: DeviceGeneration) -> String {
+    /// How it presents: the device, and the Safari it says it is. On a Mac that is the version its
+    /// settings pin, else this Mac's own Safari — what its User-Agent declares
+    /// (`DeviceGeneration.userAgent(hostSafariVersion:)`); the catalog's "26" went stale on a Mac
+    /// whose Safari is 27 (the owner, 1 November: "Mac · Safari 26" beside a page measuring 27.0.1).
+    /// Mobile views declare a fixed Safari, their catalog's.
+    static func appearsAs(_ generation: DeviceGeneration, safariVersion: String? = nil, hostSafariVersion: String) -> String {
         let device: String
         switch generation.platform {
         case .macOS: device = L("profiles.device.mac")
         case .iOS: device = L("profiles.device.iphone")
         case .iPadOS: device = L("profiles.device.ipad")
         }
-        return String(format: L("profiles.appearsAs"), device, generation.osVersionLabel)
+        var version = generation.osVersionLabel
+        if generation.matchesEngine {
+            let declared = safariVersion.flatMap { DeviceGeneration.isSafariVersion($0) ? $0 : nil } ?? hostSafariVersion
+            if DeviceGeneration.isSafariVersion(declared), let major = declared.split(separator: ".").first {
+                version = String(major)
+            }
+        }
+        return String(format: L("profiles.appearsAs"), device, version)
     }
 }
 

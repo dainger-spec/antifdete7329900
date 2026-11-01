@@ -295,6 +295,7 @@
 "gen.ios27" = "Мобильный вид: iPhone, Safari 27 (только User-Agent)";
 "gen.ipados26" = "Вид iPad: Safari 26, окно размером с iPad";
 "gen.macos26" = "Safari на macOS 26 (соответствует движку)";
+"gen.macos.host" = "Safari этого Mac, %@ (соответствует движку)";
 "history.clear" = "Очистить";
 "history.clear.all" = "Всю историю…";
 "history.clear.hour" = "За последний час";
