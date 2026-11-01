@@ -344,9 +344,10 @@ struct SetupView: View {
 
     private func requirement(_ text: String, met: Bool, shown: Bool) -> some View {
         let failed = shown && !met
+        // Not typed yet: a ring, never a check that could be read as met.
         return HStack(spacing: 7) {
-            Image(systemName: failed ? "xmark" : "checkmark")
-                .font(.system(size: 10, weight: .bold))
+            Image(systemName: failed ? "xmark" : (met ? "checkmark" : "circle"))
+                .font(.system(size: met || failed ? 10 : 7, weight: .bold))
                 .foregroundStyle(failed ? Theme.danger : (met ? Theme.textPrimary : Theme.textTertiary))
                 .frame(width: 12)
                 .accessibilityHidden(true)
@@ -462,7 +463,8 @@ struct UnlockView: View {
     }
 
     private var footer: String {
-        String(format: L("unlock.footer"), model.vaultCreatedDay ?? "?", model.vaultPathDescription)
+        // Without its day (a vault that does not say when it was made): the folder alone.
+        model.vaultCreatedDay.map { String(format: L("unlock.footer"), $0, model.vaultPathDescription) } ?? model.vaultPathDescription
     }
 
     private func unlock() {
