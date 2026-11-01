@@ -25,15 +25,16 @@ struct ProxyListView: View {
 
     var body: some View {
         if let proxies = model.proxyList {
-            ProxyListPanel(proxies: proxies, profileCounts: model.proxyUseCounts, profileNames: profileNames,
+            ProxyListPanel(proxies: proxies, profileCounts: model.proxyUseCounts, profilesUsing: profilesUsing,
                            selection: $selection, showsInspector: $showsInspector)
         }
     }
 
     /// The profiles that use each proxy, by `ProxyList.identity(of:)`, in the list's order.
-    private var profileNames: [String: [String]] {
-        model.profiles.reduce(into: [:]) { names, profile in
-            if let identity = model.details[profile.id]?.proxyIdentity { names[identity, default: []].append(profile.name) }
+    private var profilesUsing: [String: [ProxyProfileReference]] {
+        model.profiles.reduce(into: [:]) { found, profile in
+            guard let details = model.details[profile.id], let identity = details.proxyIdentity else { return }
+            found[identity, default: []].append(ProxyProfileReference(id: profile.id, name: profile.name, avatar: details.avatar))
         }
     }
 }
@@ -44,8 +45,8 @@ struct ProxyListPanel: View {
     @ObservedObject var proxies: ProxyListModel
     /// How many profiles use each proxy, by `ProxyList.identity(of:)`.
     var profileCounts: [String: Int] = [:]
-    /// Which profiles, by name.
-    var profileNames: [String: [String]] = [:]
+    /// Which profiles.
+    var profilesUsing: [String: [ProxyProfileReference]] = [:]
     @Binding var selection: Set<UUID>
     /// The inspector at the right, shown while this is on (the header's button): beside the list
     /// when there is room for both, over the list's right side when there is not.
@@ -358,7 +359,7 @@ struct ProxyListPanel: View {
         Group {
             if let entry = single {
                 ProxyInspectorView(entry: entry, checking: proxies.checking.contains(entry.id),
-                                   profileNames: profileNames[ProxyList.identity(of: entry.proxy)] ?? [],
+                                   profiles: profilesUsing[ProxyList.identity(of: entry.proxy)] ?? [],
                                    check: { proxies.check([entry.id]) },
                                    edit: proxies.loadError == nil ? { editing = entry } : nil,
                                    assign: { assigning = ProxyAssignView.Request(profileIDs: [], proxyIDs: [entry.id]) })

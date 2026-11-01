@@ -1,6 +1,13 @@
 import BrowserCore
 import SwiftUI
 
+/// A profile as the Proxies section names it: enough for its glyph and its name.
+struct ProxyProfileReference: Identifiable {
+    let id: UUID
+    let name: String
+    var avatar: ProfileAvatarStyle?
+}
+
 /// The inspector at the right of the Proxies section (the design's proxy inspector): the selected
 /// proxy's last check, step by step, with what to do about it, what it is, and the profiles that
 /// use it. 320 pt, over the light at 80 %, as the profiles' inspector.
@@ -8,8 +15,8 @@ struct ProxyInspectorView: View {
     let entry: ProxyListEntry
     /// Being checked now.
     var checking = false
-    /// The profiles that use it (`ProxyList.identity`), by name.
-    var profileNames: [String] = []
+    /// The profiles that use it (`ProxyList.identity`).
+    var profiles: [ProxyProfileReference] = []
     var check: () -> Void = {}
     /// Nil while the list cannot be written.
     var edit: (() -> Void)?
@@ -63,22 +70,16 @@ struct ProxyInspectorView: View {
                     fact(L("inspector.proxy.origin"), entry.originLine)
                 }
                 section(L("inspector.proxy.profiles")) {
-                    if profileNames.isEmpty {
+                    if profiles.isEmpty {
                         Text(L("inspector.proxy.noProfiles"))
                             .font(.lumenSecondary)
                             .foregroundStyle(Theme.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
-                        ForEach(Array(profileNames.enumerated()), id: \.offset) { _, name in
+                        ForEach(profiles) { profile in
                             HStack(spacing: 10) {
-                                Text(String(name.prefix(1)).uppercased())
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .frame(width: 22, height: 22)
-                                    .background(Circle().fill(Theme.avatarFill))
-                                    .overlay(Circle().strokeBorder(Theme.divider, lineWidth: 1))
-                                    .accessibilityHidden(true)
-                                Text(name)
+                                ProfileAvatar(name: profile.name, id: profile.id, size: 22, style: profile.avatar)
+                                Text(profile.name)
                                     .font(.lumenBody)
                                     .foregroundStyle(Theme.textPrimary)
                                     .lineLimit(1)

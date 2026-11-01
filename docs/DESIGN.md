@@ -19,6 +19,11 @@ restyled later.
   `warning` with `warningTint`/`warningLine`. A state is never told by its colour alone: it has a
   symbol or words beside it.
 - Rows: `rowHover` (white 3.5 %), `rowSelected` (6.5 %).
+- Profiles' colours: the one hue the design keeps outside the states. A profile's glyph is a dark
+  circle in its colour with its letters in a light tone of it (`ProfileAvatar.palette`, eight; five of
+  them given by an id when the person chose none) — the quickest way to tell profiles apart by eye,
+  which the search, the collections and the tags do only through reading or a click (the owner,
+  1 November). The colour chosen is kept in the profile's settings as it was.
 
 ## Type
 

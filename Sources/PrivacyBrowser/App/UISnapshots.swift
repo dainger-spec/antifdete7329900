@@ -514,15 +514,20 @@ enum UISnapshots {
             let proxies = ProxyListModel(vault: vault) { print("FAIL sample proxy list: \($0)") }
             let counts = [ProxyList.identity(of: berlin.proxy): 3, ProxyList.identity(of: silent.proxy): 2,
                           ProxyList.identity(of: entries[1].proxy): 1]
-            let names = [ProxyList.identity(of: berlin.proxy): ["Northwind", "Launch Review", "Travel"], // l10n: not text
-                         ProxyList.identity(of: silent.proxy): ["Marketplace US", "Banking"], // l10n: not text
-                         ProxyList.identity(of: entries[1].proxy): ["Research"]] // l10n: not text
+            // The sample rows' profiles, with their glyphs' colours.
+            let sample = sampleRows()
+            func using(_ indices: [Int]) -> [ProxyProfileReference] {
+                indices.map { ProxyProfileReference(id: sample[$0].id, name: sample[$0].name, avatar: sample[$0].avatar) }
+            }
+            let names = [ProxyList.identity(of: berlin.proxy): using([1, 2, 4]),
+                         ProxyList.identity(of: silent.proxy): using([8, 6]),
+                         ProxyList.identity(of: entries[1].proxy): using([3])]
             var problems = 0
             // The Profiles window's Proxies section with its inspector: wide, with a proxy that stays
             // silent selected; in the narrowest window, with one that works (the inspector over the list).
             let rows = sampleRows()
             func section(selecting ids: Set<UUID>) -> AnyView {
-                AnyView(ProxyListPanel(proxies: proxies, profileCounts: counts, profileNames: names, selection: .constant(ids)))
+                AnyView(ProxyListPanel(proxies: proxies, profileCounts: counts, profilesUsing: names, selection: .constant(ids)))
             }
             problems += await Shot(name: "proxies", size: CGSize(width: 1400, height: 860)) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [silent.id]))

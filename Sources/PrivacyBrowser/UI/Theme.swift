@@ -502,11 +502,12 @@ struct LumenEmptyHint: View {
     }
 }
 
-/// A profile's glyph (the design's `av`): its letters on a dark circle with a hairline — the
-/// first letter of its name, or the letters the person chose. `running`: the green dot at its
-/// corner, ringed in the window's black, with its glow. The colour a profile once had (a tint
-/// from its id, or one the person chose) is not drawn in this design; the choice is kept in its
-/// settings as it was (`ProfileConfiguration.avatar`).
+/// A profile's glyph (the design's `av`): its letters — the first of its name, or the ones the
+/// person chose — on a circle in the profile's colour, dark, with the letters in a light tone of it,
+/// and a hairline. `running`: the green dot at its corner, ringed in the window's black, with its
+/// glow. The colour is the person's choice (`ProfileConfiguration.avatar`) or, without one, one
+/// from its id: the quickest way to tell profiles apart by eye among dozens, which nothing else in
+/// the design does without reading or a click (the owner, 1 November).
 struct ProfileAvatar: View {
     let name: String
     let id: UUID
@@ -515,8 +516,8 @@ struct ProfileAvatar: View {
     var style: ProfileAvatarStyle?
     var running = false
 
-    /// The colours a profile's id and a person's choice gave before this design: `ProfileAvatarStyle.
-    /// colorCount` of them. Kept for what still names things by colour (a site's host).
+    /// The profiles' colours, `ProfileAvatarStyle.colorCount` of them: a dark fill and a light tone
+    /// for the letters. The first `ProfileAvatarStyle.idColorCount` are given by an id.
     static let palette: [(fill: UInt32, text: UInt32)] = [
         (0x273553, 0xB9C8F0), // blue
         (0x243A33, 0x9FD4BB), // green
@@ -543,11 +544,12 @@ struct ProfileAvatar: View {
 
     var body: some View {
         let large = size >= 44
+        let colors = Self.colors(for: id, style: style)
         Text(glyph)
             .font(.system(size: size * (glyph.count > 1 ? 0.34 : 0.4), weight: .semibold))
-            .foregroundStyle(large ? Theme.textPrimary : Theme.textSecondary)
+            .foregroundStyle(Color(hex: colors.text))
             .frame(width: size, height: size)
-            .background(Circle().fill(Theme.avatarFill))
+            .background(Circle().fill(Color(hex: colors.fill)))
             .overlay(Circle().strokeBorder(large ? Theme.strongBorder : Theme.hairline, lineWidth: 1))
             .overlay(alignment: .bottomTrailing) {
                 if running {
