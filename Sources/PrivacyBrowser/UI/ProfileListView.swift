@@ -1065,7 +1065,7 @@ struct ProfilesScreen: View {
             if columns.showsAppearsAs {
                 Text(L("profiles.column.appearsAs")).lumenCaps().frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
-            Text(L("profiles.column.state")).lumenCaps().frame(width: ProfileColumns.state, alignment: .leading)
+            Text(L("profiles.column.state")).lumenCaps().frame(width: columns.state, alignment: .leading)
             Color.clear.frame(width: ProfileColumns.actions, height: 1)
         }
         .lineLimit(1)
@@ -1120,18 +1120,27 @@ struct ProfileColumns {
     /// Wide enough for "Settings cannot be read" with its sign, whole (R1).
     static let exit: CGFloat = 192
     static let appearsAs: CGFloat = 150
-    static let state: CGFloat = 196
+    /// The state column's width while the name keeps its own.
+    static let fullState: CGFloat = 196
+    /// The narrowest it gets.
+    static let minimumState: CGFloat = 132
     static let actions: CGFloat = 68
+    /// The name's slot (its letters' circle included).
     static let minimumName: CGFloat = 200
 
     let showsAppearsAs: Bool
+    /// The state column: full, or narrower in a narrow window rather than leaving the name a few
+    /// letters ("Mar…", "N…" at the narrowest window: CI run 555's profiles-narrow).
+    let state: CGFloat
 
-    /// The narrowest list whose rows keep every column but "Appears as": 20 pt page margins and the
-    /// rows' own padding on both sides, the columns, the narrowest name.
-    static let minimumContentWidth: CGFloat = 2 * 20 + 2 * Self.rowPadding + Self.exit + Self.state + Self.actions + 3 * Self.gap + Self.minimumName
+    /// The narrowest list whose rows keep every column but "Appears as" at their full widths: 20 pt
+    /// page margins and the rows' own padding on both sides, the columns, the narrowest name.
+    static let minimumContentWidth: CGFloat = 2 * 20 + 2 * Self.rowPadding + Self.exit + Self.fullState + Self.actions + 3 * Self.gap + Self.minimumName
 
     init(contentWidth: CGFloat) {
         showsAppearsAs = contentWidth >= Self.minimumContentWidth + Self.appearsAs + Self.gap
+        let short = max(0, Self.minimumContentWidth - contentWidth)
+        state = max(Self.minimumState, Self.fullState - short)
     }
 }
 
@@ -1349,7 +1358,7 @@ private struct ProfileRow: View {
             if columns.showsAppearsAs {
                 seenCell.frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
-            stateCell.frame(width: ProfileColumns.state, alignment: .leading)
+            stateCell.frame(width: columns.state, alignment: .leading)
             actionsCell.frame(width: ProfileColumns.actions, alignment: .trailing)
         }
         .padding(.horizontal, ProfileColumns.rowPadding)
