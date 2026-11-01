@@ -49,12 +49,15 @@ jobs:
         run: |
           set +e
           APP=build/unsandboxed/Lumen.app
-          for args in '-AppleLanguages (de-DE,en)' '-AppleLanguages (ru)' '-AppleLanguages (en)' \
-                      '-AppleLanguages (ru) --sites-languages en-US,en' '-AppleLanguages (en) --sites-languages ru-RU,ru' \
-                      '-AppleLanguages (ru) --sites-languages de-DE,de'; do
-            echo "::group::chrome language: $args"
-            # shellcheck disable=SC2086
-            eval "\"$APP/Contents/MacOS/Lumen\" --chrome-language-check $args" 2>&1 | grep -E 'CHROME-LANG|Terminating|exception' | cut -c1-700
+          chrome() {
+            echo "::group::chrome language: $*"
+            "$APP/Contents/MacOS/Lumen" --chrome-language-check "$@" 2>&1 | grep -E 'CHROME-LANG|Terminating|exception' | cut -c1-700
             echo "exit ${PIPESTATUS[0]}"
             echo "::endgroup::"
-          done
+          }
+          chrome -AppleLanguages "(de-DE, en)"
+          chrome -AppleLanguages "(ru)"
+          chrome -AppleLanguages "(en)"
+          chrome -AppleLanguages "(ru)" --sites-languages en-US,en
+          chrome -AppleLanguages "(en)" --sites-languages ru-RU,ru
+          chrome -AppleLanguages "(ru)" --sites-languages de-DE,de
