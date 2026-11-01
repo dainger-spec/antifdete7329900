@@ -232,7 +232,8 @@ enum BannerMeasure {
     /// says which keys it was asked for, and answers each with another such dictionary, handed to
     /// -[WBSAppLink _scopeURLFromInfoDictionary:] on a bare instance (no initializer run).
     private static func probeWebAppLookup() {
-        guard let linkClass = NSClassFromString("WBSAppLink"), let bare = class_createInstance(linkClass, 0) else { return }
+        guard let linkClass = NSClassFromString("WBSAppLink"), let created = class_createInstance(linkClass, 0) else { return }
+        let bare = created as AnyObject
         let scopeSelector = NSSelectorFromString("_scopeURLFromInfoDictionary:")
         guard bare.responds(to: scopeSelector) else { return }
         let spy = KeySpy(path: "Info")
