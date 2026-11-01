@@ -95,6 +95,8 @@ final class AppModel: ObservableObject {
         AppEnvironment.adoptSandboxedDataIfNeeded()
         root = AppEnvironment.vaultDirectory
         AppEnvironment.removeStandaloneSafariHome(in: root)
+        // Partial plaintext an unseal that did not finish left (R8): no profile runs yet.
+        AppEnvironment.removeUnsealLeftovers(vault: root)
         phase = MasterVault.exists(in: root) ? .locked : .setup
         // No profile's page is handed to Quick Look, Services or another app (`HandOffs`).
         HandOffs.closeForWebViews()
@@ -258,6 +260,9 @@ final class AppModel: ObservableObject {
         // window says so (`indexNotice`); with it read, only the folders of profiles it records as
         // deleted go (ProfileRepository.openedAtUnlock, which the tests run as well).
         let repository = try ProfileRepository.openedAtUnlock(vault: vault)
+        // Partial plaintext an unseal that did not finish left (R8) — while the vault was locked,
+        // no profile ran; none is started again before this.
+        AppEnvironment.removeUnsealLeftovers(vault: vault.root)
         switch repository.indexState {
         case .read:
             break

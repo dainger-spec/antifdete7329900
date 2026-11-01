@@ -193,6 +193,9 @@ final class ProfileManager: ObservableObject {
         busyProfileIDs.insert(id)
         defer { busyProfileIDs.remove(id) }
 
+        // Partial plaintext an unseal of this profile that did not finish left (R8): first, whatever
+        // the launch then does, and before its archives are extracted again.
+        AppEnvironment.removeUnsealLeftovers(vault: repository.root, of: id)
         let summary = try repository.summary(for: id)
         let key = try repository.profileKey(for: id)
         let stored = try repository.loadConfiguration(id, key: key)

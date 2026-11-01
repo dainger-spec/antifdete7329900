@@ -99,9 +99,8 @@ public enum EncryptedDirectoryArchive {
             if FileManager.default.fileExists(atPath: destination.path) {
                 throw CoreError.io("unseal destination for '\(label)' already exists: \(destination.path)")
             }
-            let parent = destination.deletingLastPathComponent()
-            try SecureFile.ensureDirectory(parent)
-            let staged = parent.appendingPathComponent(".\(destination.lastPathComponent).unseal-\(UUID().uuidString)")
+            try SecureFile.ensureDirectory(destination.deletingLastPathComponent())
+            let staged = stagingDirectory(for: destination)
             staging.roots[label] = (staged, destination)
             return staged
         }
@@ -161,6 +160,60 @@ public enum EncryptedDirectoryArchive {
             try SecureFile.replace(root.destination, with: root.staged)
         }
         return stats
+    }
+
+    // MARK: What an unseal that never finished left
+
+    /// Where a root is extracted before it is moved into place: hidden, next to its destination,
+    /// named after it — `.<destination>.unseal-<UUID>`.
+    static func stagingDirectory(for destination: URL) -> URL {
+        destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(destination.lastPathComponent).unseal-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    /// The name of the destination `name` is the staging directory of (`stagingDirectory(for:)`),
+    /// or nil when it is not one.
+    static func stagedDestinationName(_ name: String) -> String? {
+        guard name.hasPrefix("."), let marker = name.range(of: ".unseal-", options: .backwards),
+              UUID(uuidString: String(name[marker.upperBound...])) != nil else { return nil }
+        let destination = String(name[name.index(after: name.startIndex)..<marker.lowerBound])
+        return destination.isEmpty ? nil : destination
+    }
+
+    /// Removes the staging directories that an unseal which never finished left below
+    /// `directories`, down to `depth` levels: a crash or a kill while an archive was extracted
+    /// leaves part of a profile's plaintext there, which nothing reads and no seal takes in (a
+    /// finished unseal moves its directory into place; one that fails removes it itself). The
+    /// archive is not touched. `destinationNamed`: only the staging directories of destinations
+    /// of that name, case aside (a profile's UUID). Symbolic links are neither followed nor
+    /// removed, and a directory named by a UUID is not looked into: it is a store's own (a running
+    /// profile's data), and a staging directory is beside a destination, never inside one.
+    /// Returns how many were removed, and how many could not be.
+    @discardableResult
+    public static func removeStagingLeftovers(below directories: [URL], depth: Int,
+                                              destinationNamed name: String? = nil) -> (removed: Int, failed: Int) {
+        var removed = 0, failed = 0
+        func walk(_ directory: URL, level: Int) {
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return }
+            for entry in names {
+                let child = directory.appendingPathComponent(entry, isDirectory: true)
+                guard let attributes = try? FileManager.default.attributesOfItem(atPath: child.path),
+                      attributes[.type] as? FileAttributeType == .typeDirectory else { continue } // lstat
+                if let destination = stagedDestinationName(entry) {
+                    if let name, destination.caseInsensitiveCompare(name) != .orderedSame { continue }
+                    do {
+                        try FileManager.default.removeItem(at: child)
+                        removed += 1
+                    } catch {
+                        failed += 1
+                    }
+                } else if level < depth, UUID(uuidString: entry) == nil {
+                    walk(child, level: level + 1)
+                }
+            }
+        }
+        for directory in directories { walk(directory, level: 0) }
+        return (removed, failed)
     }
 
     // MARK: Re-encrypting without plaintext

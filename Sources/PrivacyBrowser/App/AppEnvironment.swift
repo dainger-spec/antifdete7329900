@@ -45,6 +45,35 @@ enum AppEnvironment {
         }
     }
 
+    /// What an unseal that never finished left (R8, docs/DESTRUCTIVE_PATHS.md): part of a
+    /// profile's plaintext in a hidden staging directory, `.<name>.unseal-<UUID>`, next to WebKit's
+    /// data or, in the profile's folder, next to Safari's home — a crash or a kill while one of
+    /// its archives was extracted. Nothing reads it and no seal takes it in: the archive holds the
+    /// profile's data. Removed at the app's launch and at unlock (every profile's), and before a
+    /// profile's launch (its own); how many, said in the log. Returns how many were removed.
+    @discardableResult
+    static func removeUnsealLeftovers(vault: URL, of profileID: UUID? = nil) -> Int {
+        let webKit = WebDataStoreVault.layout.removeUnsealLeftovers(of: profileID)
+        // Safari's home is extracted in the profile's own folder, next to where it goes.
+        let profiles = vault.appendingPathComponent("profiles", isDirectory: true)
+        let folders = profileID.map { [$0.uuidString] } ?? ((try? FileManager.default.contentsOfDirectory(atPath: profiles.path)) ?? [])
+        let homes = EncryptedDirectoryArchive.removeStagingLeftovers(
+            below: folders.map { profiles.appendingPathComponent($0, isDirectory: true) }, depth: 0)
+        let removed = webKit.removed + homes.removed, failed = webKit.failed + homes.failed
+        let log = Logger(subsystem: "PrivacyBrowser", category: "AppEnvironment")
+        if removed > 0 {
+            if let profileID {
+                log.notice("Removed \(Int(removed), privacy: .public) partial plaintext directories an unseal of \(profileID.uuidString, privacy: .public) did not finish left")
+            } else {
+                log.notice("Removed \(Int(removed), privacy: .public) partial plaintext directories unseals that did not finish left")
+            }
+        }
+        if failed > 0 {
+            log.error("Could not remove \(Int(failed), privacy: .public) partial plaintext directories unseals that did not finish left")
+        }
+        return removed
+    }
+
     /// An unsandboxed build that has no vault yet takes over the one a sandboxed build of the same
     /// bundle identifier left in its container (`UnsandboxedMigration`), once, before the vault is
     /// looked for. Not while another instance of the app runs (it may be that sandboxed build, using

@@ -239,7 +239,11 @@ The plaintext is a record stream (`kind | path | mode | [size | bytes]`). Files 
 streamed in 1 MiB chunks, so memory use stays bounded. Readers reject truncation, data
 after the final chunk, reordered chunks, unsafe paths (`..`, absolute, NUL) and symlinks.
 Extraction goes to a staging directory, and nothing reaches its destination until the
-whole archive has authenticated.
+whole archive has authenticated. The staging directory is hidden, beside its destination
+(`.<name>.unseal-<UUID>`); a failed extraction removes it, a finished one moves it into place. One
+that a crash or a kill left — part of a profile's plaintext — is removed at the app's launch and at
+unlock (every profile's), and at a profile's launch (its own), and the count said in the log
+(`AppEnvironment.removeUnsealLeftovers`, docs/DESTRUCTIVE_PATHS.md R8).
 
 ## Profile lifecycle
 

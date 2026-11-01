@@ -316,6 +316,7 @@ final class SelfTest {
         await group("recovery sealing") { try await recoverySealing(repository) }
         await group("format policy") { try formatPolicy(repository) }
         await group("unreadable settings") { try await unreadableSettings(repository) }
+        await group("unseal leftovers") { try await unsealLeftovers(repository) }
         await group("Safari's home: a restore that fails") { try safariHomeRestoreFailure(repository) }
         await group("a seal whose deletion stops part-way") { try await sealWithAFailedDeletion(repository) }
         await group("earlier versions' Safari keys") { earlierVersionsSafariKeys() }
@@ -3441,6 +3442,59 @@ final class SelfTest {
             check("unreadable settings: a save is refused and writes nothing (\(state))",
                   saveRefused && onDisk == (missing ? nil : damaged), saveRefusal.map { String(describing: $0) } ?? "saved")
         }
+    }
+
+    /// What an unseal that did not finish left — part of a profile's plaintext in a hidden staging
+    /// directory next to WebKit's data or to Safari's home, after a crash or a kill (R8,
+    /// docs/DESTRUCTIVE_PATHS.md) — goes: a profile's own at its launch (here a launch refused right
+    /// after, its settings damaged), every profile's at the app's launch and at unlock
+    /// (`AppEnvironment.removeUnsealLeftovers`). Not another profile's data, nor an archive.
+    private func unsealLeftovers(_ repository: ProfileRepository) async throws {
+        let layout = WebDataStoreVault.layout
+        let launched = try repository.create(name: "Unseal leftovers", configuration: ProfileConfiguration())
+        let other = try repository.create(name: "Unseal leftovers, other", configuration: ProfileConfiguration())
+        defer {
+            try? repository.delete(launched.id)
+            try? repository.delete(other.id)
+        }
+        func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }
+        // Named as `EncryptedDirectoryArchive` names them: `.<destination>.unseal-<UUID>`, beside it.
+        func staged(_ destination: URL) throws -> URL {
+            let url = destination.deletingLastPathComponent()
+                .appendingPathComponent(".\(destination.lastPathComponent).unseal-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try Data("plaintext".utf8).write(to: url.appendingPathComponent("part"))
+            return url
+        }
+        func leftovers(of id: UUID) throws -> [URL] {
+            [try staged(layout.destination(forLabel: "WebKit|WebsiteDataStore|\(id.uuidString)", profileID: id)),
+             try staged(layout.destination(forLabel: "Caches|WebKit|WebsiteDataStore|\(id.uuidString)", profileID: id)),
+             try staged(SafariHomeVault(repository: repository).homeDirectory(for: id))]
+        }
+        let mine = try leftovers(of: launched.id), others = try leftovers(of: other.id)
+        defer { for url in mine + others { try? FileManager.default.removeItem(at: url) } }
+        // The other profile's own data, which nothing here may touch: its store and its archive.
+        let store = try layout.destination(forLabel: "WebKit|WebsiteDataStore|\(other.id.uuidString)", profileID: other.id)
+        try FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: store) }
+        try Data("data".utf8).write(to: store.appendingPathComponent("data"))
+        let archive = repository.webDataArchiveURL(for: other.id)
+        try Data("archive".utf8).write(to: archive)
+
+        let url = repository.directory(for: launched.id).appendingPathComponent("config.bin")
+        var damaged = try Data(contentsOf: url)
+        damaged[damaged.count - 1] ^= 0x01
+        try damaged.write(to: url)
+        let manager = ProfileManager(repository: repository)
+        var refusal: Error?
+        do { try await manager.launch(launched.id) } catch { refusal = error }
+        check("unseal leftovers: a profile's launch removes what an unseal of it left (\(mine.count) places), and no other profile's",
+              refusal != nil && mine.allSatisfy { !exists($0) } && others.allSatisfy(exists),
+              "left of it: \(mine.filter(exists).map(\.lastPathComponent)); the other's gone: \(others.filter { !exists($0) }.map(\.lastPathComponent))")
+        let removed = AppEnvironment.removeUnsealLeftovers(vault: repository.root)
+        check("unseal leftovers: the app's launch and unlock remove every profile's, and neither a store nor an archive",
+              removed >= others.count && others.allSatisfy { !exists($0) } && exists(store.appendingPathComponent("data")) && exists(archive),
+              "removed \(removed); left: \(others.filter(exists).map(\.lastPathComponent)); store \(exists(store)), archive \(exists(archive))")
     }
 
     /// Safari's home archive that cannot be restored — damaged, not a newer version's: the launch
