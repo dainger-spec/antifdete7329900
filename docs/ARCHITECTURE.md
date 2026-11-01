@@ -170,9 +170,11 @@ Application Support/PrivacyBrowser/      (0700)
     warmup-schedule.bin           AES-GCM(warm-up-schedule key, WarmUpSchedule JSON)  [this Mac only, not exported: every N hours, last run]
     tabs.bin                      AES-GCM(open-tabs key, OpenTabs JSON)               [this Mac only, not synced or exported: http(s) tabs
                                                                                        left open, with Settings → Startup → restore tabs]
-    config.bin.unreadable         a profile file that could not be read (here the settings; any synced file the same way), moved
-                                  aside by a sync that took the server's copy in its place (then -2, …); never written over or
-                                  deleted. Settings that cannot be read never start the profile and are never saved over (R1)
+    <file>.unreadable             a file that could not be read (damaged, cut short, another key's), moved aside instead of being
+                                  written over or deleted (then -2, …): by a save or a removal of any encrypted document, by a
+                                  sync that took the server's copy in its place, by the key copy written again. Nothing
+                                  unreadable is ever deleted (docs/DESTRUCTIVE_PATHS.md). Settings that cannot be read never
+                                  start the profile and are never saved over (R1)
     config.bin.conflict           the other device's version after a sync conflict (encrypted as the file; passwords.bin.conflict
                                   only from before passwords.bin format 2, taken into passwords.bin as kept versions when the
                                   vault opens, then removed: a password conflict now keeps both versions in the file)
