@@ -325,6 +325,10 @@ struct SetupView: View {
     @EnvironmentObject private var model: AppModel
     @State private var password = ""
     @State private var confirmation = ""
+    /// "It's written down": one click at the moment of the product's costliest mistake (the owner,
+    /// 1 November) — a pause, and a choice made knowingly. Unticked again when the password changes:
+    /// what was written down is then another password.
+    @State private var writtenDown = false
 
     private var longEnough: Bool { password.count >= 10 }
     private var matches: Bool { !confirmation.isEmpty && password == confirmation }
@@ -352,16 +356,26 @@ struct SetupView: View {
                     PasswordRequirement(text: L("setup.req.match"), met: matches, shown: !confirmation.isEmpty)
                 }
                 .padding(.top, 14)
+                Toggle(isOn: $writtenDown) {
+                    Text(L("setup.writtenDown"))
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .toggleStyle(.lumenCheckbox)
+                .padding(.top, 22)
                 LockActionButton(title: L("setup.action.create"), working: model.isWorking,
-                                 workingTitle: L("setup.working"), enabled: longEnough && matches, action: create)
+                                 workingTitle: L("setup.working"), enabled: longEnough && matches && writtenDown,
+                                 action: create)
                     .keyboardShortcut(.defaultAction)
-                    .padding(.top, 28)
+                    .padding(.top, 22)
             }
         }
+        .onChange(of: password) { _, _ in writtenDown = false }
     }
 
     private func create() {
-        guard longEnough, matches, !model.isWorking else { return }
+        guard longEnough, matches, writtenDown, !model.isWorking else { return }
         Task { await model.createVault(password: password) }
     }
 }

@@ -1445,6 +1445,7 @@
 "setup.facts.notSent" = "It is sent nowhere: not to our server, not when syncing.";
 "setup.facts.noRecovery" = "It cannot be recovered — not by email, not through support. Forgotten, it leaves the profiles' data unopenable for good.";
 "setup.facts.writeDown" = "Write it down and keep it apart from your account password.";
+"setup.writtenDown" = "It’s written down, somewhere I’ll find it";
 "banners.more" = "%ld more";
 "banners.more.a11y" = "%ld more notices, show them";
 "banners.collapse" = "collapse";
