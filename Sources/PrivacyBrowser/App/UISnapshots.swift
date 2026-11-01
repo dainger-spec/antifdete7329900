@@ -214,6 +214,21 @@ enum UISnapshots {
                 .init(id: UUID(), name: "Fall Promo", createdAt: Date().addingTimeInterval(-90 * 86_400), broughtBack: true),
                 .init(id: UUID(), name: nil, createdAt: nil)])
         }.capture(into: folder)
+        // Several things to say at once (the owner and the designer, 1 November): the most important
+        // shows, "2 more" opens the others in the same order — the index, the proxy, the kept folders.
+        let threeAtOnce = ProxyProblemBanner.Item(title: String(format: L("proxyProblem.title.notStarted"), rows[8].name),
+                                                  text: String(format: L("proxyProblem.subtitle.notStarted"), "us-dal.proxy.example:1080"), // l10n: not text
+                                                  notStarted: true, more: 2)
+        let keptOne: [ProfileRepository.KeptDeletedProfile] = [
+            .init(id: UUID(), name: "Retail Audit", createdAt: Date().addingTimeInterval(-40 * 86_400))]
+        let unlisted = AppModel.IndexNotice(kind: .unlisted, folders: 3, vaultPath: vaultPath)
+        problems += await Shot(name: "profiles-banners", size: CGSize(width: 1180, height: 640)) {
+            ProfilesPreview(rows: rows, sync: .off, indexNotice: unlisted, keptDeleted: keptOne, proxyProblem: threeAtOnce)
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-banners-open", size: CGSize(width: 1180, height: 900)) {
+            ProfilesPreview(rows: rows, sync: .off, indexNotice: unlisted, keptDeleted: keptOne, proxyProblem: threeAtOnce,
+                            bannersExpanded: true)
+        }.capture(into: folder)
         problems += await Shot(name: "profiles-no-matches", size: CGSize(width: 1180, height: 520)) {
             ProfilesPreview(rows: rows, search: "zzz", sync: .syncing)
         }.capture(into: folder)
@@ -1021,12 +1036,14 @@ private struct ProfilesPreview: View {
     var selected: [UUID] = []
     var inspectorInfo: (UUID) -> InspectorInfo = { _ in InspectorInfo() }
     var proxyProblem: ProxyProblemBanner.Item?
+    var bannersExpanded = false
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
                        section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice,
                        keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
-                       tunnelCarriesWebRTC: true, initialSelection: selected, proxyProblem: proxyProblem)
+                       tunnelCarriesWebRTC: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
+                       proxyProblem: proxyProblem)
     }
 }
 

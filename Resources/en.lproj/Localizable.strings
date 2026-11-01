@@ -1383,7 +1383,7 @@
 "inspector.warmUpQueue" = "Warm up in turn…";
 "inspector.queueNote" = "They start %ld at a time: the next one when one of them has its window up.";
 "inspector.empty" = "Select a profile to see how it reaches the web, how sites see it and what it keeps.";
-"proxyProblem.more.short" = "and %ld more";
+"proxyProblem.more.short" = "%ld more profiles";
 "profiles.noMatches.query" = "No profile in this collection matches “%@”.";
 "profiles.noMatches.filter" = "This collection has no profiles.";
 "palette.group.actions" = "Actions";
@@ -1437,3 +1437,8 @@
 "setup.facts.notSent" = "It is sent nowhere: not to our server, not when syncing.";
 "setup.facts.noRecovery" = "It cannot be recovered — not by email, not through support. Forgotten, it leaves the profiles' data unopenable for good.";
 "setup.facts.writeDown" = "Write it down and keep it apart from your account password.";
+"banners.more" = "%ld more";
+"banners.more.a11y" = "%ld more notices, show them";
+"banners.collapse" = "collapse";
+"banners.more.help" = "Show the other notices, most important first";
+"banners.collapse.help" = "Keep only the most important one";

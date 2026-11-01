@@ -678,6 +678,8 @@ struct ProfilesScreen: View {
     var tunnelCarriesWebRTC = false
     /// The profiles selected as the window opens (the snapshots).
     var initialSelection: [UUID] = []
+    /// The banners open behind "N more" as the window opens (the snapshots).
+    var initialBannersExpanded = false
     /// A profile whose proxy does not work, said above the list (`ProxyProblemBanner`).
     var proxyProblem: ProxyProblemBanner.Item?
     var openProxyProblem: () -> Void = {}
@@ -687,6 +689,8 @@ struct ProfilesScreen: View {
     /// shows, with two or more `ProfileBulkBar` acts on them all.
     @State private var selection = ProfileSelection()
     @State private var appeared = false
+    /// The banners behind "N more" are open.
+    @State private var bannersExpanded = false
     @ObservedObject private var appearance = AppearancePreferences.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.lumenStillFrame) private var stillFrame
@@ -745,6 +749,7 @@ struct ProfilesScreen: View {
         .onChange(of: inspectorShown) { _, _ in inspect() }
         .onAppear {
             if selection.isEmpty, !initialSelection.isEmpty { selection.select(initialSelection) }
+            if initialBannersExpanded { bannersExpanded = true }
             enter()
             inspect()
         }
@@ -758,17 +763,7 @@ struct ProfilesScreen: View {
             } else {
                 VStack(spacing: 0) {
                     header
-                    if let proxyProblem {
-                        ProxyProblemBanner(item: proxyProblem, open: openProxyProblem, retry: retryProxyProblem,
-                                           dismiss: dismissProxyProblem)
-                    }
-                    if let indexNotice {
-                        IndexNoticeBox(notice: indexNotice, reveal: revealVault)
-                    }
-                    if !keptDeleted.isEmpty {
-                        KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack,
-                                       removeForGood: removeForGood, reveal: revealKeptDeleted)
-                    }
+                    bannerStack
                     content
                         .overlay(alignment: .bottom) {
                             // Floating over the list's foot, while several are selected.
@@ -787,6 +782,70 @@ struct ProfilesScreen: View {
         }
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared || Motion.isReduced(reduceMotion) ? 0 : 10)
+    }
+
+    // MARK: The banners
+
+    /// What is said above the list, most important first: one banner shows, the others behind
+    /// "N more", which opens them in the same order ("collapse" puts them away) — so that solving
+    /// one, the person learns of the next (the owner and the designer, 1 November; CONTRACT §8.5
+    /// orders the licence's banners the same way, when they come). The vault's index (what the
+    /// list shows may be incomplete), then a profile whose proxy does not work (it was just
+    /// launched), then deleted profiles whose folders are kept (R3: a decision that can wait).
+    private enum ProfilesBanner: Identifiable {
+        case index(AppModel.IndexNotice)
+        case proxyProblem(ProxyProblemBanner.Item)
+        case keptDeleted
+
+        var id: String {
+            switch self {
+            case .index: return "index"
+            case .proxyProblem: return "proxy"
+            case .keptDeleted: return "kept"
+            }
+        }
+    }
+
+    private var banners: [ProfilesBanner] {
+        var banners: [ProfilesBanner] = []
+        if let indexNotice { banners.append(.index(indexNotice)) }
+        if let proxyProblem { banners.append(.proxyProblem(proxyProblem)) }
+        if !keptDeleted.isEmpty { banners.append(.keptDeleted) }
+        return banners
+    }
+
+    @ViewBuilder
+    private var bannerStack: some View {
+        let banners = self.banners
+        let shown = bannersExpanded ? banners : Array(banners.prefix(1))
+        VStack(spacing: 0) {
+            ForEach(Array(shown.enumerated()), id: \.element.id) { index, banner in
+                bannerView(banner)
+                    .environment(\.bannerMore, index == 0 && banners.count > 1
+                        ? BannerMore(count: banners.count - 1, expanded: bannersExpanded) {
+                            withAnimation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation) { bannersExpanded.toggle() }
+                        }
+                        : nil)
+                    .transition(.opacity)
+            }
+        }
+        // Down to one: the next that comes starts behind "1 more" again.
+        .onChange(of: banners.count) { _, count in
+            if count < 2 { bannersExpanded = false }
+        }
+    }
+
+    @ViewBuilder
+    private func bannerView(_ banner: ProfilesBanner) -> some View {
+        switch banner {
+        case let .index(notice):
+            IndexNoticeBox(notice: notice, reveal: revealVault)
+        case let .proxyProblem(item):
+            ProxyProblemBanner(item: item, open: openProxyProblem, retry: retryProxyProblem, dismiss: dismissProxyProblem)
+        case .keptDeleted:
+            KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack,
+                           removeForGood: removeForGood, reveal: revealKeptDeleted)
+        }
     }
 
     // MARK: The inspector
@@ -1781,19 +1840,88 @@ struct LumenBanner<Content: View>: View {
 
     let tone: Tone
     @ViewBuilder let content: () -> Content
+    /// The first of several banners: "N more" (or "collapse") at its end.
+    @Environment(\.bannerMore) private var more
 
     var body: some View {
-        content()
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(tone == .danger ? Theme.dangerTint : Theme.warningTint))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(tone == .danger ? Theme.dangerLine : Theme.warningLine, lineWidth: 1))
-            .padding(.horizontal, ProfilesScreen.headerTrailing)
-            .padding(.bottom, 10)
-            .accessibilityElement(children: .contain)
+        HStack(alignment: .top, spacing: 12) {
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let more {
+                Button(action: more.toggle) {
+                    HStack(spacing: 6) {
+                        Text(more.expanded ? L("banners.collapse") : String(format: L("banners.more"), more.count))
+                            .monospacedDigit()
+                        Image(systemName: more.expanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .buttonStyle(BannerMoreButtonStyle())
+                .fixedSize()
+                .help(more.expanded ? L("banners.collapse.help") : L("banners.more.help"))
+                .accessibilityLabel(more.expanded ? L("banners.collapse") : String(format: L("banners.more.a11y"), more.count))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(tone == .danger ? Theme.dangerTint : Theme.warningTint))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(tone == .danger ? Theme.dangerLine : Theme.warningLine, lineWidth: 1))
+        .padding(.horizontal, ProfilesScreen.headerTrailing)
+        .padding(.bottom, 10)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// The design's "N more" (`.morex`): a capsule 26 pt high with a fine line and a breath of white,
+/// the words in full white and the chevron in grey; the line a shade stronger under the pointer,
+/// a press sinking to 98 % (not under Reduce Motion), as the other buttons do.
+private struct BannerMoreButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Pill(configuration: configuration)
+    }
+
+    private struct Pill: View {
+        let configuration: Configuration
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @State private var hovered = false
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .background(Capsule().fill(Color.white.opacity(hovered ? 0.07 : 0.04)))
+                .overlay(Capsule().strokeBorder(hovered ? Theme.edge : Theme.strongBorder, lineWidth: 1))
+                .contentShape(Capsule())
+                .scaleEffect(configuration.isPressed && !Motion.isReduced(reduceMotion) ? 0.98 : 1)
+                .onHover { hovered = $0 }
+                .animation(Motion.hover(hovered), value: hovered)
+                .animation(Motion.press, value: configuration.isPressed)
+        }
+    }
+}
+
+/// "N more" on the first of several banners: how many, whether they are open, and what opens them.
+struct BannerMore {
+    let count: Int
+    let expanded: Bool
+    let toggle: () -> Void
+}
+
+private struct BannerMoreKey: EnvironmentKey {
+    static let defaultValue: BannerMore? = nil
+}
+
+extension EnvironmentValues {
+    var bannerMore: BannerMore? {
+        get { self[BannerMoreKey.self] }
+        set { self[BannerMoreKey.self] = newValue }
     }
 }
 

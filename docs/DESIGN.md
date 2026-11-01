@@ -44,6 +44,11 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   have the palette). Keys: `KeyCap`.
 - A box that asks for the person: `LumenBanner(tone: .danger | .warning)` above a list (the proxy
   problem, the index notice, kept deleted profiles), the inspector's advice box inside a panel.
+  Above the profiles they show one at a time, the most important first; the others wait behind
+  "N more" at the first one's end, which opens them in the same order ("collapse" puts them away)
+  — so that whoever solves one learns of the next (the owner and the designer, 1 November;
+  `ProfilesScreen.bannerStack`). Now: the index, a proxy that does not work, kept folders; the
+  licence's banners will take their places by CONTRACT §8.5.
 
 ## Windows
 
