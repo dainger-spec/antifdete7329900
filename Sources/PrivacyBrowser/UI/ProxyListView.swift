@@ -304,6 +304,10 @@ struct ProxyListPanel: View {
                                     .tag(entry.id)
                                     .id(entry.id)
                                     .listRowSeparatorTint(Theme.divider)
+                                    // The design's selected row, as the profiles' (the system's grey off).
+                                    .listRowBackground(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(selection.contains(entry.id) ? Theme.rowSelected : Color.clear))
+                                    .background(SystemListHighlightOff())
                             }
                         }
                         .listStyle(.plain)
@@ -388,6 +392,32 @@ struct ProxyListPanel: View {
 }
 
 // MARK: - Rows
+
+/// Turns off the system's selection highlight in the table a SwiftUI `List` is drawn with, so that
+/// its rows show the design's tone instead (`listRowBackground`): the system's was a grey bar of its
+/// own (CI run 555's proxies). The selection itself — a click, ⌘ and ⇧, the arrow keys, the context
+/// menu, Delete — is still the table's. Found no table (another way of drawing lists): nothing.
+private struct SystemListHighlightOff: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Finder() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class Finder: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil else { return }
+            DispatchQueue.main.async { [weak self] in
+                var view = self?.superview
+                while let current = view {
+                    if let table = current as? NSTableView {
+                        if table.selectionHighlightStyle != .none { table.selectionHighlightStyle = .none }
+                        return
+                    }
+                    view = current.superview
+                }
+            }
+        }
+    }
+}
 
 /// Column widths of the proxy list (the design's table), and whether the exit IP fits (the name
 /// takes what is left).
