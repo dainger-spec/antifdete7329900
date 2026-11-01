@@ -235,6 +235,23 @@ enum UISnapshots {
                 EditorPreview(draft: sample, topic: topic, isNew: isNew, error: error)
             }.capture(into: folder)
         }
+        // The versions of the settings a sync kept beside them (R4, R2), one of them unreadable.
+        let now = Date()
+        func version(_ file: String, _ origin: KeptSettings.Origin, _ device: String?, host: String?, changed: TimeInterval,
+                     kept: TimeInterval) -> KeptSettings {
+            KeptSettings(file: file, origin: origin, device: device, keptAt: now.addingTimeInterval(-kept),
+                         configuration: ProfileConfiguration(proxy: host.map { ProxySettings(kind: .socks5, host: $0, port: 1080) },
+                                                             settingsModifiedAt: now.addingTimeInterval(-changed)))
+        }
+        var unreadableVersion = version("config.bin.conflict-4", .unknown, nil, host: nil, changed: 0, kept: 9 * 86_400)
+        unreadableVersion.configuration = nil
+        let versions = [version("config.bin.conflict", .thisMac, "MacBook Pro", host: "de.gateway.example", changed: 3 * 86_400, kept: 2 * 86_400),
+                        version("config.bin.conflict-2", .otherDevice, nil, host: "nl.gateway.example", changed: 86_400, kept: 3_600),
+                        version("config.bin.conflict-3", .restored, "MacBook Pro", host: nil, changed: 30 * 86_400, kept: 600),
+                        unreadableVersion]
+        problems += await Shot(name: "editor-profile-versions", size: ProfileEditorForm.size, titled: false) {
+            EditorPreview(draft: labelled, topic: .profile, isNew: false, error: nil, keptVersions: versions)
+        }.capture(into: folder)
         // The editor in the narrowest Profiles window: no taller than the window has room for.
         problems += await Shot(name: "narrow-editor-location", size: narrow(ProfileEditorForm.size), titled: false) {
             EditorPreview(draft: location, topic: .location, isNew: false, error: nil).environment(\.sheetRoom, narrowRoom)
@@ -887,13 +904,14 @@ private struct EditorPreview: View {
     var error: String?
     var savedProxies: [ProxyListEntry] = []
     var visibleScreen: CGSize? = CGSize(width: 1728, height: 1024)
+    var keptVersions: [KeptSettings] = []
 
     var body: some View {
         // A saved profile's editor has its What Sites See button, as ProfileEditorView gives it.
         ProfileEditorForm(draft: $draft, topic: $topic, isNew: isNew, avatarID: UISnapshots.sampleRows()[1].id,
                           error: error, tunnelCarriesWebRTC: false, savedProxies: savedProxies,
                           knownTags: ["ads", "DE", "US", "warm-up", "Q4 campaign"], visibleScreen: visibleScreen,
-                          onWhatSitesSee: isNew ? nil : {})
+                          keptVersions: keptVersions, onWhatSitesSee: isNew ? nil : {})
     }
 }
 

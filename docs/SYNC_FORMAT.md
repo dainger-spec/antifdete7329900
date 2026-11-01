@@ -157,6 +157,10 @@ revision and the SHA-256 of the last synced bytes.
    missing or unreadable).
 3. **Per-profile files**, for each profile in the merged index:
    - local change only → push (`revision = remote + 1`, CAS on the remote revision) — but
+     **config** older than the server's (by `settingsModifiedAt`, settings that differ) is not an
+     edit: a version put back from a backup (R2). The server's stays the settings, this device's is
+     kept as a version (`KeptSettings.Origin.restored`, `report.restoredSettings`) and never pushed
+     over the newer ones; and
      **bookmarks**, **history** and **cookies** are merged with the remote copy when there is
      one, as if both had changed: a file this device lost and made anew holds only what was
      added since, and pushed as it was it took everything else off every other device
@@ -165,8 +169,11 @@ revision and the SHA-256 of the last synced bytes.
      - **bookmarks**, **history** and **cookies** are merged record by record (see below)
        and the result is pushed (`report.merged`);
      - **config**: the newer settings win, by `settingsModifiedAt` (when the user last
-       changed them); the other device's file is kept as `config.bin.conflict` on the device
-       that ran the sync, whichever side won (`report.resolvedConflicts`). When the two differ
+       changed them); the other version is kept on the device that ran the sync, whichever side
+       won (`report.resolvedConflicts`), in a file of its own — `config.bin.conflict`, then `-2`,
+       `-3`… — never written over, with where it is from and when (`KeptSettings`); the person
+       uses or removes it in the profile's editor, and past five the sync asks them to go through
+       them (`report.settingsVersionsToReview`), removing none. When the two differ
        only in what the browser keeps for itself (`lastProxyLocation`, found at a launch),
        the remote file is taken, with no copy and no conflict reported. A version with the
        time beats one without (never edited since it was created, or rewritten by an older

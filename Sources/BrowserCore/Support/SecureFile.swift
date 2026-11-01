@@ -99,6 +99,19 @@ public enum SecureFile {
         return aside
     }
 
+    /// Writes `data` beside the file at `url` — `<name>.<suffix>`, then `<name>.<suffix>-2`, … —
+    /// never over a file there already. Returns where it went.
+    @discardableResult
+    public static func writeBeside(_ data: Data, of url: URL, suffix: String) throws -> URL {
+        var beside = url.appendingPathExtension(suffix)
+        var next = 2
+        while try !createNew(data, at: beside) {
+            beside = url.appendingPathExtension("\(suffix)-\(next)")
+            next += 1
+        }
+        return beside
+    }
+
     /// Atomically moves `source` over `destination` (rename(2) on the same volume).
     public static func replace(_ destination: URL, with source: URL) throws {
         if rename(source.path, destination.path) != 0 {

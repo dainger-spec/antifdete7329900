@@ -495,6 +495,24 @@ final class AppModel: ObservableObject {
         return try repository.loadConfiguration(id)
     }
 
+    /// The versions of the profile's settings kept beside them (R4, R2).
+    func keptSettings(for id: UUID) -> [KeptSettings] {
+        repository?.keptSettings(for: id) ?? []
+    }
+
+    /// The person chose a kept version for the profile's settings (`ProfileRepository.useKeptSettings`).
+    func useKeptSettings(_ file: String, for id: UUID) throws {
+        guard let repository else { return }
+        try repository.useKeptSettings(file, for: id)
+        refresh()
+    }
+
+    /// The person removed a kept version, having looked at it; one that does not open is refused.
+    func removeKeptSettings(_ file: String, for id: UUID) throws {
+        guard let repository else { return }
+        try repository.removeKeptSettings(file, for: id)
+    }
+
     /// Changes take effect the next time the profile is launched.
     func updateProfile(_ id: UUID, name: String, configuration: ProfileConfiguration) throws {
         guard let repository else { return }
@@ -730,6 +748,13 @@ final class AppModel: ObservableObject {
             }
             for copy in report.unreadable {
                 showError(Self.unreadableCopyText(copy, name: (try? repository.summary(for: copy.profileID))?.name))
+            }
+            // Settings put back from a backup, older than the server's (R2), and versions to go
+            // through (R4): said, by the profile's name.
+            func name(_ id: UUID) -> String { (try? repository.summary(for: id))?.name ?? id.uuidString }
+            for id in report.restoredSettings { showError(String(format: L("sync.versions.restored"), name(id))) }
+            for id in report.settingsVersionsToReview {
+                showError(String(format: L("sync.versions.review"), name(id), repository.keptSettings(for: id).count))
             }
             status = DeviceSettings.SyncStatus(report: report)
         } catch {

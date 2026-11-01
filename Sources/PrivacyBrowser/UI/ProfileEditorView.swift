@@ -388,6 +388,9 @@ struct ProfileEditorView: View {
     /// saved over them (R1). The Profiles list does not open the editor then; this is for settings
     /// that went bad while it was opening.
     @State private var settingsUnreadable = false
+    /// The versions of the settings kept beside them (R4, R2), and the one the person asked to remove.
+    @State private var keptVersions: [KeptSettings] = []
+    @State private var removingVersion: String?
     @ObservedObject private var tunnel = TunnelManager.shared
 
     /// The glyph colour of a profile not created yet (it has no id).
@@ -414,6 +417,16 @@ struct ProfileEditorView: View {
         .fileImporter(isPresented: $choosingCookieFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in
             if case let .success(url) = result { readCookieFile(url) }
         }
+        .alert(L("editor.versions.removeTitle"), isPresented: Binding(get: { removingVersion != nil },
+                                                                      set: { if !$0 { removingVersion = nil } })) {
+            Button(L("editor.versions.remove"), role: .destructive) {
+                if let file = removingVersion { removeVersion(file) }
+                removingVersion = nil
+            }
+            Button(L("common.cancel"), role: .cancel) { removingVersion = nil }
+        } message: {
+            Text(L("editor.versions.removeMessage"))
+        }
     }
 
     /// A cookie file chosen or dropped, read as Import Cookies reads one.
@@ -432,6 +445,7 @@ struct ProfileEditorView: View {
                           knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen,
                           onChooseCookieFile: { choosingCookieFile = true }, onDropCookieFile: readCookieFile,
                           isSaving: savingCookies, saveRefused: settingsUnreadable,
+                          keptVersions: keptVersions, onUseVersion: useVersion, onRemoveVersion: { removingVersion = $0 },
                           onWhatSitesSee: target.isNew ? nil : { showingWhatSitesSee = true })
     }
 
@@ -456,6 +470,7 @@ struct ProfileEditorView: View {
                 draft = ProfileDraft(name: summary.name, configuration: try model.configuration(for: summary.id),
                                      savedProxies: model.proxyList?.entries ?? [])
                 draft.proxyLocationLookupFailed = model.manager?.proxyLocationUnknown.contains(summary.id) ?? false
+                keptVersions = model.keptSettings(for: summary.id)
             } catch {
                 settingsUnreadable = true
                 self.error = String(format: L("editor.error.decrypt"), error.localizedDescription)
@@ -473,6 +488,32 @@ struct ProfileEditorView: View {
                 draft.setWindowSize(WindowSize.randomSafe(fitting: (Int(visible.width), Int(visible.height)), using: &generator))
                 draft.windowSizeIsRandom = true
             }
+        }
+    }
+
+    /// "Use this version": the kept version becomes the profile's settings at once, the settings it
+    /// replaces kept in its place; the form shows them. What the form held unsaved goes with it.
+    private func useVersion(_ file: String) {
+        guard case .existing(let summary) = target else { return }
+        do {
+            try model.useKeptSettings(file, for: summary.id)
+            draft = ProfileDraft(name: summary.name, configuration: try model.configuration(for: summary.id),
+                                 savedProxies: model.proxyList?.entries ?? [])
+            keptVersions = model.keptSettings(for: summary.id)
+            error = nil
+        } catch {
+            self.error = errorText(error)
+        }
+    }
+
+    /// Removes a kept version once the person said so in the alert.
+    private func removeVersion(_ file: String) {
+        guard case .existing(let summary) = target else { return }
+        do {
+            try model.removeKeptSettings(file, for: summary.id)
+            keptVersions = model.keptSettings(for: summary.id)
+        } catch {
+            self.error = errorText(error)
         }
     }
 

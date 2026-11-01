@@ -29,6 +29,13 @@ public struct SyncReport: Equatable, Sendable {
     /// Profile files whose copy on this device does not open (damaged, cut short, another key's):
     /// never pushed, never written over (docs/DESTRUCTIVE_PATHS.md).
     public var unreadable: [UnreadableCopy] = []
+    /// Profiles whose settings changed here only, but older than the server's (R2): put back from a
+    /// backup. The server's stayed the profile's settings; this Mac's are kept as a version of them
+    /// (`KeptSettings.Origin.restored`), never pushed over the newer ones.
+    public var restoredSettings: [UUID] = []
+    /// Profiles that hold more kept versions of their settings than `KeptSettings.reviewAbove`
+    /// after this sync: the person is asked to go through them; none is removed for them.
+    public var settingsVersionsToReview: [UUID] = []
 
     public struct UnreadableCopy: Equatable, Sendable {
         public var profileID: UUID
@@ -214,10 +221,21 @@ public final class SyncEngine: @unchecked Sendable {
                 let opens: (Data) -> Bool = { [repository] data in
                     repository.opensSyncedFile(file, profileID: id, data: data)
                 }
+                // The version a conflict does not keep as the file: one file of its own beside it,
+                // never one written over (R4).
+                let keep: (Data, KeptSettings.Origin) throws -> Void = { [repository] data, origin in
+                    if file == .config {
+                        try repository.keepSettingsVersion(data, origin: origin, for: id)
+                    } else {
+                        try SecureFile.writeBeside(data, of: repository.url(of: file, for: id), suffix: "conflict")
+                    }
+                }
                 try await syncFile(name: "profile/\(id.uuidString)/\(file.rawValue)", url: repository.url(of: file, for: id),
                                    profileID: id, neededToStart: file.isNeededToStart,
-                                   merge: merge, newer: newer, check: check, opens: opens, remote: remote, state: &state, report: &report)
+                                   merge: merge, newer: newer, check: check, opens: opens, keep: keep,
+                                   remote: remote, state: &state, report: &report)
             }
+            if repository.keptSettings(for: id).count > KeptSettings.reviewAbove { report.settingsVersionsToReview.append(id) }
         }
 
         let profilesAfter = Set(index.entries.map(\.summary.id))
@@ -287,6 +305,7 @@ public final class SyncEngine: @unchecked Sendable {
                           merge: ((Data, Data) throws -> Data)?,
                           newer: ((Data, Data) throws -> ProfileRepository.NewerVersion?)?,
                           check: (Data) throws -> Void, opens: (Data) -> Bool,
+                          keep: (Data, KeptSettings.Origin) throws -> Void,
                           remote: [String: Int], state: inout [String: ItemState], report: inout SyncReport) async throws {
         let objectID = codec.objectID(for: name)
         let localData = FileManager.default.fileExists(atPath: url.path) ? try SecureFile.read(url) : nil
@@ -312,6 +331,28 @@ public final class SyncEngine: @unchecked Sendable {
         case (false, false):
             return
         case (true, false) where merge == nil || remoteRevision == nil:
+            // The settings changed here only, but older than the server's (R2): not an edit, a
+            // version put back from a backup. The server's stay the profile's settings, and this
+            // Mac's are kept as a version of them — never pushed over the newer ones. The clocks
+            // decide only which is the profile's settings; neither is dropped. The same settings
+            // with only what the browser keeps for itself changed (the proxy location found at a
+            // launch) are no version: pushed as before.
+            if let newer, let localData, remoteRevision != nil, let blob = try await transport.fetch(objectID: objectID) {
+                let decoded = try codec.decode(blob)
+                guard decoded.payload.logicalName == name else { throw CoreError.corruptData("unexpected object \(decoded.payload.logicalName)") }
+                if !decoded.payload.deleted {
+                    try check(localData)
+                    try check(decoded.payload.data)
+                    if let verdict = try newer(localData, decoded.payload.data), verdict.remoteWins, verdict.keepsConflictCopy {
+                        try keep(localData, .restored)
+                        try SecureFile.write(decoded.payload.data, to: url)
+                        state[name] = ItemState(revision: decoded.revision, sha256: Self.hash(decoded.payload.data))
+                        report.pulled.append(name)
+                        report.restoredSettings.append(profileID)
+                        return
+                    }
+                }
+            }
             try await push(name: name, data: localData!, revision: (remoteRevision ?? 0) + 1,
                            expected: remoteRevision, state: &state, report: &report)
         case (false, true):
@@ -342,14 +383,13 @@ public final class SyncEngine: @unchecked Sendable {
                 if !decoded.payload.deleted { try check(decoded.payload.data) }
                 if let verdict = try newer(localData, decoded.payload.data) {
                     if verdict.keepsConflictCopy { report.resolvedConflicts.append(name) }
-                    let conflictURL = url.appendingPathExtension("conflict")
                     if verdict.remoteWins {
-                        if verdict.keepsConflictCopy { try SecureFile.write(localData, to: conflictURL) }
+                        if verdict.keepsConflictCopy { try keep(localData, .thisMac) }
                         try SecureFile.write(decoded.payload.data, to: url)
                         state[name] = ItemState(revision: decoded.revision, sha256: Self.hash(decoded.payload.data))
                         report.pulled.append(name)
                     } else {
-                        if verdict.keepsConflictCopy { try SecureFile.write(decoded.payload.data, to: conflictURL) }
+                        if verdict.keepsConflictCopy { try keep(decoded.payload.data, .otherDevice) }
                         try await push(name: name, data: localData, revision: decoded.revision + 1,
                                        expected: decoded.revision, state: &state, report: &report)
                     }
@@ -357,18 +397,23 @@ public final class SyncEngine: @unchecked Sendable {
                 }
             }
             // Whichever side is kept, the remote copy is looked at first: a newer version's copy
-            // is not written over, nor pulled.
+            // is not written over, nor pulled. The side not kept is kept beside, as a version.
+            var remoteData: Data?
             if let blob = try await transport.fetch(objectID: objectID) {
                 let decoded = try codec.decode(blob)
-                if !decoded.payload.deleted { try check(decoded.payload.data) }
+                if !decoded.payload.deleted {
+                    try check(decoded.payload.data)
+                    remoteData = decoded.payload.data
+                }
             }
             report.resolvedConflicts.append(name)
             switch resolveConflict(name) {
             case .keepLocal:
+                if let remoteData { try keep(remoteData, .otherDevice) }
                 try await push(name: name, data: localData!, revision: remoteRevision! + 1,
                                expected: remoteRevision, state: &state, report: &report)
             case .keepRemote:
-                try SecureFile.write(localData!, to: url.appendingPathExtension("conflict"))
+                try keep(localData!, .thisMac)
                 try await pull(name: name, objectID: objectID, url: url, check: check, state: &state, report: &report)
             }
         }

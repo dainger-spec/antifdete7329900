@@ -175,7 +175,11 @@ Application Support/PrivacyBrowser/      (0700)
                                   sync that took the server's copy in its place, by the key copy written again. Nothing
                                   unreadable is ever deleted (docs/DESTRUCTIVE_PATHS.md). Settings that cannot be read never
                                   start the profile and are never saved over (R1)
-    config.bin.conflict           the other device's version after a sync conflict (encrypted as the file; passwords.bin.conflict
+    config.bin.conflict(-2, -3 …) each version of the settings a sync did not keep as them — the other side of a conflict, or
+                                  this Mac's older settings put back from a backup (R2) — a file of its own, never written over,
+                                  removed only by the person, in the editor (R4). config-versions.bin: AES-GCM(versions key,
+                                  where each is from and when it was kept). Earlier versions kept one config.bin.conflict
+    config.bin.conflict           (legacy, as before:) the other device's version after a sync conflict (encrypted as the file; passwords.bin.conflict
                                   only from before passwords.bin format 2, taken into passwords.bin as kept versions when the
                                   vault opens, then removed: a password conflict now keeps both versions in the file)
     history.bin                   AES-GCM(history key, HistoryDocument JSON)          [not for ephemeral profiles]

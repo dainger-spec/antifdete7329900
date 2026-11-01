@@ -76,6 +76,11 @@ struct ProfileEditorForm: View {
     var isSaving = false
     /// The profile's settings could not be read: Save would put the form's defaults in their place.
     var saveRefused = false
+    /// The versions of the profile's settings kept beside them (R4, R2): shown at the top of its
+    /// first part, each to use or to remove — none goes but by the person's hand.
+    var keptVersions: [KeptSettings] = []
+    var onUseVersion: (String) -> Void = { _ in }
+    var onRemoveVersion: (String) -> Void = { _ in }
     /// What sites see of the profile as it is saved (an existing profile; nil for a new one).
     var onWhatSitesSee: (() -> Void)?
 
@@ -274,6 +279,10 @@ struct ProfileEditorForm: View {
 
     private var profile: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if !keptVersions.isEmpty {
+                keptVersionsPart
+                EditorDivider()
+            }
             EditorField(L("editor.name")) {
                 TextField(L("editor.name"), text: $draft.name, prompt: Text(verbatim: "")).lumenField()
             }
@@ -305,6 +314,58 @@ struct ProfileEditorForm: View {
             EditorDivider()
             EditorToggle(L("editor.ephemeral.title"), detail: L("editor.ephemeral.detail"), isOn: $draft.ephemeral)
         }
+    }
+
+    /// Each kept version: where it is from, when its settings were changed and kept, its proxy,
+    /// and what can be done with it. One that does not open is shown as such, with nothing to do.
+    private var keptVersionsPart: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            EditorGroupTitle(L("editor.versions.title"))
+            if keptVersions.count > KeptSettings.reviewAbove {
+                EditorNote(String(format: L("editor.versions.review"), keptVersions.count), tone: .warning)
+            } else {
+                EditorNote(L("editor.versions.note"))
+            }
+            ForEach(keptVersions, id: \.file) { version in
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Self.versionOrigin(version))
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(Self.versionDetail(version))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    if version.configuration != nil {
+                        Button(L("editor.versions.use")) { onUseVersion(version.file) }
+                            .buttonStyle(.lumenSecondary)
+                        Button(L("editor.versions.remove")) { onRemoveVersion(version.file) }
+                            .buttonStyle(.lumenSecondary)
+                    }
+                }
+            }
+        }
+    }
+
+    static func versionOrigin(_ version: KeptSettings) -> String {
+        switch version.origin {
+        case .thisMac: return version.device.map { String(format: L("editor.versions.thisMacNamed"), $0) } ?? L("editor.versions.thisMac")
+        case .otherDevice: return L("editor.versions.otherDevice")
+        case .restored: return L("editor.versions.restored")
+        case .replaced: return L("editor.versions.replaced")
+        case .unknown: return L("editor.versions.unknown")
+        }
+    }
+
+    /// "Changed Oct 31, 14:02 · kept Nov 1, 09:10 · through proxy.example:1080".
+    static func versionDetail(_ version: KeptSettings) -> String {
+        guard let configuration = version.configuration else { return L("editor.versions.unreadable") }
+        let changed = version.editedAt.map { $0.shown(date: .abbreviated, time: .shortened) } ?? L("editor.versions.neverChanged")
+        let exit = configuration.proxy.map { String(format: L("editor.versions.proxy"), "\($0.host):\($0.port)") }
+            ?? L("editor.versions.direct")
+        return String(format: L("editor.versions.detail"), changed, version.keptAt.shown(date: .abbreviated, time: .shortened), exit)
     }
 
     // MARK: Identity
