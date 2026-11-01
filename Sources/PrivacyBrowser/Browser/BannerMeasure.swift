@@ -239,13 +239,9 @@ enum BannerMeasure {
     /// says which keys it was asked for, and answers each with another such dictionary, handed to
     /// -[WBSAppLink _scopeURLFromInfoDictionary:] on a bare instance (no initializer run).
     private static func probeWebAppLookup() {
-        guard let linkClass = NSClassFromString("WBSAppLink"), let created = class_createInstance(linkClass, 0) else { return }
-        let bare = created as AnyObject
-        let scopeSelector = NSSelectorFromString("_scopeURLFromInfoDictionary:")
-        guard bare.responds(to: scopeSelector) else { return }
-        let spy = KeySpy(path: "Info")
-        let answer = bare.perform(scopeSelector, with: spy)?.takeUnretainedValue()
-        say("web app: -_scopeURLFromInfoDictionary: read \(KeySpy.asked) and answered \(answer.map { String(describing: $0) } ?? "nil")")
+        // A dictionary that says which keys it is asked for cannot be made in Swift (NSDictionary's
+        // literal initializer cannot be given by a subclass): the next round makes one at run time.
+        say("web app: the key probe is not in this round")
     }
 
     /// Folders listed by anyone in this process whose path names applications or web apps, with
@@ -445,37 +441,4 @@ enum BannerMeasure {
     nonisolated private static func short(_ line: String) -> String {
         line.split(separator: " ", omittingEmptySubsequences: true).dropFirst().filter { !$0.hasPrefix("0x") }.joined(separator: " ")
     }
-}
-
-/// MEASUREMENT BRANCH ONLY. A dictionary that says which keys it was asked for, by path, and
-/// answers each with another such dictionary.
-final class KeySpy: NSDictionary {
-    nonisolated(unsafe) static var asked: [String] = []
-    private var path = ""
-
-    init(path: String) {
-        self.path = path
-        super.init()
-    }
-
-    override init() {
-        super.init()
-    }
-
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    required convenience init(dictionaryLiteral elements: (Any, Any)...) {
-        self.init()
-    }
-
-    override var count: Int { 0 }
-    override func object(forKey key: Any) -> Any? {
-        let name = "\(path).\(key)"
-        KeySpy.asked.append(name)
-        return KeySpy(path: name)
-    }
-    override func keyEnumerator() -> NSEnumerator { NSArray().objectEnumerator() }
-    override func value(forKey key: String) -> Any? { object(forKey: key) }
 }
