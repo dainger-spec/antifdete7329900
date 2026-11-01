@@ -76,7 +76,7 @@ Its profiles stay encrypted with the old password; if that comes back to you, qu
 
 ## What a sync location sees {#sync}
 
-Sync is off until you choose **Folder (local-only)** or **Server** in **⋯ → Sync…**. {{name}} has no sync server of its own yet: the app is a client for a documented protocol.
+Sync is off until you choose **Folder (local-only)** or **Server** in **⋯ → Sync…**.
 
 A sync location sees the vault header in plain text, there so another Mac can open the vault with the same password (the app can’t yet set up a second Mac like this); how many objects there are, their sizes, versions and when they change; and, for a server, this Mac’s IP address — sync goes directly, not through a profile’s proxy.
 

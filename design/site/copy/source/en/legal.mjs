@@ -1,9 +1,10 @@
-// Legal: privacy policy, terms of use, refund policy. As the owner decided: there is no legal entity and no
-// company details — the party is called {{name}} throughout; crypto is the only way to pay, and the crypto
-// processor is the only one that receives payment data; nothing renews by itself; data is never deleted; refunds
-// within 14 days, and 7 days after a renewal, in the same coin and the same amount. Retention periods and service
-// names are still the owner's call (question 12). Facts about data: docs/SYNC_FORMAT.md, docs/SYNC_SERVER_API.md,
-// ProxyGeoLookup.swift, README.
+// Legal: privacy policy, terms of use, refund policy. As the owner decided: the seller is a private individual, and
+// there will be no legal entity; the owner fills in the name, country and governing law — here they are marked places
+// (question 15), no values made up. Crypto only, and the crypto processor is the only recipient of payment data; no
+// automatic charges, reminders 7 days and 1 day before; data is never deleted; refunds within 14 days, and 7 days after a
+// renewal, in the same coin and the same amount. What the account server keeps and doesn't keep follows
+// lumen-api-server, docs/SITE_API.md §9 (plainly: each Mac tells the server how many profiles it has); sync follows
+// docs/SYNC_FORMAT.md and docs/SYNC_SERVER_API.md. Retention periods and service names are the owner's call (question 12).
 export default {
   title: 'Legal',
   tabs: [['privacy.html', 'Privacy'], ['terms.html', 'Terms of use'], ['refunds.html', 'Refunds']],
@@ -12,118 +13,153 @@ export default {
   tocTitle: 'Sections',
   privacy: {
     title: 'Privacy policy',
-    lead: 'What we know about you, why, and for how long. And what we do not know and cannot find out.',
-    toc: [['short', 'In short'], ['who', 'What this covers'], ['server', 'What the server knows about you'], ['cannot', 'What we don’t know'], ['app', 'The app'], ['site', 'The website'], ['processors', 'Who we share data with'], ['rights', 'Your rights'], ['changes', 'Changes']],
+    lead: 'What we know about you, why, and for how long. And what we don’t know and can’t find out.',
+    toc: [['short', 'In short'], ['who', 'Who is responsible'], ['server', 'What the server keeps'], ['devices', 'About your devices'], ['sync', 'Sync'], ['not', 'What the server doesn’t keep'], ['terms', 'How long'], ['app', 'The app'], ['site', 'The site'], ['processors', 'Who we share data with'], ['rights', 'Your rights'], ['changes', 'Changes']],
     body: `## In short {#short}
 
-- Your profiles, what’s in them and your master password stay on your Macs. The server can’t see them and can’t decrypt them.
-- We know little about you: your email (if you sign in by email), the IP addresses of requests to the server, how many devices you have, the sizes and change times of encrypted sync blocks — and your payment data.
-- **A forgotten master password cannot be recovered.** Not by us, not by anyone.
-- The website has no analytics and no third-party scripts. The app sends us no analytics and no crash reports.
+- Profiles, what’s in them and your master password stay on your Macs. The server can’t see them or decrypt them.
+- The server knows your email, a hash of your password, your plan and paid period, your invoices and your devices — and **how many profiles each Mac has**. That number is all it knows about your profiles.
+- The server doesn’t keep IP addresses. It has no computer names.
+- **A forgotten master password can’t be recovered.** Not by us, not by anyone.
+- The site has no analytics, no cookies and no third-party scripts. The app sends us no analytics and no crash reports.
 
-## What this covers {#who}
+## Who is responsible {#who}
 
-{{name}}: the Mac app, the {{domain}} website and the sync server. For questions about your data, write to privacy@{{domain}}.
+{{name}} is a Mac app, the site {{domain}}, an account server and a sync server. They are sold and supported by a private individual: {{tbd:q15:[the seller’s full name]}}, {{tbd:q15:[country]}}, who is responsible for the processing described here. Questions about data: privacy@{{domain}}.
 
-## What the server knows about you {#server}
+## What the server keeps {#server}
 
-This is the complete list.
+This is the full list.
 
-| Data | Why | How long we keep it |
+| Data | Why | How long |
 |---|---|---|
-| **Email** — only if you sign in by email | One-time sign-in codes, receipts, the reminder before a period ends | As long as the account exists |
-| **IP addresses** of requests to the server | Abuse protection and diagnostics | {{tbd:q12:30 days}} in server logs |
-| **The number of devices** in the account and when each last checked in | The plan’s Mac limit, revoking a device | As long as the account exists |
-| **Sizes and change times** of encrypted sync blocks, and their revisions | Sync itself | Until you delete them or the account |
-| **Payment data**: the plan, the period, the amount in dollars, the coin and how much of it, the payment address and the network transaction | Receipts, the paid period, refunds | {{tbd:q12:the retention period}} |
-| **Support emails** | To answer you | {{tbd:q12:2 years}} |
+| **Email** | Signing in, password resets, receipts, reminders before a period ends | While the account exists |
+| **A hash of your password** — not the password | Signing in | While the account exists |
+| **Plan, limits and end date** of the paid period | What the app may do on your Macs | While the account exists |
+| **Invoices**: the amount in dollars, the coin and how much of it, the address issued for the payment, the transaction on the network, dates | Receipts, the paid period, refunds, accounting | After the account is deleted — without the email, as long as accounting requires: {{tbd:q12:[period]}} |
+| **Team seats**: the invited people’s emails | The team | While the seat is open |
+| **A log of changes to your rights**: when and why the plan, period and limits changed | To sort out an error or a dispute | {{tbd:q12:[period]}} |
+| **Messages** with support | To answer | {{tbd:q12:[period]}} |
 
-## What we don’t know and can’t find out {#cannot}
+## About your devices {#devices}
 
-- Everything in your profiles — settings, proxies, passwords, cookies, history, bookmarks — is encrypted on your Mac with a key from your master password **before** anything goes to the server. The server stores only ciphertext. It has no key.
-- **We cannot decrypt your profile data** — not by choice, not on anyone’s demand.
-- Object names on the server are HMACs of their real names. They don’t even reveal that an object is “a profile’s history”, or the exact number of profiles.
-- We don’t store your master password and can’t reset it. **A forgotten master password cannot be recovered**: without it, profile data can’t be decrypted — by you or by us.
-- If you sign in with a licence key, we don’t have your email either.
+For each Mac in the account the server keeps:
+
+- an identifier computed from the Mac’s hardware identifier — the hardware identifier itself never reaches the server;
+- a label, if you set one;
+- the app’s version;
+- when the Mac was added and when it last checked in;
+- **the number of profiles on that Mac.**
+
+Each Mac tells the server how many profiles it has, so that your plan’s profile limit is shared by all your Macs — and by the whole team. That number is all the server knows about your profiles: their names, tags, notes, contents, cookies, site passwords, history and proxy addresses never reach it.
+
+## Sync {#sync}
+
+- Everything in your profiles — settings, proxies, passwords, cookies, history, bookmarks — is encrypted on your Mac with a key from your master password **before** anything goes to the sync server. It keeps only ciphertext: how many objects, their sizes, revisions and when they change. It doesn’t have the key.
+- Object names on the server are HMACs of their real names. They don’t even reveal that an object is “a profile’s history”.
+- **We cannot decrypt profile data** — not of our own will, not on anyone’s demand.
+
+## What the server doesn’t keep {#not}
+
+- **IP addresses.** They are used only in memory, to limit how often requests come, and are never written down.
+- **Computer names.** A device is known by its code and label.
+- **Profile data** and your master password. We can’t reset a master password: without it profile data can’t be decrypted — not by you, not by us.
+
+## How long {#terms}
+
+- **The account** is deleted when you ask, in your account: it is blocked at once, and after 7 days the email, password and devices are deleted. Until then, the deletion can be cancelled by signing in.
+- **Payment records** are then kept without the email, as long as accounting requires: {{tbd:q12:[period]}}.
+- **Backups** of the database are kept for up to 30 days: a deleted email disappears from them with the oldest copies.
 
 ## The app on your Mac {#app}
 
 - The app sends us no analytics, no crash reports and nothing about which sites you open.
 - To learn a proxy’s country, time zone and external IP, the app asks the geolocation services ipinfo.io, get.geojs.io and ipwho.is — **through the proxy itself**, when a profile with a proxy starts or you check a proxy. They see the proxy’s address, not yours.
-- The search at the start of a warm-up goes through DuckDuckGo, as from the address bar — through the profile’s proxy too.
-- Sites you open in your profiles get what they would get from Safari. That is between you and those sites; their privacy policies apply to them.
+- The search at the start of a warm-up goes through DuckDuckGo, as from the address bar — also through the profile’s proxy.
+- Sites you open in profiles get what they would get from Safari. That is between you and those sites; their privacy policies apply to them.
 
-## The website {#site}
+## The site {#site}
 
-- The website has no analytics, no ad pixels and no third-party scripts. Fonts and images come from our own server.
-- The website has one cookie: your account session after you sign in. Until you sign in, there are no cookies.
-- The payment page is ours: you don’t leave the site; the server gets the address to pay to from the crypto processor.
+- The site has no analytics, no ad pixels, no third-party scripts and no cookies. Fonts and images come from our server.
+- After you sign in, the site keeps the session key in the tab’s memory and forgets it when you sign out. A session lasts 30 days and ends after 7 days without use.
+- The payment page is ours: you don’t leave the site, and the server gets the address for the transfer from the crypto processor.
 
 ## Who we share data with {#processors}
 
-- **The crypto processor** — {{tbd:q12:name}} — takes crypto payments: it gets the amount, the coin and the order number and gives back an address to pay to. It is the only one that receives payment data. Neither your email nor any profile data is passed to it.
-- **The email service** — {{tbd:q12:name}} — to send sign-in codes, receipts and reminders.
-- **Hosting** — {{tbd:q12:name and country}} — where the server runs.
+- **The crypto processor** — {{tbd:q12:[name]}} — is the only one that receives payment data. From us it gets the amount in dollars, the coin, the invoice number and the plan’s name — without your email and without any other data about you — and it issues the address for the transfer.
+- **The email service** — {{tbd:q12:[name]}} — to send codes, receipts and reminders.
+- **Hosting** — {{tbd:q12:[name and country]}} — where the servers run.
 
-We don’t sell data or pass it to ad networks. On a lawful demand we can hand over only what we have — the list above. Your profile data is encrypted on our side, and we can’t decrypt it.
+We don’t sell data and don’t pass it to ad networks. On a lawful demand we can hand over only what we have — the lists above. Profile data is encrypted, and we can’t decrypt it.
 
 ## Your rights {#rights}
 
 - **Find out** what data we have about you and get a copy — write to privacy@{{domain}}.
-- **Delete** your account and all sync data — in your account, at once, no emails needed.
-- **Correct** your email — in account settings.
-- **Opt out** of release emails — there too.
-- **Complain** to the data protection authority of your country.
+- **Delete** your account — in your account; sync data — there too, separately.
+- **Correct** your data — write to privacy@{{domain}}.
+- **Complain** to your country’s data protection authority.
 
 ## Changes {#changes}
 
-We’ll email you about material changes {{tbd:q12:30 days}} before they take effect. Earlier versions of this policy stay on this page.`,
+We email you about material changes {{tbd:q12:30 days}} before they take effect. Earlier versions of the policy stay on this page.`,
   },
   terms: {
     title: 'Terms of use',
     lead: 'The rules on which you use {{name}}. Short, and no small print.',
-    toc: [['license', 'Licence'], ['account', 'Account'], ['payment', 'Payment and periods'], ['use', 'Acceptable use'], ['data', 'Your data'], ['warranty', 'Liability'], ['end', 'Ending'], ['contact', 'Questions']],
-    body: `## Licence {#license}
+    toc: [['parties', 'The parties'], ['license', 'Licence'], ['account', 'Account'], ['team', 'Team'], ['payment', 'Payment and period'], ['use', 'Acceptable use'], ['data', 'Your data'], ['warranty', 'Liability'], ['law', 'Governing law'], ['end', 'Ending'], ['contact', 'Questions']],
+    body: `## The parties {#parties}
 
-While you have a trial or a paid period, you may install and use {{name}} on your Macs — within your plan’s number of profiles and Macs. How many profiles run at once is not limited on any plan.
+{{name}} is sold by a private individual: {{tbd:q15:[the seller’s full name]}}, {{tbd:q15:[country]}}. These terms are an agreement between you and the seller.
+
+## Licence {#license}
+
+While you have a trial or a paid period, you may install and use {{name}} on your devices — within your plan’s number of profiles and devices.
 
 {{name}} runs on Macs with Apple Silicon and macOS 26 or later. Intel Macs are not supported.
 
 ## Account {#account}
 
-- You sign in by email with a one-time code, or with a licence key.
-- The key is the only way into an account without an email. Lose it and we can’t restore access.
-- Your profiles’ master password is not tied to the account and is unknown to us. A forgotten master password cannot be recovered.
+- Your account is your email and password. A code from an email confirms a registration and a password reset.
+- Your profiles’ master password isn’t tied to the account, and we don’t know it. A forgotten master password can’t be recovered.
 
-## Payment and periods {#payment}
+## Team {#team}
 
-- You pay in crypto, for a month or for a whole year; a year costs ten months. Prices are in US dollars, on the [pricing page](pricing.html).
-- Crypto can’t be charged automatically, so nothing renews by itself and there is nothing to cancel: a paid period simply ends. We remind you by email in advance if you sign in by email. You can renew in your account at any time.
-- The trial is 7 days free, up to 3 profiles, with every feature.
-- When a period has ended, the app opens your profiles for data export only, until you renew. **Your data is never deleted.**
-- We tell you about a price change in advance; the new price applies to periods paid for after the change.
+The Team plan has 5 seats: you and 4 invited. Each person signs in with their own email and password. The profile and device limits are shared by the team. The owner pays; members don’t see the team’s invoices.
+
+## Payment and period {#payment}
+
+- You pay in crypto, for a month or a whole year; a year costs ten months. Prices are in US dollars, on the [pricing page](pricing.html).
+- A payment is one-off: there are no automatic charges and nothing to cancel. A paid period simply ends; a new payment renews it. Pay early and the new period starts when the current one ends.
+- We remind you by email 7 days and 1 day before a period ends. You can renew in your account at any time.
+- The trial is 7 days free, up to 3 profiles.
+- When a period ends, the app opens your profiles for data export only until you renew. **Your data is never deleted.**
+- We tell you about a price change in advance; the new price applies to periods paid after the change.
 - Refunds follow the [refund policy](refunds.html).
 
 ## Acceptable use {#use}
 
-{{name}} is made for privacy and for working with several accounts. You may not use it:
+{{name}} is built for privacy and for working with several accounts. You may not use it:
 
-- for fraud, for impersonating someone else, or for anything that breaks the law;
+- for fraud, for passing yourself off as someone else, or for anything that breaks the law;
 - to spread malware, send spam or attack other people’s systems.
 
-You follow the rules of the sites and services you use. If we learn of prohibited use, we may close access to the account.
+You follow the rules of the sites and services you use. If the seller learns of prohibited use, they may close access to the account.
 
 ## Your data {#data}
 
-Your profiles and everything in them belong to you and are stored on your Macs, encrypted. We never delete them — not when a period ends, not when you stop paying. How we handle account data is described in the [privacy policy](privacy.html).
+Profiles and everything in them are yours, kept encrypted on your Macs. We never delete them — not when a period ends, not when you stop paying. How we handle account data is in the [privacy policy](privacy.html).
 
 ## Liability {#warranty}
 
-We check {{name}} on every build and publish what we measure and how. But the software is provided “as is”: we don’t promise it fits every task, and we are not responsible for how sites treat your accounts. Our liability is limited to what you paid in the last {{tbd:q12:12 months}}, as far as the law allows.
+We check {{name}} on every build and publish what we measure and how. But the software is provided “as is”: the seller doesn’t promise it suits every task and isn’t responsible for how sites treat your accounts. The seller’s liability is limited to what you paid over the last {{tbd:q12:12 months}}, as far as the governing law allows.
+
+## Governing law {#law}
+
+These terms are governed by {{tbd:q15:[the governing law]}}.
 
 ## Ending {#end}
 
-You can delete your account at any time, in your account. When a paid period ends, your profiles stay on your Macs: the app opens them for data export only. Your data is never deleted.
+You can delete your account at any time, in your account. It is blocked at once: devices leave the account, team seats close. After 7 days the email, password and devices are deleted; until then the deletion can be cancelled by signing in. The profiles on your Macs are not touched: your data is never deleted.
 
 ## Questions {#contact}
 
@@ -135,19 +171,20 @@ Questions about these terms: legal@{{domain}}.`,
     toc: [['when', 'When'], ['how', 'How'], ['crypto', 'Crypto'], ['after', 'After a refund']],
     body: `## When {#when}
 
-- Within **14 days** of your first payment — in full, no questions asked.
+- Within **14 days** of your first payment — in full, no reason needed.
 - After a renewal — within **7 days**, if you haven’t worked in {{name}} in the new period.
+- If you sent more than needed, the payment counts, and we return the excess when you ask.
 
 ## How {#how}
 
-Write to billing@{{domain}} from your account’s address, or give your licence key. Add the address for the refund, on the same network you paid on.
+Write to billing@{{domain}} from your account’s email. Add the address for the refund, on the same network you paid on.
 
 ## Crypto {#crypto}
 
-We return **the same coin and the same amount** we received, however the exchange rate has moved since you paid. Whether the coin went up or down, the refund doesn’t change in your favour or ours. We pay the network fee for the refund.
+We return **the same coin and the same amount** we received — whatever the exchange rate has done since. Whether the coin went up or down, the refund doesn’t change in your favour or in ours. We pay the network fee for the refund.
 
 ## After a refund {#after}
 
-The paid period ends and your devices are signed out of the account. Your profiles stay on your Macs, encrypted as they were; the app opens them for data export. Your data is never deleted.`,
+The part of the period that payment paid for is removed. Your profiles stay on your Macs, encrypted as they were; if no paid days are left, the app opens them for data export only. Your data is never deleted.`,
   },
 };

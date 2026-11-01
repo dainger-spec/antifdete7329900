@@ -1,10 +1,11 @@
 import { inline, esc } from '../../lib/html.mjs';
 import { icon } from '../../lib/kit.mjs';
 
-// The account: four sections — overview, Macs and sync, payments, settings. On a computer, a column on the left
-// (who you are, the sections, Sign out); on a phone, a tab bar at the bottom, as in an app, and one column of cards
-// and lists, so nothing on a page needs a table or a sideways scroll. Every user value is sample data
-// (data-sample): the email, dates, device codes, the sync objects and payments.
+// The account, as the account server has it (lumen-api-server, docs/SITE_API.md): overview, devices and sync, payments,
+// team, settings. On a computer, a column on the left (who you are, the sections, Sign out); on a phone, a tab bar at
+// the bottom, as in an app, and one column of cards and lists, so nothing on a page needs a table or a sideways scroll.
+// Every user value is sample data (data-sample): the email, dates, device codes, profile counts, the sync objects,
+// payments and the team. The sample is a Team plan's owner, so the mock-up shows every page.
 export default function account(c, { lang, slug, state }) {
   const here = `${slug}.html`;
   const side = `<aside class="acc-side" aria-label="${lang === 'ru' ? 'Разделы кабинета' : 'Account sections'}">
@@ -13,7 +14,10 @@ export default function account(c, { lang, slug, state }) {
     <a class="acc-out" href="index.html">${icon('logout', 16)}${esc(c.logout)}</a>
   </aside>`;
   const tabs = `<nav class="acc-tabs" aria-label="${lang === 'ru' ? 'Разделы кабинета' : 'Account sections'}">${c.nav.map(([href, ic, t]) => `<a href="${href}"${href === here ? ' aria-current="page"' : ''}>${icon(ic, 22)}<span>${esc(t)}</span></a>`).join('')}</nav>`;
-  const row = (href, ic, k, v, sample = true) => `<li><a class="acc-row" href="${href}"><span class="ic">${icon(ic, 16)}</span><span class="k">${inline(k, lang)}</span><span class="v"${sample ? ' data-sample' : ''}>${inline(v, lang)}</span>${icon('chevronRight', 14)}</a></li>`;
+  const row = (href, ic, k, v, sub = '') => {
+    const inner = `<span class="ic">${icon(ic, 16)}</span><span class="k">${inline(k, lang)}${sub ? `<span class="sub">${inline(sub, lang)}</span>` : ''}</span><span class="v" data-sample>${inline(v, lang)}</span>`;
+    return href ? `<li><a class="acc-row" href="${href}">${inner}${icon('chevronRight', 14)}</a></li>` : `<li><div class="acc-row${sub ? ' tall' : ''}">${inner}</div></li>`;
+  };
   let content = '';
 
   if (state === 'overview') {
@@ -28,13 +32,14 @@ export default function account(c, { lang, slug, state }) {
         <div class="plan-actions"><a class="btn primary" href="checkout.html">${icon('wallet', 15)}${inline(o.renew, lang)}</a><a class="btn ghost" href="pricing.html">${inline(o.change, lang)}</a></div>
       </section>
       <p class="acc-hint">${icon('envelope', 14)}<span>${inline(o.hint, lang)}</span></p>
-      <ul class="acc-list">${o.rows.map(([href, ic, k, v]) => row(href, ic, k, v)).join('')}</ul>`;
+      <ul class="acc-list">${o.rows.map(([href, ic, k, v, sub]) => row(href, ic, k, v, sub)).join('')}</ul>`;
   } else if (state === 'devices') {
     const d = c.devices, s = d.sync;
     content = `<h1 class="acc-title">${inline(d.title, lang)}</h1>
       <h2 class="acc-h">${inline(d.macs, lang)} · <span data-sample>${inline(d.count, lang)}</span></h2>
-      <ul class="acc-list" data-sample>${d.list.map((m) => `<li><div class="acc-row tall"><span class="ic">${icon('laptop', 16)}</span><span class="k">${esc(d.mac)} <span class="code-badge">${esc(m.code)}</span>${m.current ? ` <span class="tag accent">${esc(d.thisMac)}</span>` : ''}<span class="sub">${inline(m.seen, lang)} · IP <span class="mono">${esc(m.ip)}</span></span></span>${m.current ? '' : `<a class="btn ghost sm danger-text" href="account-devices.html">${inline(d.revoke, lang)}</a>`}</div></li>`).join('')}</ul>
+      <ul class="acc-list" data-sample>${d.list.map((m) => `<li><div class="acc-row tall"><span class="ic">${icon('laptop', 16)}</span><span class="k">${esc(d.mac)} <span class="code-badge">${esc(m.code)}</span>${m.label ? ` · ${esc(m.label)}` : ''}${m.current ? ` <span class="tag accent">${esc(d.thisMac)}</span>` : ''}<span class="sub">${m.member ? `${esc(m.member)} · ` : ''}${inline(m.seen, lang)} · ${inline(m.profiles, lang)}</span></span>${m.current ? '' : `<a class="btn ghost sm danger-text" href="account-devices.html">${inline(d.unlink, lang)}</a>`}</div></li>`).join('')}</ul>
       <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(d.note, lang)}</span></p>
+      <p class="acc-hint">${icon('clock', 14)}<span>${inline(d.cooldown, lang)}</span></p>
       <h2 class="acc-h" id="sync" style="margin-top:36px">${inline(s.title, lang)}</h2>
       <div class="acc-stats" data-sample>${s.stats.map(([k, v]) => `<div><div class="n">${inline(v, lang)}</div><div class="k">${inline(k, lang)}</div></div>`).join('')}</div>
       <section class="acc-card server"><details>
@@ -51,20 +56,33 @@ export default function account(c, { lang, slug, state }) {
     content = `<h1 class="acc-title">${inline(v.title, lang)}</h1>
       <ul class="acc-list" data-sample>${v.rows.map(([date, no, sum, coin, status]) => `<li><div class="acc-row tall"><span class="ic">${icon('wallet', 16)}</span><span class="k">${esc(date)}<span class="sub"><span class="mono">${esc(no)}</span> · ${esc(coin)} · <span class="ok-text">${icon('check', 11)}${esc(status)}</span></span></span><span class="sum">${inline(sum, lang)}</span><a class="btn ghost sm icon-only" href="account-invoices.html" title="${esc(v.pdf)}" aria-label="${esc(v.pdf)}">${icon('download', 15)}</a></div></li>`).join('')}</ul>
       <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(v.note, lang)}</span></p>`;
+  } else if (state === 'team') {
+    const t = c.team;
+    content = `<h1 class="acc-title">${inline(t.title, lang)}</h1>
+      <p class="acc-lead">${inline(t.lead, lang)}</p>
+      <h2 class="acc-h">${inline(t.seats, lang)} · <span data-sample>${inline(t.count, lang)}</span></h2>
+      <ul class="acc-list" data-sample>
+        <li><div class="acc-row"><span class="avatar sm">${esc(c.who.initial)}</span><span class="k">${inline(c.who.email, lang)}<span class="sub">${inline(t.you, lang)}</span></span><span class="tag">${inline(t.owner, lang)}</span></div></li>
+        ${t.list.map((m) => `<li><div class="acc-row tall"><span class="avatar sm${m.invited ? ' pending' : ''}">${esc(m.email[0].toUpperCase())}</span><span class="k">${esc(m.email)}<span class="sub">${inline(m.status, lang)}</span></span><a class="btn ghost sm${m.invited ? '' : ' danger-text'}" href="account-team.html">${inline(m.invited ? t.revoke : t.remove, lang)}</a></div></li>`).join('')}
+      </ul>
+      <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(t.removeHint, lang)}</span></p>
+      <h2 class="acc-h" style="margin-top:32px">${inline(t.invite, lang)}</h2>
+      <form class="acc-card invite" action="account-team.html"><input class="input" type="email" placeholder="${esc(t.invitePlaceholder)}" aria-label="${esc(t.invite)}" required><button class="btn primary" type="submit">${icon('envelope', 15)}${inline(t.invite, lang)}</button></form>
+      <p class="acc-hint">${icon('clock', 14)}<span>${inline(t.inviteHint, lang)}</span></p>`;
   } else {
     const s = c.settings;
     content = `<h1 class="acc-title">${inline(s.title, lang)}</h1>
       <h2 class="acc-h">${inline(s.signin.title, lang)}</h2>
-      <ul class="acc-list" data-sample>${s.signin.rows.map(([k, v], i) => `<li><div class="acc-row"><span class="k">${inline(k, lang)}</span><span class="v">${inline(v, lang)}</span>${i === 0 ? `<a class="btn ghost sm" href="account-settings.html">${inline(s.signin.change, lang)}</a>` : ''}</div></li>`).join('')}</ul>
+      <ul class="acc-list" data-sample>${s.signin.rows.map(([k, v], i) => `<li><div class="acc-row"><span class="k">${inline(k, lang)}</span><span class="v">${inline(v, lang)}</span>${i === 1 ? `<a class="btn ghost sm" href="account-settings.html">${inline(s.signin.change, lang)}</a>` : ''}</div></li>`).join('')}</ul>
+      <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(s.signin.note, lang)}</span></p>
       <h2 class="acc-h">${inline(s.email.title, lang)}</h2>
-      <ul class="acc-list">${s.email.items.map(([t, on, locked]) => locked ? `<li><div class="acc-row"><span class="k">${inline(t, lang)}</span><span class="v">${inline(s.email.always, lang)}</span></div></li>` : `<li><label class="acc-row"><span class="k">${inline(t, lang)}</span><input class="switch" type="checkbox"${on ? ' checked' : ''}></label></li>`).join('')}
+      <ul class="acc-list">${s.email.items.map(([t]) => `<li><div class="acc-row"><span class="k">${inline(t, lang)}</span><span class="v">${inline(s.email.always, lang)}</span></div></li>`).join('')}
         <li><div class="acc-row"><span class="k">${inline(s.email.lang, lang)}</span><span class="seg"><a aria-current="${lang === 'ru'}">RU</a><a aria-current="${lang === 'en'}">EN</a></span></div></li></ul>
       <h2 class="acc-h">${inline(s.sessions.title, lang)}</h2>
-      <ul class="acc-list"><li><div class="acc-row"><span class="ic">${icon('globe', 16)}</span><span class="k">${inline(s.sessions.current, lang)}</span></div></li>
+      <ul class="acc-list">
         <li class="phone-only"><a class="acc-row" href="index.html"><span class="ic">${icon('logout', 16)}</span><span class="k">${inline(s.sessions.out, lang)}</span>${icon('chevronRight', 14)}</a></li>
-        <li><a class="acc-row" href="login.html"><span class="ic">${icon('logout', 16)}</span><span class="k">${inline(s.sessions.all, lang)}</span>${icon('chevronRight', 14)}</a></li></ul>
-      <div class="acc-danger" style="margin-top:36px"><a class="btn ghost sm" href="account-settings.html">${inline(s.key.action, lang)}</a><span>${inline(s.key.text, lang)}</span></div>
-      <div class="acc-danger"><a class="btn ghost sm danger-text" href="account-settings.html">${inline(s.danger.action, lang)}</a><span>${inline(s.danger.text, lang)}</span></div>`;
+        <li><a class="acc-row tall" href="login.html"><span class="ic">${icon('logout', 16)}</span><span class="k">${inline(s.sessions.all, lang)}<span class="sub">${inline(s.sessions.allSub, lang)}</span></span>${icon('chevronRight', 14)}</a></li></ul>
+      <div class="acc-danger" style="margin-top:36px"><a class="btn ghost sm danger-text" href="account-settings.html">${inline(s.danger.action, lang)}</a><span data-sample>${inline(s.danger.text, lang)}</span></div>`;
   }
   return { title: c.title, body: `<div class="container"><div class="acc">${side}<div class="acc-main">${content}</div></div></div>${tabs}`, bodyClass: 'page-account', hideFooter: true };
 }

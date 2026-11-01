@@ -156,7 +156,7 @@ export default {
   faqTitle: 'Questions',
   faq: [
     { q: 'Which Mac and macOS do I need?', a: 'A Mac with Apple Silicon and macOS 26 or later. Intel Macs are not supported.' },
-    { q: 'How can I pay?', a: 'In crypto, on our own payment page — for a month or a whole year. You can skip the email: you get a licence key.' },
+    { q: 'How can I pay?', a: 'In crypto, on our own payment page — for a month or a whole year. Nothing renews by itself: we remind you by email 7 days and 1 day before your period ends.' },
   ],
   cta: {
     title: 'Try it free',

@@ -1,49 +1,56 @@
-// The account — four sections: overview, Macs and sync, payments, settings. On a phone, a tab bar at the bottom, as
-// in an app; on a computer, a column on the left. The user's values (email, dates, device codes, sync size,
-// payments) are sample data. The account shows only what the server really knows (the owner's decision, question
-// 6): the server doesn't know your Macs' names or your profiles' names or number — and the page shows it as proof
-// of the main promise. Crypto only, which can't be charged automatically: "paid until" and "Renew".
+// The account, as the account server has it (lumen-api-server, docs/SITE_API.md §4 and §7): the overview (plan, paid
+// period, renewing), devices (code, label, when last online, how many profiles each has — only the number; no computer
+// names and no IP addresses, now or later), payments, the team (seats: you and 4 invited), settings (password, email
+// language, sign out everywhere, deleting the account — in the server's words). Sync stays (the owner's decision): it is
+// on the devices page. The sample is the owner of a Team plan, so the mock-up has every page; the values are samples.
+// Crypto only, which can't be charged automatically: "paid until" and "Renew".
 export default {
   title: 'Account',
-  description: 'Your {{name}} account: plan and paid period, Macs and sync, payments and account settings.',
-  who: { email: 'you@example.com', initial: 'Y', plan: 'Professional plan' },
+  description: 'Your {{name}} account: plan and paid period, devices and sync, payments, team and account settings.',
+  who: { email: 'you@example.com', initial: 'Y', plan: 'Team plan' },
   nav: [
     ['account.html', 'house', 'Overview'],
-    ['account-devices.html', 'laptop', 'Macs'],
+    ['account-devices.html', 'laptop', 'Devices'],
     ['account-invoices.html', 'doc', 'Payments'],
+    ['account-team.html', 'person2', 'Team'],
     ['account-settings.html', 'gearshape', 'Settings'],
   ],
   logout: 'Sign out',
   overview: {
     title: 'Overview',
-    plan: 'Professional',
+    plan: 'Team',
     status: 'Paid',
-    meta: '$59 per month · up to 50 profiles · 3 Macs',
+    meta: '$149 per month · up to 200 profiles · 10 devices',
     untilLabel: 'Paid until',
     until: '29 November 2026',
     left: '29 days left',
     renew: 'Renew',
     change: 'Change plan',
-    hint: 'We remind you by email in advance. If you don’t renew, profiles open for export only — your data is never deleted.',
+    hint: 'We remind you by email 7 days and 1 day before the period ends. Renew early and the new period starts when the current one ends. If you don’t renew, profiles open for export only — your data is never deleted.',
     rows: [
-      ['account-devices.html', 'laptop', 'Macs', '2 of 3'],
+      ['account-devices.html', 'laptop', 'Devices', '4 of 10'],
+      ['', 'person2', 'Profiles', '38 of 200', 'The number from all the team’s devices — the server doesn’t know their names'],
+      ['account-team.html', 'person', 'Team', '3 of 5'],
       ['account-devices.html#sync', 'syncArrows', 'Sync', '12 minutes ago'],
-      ['account-invoices.html', 'doc', 'Last payment', '$59 · 29 October'],
-      ['account-settings.html', 'person', 'Sign-in', 'you@example.com'],
+      ['account-invoices.html', 'doc', 'Last payment', '$149 · 29 October'],
+      ['account-settings.html', 'gearshape', 'Sign-in', 'you@example.com'],
     ],
   },
   devices: {
-    title: 'Macs and sync',
-    macs: 'Macs in the account',
-    count: '2 of 3',
+    title: 'Devices and sync',
+    macs: 'Devices on the licence',
+    count: '4 of 10',
     list: [
-      { code: 'A7F3', current: true, seen: 'Online now', ip: '203.0.113.24' },
-      { code: '3KQ9', seen: 'Synced 3 days ago', ip: '198.51.100.7' },
+      { code: 'A7F3', current: true, seen: 'Online now', profiles: '21 profiles' },
+      { code: '3KQ9', label: 'Work', seen: 'Online 3 days ago', profiles: '9 profiles' },
+      { code: 'Q2W8', member: 'anna@example.com', seen: 'Online yesterday', profiles: '6 profiles' },
+      { code: 'M5T1', member: 'anna@example.com', seen: 'Online 2 weeks ago', profiles: '2 profiles' },
     ],
     mac: 'Mac',
     thisMac: 'This Mac',
-    revoke: 'Revoke',
-    note: 'We don’t know your Macs’ names. Match the code: the app shows it in its sync settings.',
+    unlink: 'Unlink',
+    note: 'We have no computer names and no IP addresses: a device is known by its code and label. The app shows the code in Settings → Account.',
+    cooldown: 'An unlinked Mac without internet can keep working for up to 7 days. So the next unlink can be made 7 days after the previous one.',
     sync: {
       title: 'Sync',
       stats: [['Objects', '38'], ['Size', '4.2 MB'], ['Changed', '12 minutes ago']],
@@ -59,39 +66,54 @@ export default {
   invoices: {
     title: 'Payments',
     rows: [
-      ['29 October 2026', 'LMN-0003', '$59', 'USDT', 'Received'],
-      ['29 September 2026', 'LMN-0002', '$59', 'BTC', 'Received'],
-      ['29 August 2026', 'LMN-0001', '$19', 'USDT', 'Received'],
+      ['29 October 2026', 'LMN-000003', '$149', 'USDT', 'Received'],
+      ['29 September 2026', 'LMN-000002', '$149', 'BTC', 'Received'],
+      ['29 August 2026', 'LMN-000001', '$59', 'USDT', 'Received'],
     ],
     pdf: 'PDF receipt',
     note: 'A receipt shows the amount in dollars, the coin, how much of it, and the transaction. Refunds go by it: the same coin, the same amount.',
+  },
+  team: {
+    title: 'Team',
+    seats: 'Seats',
+    count: '3 of 5',
+    lead: 'A team has 5 seats: you and 4 invited. Each person signs in with their own email and password. The profile and device limits are shared by the team. You pay: members don’t see the team’s invoices.',
+    you: 'You',
+    owner: 'Owner',
+    list: [
+      { email: 'anna@example.com', status: 'In the team since 3 October' },
+      { email: 'ivan@example.com', status: 'Invitation valid until 14 November', invited: true },
+    ],
+    remove: 'Remove',
+    revoke: 'Revoke',
+    invite: 'Invite',
+    invitePlaceholder: 'colleague@example.com',
+    inviteHint: 'An invitation is valid for 14 days. It can only be accepted by signing in with the invited email.',
+    removeHint: 'When you remove someone from the team, their devices leave the team’s licence.',
   },
   settings: {
     title: 'Settings',
     signin: {
       title: 'Sign-in',
-      rows: [['Email', 'you@example.com'], ['Method', 'One-time code by email']],
+      rows: [['Email', 'you@example.com'], ['Password', 'Changed on 2 October']],
       change: 'Change',
+      note: 'When you change the password, your other sessions on the site end. Your Macs stay in the account.',
     },
     email: {
       title: 'Emails',
-      items: [['Receipts, and a reminder before a period ends', true, true], ['New releases — at most once a month', false, false]],
+      items: [['Receipts, and reminders before a period ends', true, true]],
       always: 'Always',
       lang: 'Email language',
     },
     sessions: {
       title: 'Sessions',
-      current: 'This browser — now',
-      all: 'Sign out everywhere',
       out: 'Sign out on this device',
-    },
-    key: {
-      action: 'Switch to a licence key…',
-      text: 'We delete your email and give you a licence key. Without the key, access can’t be recovered, and there are no email reminders.',
+      all: 'Sign out everywhere',
+      allSub: 'Your sessions on the site end. Devices don’t leave the account.',
     },
     danger: {
       title: 'Delete account',
-      text: 'We delete the account and the encrypted sync data from the server. The profiles on your Macs stay.',
+      text: 'The account is blocked at once: devices leave the account, team seats close. After 7 days your email, password and devices are deleted. Payment records are kept without the email — accounting requires it. The profiles on your Macs are not touched: they are kept only by you, and {{name}} does not delete them. Until 8 November 2026 the deletion can be cancelled by signing in.',
       action: 'Delete account…',
     },
   },

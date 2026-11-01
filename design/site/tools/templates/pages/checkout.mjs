@@ -43,6 +43,11 @@ export default function checkout(c, { lang }) {
   // a round copy button: site.js copies its data-copy and marks it .copied for a moment (a tick)
   const copyBtn = (value, label, attr) => `<button type="button" class="pay-copy" data-copy="${esc(value)}" ${attr} aria-label="${esc(label)}" title="${esc(label)}"><span class="idle">${icon('copy', 15)}</span><span class="done">${icon('check', 15)}</span></button>`;
   const amount = (v) => `<b>${esc(v)} <span data-ticker>${esc(k0.t)}</span></b>`;
+  // the rule for the transfer, in the server's words (docs/SITE_API.md §5) with this invoice's amount, coin and network
+  const [ex0, exRest] = c.exact.split('{amount}');
+  const [ex1, exRest2] = exRest.split('{ticker}');
+  const [ex2, ex3] = exRest2.split('{network}');
+  const exactText = `${inline(ex0, lang)}<span data-sample>${both(esc(k0.m), esc(k0.y))}</span>${inline(ex1, lang)}<span data-ex-t>${esc(k0.t)}</span>${inline(ex2, lang)}<span data-ex-net>${esc(k0.net)}</span>${inline(ex3, lang)}`;
   const style = `<style>
     .pay { max-width: 940px; margin: 0 auto; padding: 16px 0 112px; }
     /* the bar on top: the way back on the left, the mark in the middle (an iOS navigation bar) */
@@ -139,7 +144,7 @@ export default function checkout(c, { lang }) {
   const coin = `<div class="tbd coin-wrap" data-q="q13" title="Решение владельца: вопрос 13"><div class="coin" data-sample>
       <button type="button" class="coin-btn lg-c" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="pay-coin-label">${coinRow(k0)}${icon('chevronUpDown', 14)}</button>
       <div class="coin-pop lg-f" hidden>
-        <label class="coin-search">${icon('magnifyingglass', 14)}<input type="search" placeholder="${esc(c.coinSearch)}" aria-label="${esc(c.coinSearch)}" autocomplete="off"></label>
+        ${c.coins.length > 6 ? `<label class="coin-search">${icon('magnifyingglass', 14)}<input type="search" placeholder="${esc(c.coinSearch)}" aria-label="${esc(c.coinSearch)}" autocomplete="off"></label>` : ''}
         <ul class="coin-list" role="listbox" aria-label="${esc(c.coinLabel)}">${c.coins.map((x, i) => `<li role="option" tabindex="-1" data-i="${i}" aria-selected="${i === 0}">${coinRow(x)}<span class="ok">${icon('check', 14)}</span></li>`).join('')}</ul>
         <p class="coin-empty" hidden>${inline(c.coinEmpty, lang)}</p>
       </div>
@@ -181,7 +186,7 @@ export default function checkout(c, { lang }) {
               </div>
             </div>
           </div>
-          <p class="pay-exact">${icon('infoCircle', 15)}<span>${inline(c.exact, lang)}</span></p>
+          <p class="pay-exact">${icon('infoCircle', 15)}<span>${exactText}</span></p>
           <div class="pay-status pay-line"><span><span class="live"><i class="dot"></i>${inline(c.status, lang)}</span><span class="gone">${inline(c.expired, lang)} <a href="checkout.html">${inline(c.newAddress, lang)}</a></span></span><span class="t live" data-sample>${icon('clock', 13)}<span class="lbl">${inline(c.timerLabel, lang)}</span> <b data-timer>${esc(c.timer)}</b></span></div>
           <p class="pay-after">${inline(c.after, lang)}</p>
         </div>
@@ -196,8 +201,8 @@ export default function checkout(c, { lang }) {
     ${qrDrawing.toString()}
     var pay = document.querySelector('[data-pay]'), box = pay.querySelector('.coin'), btn = box.querySelector('.coin-btn'), pop = box.querySelector('.coin-pop');
     var q = pop.querySelector('input'), items = Array.prototype.slice.call(pop.querySelectorAll('li')), empty = pop.querySelector('.coin-empty');
-    function open(on) { pop.hidden = !on; btn.setAttribute('aria-expanded', on ? 'true' : 'false'); if (on) { q.value = ''; filter(); q.focus(); } }
-    function filter() { var s = q.value.trim().toLowerCase(), n = 0; items.forEach(function (li) { var hit = !s || li.textContent.toLowerCase().indexOf(s) >= 0; li.hidden = !hit; if (hit) n++; }); empty.hidden = n > 0; }
+    function open(on) { pop.hidden = !on; btn.setAttribute('aria-expanded', on ? 'true' : 'false'); if (on) { if (q) { q.value = ''; filter(); q.focus(); } else { (pop.querySelector('[aria-selected="true"]') || items[0]).focus(); } } }
+    function filter() { if (!q) return; var s = q.value.trim().toLowerCase(), n = 0; items.forEach(function (li) { var hit = !s || li.textContent.toLowerCase().indexOf(s) >= 0; li.hidden = !hit; if (hit) n++; }); empty.hidden = n > 0; }
     function pick(li) {
       var x = COINS[+li.getAttribute('data-i')];
       items.forEach(function (o) { o.setAttribute('aria-selected', o === li ? 'true' : 'false'); });
@@ -207,23 +212,25 @@ export default function checkout(c, { lang }) {
         amt.firstChild.textContent = x[k] + ' '; amt.querySelector('[data-ticker]').textContent = x.t; b.setAttribute('data-copy', x[k]);
       });
       pay.querySelector('[data-net]').textContent = x.net;
+      pay.querySelector('.pay-exact .p-m').textContent = x.m; pay.querySelector('.pay-exact .p-y').textContent = x.y;
+      pay.querySelector('[data-ex-t]').textContent = x.t; pay.querySelector('[data-ex-net]').textContent = x.net;
       pay.querySelector('[data-addr]').textContent = x.a; pay.querySelector('[data-addr-copy]').setAttribute('data-copy', x.a);
       pay.querySelector('[data-qr]').innerHTML = qrDrawing(x.a, 168);
       open(false); btn.focus();
     }
     btn.addEventListener('click', function () { open(pop.hidden); });
-    q.addEventListener('input', filter);
+    if (q) q.addEventListener('input', filter);
     items.forEach(function (li) { li.addEventListener('click', function () { pick(li); }); });
     pop.addEventListener('keydown', function (e) {
       var vis = items.filter(function (li) { return !li.hidden; }), i = vis.indexOf(document.activeElement);
       if (e.key === 'ArrowDown') { e.preventDefault(); (vis[i + 1] || vis[0]).focus(); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); if (i <= 0) q.focus(); else vis[i - 1].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); if (i > 0) vis[i - 1].focus(); else if (q) q.focus(); }
       else if (e.key === 'Enter') { e.preventDefault(); if (i >= 0) pick(vis[i]); else if (vis.length) pick(vis[0]); }
       else if (e.key === 'Escape') { open(false); btn.focus(); }
     });
     document.addEventListener('click', function (e) { if (!box.contains(e.target)) open(false); });
     if (/[?&]shot=1/.test(location.search)) return;
-    var el = pay.querySelector('[data-timer]'), left = 14 * 60 + 59;
+    var el = pay.querySelector('[data-timer]'), left = 29 * 60 + 59;
     var t = setInterval(function () {
       left = Math.max(0, left - 1);
       el.textContent = String(Math.floor(left / 60)).padStart(2, '0') + ':' + String(left % 60).padStart(2, '0');

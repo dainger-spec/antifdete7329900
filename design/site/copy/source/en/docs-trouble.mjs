@@ -74,6 +74,6 @@ An update installs only at a quit that encrypted every profile. Otherwise the ne
 What {{name}} puts in it leaves out profiles’ names, tags and notes, proxies’ addresses and credentials, passwords, cookies, history and addresses visited; in its own log lines your data shows as \`<private>\`. On every CI build \`check_log_privacy.py\` fails if {{name}}’s code logs in clear anything but an id, a count, a status or a name from the code; the self-test searches a ZIP’s bytes for a profile’s name, notes and proxy password. {{unv:whether WebKit’s own lines in the system log hold page addresses in clear}}
 
 ::: warn
-Never send your master password, your licence key, cookie export files — whoever has one is signed in as that profile — or a proxy list exported with passwords.
+Never send your master password, your account password, cookie export files — whoever has one is signed in as that profile — or a proxy list exported with passwords.
 :::`,
 };

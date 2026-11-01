@@ -104,9 +104,9 @@ export default {
       'Conflicts are resolved on the device: history and bookmarks merge record by record, cookies one by one (the newer change wins), and for settings the later edit wins while the other is kept as a copy.',
     ],
     knowsTitle: 'The server knows',
-    knows: ['The vault’s identifier', 'How many objects there are, and their sizes', 'Revision counters and when objects change'],
+    knows: ['The vault’s identifier', 'How many objects there are, and their sizes', 'Revision counters and when objects change', 'How many profiles each Mac has — the app reports the number, so the plan’s limit is shared by all your Macs'],
     notTitle: 'The server does not know',
-    not: ['Profile names, or exactly how many — the object count is only a rough upper bound', 'Settings and proxy details', 'Passwords, cookies, history, bookmarks, the sites you visit'],
+    not: ['Profile names, tags and notes', 'Settings and proxy addresses', 'Passwords, cookies, history, bookmarks, the sites you visit'],
   },
   limits: {
     title: 'Limits',

@@ -6,8 +6,8 @@ from PIL import Image, ImageDraw, ImageFont
 SITE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PAGES = ['index', 'features', 'how-it-works', 'verification', 'pricing', 'download',
          'docs', 'docs-install', 'docs-vault', 'docs-updates', 'docs-profile', 'docs-multiple', 'docs-mobile',
-         'docs-proxy', 'docs-cookies', 'docs-trouble', 'blog', 'blog-no-noise', 'login', 'login-code',
-         'login-key', 'signup', 'account', 'account-devices', 'account-invoices',
+         'docs-proxy', 'docs-cookies', 'docs-trouble', 'blog', 'blog-no-noise', 'login', 'signup', 'signup-code',
+         'reset-password', 'reset-password-code', 'account', 'account-devices', 'account-invoices', 'account-team',
          'account-settings', 'checkout', 'privacy', 'terms', 'refunds', 'support', '404']
 
 def font(size):

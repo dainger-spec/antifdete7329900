@@ -1355,6 +1355,17 @@ label.acc-row { cursor: pointer; }
   .contacts .acc-row { flex-wrap: wrap; }
   .contacts .v.mail { flex-basis: 100%; padding-left: 44px; text-align: left; margin-top: -6px; }
 }
+/* The account's team: the owner first, then the members and invitations; an invitation is one field and a button */
+.acc-lead { margin: -8px 4px 24px; font: var(--t-small); color: var(--text-secondary); max-width: 620px; }
+.avatar.sm { width: 32px; height: 32px; font-size: 13px; }
+.avatar.pending { background: var(--lgc-tint); box-shadow: var(--lgs); color: var(--text-secondary); }
+.acc-card.invite { display: flex; gap: 10px; padding: 12px; }
+.acc-card.invite .input { flex: 1; min-width: 0; height: 40px; }
+@media (max-width: 599px) { .acc-card.invite { flex-direction: column; } .acc-card.invite .input { flex: none; height: 44px; } .acc-card.invite .btn { justify-content: center; } }
+/* Sign-in: «Forgot your password?» on the line of the password's label */
+.field-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.field-row .field-label { margin-bottom: 0; }
+.field-link { font: var(--t-caption); }
 /* rows that exist only on a phone, where the column with «Sign out» is gone */
 .phone-only { display: none; }
 @media (max-width: 899px) { .phone-only { display: revert; } }
@@ -1367,7 +1378,7 @@ label.acc-row { cursor: pointer; }
   .acc-side { display: none; }
   .acc-main { max-width: none; }
   .acc-title { font-size: 28px; line-height: 34px; margin-bottom: 16px; }
-  .acc-tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 6px 6px calc(8px + env(safe-area-inset-bottom)); background: rgba(12, 14, 18, 0.86); -webkit-backdrop-filter: blur(22px) saturate(1.5); backdrop-filter: blur(22px) saturate(1.5); border-top: 1px solid var(--hairline); }
+  .acc-tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding: 6px 6px calc(8px + env(safe-area-inset-bottom)); background: rgba(12, 14, 18, 0.86); -webkit-backdrop-filter: blur(22px) saturate(1.5); backdrop-filter: blur(22px) saturate(1.5); border-top: 1px solid var(--hairline); }
   .acc-tabs a { display: grid; justify-items: center; gap: 3px; padding: 6px 0 2px; border-radius: 10px; font: 500 11px/14px var(--font); color: var(--text-tertiary); }
   .acc-tabs a .icon { width: 22px; height: 22px; }
   .acc-tabs a:hover { text-decoration: none; color: var(--text-secondary); }
