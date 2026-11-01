@@ -295,6 +295,25 @@ jobs:
           echo "exit $?"; cat build/egress27/export-check.txt
           grep '^EXPORT-CHECK' build/egress27/export-check.txt | head -20 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - export in a profile process::/'
           exit 0
+      - name: MEASUREMENT (branch claude/measure-pill) - macOS 27 - a pill in Safari's title bar, in a process like a profile's
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          set +e
+          mkdir -p build/egress27/titlebar-probe
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --titlebar-probe "$PWD/build/egress27/titlebar-probe" > build/egress27/titlebar-probe/probe.txt 2>/dev/null
+          echo "exit $?"; cat build/egress27/titlebar-probe/probe.txt
+          grep -E '^TITLEBAR [a-z-]+ (pill|page)|^TITLEBAR (macOS|adding|removing|exceptions|threw|did not)' build/egress27/titlebar-probe/probe.txt | head -30 | cut -c1-600 \
+            | sed 's/^/::notice title=macOS 27 - titlebar pill::/'
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: titlebar-probe-27
+          path: build/egress27/titlebar-probe
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         continue-on-error: true
@@ -681,6 +700,25 @@ jobs:
           echo "exit $?"; cat build/export-check.txt
           grep '^EXPORT-CHECK' build/export-check.txt | head -20 | cut -c1-500 | sed 's/^/::notice title=export in a profile process::/'
           exit 0
+      - name: MEASUREMENT (branch claude/measure-pill) - a pill in Safari's title bar, in a process like a profile's
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          set +e
+          mkdir -p build/titlebar-probe
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --titlebar-probe "$PWD/build/titlebar-probe" > build/titlebar-probe/probe.txt 2>/dev/null
+          echo "exit $?"; cat build/titlebar-probe/probe.txt
+          grep -E '^TITLEBAR [a-z-]+ (pill|page)|^TITLEBAR (macOS|adding|removing|exceptions|threw|did not)' build/titlebar-probe/probe.txt | head -30 | cut -c1-600 \
+            | sed 's/^/::notice title=titlebar pill::/'
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: titlebar-probe
+          path: build/titlebar-probe
+          if-no-files-found: ignore
       - name: Compare the fingerprint surface with this Mac's real Safari (safaridriver)
         run: |
           sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
