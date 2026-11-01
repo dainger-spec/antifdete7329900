@@ -130,6 +130,9 @@ final class AppUpdater: ObservableObject, Updater {
     static let feedLimit = 1 << 20
 
     @Published private(set) var state: UpdateState = .idle
+    /// The error behind the last `.failed` state, as thrown. The state says it in the interface's
+    /// language; the update scenarios (`UpdateSelfTest`) check which refusal it was by this.
+    private(set) var lastFailure: Error?
     @Published var automaticChecks: Bool {
         didSet {
             guard automaticChecks != oldValue, !isPreview else { return }
@@ -233,6 +236,7 @@ final class AppUpdater: ObservableObject, Updater {
             if installPolicy == .atQuit { await download() }
         } catch {
             log.error("Update check failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
+            lastFailure = error
             state = .failed(Self.describe(error))
             if case .ready = previous { state = previous }
         }
@@ -256,6 +260,7 @@ final class AppUpdater: ObservableObject, Updater {
         } catch {
             try? FileManager.default.removeItem(at: configuration.staging.appendingPathComponent(name))
             log.error("Update download failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
+            lastFailure = error
             state = .failed(Self.describe(error))
         }
     }

@@ -118,16 +118,16 @@ enum UpdateSelfTest {
 
             try await serve("stale")
             await updater.checkNow()
-            check("stale: a validly signed appcast older than the one accepted is refused", failed(updater, saying: "older"), "\(updater.state)")
+            check("stale: a validly signed appcast older than the one accepted is refused", failed(updater) { if case .staleAppcast = $0 { return true } else { return false } }, "\(updater.state)")
 
             try await serve("forged")
             await updater.checkNow()
-            check("forged: an appcast whose list was changed under its signature is refused", failed(updater, saying: "signature"), "\(updater.state)")
+            check("forged: an appcast whose list was changed under its signature is refused", failed(updater) { $0 == .badSignature("appcast") }, "\(updater.state)")
             check("forged: nothing was downloaded", !archiveStaged(configuration))
 
             try await serve("tampered")
             await updater.checkNow()
-            check("changed archive: refused once downloaded", failed(updater, saying: "SHA-256"), "\(updater.state)")
+            check("changed archive: refused once downloaded", failed(updater) { $0 == .archiveHash }, "\(updater.state)")
             check("changed archive: not kept", !archiveStaged(configuration))
 
             try await serve("valid")
@@ -229,9 +229,12 @@ enum UpdateSelfTest {
 
     private static func info(_ text: String) { print("INFO \(text)") }
 
-    private static func failed(_ updater: AppUpdater, saying text: String) -> Bool {
-        if case .failed(let reason) = updater.state { return reason.contains(text) }
-        return false
+    /// Whether the updater refused, and with which of the core's refusals: the error itself, not
+    /// its text, which is in the interface's language (the check said "older" and "signature"
+    /// in English, and failed once the reasons were said in Russian: CI run 542).
+    private static func failed(_ updater: AppUpdater, as refusal: (UpdateError) -> Bool) -> Bool {
+        guard case .failed = updater.state, let error = updater.lastFailure as? UpdateError else { return false }
+        return refusal(error)
     }
 
     private static func archiveStaged(_ configuration: AppUpdater.Configuration) -> Bool {
