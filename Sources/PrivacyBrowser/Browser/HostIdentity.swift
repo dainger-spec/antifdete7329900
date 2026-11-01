@@ -32,10 +32,13 @@ enum HostSafari {
 /// is no public per-web-view setting (a content rule list's `modify-headers` action only applies
 /// for Safari web extensions). So the first profile launched in a run decides: the language of
 /// its proxy's country when that is known (`ProfileConfiguration.matchProxyLocation`), otherwise
-/// the user's own languages — the list Safari on this Mac uses, not the app's UI language (which
-/// `Localization.applyProcessLanguage` keeps in the app's own domain). The JavaScript shim never
-/// overrides navigator.language(s), so the header and the script always agree — a mismatch
-/// between them is itself a detection signal.
+/// the user's own languages — the list Safari on this Mac uses. Never the app's interface language
+/// (`InterfaceLanguage`), in either direction: in this process the interface's is set first and
+/// this list replaces it for WebKit; in a profile's own process the websites' list is the command
+/// line's and the interface's is fixed before anything reads it (`ProfileProcess`,
+/// `Localization.pinInterfaceLanguage`). The self-test's group "interface and websites' languages"
+/// fails if they are ever linked. The JavaScript shim never overrides navigator.language(s), so
+/// the header and the script always agree — a mismatch between them is itself a detection signal.
 @MainActor
 enum WebContentLanguage {
     /// What WebKit was given (`AppleLanguages` as WebKit reads it), once decided.

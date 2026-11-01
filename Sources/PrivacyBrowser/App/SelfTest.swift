@@ -2252,9 +2252,9 @@ final class SelfTest {
         info("plain WKWebView: plugins \(string(reference, "plugins")), languages \(string(reference, "languages")), WebGL \(string(reference, "webgl.unmaskedRenderer"))")
         check("language: navigator.language is the language WebKit was given",
               string(reference, "language") == WebContentLanguage.decided?.first, string(reference, "language"))
-        // A profile without a proxy country: this Mac's languages, as Safari has them — not the
-        // app's UI language, which Localization.applyProcessLanguage keeps in the app's domain.
-        // (scripts/live_compare.py checks the result against Safari's navigator.language.)
+        // A profile without a proxy country: this Mac's languages, as Safari has them — never the
+        // app's interface language (the group "interface and websites' languages" checks that in
+        // a profile's own process). (scripts/live_compare.py checks the result against Safari's.)
         let systemLanguages = WebContentLanguage.languages(for: nil)
         check("language: without a proxy country, websites get this Mac's languages, not the app's UI language",
               !systemLanguages.isEmpty && systemLanguages == WebContentLanguage.systemLanguages, systemLanguages.joined(separator: ","))

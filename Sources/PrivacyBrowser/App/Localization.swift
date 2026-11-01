@@ -34,9 +34,6 @@ enum Localization {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: choiceKey) }
     }
 
-    /// The choice this run started with: a different `choice` now means a restart is wanted.
-    static let startedWithChoice: InterfaceLanguage.Choice = choice
-
     /// Resolved once (`InterfaceLanguage.resolve`). In a profile's own process the manager gives it
     /// by name (`PRIVACYBROWSER_LANG`, `ProfileProcess`): that process's `-AppleLanguages` is the
     /// websites' list, never read for the interface's.
@@ -81,14 +78,22 @@ enum Localization {
     /// is exactly what they wrote; a list the person set stays. Call once, as early as possible in
     /// `main`, before AppKit builds its menus.
     static func applyProcessLanguage() {
-        let domain = (Bundle.main.bundleIdentifier ?? "io.lumenbrowser.Lumen") as CFString
-        if InterfaceLanguage.isEarlierVersionsWrite(CFPreferencesCopyAppValue("AppleLanguages" as CFString, domain)) {
-            CFPreferencesSetAppValue("AppleLanguages" as CFString, nil, domain)
-            CFPreferencesAppSynchronize(domain)
+        if InterfaceLanguage.isEarlierVersionsWrite(languagesOnDisk) {
+            CFPreferencesSetValue("AppleLanguages" as CFString, nil, appDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+            CFPreferencesSynchronize(appDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
         }
         var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         arguments["AppleLanguages"] = [languageCode]
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+    }
+
+    /// The app's own preferences on disk: its domain alone, not the search list
+    /// (`CFPreferencesCopyAppValue` answers with the command line's or the Mac's list as well).
+    private static var appDomain: CFString { (Bundle.main.bundleIdentifier ?? "io.lumenbrowser.Lumen") as CFString }
+
+    /// `AppleLanguages` in the app's own preferences on disk, nil when there is none there.
+    static var languagesOnDisk: Any? {
+        CFPreferencesCopyValue("AppleLanguages" as CFString, appDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
     }
 
     /// In a profile's own process, first thing in `main`: AppKit, Safari's chrome and the

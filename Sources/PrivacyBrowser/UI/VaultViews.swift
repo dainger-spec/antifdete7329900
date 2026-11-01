@@ -374,6 +374,16 @@ struct SetupView: View {
             }
         }
         .onChange(of: password) { _, _ in writtenDown = false }
+        .overlay(alignment: .topTrailing) {
+            // The interface's language, when this is the run's first screen (the owner: on the
+            // first screen, before the vault exists). Not after "forgot password": a restart would
+            // lose the line that says where the previous vault was moved.
+            if model.setupIsFirstScreen && model.movedAsideVaultPath == nil {
+                FirstLaunchLanguagePicker()
+                    .padding(.top, ProfilesScreen.inspectorTop)
+                    .padding(.trailing, 20)
+            }
+        }
     }
 
     private func create() {

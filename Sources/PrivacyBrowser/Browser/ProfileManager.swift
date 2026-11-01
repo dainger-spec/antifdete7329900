@@ -421,7 +421,7 @@ final class ProfileManager: ObservableObject {
                 self.onProfileRunning?(id, hostsSafariChrome)
                 self.objectWillChange.send()
             case .interfaceLanguage(let code, let bundles, let chrome):
-                self.log.info("Profile \(id.uuidString, privacy: .public)'s process: interface \(code, privacy: .public), its bundles \(bundles, privacy: .public), Safari's chrome \(chrome ?? "not hosted", privacy: .public)")
+                self.log.info("Profile \(id.uuidString, privacy: .public)'s process: interface \(code, privacy: .private), its bundles \(bundles, privacy: .private), Safari's chrome \(chrome ?? "not hosted", privacy: .private)")
                 self.onInterfaceLanguage?(id, code, bundles, chrome)
             case .warmUp(let status):
                 self.reportedWarmUp[id] = status

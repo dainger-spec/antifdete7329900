@@ -1437,7 +1437,7 @@
 "settings.language.commandLine.title" = "Язык задан при запуске";
 "settings.language.commandLine.detail" = "Lumen запущен с -AppleLanguages: этот запуск идёт на языке из командной строки. Выбор здесь действует со следующего обычного запуска.";
 "settings.language.sites.title" = "Язык для сайтов";
-"settings.language.sites.detail" = "Сайты видят язык и регион профиля — в его настройках, в разделе «Отпечаток». Смена языка интерфейса их не меняет, и наоборот.";
+"settings.language.sites.detail" = "Сайты видят язык профиля — он задаётся в настройках профиля, в блоке «Часовой пояс и язык». Язык интерфейса его не меняет, и наоборот.";
 "settings.section.webRTC" = "WebRTC через прокси";
 "settings.section.sync" = "Синхронизация";
 "settings.section.security" = "Безопасность";

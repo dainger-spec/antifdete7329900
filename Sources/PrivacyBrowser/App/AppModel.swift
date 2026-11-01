@@ -101,6 +101,9 @@ final class AppModel: ObservableObject {
     /// The first launch's sign-in and this Mac's connection are done — or this build has no account
     /// server: the master password's screen comes next (§10.1, the owner's order).
     @Published var accountStepDone: Bool
+    /// The master password's screen is the first this run shows (no sign-in before it): the
+    /// interface's language is offered on it (`FirstLaunchLanguagePicker`).
+    let setupIsFirstScreen: Bool
     private var licenseObservation: AnyCancellable?
 
     init() {
@@ -111,9 +114,13 @@ final class AppModel: ObservableObject {
         AppEnvironment.removeStandaloneSafariHome(in: root)
         // Partial plaintext an unseal that did not finish left (R8): no profile runs yet.
         AppEnvironment.removeUnsealLeftovers(vault: root)
-        phase = MasterVault.exists(in: root) ? .locked : .setup
+        let firstPhase: Phase = MasterVault.exists(in: root) ? .locked : .setup
+        phase = firstPhase
         license = LicenseModel(root: root)
-        accountStepDone = !license.isConfigured || license.record.isSignedIn
+        let accountDone = !license.isConfigured || license.record.isSignedIn
+        accountStepDone = accountDone
+        // The master password's screen is this run's first: no sign-in comes before it.
+        setupIsFirstScreen = firstPhase == .setup && accountDone
         // No profile's page is handed to Quick Look, Services or another app (`HandOffs`).
         HandOffs.closeForWebViews()
         // Profiles in processes of their own get changed browsing settings at once.

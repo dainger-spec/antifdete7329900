@@ -1437,7 +1437,7 @@
 "settings.language.commandLine.title" = "Language set at launch";
 "settings.language.commandLine.detail" = "Lumen was started with -AppleLanguages: this run uses the command line’s language. The choice here applies from the next ordinary start.";
 "settings.language.sites.title" = "Language for websites";
-"settings.language.sites.detail" = "Websites see the profile’s language and region — in its settings, under Fingerprint. Changing the interface language doesn’t change them, and the other way round.";
+"settings.language.sites.detail" = "Websites see the profile’s language, set in the profile’s settings under “Time zone and language”. The interface language doesn’t change it, and the other way round.";
 "settings.section.webRTC" = "WebRTC through the proxy";
 "settings.section.sync" = "Sync";
 "settings.section.security" = "Security";

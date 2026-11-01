@@ -101,7 +101,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // An update goes to its installer only at the end of a quit that sealed every profile.
         hasUpdate: { [weak self] in self?.model?.updater?.isReady ?? false },
         installUpdate: { [weak self] in await self?.model?.installUpdateAtQuit() },
-        confirm: { [weak self] in self?.confirmQuit() ?? true })
+        confirm: { [weak self] in
+            let quits = self?.confirmQuit() ?? true
+            // A restart asked for (Settings › Language) and declined here: no reopening later.
+            if !quits { SystemOpen.cancelRelaunch() }
+            return quits
+        })
 
     /// Settings → Startup → confirm quit: asked when profiles run, before any of them is stopped.
     private func confirmQuit() -> Bool {

@@ -12,9 +12,10 @@ import BrowserCore
 enum InterfaceLanguageCheck {
     static func run() -> Never {
         setvbuf(stdout, nil, _IOLBF, 0)
-        let domain = (Bundle.main.bundleIdentifier ?? "io.lumenbrowser.Lumen") as CFString
+        // The app's own domain alone: the effective value would answer with the command line's or
+        // this Mac's list too (CI run 583, the first version of this check).
         func onDisk() -> String {
-            guard let value = CFPreferencesCopyAppValue("AppleLanguages" as CFString, domain) else { return "none" }
+            guard let value = Localization.languagesOnDisk else { return "none" }
             return (value as? [String])?.joined(separator: ",") ?? "\(value)"
         }
         let before = onDisk()
