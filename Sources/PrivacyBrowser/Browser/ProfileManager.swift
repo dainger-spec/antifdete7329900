@@ -1159,8 +1159,14 @@ final class ProfileManager: ObservableObject {
             queued = try repository.importedCookiesForLaunch(id)
         } catch {
             log.error("Could not read the cookies queued for \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
-            repository.clearImportedCookies(id)
-            onError?(String(format: L("cookies.launch.unreadable"), name))
+            if case CoreError.newerFormat = error {
+                // A newer version's queue stays for it as it is (docs/UPDATES.md §4).
+                onError?(errorText(error))
+            } else {
+                // Never deleted (docs/DESTRUCTIVE_PATHS.md): moved aside, the import can be made again.
+                let aside = try? repository.moveUnreadableImportedCookiesAside(id)
+                onError?(String(format: L("cookies.launch.unreadable"), name, aside?.lastPathComponent ?? "cookies-import.bin"))
+            }
             return
         }
         guard !queued.isEmpty, let store = session.dataStore else { return }

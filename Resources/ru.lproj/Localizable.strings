@@ -59,7 +59,7 @@
 "cookies.formatLine" = "Формат: %1$@, прочитан как %2$@";
 "cookies.import" = "Импортировать cookies: %ld";
 "cookies.launch.refused" = "WebKit не сохранил импортированные cookies профиля «%2$@» (%1$ld): %3$@";
-"cookies.launch.unreadable" = "Cookies, импортированные в «%@», не удалось прочитать; они отброшены.";
+"cookies.launch.unreadable" = "Cookies, импортированные в «%1$@», не удалось прочитать, и они не применены. Очередь импорта не удалена: она сохранена рядом как %2$@. Импорт можно повторить.";
 "cookies.problemsTitle" = "Не импортировано: %ld";
 "cookies.reason.cutOff" = "Обрезано: файл кончается внутри этой записи";
 "cookies.reason.damagedJSON" = "JSON повреждён (со строки %ld): импортируются cookies, которые удалось прочитать вокруг повреждения";
@@ -974,6 +974,8 @@
 "warmup.source.manual" = "Свой список";
 "warmup.source.preset" = "Готовый список";
 "warmup.start" = "Запустить";
+"warmup.unreadable.plan" = "Сохранённый план прогрева не удалось прочитать — показан новый. Прежний файл не перезаписывается: при сохранении плана он останется рядом как warmup.bin.unreadable.";
+"warmup.unreadable.schedule" = "Сохранённое расписание прогрева не удалось прочитать — повтор выключен. Прежний файл не перезаписывается: когда повтор включат, он останется рядом как warmup-schedule.bin.unreadable.";
 "warmup.status.finished" = "Готово: страниц — %1$ld, не загрузилось — %2$ld";
 "warmup.status.pageNeedsAttention" = "Остановлен: страница ждёт ответа в окне профиля.";
 "warmup.status.profileStopped" = "Остановлен: профиль остановлен.";

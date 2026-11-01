@@ -59,7 +59,7 @@
 "cookies.formatLine" = "Format: %1$@, read as %2$@";
 "cookies.import" = "Import %ld Cookies";
 "cookies.launch.refused" = "WebKit did not keep %1$ld imported cookies of “%2$@”: %3$@";
-"cookies.launch.unreadable" = "The cookies imported into “%@” could not be read and were dropped.";
+"cookies.launch.unreadable" = "The cookies imported into “%1$@” could not be read and were not applied. The import queue was not deleted: it is kept beside as %2$@. The import can be made again.";
 "cookies.problemsTitle" = "Not imported: %ld";
 "cookies.reason.cutOff" = "Cut off: the file ends inside this entry";
 "cookies.reason.damagedJSON" = "The JSON is damaged (from line %ld): the cookies that could be read around the damage are imported";
@@ -974,6 +974,8 @@
 "warmup.source.manual" = "My own list";
 "warmup.source.preset" = "Ready-made list";
 "warmup.start" = "Start";
+"warmup.unreadable.plan" = "The saved warm-up plan could not be read, so a new one is shown. The old file is not written over: when a plan is saved, it is kept beside as warmup.bin.unreadable.";
+"warmup.unreadable.schedule" = "The saved warm-up schedule could not be read, so repeating is off. The old file is not written over: when repeating is turned on, it is kept beside as warmup-schedule.bin.unreadable.";
 "warmup.status.finished" = "Done: %1$ld pages, %2$ld did not load";
 "warmup.status.pageNeedsAttention" = "Stopped: a page is waiting for an answer in the profile’s window.";
 "warmup.status.profileStopped" = "Stopped: the profile was stopped.";

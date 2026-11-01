@@ -35,6 +35,27 @@ struct EncryptedDocumentFile<Document: Codable> {
         try SecureFile.write(encode(document), to: url)
     }
 
+    /// Saves `document` where a file that does not open may be: damaged, cut short, another key's —
+    /// not a newer version's, which `save` refuses. Such a file is moved aside first, as
+    /// `<file>.unreadable` (then `-2`, …), never written over (docs/DESTRUCTIVE_PATHS.md). Returns
+    /// where it went, when it was moved.
+    @discardableResult
+    func saveKeepingUnreadable(_ document: Document) throws -> URL? {
+        guard let url else { return nil }
+        var aside: URL?
+        if FileManager.default.fileExists(atPath: url.path) {
+            do {
+                _ = try load()
+            } catch CoreError.newerFormat {
+                // `save` refuses it below.
+            } catch {
+                aside = try SecureFile.moveAside(url, suffix: "unreadable")
+            }
+        }
+        try save(document)
+        return aside
+    }
+
     /// Deletes the file — never one that declares a newer format than `supportedFormat`, which
     /// is refused like a save over it.
     func remove() throws {

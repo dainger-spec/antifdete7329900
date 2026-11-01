@@ -51,12 +51,19 @@ public enum UnsandboxedMigration {
 
     /// Carries out `plan`, in order: the vault first, so that an interruption leaves at worst
     /// residue in the container, which the sandboxed build seals as before.
+    ///
+    /// What is in a move's way is looked at again at that moment, not taken on `plan`'s word (R7,
+    /// docs/DESTRUCTIVE_PATHS.md): an empty folder is removed with `rmdir(2)`, which removes
+    /// nothing else; anything else — a file, a folder with something in it, a link — stops the
+    /// migration before this move, with nothing of it touched (`CoreError.io`). The moves made
+    /// before it stay made.
     public static func perform(_ moves: [Move]) throws {
         for move in moves {
             try FileManager.default.createDirectory(at: move.to.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if FileManager.default.fileExists(atPath: move.to.path) {
-                // Only an empty folder can be in the way (`plan` refuses anything else).
-                try FileManager.default.removeItem(at: move.to)
+            if let attributes = try? FileManager.default.attributesOfItem(atPath: move.to.path) { // lstat
+                guard attributes[.type] as? FileAttributeType == .typeDirectory, rmdir(move.to.path) == 0 else {
+                    throw CoreError.io("the migration stopped: \(move.to.lastPathComponent) is in the way and is not an empty folder; nothing was removed")
+                }
             }
             try FileManager.default.moveItem(at: move.from, to: move.to)
         }

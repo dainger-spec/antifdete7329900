@@ -599,9 +599,17 @@ final class AppModel: ObservableObject {
 
     // MARK: Session warm-up
 
-    /// The profile's last warm-up plan, or a new one.
-    func warmUpPlan(for id: UUID) -> WarmUpPlan {
-        (try? repository?.warmUpPlan(for: id)) ?? WarmUpPlan()
+    /// The profile's last warm-up plan, or a new one — and whether a saved plan could not be read
+    /// (R1b): the warm-up screen says so, and the file is moved aside at the next save, never
+    /// written over. A newer version's plan is not said here: saving over it is refused, and said.
+    func warmUpPlan(for id: UUID) -> (plan: WarmUpPlan, unreadable: Bool) {
+        guard let repository else { return (WarmUpPlan(), false) }
+        do {
+            return (try repository.warmUpPlan(for: id) ?? WarmUpPlan(), false)
+        } catch {
+            if case CoreError.newerFormat = error { return (WarmUpPlan(), false) }
+            return (WarmUpPlan(), true)
+        }
     }
 
     /// Remembers `plan` for the profile and starts it, launching the profile first when it is

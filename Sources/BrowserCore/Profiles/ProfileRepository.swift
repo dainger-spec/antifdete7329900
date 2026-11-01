@@ -397,11 +397,20 @@ public final class ProfileRepository: @unchecked Sendable {
     /// cookie store (its website data is sealed while it is stopped). Added to those queued before;
     /// a later cookie replaces an earlier one with the same name, domain and path. Returns how
     /// many are queued now.
+    /// A queue that cannot be read is moved aside first (`moveUnreadableImportedCookiesAside`),
+    /// never written over; a newer version's refuses the import.
     @discardableResult
     public func queueImportedCookies(_ cookies: [ImportedCookie], for id: UUID) throws -> Int {
         _ = try summary(for: id)
         let file = try importedCookiesFile(for: id)
-        var queued = try file.load() ?? []
+        var queued: [ImportedCookie]
+        do {
+            queued = try file.load() ?? []
+        } catch {
+            if case CoreError.newerFormat = error { throw error }
+            try moveUnreadableImportedCookiesAside(id)
+            queued = []
+        }
         let incoming = Set(cookies.map(\.identity))
         queued.removeAll { incoming.contains($0.identity) }
         queued += cookies
@@ -414,10 +423,29 @@ public final class ProfileRepository: @unchecked Sendable {
         try importedCookiesFile(for: id).load() ?? []
     }
 
-    /// Drops the queue once the launch has put the cookies into the profile's store, or found it
-    /// unreadable — never a queue a newer version wrote (docs/UPDATES.md §4).
+    /// Drops the queue once the launch has put the cookies into the profile's store — never a
+    /// queue a newer version wrote (docs/UPDATES.md §4), nor one that could not be read (moved
+    /// aside instead, `moveUnreadableImportedCookiesAside`).
     public func clearImportedCookies(_ id: UUID) {
         try? importedCookiesFile(for: id).remove()
+    }
+
+    /// A queue that cannot be read — damaged, another key's; not a newer version's, which stays as
+    /// it is — moved aside as `cookies-import.bin.unreadable` (then `-2`, …): nothing unreadable is
+    /// ever deleted (docs/DESTRUCTIVE_PATHS.md). Returns where it went; nil when there is no queue,
+    /// or it reads.
+    @discardableResult
+    public func moveUnreadableImportedCookiesAside(_ id: UUID) throws -> URL? {
+        let url = importedCookiesURL(for: id)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        do {
+            _ = try importedCookiesFile(for: id).load()
+            return nil
+        } catch CoreError.newerFormat {
+            return nil
+        } catch {
+            return try SecureFile.moveAside(url, suffix: "unreadable")
+        }
     }
 
     // MARK: Synced cookies
@@ -476,8 +504,10 @@ public final class ProfileRepository: @unchecked Sendable {
         try warmUpPlanFile(for: id).load()
     }
 
+    /// A saved plan that cannot be read is moved aside as `warmup.bin.unreadable`, never written
+    /// over (R1b, docs/DESTRUCTIVE_PATHS.md).
     public func saveWarmUpPlan(_ plan: WarmUpPlan, for id: UUID) throws {
-        try warmUpPlanFile(for: id).save(plan)
+        try warmUpPlanFile(for: id).saveKeepingUnreadable(plan)
     }
 
     // MARK: Warm-up schedule (this Mac only)
@@ -495,8 +525,10 @@ public final class ProfileRepository: @unchecked Sendable {
         try warmUpScheduleFile(for: id).load()
     }
 
+    /// A saved schedule that cannot be read is moved aside as `warmup-schedule.bin.unreadable`,
+    /// never written over (R1b).
     public func saveWarmUpSchedule(_ schedule: WarmUpSchedule, for id: UUID) throws {
-        try warmUpScheduleFile(for: id).save(schedule)
+        try warmUpScheduleFile(for: id).saveKeepingUnreadable(schedule)
     }
 
     // MARK: Open tabs (this Mac only)

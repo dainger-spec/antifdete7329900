@@ -24,6 +24,10 @@ import os
 final class WarmUpCoordinator: ObservableObject {
     @Published private(set) var queue = WarmUpQueue()
     @Published private(set) var scheduler = WarmUpScheduler()
+    /// The profiles whose saved schedule could not be read (R1b): repeating is off for them, the
+    /// warm-up screen says so, and the file is moved aside when a schedule is set, never written
+    /// over.
+    @Published private(set) var unreadableSchedules: Set<UUID> = []
 
     /// Launches the profile without a window if it is stopped and starts `plan` in it; false when
     /// that did not happen (the user was told why). In the app this is `AppModel.startWarmUp`,
@@ -53,13 +57,17 @@ final class WarmUpCoordinator: ObservableObject {
         self.repository = repository
         self.start = start
         var schedules: [UUID: WarmUpSchedule] = [:]
+        var unreadable: Set<UUID> = []
         for profile in repository.list() {
             do {
                 if let schedule = try repository.warmUpSchedule(for: profile.id) { schedules[profile.id] = schedule }
             } catch {
                 log.error("Could not read the warm-up schedule of \(profile.id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
+                if case CoreError.newerFormat = error { continue }
+                unreadable.insert(profile.id)
             }
         }
+        unreadableSchedules = unreadable
         scheduler = WarmUpScheduler(schedules: schedules)
         // Every run that ends counts for the schedule — one from the warm-up screen too: a profile
         // warmed an hour ago by hand is not due again because its timer says so.
@@ -232,6 +240,7 @@ final class WarmUpCoordinator: ObservableObject {
         schedule.isEnabled = enabled
         schedule.everyHours = min(max(everyHours, WarmUpSchedule.hourRange.lowerBound), WarmUpSchedule.hourRange.upperBound)
         try repository.saveWarmUpSchedule(schedule, for: id)
+        unreadableSchedules.remove(id)
         scheduler.set(schedule, for: id)
         log.notice("Warm-up schedule of \(id.uuidString, privacy: .public): \(enabled ? schedule.everyHours : 0, privacy: .public) h (0: off)")
     }

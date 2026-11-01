@@ -40,6 +40,8 @@ private struct WarmUpPanel: View {
     /// counts and what Start runs, so the two cannot disagree.
     @State private var builtPlan = WarmUpPlan()
     @State private var loaded = false
+    /// The saved plan could not be read (R1b): a new one is shown, and the screen says so.
+    @State private var planUnreadable = false
     @State private var starting = false
     /// After a run: its pages instead of the sites it left cookies on.
     @State private var showingPages = false
@@ -56,6 +58,7 @@ private struct WarmUpPanel: View {
             HStack(alignment: .top, spacing: 16) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        unreadableNotice
                         WarmUpPlanChooser(choice: $choice, manualPlan: $manualPlan, plan: plan, countryCode: countryCode)
                             .disabled(isRunning || starting)
                         scheduleSection
@@ -89,7 +92,8 @@ private struct WarmUpPanel: View {
         .onAppear {
             guard !loaded else { return }
             loaded = true
-            let saved = model.warmUpPlan(for: profile.id)
+            let (saved, unreadable) = model.warmUpPlan(for: profile.id)
+            planUnreadable = unreadable
             manualPlan = saved
             choice = saved.choice ?? (saved.addresses.isEmpty ? WarmUpChoice() : WarmUpChoice(source: .manual))
             rebuild()
@@ -117,6 +121,18 @@ private struct WarmUpPanel: View {
         }
         plan.choice = choice
         return plan
+    }
+
+    /// A saved plan or schedule that could not be read: not shown as if there had been none (R1b).
+    @ViewBuilder private var unreadableNotice: some View {
+        let lines = (planUnreadable ? [L("warmup.unreadable.plan")] : [])
+            + (warmUps.unreadableSchedules.contains(profile.id) ? [L("warmup.unreadable.schedule")] : [])
+        if !lines.isEmpty {
+            Label(lines.joined(separator: " "), systemImage: "exclamationmark.triangle.fill")
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.warning)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: Repeating
