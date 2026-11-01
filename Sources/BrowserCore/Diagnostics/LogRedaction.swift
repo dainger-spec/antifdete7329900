@@ -29,9 +29,18 @@ public enum LogRedaction {
         return text
     }
 
-    /// In order: the whole of a URL before its host is taken for a host name, an e-mail address
+    /// In order: the account's codes and tokens first — a license key, a purchase code or a token
+    /// is the account itself for whoever holds it, and the app never puts one in an exception or a
+    /// log (`AccountKey`, `ServerToken`): this is the line behind that, for what another's code might
+    /// quote — then the whole of a URL before its host is taken for a host name, an e-mail address
     /// before its domain is, quotes before a path inside them.
     private static let rules: [(String, String)] = [
+        // A license key, a purchase code, an invoice's number (LMK-/LPC-/LMN- and groups of four),
+        // with or without the hyphens — and a key without its prefix: six groups of four, hyphened.
+        (#"(?i)\bL(?:MK|PC|MN)[\s\-\x{2010}-\x{2014}]?(?:[0-9A-Z]{4}[\s\-\x{2010}-\x{2014}]?){4,5}[0-9A-Z]{4}\b"#, "<code>"),
+        (#"(?i)\b[0-9A-Z]{4}(?:[\-\x{2010}-\x{2014}][0-9A-Z]{4}){5}\b"#, "<code>"),
+        // The server's tokens: a device's (lmd_…) and a session's (lms_…).
+        (#"\blm[ds]_[A-Za-z0-9_\-]+"#, "<token>"),
         // Anything in quotes, of any kind: a title, a form's value, a key a page chose.
         (#""[^"]*""#, "\"…\""),
         (#"'[^']*'"#, "'…'"),

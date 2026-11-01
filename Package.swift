@@ -45,7 +45,9 @@ var targets: [Target] = [
     .testTarget(
         name: "BrowserCoreTests",
         dependencies: ["BrowserCore"],
-        path: "Tests/BrowserCoreTests"
+        path: "Tests/BrowserCoreTests",
+        // Read by the tests from the checkout (#filePath): the server's test vectors, as it publishes them.
+        exclude: ["Fixtures"]
     ),
     .target(
         name: "TunnelCore",

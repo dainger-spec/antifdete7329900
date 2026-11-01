@@ -1,0 +1,183 @@
+import Foundation
+
+/// A token the server gave — the device's (`lmd_…`) or a session's (`lms_…`). Written to its file as
+/// it is; never says itself anywhere else: interpolated, printed, dumped or mirrored it shows its
+/// prefix and "…" (as `AccountKey` does), so that no log line, error or report can carry it.
+public struct ServerToken: Codable, Equatable, Hashable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    private let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public init(from decoder: Decoder) throws {
+        value = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(value)
+    }
+
+    /// For the `Authorization` header only.
+    public func unredacted() -> String { value }
+
+    public var isEmpty: Bool { value.isEmpty }
+    public var description: String { value.hasPrefix("lm") && value.count > 4 ? String(value.prefix(4)) + "…" : "…" }
+    public var debugDescription: String { "ServerToken(\(description))" }
+    public var customMirror: Mirror { Mirror(self, children: [], displayStyle: .struct) }
+}
+
+/// This Mac's account state (`account.json`, the server's `docs/CONTRACT.md` §4.2): beside the vault,
+/// outside it — the rights are checked before the vault is unlocked — and outside every profile;
+/// owner-only (0600), read and written only by the app's own process, never a profile's.
+///
+/// Never in it: the account's password, a license key (an account without an email keeps its key in
+/// the vault, `AccountKeyVault`), anything of a profile.
+public struct AccountRecord: Codable, Equatable, Sendable {
+    public static let currentFormat = 1
+
+    public struct Session: Codable, Equatable, Sendable {
+        public var sessionToken: ServerToken?
+        public var expiresAt: Date?
+        public var idleTimeoutSeconds: Int?
+
+        public init(sessionToken: ServerToken?, expiresAt: Date?, idleTimeoutSeconds: Int?) {
+            self.sessionToken = sessionToken
+            self.expiresAt = expiresAt
+            self.idleTimeoutSeconds = idleTimeoutSeconds
+        }
+    }
+
+    /// How this Mac was signed in — what the account screen offers depends on it (a password reset
+    /// by email, or a key that has none). Not the server's: the app's own note.
+    public enum SignInMethod: String, Codable, Equatable, Sendable {
+        case email
+        case key
+    }
+
+    public var format: Int
+    public var deviceID: String?
+    /// The device's four characters (`B119`), the same the account's page on the site shows.
+    public var code: String?
+    public var deviceToken: ServerToken?
+    /// The last document accepted, as it came (§7.1).
+    public var entitlement: EntitlementEnvelope?
+    /// The effective time's floor (§8.3).
+    public var floorTime: Date?
+    public var floorUptime: TimeInterval?
+    /// The server's time at the last successful contact (§4.2): for GRACE's text.
+    public var lastSuccessAt: Date?
+    /// The last refresh got a document this app cannot judge (§9.4); any accepted one clears it.
+    public var appOutdated: Bool
+    public var session: Session?
+
+    // The app's own notes, beside the contract's fields.
+
+    public var signedInWith: SignInMethod?
+    /// Why this Mac was signed out by the server (§9.4), for the banner, until the next sign-in.
+    public var signedOutReason: SignedOutReason?
+    /// The clock's difference from the server's at the last contact, when over ten minutes (§8.3).
+    public var clockSkewSeconds: Double?
+    /// The license whose trial banner the person closed (`trial.started`, §8.5).
+    public var trialNoticeClosedFor: String?
+
+    public init() {
+        format = Self.currentFormat
+        appOutdated = false
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case format, deviceID, code, deviceToken, entitlement, floorTime, floorUptime, lastSuccessAt, appOutdated, session
+        case signedInWith, signedOutReason, clockSkewSeconds, trialNoticeClosedFor
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        format = try container.decodeIfPresent(Int.self, forKey: .format) ?? 1
+        deviceID = try container.decodeIfPresent(String.self, forKey: .deviceID)
+        code = try container.decodeIfPresent(String.self, forKey: .code)
+        deviceToken = try container.decodeIfPresent(ServerToken.self, forKey: .deviceToken)
+        entitlement = try container.decodeIfPresent(EntitlementEnvelope.self, forKey: .entitlement)
+        floorTime = try container.decodeIfPresent(Date.self, forKey: .floorTime)
+        floorUptime = try container.decodeIfPresent(TimeInterval.self, forKey: .floorUptime)
+        lastSuccessAt = try container.decodeIfPresent(Date.self, forKey: .lastSuccessAt)
+        appOutdated = try container.decodeIfPresent(Bool.self, forKey: .appOutdated) ?? false
+        session = try container.decodeIfPresent(Session.self, forKey: .session)
+        signedInWith = try container.decodeIfPresent(SignInMethod.self, forKey: .signedInWith)
+        signedOutReason = try container.decodeIfPresent(SignedOutReason.self, forKey: .signedOutReason)
+        clockSkewSeconds = try container.decodeIfPresent(Double.self, forKey: .clockSkewSeconds)
+        trialNoticeClosedFor = try container.decodeIfPresent(String.self, forKey: .trialNoticeClosedFor)
+    }
+
+    /// A device token is stored: this Mac is signed in (§8.2).
+    public var isSignedIn: Bool { deviceToken.map { !$0.isEmpty } ?? false }
+
+    /// The effective time's floor, when one is stored.
+    public var clock: EffectiveClock? {
+        get {
+            guard let floorTime, let floorUptime else { return nil }
+            return EffectiveClock(floorTime: floorTime, floorUptime: floorUptime)
+        }
+        set {
+            floorTime = newValue?.floorTime
+            floorUptime = newValue?.floorUptime
+        }
+    }
+
+    /// Signed out: the device's token and document go (§6.3, §9.4); what the profiles hold is
+    /// never touched (§1). The session goes with them; the reason stays for the banner.
+    public mutating func signOut(because reason: SignedOutReason?) {
+        deviceID = nil
+        code = nil
+        deviceToken = nil
+        entitlement = nil
+        session = nil
+        appOutdated = false
+        signedInWith = nil
+        clockSkewSeconds = nil
+        signedOutReason = reason
+    }
+}
+
+/// `account.json`: read before the vault is unlocked, written atomically and owner-only. A file of a
+/// newer format is refused and never written over; one that does not read is moved aside
+/// (`account.json.unreadable`) — never deleted, never written over (docs/DESTRUCTIVE_PATHS.md).
+public struct AccountFile: Sendable {
+    public let url: URL
+
+    public init(url: URL) { self.url = url }
+
+    /// `account.json` in `directory` (the vault's folder).
+    public init(directory: URL) {
+        url = directory.appendingPathComponent("account.json")
+    }
+
+    /// The record, or nil when there is no file.
+    public func load() throws -> AccountRecord? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let data = try SecureFile.read(url)
+        try DocumentFormat.check(data, supported: AccountRecord.currentFormat, what: "account.json")
+        do {
+            return try JSONCoding.decoder.decode(AccountRecord.self, from: data)
+        } catch {
+            throw CoreError.corruptData("account.json")
+        }
+    }
+
+    public func save(_ record: AccountRecord) throws {
+        try makeWay()
+        try SecureFile.write(JSONCoding.encoder.encode(record), to: url)
+    }
+
+    /// Before a write: a newer version's file refuses it; one that does not read is moved aside.
+    /// Returns where it went, when it was moved.
+    @discardableResult
+    public func makeWay() throws -> URL? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard let data = try? SecureFile.read(url) else { return try SecureFile.moveAside(url, suffix: "unreadable") }
+        try DocumentFormat.check(data, supported: AccountRecord.currentFormat, what: "account.json")
+        if (try? JSONCoding.decoder.decode(AccountRecord.self, from: data)) == nil {
+            return try SecureFile.moveAside(url, suffix: "unreadable")
+        }
+        return nil
+    }
+}

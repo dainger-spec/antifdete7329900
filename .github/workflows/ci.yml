@@ -55,6 +55,10 @@ jobs:
       # self-check first: the scan must find each forbidden form planted for it.
       - name: Nothing is handed to the system except through SystemOpen
         run: python3 scripts/check_system_opens.py --self-check && python3 scripts/check_system_opens.py
+      # A license key bought without registration is the whole account: its text, and the server's
+      # tokens', come out only where a request or the vault needs them (scripts/check_account_key.py).
+      - name: The account's key and tokens are text only where they must be
+        run: python3 scripts/check_account_key.py --self-check && python3 scripts/check_account_key.py
 
   macos-27:
     name: macOS 27 — the self-test on the newest macOS (preview image; fails the build only on a certificate fetched outside the proxy)
