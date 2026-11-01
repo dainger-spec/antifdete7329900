@@ -127,6 +127,24 @@ final class LicenseTests: XCTestCase {
         XCTAssertNotNil(check(try document(payload(["somethingNew": ["a": 1]]))).entitlement)
     }
 
+    func testACountdownSaysTheTwoLargestUnitsRoundedDown() {
+        func said(_ seconds: TimeInterval) -> String {
+            Countdown.parts(seconds).map { "\($0.value) \($0.unit.rawValue)" }.joined(separator: " ")
+        }
+        // The account page's case (CI run 586): 10020 minutes left.
+        XCTAssertEqual(said(10_020 * 60), "6 day 23 hour")
+        XCTAssertEqual(said(7 * 86_400), "7 day")
+        XCTAssertEqual(said(86_400 + 59 * 60), "1 day")
+        XCTAssertEqual(said(90 * 60), "1 hour 30 minute")
+        XCTAssertEqual(said(2 * 3_600), "2 hour")
+        XCTAssertEqual(said(59 * 60 + 59), "59 minute")
+        // Never less than a minute, nor nothing: the moment is reached when the mode changes.
+        XCTAssertEqual(said(59), "1 minute")
+        XCTAssertEqual(said(0), "1 minute")
+        XCTAssertEqual(said(-3_600), "1 minute")
+        XCTAssertEqual(said(.infinity), "1 minute")
+    }
+
     func testEachStepRefusesWhatItMust() throws {
         // 1. Not an object, no format, a format that is not a whole number.
         XCTAssertEqual(check(Data("[1]".utf8)), .notADocument)

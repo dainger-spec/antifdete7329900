@@ -39,7 +39,7 @@ enum UISnapshots {
     /// ready, with its notes; up to date with automatic checks off; and a build without an update
     /// feed. Previews fetch nothing.
     /// A Mac signed out, and one on the Professional plan with two Macs — previews: nothing asked.
-    private static func previewLicenses() -> (signedOut: LicenseModel, signedIn: LicenseModel) {
+    private static func previewLicenses() -> (signedOut: LicenseModel, signedIn: LicenseModel, signedInWithKey: LicenseModel) {
         let now = Date()
         let p = Entitlement(deviceID: "d1", machineID: "m", role: "owner", plan: "pro", status: .active, exportReason: nil,
                             limits: .init(profiles: 50, devices: 3, seats: 1), profilesOnOtherDevices: 12,
@@ -63,7 +63,14 @@ enum UISnapshots {
         let signedOut = LicenseModel(preview: AccountRecord(), state: LicenseState(mode: .notSignedIn, entitlement: nil, check: nil,
                                                                                     banners: [.notSignedIn], allowedProfilesHere: 0,
                                                                                     worksWithoutServerUntil: nil, now: now))
-        return (signedOut, signedIn)
+        // The same Mac, its account a key's: no email, so Lumen warns itself (§17).
+        var keyRecord = record
+        keyRecord.signedInWith = .key
+        keyRecord.session = nil
+        let signedInWithKey = LicenseModel(preview: keyRecord, state: LicenseState(mode: .full, entitlement: p, check: .valid(p), banners: [],
+                                                                                    allowedProfilesHere: 38, worksWithoutServerUntil: p.graceEndsAt,
+                                                                                    now: now))
+        return (signedOut, signedIn, signedInWithKey)
     }
 
     private static func settings(into folder: URL, model: AppModel) async -> Int {
@@ -95,6 +102,36 @@ enum UISnapshots {
         problems += await Shot(name: "account-sign-in-key", size: CGSize(width: 560, height: 780), titled: false) {
             SignInFlow(license: licenses.signedOut, onFinished: {}, method: .key,
                        keyText: "LMK-0123-4567-89AB-CDEF-GHJK-MNMT").environmentObject(model) // l10n: not text
+        }.capture(into: folder)
+        // Every banner of the license above the profiles (§8.5), as each reads: the period's end a
+        // week and a day ahead (the owner: above all for an account with a key, which gets no
+        // letters), grace, the period ended, not signed in, revoked, the clock, a trial.
+        let now = Date()
+        let shown: [(license: LicenseModel, banner: LicenseBanner)] = [
+            (licenses.signedIn, .periodEnding(owner: true, endsAt: now.addingTimeInterval(7 * 86_400), final: false)),
+            (licenses.signedInWithKey, .periodEnding(owner: true, endsAt: now.addingTimeInterval(7 * 86_400), final: false)),
+            (licenses.signedIn, .periodEnding(owner: true, endsAt: now.addingTimeInterval(86_400), final: true)),
+            (licenses.signedInWithKey, .periodEnding(owner: true, endsAt: now.addingTimeInterval(86_400), final: true)),
+            (licenses.signedIn, .grace(outdated: false, lastSuccessAt: now.addingTimeInterval(-5 * 86_400), until: now.addingTimeInterval(2 * 86_400))),
+            (licenses.signedIn, .periodEnded(owner: true, endedAt: now.addingTimeInterval(-86_400))),
+            (licenses.signedOut, .notSignedIn),
+            (licenses.signedOut, .deviceRevoked),
+            (licenses.signedIn, .clockSkew(seconds: 11 * 60)),
+            (licenses.signedIn, .trialStarted(until: now.addingTimeInterval(7 * 86_400))),
+        ]
+        problems += await Shot(name: "license-banners", size: CGSize(width: 1000, height: 1100), edges: true) {
+            ZStack(alignment: .topLeading) {
+                Theme.surface.ignoresSafeArea()
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(shown.indices, id: \.self) { index in
+                        LicenseBannerView(license: shown[index].license, banner: shown[index].banner)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, ProfilesScreen.inspectorTop)
+            }
+            .environment(\.colorScheme, .dark)
+            .environmentObject(model)
         }.capture(into: folder)
         // Signed in, in the Settings window as the app shows it: a bare scroll view did not reach
         // the window's edges (CI run 585's edge check).

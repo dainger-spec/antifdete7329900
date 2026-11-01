@@ -52,6 +52,12 @@ enum LicenseText {
         return count(Int((Double(whole) / 60).rounded(.up)), "minute")
     }
 
+    /// What is left until a moment (`Countdown`): "6 дней 23 часа", "5 hours 12 minutes" — not
+    /// `<срок>`, which is for lengths the server configures.
+    static func remaining(_ seconds: TimeInterval) -> String {
+        Countdown.parts(seconds).map { count($0.value, $0.unit.rawValue) }.joined(separator: " ")
+    }
+
     /// A number and its noun in the right form: `day`, `hour`, `minute`, `profile`, `time`.
     static func count(_ number: Int, _ noun: String) -> String {
         String(format: L("license.unit.\(noun).\(form(number))"), number)

@@ -693,7 +693,7 @@ struct AccountSettingsPage: View {
         SettingsCaption(L("license.account.caption.offline"))
         if let until = state.worksWithoutServerUntil {
             note(String(format: L("license.account.offline"), LicenseText.date(until),
-                        LicenseText.duration(max(60, until.timeIntervalSince(Date()).rounded(.down)))))
+                        LicenseText.remaining(until.timeIntervalSince(Date()))))
         } else {
             note(L("license.account.offline.none"))
         }

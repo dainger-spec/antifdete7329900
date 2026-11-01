@@ -137,3 +137,20 @@ public enum RefreshSchedule {
         return end.timeIntervalSince(t) < 3 * 86_400
     }
 }
+
+/// How much is left until a moment, as a person reads it: the two largest units, rounded down —
+/// "6 days 23 hours", "5 hours 12 minutes" — and never less than a minute. The contract's `<срок>`
+/// names lengths the server configures, which divide evenly (§17.1: a document's 7 days); a
+/// countdown seldom does, and in that form the account page said "10020 minutes" (CI run 586's
+/// snapshot).
+public enum Countdown {
+    public enum Unit: String, Sendable { case day, hour, minute }
+
+    public static func parts(_ seconds: TimeInterval) -> [(unit: Unit, value: Int)] {
+        let total = max(60, Int(seconds.isFinite ? seconds.rounded(.down) : 60))
+        let days = total / 86_400, hours = total % 86_400 / 3_600, minutes = total % 3_600 / 60
+        if days > 0 { return hours > 0 ? [(.day, days), (.hour, hours)] : [(.day, days)] }
+        if hours > 0 { return minutes > 0 ? [(.hour, hours), (.minute, minutes)] : [(.hour, hours)] }
+        return [(.minute, max(1, minutes))]
+    }
+}
