@@ -68,6 +68,20 @@ What Lumen encrypts and how, how to unlock and lock the vault and change the mas
 
 From the code as of 31 October 2026 · Reading time: five minutes
 
+**On this page**
+
+What the vault holds
+
+How the data is encrypted
+
+Unlocking and locking
+
+Changing the master password
+
+If you forgot the master password
+
+What a sync location sees
+
 ## What the vault holds
 
 The vault is a folder named `PrivacyBrowser` in your account’s Application Support: `~/Library/Containers/…/Data/Library/Application Support/PrivacyBrowser` in a build with the App Sandbox, `~/Library/Application Support/PrivacyBrowser` without it. **Settings → About → Build** shows which build you have.
@@ -113,9 +127,15 @@ Even with the vault open, the app asks for the master password before showing sa
 2. Fill in **Current password**, **New password** and **Repeat new password**.
 3. Click **Change** — available once the new password has at least 10 characters and both new fields match.
 
-As the window says: “Only the wrapped vault key is re-encrypted; profile data is unchanged.” The new password gets a new salt.
+Only the key that opens the vault is encrypted anew with the new password; your data and its keys stay as they are. The new password goes to the sync location, so new devices join with it.
 
-The vault key stays the same. An old copy of `vault.json` — from a Mac backup, say — still opens with the old password, and the current data with it. A sync location gets the header at the first sync, and the app doesn’t update it after a change: there it stays under the old password.
+It does not reach copies made before: an earlier copy of `vault.json` (a backup, Time Machine, a Mac that already syncs) still opens the vault with the old password, including what you save after the change.
+
+If such a copy may be in someone else's hands, changing the password is not enough: move your profiles to a new vault (export each profile, create a new vault, import them; an import encrypts everything under new keys).
+
+If it can't be sent to the sync location, the app says: “The new master password is set on this Mac. It could not be sent to the sync location now (…): it goes there at the next sync. Until then, new devices join with the old one.”
+
+If the sync location keeps another Mac's password: “The new master password is set on this Mac, but the sync location keeps another Mac's, changed there later or at the same time: new devices join with that one.”
 
 ## If you forgot the master password
 
@@ -130,11 +150,13 @@ Its profiles stay encrypted with the old password; if that comes back to you, qu
 
 ## What a sync location sees
 
-Sync is off until you choose **Folder (local-only)** or **Server** in **⋯ → Sync…**. Lumen has no sync server of its own yet: the app is a client for a documented protocol.
+Sync is off until you choose **Folder (local-only)** or **Server** in **⋯ → Sync…**.
 
 A sync location sees the vault header in plain text, there so another Mac can open the vault with the same password (the app can’t yet set up a second Mac like this); how many objects there are, their sizes, versions and when they change; and, for a server, this Mac’s IP address — sync goes directly, not through a profile’s proxy.
 
 The profile list, settings, passwords, bookmarks, history and persistent cookies arrive encrypted (the profiles’ files twice) under opaque names: no profile names, site addresses, proxies, passwords or cookies are visible. Other website data doesn’t sync.
+
+The Lumen server doesn’t keep the IP address: it is used only in memory, to limit request rates. Nor does it keep which Mac synced when — only when the vault last changed. What it sees is on the Sync page of your account.
 
 Found a mistake, or is something missing? Write to us.
 

@@ -66,7 +66,21 @@ Profiles
 
 A profile can call itself an iPhone or an iPad to websites. How to turn this on, what changes, and what stays this Mac's.
 
-From the code as of 31 October 2026 · Reading time: four minutes · Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
+From the code as of 31 October 2026 · Reading time: four minutes
+
+**On this page**
+
+What a mobile view is
+
+Turning it on
+
+What changes
+
+What stays the Mac's
+
+Checking it
+
+What a mobile view cannot do
 
 ## What a mobile view is
 
@@ -139,6 +153,8 @@ Whether the window fits the screen. An iPad view opens 1180 points tall — tall
 Unconfirmed
 
 Whether a profile with Safari for iOS will come. Work on one on Apple's iOS Simulator is shelved (docs/IOS_SIMULATOR.md), while ROADMAP.md lists it for after launch. The owner's decision would confirm it.
+
+Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
 
 Found a mistake, or is something missing? Write to us.
 

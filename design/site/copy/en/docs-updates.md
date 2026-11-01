@@ -66,7 +66,25 @@ Getting started
 
 How Lumen finds, checks and installs new versions, what you see, and what the update server learns.
 
-From the code as of 31 October 2026 · Reading time: five minutes · Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
+From the code as of 31 October 2026 · Reading time: five minutes
+
+**On this page**
+
+How updates are found
+
+The Updates section
+
+How an update is checked
+
+When an update is installed
+
+What is kept, and how rollback works
+
+What the update server sees
+
+Release notes
+
+What isn’t there yet
 
 ## How updates are found
 
@@ -135,6 +153,8 @@ Notes for the next release are written; both changes concern the build without t
 - Installing where only an administrator can write: the app says it can’t install there.
 - Partial updates: every update is a whole signed archive.
 - Updating the system extension for WebRTC through proxies by this path.
+
+Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
 
 Found a mistake, or is something missing? Write to us.
 

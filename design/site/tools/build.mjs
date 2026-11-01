@@ -47,6 +47,7 @@ export const PAGES = [
   { slug: 'reset-password-code', template: 'auth', copy: 'auth', state: 'resetCode', group: 'Вход и кабинет' },
   { slug: 'account', template: 'account', copy: 'account', state: 'overview', group: 'Вход и кабинет' },
   { slug: 'account-devices', template: 'account', copy: 'account', state: 'devices', group: 'Вход и кабинет' },
+  { slug: 'account-sync', template: 'account', copy: 'account', state: 'sync', group: 'Вход и кабинет' },
   { slug: 'account-invoices', template: 'account', copy: 'account', state: 'invoices', group: 'Вход и кабинет' },
   { slug: 'account-team', template: 'account', copy: 'account', state: 'team', group: 'Вход и кабинет' },
   { slug: 'account-settings', template: 'account', copy: 'account', state: 'settings', group: 'Вход и кабинет' },

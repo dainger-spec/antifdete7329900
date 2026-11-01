@@ -66,7 +66,21 @@ Proxies
 
 Set and check a profile's proxy, and see what happens when it fails: pages do not go around it.
 
-From the code as of 31 October 2026 · Reading time: five minutes · Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
+From the code as of 31 October 2026 · Reading time: five minutes
+
+**On this page**
+
+Proxy types
+
+Setting a proxy
+
+List and checks
+
+Time zone and language
+
+DNS, WebRTC, UDP
+
+When the proxy fails
 
 ## Proxy types
 
@@ -128,6 +142,8 @@ While the proxy is down, pages do not load: Lumen never falls back to a direct c
 | **VPN's substitute DNS** | Check with the VPN off |
 
 To recover, click **Check Proxy**: if it works, reload the page, or reopen the profile if the type was corrected; if not, fix the proxy (**⋯ → Edit…**) or assign another and relaunch. More: what to do when something fails.
+
+Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
 
 Found a mistake, or is something missing? Write to us.
 

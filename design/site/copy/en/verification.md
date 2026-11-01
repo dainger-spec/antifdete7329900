@@ -12,7 +12,7 @@ How we verify
 
 # Every build, against real Safari
 
-We do not ask you to take our word for it. Every change to Lumen is built on a Mac with real Safari: a profile is compared with it, every request around the proxy is looked for, and the results are recorded. Here is what is measured, how, and the numbers of the latest runs — including what differs.
+We do not ask you to take our word for it. Every change to Lumen is built on a Mac with real Safari: a profile is compared with it, every request around the proxy is looked for, and the results are recorded.
 
 Latest runs
 
@@ -92,7 +92,7 @@ one difference
 
 Before permission, Safari lists a camera and a microphone, a profile only the microphone: macOS hides the camera from an app not yet allowed to use it. Allow Lumen the camera once and the lists match.
 
-identical · differs, for a known reason · not measured in this run
+identical · differs, for a known reason
 
 ## What differs — and why
 
@@ -177,6 +177,8 @@ self-test and packet capture
 ## What every build checks
 
 These steps run on every change to the code. If any required one fails, the build is red.
+
+**Every step of a build**
 
 | Step | What it checks | Latest run |
 | --- | --- | --- |

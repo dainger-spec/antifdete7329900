@@ -1296,6 +1296,16 @@ label.acc-row { cursor: pointer; }
 .acc-danger { display: grid; gap: 4px; justify-items: start; margin: 24px 6px 0; font: var(--t-caption); color: var(--text-tertiary); }
 .acc-danger .btn { margin-left: -12px; }
 .acc-danger + .acc-danger { margin-top: 18px; }
+/* Sync (its own page again, SITE_API.md §10): the space used, a bar like the plan’s; the vaults as rows; the objects
+   folded, largest first, with the vault's header last and labelled */
+.acc-card.space { padding: 18px 20px; }
+.space-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.space-top .k { font: var(--t-small); color: var(--text-tertiary); }
+.space-top .v { font: 600 17px/24px var(--font); color: var(--text-primary); white-space: nowrap; }
+.acc-list + .acc-card { margin-top: 12px; }
+.server-list li.more { border-bottom: 1px solid var(--divider); padding-bottom: 9px; }
+.server-list li.head { flex-wrap: wrap; border-bottom: 0; padding-bottom: 0; }
+.server-list li.head .what { flex-basis: 100%; margin-top: -2px; font: var(--t-caption); color: var(--text-tertiary); }
 /* Features, «Everything Safari has»: on a phone the six cards are compact rows (the icon beside the title) */
 @media (max-width: 599px) {
   .data-cards { gap: 10px; }
@@ -1567,4 +1577,11 @@ textarea.input { border-radius: 18px; }
   .acc-tabs a { position: relative; z-index: 1; padding: 6px 0 4px; border-radius: var(--r-pill); }
   .acc-tabs a[aria-current="page"] { color: #AFC2F5; background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.07)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14); }
   html.shot .acc-tabs { bottom: 12px; }
+  /* Six sections don't fit six labels on a phone («Синхронизация» alone is wider than a sixth of the bar): the bar shows
+     the icons, and the section you are in opens into a pill with its name. Every tab keeps its name for VoiceOver. */
+  .acc-tabs { display: flex; gap: 2px; }
+  .acc-tabs a { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; height: 46px; padding: 0; }
+  .acc-tabs a span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .acc-tabs a[aria-current="page"] { flex: 0 0 auto; padding: 0 14px 0 12px; }
+  .acc-tabs a[aria-current="page"] span { position: static; width: auto; height: auto; overflow: visible; clip-path: none; font: 600 13px/18px var(--font); }
 }

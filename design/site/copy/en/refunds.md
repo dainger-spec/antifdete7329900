@@ -20,6 +20,16 @@ When and how we give your money back.
 
 In effect from ⟦q12: the publication date⟧
 
+**Sections**
+
+When
+
+How
+
+Crypto
+
+After a refund
+
 ## Sections
 
 1. When
@@ -29,17 +39,18 @@ In effect from ⟦q12: the publication date⟧
 
 ## When
 
-- Within **14 days** of your first payment — in full, no questions asked.
+- Within **14 days** of your first payment — in full, no reason needed.
 - After a renewal — within **7 days**, if you haven’t worked in Lumen in the new period.
+- If you sent more than needed, the payment counts, and we return the excess when you ask.
 
 ## How
 
-Write to billing@lumenbrowser.io from your account’s address, or give your licence key. Add the address for the refund, on the same network you paid on.
+Write to billing@lumenbrowser.io from your account’s email. Add the address for the refund, on the same network you paid on.
 
 ## Crypto
 
-We return **the same coin and the same amount** we received, however the exchange rate has moved since you paid. Whether the coin went up or down, the refund doesn’t change in your favour or ours. We pay the network fee for the refund.
+We return **the same coin and the same amount** we received — whatever the exchange rate has done since. Whether the coin went up or down, the refund doesn’t change in your favour or in ours. We pay the network fee for the refund.
 
 ## After a refund
 
-The paid period ends and your devices are signed out of the account. Your profiles stay on your Macs, encrypted as they were; the app opens them for data export. Your data is never deleted.
+The part of the period that payment paid for is removed. Your profiles stay on your Macs, encrypted as they were; if no paid days are left, the app opens them for data export only. Your data is never deleted.

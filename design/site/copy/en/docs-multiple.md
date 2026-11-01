@@ -66,7 +66,23 @@ Profiles
 
 Launch, tell apart and stop several profiles at the same time: what each keeps to itself, what they share, and how many a Mac holds as measured.
 
-From the code as of 31 October 2026 · Reading time: five minutes · Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
+From the code as of 31 October 2026 · Reading time: five minutes
+
+**On this page**
+
+Each profile is a process
+
+Launching and stopping
+
+Telling windows apart
+
+What is separate, what is shared
+
+How many a Mac holds
+
+Warm-up in turn
+
+When a profile crashes
 
 ## Each profile is a process
 
@@ -138,6 +154,8 @@ Unconfirmed
 What a profile keeps after its process crashes is untested; the app says sign-ins and cookies stay, tabs do not. A test that kills the process mid-run and starts the profile again would confirm it.
 
 What to do next: When something fails.
+
+Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
 
 Found a mistake, or is something missing? Write to us.
 

@@ -125,10 +125,14 @@
       <td><a href="ru/account.html">RU</a> · <a href="en/account.html">EN</a></td>
       <td><a href="../shots/ru/account-1440.png">1440</a> · <a href="../shots/ru/account-390.png">390</a> <span class="caption">ru</span></td>
       <td><a href="../shots/en/account-1440.png">1440</a> · <a href="../shots/en/account-390.png">390</a> <span class="caption">en</span></td></tr><tr>
-      <td class="strong">Кабинет: устройства и синхронизация</td>
+      <td class="strong">Кабинет: устройства</td>
       <td><a href="ru/account-devices.html">RU</a> · <a href="en/account-devices.html">EN</a></td>
       <td><a href="../shots/ru/account-devices-1440.png">1440</a> · <a href="../shots/ru/account-devices-390.png">390</a> <span class="caption">ru</span></td>
       <td><a href="../shots/en/account-devices-1440.png">1440</a> · <a href="../shots/en/account-devices-390.png">390</a> <span class="caption">en</span></td></tr><tr>
+      <td class="strong">Кабинет: синхронизация</td>
+      <td><a href="ru/account-sync.html">RU</a> · <a href="en/account-sync.html">EN</a></td>
+      <td><a href="../shots/ru/account-sync-1440.png">1440</a> · <a href="../shots/ru/account-sync-390.png">390</a> <span class="caption">ru</span></td>
+      <td><a href="../shots/en/account-sync-1440.png">1440</a> · <a href="../shots/en/account-sync-390.png">390</a> <span class="caption">en</span></td></tr><tr>
       <td class="strong">Кабинет: платежи</td>
       <td><a href="ru/account-invoices.html">RU</a> · <a href="en/account-invoices.html">EN</a></td>
       <td><a href="../shots/ru/account-invoices-1440.png">1440</a> · <a href="../shots/ru/account-invoices-390.png">390</a> <span class="caption">ru</span></td>
@@ -191,11 +195,11 @@
   <p class="lead" style="margin-top:10px;max-width:820px">Выберите варианты — рекомендуемый отмечен и выбран по умолчанию, — допишите комментарии и нажмите «Скопировать ответы»: получится текст, который можно прислать одним сообщением. Жёлтым на страницах подсвечено то, что от них зависит.</p>
   <div style="display:grid;gap:16px;margin-top:24px;max-width:900px"><section class="card pad-lg qcard" id="q12" data-q="q12">
       <h3 class="h3">12. Сроки, сервисы и даты для правовых страниц и поддержки</h3>
-      <p class="small muted" style="margin-top:8px">Это не реквизиты, а значения, без которых политику и условия не опубликовать. Что хранит сервер и чего не хранит, взято из docs/SITE_API.md §9: IP-адреса не записываются вовсе, удаление аккаунта — через 7 дней, резервные копии — до 30 дней. Остальное в текстах отмечено.</p>
-      <ul class="bullets" style="margin-top:12px"><li>Дата, с которой действуют политика и условия</li><li>Сколько хранить записи о платежах после удаления аккаунта (без почты — столько, сколько требует учёт)</li><li>Сколько хранить журнал изменений прав и переписку с поддержкой</li><li>Названия криптопроцессинга, почтового сервиса и хостинга (и страна хостинга)</li><li>За сколько дней предупреждать об изменении политики (предложено 30) и предел ответственности (предложено 12 месяцев)</li><li>За сколько времени отвечает поддержка (предложено — в течение рабочего дня)</li></ul>
+      <p class="small muted" style="margin-top:8px">Это не реквизиты, а значения, без которых политику и условия не опубликовать. Что хранит сервер и чего не хранит, синхронизация и сроки — готовая формулировка из docs/SITE_API.md §9, дословно: записи о платежах и журнал прав — три полных календарных года после года записи, удаление аккаунта — через 7 дней вместе с данными синхронизации, резервные копии — до 30 дней. Остальное в текстах отмечено.</p>
+      <ul class="bullets" style="margin-top:12px"><li>Дата, с которой действуют политика и условия</li><li>Сколько хранить переписку с поддержкой</li><li>Названия платёжного сервиса, почтового сервиса и хостинга (и страна хостинга)</li><li>За сколько дней предупреждать об изменении политики (предложено 30) и предел ответственности (предложено 12 месяцев)</li><li>За сколько времени отвечает поддержка (предложено — в течение рабочего дня)</li></ul>
       
       <textarea class="input" data-note placeholder="Комментарий или свой вариант" style="margin-top:14px;min-height:64px"></textarea>
-      <p class="caption" style="margin-top:10px">Жёлтым на страницах: <a href="ru/privacy.html">Политика конфиденциальности</a> <span class="caption">×9</span>, <a href="ru/terms.html">Условия использования</a> <span class="caption">×2</span>, <a href="ru/refunds.html">Правила возврата</a>, <a href="ru/support.html">Поддержка и контакты</a></p>
+      <p class="caption" style="margin-top:10px">Жёлтым на страницах: <a href="ru/privacy.html">Политика конфиденциальности</a> <span class="caption">×6</span>, <a href="ru/terms.html">Условия использования</a> <span class="caption">×2</span>, <a href="ru/refunds.html">Правила возврата</a>, <a href="ru/support.html">Поддержка и контакты</a></p>
     </section><section class="card pad-lg qcard" id="q13" data-q="q13">
       <h3 class="h3">13. Какие монеты и сети принимать</h3>
       <p class="small muted" style="margin-top:8px">Сервер берёт список из настройки LUMEN_COINS и отдаёт сайту (GET /v1/plans); по умолчанию — USDT в сети Tron, BTC и ETH, и страница оплаты в макете показывает их. Раньше в макете был образец из 14 монет: USDT и USDC в нескольких сетях, BTC, ETH, SOL, TON, LTC, TRX, BNB, DOGE, POL. От ответа зависит, что в этом списке.</p>
@@ -217,6 +221,13 @@
       
       <textarea class="input" data-note placeholder="Комментарий или свой вариант" style="margin-top:14px;min-height:64px"></textarea>
       <p class="caption" style="margin-top:10px">Жёлтым на страницах: <a href="ru/privacy.html">Политика конфиденциальности</a> <span class="caption">×2</span>, <a href="ru/terms.html">Условия использования</a> <span class="caption">×3</span></p>
+    </section><section class="card pad-lg qcard" id="q16" data-q="q16">
+      <h3 class="h3">16. Место для синхронизации: показывать ли его в тарифах</h3>
+      <p class="small muted" style="margin-top:8px">Сервер синхронизации построен; место на сервере — по тарифу. Сервер предложил формулу: 20 МиБ на каждый профиль тарифа, не меньше 100 МиБ (пробный — 100 МиБ, Личный — 200, Профессиональный — 1 000, Команда — 4 000 на всю команду); она ждёт вашего утверждения (docs/SYNC_SERVER.md, «Квота»). Пока её нет, страница цен о месте молчит, а кабинет показывает занятое из квоты как образец.</p>
+      <div class="qopts"><label class="qopt"><input type="radio" name="q16" value="A" checked><span><strong>A. Показать в тарифах</strong> <span class="tag accent" style="height:20px;font-size:11px">рекомендую</span><br><span class="caption" style="font-size:13px;color:var(--text-secondary)">После утверждения формулы — строка «Синхронизация: 200 МБ» и т. д. в каждой карточке тарифа.</span></span></label><label class="qopt"><input type="radio" name="q16" value="B"><span><strong>B. Только в кабинете</strong><br><span class="caption" style="font-size:13px;color:var(--text-secondary)">На странице цен — «синхронизация между Mac» без чисел; место и сколько занято — в кабинете.</span></span></label></div>
+      <p class="small" style="margin-top:12px;color:var(--text-primary)">Рекомендую A, когда формула утверждена: число прямо на странице цен честнее, чем узнавать его после оплаты.</p>
+      <textarea class="input" data-note placeholder="Комментарий или свой вариант" style="margin-top:14px;min-height:64px"></textarea>
+      
     </section></div>
   <div class="row" style="margin-top:24px"><button class="btn primary lg" type="button" id="copy-answers"><svg class="icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.2" y="5.2" width="8.6" height="8.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2.8 10.6V4.1c0-.8.6-1.4 1.4-1.4h6.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Скопировать ответы</button><span class="caption copied-msg">Скопировано в буфер обмена</span></div>
   <pre id="answers-out" class="code" style="margin-top:16px;padding:14px 16px;white-space:pre-wrap;display:none"></pre>

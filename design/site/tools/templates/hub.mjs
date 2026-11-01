@@ -22,7 +22,7 @@ export function hub({ pages, tbdIndex, unvIndex = {} }) {
     index: 'Главная', features: 'Возможности', 'how-it-works': 'Как устроено', verification: 'Как мы проверяем', pricing: 'Цены', download: 'Скачать',
     docs: 'Документация — оглавление', 'docs-install': 'Док.: установка и первый запуск', 'docs-vault': 'Док.: хранилище и мастер-пароль', 'docs-updates': 'Док.: обновления', 'docs-profile': 'Док.: создание профиля', 'docs-multiple': 'Док.: несколько профилей сразу', 'docs-mobile': 'Док.: мобильные профили', 'docs-proxy': 'Док.: прокси и его отказ', 'docs-cookies': 'Док.: импорт и экспорт cookies', 'docs-trouble': 'Док.: что делать при сбое', blog: 'Обновления — список', 'blog-no-noise': 'Обновления — запись',
     login: 'Вход: почта и пароль', signup: 'Регистрация', 'signup-code': 'Регистрация: код из письма', 'reset-password': 'Сброс пароля', 'reset-password-code': 'Сброс пароля: код и новый пароль',
-    account: 'Кабинет: обзор', 'account-devices': 'Кабинет: устройства и синхронизация', 'account-invoices': 'Кабинет: платежи', 'account-team': 'Кабинет: команда', 'account-settings': 'Кабинет: настройки', checkout: 'Оплата криптовалютой',
+    account: 'Кабинет: обзор', 'account-devices': 'Кабинет: устройства', 'account-sync': 'Кабинет: синхронизация', 'account-invoices': 'Кабинет: платежи', 'account-team': 'Кабинет: команда', 'account-settings': 'Кабинет: настройки', checkout: 'Оплата криптовалютой',
     privacy: 'Политика конфиденциальности', terms: 'Условия использования', refunds: 'Правила возврата', support: 'Поддержка и контакты', 404: 'Страница 404',
   };
   const rows = groups.map((g) => `<tr><th colspan="4" style="padding-top:24px;color:var(--text-secondary)">${esc(g)}</th></tr>` +

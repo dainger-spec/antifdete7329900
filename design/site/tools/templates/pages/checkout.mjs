@@ -117,6 +117,10 @@ export default function checkout(c, { lang }) {
     /* the one rule that matters, then the status and the timer */
     .pay-exact { margin-top: 18px; display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 10px; padding: 12px 14px; border-radius: 16px; background: linear-gradient(180deg, rgba(111, 143, 234, 0.14), rgba(111, 143, 234, 0.07)); box-shadow: inset 0 1px 0 rgba(200, 214, 255, 0.12); font: var(--t-small); color: var(--text-secondary); }
     .pay-exact svg { margin-top: 3px; color: var(--accent); }
+    /* the server: «show this line prominently, not in small print» — body size, and the exchange's fee in bold */
+    .pay-exact { font: var(--t-body); color: var(--text-primary); }
+    .pay-exact svg { margin-top: 5px; }
+    .pay-exact strong { font-weight: 600; color: #FFFFFF; }
     .pay-status { margin-top: 18px; padding-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font: var(--t-small); color: var(--text-secondary); white-space: nowrap; }
     .pay-status .dot { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
     .pay-status .t { display: inline-flex; align-items: center; gap: 6px; color: var(--text-tertiary); }

@@ -10,51 +10,48 @@ Search description: Pay for Lumen in crypto: the address, a QR code, the amount,
 
 Account
 
-# Payment
-
 Pay
 
-Professional plan
+# Payment
 
-$59$590
+## Order
+
+Team plan
 
 Month
 
 Year
 
+Total
+
+$149$1490
+
 Your period runs until 29 December 2026The price of ten months · your period runs until 29 November 2027
+
+## Transfer
+
+Coin and network
 
 [USDT Tether Tron (TRC-20)]
 
-[поле: Coin or network]
-
 - USDT Tether Tron (TRC-20)
-- USDT Tether Ethereum (ERC-20)
-- USDT Tether TON
-- USDC USD Coin Ethereum (ERC-20)
-- USDC USD Coin Solana
 - BTC Bitcoin
 - ETH Ethereum
-- SOL Solana
-- TON Toncoin TON
-- LTC Litecoin
-- TRX TRON
-- BNB BNB BNB Smart Chain (BEP-20)
-- DOGE Dogecoin
-- POL Polygon
 
 Nothing found
 
-59.00 USDT590.00 USDT
+- **Amount **149.000000 USDT** [] **1490.000000 USDT** []** — Network Tron (TRC-20)
 
-On Tron (TRC-20)
+Address
 
 TLumenExampLeAddr3ssQ7nS4yE9wq2Xb8u
 
-Waiting for your transferOut of time. Get a new address
+Send exactly 149.0000001490.000000 USDT on Tron (TRC-20) to this address, in one transfer. **If you pay from an exchange, add its withdrawal fee on top**: the whole amount must arrive, or you’ll have to send the rest.
 
-Address valid for
+Waiting for your transferOut of time: the rate in a coin is held for 30 minutes. Get a new address
 
-14:59
+Rate held for
 
-Send exactly this amount on this network, in one transfer. No need to reload: the status changes by itself, and the receipt comes by email.
+29:59
+
+No need to reload: the status changes by itself, and the receipt comes by email.

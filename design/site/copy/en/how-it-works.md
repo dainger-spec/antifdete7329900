@@ -12,7 +12,7 @@ How it works
 
 # How Lumen keeps profiles apart
 
-For technical readers: which processes start, where the keys are, how a profile’s traffic reaches its proxy, and what the sync server sees. And where all of it stops.
+For technical readers: which processes start, where the keys are, how a profile’s traffic reaches its proxy, and what the sync server sees.
 
 ## Sections
 
@@ -52,6 +52,8 @@ The process’s environment is built from a list, not inherited: the user’s na
 Language, region and time zone are given to the process when it starts — so WebKit, the page and its workers all get them. No script over the page is needed.
 
 If its channel to the manager closes — the manager quit or crashed — the profile’s process seals its data and exits. While it runs it holds a lock on its home, so a manager started after a crash seals that home only once the process is gone.
+
+**Given to the process**
 
 | Given to the process | Value |
 | --- | --- |
@@ -116,11 +118,12 @@ Conflicts are resolved on the device: history and bookmarks merge record by reco
 - The vault’s identifier
 - How many objects there are, and their sizes
 - Revision counters and when objects change
+- How many profiles each Mac has — the app reports the number, so the plan’s limit is shared by all your Macs
 
 ### The server does not know
 
-- Profile names, or exactly how many — the object count is only a rough upper bound
-- Settings and proxy details
+- Profile names, tags and notes
+- Settings and proxy addresses
 - Passwords, cookies, history, bookmarks, the sites you visit
 
 ## Limits

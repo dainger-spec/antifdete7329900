@@ -26,7 +26,7 @@ Forgot the master password It cannot be recovered. What you can do with the old 
 
 ## Write to us
 
-Never send your master password, licence key or cookie export files. We will not ask for them.
+Never send your master password, your account password or cookie export files. We will not ask for them.
 
 Topic
 
@@ -34,7 +34,7 @@ Topic
 
 Email for our reply
 
-Signing in with a key? Give any address for the reply — we delete it with the conversation.
+We reply to this address. If you write about your account, give its email.
 
 Message
 
@@ -48,24 +48,8 @@ The logs hold none of your data in the clear — every build checks that.
 
 ## Contact
 
-### Support
-
-support@lumenbrowser.io
-
-### Security
-
-security@lumenbrowser.io
-
-Found a vulnerability? Write here — we reply, and tell you when the fix ships.
-
-### Payments and refunds
-
-billing@lumenbrowser.io
-
-### Privacy
-
-privacy@lumenbrowser.io
-
-### Legal
-
-legal@lumenbrowser.io
+- Support support@lumenbrowser.io
+- SecurityFound a vulnerability? Write here — we reply, and tell you when the fix ships. security@lumenbrowser.io
+- Payments and refunds billing@lumenbrowser.io
+- Privacy privacy@lumenbrowser.io
+- Legal legal@lumenbrowser.io

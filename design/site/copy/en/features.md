@@ -21,17 +21,12 @@ Every account in its own Safari, a proxy that never leaks, warm-up and encryptio
 3. Encryption
 4. Proxy
 5. Verification
-6. No noise
-7. Warm-up
-8. Profile data
+6. Warm-up
+7. Profile data
 
 ## Real Safari in every profile
 
 A profile opens in a Safari window and runs on your Mac’s system WebKit. Sites see Safari because that is what it is.
-
-- A Safari window: the address bar, tabs and menus
-- The network handshake and headers of Safari
-- The same Safari version as on your Mac
 
 | What a site sees | A Chromium browser | Lumen |
 | --- | --- | --- |
@@ -112,11 +107,9 @@ Paste a list in any usual format. Lumen checks every proxy through itself and sh
 
 | Proxy | Exit | Latency |
 | --- | --- | --- |
-| Berlin 1 SOCKS5 · `203.0.113.10:1080` | Germany | 84 ms |
-| proxy.example.net:3128 HTTP | Netherlands | 142 ms |
-| Tokyo HTTPS · `192.0.2.44:8443` | Japan | 1,730 ms |
-| Whitelisted HTTP · `198.51.100.40:8000` | Silent after connecting | — |
-| Old provider SOCKS5 · `192.0.2.7:1080` | Login rejected | — |
+| Berlin 1 SOCKS5 | Germany | 84 ms |
+| Tokyo HTTPS | Japan | 1,730 ms |
+| Old provider SOCKS5 | Login rejected | — |
 
 ## Checked against real Safari
 
@@ -134,26 +127,9 @@ headers match
 
 TLS and HTTP/2 values
 
-How we verify
-
-## No noise in the fingerprint
-
 Many browsers add random noise to canvas and WebGL, and fingerprint tests notice such forgeries. A Lumen profile gives exactly what Safari on your Mac gives.
 
-Noise is easy to spot: a faked canvas does not agree with WebGL, the fonts, or what the page’s background scripts see.
-
-A server sees the TLS handshake and headers before any script runs. A profile’s are Safari’s.
-
-### A profile against Safari on the same Mac
-
-Every build, the probe page
-
-|  |  |
-| --- | --- |
-| Canvasthe same data URL, byte for byte | identical |
-| WebGLvendor, renderer, extensions, parameters | identical |
-| Fontstext metrics | identical |
-| Navigator and screenevery value | identical |
+How we verifyWhy a profile has no noise
 
 ## Profile warm-up
 
@@ -228,29 +204,7 @@ A whole profile in one file under a password: for another Mac or a colleague.
 
 A profile that keeps nothing.
 
-## Getting started is simple
-
-1. Create a profile A name and a country. Every profile is a Safari of its own.
-2. Add proxies Paste a list, and Lumen checks every proxy.
-3. Work Run profiles side by side, each in its own windows.
-
 ## Questions
-
-**Is it really Safari?**
-
-Yes. Lumen runs Safari’s interface and the system WebKit, the same engine as Safari on your Mac. We compare every build with real Safari and publish the results.
-
-**What if the proxy goes down?**
-
-The profile opens no page until the proxy is back. It never goes online directly, with your IP.
-
-**Can I bring accounts over from another browser?**
-
-Yes. Import cookies as JSON or cookies.txt: exports of popular extensions, Puppeteer, Playwright and Selenium all work.
-
-**Where is my data kept?**
-
-On your Mac, encrypted. When you sync, only encrypted data goes to the server, and only you can read it.
 
 **Which Mac and macOS do I need?**
 
@@ -258,7 +212,7 @@ A Mac with Apple Silicon and macOS 26 or later. Intel Macs are not supported.
 
 **How can I pay?**
 
-In crypto, on our own payment page — for a month or a whole year. You can skip the email: you get a licence key.
+In crypto, on our own payment page — for a month or a whole year. Nothing renews by itself: we remind you by email 7 days and 1 day before your period ends.
 
 ## Try it free
 

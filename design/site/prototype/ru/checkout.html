@@ -105,6 +105,10 @@
     /* the one rule that matters, then the status and the timer */
     .pay-exact { margin-top: 18px; display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 10px; padding: 12px 14px; border-radius: 16px; background: linear-gradient(180deg, rgba(111, 143, 234, 0.14), rgba(111, 143, 234, 0.07)); box-shadow: inset 0 1px 0 rgba(200, 214, 255, 0.12); font: var(--t-small); color: var(--text-secondary); }
     .pay-exact svg { margin-top: 3px; color: var(--accent); }
+    /* the server: «show this line prominently, not in small print» — body size, and the exchange's fee in bold */
+    .pay-exact { font: var(--t-body); color: var(--text-primary); }
+    .pay-exact svg { margin-top: 5px; }
+    .pay-exact strong { font-weight: 600; color: #FFFFFF; }
     .pay-status { margin-top: 18px; padding-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font: var(--t-small); color: var(--text-secondary); white-space: nowrap; }
     .pay-status .dot { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
     .pay-status .t { display: inline-flex; align-items: center; gap: 6px; color: var(--text-tertiary); }
@@ -172,7 +176,7 @@
               </div>
             </div>
           </div>
-          <p class="pay-exact"><svg class="icon" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 7.2v4.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="4.9" r="0.9" fill="currentColor"/></svg><span>Отправьте ровно <span data-sample><span class="p-m">149.000000</span><span class="p-y">1490.000000</span></span> <span data-ex-t>USDT</span> в сети <span data-ex-net>Tron (TRC-20)</span> на этот адрес, одним переводом. Если биржа берёт комиссию за вывод из суммы, добавьте её сверху: должна прийти вся сумма.</span></p>
+          <p class="pay-exact"><svg class="icon" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 7.2v4.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="4.9" r="0.9" fill="currentColor"/></svg><span>Отправьте ровно <span data-sample><span class="p-m">149.000000</span><span class="p-y">1490.000000</span></span> <span data-ex-t>USDT</span> в сети <span data-ex-net>Tron (TRC-20)</span> на этот адрес, одним переводом. <strong>Если платите с биржи, добавьте её комиссию за вывод сверху</strong>: должна прийти вся сумма, иначе придётся доплачивать.</span></p>
           <div class="pay-status pay-line"><span><span class="live"><i class="dot"></i>Ждём перевод</span><span class="gone">Время вышло: курс в монете действует 30 минут. <a href="checkout.html">Получить новый адрес</a></span></span><span class="t live" data-sample><svg class="icon" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.4V8l2.6 1.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Курс действует ещё</span> <b data-timer>29:59</b></span></div>
           <p class="pay-after">Обновлять страницу не нужно: статус сменится сам, квитанция придёт на почту.</p>
         </div>

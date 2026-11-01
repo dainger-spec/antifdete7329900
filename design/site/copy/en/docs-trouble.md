@@ -66,7 +66,25 @@ When something is wrong
 
 What Lumen says when a profile, the vault, sync or an update fails, what that means and what to do — and how to put together a report for us.
 
-From the code as of 31 October 2026 · Reading time: five minutes · Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
+From the code as of 31 October 2026 · Reading time: five minutes
+
+**On this page**
+
+At a glance
+
+A profile does not start
+
+A profile crashed or hangs
+
+Lumen itself quit
+
+The vault does not open
+
+Sync failed
+
+An update was not installed
+
+Reporting a problem
 
 ## At a glance
 
@@ -136,7 +154,9 @@ Lumen keeps no log files: it writes to the macOS system log. The ZIP holds the s
 
 What Lumen puts in it leaves out profiles’ names, tags and notes, proxies’ addresses and credentials, passwords, cookies, history and addresses visited; in its own log lines your data shows as `<private>`. On every CI build `check_log_privacy.py` fails if Lumen’s code logs in clear anything but an id, a count, a status or a name from the code; the self-test searches a ZIP’s bytes for a profile’s name, notes and proxy password. **Unconfirmed:** whether WebKit’s own lines in the system log hold page addresses in clear
 
-Never send your master password, your licence key, cookie export files — whoever has one is signed in as that profile — or a proxy list exported with passwords.
+Never send your master password, your account password, cookie export files — whoever has one is signed in as that profile — or a proxy list exported with passwords.
+
+Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
 
 Found a mistake, or is something missing? Write to us.
 

@@ -4,61 +4,34 @@
 
 Window title: Account — Lumen
 
-Search description: Your Lumen account: plan and paid period, Macs and sync, payments and account settings.
+Search description: Your Lumen account: plan and paid period, devices, sync, payments, team and account settings.
 
 ---
 
 you@example.com
 
-Professional plan
+Team plan
 
 - Overview
-- Macs
+- Devices
+- Sync
 - Payments
+- Team
 - Settings
 
 Sign out
 
-# Macs and sync
+# Devices
 
-## Macs in the account · 2 of 3
+## Devices on the licence · 4 of 10
 
-- Mac A7F3 This MacOnline now · IP `203.0.113.24`
-- Mac 3KQ9Synced 3 days ago · IP `198.51.100.7` [Revoke]
+- Mac A7F3 This MacOnline now · 21 profiles
+- Mac 3KQ9 · WorkOnline 3 days ago · 9 profiles [Unlink]
+- Mac Q2W8anna@example.com · Online yesterday · 6 profiles [Unlink]
+- Mac M5T1anna@example.com · Online 2 weeks ago · 2 profiles [Unlink]
 
-We don’t know your Macs’ names. Match the code: the app shows it in its sync settings.
+We have no computer names and no IP addresses: a device is known by its code and label. The app shows the code in Settings → Account.
 
-## Sync
+An unlinked Mac without internet can keep working for up to 7 days. So the next unlink can be made 7 days after the previous one.
 
-38
-
-Objects
-
-4.2 MB
-
-Size
-
-12 minutes ago
-
-Changed
-
-Your data, as the server sees it
-
-Ciphertext only: opaque names and sizes. Only you can read it — on your Mac, with your master password.
-
-- `vault-header`0.6 KB
-- `3f9a07c1…b84e21c9`1.1 MB
-- `a41d9e30…07f5c2aa`612 KB
-- `c0e8b512…9d1a47f0`48 KB
-- `7b26fd04…e3c90b18`4.1 KB
-- 33 more objects
-
-There are no profile names here: the server doesn’t know them. They exist only in the app on your Macs.
-
-`vault-header` is the vault’s header: the salt, the Argon2id parameters and the encrypted key — no secrets.
-
-[Delete sync data…]
-
-The server deletes every encrypted object. The data on your Macs stays.
-
-OverviewMacsPaymentsSettings
+OverviewDevicesSyncPaymentsTeamSettings

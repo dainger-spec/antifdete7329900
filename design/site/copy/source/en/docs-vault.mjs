@@ -80,5 +80,7 @@ Sync is off until you choose **Folder (local-only)** or **Server** in **⋯ → 
 
 A sync location sees the vault header in plain text, there so another Mac can open the vault with the same password (the app can’t yet set up a second Mac like this); how many objects there are, their sizes, versions and when they change; and, for a server, this Mac’s IP address — sync goes directly, not through a profile’s proxy.
 
-The profile list, settings, passwords, bookmarks, history and persistent cookies arrive encrypted (the profiles’ files twice) under opaque names: no profile names, site addresses, proxies, passwords or cookies are visible. Other website data doesn’t sync.`,
+The profile list, settings, passwords, bookmarks, history and persistent cookies arrive encrypted (the profiles’ files twice) under opaque names: no profile names, site addresses, proxies, passwords or cookies are visible. Other website data doesn’t sync.
+
+The {{name}} server doesn’t keep the IP address: it is used only in memory, to limit request rates. Nor does it keep which Mac synced when — only when the vault last changed. What it sees is on the [Sync page of your account](account-sync.html).`,
 };

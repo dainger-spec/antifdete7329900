@@ -1,11 +1,15 @@
 import { inline, esc } from '../../lib/html.mjs';
 import { icon } from '../../lib/kit.mjs';
 
-// The account, as the account server has it (lumen-api-server, docs/SITE_API.md): overview, devices and sync, payments,
+// The account, as the account server has it (lumen-api-server, docs/SITE_API.md): overview, devices, sync, payments,
 // team, settings. On a computer, a column on the left (who you are, the sections, Sign out); on a phone, a tab bar at
 // the bottom, as in an app, and one column of cards and lists, so nothing on a page needs a table or a sideways scroll.
 // Every user value is sample data (data-sample): the email, dates, device codes, profile counts, the sync objects,
 // payments and the team. The sample is a Team plan's owner, so the mock-up shows every page.
+// Sync (SITE_API.md §10) shows only what the server sees: each vault's objects, size and when it last changed, the space
+// used of the plan's quota (a team shares one), the opaque objects largest first, and the button that deletes them. No
+// profile names or counts, no kinds of objects, nothing about when each Mac synced: the server doesn't keep it. The
+// «space ran out» line appears only when it has: the sample's team is far from it, so the mock-up doesn't show it.
 export default function account(c, { lang, slug, state }) {
   const here = `${slug}.html`;
   const side = `<aside class="acc-side" aria-label="${lang === 'ru' ? 'Разделы кабинета' : 'Account sections'}">
@@ -34,23 +38,33 @@ export default function account(c, { lang, slug, state }) {
       <p class="acc-hint">${icon('envelope', 14)}<span>${inline(o.hint, lang)}</span></p>
       <ul class="acc-list">${o.rows.map(([href, ic, k, v, sub]) => row(href, ic, k, v, sub)).join('')}</ul>`;
   } else if (state === 'devices') {
-    const d = c.devices, s = d.sync;
+    const d = c.devices;
     content = `<h1 class="acc-title">${inline(d.title, lang)}</h1>
       <h2 class="acc-h">${inline(d.macs, lang)} · <span data-sample>${inline(d.count, lang)}</span></h2>
       <ul class="acc-list" data-sample>${d.list.map((m) => `<li><div class="acc-row tall"><span class="ic">${icon('laptop', 16)}</span><span class="k">${esc(d.mac)} <span class="code-badge">${esc(m.code)}</span>${m.label ? ` · ${esc(m.label)}` : ''}${m.current ? ` <span class="tag accent">${esc(d.thisMac)}</span>` : ''}<span class="sub">${m.member ? `${esc(m.member)} · ` : ''}${inline(m.seen, lang)} · ${inline(m.profiles, lang)}</span></span>${m.current ? '' : `<a class="btn ghost sm danger-text" href="account-devices.html">${inline(d.unlink, lang)}</a>`}</div></li>`).join('')}</ul>
       <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(d.note, lang)}</span></p>
-      <p class="acc-hint">${icon('clock', 14)}<span>${inline(d.cooldown, lang)}</span></p>
-      <h2 class="acc-h" id="sync" style="margin-top:36px">${inline(s.title, lang)}</h2>
-      <div class="acc-stats" data-sample>${s.stats.map(([k, v]) => `<div><div class="n">${inline(v, lang)}</div><div class="k">${inline(k, lang)}</div></div>`).join('')}</div>
+      <p class="acc-hint">${icon('clock', 14)}<span>${inline(d.cooldown, lang)}</span></p>`;
+  } else if (state === 'sync') {
+    const s = c.sync, h = s.header;
+    content = `<h1 class="acc-title">${inline(s.title, lang)}</h1>
+      <p class="acc-lead">${inline(s.lead, lang)}</p>
+      <section class="acc-card space" data-sample>
+        <div class="space-top"><span class="k">${inline(s.place.label, lang)}</span><span class="v">${inline(s.place.value, lang)}</span></div>
+        <div class="plan-bar" aria-hidden="true"><i style="width:max(6px, ${s.place.pct}%)"></i></div>
+        <p class="plan-left">${inline(s.place.line, lang)}</p>
+      </section>
+      <p class="acc-hint">${icon('person2', 14)}<span>${inline(s.team, lang)}</span></p>
+      <h2 class="acc-h" style="margin-top:32px">${inline(s.vaults, lang)}</h2>
+      <ul class="acc-list" data-sample>${s.list.map((v) => `<li><div class="acc-row tall"><span class="ic">${icon('lockFill', 16)}</span><span class="k">${esc(s.vault)} <span class="code-badge">${esc(v.id)}</span><span class="sub">${inline(v.meta, lang)}</span></span></div></li>`).join('')}</ul>
       <section class="acc-card server"><details>
-        <summary><span class="ic">${icon('lockFill', 15)}</span><span class="k"><span class="t">${inline(s.serverTitle, lang)}</span><span class="sub">${inline(s.serverSub, lang)}</span></span>${icon('chevronDown', 14)}</summary>
+        <summary><span class="ic">${icon('server', 15)}</span><span class="k"><span class="t">${inline(s.serverTitle, lang)}</span><span class="sub">${inline(s.serverSub, lang)}</span></span>${icon('chevronDown', 14)}</summary>
         <div class="server-in">
           <p class="lead-s">${inline(s.serverLead, lang)}</p>
-          <ul class="server-list" data-sample>${s.rows.map(([n, z]) => `<li><span class="mono">${esc(n)}</span><span>${esc(z)}</span></li>`).join('')}<li class="more">${inline(s.more, lang)}</li></ul>
-          <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(s.headerNote, lang)}</span></p>
+          <ul class="server-list" data-sample>${s.rows.map(([n, z]) => `<li><span class="mono">${esc(n)}</span><span>${esc(z)}</span></li>`).join('')}<li class="more">${inline(s.more, lang)}</li><li class="head"><span class="mono">${esc(h[0])}</span><span>${esc(h[1])}</span><span class="what">${inline(h[2], lang)}</span></li></ul>
+          <p class="acc-hint">${icon('clock', 14)}<span>${inline(s.noTrace, lang)}</span></p>
         </div>
       </details></section>
-      <div class="acc-danger"><a class="btn ghost sm danger-text" href="account-devices.html">${inline(s.danger.action, lang)}</a><span>${inline(s.danger.text, lang)}</span></div>`;
+      <div class="acc-danger" style="margin-top:36px"><a class="btn ghost sm danger-text" href="account-sync.html">${inline(s.danger.action, lang)}</a><span>${inline(s.danger.text, lang)}</span></div>`;
   } else if (state === 'invoices') {
     const v = c.invoices;
     content = `<h1 class="acc-title">${inline(v.title, lang)}</h1>

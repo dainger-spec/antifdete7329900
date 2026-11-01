@@ -2,9 +2,10 @@
 // there will be no legal entity; the owner fills in the name, country and governing law — here they are marked places
 // (question 15), no values made up. Crypto only, and the crypto processor is the only recipient of payment data; no
 // automatic charges, reminders 7 days and 1 day before; data is never deleted; refunds within 14 days, and 7 days after a
-// renewal, in the same coin and the same amount. What the account server keeps and doesn't keep follows
-// lumen-api-server, docs/SITE_API.md §9 (plainly: each Mac tells the server how many profiles it has); sync follows
-// docs/SYNC_FORMAT.md and docs/SYNC_SERVER_API.md. Retention periods and service names are the owner's call (question 12).
+// renewal, in the same coin and the same amount. What the server keeps and doesn't, sync, the periods and the payment
+// service are the ready wording of lumen-api-server, docs/SITE_API.md §9, word for word (it may be rearranged for the
+// page, but no point may go and the paragraph on the number of profiles may not be softened); the rights log goes on the
+// payments' schedule (internal/core/retention.go). Service names and how long support mail is kept: question 12.
 export default {
   title: 'Legal',
   tabs: [['privacy.html', 'Privacy'], ['terms.html', 'Terms of use'], ['refunds.html', 'Refunds']],
@@ -14,10 +15,10 @@ export default {
   privacy: {
     title: 'Privacy policy',
     lead: 'What we know about you, why, and for how long. And what we don’t know and can’t find out.',
-    toc: [['short', 'In short'], ['who', 'Who is responsible'], ['server', 'What the server keeps'], ['devices', 'About your devices'], ['sync', 'Sync'], ['not', 'What the server doesn’t keep'], ['terms', 'How long'], ['app', 'The app'], ['site', 'The site'], ['processors', 'Who we share data with'], ['rights', 'Your rights'], ['changes', 'Changes']],
+    toc: [['short', 'In short'], ['who', 'Who is responsible'], ['server', 'What the server keeps'], ['devices', 'About your Macs'], ['sync', 'Sync'], ['not', 'What the server doesn’t keep'], ['terms', 'How long'], ['app', 'The app'], ['site', 'The site'], ['processors', 'Who we share data with'], ['rights', 'Your rights'], ['changes', 'Changes']],
     body: `## In short {#short}
 
-- Profiles, what’s in them and your master password stay on your Macs. The server can’t see them or decrypt them.
+- Profiles, what’s in them and your master password stay on your Macs. Turn on sync and only ciphertext goes to the server: the key never leaves your Macs.
 - The server knows your email, a hash of your password, your plan and paid period, your invoices and your devices — and **how many profiles each Mac has**. That number is all it knows about your profiles.
 - The server doesn’t keep IP addresses. It has no computer names.
 - **A forgotten master password can’t be recovered.** Not by us, not by anyone.
@@ -27,49 +28,39 @@ export default {
 
 {{name}} is a Mac app, the site {{domain}}, an account server and a sync server. They are sold and supported by a private individual: {{tbd:q15:[the seller’s full name]}}, {{tbd:q15:[country]}}, who is responsible for the processing described here. Questions about data: privacy@{{domain}}.
 
-## What the server keeps {#server}
+## What the {{name}} server keeps {#server}
 
-This is the full list.
+- Your email address and a hash of your password (we neither keep nor know the password itself).
+- Your plan, its limits and the date your paid period ends.
+- Invoices: the amount in dollars, the coin and its amount, the address issued for the payment, the transaction on the network, dates.
+- If you have a team, the addresses of the people you invited.
+- A record of changes to your rights: what changed, when and why (payment, extension, refund, end of period).
 
-| Data | Why | How long |
-|---|---|---|
-| **Email** | Signing in, password resets, receipts, reminders before a period ends | While the account exists |
-| **A hash of your password** — not the password | Signing in | While the account exists |
-| **Plan, limits and end date** of the paid period | What the app may do on your Macs | While the account exists |
-| **Invoices**: the amount in dollars, the coin and how much of it, the address issued for the payment, the transaction on the network, dates | Receipts, the paid period, refunds, accounting | After the account is deleted — without the email, as long as accounting requires: {{tbd:q12:[period]}} |
-| **Team seats**: the invited people’s emails | The team | While the seat is open |
-| **A log of changes to your rights**: when and why the plan, period and limits changed | To sort out an error or a dispute | {{tbd:q12:[period]}} |
-| **Messages** with support | To answer | {{tbd:q12:[period]}} |
+## About your Macs {#devices}
 
-## About your devices {#devices}
+For each Mac: an identifier derived from the Mac’s hardware identifier (the hardware identifier itself never reaches us), the label you gave it, if any, the app’s version, when the Mac was added and when it was last in touch — and **how many profiles are on that Mac**.
 
-For each Mac in the account the server keeps:
-
-- an identifier computed from the Mac’s hardware identifier — the hardware identifier itself never reaches the server;
-- a label, if you set one;
-- the app’s version;
-- when the Mac was added and when it last checked in;
-- **the number of profiles on that Mac.**
-
-Each Mac tells the server how many profiles it has, so that your plan’s profile limit is shared by all your Macs — and by the whole team. That number is all the server knows about your profiles: their names, tags, notes, contents, cookies, site passwords, history and proxy addresses never reach it.
+**The number of profiles is the only thing the server knows about your profiles.** It is needed so that your plan’s profile limit is shared by all your Macs and by your whole team. The server never receives profile names, their contents, cookies, saved passwords, history or proxy addresses.
 
 ## Sync {#sync}
 
-- Everything in your profiles — settings, proxies, passwords, cookies, history, bookmarks — is encrypted on your Mac with a key from your master password **before** anything goes to the sync server. It keeps only ciphertext: how many objects, their sizes, revisions and when they change. It doesn’t have the key.
-- Object names on the server are HMACs of their real names. They don’t even reveal that an object is “a profile’s history”.
-- **We cannot decrypt profile data** — not of our own will, not on anyone’s demand.
+If you turn it on, the server keeps your data encrypted only — the key never leaves your Macs, and only you can read it. The server sees that your account has a vault, how many objects it holds, their sizes and when they changed.
 
-## What the server doesn’t keep {#not}
+Object names on the server are HMACs of their real names: they don’t even reveal that an object is “a profile’s history”. **We cannot decrypt profile data** — not of our own will, not on anyone’s demand.
 
-- **IP addresses.** They are used only in memory, to limit how often requests come, and are never written down.
-- **Computer names.** A device is known by its code and label.
-- **Profile data** and your master password. We can’t reset a master password: without it profile data can’t be decrypted — not by you, not by us.
+## What the server does not keep {#not}
+
+IP addresses (used only in memory, to limit request rates), computer names, profile data.
+
+The server never receives your master password. We can’t reset it: without it profile data can’t be decrypted — not by you, not by us.
 
 ## How long {#terms}
 
-- **The account** is deleted when you ask, in your account: it is blocked at once, and after 7 days the email, password and devices are deleted. Until then, the deletion can be cancelled by signing in.
-- **Payment records** are then kept without the email, as long as accounting requires: {{tbd:q12:[period]}}.
-- **Backups** of the database are kept for up to 30 days: a deleted email disappears from them with the oldest copies.
+- **Your account** is deleted 7 days after you ask (until then you can cancel), and your sync data with it. You ask in your account; the account is blocked at once.
+- **Payment records** are then kept without your email address for three full calendar years after the year of the payment, and deleted.
+- **The record of changes to your rights** goes on the same schedule: three full calendar years after the year of the entry.
+- **Database backups** are kept for up to 30 days: a deleted email disappears from them with the oldest copies.
+- **Messages with support** are kept for {{tbd:q12:[period]}}.
 
 ## The app on your Mac {#app}
 
@@ -82,11 +73,11 @@ Each Mac tells the server how many profiles it has, so that your plan’s profil
 
 - The site has no analytics, no ad pixels, no third-party scripts and no cookies. Fonts and images come from our server.
 - After you sign in, the site keeps the session key in the tab’s memory and forgets it when you sign out. A session lasts 30 days and ends after 7 days without use.
-- The payment page is ours: you don’t leave the site, and the server gets the address for the transfer from the crypto processor.
+- The payment page is ours: you don’t leave the site, and the server gets the address for the transfer from the payment service.
 
 ## Who we share data with {#processors}
 
-- **The crypto processor** — {{tbd:q12:[name]}} — is the only one that receives payment data. From us it gets the amount in dollars, the coin, the invoice number and the plan’s name — without your email and without any other data about you — and it issues the address for the transfer.
+- **The payment service** ({{tbd:q12:[name]}}) receives from us only the amount in dollars, the coin, the invoice number and the plan’s name — not your email address, nothing else about you. It issues the address for the transfer.
 - **The email service** — {{tbd:q12:[name]}} — to send codes, receipts and reminders.
 - **Hosting** — {{tbd:q12:[name and country]}} — where the servers run.
 
@@ -124,7 +115,7 @@ While you have a trial or a paid period, you may install and use {{name}} on you
 
 ## Team {#team}
 
-The Team plan has 5 seats: you and 4 invited. Each person signs in with their own email and password. The profile and device limits are shared by the team. The owner pays; members don’t see the team’s invoices.
+The Team plan has 5 seats, including the owner. Each person signs in with their own email and password. The profile and device limits are shared by the team. The owner pays; members don’t see the team’s invoices.
 
 ## Payment and period {#payment}
 
@@ -147,7 +138,7 @@ You follow the rules of the sites and services you use. If the seller learns of 
 
 ## Your data {#data}
 
-Profiles and everything in them are yours, kept encrypted on your Macs. We never delete them — not when a period ends, not when you stop paying. How we handle account data is in the [privacy policy](privacy.html).
+Profiles and everything in them are yours, kept encrypted on your Macs. We never delete them — not when a period ends, not when you stop paying. If you turned on sync, its encrypted copy on the server is deleted with the account — or earlier, when you ask in your account; the data on your Macs stays. How we handle account data is in the [privacy policy](privacy.html).
 
 ## Liability {#warranty}
 
@@ -159,7 +150,7 @@ These terms are governed by {{tbd:q15:[the governing law]}}.
 
 ## Ending {#end}
 
-You can delete your account at any time, in your account. It is blocked at once: devices leave the account, team seats close. After 7 days the email, password and devices are deleted; until then the deletion can be cancelled by signing in. The profiles on your Macs are not touched: your data is never deleted.
+You can delete your account at any time, in your account. It is blocked at once: devices leave the account, team seats close. After 7 days the email, password, devices and the encrypted sync data on the server are deleted; until then the deletion can be cancelled by signing in. The profiles on your Macs are not touched: they are kept only by you, and {{name}} does not delete them.
 
 ## Questions {#contact}
 

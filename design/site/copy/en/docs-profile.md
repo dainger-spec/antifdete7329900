@@ -66,7 +66,19 @@ Profiles
 
 How to create a profile, what each field of the editor sets, and how to launch, stop, change and delete a profile.
 
-From the code as of 31 October 2026 · Reading time: five minutes · Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
+From the code as of 31 October 2026 · Reading time: five minutes
+
+**On this page**
+
+Creating a profile
+
+The editor's fields
+
+Launching and stopping
+
+The profile's window
+
+Editing, copying and deleting
 
 ## Creating a profile
 
@@ -155,6 +167,8 @@ There is no Duplicate command. Export makes a copy with all the data: ⋯ → **
 ### Delete
 
 ⋯ → **Delete…**, then **Delete Profile and All Its Data**. The profile's cookies, site data, cache, settings, history, bookmarks and saved passwords are deleted; a running profile is stopped first. To keep a copy, export it first.
+
+Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
 
 Found a mistake, or is something missing? Write to us.
 

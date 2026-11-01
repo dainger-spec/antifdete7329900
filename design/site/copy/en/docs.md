@@ -12,19 +12,9 @@ Docs
 
 # Using Lumen
 
-From installing to working with several profiles. Every article describes what the app has — in the words on its own buttons. Where behaviour isn’t confirmed by the code or a measurement, the article says so.
+From installing to working with several profiles — in the words on the app’s own buttons.
 
 /
-
-Read most often:
-
-- Installing and the first launch
-
-- Proxies: setup, and when one fails
-
-- Importing and exporting cookies
-
-- When something fails
 
 ## Getting started
 

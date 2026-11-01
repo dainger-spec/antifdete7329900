@@ -20,58 +20,97 @@ The rules on which you use Lumen. Short, and no small print.
 
 In effect from ⟦q12: the publication date⟧
 
+**Sections**
+
+The parties
+
+Licence
+
+Account
+
+Team
+
+Payment and period
+
+Acceptable use
+
+Your data
+
+Liability
+
+Governing law
+
+Ending
+
+Questions
+
 ## Sections
 
-1. Licence
-2. Account
-3. Payment and periods
-4. Acceptable use
-5. Your data
-6. Liability
-7. Ending
-8. Questions
+1. The parties
+2. Licence
+3. Account
+4. Team
+5. Payment and period
+6. Acceptable use
+7. Your data
+8. Liability
+9. Governing law
+10. Ending
+11. Questions
+
+## The parties
+
+Lumen is sold by a private individual: ⟦q15: [the seller’s full name]⟧, ⟦q15: [country]⟧. These terms are an agreement between you and the seller.
 
 ## Licence
 
-While you have a trial or a paid period, you may install and use Lumen on your Macs — within your plan’s number of profiles and Macs. How many profiles run at once is not limited on any plan.
+While you have a trial or a paid period, you may install and use Lumen on your devices — within your plan’s number of profiles and devices.
 
 Lumen runs on Macs with Apple Silicon and macOS 26 or later. Intel Macs are not supported.
 
 ## Account
 
-- You sign in by email with a one-time code, or with a licence key.
-- The key is the only way into an account without an email. Lose it and we can’t restore access.
-- Your profiles’ master password is not tied to the account and is unknown to us. A forgotten master password cannot be recovered.
+- Your account is your email and password. A code from an email confirms a registration and a password reset.
+- Your profiles’ master password isn’t tied to the account, and we don’t know it. A forgotten master password can’t be recovered.
 
-## Payment and periods
+## Team
 
-- You pay in crypto, for a month or for a whole year; a year costs ten months. Prices are in US dollars, on the pricing page.
-- Crypto can’t be charged automatically, so nothing renews by itself and there is nothing to cancel: a paid period simply ends. We remind you by email in advance if you sign in by email. You can renew in your account at any time.
-- The trial is 7 days free, up to 3 profiles, with every feature.
-- When a period has ended, the app opens your profiles for data export only, until you renew. **Your data is never deleted.**
-- We tell you about a price change in advance; the new price applies to periods paid for after the change.
+The Team plan has 5 seats, including the owner. Each person signs in with their own email and password. The profile and device limits are shared by the team. The owner pays; members don’t see the team’s invoices.
+
+## Payment and period
+
+- You pay in crypto, for a month or a whole year; a year costs ten months. Prices are in US dollars, on the pricing page.
+- A payment is one-off: there are no automatic charges and nothing to cancel. A paid period simply ends; a new payment renews it. Pay early and the new period starts when the current one ends.
+- We remind you by email 7 days and 1 day before a period ends. You can renew in your account at any time.
+- The trial is 7 days free, up to 3 profiles.
+- When a period ends, the app opens your profiles for data export only until you renew. **Your data is never deleted.**
+- We tell you about a price change in advance; the new price applies to periods paid after the change.
 - Refunds follow the refund policy.
 
 ## Acceptable use
 
-Lumen is made for privacy and for working with several accounts. You may not use it:
+Lumen is built for privacy and for working with several accounts. You may not use it:
 
-- for fraud, for impersonating someone else, or for anything that breaks the law;
+- for fraud, for passing yourself off as someone else, or for anything that breaks the law;
 - to spread malware, send spam or attack other people’s systems.
 
-You follow the rules of the sites and services you use. If we learn of prohibited use, we may close access to the account.
+You follow the rules of the sites and services you use. If the seller learns of prohibited use, they may close access to the account.
 
 ## Your data
 
-Your profiles and everything in them belong to you and are stored on your Macs, encrypted. We never delete them — not when a period ends, not when you stop paying. How we handle account data is described in the privacy policy.
+Profiles and everything in them are yours, kept encrypted on your Macs. We never delete them — not when a period ends, not when you stop paying. If you turned on sync, its encrypted copy on the server is deleted with the account — or earlier, when you ask in your account; the data on your Macs stays. How we handle account data is in the privacy policy.
 
 ## Liability
 
-We check Lumen on every build and publish what we measure and how. But the software is provided “as is”: we don’t promise it fits every task, and we are not responsible for how sites treat your accounts. Our liability is limited to what you paid in the last ⟦q12: 12 months⟧, as far as the law allows.
+We check Lumen on every build and publish what we measure and how. But the software is provided “as is”: the seller doesn’t promise it suits every task and isn’t responsible for how sites treat your accounts. The seller’s liability is limited to what you paid over the last ⟦q12: 12 months⟧, as far as the governing law allows.
+
+## Governing law
+
+These terms are governed by ⟦q15: [the governing law]⟧.
 
 ## Ending
 
-You can delete your account at any time, in your account. When a paid period ends, your profiles stay on your Macs: the app opens them for data export only. Your data is never deleted.
+You can delete your account at any time, in your account. It is blocked at once: devices leave the account, team seats close. After 7 days the email, password, devices and the encrypted sync data on the server are deleted; until then the deletion can be cancelled by signing in. The profiles on your Macs are not touched: they are kept only by you, and Lumen does not delete them.
 
 ## Questions
 

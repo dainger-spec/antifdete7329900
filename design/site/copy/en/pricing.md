@@ -4,7 +4,7 @@
 
 Window title: Pricing — Lumen
 
-Search description: Lumen pricing: every protection in every plan; plans differ by the number of profiles and Macs. 7 days free, crypto payments, refunds.
+Search description: Lumen pricing: every protection in every plan; plans differ by the number of profiles and devices. 7 days free, crypto payments, refunds.
 
 ---
 
@@ -12,7 +12,7 @@ Pricing
 
 # Simple plans, every feature in each
 
-Plans differ only by the number of profiles and Macs. Start with 7 free days.
+Plans differ only by the number of profiles and devices. Start with 7 free days.
 
 Monthly
 
@@ -32,7 +32,7 @@ Profiles
 
 10
 
-Macs
+Devices
 
 2
 
@@ -56,7 +56,7 @@ Profiles
 
 50
 
-Macs
+Devices
 
 3
 
@@ -66,7 +66,7 @@ Seats
 
 Team
 
-For agencies: one account and seats for the team.
+For agencies: seats for the team, shared limits.
 
 $149$1490
 
@@ -78,23 +78,21 @@ Profiles
 
 200
 
-Macs
+Devices
 
 10
 
 Seats
 
-5
+5, including the owner
 
 - 7 days free, up to 3 profiles
-- Run profiles at once, no limit
 - Money back within 14 days
 - Your data is never deleted
 
 ## In every plan
 
 - Real Safari and a separate process for every profile
-- As many profiles at once as you like: a plan only limits how many you have
 - Everything on disk encrypted: Argon2id and AES-256-GCM
 - Proxies with no way around them, and a proxy list checked through the proxy itself
 - Warm-up: ready lists, smart picks, a queue and a schedule
@@ -103,19 +101,14 @@ Seats
 - Profile export to a file under its own password
 - Updates and email support
 
-### Free trial
-
-7 days free, up to 3 profiles, with every feature. If you like it, pick a plan and pay for a period.
-
 ### Payment
 
-- **In crypto.** ⟦q13: USDT, BTC or ETH⟧, on Lumen Pay, our own payment page: the address, a QR code, the amount and a timer. Your period starts when the network confirms the payment.
+- **In crypto.** ⟦q13: USDT on Tron, BTC or ETH⟧, on Lumen Pay, our own payment page: the address, a QR code, the amount and a timer. Your period starts when the network confirms the payment.
 - **A year at once.** One payment instead of twelve, at the price of ten months.
-- **No email.** You can skip the email: you get a licence key, and it becomes your account.
 
 ### When a period ends
 
-Crypto can’t be charged automatically, so you renew yourself, when it suits you. We remind you by email in advance. If you don’t renew, the app opens your profiles for data export only. **Your data is never deleted**: renew, and everything works as before.
+Crypto can’t be charged automatically, so you renew yourself, when it suits you. We remind you by email 7 days and 1 day before. If you don’t renew, the app opens your profiles for data export only. **Your data is never deleted**: renew, and everything works as before.
 
 ### Refunds
 
@@ -125,29 +118,21 @@ Refund policy
 
 ## Questions
 
-**What happens when my paid period ends?**
-
-Your profiles stay on your Mac, encrypted as they were. Until you renew, the app opens them for data export only. Your data is never deleted.
-
 **How do I renew?**
 
-In your account: choose a month or a year and pay in crypto on our payment page. We remind you by email in advance that your period is ending.
+In your account: choose a month or a year and pay in crypto on our payment page. You can renew early — the new period starts when the current one ends. We remind you by email 7 days and 1 day before your period ends.
 
-**How many profiles can I run at once?**
+**How many people are in a Team?**
 
-As many as you need. Running profiles at once is unlimited on every plan: a plan only sets how many profiles and Macs you have.
+Five seats, including the owner. Each person signs in with their own email and password; the profile and device limits are shared by the team. The owner pays; members don’t see the team’s invoices.
 
 **Can I move profiles to another Mac?**
 
 Yes: by syncing between the Macs in your account, or by exporting a profile to a file under its own password. Importing creates a new profile.
 
-**Why sign in with a key and no email?**
-
-So that we don’t even have your email. The key is the only way in: lose it and access can’t be restored. Keep it as carefully as your master password. There is no reminder email in that case — the end of your period is shown in your account.
-
 **Can the server see my profiles?**
 
-No. It stores encrypted blocks and knows only their size and when they changed. The key comes from your master password and never leaves your Mac.
+Only their number. Each Mac tells the server how many profiles it has, so that your plan’s profile limit is shared by all your Macs. Their names, tags, notes, cookies, site passwords, history and proxy addresses never reach it. Sync sends profile data only encrypted: the key comes from your master password and never leaves your Mac.
 
 **Can I change plans?**
 

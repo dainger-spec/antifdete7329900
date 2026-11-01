@@ -50,6 +50,8 @@ The signature proves we built the app and nobody changed it since. Check it with
 - **Notarized by** — Apple Notary Service
 - **Image SHA-256** — 9c1e4b7a…f03d2a68 — published with every release
 
+**Check it in Terminal**
+
 Terminal
 
 [Copy Copied]
@@ -63,24 +65,6 @@ $ shasum -a 256 ~/Downloads/Lumen.dmg
 ```
 
 If the signature is intact, `codesign` answers `valid on disk` and `satisfies its Designated Requirement`, and `spctl` answers `accepted` and `source=Notarized Developer ID`: the app is signed with a developer certificate issued by Apple and notarized by Apple. If anyone changed the file, the check fails — don’t open it. The checksum of the downloaded image must match the one published here for this release.
-
-## The first launch
-
-This is the first screen: the vault is created once, on this Mac.
-
-Create a master password
-
-The master password encrypts the profile list, every profile’s settings, saved passwords, history, bookmarks and archived website data. It cannot be recovered — if you forget it, the data is lost.
-
-Master password
-
-Repeat master password
-
-Use at least 10 characters.
-
-[Create Vault]
-
-The text is the app’s own.
 
 ## Something wrong?
 

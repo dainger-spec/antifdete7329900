@@ -3,7 +3,7 @@
 // code, the network and a deadline — the rate in a coin is held for 30 minutes; the page polls the invoice and never asks
 // for a reload; the processor's name appears nowhere (nor is it in the server's answers). «Order» (the plan, month or
 // year, the total, the period) and «Transfer» (the coin, the QR code, the amount and the address with copy buttons, the
-// network, the rule for the transfer — in the server's words, the status). Coins come from GET /v1/plans, three by
+// network, the rule for the transfer — in the server's words, prominent, not in small print, the status). Coins come from GET /v1/plans, three by
 // default: USDT on Tron, BTC and ETH (the owner sets the list, question 13); the list gets a search field when there are
 // more than six. The sample is a Team plan, as in the account; amounts, addresses, the timer and dates are samples.
 export default {
@@ -34,7 +34,7 @@ export default {
   status: 'Waiting for your transfer',
   timer: '29:59',
   timerLabel: 'Rate held for',
-  exact: 'Send exactly {amount} {ticker} on {network} to this address, in one transfer. If your exchange takes its withdrawal fee out of the amount, add it on top: the whole amount must arrive.',
+  exact: 'Send exactly {amount} {ticker} on {network} to this address, in one transfer. **If you pay from an exchange, add its withdrawal fee on top**: the whole amount must arrive, or you’ll have to send the rest.',
   after: 'No need to reload: the status changes by itself, and the receipt comes by email.',
   expired: 'Out of time: the rate in a coin is held for 30 minutes.',
   newAddress: 'Get a new address',

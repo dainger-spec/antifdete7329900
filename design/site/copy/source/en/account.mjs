@@ -1,16 +1,18 @@
-// The account, as the account server has it (lumen-api-server, docs/SITE_API.md §4 and §7): the overview (plan, paid
+// The account, as the account server has it (lumen-api-server, docs/SITE_API.md §4, §7 and §10): the overview (plan, paid
 // period, renewing), devices (code, label, when last online, how many profiles each has — only the number; no computer
-// names and no IP addresses, now or later), payments, the team (seats: you and 4 invited), settings (password, email
-// language, sign out everywhere, deleting the account — in the server's words). Sync stays (the owner's decision): it is
-// on the devices page. The sample is the owner of a Team plan, so the mock-up has every page; the values are samples.
-// Crypto only, which can't be charged automatically: "paid until" and "Renew".
+// names and no IP addresses, now or later), sync on a page of its own (the owner's decision: the sync server is built and
+// deployed; the account shows only what the server sees: vaults, object counts, sizes, the space, when a vault changed),
+// payments, the team (5 seats, including the owner), settings (password, email language, sign out everywhere, deleting
+// the account — in the server's words). The sample is the owner of a Team plan, so the mock-up has every page; the values
+// are samples. Crypto only, which can't be charged automatically: "paid until" and "Renew".
 export default {
   title: 'Account',
-  description: 'Your {{name}} account: plan and paid period, devices and sync, payments, team and account settings.',
+  description: 'Your {{name}} account: plan and paid period, devices, sync, payments, team and account settings.',
   who: { email: 'you@example.com', initial: 'Y', plan: 'Team plan' },
   nav: [
     ['account.html', 'house', 'Overview'],
     ['account-devices.html', 'laptop', 'Devices'],
+    ['account-sync.html', 'syncArrows', 'Sync'],
     ['account-invoices.html', 'doc', 'Payments'],
     ['account-team.html', 'person2', 'Team'],
     ['account-settings.html', 'gearshape', 'Settings'],
@@ -31,13 +33,13 @@ export default {
       ['account-devices.html', 'laptop', 'Devices', '4 of 10'],
       ['', 'person2', 'Profiles', '38 of 200', 'The number from all the team’s devices — the server doesn’t know their names'],
       ['account-team.html', 'person', 'Team', '3 of 5'],
-      ['account-devices.html#sync', 'syncArrows', 'Sync', '12 minutes ago'],
+      ['account-sync.html', 'syncArrows', 'Sync', '12 minutes ago'],
       ['account-invoices.html', 'doc', 'Last payment', '$149 · 29 October'],
       ['account-settings.html', 'gearshape', 'Sign-in', 'you@example.com'],
     ],
   },
   devices: {
-    title: 'Devices and sync',
+    title: 'Devices',
     macs: 'Devices on the licence',
     count: '4 of 10',
     list: [
@@ -51,17 +53,23 @@ export default {
     unlink: 'Unlink',
     note: 'We have no computer names and no IP addresses: a device is known by its code and label. The app shows the code in Settings → Account.',
     cooldown: 'An unlinked Mac without internet can keep working for up to 7 days. So the next unlink can be made 7 days after the previous one.',
-    sync: {
-      title: 'Sync',
-      stats: [['Objects', '38'], ['Size', '4.2 MB'], ['Changed', '12 minutes ago']],
-      serverTitle: 'Your data, as the server sees it',
-      serverSub: 'Ciphertext only: opaque names and sizes.',
-      serverLead: 'Only you can read it — on your Mac, with your master password. There are no profile names here: the server doesn’t know them; they exist only in the app on your Macs.',
-      rows: [['vault-header', '0.6 KB'], ['3f9a07c1…b84e21c9', '1.1 MB'], ['a41d9e30…07f5c2aa', '612 KB'], ['c0e8b512…9d1a47f0', '48 KB'], ['7b26fd04…e3c90b18', '4.1 KB']],
-      more: '33 more objects',
-      headerNote: '`vault-header` is the vault’s header: the salt, the Argon2id parameters and the encrypted key — no secrets.',
-      danger: { action: 'Delete sync data…', text: 'The server deletes every encrypted object. The data on your Macs stays.' },
-    },
+  },
+  sync: {
+    title: 'Sync',
+    lead: 'The server keeps your data encrypted only: the key never leaves your Macs, and only you can read it.',
+    place: { label: 'Your team uses', value: '53 MB of 4 GB', pct: 1.3, line: 'Yours: 42 MB.' },
+    team: 'The space is shared by the team, and each person has a vault of their own: nobody sees anyone else’s — neither you nor the others on the team.',
+    vaults: 'Vaults',
+    vault: 'Vault',
+    list: [{ id: '6f1c2a9e', meta: '152 objects · 42 MB · changed 12 minutes ago' }],
+    serverTitle: 'Your data, as the server sees it',
+    serverSub: 'Opaque names and sizes, largest first.',
+    serverLead: 'There are no profile names here: the server doesn’t know them. They exist only in the app on your Macs.',
+    rows: [['e1b04c77…5a9f3d02', '3.6 MB'], ['3f9a07c1…b84e21c9', '2.9 MB'], ['a41d9e30…07f5c2aa', '1.7 MB'], ['c0e8b512…9d1a47f0', '1.2 MB']],
+    more: '147 more objects',
+    header: ['vault-header', '0.6 KB', 'The vault’s header: the salt, the Argon2id parameters and the encrypted key — no secrets.'],
+    noTrace: 'The server doesn’t keep which Mac synced when — only when the vault last changed.',
+    danger: { action: 'Delete sync data…', text: 'The server deletes every encrypted object. The data on your Macs stays.' },
   },
   invoices: {
     title: 'Payments',
@@ -77,7 +85,7 @@ export default {
     title: 'Team',
     seats: 'Seats',
     count: '3 of 5',
-    lead: 'A team has 5 seats: you and 4 invited. Each person signs in with their own email and password. The profile and device limits are shared by the team. You pay: members don’t see the team’s invoices.',
+    lead: 'A team has 5 seats, including the owner. Each person signs in with their own email and password. The profile and device limits are shared by the team. You pay: members don’t see the team’s invoices.',
     you: 'You',
     owner: 'Owner',
     list: [
@@ -113,7 +121,7 @@ export default {
     },
     danger: {
       title: 'Delete account',
-      text: 'The account is blocked at once: devices leave the account, team seats close. After 7 days your email, password and devices are deleted. Payment records are kept without the email — accounting requires it. The profiles on your Macs are not touched: they are kept only by you, and {{name}} does not delete them. Until 8 November 2026 the deletion can be cancelled by signing in.',
+      text: 'The account is blocked at once: devices leave the account, team seats close. After 7 days your email, password, devices and the encrypted sync data on the server are deleted. Payment records are kept without the email — accounting requires it. The profiles on your Macs are not touched: they are kept only by you, and {{name}} does not delete them. Until 8 November 2026 the deletion can be cancelled by signing in.',
       action: 'Delete account…',
     },
   },

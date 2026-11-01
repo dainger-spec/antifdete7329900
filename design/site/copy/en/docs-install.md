@@ -66,7 +66,21 @@ Getting started
 
 How to put Lumen on your Mac, create the vault with a master password, and get to your first profile.
 
-From the code as of 31 October 2026 · Reading time: three minutes · Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
+From the code as of 31 October 2026 · Reading time: three minutes
+
+**On this page**
+
+What you need and what you download
+
+Installing
+
+The first screen: the master password
+
+What happens next
+
+Your first profile
+
+Later launches
 
 ## What you need and what you download
 
@@ -132,6 +146,8 @@ Everything in the editor is in Creating a profile; proxies are in Proxies: setup
 From then on, each launch shows **Vault locked**. Type the master password and click **Unlock**.
 
 The vault stays open until you click **Lock** or quit the app (⌘Q). Either way, every profile stops and its data is encrypted.
+
+Marked “Unconfirmed”: behaviour neither the code nor a measurement confirms
 
 Found a mistake, or is something missing? Write to us.
 

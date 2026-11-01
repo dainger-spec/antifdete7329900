@@ -68,6 +68,20 @@ Bring cookies from a file into a profile and write them out again: which files w
 
 From the code as of 31 October 2026 · Reading time: four minutes
 
+**On this page**
+
+Which files work
+
+How to import
+
+What the check shows
+
+Running and stopped profiles
+
+Exporting cookies
+
+Where cookies are kept
+
 ## Which files work
 
 Lumen reads cookie exports in JSON and in the Netscape `cookies.txt` format.

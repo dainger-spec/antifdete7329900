@@ -4,17 +4,19 @@
 
 Window title: Account — Lumen
 
-Search description: Your Lumen account: plan and paid period, Macs and sync, payments and account settings.
+Search description: Your Lumen account: plan and paid period, devices, sync, payments, team and account settings.
 
 ---
 
 you@example.com
 
-Professional plan
+Team plan
 
 - Overview
-- Macs
+- Devices
+- Sync
 - Payments
+- Team
 - Settings
 
 Sign out
@@ -23,25 +25,23 @@ Sign out
 
 ## Sign-in
 
-- Email you@example.com [Change]
-- Method One-time code by email
-- Switch to a licence keyWe delete your email and give you a licence key. Without the key, access can’t be recovered, and there are no email reminders.
+- Email you@example.com
+- Password Changed on 2 October [Change]
+
+When you change the password, your other sessions on the site end. Your Macs stay in the account.
 
 ## Emails
 
-- Receipts, and a reminder before a period ends
-- New releases — at most once a month
+- Receipts, and reminders before a period ends Always
 - Email language RUEN
 
 ## Sessions
 
-- This browser — now
-- Sign out everywhere
+- Sign out on this device
+- Sign out everywhereYour sessions on the site end. Devices don’t leave the account.
 
 [Delete account…]
 
-We delete the account and the encrypted sync data from the server. The profiles on your Macs stay.
+The account is blocked at once: devices leave the account, team seats close. After 7 days your email, password, devices and the encrypted sync data on the server are deleted. Payment records are kept without the email — accounting requires it. The profiles on your Macs are not touched: they are kept only by you, and Lumen does not delete them. Until 8 November 2026 the deletion can be cancelled by signing in.
 
-Sign out
-
-OverviewMacsPaymentsSettings
+OverviewDevicesSyncPaymentsTeamSettings
