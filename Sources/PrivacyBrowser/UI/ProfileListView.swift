@@ -1242,6 +1242,7 @@ private struct ProfilesSidebar: View {
                 section = .profiles
             }
         }
+        .help(L("tags.color.hint"))
         .contextMenu {
             Menu(L("tags.color.menu")) {
                 ForEach(0..<ProfileAvatarStyle.colorCount, id: \.self) { index in

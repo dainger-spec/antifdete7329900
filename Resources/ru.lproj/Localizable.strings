@@ -1453,6 +1453,7 @@
 "banners.collapse.help" = "Оставить одно, самое важное";
 "tags.color.menu" = "Цвет метки";
 "tags.color.none" = "Без цвета";
+"tags.color.hint" = "Цвет метки — в её меню: правый щелчок или щелчок с Control";
 "tags.color.0" = "Синий";
 "tags.color.1" = "Зелёный";
 "tags.color.2" = "Песочный";

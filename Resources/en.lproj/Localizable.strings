@@ -1453,6 +1453,7 @@
 "banners.collapse.help" = "Keep only the most important one";
 "tags.color.menu" = "Tag Colour";
 "tags.color.none" = "No Colour";
+"tags.color.hint" = "The tag’s colour is in its menu: right-click, or Control-click";
 "tags.color.0" = "Blue";
 "tags.color.1" = "Green";
 "tags.color.2" = "Sand";
