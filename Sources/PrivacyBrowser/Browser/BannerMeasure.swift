@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import MachO
+import ObjCExceptions
 
 /// MEASUREMENT BRANCH ONLY (claude/measure-banner). What Safari's app-banner tracker does in a
 /// profile's own process, printed on standard error as `BANNER-MEASURE` lines, by
@@ -191,7 +192,13 @@ enum BannerMeasure {
     /// folders it looks in).
     static func askTrackerDirectly() {
         guard !mode.isEmpty else { return }
-        probeWebAppLookup()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            MainActor.assumeIsolated {
+                if let exception = PBCatchException({ probeWebAppLookup() }) {
+                    say("web app: the probe threw \(exception.name.rawValue): \(exception.reason ?? "")")
+                }
+            }
+        }
         guard let cls: AnyObject = NSClassFromString("WBSAppLinkBannerTracker") else {
             say("direct: no WBSAppLinkBannerTracker in this process")
             return
@@ -446,9 +453,17 @@ final class KeySpy: NSDictionary {
     nonisolated(unsafe) static var asked: [String] = []
     private var path = ""
 
-    convenience init(path: String) {
-        self.init()
+    init(path: String) {
         self.path = path
+        super.init()
+    }
+
+    override init() {
+        super.init()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
     }
 
     override var count: Int { 0 }
