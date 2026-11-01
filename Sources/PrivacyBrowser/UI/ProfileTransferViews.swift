@@ -13,9 +13,8 @@ private func transferErrorText(_ error: Error) -> String {
     switch error as? CoreError {
     case .authenticationFailed?: return L("transfer.error.password")
     case .unsupportedFormat?: return L("transfer.error.notExport")
-    case .newerFormat?: return errorText(error)
-    case let core?: return core.description
-    case nil: return error.localizedDescription
+    // Every other error in the interface's language too (`errorText`), never the core's English.
+    default: return errorText(error)
     }
 }
 
