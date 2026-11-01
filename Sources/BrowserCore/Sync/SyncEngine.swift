@@ -204,6 +204,7 @@ public final class SyncEngine: @unchecked Sendable {
 
         let profilesBefore = Set(repository.list().map(\.id))
         try await syncIndex(remote: remote, state: &state, report: &report)
+        try await syncLabels(remote: remote, state: &state, report: &report)
 
         let index = repository.currentIndex()
         for entry in index.entries {
@@ -280,6 +281,59 @@ public final class SyncEngine: @unchecked Sendable {
             let remoteRevision = remote[objectID]
             try await push(name: name, data: localBytes, revision: (remoteRevision ?? 0) + 1,
                            expected: remoteRevision, state: &state, report: &report)
+        }
+    }
+
+    // MARK: Tag colours
+
+    /// The tags' colours (`labels.bin`, `TagColors`): whenever either side changed, the two are
+    /// merged tag by tag, written here when the merge differs from this device's copy and pushed
+    /// when it differs from the server's. A copy here that does not open counts as none: the
+    /// server's is taken in and this one kept beside it as `labels.bin.unreadable` — never pushed,
+    /// never written over. A newer version's copy, here or there, stops the sync with nothing
+    /// written on either side. With nothing there and no colour here, nothing is pushed.
+    private func syncLabels(remote: [String: Int], state: inout [String: ItemState], report: inout SyncReport) async throws {
+        let name = "labels"
+        let objectID = codec.objectID(for: name)
+        let file = try TagColors.file(for: repository.vault)
+        var localOpens = true
+        let local: TagColors
+        do {
+            local = try file.load() ?? TagColors()
+        } catch let error as CoreError {
+            if case .newerFormat = error { throw error }
+            local = TagColors()
+            localOpens = false
+        } catch {
+            local = TagColors()
+            localOpens = false
+        }
+        let localBytes = try JSONCoding.encoder.encode(local)
+        let known = state[name]
+        let remoteRevision = remote[objectID]
+        let localChanged = localOpens && Self.hash(localBytes) != known?.sha256
+        let remoteChanged = remoteRevision != nil && remoteRevision != known?.revision
+
+        if let remoteRevision, remoteChanged || localChanged || !localOpens {
+            guard let blob = try await transport.fetch(objectID: objectID) else { return }
+            let decoded = try codec.decode(blob)
+            guard decoded.payload.logicalName == name else { throw CoreError.corruptData("unexpected object \(decoded.payload.logicalName)") }
+            try DocumentFormat.check(decoded.payload.data, supported: TagColors.supportedFormat, what: "labels.bin")
+            let theirs = try JSONCoding.decoder.decode(TagColors.self, from: decoded.payload.data)
+            let merged = TagColors.merge(local, theirs)
+            let mergedBytes = try JSONCoding.encoder.encode(merged)
+            if mergedBytes != localBytes || !localOpens {
+                try file.save(merged)
+                report.pulled.append(name)
+            }
+            if mergedBytes != decoded.payload.data {
+                try await push(name: name, data: mergedBytes, revision: remoteRevision + 1,
+                               expected: remoteRevision, state: &state, report: &report)
+            } else {
+                state[name] = ItemState(revision: remoteRevision, sha256: Self.hash(mergedBytes))
+            }
+        } else if remoteRevision == nil, localChanged, !local.choices.isEmpty {
+            try await push(name: name, data: localBytes, revision: 1, expected: nil, state: &state, report: &report)
         }
     }
 

@@ -193,6 +193,8 @@ public final class UnlockedVault: @unchecked Sendable {
     var settingsKey: SymmetricKey { get throws { try vaultKey("device-settings") } }
     /// The proxy list (`proxies.bin`, `ProxyList`): this Mac's, never synced, like the settings.
     var proxyListKey: SymmetricKey { get throws { try vaultKey("proxy-list") } }
+    /// The tags' colours (`labels.bin`, `TagColors`): the vault's, synced as an object of their own.
+    var labelsKey: SymmetricKey { get throws { try vaultKey("profile-labels") } }
 
     private func vaultKey(_ purpose: String) throws -> SymmetricKey {
         guard let masterKey else { throw CoreError.notGranted(purpose) }

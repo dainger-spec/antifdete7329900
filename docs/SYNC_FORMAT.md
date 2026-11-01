@@ -96,6 +96,7 @@ never needs to parse a blob.
 |---|---|---|
 | `vault-header` | `VaultHeader` JSON: vault ID, KDF params, salt, wrapped VMK, `passwordRevision` (how many times the master password was changed) | no, it contains nothing secret, and a new device needs it to derive the key |
 | `HMAC(objectIDKey, "index")` | envelope → profile index | yes |
+| `HMAC(objectIDKey, "labels")` | envelope → the tags' colours (`TagColors`, `labels.bin`): one choice per tag for the whole vault, not part of any profile's settings | yes |
 | `HMAC(objectIDKey, "profile/<uuid>/config")` | envelope → the profile's `config.bin` bytes | yes (twice) |
 | `HMAC(objectIDKey, "profile/<uuid>/passwords")` | envelope → the profile's `passwords.bin` bytes | yes (twice) |
 | `HMAC(objectIDKey, "profile/<uuid>/bookmarks")` | envelope → the profile's `bookmarks.bin` bytes | yes (twice) |
@@ -215,6 +216,12 @@ another device's copy. Merges are idempotent (`merge(x, x) == x`) and unit-teste
 | History | normalised URL | `lastVisitedAt` = max, `visitCount` = max (not sum: the same visits exist on both sides), title of the newest visit | `removedURLs[url] = time` drops visits not newer than it; "Clear all" sets a `clearedThrough` watermark |
 | Cookies | name, domain (leading dot for a domain cookie, none for host-only), path — as a cookie store keys them | newer `updatedAt` wins; on the same second a deletion wins, then the larger value, the later expiry, then the flags (Secure, HttpOnly, SameSite), so the result does not depend on which device merges | `deleted[] = (key, deletedAt)`; a cookie set *after* its deletion elsewhere comes back |
 | Settings (`config`) | the whole file | newer `settingsModifiedAt` wins; the other kept as `config.bin.conflict` | — |
+| Tags' colours (`labels`) | the tag's name in lower case | later `chosenAt` wins; at the same moment a colour over none, then the lower colour | a colour taken away is a choice with no colour (`color: nil`), kept: a later one wins over it as over any |
+
+A version of the app from before the tags' colours does not know the `labels` object: it never
+reads it, and never writes it back without what it did not know. On a device, a `labels.bin` that
+does not open is never pushed: the server's copy is taken in and the one here kept beside it as
+`labels.bin.unreadable`.
 
 History tombstones older than the profile's retention window are dropped, because no
 surviving entry can be that old. Cookie tombstones are dropped after 400 days (no browser keeps
