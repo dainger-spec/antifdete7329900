@@ -4652,15 +4652,23 @@ final class SelfTest {
                   idle < 0.4, "\(Int(idle * 100)) % of a core over 4 s (the control read \(Int(control * 100)) %)")
         }
 
-        // The page's process ended from outside, four times at most.
+        // The page's process ended from outside, as a crash ends it, four times at most. A
+        // sandboxed build may not signal another process: there WebKit's own call ends it
+        // (`_killWebContentProcess`), which our tab is told of the same way.
         var ended = 0
         var started: [pid_t] = []
         var last: pid_t = 0
+        var throughWebKit = 0
+        let killSelector = NSSelectorFromString("_killWebContentProcess")
         for _ in 0..<4 {
             let current = pid()
             guard current > 0, current != last else { break }
             last = current
-            kill(current, SIGKILL)
+            if kill(current, SIGKILL) != 0 {
+                guard tab.webView.responds(to: killSelector) else { break }
+                _ = tab.webView.perform(killSelector)
+                throughWebKit += 1
+            }
             ended += 1
             _ = await waitUntil(timeout: 10) { tab.terminationCount >= ended && (tab.pageStopped || (pid() > 0 && pid() != current)) }
             if tab.pageStopped { break }
@@ -4674,7 +4682,8 @@ final class SelfTest {
         check("ended page: once left, no new process is started for it",
               tab.pageStopped && (after == 0 || after == last), "the page's process now \(after), the one ended last \(last)")
         check("ended page: its window says so over the tab", controller.showsStoppedPage)
-        info("ended page: WebKit said why the last time: \(tab.lastTerminationReason)")
+        info("ended page: WebKit said why the last time: \(tab.lastTerminationReason); ended by a signal \(ended - throughWebKit) times, "
+             + "through WebKit \(throughWebKit) (this build \(throughWebKit > 0 ? "may not signal another process" : "signals it"))")
 
         controller.reload()
         let back = await waitUntil(timeout: 20) { !tab.pageStopped && !tab.isLoading && pid() > 0 && pid() != last }
