@@ -104,6 +104,9 @@ struct LockPasswordField: View {
     /// Changes when a wrong password was tried: the field shakes once.
     var attempts = 0
     var onSubmit: () -> Void = {}
+    /// The cursor starts here. One field per screen: each took it as it appeared, and the last one
+    /// won — the first launch began in "Repeat the master password" (CI run 554's snapshot).
+    var takesFocus = true
     @State private var revealed = false
     @FocusState private var focused: Bool
     @StateObject private var capsLock = CapsLockState()
@@ -157,7 +160,7 @@ struct LockPasswordField: View {
             .animation(Theme.hoverAnimation, value: focused)
             .animation(.linear(duration: 0.42), value: attempts)
         }
-        .onAppear { focused = true }
+        .onAppear { if takesFocus { focused = true } }
     }
 }
 
@@ -338,11 +341,12 @@ struct SetupView: View {
                     .padding(.top, 26)
                 StrengthMeter(score: PasswordStrength.score(password))
                     .padding(.top, 10)
-                LockPasswordField(label: L("setup.field.repeat"), password: $confirmation, onSubmit: create)
+                LockPasswordField(label: L("setup.field.repeat"), password: $confirmation, onSubmit: create,
+                                  takesFocus: false)
                     .padding(.top, 20)
                 VStack(alignment: .leading, spacing: 6) {
-                    requirement(L("setup.req.length"), met: longEnough, shown: !password.isEmpty)
-                    requirement(L("setup.req.match"), met: matches, shown: !confirmation.isEmpty)
+                    PasswordRequirement(text: L("setup.req.length"), met: longEnough, shown: !password.isEmpty)
+                    PasswordRequirement(text: L("setup.req.match"), met: matches, shown: !confirmation.isEmpty)
                 }
                 .padding(.top, 14)
                 LockActionButton(title: L("setup.action.create"), working: model.isWorking,
@@ -353,10 +357,22 @@ struct SetupView: View {
         }
     }
 
-    private func requirement(_ text: String, met: Bool, shown: Bool) -> some View {
+    private func create() {
+        guard longEnough, matches, !model.isWorking else { return }
+        Task { await model.createVault(password: password) }
+    }
+}
+
+/// A new master password's requirement under its fields: a ring until it is typed, then a check when
+/// met or a cross in red when not — never a check that could be read as met before anything is typed.
+private struct PasswordRequirement: View {
+    let text: String
+    let met: Bool
+    let shown: Bool
+
+    var body: some View {
         let failed = shown && !met
-        // Not typed yet: a ring, never a check that could be read as met.
-        return HStack(spacing: 7) {
+        HStack(spacing: 7) {
             Image(systemName: failed ? "xmark" : (met ? "checkmark" : "circle"))
                 .font(.system(size: met || failed ? 10 : 7, weight: .bold))
                 .foregroundStyle(failed ? Theme.danger : (met ? Theme.textPrimary : Theme.textTertiary))
@@ -368,11 +384,6 @@ struct SetupView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(Text(met ? L("setup.req.met") : L("setup.req.notMet")))
-    }
-
-    private func create() {
-        guard longEnough, matches, !model.isWorking else { return }
-        Task { await model.createVault(password: password) }
     }
 }
 
@@ -544,33 +555,67 @@ struct ChangePasswordView: View {
     @State private var current = ""
     @State private var new = ""
     @State private var confirmation = ""
+    /// A change is on its way: a second click does not start another.
+    @State private var changing = false
 
+    private var longEnough: Bool { new.count >= 10 }
+    private var matches: Bool { !confirmation.isEmpty && new == confirmation }
+    private var canChange: Bool { !current.isEmpty && longEnough && matches && !changing }
+
+    // The lock screen's fields (the design's), with Caps Lock said and the eye to show what was
+    // typed; the new password's strength and requirements as at the first launch. Return presses
+    // "Change" (the default button) — the fields themselves submit nothing, so that one press is
+    // never two changes.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: L("changepw.title"))
-            Form {
-                SecureField(L("changepw.current"), text: $current)
-                SecureField(L("changepw.new"), text: $new)
-                SecureField(L("changepw.repeat"), text: $confirmation)
-                Text(L("changepw.note")).font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    LockPasswordField(label: L("changepw.current"), password: $current)
+                    LockPasswordField(label: L("changepw.new"), password: $new, takesFocus: false)
+                        .padding(.top, 18)
+                    StrengthMeter(score: PasswordStrength.score(new))
+                        .padding(.top, 10)
+                    LockPasswordField(label: L("changepw.repeat"), password: $confirmation, takesFocus: false)
+                        .padding(.top, 18)
+                    VStack(alignment: .leading, spacing: 6) {
+                        PasswordRequirement(text: L("setup.req.length"), met: longEnough, shown: !new.isEmpty)
+                        PasswordRequirement(text: L("setup.req.match"), met: matches, shown: !confirmation.isEmpty)
+                    }
+                    .padding(.top, 12)
+                    Text(L("changepw.note"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 18)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 6)
+                .padding(.bottom, 18)
             }
-            .lumenForm()
+            .scrollBounceBehavior(.basedOnSize)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
                     .buttonStyle(.lumenSecondary)
                     .keyboardShortcut(.cancelAction)
-                Button(L("changepw.action.change")) {
-                    Task {
-                        await model.changePassword(current: current, new: new)
-                        if model.errorMessage == nil { dismiss() }
-                    }
-                }
-                .buttonStyle(.lumenPrimary)
-                .keyboardShortcut(.defaultAction)
-                .disabled(current.isEmpty || new.count < 10 || new != confirmation)
+                Button(L("changepw.action.change"), action: change)
+                    .buttonStyle(.lumenPrimary)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canChange)
             }
         }
-        .sheetFrame(width: 420)
+        // Fits under the Settings window's title bar (700 pt) as well as the Profiles window's.
+        .sheetFrame(width: 480, height: 660)
         .background(Theme.raised)
+    }
+
+    private func change() {
+        guard canChange else { return }
+        changing = true
+        Task {
+            await model.changePassword(current: current, new: new)
+            changing = false
+            if model.errorMessage == nil { dismiss() }
+        }
     }
 }
