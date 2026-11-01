@@ -1433,3 +1433,7 @@
 "settings.security.password.change" = "Сменить…";
 "settings.security.lock" = "Заблокировать сейчас";
 "settings.security.vault" = "Хранилище";
+"setup.facts.title" = "Это отдельный пароль — не от аккаунта Lumen";
+"setup.facts.notSent" = "Он никуда не отправляется: ни на наш сервер, ни при синхронизации.";
+"setup.facts.noRecovery" = "Восстановить его нельзя — ни письмом, ни через поддержку. Если он забыт, данные профилей не открыть никак.";
+"setup.facts.writeDown" = "Запишите его и храните отдельно от пароля аккаунта.";

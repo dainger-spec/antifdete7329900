@@ -34,6 +34,27 @@ struct LockScreen<Content: View>: View {
     @Environment(\.lumenStillFrame) private var stillFrame
 
     var body: some View {
+        // Centred in the window; scrolls when the window is shorter than the screen's content.
+        GeometryReader { geometry in
+            ScrollView {
+                screen.frame(minHeight: geometry.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollIndicators(.automatic)
+        }
+        .onAppear {
+            guard !appeared else { return }
+            if stillFrame {
+                appeared = true
+                return
+            }
+            withAnimation(Motion.isReduced(reduceMotion) ? nil : Motion.entry(duration: 0.9).delay(0.2)) {
+                appeared = true
+            }
+        }
+    }
+
+    private var screen: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 40)
             VStack(spacing: 0) {
@@ -70,16 +91,6 @@ struct LockScreen<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-            guard !appeared else { return }
-            if stillFrame {
-                appeared = true
-                return
-            }
-            withAnimation(Motion.isReduced(reduceMotion) ? nil : Motion.entry(duration: 0.9).delay(0.2)) {
-                appeared = true
-            }
-        }
     }
 }
 
@@ -315,14 +326,16 @@ struct SetupView: View {
     var body: some View {
         LockScreen(title: L("setup.title"), subtitle: L("setup.subtitle"), footer: L("setup.footer")) {
             VStack(alignment: .leading, spacing: 0) {
+                MasterPasswordFacts()
+                    .padding(.top, 24)
                 if let moved = model.movedAsideVaultPath {
                     // After "forgot password": the previous vault was moved, not deleted.
                     LockNote(symbol: "archivebox", text: String(format: L("setup.movedAside"), moved))
                         .textSelection(.enabled)
-                        .padding(.top, 24)
+                        .padding(.top, 20)
                 }
                 LockPasswordField(label: L("setup.field.password"), password: $password)
-                    .padding(.top, 34)
+                    .padding(.top, 26)
                 StrengthMeter(score: PasswordStrength.score(password))
                     .padding(.top, 10)
                 LockPasswordField(label: L("setup.field.repeat"), password: $confirmation, onSubmit: create)
@@ -336,8 +349,6 @@ struct SetupView: View {
                                  workingTitle: L("setup.working"), enabled: longEnough && matches, action: create)
                     .keyboardShortcut(.defaultAction)
                     .padding(.top, 28)
-                LockNote(symbol: "exclamationmark.triangle", tint: Theme.warning, text: L("setup.warning"))
-                    .padding(.top, 26)
             }
         }
     }
@@ -362,6 +373,46 @@ struct SetupView: View {
     private func create() {
         guard longEnough, matches, !model.isWorking else { return }
         Task { await model.createVault(password: password) }
+    }
+}
+
+/// What the person must know before choosing the master password, said first and large — not as a
+/// footnote (the owner, 1 November). With accounts, this screen comes right after the account's own
+/// password, twice typed, and many would type that one again; but the account's password comes back
+/// by email and this one never does. So: it is another password, it is sent nowhere, it cannot be
+/// recovered, and it is to be written down apart. "Cannot be recovered", not "keep it safe".
+private struct MasterPasswordFacts: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L("setup.facts.title"))
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            fact("icloud.slash", L("setup.facts.notSent"), strong: false)
+            fact("exclamationmark.triangle.fill", L("setup.facts.noRecovery"), strong: true)
+            fact("square.and.pencil", L("setup.facts.writeDown"), strong: false)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.warningTint))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.warningLine, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func fact(_ symbol: String, _ text: String, strong: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(strong ? Theme.warning : Theme.textSecondary)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.system(size: 15, weight: strong ? .semibold : .regular))
+                .lineSpacing(2)
+                .foregroundStyle(Theme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

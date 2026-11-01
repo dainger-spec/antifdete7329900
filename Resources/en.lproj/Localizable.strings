@@ -1433,3 +1433,7 @@
 "settings.security.password.change" = "Change…";
 "settings.security.lock" = "Lock now";
 "settings.security.vault" = "Vault";
+"setup.facts.title" = "This is a separate password — not your Lumen account's";
+"setup.facts.notSent" = "It is sent nowhere: not to our server, not when syncing.";
+"setup.facts.noRecovery" = "It cannot be recovered — not by email, not through support. Forgotten, it leaves the profiles' data unopenable for good.";
+"setup.facts.writeDown" = "Write it down and keep it apart from your account password.";
