@@ -85,6 +85,10 @@ export function hub({ pages, tbdIndex, unvIndex = {} }) {
   <h2 class="h2" style="margin-top:72px">Страницы</h2>
   <div class="table-wrap" style="margin-top:20px"><div class="table-scroll"><table class="table compact"><thead><tr><th>Страница</th><th>Прототип</th><th>Снимки, ru</th><th>Снимки, en</th></tr></thead><tbody>${rows}</tbody></table></div></div>
 
+  <h2 class="h2" style="margin-top:72px" id="mail">Письма сервера</h2>
+  <p class="lead" style="margin-top:10px;max-width:820px">Десять писем сервера аккаунтов — коды, сброс пароля, напоминания, квитанции, приглашения в команду и остальные — на русском и английском, HTML и текст. Как у крупных: логотип, одна строка, крупный код, подпись; таблицы и построчные стили, одна колонка до 600 px, цвета сайта. Шаблоны — <code>email/templates</code>, как их подключить — <code>email/README.md</code>.</p>
+  <p style="margin-top:16px"><a class="btn secondary" href="email/index.html">Открыть все письма</a></p>
+
   <h2 class="h2" style="margin-top:72px">Движение</h2>
   <p class="lead" style="margin-top:10px;max-width:820px">Записи из этого же прототипа (Chromium, 25 кадров в секунду — кривые лучше смотреть вживую). Правила: обычное движение ≤ 300 мс, ничего не пульсирует в покое, всё уважает Reduce Motion, страница читается без JavaScript.</p>
   <div class="grid c2" style="margin-top:24px">${motion}</div>

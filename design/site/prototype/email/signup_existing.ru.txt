@@ -1,0 +1,14 @@
+Subject: У вас уже есть аккаунт Lumen
+From: Lumen <no-reply@mail.lumenbrowser.io>
+Reply-To: support@lumenbrowser.io
+
+Кто-то — возможно, вы — пытался создать аккаунт Lumen с этим адресом. Аккаунт с ним уже есть.
+
+Войти: https://lumenbrowser.io/login
+Забыли пароль? https://lumenbrowser.io/reset-password
+
+Если это были не вы, ничего делать не нужно.
+
+— Lumen
+
+Ответ на это письмо придёт в поддержку Lumen.

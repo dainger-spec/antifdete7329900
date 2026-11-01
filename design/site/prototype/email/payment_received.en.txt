@@ -1,0 +1,15 @@
+Subject: Payment received — LMN-000003
+From: Lumen <no-reply@mail.lumenbrowser.io>
+Reply-To: support@lumenbrowser.io
+
+Invoice LMN-000003 is paid.
+
+Plan: “Team”, one month
+Amount: $149.00 (149.000000 USDT)
+Paid until: 29 November 2026, 09:00 UTC
+
+Refunds: within 14 days of the first payment, no questions asked; after a renewal, within 7 days if you did not work in the new period. We refund in the same coin and the same amount.
+
+— Lumen
+
+Replies to this email reach Lumen support.

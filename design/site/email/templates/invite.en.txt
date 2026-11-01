@@ -1,0 +1,9 @@
+{{define "subject"}}An invitation to a Lumen team{{end}}{{.OwnerEmail}} invites you to their Lumen team. You will have a sign-in of your own, with your own password.
+
+Accept the invitation: {{.AcceptURL}}
+
+If you have no Lumen account yet, create one with this address, then open the link. The invitation is valid until {{.Expires}}.
+
+— Lumen
+
+Replies to this email reach Lumen support.

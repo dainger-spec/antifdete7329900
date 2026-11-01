@@ -1,0 +1,13 @@
+Subject: An invitation to a Lumen team
+From: Lumen <no-reply@mail.lumenbrowser.io>
+Reply-To: support@lumenbrowser.io
+
+anna@example.com invites you to their Lumen team. You will have a sign-in of your own, with your own password.
+
+Accept the invitation: https://lumenbrowser.io/team/accept?code=tq3v9x7k2m4p8r6w1y5z
+
+If you have no Lumen account yet, create one with this address, then open the link. The invitation is valid until 15 November 2026, 09:00 UTC.
+
+— Lumen
+
+Replies to this email reach Lumen support.

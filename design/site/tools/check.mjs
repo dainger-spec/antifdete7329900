@@ -30,7 +30,10 @@ const files = [];
 for (const f of files.filter((x) => /\.(html|css|js)$/.test(x))) {
   const s = fs.readFileSync(f, 'utf8');
   const rel = path.relative(SITE, f);
-  for (const m of s.matchAll(/(?:src|href)\s*=\s*"(https?:)?\/\/[^"]+"/g)) if (!/rel="alternate"/.test(m[0])) fail('network', `${rel}: ${m[0].slice(0, 80)}`);
+  // The letters' previews (prototype/email) keep the links the real letters carry — to the product's own site, a click
+  // away, never loaded; what they load (the logo) is local like everything else.
+  const mailLink = (m) => rel.startsWith(`prototype${path.sep}email${path.sep}`) && /^href="https:\/\/lumenbrowser\.io\//.test(m);
+  for (const m of s.matchAll(/(?:src|href)\s*=\s*"(https?:)?\/\/[^"]+"/g)) if (!/rel="alternate"/.test(m[0]) && !mailLink(m[0])) fail('network', `${rel}: ${m[0].slice(0, 80)}`);
   for (const m of s.matchAll(/url\(\s*['"]?https?:/g)) fail('network', `${rel}: ${m[0]}`);
   for (const m of s.matchAll(/@import\s/g)) fail('network', `${rel}: @import`);
   for (const m of s.matchAll(/<link[^>]+rel="stylesheet"[^>]+href="(?!\.\.\/assets\/|assets\/)[^"]*"/g)) fail('network', `${rel}: ${m[0]}`);

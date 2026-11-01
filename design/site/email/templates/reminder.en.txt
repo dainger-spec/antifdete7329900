@@ -1,0 +1,11 @@
+{{define "subject"}}Your Lumen period ends {{.When}}{{end}}Your “{{.PlanName}}” plan is paid until {{.Ends}}.
+
+Nothing is charged automatically: to go on, pay for the next period — it starts where this one ends, no day is lost.
+
+Renew: {{.SiteURL}}/account
+
+Without a renewal, Lumen keeps opening your profiles to export their data. Profile data is never deleted.
+
+— Lumen
+
+Replies to this email reach Lumen support.

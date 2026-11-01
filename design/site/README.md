@@ -154,6 +154,7 @@ node design/site/tools/export-copy.mjs  # тексты → copy/{ru,en}/*.md
 node design/site/tools/render.mjs       # снимки → shots/{ru,en}/*.png (или: render.mjs pricing)
 node design/site/tools/record.mjs       # ролики → shots/motion/*.mp4
 python3 design/site/tools/overview.py   # обзорные листы → shots/overview-*.png
+node design/site/email/src/build.mjs    # письма сервера → email/templates, превью → prototype/email (нужен Go)
 node design/site/tools/preview-scene.mjs proxy           # одна сцена главной → prototype/_preview/ (не коммитится)
 node design/site/tools/scene-frames.mjs <страница> <папка> --scene proxy   # кадры сцены в точках прокрутки
 node design/site/tools/hero/render.mjs  # MacBook во вступлении, кадры заново (около 45 минут)
@@ -172,6 +173,7 @@ design/site/
     ru/, en/         25 страниц на каждом языке (страница оплаты — checkout.html)
     assets/          site.css, site.js — общая вёрстка и поведение (знак из кода — site.js, «Code art»)
       scenes/        сцены главной: <сцена>.css, <сцена>.js и их картинки
+    email/           письма сервера, собранные движком сервера с образцом данных (index.html — все сразу)
   shots/
     ru/, en/         <страница>-1440.png, <страница>-390.png
     motion/          ролики движения, MP4
@@ -180,6 +182,8 @@ design/site/
     ru/, en/         тексты страниц для чтения (выгружаются из прототипа)
     source/ru, en/   исходники текстов, из которых собираются страницы
     facts.mjs        каждая цифра сайта и её источник
+  email/             письма сервера: templates/ (Go html/template и text/template, ru/en, и логотип, который сервер вкладывает в письмо),
+                     src/ — генератор, сборка движком Go, правила; как подключить — email/README.md
   tools/             сборка, проверки, рендер, запись, шаблоны страниц, вопросы
     templates/pages/home/   сцены главной: по модулю на сцену, порядок — в home.mjs
     hero/            рендер MacBook во вступлении

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Письма Lumen — шаблоны</title>
+<style>
+  body { margin: 0; background: #060709; color: #ECEEF2; font: 400 15px/22px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif; }
+  .wrap { max-width: 1320px; margin: 0 auto; padding: 32px 16px 80px; }
+  a { color: #6F8FEA; }
+  h1 { font: 600 30px/36px -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif; margin: 12px 0 8px; }
+  .lead { color: #A2A9B6; max-width: 760px; margin: 0; }
+  .mail { margin-top: 48px; }
+  .mail h2 { font: 600 18px/26px inherit; margin: 0; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 12px; }
+  .pane { border: 1px solid #1E222A; border-radius: 16px; overflow: hidden; background: #0B0C0F; }
+  .head { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #1E222A; font-size: 13px; color: #8A93A3; }
+  .head b { color: #ECEEF2; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  iframe { display: block; width: 100%; height: 640px; border: 0; background: #060709; }
+  @media (max-width: 899px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body><div class="wrap">
+<a href="../index.html">← Все страницы</a>
+<h1>Письма сервера</h1>
+<p class="lead">Десять писем из internal/mail/templates.go сервера, на русском и английском, как их соберёт сервер: шаблоны прочитаны Go (html/template и text/template) и исполнены с образцом данных. У каждого письма — текстовая версия с темой. Отправитель — no-reply@mail.lumenbrowser.io, ответы — в support@lumenbrowser.io. Логотип сервер вкладывает в само письмо (docs/SITE_API.md §11): извне письмо не грузит ничего.</p>
+<section class="mail" id="signup_code"><h2>Код подтверждения регистрации</h2><div class="grid">
+<div class="pane"><div class="head"><b>Код подтверждения Lumen: 482917</b><span><a href="signup_code.ru.html">HTML</a> · <a href="signup_code.ru.txt">текст</a></span></div><iframe src="signup_code.ru.html" title="Код подтверждения Lumen: 482917" loading="lazy"></iframe></div>
+<div class="pane"><div class="head"><b>Your Lumen confirmation code: 482917</b><span><a href="signup_code.en.html">HTML</a> · <a href="signup_code.en.txt">текст</a></span></div><iframe src="signup_code.en.html" title="Your Lumen confirmation code: 482917" loading="lazy"></iframe></div>
+</div></section>
+<section class="mail" id="signup_existing"><h2>Аккаунт с этим адресом уже есть</h2><div class="grid">
+<div class="pane"><div class="head"><b>У вас уже есть аккаунт Lumen</b><span><a href="signup_existing.ru.html">HTML</a> · <a href="signup_existing.ru.txt">текст</a></span></div><iframe src="signup_existing.ru.html" title="У вас уже есть аккаунт Lumen" loading="lazy"></iframe></div>
+<div class="pane"><div class="head"><b>You already have a Lumen account</b><span><a href="signup_existing.en.html">HTML</a> · <a href="signup_existing.en.txt">текст</a></span></div><iframe src="signup_existing.en.html" title="You already have a Lumen account" loading="lazy"></iframe></div>
+</div></section>
+<section class="mail" id="password_reset_code"><h2>Код сброса пароля</h2><div class="grid">
+<div class="pane"><div class="head"><b>Сброс пароля Lumen: 482917</b><span><a href="password_reset_code.ru.html">HTML</a> · <a href="password_reset_code.ru.txt">текст</a></span></div><iframe src="password_reset_code.ru.html" title="Сброс пароля Lumen: 482917" loading="lazy"></iframe></div>
+<div class="pane"><div class="head"><b>Reset your Lumen password: 482917</b><span><a href="password_reset_code.en.html">HTML</a> · <a href="password_reset_code.en.txt">текст</a></span></div><iframe src="password_reset_code.en.html" title="Reset your Lumen password: 482917" loading="lazy"></iframe></div>
+</div></section>
+<section class="mail" id="password_changed"><h2>Пароль изменён</h2><div class="grid">
+<div class="pane"><div class="head"><b>Пароль Lumen изменён</b><span><a href="password_changed.ru.html">HTML</a> · <a href="password_changed.ru.txt">текст</a></span></div><iframe src="password_changed.ru.html" title="Пароль Lumen изменён" loading="lazy"></iframe></div>
+<div class="pane"><div class="head"><b>Your Lumen password was changed</b><span><a href="password_changed.en.html">HTML</a> · <a href="password_changed.en.txt">текст</a></span></div><iframe src="password_changed.en.html" title="Your Lumen password was changed" loading="lazy"></iframe></div>
+</div></section>
+<section class="mail" id="invite"><h2>Приглашение в команду</h2><div class="grid">
+<div class="pane"><div class="head"><b>Приглашение в команду Lumen</b><span><a href="invite.ru.html">HTML</a> · <a href="invite.ru.txt">текст</a></span></div><iframe src="invite.ru.html" title="Приглашение в команду Lumen" loading="lazy"></iframe></div>
+<div class="pane"><div class="head"><b>An invitation to a Lumen team</b><span><a href="invite.en.html">HTML</a> · <a href="invite.en.txt">текст</a></span></div><iframe src="invite.en.html" title="An invitation to a Lumen team" loading="lazy"></iframe></div>
+</div></section>
+<section class="mail" id="seat_revoked"><h2>Место в команде закрыто</h2><div class="grid">
+<div class="pane"><div class="head"><b>Ваше место в команде Lumen закрыто</b><span><a href="seat_revoked.ru.html">HTML</a> · <a href="seat_revoked.ru.txt">текст</a></span></div><iframe src="seat_revoked.ru.html" title="Ваше место в команде Lumen закрыто" loading="lazy"></iframe></div>
+<div class="pane"><div class="head"><b>Your seat in a Lumen team was closed</b><span><a href="seat_revoked.en.html">HTML</a> · <a href="seat_revoked.en.txt">текст</a></span></div><iframe src="seat_revoked.en.html" title="Your seat in a Lumen team was closed" loading="lazy"></iframe></div>
+</div></section>
+<section class="mail" id="reminder"><h2>Напоминание о конце периода</h2><div class="grid">
+<div class="pane"><div class="head"><b>Оплаченный период Lumen заканчивается через 7 дней</b><span><a href="reminder.ru.html">HTML</a> · <a href="reminder.ru.txt">текст</a></span></div><iframe src="reminder.ru.html" title="Оплаченный период Lumen заканчивается через 7 дней" loading="lazy"></iframe></div>
+<div class="pane"><div class="head"><b>Your Lumen period ends in 7 days</b><span><a href="reminder.en.html">HTML</a> · <a href="reminder.en.txt">текст</a></span></div><iframe src="reminder.en.html" title="Your Lumen period ends in 7 days" loading="lazy"></iframe></div>
+</div></section>
+<section class="mail" id="payment_received"><h2>Квитанция об оплате</h2><div class="grid">
+<div class="pane"><div class="head"><b>Оплата получена — LMN-000003</b><span><a href="payment_received.ru.html">HTML</a> · <a href="payment_received.ru.txt">текст</a></span></div><iframe src="payment_received.ru.html" title="Оплата получена — LMN-000003" loading="lazy"></iframe></div>
+<div class="pane"><div class="head"><b>Payment received — LMN-000003</b><span><a href="payment_received.en.html">HTML</a> · <a href="payment_received.en.txt">текст</a></span></div><iframe src="payment_received.en.html" title="Payment received — LMN-000003" loading="lazy"></iframe></div>
+</div></section>
+<section class="mail" id="deletion_scheduled"><h2>Аккаунт будет удалён</h2><div class="grid">
+<div class="pane"><div class="head"><b>Аккаунт Lumen будет удалён</b><span><a href="deletion_scheduled.ru.html">HTML</a> · <a href="deletion_scheduled.ru.txt">текст</a></span></div><iframe src="deletion_scheduled.ru.html" title="Аккаунт Lumen будет удалён" loading="lazy"></iframe></div>
+<div class="pane"><div class="head"><b>Your Lumen account will be deleted</b><span><a href="deletion_scheduled.en.html">HTML</a> · <a href="deletion_scheduled.en.txt">текст</a></span></div><iframe src="deletion_scheduled.en.html" title="Your Lumen account will be deleted" loading="lazy"></iframe></div>
+</div></section>
+<section class="mail" id="deletion_cancelled"><h2>Удаление отменено</h2><div class="grid">
+<div class="pane"><div class="head"><b>Удаление аккаунта Lumen отменено</b><span><a href="deletion_cancelled.ru.html">HTML</a> · <a href="deletion_cancelled.ru.txt">текст</a></span></div><iframe src="deletion_cancelled.ru.html" title="Удаление аккаунта Lumen отменено" loading="lazy"></iframe></div>
+<div class="pane"><div class="head"><b>Your Lumen account will not be deleted</b><span><a href="deletion_cancelled.en.html">HTML</a> · <a href="deletion_cancelled.en.txt">текст</a></span></div><iframe src="deletion_cancelled.en.html" title="Your Lumen account will not be deleted" loading="lazy"></iframe></div>
+</div></section>
+</div></body>
+</html>

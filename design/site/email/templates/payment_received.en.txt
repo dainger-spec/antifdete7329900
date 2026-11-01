@@ -1,0 +1,11 @@
+{{define "subject"}}Payment received — {{.Number}}{{end}}Invoice {{.Number}} is paid.
+
+Plan: “{{.PlanName}}”, {{.Cycle}}
+Amount: ${{.PriceUSD}} ({{.Amount}} {{.Ticker}})
+Paid until: {{.Ends}}
+
+Refunds: within 14 days of the first payment, no questions asked; after a renewal, within 7 days if you did not work in the new period. We refund in the same coin and the same amount.
+
+— Lumen
+
+Replies to this email reach Lumen support.

@@ -1,0 +1,10 @@
+{{define "subject"}}You already have a Lumen account{{end}}Someone — perhaps you — tried to create a Lumen account with this address. There already is one.
+
+Sign in: {{.SiteURL}}/login
+Forgot your password? {{.SiteURL}}/reset-password
+
+If it was not you, there is nothing to do.
+
+— Lumen
+
+Replies to this email reach Lumen support.

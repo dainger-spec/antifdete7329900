@@ -1,0 +1,9 @@
+{{define "subject"}}Your Lumen confirmation code: {{.Code}}{{end}}Your code to create a Lumen account:
+
+{{.Code}}
+
+The code is valid for 15 minutes. If you did not sign up, there is nothing to do.
+
+— Lumen
+
+Replies to this email reach Lumen support.

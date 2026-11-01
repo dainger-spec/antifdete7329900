@@ -1,0 +1,13 @@
+Subject: Приглашение в команду Lumen
+From: Lumen <no-reply@mail.lumenbrowser.io>
+Reply-To: support@lumenbrowser.io
+
+anna@example.com приглашает вас в свою команду Lumen. У вас будет свой вход — со своим паролем.
+
+Принять приглашение: https://lumenbrowser.io/team/accept?code=tq3v9x7k2m4p8r6w1y5z
+
+Если аккаунта Lumen у вас ещё нет, создайте его с этим адресом, затем откройте ссылку. Приглашение действует до 15 ноября 2026, 09:00 UTC.
+
+— Lumen
+
+Ответ на это письмо придёт в поддержку Lumen.

@@ -1,0 +1,17 @@
+Subject: Your Lumen account will be deleted
+From: Lumen <no-reply@mail.lumenbrowser.io>
+Reply-To: support@lumenbrowser.io
+
+We received a request to delete your Lumen account.
+
+On 8 November 2026, 09:00 UTC the email address, password, devices, team seats and the encrypted sync data on the server will be deleted. Payment records are kept without the email address, as accounting requires.
+
+Until then the deletion can be cancelled: sign in.
+
+Sign in: https://lumenbrowser.io/account
+
+The profiles on your Macs are not touched: they are only on your Macs, and Lumen does not delete them.
+
+— Lumen
+
+Replies to this email reach Lumen support.
