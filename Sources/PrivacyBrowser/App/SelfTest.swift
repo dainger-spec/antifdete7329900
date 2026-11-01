@@ -4926,6 +4926,8 @@ final class SelfTest {
             // (CI run 580), as Safari does for the same list.
             func primary(_ tag: String) -> String { String(tag.lowercased().prefix { $0.isLetter }) }
             let wanted = primary(websites)
+            info("languages: \(pair): pages see navigator.language \(language), navigator.languages \(languages), "
+                 + "Accept-Language \(accept); its process: \(reported.map { "words \($0.code), bundles \($0.bundles), chrome \($0.chrome ?? "not hosted")" } ?? "said nothing")")
             check("languages: \(pair) — its pages see \(websites) (navigator.language, navigator.languages, Accept-Language)",
                   ownProcess && primary(language) == wanted && primary(languages) == wanted && primary(accept) == wanted,
                   "own process \(ownProcess), navigator.language \(language), navigator.languages \(languages), "

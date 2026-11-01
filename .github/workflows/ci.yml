@@ -69,4 +69,4 @@ jobs:
           PB_SELFTEST_ONLY: "interface and websites' languages"
         run: |
           set -o pipefail
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test 2>&1 | grep -E "^(PASS|FAIL|SKIP|SELFTEST)|languages:|Terminating" | cut -c1-600
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test 2>&1 | grep -E "^(PASS|FAIL|SKIP|SELFTEST|INFO|NOTE)|languages|Terminating" | cut -c1-600
