@@ -3,15 +3,21 @@ import BrowserCore
 import Foundation
 
 /// "What sites see" for one profile (its ⋯ menu, the command palette): a snapshot of what a page
-/// measures in a window of the profile, next to what it measures in this Mac's Safari.
+/// measures in a window of the profile — and, only when the person asks for it, next to what the
+/// same page measures in this Mac's own Safari.
 ///
-/// On the button: the profile starts if it is stopped; a listener of this Mac (`SiteSnapshotServer`,
+/// On "Take": the profile starts if it is stopped; a listener of this Mac (`SiteSnapshotServer`,
 /// 127.0.0.1 only, while the snapshot is taken) serves one page; the page opens in a new window of
-/// the profile, then in Safari, and in each runs the scripts CI's live comparison runs — the
-/// fingerprint probe, the window's geometry, the request headers in their order, the APIs — makes
-/// an https request whose ClientHello the listener reads, and posts its report back to the
-/// listener. Nothing goes anywhere else: the page, its scripts, its requests and its report stay
-/// on this Mac. The two reports are compared signal by signal (`SiteComparison`).
+/// the profile and runs the scripts CI's live comparison runs — the fingerprint probe, the
+/// window's geometry, the request headers in their order, the APIs — makes an https request whose
+/// ClientHello the listener reads, and posts its report back to the listener. Nothing goes
+/// anywhere else: the page, its scripts, its requests and its report stay on this Mac.
+///
+/// On "Compare with Safari", and only then: the same page in a window of this Mac's own Safari —
+/// not a profile — through the app's one place for what it hands the system (`SystemOpen`); the
+/// two reports are compared signal by signal (`SiteComparison`). Up to 1 November Safari was
+/// opened by itself on every snapshot (the owner's finding): the person had not asked for a window
+/// of their own browser, outside every profile.
 @MainActor
 final class WhatSitesSee: ObservableObject {
     enum Step: Equatable {
@@ -28,8 +34,6 @@ final class WhatSitesSee: ObservableObject {
     let profileID: UUID
     private let manager: () -> ProfileManager?
     private let launch: (UUID) async -> Void
-    /// Opens the page in this Mac's Safari; the self-test's stands in for it.
-    var openInSafari: @MainActor (URL) async -> Bool = { url in await WhatSitesSee.openInThisMacsSafari(url) }
     var profileTimeout: TimeInterval = 60
     var safariTimeout: TimeInterval = 90
     /// The profile's own snapshot of the last run (the self-test reads it).
@@ -52,6 +56,7 @@ final class WhatSitesSee: ObservableObject {
         guard !isTaking else { return }
         signals = []
         comparedWithSafari = false
+        safariDidNotAnswer = false
         profileSnapshot = nil
         guard let scripts = Self.scripts() else {
             step = .failed(L("whatSites.error.scripts"))
@@ -85,16 +90,40 @@ final class WhatSitesSee: ObservableObject {
         }
         profileSnapshot = profile
         closeMeasuringWindows(manager)
+        show(SiteComparison.compare(profile: profile, safari: nil), comparedWithSafari: false, takenAt: Date())
+    }
 
+    /// The person's "Compare with Safari": the same page in a window of this Mac's own Safari, its
+    /// report next to the profile's last one. Nothing else opens Safari.
+    func compareWithSafari() async {
+        guard !isTaking, let profile = profileSnapshot else { return }
+        guard let scripts = Self.scripts() else {
+            step = .failed(L("whatSites.error.scripts"))
+            return
+        }
+        let server = SiteSnapshotServer { token, tlsPort in
+            SiteSnapshotPage.html(scripts: scripts, tlsPort: tlsPort, token: token, title: L("whatSites.page.title"),
+                                  measuring: L("whatSites.page.measuring"), done: L("whatSites.page.done"))
+        }
+        guard await server.start() else {
+            step = .failed(L("whatSites.error.listen"))
+            return
+        }
+        defer { server.stop() }
         step = .measuringSafari
         let safariPage = server.newPage(.safari)
         var safari: SiteSnapshot?
-        if await openInSafari(safariPage.url), let measured = await server.measured(safariPage.token, timeout: safariTimeout) {
+        if await SystemOpen.openInThisMacsSafari(safariPage.url),
+           let measured = await server.measured(safariPage.token, timeout: safariTimeout) {
             safari = try? SiteSnapshot(report: measured.report, clientHello: measured.clientHello)
         }
         NSApp.activate(ignoringOtherApps: true)
-        show(SiteComparison.compare(profile: profile, safari: safari), comparedWithSafari: safari != nil, takenAt: Date())
+        safariDidNotAnswer = safari == nil
+        show(SiteComparison.compare(profile: profile, safari: safari), comparedWithSafari: safari != nil, takenAt: takenAt ?? Date())
     }
+
+    /// The last "Compare with Safari" got nothing back from Safari.
+    @Published private(set) var safariDidNotAnswer = false
 
     /// A finished snapshot's list (the UI snapshots show one of sample values).
     func show(_ signals: [SiteSignal], comparedWithSafari: Bool, takenAt: Date) {
@@ -127,14 +156,4 @@ final class WhatSitesSee: ObservableObject {
         return scripts
     }
 
-    /// This Mac's Safari, asked to open the page (a new tab of its own).
-    static func openInThisMacsSafari(_ url: URL) async -> Bool {
-        guard let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else { return false }
-        do {
-            _ = try await NSWorkspace.shared.open([url], withApplicationAt: safari, configuration: NSWorkspace.OpenConfiguration())
-            return true
-        } catch {
-            return false
-        }
-    }
 }

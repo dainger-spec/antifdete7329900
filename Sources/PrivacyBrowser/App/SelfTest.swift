@@ -1536,6 +1536,8 @@ final class SelfTest {
                   report.webViewsWithLinkPreview == 0 && !report.openedInAnotherApp && report.sharingServices == 0
                     && !report.credentialsKept && (report.handOffsRefused["clipboard"] ?? 0) > 0,
                   "link previews \(report.webViewsWithLinkPreview), opened \(report.openedInAnotherApp), sharing \(report.sharingServices), credentials kept \(report.credentialsKept), refused \(report.handOffsRefused)")
+            check("Safari chrome: the app's one place for what it hands the system refuses it in the profile's process (SystemOpen)",
+                  report.systemOpenRefused, "a web page asked of SystemOpen from the profile's process was not refused as such")
             check("Safari chrome: the real Safari's places are closed to the profile's process",
                   report.safariPlacesClosed, "no sandbox over ~/Library/Safari and the rest")
             info("Safari chrome: \(report.safariPathsRedirected.count) path getters of Safari's frameworks answer with the profile's home: \(report.safariPathsRedirected.prefix(80).joined(separator: " "))")
@@ -4186,7 +4188,11 @@ final class SelfTest {
         let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
             do { try await manager.launch(id) } catch { standIn.launchError = String(describing: error) }
         })
-        snapshot.openInSafari = { url in
+        // The system stands in only where the app hands something to it (SystemOpen): everything
+        // above — the panel's model, its "Compare with Safari" — is the app's own path. Safari's
+        // side is a plain WebKit view: this run is inside the egress capture.
+        SystemOpen.standIn = { purpose, url in
+            guard purpose == .compareInSafari else { return false }
             let configuration = WKWebViewConfiguration()
             configuration.websiteDataStore = .nonPersistent()
             let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 1000, height: 700), configuration: configuration)
@@ -4200,16 +4206,30 @@ final class SelfTest {
         }
         snapshot.safariTimeout = 60
         defer {
+            SystemOpen.standIn = nil
             standIn.window?.close()
             try? repository.delete(profile.id)
         }
+        let handedBefore = SystemOpen.requests.count
         await snapshot.take()
+        let handedByTaking = Array(SystemOpen.requests.dropFirst(handedBefore))
+        check("what sites see: taking a snapshot hands nothing to the system — this Mac's Safari is not opened unless the person asks",
+              handedByTaking.isEmpty && !snapshot.comparedWithSafari,
+              "handed \(handedByTaking.map { "\($0.purpose.rawValue) \($0.target)" }), compared \(snapshot.comparedWithSafari)")
         let measured = snapshot.profileSnapshot?.values ?? [:]
         let parts = ["probe.ua", "probe.screen", "geometry.chrome", "apis.quota", "headers.navigation.order", "tls.ja4", "tls.cipherSuites"]
         let missing = parts.filter { measured[$0] == nil }
         check("what sites see: a profile's window measured every part — navigator, screen, the window, request headers in order, TLS (a ClientHello read), APIs",
               snapshot.step == WhatSitesSee.Step.done && missing.isEmpty && (measured["headers.navigation.order"] ?? "").contains("User-Agent"),
               "step \(snapshot.step), missing \(missing), launch \(standIn.launchError)")
+        // The person's "Compare with Safari": one page, to Safari, through the one place.
+        let handedBeforeComparing = SystemOpen.requests.count
+        await snapshot.compareWithSafari()
+        let handedByComparing = Array(SystemOpen.requests.dropFirst(handedBeforeComparing))
+        check("what sites see: \"Compare with Safari\" hands the system one address — the measuring page on this Mac, for Safari — and nothing else",
+              handedByComparing.count == 1 && handedByComparing.first?.purpose == .compareInSafari
+                && handedByComparing.first.map { $0.target.hasPrefix("http://127.0.0.1:") } == true,
+              "\(handedByComparing.map { "\($0.purpose.rawValue) \($0.target)" })")
         let ja4 = snapshot.signals.first { $0.key == "tls.ja4" }
         check("what sites see: compared with the other side; the profile's ClientHello is a plain WebKit view's (one network stack)",
               snapshot.comparedWithSafari && ja4?.verdict == .same,
@@ -4228,7 +4248,8 @@ final class SelfTest {
     }
 
     /// `--what-sites-see-check [--safari-window] [--proxy host:port]`: a new profile's snapshot next
-    /// to this Mac's real Safari, taken as the panel takes it, printed signal by signal — CI's steps
+    /// to this Mac's real Safari, taken as the panel takes it — "Take", which must hand the system
+    /// nothing (exit 1 otherwise), then "Compare with Safari" — printed signal by signal — CI's steps
     /// after the egress capture. `--safari-window`: the profile in a process of its own showing
     /// Safari's window, as the build without the App Sandbox shows a profile (refused when the
     /// window would not be Safari's); without it, in this process and this app's window. `--proxy`:
@@ -4299,12 +4320,21 @@ final class SelfTest {
         let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
             do { try await manager.launch(id) } catch { print("INFO the profile's launch failed: \(error)") }
         })
+        let handedBefore = SystemOpen.requests.count
         await snapshot.take()
         guard snapshot.step == .done else {
             print("WHAT-SITES-SEE the profile's side was not taken: \(snapshot.step)")
             try? await manager.stop(profile.id)
             return 1
         }
+        // The panel's "Take" alone hands nothing to the system; Safari only on "Compare with Safari".
+        let handedByTaking = SystemOpen.requests.dropFirst(handedBefore)
+        print("WHAT-SITES-SEE taking the snapshot handed the system: \(handedByTaking.isEmpty ? "nothing" : handedByTaking.map(\.target).joined(separator: " "))")
+        guard handedByTaking.isEmpty else {
+            try? await manager.stop(profile.id)
+            return 1
+        }
+        await snapshot.compareWithSafari()
         // First, with the categories after it: what CI turns into notices on the job.
         let count = snapshot.signals.first { $0.key == "probe.windowOwnCount" }
         print("WHAT-SITES-SEE the window's own properties: profile \(count?.profile ?? "-"), Safari \(count?.safari ?? "-")")

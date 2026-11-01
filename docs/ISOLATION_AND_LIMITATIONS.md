@@ -349,8 +349,9 @@ Safari on this Mac.
 ### What sites see (a profile next to this Mac's Safari)
 
 A profile's ⋯ menu (and the command palette) has **What Sites See…**: on its button, one page of
-this Mac opens in a new window of the profile and then in Safari, and in each runs the scripts
-CI's live comparison runs (`scripts/live_compare.py`): the fingerprint probe
+this Mac opens in a new window of the profile — and only on the person's **Compare with Safari…**,
+whose note says that this Mac's own Safari will open, not a profile, the same page in a new tab of
+Safari — and in each runs the scripts CI's live comparison runs (`scripts/live_compare.py`): the fingerprint probe
 (`Resources/fingerprint_probe.js`), the window's geometry, the request headers in the order the
 listener received them, and the APIs a WebKit app may answer differently
 (`Resources/SiteProbes/`, bundled with the app and read by CI from there). The page then makes an
@@ -414,6 +415,16 @@ measuring page is on this Mac and loads directly, and the proxy's location is no
 profile keeps this Mac's language and time zone, as Safari does) and without one. Each prints the
 count of the window's own properties on both sides, every group's summary and the signals that
 differ, as notices on the job; a Safari that does not answer is a warning.
+
+Until 1 November the snapshot opened Safari by itself, every time (the owner's finding): a window
+of the person's own browser, outside every profile, that nobody had asked for. Everything this app
+hands to the system — an address to another app, a folder to the Finder, System Settings, the
+update's installer — now goes through one place, `SystemOpen`, which names each kind with why it
+is allowed and refuses all of them in a profile's own process; `scripts/check_system_opens.py`
+fails CI on any other call (and its self-check fails unless it finds each forbidden form planted
+for it). The self-test takes a snapshot and checks that nothing was handed to the system, then
+compares with Safari and checks that exactly one address went — the measuring page, for Safari —
+and asks `SystemOpen` from a profile's own process, which must refuse.
 
 ### What remains impossible with public APIs
 

@@ -152,15 +152,7 @@ final class TunnelManager: NSObject, ObservableObject {
     /// Items & Extensions (Network Extensions is in that pane), through the documented API; on
     /// macOS 14 Privacy & Security, through its (undocumented) URL.
     func openSystemSettings() {
-        if #available(macOS 15, *) {
-            SMAppService.openSystemSettingsLoginItems()
-            return
-        }
-        for candidate in ["x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
-                          "x-apple.systempreferences:com.apple.preference.security"] {
-            if let url = URL(string: candidate), NSWorkspace.shared.open(url) { return }
-        }
-        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+        SystemOpen.openSystemSettingsForExtensions()
     }
 
     /// Loads (and with `install`, creates and saves — the "add VPN configurations" prompt) the

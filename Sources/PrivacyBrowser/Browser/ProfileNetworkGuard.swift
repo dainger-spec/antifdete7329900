@@ -1122,6 +1122,9 @@ enum ProfileNetworkGuard {
             // Safari's app-link banner tracker, asked as its banner asks it: its file read from a
             // path the process does not have ended the profile's process (SafariChrome).
             report.appLinkTrackerAnswer = await SafariChrome.askAppLinkBannerTracker()
+            let refusedBefore = SystemOpen.refused
+            let opened = SystemOpen.openWebsite(URL(string: "https://open-refused.selftest.invalid/")!)
+            report.systemOpenRefused = !opened && SystemOpen.refused == refusedBefore + 1
         }
         // Last: what the probes above reached is counted too.
         report.stubsReached = SafariStubCount.snapshot
@@ -1272,6 +1275,9 @@ struct ProfileNetworkReport: Codable, Equatable {
     /// What Safari's app-link banner tracker answered when the self-test's probe asked it whether a
     /// banner is blocked, as the banner asks it ("blocked", "not blocked", "no answer", "no tracker").
     var appLinkTrackerAnswer = ""
+    /// The app's one place for what it hands the system (`SystemOpen`), asked to open a web page
+    /// from this process: refused, as a profile's process must refuse it, and counted as refused.
+    var systemOpenRefused = false
     /// The names in the process's environment (`ProfileProcess.childEnvironment`), and where its
     /// home and temporary files go: `HOME`, `TMPDIR`, `CFFIXED_USER_HOME` and Foundation's
     /// temporary directory, by those names.

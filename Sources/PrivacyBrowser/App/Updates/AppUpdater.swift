@@ -288,10 +288,7 @@ final class AppUpdater: ObservableObject, Updater {
         do {
             try UpdateRequest(appPath: configuration.app.path, archive: staged.archive, item: item, requestedAt: Date())
                 .write(to: configuration.staging)
-            let open = NSWorkspace.OpenConfiguration()
-            open.activates = false
-            open.addsToRecentItems = false
-            _ = try await NSWorkspace.shared.openApplication(at: configuration.helper, configuration: open)
+            try await SystemOpen.startUpdateInstaller(at: configuration.helper)
             helperStarted = true
             log.notice("Update handed to the installer; the app quits now")
             return .started
