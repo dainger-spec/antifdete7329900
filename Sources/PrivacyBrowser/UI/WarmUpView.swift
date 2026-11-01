@@ -265,13 +265,9 @@ private struct WarmUpPanel: View {
         if let sites = status.flatMap({ $0.isRunning ? nil : $0.sites }) {
             VStack(alignment: .leading, spacing: 10) {
                 if !manager.warmUpVisits(of: profile.id).isEmpty {
-                    Picker("", selection: $showingPages) {
-                        Text(L("warmup.report.tab.sites")).tag(false)
-                        Text(L("warmup.report.tab.pages")).tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
+                    LumenSegmented(selection: $showingPages,
+                                   options: [(value: false, title: L("warmup.report.tab.sites")),
+                                             (value: true, title: L("warmup.report.tab.pages"))])
                 }
                 if showingPages {
                     visitList
@@ -399,13 +395,10 @@ struct WarmUpPlanChooser: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Picker("", selection: $choice.source) {
-                Text(L("warmup.source.preset")).tag(WarmUpChoice.Source.preset)
-                Text(L("warmup.source.composed")).tag(WarmUpChoice.Source.composed)
-                Text(L("warmup.source.manual")).tag(WarmUpChoice.Source.manual)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            LumenSegmented(selection: $choice.source,
+                           options: [(value: WarmUpChoice.Source.preset, title: L("warmup.source.preset")),
+                                     (value: WarmUpChoice.Source.composed, title: L("warmup.source.composed")),
+                                     (value: WarmUpChoice.Source.manual, title: L("warmup.source.manual"))])
             switch choice.source {
             case .preset: presetChooser
             case .composed: composedChooser
@@ -525,13 +518,10 @@ struct WarmUpPlanChooser: View {
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(L("warmup.quality")).font(.lumenLabel).foregroundStyle(Theme.textSecondary)
-                Picker("", selection: $choice.quality) {
-                    ForEach(WarmUpQuality.allCases, id: \.self) { quality in
-                        Text(L("warmup.quality." + quality.rawValue)).tag(quality)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                LumenSegmented(selection: $choice.quality,
+                               options: WarmUpQuality.allCases.map { (value: $0, title: L("warmup.quality." + $0.rawValue)) })
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(L("warmup.quality"))
                 Text(L("warmup.quality." + choice.quality.rawValue + ".detail"))
                     .font(.caption).foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

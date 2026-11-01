@@ -38,14 +38,12 @@ struct ProxyImportView: View {
                     Text(L("proxies.import.kind"))
                         .font(.lumenLabel)
                         .foregroundStyle(Theme.textPrimary)
-                    Picker(L("proxies.import.kind"), selection: $kind) {
-                        Text(L("proxies.import.kind.auto")).tag(ProxySettings.Kind?.none)
-                        Text(verbatim: "SOCKS5").tag(ProxySettings.Kind?.some(.socks5))
-                        Text(verbatim: "HTTP").tag(ProxySettings.Kind?.some(.httpConnect))
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 320)
+                    LumenSegmented(selection: $kind,
+                                   options: [(value: ProxySettings.Kind?.none, title: L("proxies.import.kind.auto")),
+                                             (value: ProxySettings.Kind?.some(.socks5), title: "SOCKS5"), // l10n: not text
+                                             (value: ProxySettings.Kind?.some(.httpConnect), title: "HTTP")]) // l10n: not text
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(L("proxies.import.kind"))
                     .help(L("proxies.import.kind.help"))
                     .disabled(added != nil)
                     Spacer(minLength: 12)

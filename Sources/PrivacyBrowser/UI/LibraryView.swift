@@ -23,12 +23,8 @@ struct LibraryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $navigation.section) {
-                ForEach(Section.allCases) { Text(L($0.labelKey)).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 280)
+            LumenSegmented(selection: $navigation.section,
+                           options: Section.allCases.map { (value: $0, title: L($0.labelKey)) })
             .padding(12)
             Divider()
             switch navigation.section {
