@@ -325,9 +325,24 @@ public final class ProfileRepository: @unchecked Sendable {
         try loadConfiguration(id, key: profileKey(for: id))
     }
 
+    /// The profile's settings. Settings that cannot be read — damaged, cut short, missing, another
+    /// key's — throw `CoreError.unreadableSettings`, never defaults: a profile started or saved
+    /// with defaults goes without its proxy (docs/DESTRUCTIVE_PATHS.md, R1). A newer version's
+    /// throw `newerFormat`, as before.
     public func loadConfiguration(_ id: UUID, key: SymmetricKey) throws -> ProfileConfiguration {
-        let sealed = try SecureFile.read(configURL(for: id))
-        return try Self.decodeConfiguration(AEAD.open(sealed, key: key, aad: Self.configAAD(id)))
+        do {
+            let sealed = try SecureFile.read(configURL(for: id))
+            return try Self.decodeConfiguration(AEAD.open(sealed, key: key, aad: Self.configAAD(id)))
+        } catch let error as CoreError {
+            if case .newerFormat = error { throw error }
+            throw unreadableSettings(id, error)
+        } catch {
+            throw unreadableSettings(id, error)
+        }
+    }
+
+    private func unreadableSettings(_ id: UUID, _ error: Error) -> CoreError {
+        .unreadableSettings(profileID: id, profile: (try? summary(for: id))?.name ?? id.uuidString, reason: String(describing: error))
     }
 
     /// The newest format of `config.bin` this version reads and writes (docs/UPDATES.md §4).
@@ -340,9 +355,14 @@ public final class ProfileRepository: @unchecked Sendable {
         return try JSONCoding.decoder.decode(ProfileConfiguration.self, from: json)
     }
 
+    /// Saves an edit of the profile's settings. Never over settings that cannot be read (R1): the
+    /// edit was made without them — the editor's form, opened on defaults — and the profile would
+    /// start without its proxy. They are read first, and their error stops the save.
     public func saveConfiguration(_ configuration: ProfileConfiguration, for id: UUID) throws {
         try configuration.validate()
-        try writeConfiguration(configuration, id: id, key: profileKey(for: id))
+        let key = try profileKey(for: id)
+        _ = try loadConfiguration(id, key: key)
+        try writeConfiguration(configuration, id: id, key: key)
         try bumpRevision(id)
     }
 
@@ -642,6 +662,25 @@ public final class ProfileRepository: @unchecked Sendable {
         }
     }
 
+    /// Whether a copy of a profile file opens with the profile's key: decrypted and, for the
+    /// settings, decoded as a launch reads them. A newer version's copy opens (`checkSyncedFileFormat`
+    /// refuses it, and the sync stops). One that does not — damaged, cut short, another key's — is
+    /// never pushed and never written over (`SyncEngine.syncFile`).
+    func opensSyncedFile(_ file: ProfileSyncFile, profileID id: UUID, data: Data) -> Bool {
+        do {
+            if file == .config {
+                _ = try Self.decodeConfiguration(AEAD.open(data, key: profileKey(for: id), aad: Self.configAAD(id)))
+            } else {
+                try checkSyncedFileFormat(file, profileID: id, data: data)
+            }
+            return true
+        } catch CoreError.newerFormat {
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// Sync merge of two encrypted versions of a mergeable profile file. Both are decrypted with
     /// the profile key, merged, and the result is re-encrypted.
     func mergeSyncedFile(_ file: ProfileSyncFile, profileID id: UUID, local: Data, remote: Data) throws -> Data {
@@ -805,6 +844,9 @@ enum ProfileSyncFile: String, CaseIterable {
     var isMergeable: Bool { self != .config }
     /// Changed on two devices: the newer version wins, the other is kept as `<file>.conflict`.
     var prefersNewer: Bool { self == .config }
+    /// The profile does not start without it: a copy lost here is taken back from the server even
+    /// when the server's has not changed since this device last had it.
+    var isNeededToStart: Bool { self == .config }
 }
 
 #if !canImport(Darwin)

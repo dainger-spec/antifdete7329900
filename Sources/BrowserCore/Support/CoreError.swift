@@ -23,6 +23,12 @@ public enum CoreError: Error, Equatable, CustomStringConvertible {
     /// Asked of a vault opened for one profile only (`ProfileGrant`, in that profile's own
     /// process): what is named needs the whole vault.
     case notGranted(String)
+    /// The profile's settings (`config.bin`) could not be read — damaged, cut short, missing, or
+    /// another key's; not a newer version's (`newerFormat`). Nothing is written over them, and the
+    /// profile does not start: started with defaults, it would go without its proxy, from this
+    /// Mac's own address. They come back from a backup, or from the sync location (Sync Now).
+    /// `profile`: its name; `reason`: why the read failed, for the log.
+    case unreadableSettings(profileID: UUID, profile: String, reason: String)
 
     public var description: String {
         switch self {
@@ -44,6 +50,9 @@ public enum CoreError: Error, Equatable, CustomStringConvertible {
             return "Sync server error \(status)\(message.isEmpty ? "" : ": \(message)")"
         case .io(let detail): return "I/O error: \(detail)"
         case .notGranted(let detail): return "Not available to a single profile's process: \(detail)"
+        case .unreadableSettings(let id, let profile, let reason):
+            return "The settings of profile \(profile) (profiles/\(id.uuidString)/config.bin) could not be read (\(reason)); nothing is written over them, "
+                + "and the profile does not start until a readable copy is back (a backup, or Sync Now)"
         }
     }
 }

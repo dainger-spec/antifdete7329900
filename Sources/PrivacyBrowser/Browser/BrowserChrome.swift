@@ -98,6 +98,9 @@ struct ProfileChipView: View {
             return String(format: L("chip.exits"), model.profileName, CountryNames.name(for: code), endpoint)
         case let .proxy(endpoint, nil):
             return String(format: L("chip.proxy"), model.profileName, endpoint)
+        case .unreadable:
+            // Not for a window: a profile whose settings cannot be read does not start.
+            return model.profileName
         }
     }
 }
@@ -332,7 +335,7 @@ struct ExitPill: View {
             case let .proxy(endpoint, nil):
                 Image(systemName: "network").font(.system(size: 11))
                 Text(String(format: L("start.exit"), endpoint))
-            case .direct:
+            case .direct, .unreadable:
                 EmptyView()
             }
         }

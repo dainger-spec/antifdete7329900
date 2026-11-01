@@ -83,6 +83,22 @@ public enum SecureFile {
         }
     }
 
+    /// Moves the file at `url` aside, next to it — `<name>.<suffix>`, then `<name>.<suffix>-2`, … —
+    /// never over a file there already. For a file that could not be read: it is never deleted
+    /// and never written over (docs/DESTRUCTIVE_PATHS.md), only moved out of the way of a readable
+    /// one. Returns where it went.
+    @discardableResult
+    public static func moveAside(_ url: URL, suffix: String) throws -> URL {
+        var aside = url.appendingPathExtension(suffix)
+        var next = 2
+        while FileManager.default.fileExists(atPath: aside.path) {
+            aside = url.appendingPathExtension("\(suffix)-\(next)")
+            next += 1
+        }
+        try FileManager.default.moveItem(at: url, to: aside)
+        return aside
+    }
+
     /// Atomically moves `source` over `destination` (rename(2) on the same volume).
     public static func replace(_ destination: URL, with source: URL) throws {
         if rename(source.path, destination.path) != 0 {

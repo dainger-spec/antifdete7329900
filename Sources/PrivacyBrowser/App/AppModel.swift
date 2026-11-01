@@ -493,7 +493,9 @@ final class AppModel: ObservableObject {
     /// Changes take effect the next time the profile is launched.
     func updateProfile(_ id: UUID, name: String, configuration: ProfileConfiguration) throws {
         guard let repository else { return }
-        let stored = try? repository.loadConfiguration(id)
+        // The settings this edit is of. Settings that cannot be read stop the save (R1): the form
+        // was opened without them, and saved, the profile would start without its proxy.
+        let stored = try repository.loadConfiguration(id)
         let saved = configuration.savingEdit(over: stored)
         try repository.saveConfiguration(saved, for: id)
         // Cookie sync off: the synced cookies go, here and (at the next sync) on the other devices.
@@ -713,6 +715,9 @@ final class AppModel: ObservableObject {
             for id in report.deletedProfileIDs {
                 await manager.removeWebData(for: id)
             }
+            for copy in report.unreadable {
+                showError(Self.unreadableCopyText(copy, name: (try? repository.summary(for: copy.profileID))?.name))
+            }
             status = DeviceSettings.SyncStatus(report: report)
         } catch {
             let message = errorText(error)
@@ -721,6 +726,20 @@ final class AppModel: ObservableObject {
         }
         try? updateDeviceSettings { $0.lastSync = status }
         refresh()
+    }
+
+    /// A profile file that did not open on this Mac, as a sync left it (`SyncReport.unreadable`):
+    /// the server's copy taken and this one kept beside it, or nothing there to take.
+    static func unreadableCopyText(_ copy: SyncReport.UnreadableCopy, name: String?) -> String {
+        let profile = name ?? copy.profileID.uuidString
+        let path = "profiles/\(copy.profileID.uuidString)/\(copy.file)"
+        let settings = copy.file == "config.bin"
+        if let kept = copy.keptAs {
+            return settings ? String(format: L("sync.unreadable.settings.taken"), profile, kept)
+                : String(format: L("sync.unreadable.file.taken"), profile, copy.file, kept)
+        }
+        return settings ? String(format: L("sync.unreadable.settings.none"), profile, path)
+            : String(format: L("sync.unreadable.file.none"), profile, copy.file, path)
     }
 
     /// The sync location's transport, and the folder whose security scope it opened (to be closed

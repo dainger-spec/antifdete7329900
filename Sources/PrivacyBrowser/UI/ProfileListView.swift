@@ -230,9 +230,14 @@ struct ProfileListView: View {
             let details = model.details[profile.id]
             let activity: ProfileRowItem.Activity = busy ? (running ? .starting : .sealing) : (running ? .running : .stopped)
             let warmUp = model.manager?.warmUpStatus(of: profile.id)
+            // No details: its settings could not be read (`AppModel.refresh`) — not "Direct" (R1).
+            var exit = ProfileExit.unreadable
+            if let details {
+                exit = details.proxyEndpoint.map { ProfileExit.proxy(endpoint: $0, countryCode: details.exitCountryCode) } ?? .direct
+            }
             return ProfileRowItem(
                 id: profile.id, name: profile.name, activity: activity,
-                exit: details?.proxyEndpoint.map { ProfileExit.proxy(endpoint: $0, countryCode: details?.exitCountryCode) } ?? .direct,
+                exit: exit,
                 ephemeral: details?.ephemeral ?? false,
                 appearsAs: ProfileRowItem.appearsAs(details?.deviceGeneration ?? DeviceGenerations.resolved(id: nil)),
                 lastUsed: profile.lastLaunchedAt,
@@ -260,7 +265,15 @@ struct ProfileListView: View {
             newWindow: { id in model.manager?.openNewWindow(id) },
             library: { id in model.manager?.showLibrary(id, section: .bookmarks) },
             edit: { id in
-                if let profile = summary(id) { editing = .existing(profile) }
+                guard let profile = summary(id) else { return }
+                // Settings that cannot be read are not edited: the form would open on defaults —
+                // no proxy — and Save would put them in place of the profile's own (R1). The alert
+                // says how to get them back.
+                do { _ = try model.configuration(for: id) } catch {
+                    model.showError(errorText(error))
+                    return
+                }
+                editing = .existing(profile)
             },
             passwords: { id in passwordsFor = summary(id) },
             importCookies: { id in importingCookiesFor = summary(id) },
@@ -355,6 +368,9 @@ enum ProfileExit: Equatable {
     case direct
     /// Through a proxy; its exit country once a lookup through it found one.
     case proxy(endpoint: String, countryCode: String?)
+    /// Its settings could not be read: where it would exit is not known, and it does not start
+    /// until they are back (R1). Never shown as "Direct".
+    case unreadable
 }
 
 enum ProfileFilter: Hashable {
@@ -1088,6 +1104,15 @@ struct ExitLabel: View {
                     .foregroundStyle(Theme.textPrimary)
                     .truncationMode(.middle)
                     .help(L("profiles.exit.unknownCountry"))
+            case .unreadable:
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.warning)
+                    .frame(width: flagSize)
+                Text(L("profiles.exit.unreadable"))
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textSecondary)
+                    .help(String(format: L("profiles.exit.unreadable.help"), L("profiles.menu.syncNow"), L("profiles.menu.more")))
             }
         }
         .lineLimit(1)

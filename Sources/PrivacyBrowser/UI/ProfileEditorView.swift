@@ -384,6 +384,10 @@ struct ProfileEditorView: View {
     @State private var choosingCookieFile = false
     /// The cookies pasted are being imported after Save: no second Save meanwhile.
     @State private var savingCookies = false
+    /// The profile's settings could not be read: the form shows defaults, not them, and is never
+    /// saved over them (R1). The Profiles list does not open the editor then; this is for settings
+    /// that went bad while it was opening.
+    @State private var settingsUnreadable = false
     @ObservedObject private var tunnel = TunnelManager.shared
 
     /// The glyph colour of a profile not created yet (it has no id).
@@ -427,7 +431,8 @@ struct ProfileEditorView: View {
                           savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
                           knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen,
                           onChooseCookieFile: { choosingCookieFile = true }, onDropCookieFile: readCookieFile,
-                          isSaving: savingCookies, onWhatSitesSee: target.isNew ? nil : { showingWhatSitesSee = true })
+                          isSaving: savingCookies, saveRefused: settingsUnreadable,
+                          onWhatSitesSee: target.isNew ? nil : { showingWhatSitesSee = true })
     }
 
     /// The tags of every profile, each once, for the tag field to offer.
@@ -452,6 +457,7 @@ struct ProfileEditorView: View {
                                      savedProxies: model.proxyList?.entries ?? [])
                 draft.proxyLocationLookupFailed = model.manager?.proxyLocationUnknown.contains(summary.id) ?? false
             } catch {
+                settingsUnreadable = true
                 self.error = String(format: L("editor.error.decrypt"), error.localizedDescription)
             }
         } else {
@@ -520,7 +526,7 @@ struct ProfileEditorView: View {
     }
 
     private func save() {
-        guard !checking, !savingCookies else { return }
+        guard !checking, !savingCookies, !settingsUnreadable else { return }
         error = nil
         // A line without a scheme whose type no check has found: Save checks it first — both
         // handshakes are tried, and the one that answers is the type. A proxy that answers neither

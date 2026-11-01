@@ -778,6 +778,9 @@ enum UISnapshots {
             ProfileRowItem(id: id(7), name: "Banking", activity: .stopped,
                            exit: .proxy(endpoint: "10.20.0.2:3128", countryCode: nil), ephemeral: false,
                            appearsAs: mac, lastUsed: nil, exitUnconfirmed: true, tags: ["ads"]),
+            // Its settings could not be read: not "Direct", and it does not start (R1).
+            ProfileRowItem(id: id(8), name: "Archive", activity: .stopped, exit: .unreadable, ephemeral: false,
+                           appearsAs: mac, lastUsed: now.addingTimeInterval(-30 * 86_400)),
         ]
     }
 }

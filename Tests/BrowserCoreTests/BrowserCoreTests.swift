@@ -140,7 +140,11 @@ final class ProfileRepositoryTests: XCTestCase {
         try FileManager.default.removeItem(at: repo.configURL(for: b.id))
         try FileManager.default.copyItem(at: repo.configURL(for: a.id), to: repo.configURL(for: b.id))
         XCTAssertThrowsError(try repo.loadConfiguration(b.id)) {
-            XCTAssertEqual($0 as? CoreError, .authenticationFailed)
+            // Settings that do not open are said as such, with the profile's name (R1); why, for the log.
+            guard case let .unreadableSettings(id, profile, reason)? = $0 as? CoreError else { return XCTFail("\($0)") }
+            XCTAssertEqual(id, b.id)
+            XCTAssertEqual(profile, "B")
+            XCTAssertEqual(reason, CoreError.authenticationFailed.description)
         }
     }
 

@@ -117,6 +117,12 @@ func translatedErrorText(_ error: Error) -> String? {
             return String(format: L("error.core.syncServer"), status, message.isEmpty ? "—" : message)
         case .io(let detail): return String(format: L("error.core.io"), detail)
         case .notGranted(let detail): return String(format: L("error.core.notGranted"), detail)
+        // Settings that could not be read (R1): the profile does not start, and how to get them
+        // back — a backup's copy of the file, or the server's through Sync Now (named as its menu
+        // item is).
+        case .unreadableSettings(let id, let profile, _):
+            return String(format: L("error.core.unreadableSettings"), profile, "profiles/\(id.uuidString)/config.bin",
+                          L("profiles.menu.syncNow"), L("profiles.menu.more"))
         }
     }
     if let error = error as? PasswordVaultError {

@@ -81,13 +81,6 @@ extension DeviceSettings {
     public static func moveUnreadableAside(in vault: UnlockedVault) throws -> URL? {
         let file = vault.root.appendingPathComponent("settings.bin")
         guard FileManager.default.fileExists(atPath: file.path) else { return nil }
-        var aside = file.appendingPathExtension("unreadable")
-        var next = 2
-        while FileManager.default.fileExists(atPath: aside.path) {
-            aside = file.appendingPathExtension("unreadable-\(next)")
-            next += 1
-        }
-        try FileManager.default.moveItem(at: file, to: aside)
-        return aside
+        return try SecureFile.moveAside(file, suffix: "unreadable")
     }
 }

@@ -26,6 +26,25 @@ public struct SyncReport: Equatable, Sendable {
     public var deletedProfileIDs: [UUID] = []
     /// The sync location's vault header against this device's (`SyncEngine.publishVaultHeader`).
     public var passwordHeader: PasswordHeader = .same
+    /// Profile files whose copy on this device does not open (damaged, cut short, another key's):
+    /// never pushed, never written over (docs/DESTRUCTIVE_PATHS.md).
+    public var unreadable: [UnreadableCopy] = []
+
+    public struct UnreadableCopy: Equatable, Sendable {
+        public var profileID: UUID
+        /// The file's name in the profile's folder (`config.bin`).
+        public var file: String
+        /// The server's copy was taken in its place, and this device's kept beside it under this
+        /// name (`config.bin.unreadable`). Nil: the server has no copy that opens; nothing was
+        /// written on either side, and the file is as it was.
+        public var keptAs: String?
+
+        public init(profileID: UUID, file: String, keptAs: String?) {
+            self.profileID = profileID
+            self.file = file
+            self.keptAs = keptAs
+        }
+    }
 
     /// Whose master password a new device sets up with: the header the sync location keeps.
     public enum PasswordHeader: String, Codable, Equatable, Sendable {
@@ -60,6 +79,11 @@ public struct SyncReport: Equatable, Sendable {
 /// device's file is kept as `config.bin.conflict`; when only what the browser keeps for itself
 /// differs (the proxy location), the remote file, no copy; without a time on either side, or
 /// equal ones, `resolveConflict`.
+///
+/// A profile file this device cannot open is never pushed and never written over: the server's
+/// copy, when one opens, is taken in its place and this device's kept beside it as
+/// `<file>.unreadable` (`SyncReport.unreadable`). Settings lost here are taken back from the
+/// server: the profile does not start without them.
 ///
 /// Profile files are already encrypted with per-profile keys; the envelope adds a second
 /// layer that hides object names and binds blobs to their name and revision.
@@ -187,8 +211,12 @@ public final class SyncEngine: @unchecked Sendable {
                 let check: (Data) throws -> Void = { [repository] data in
                     try repository.checkSyncedFileFormat(file, profileID: id, data: data)
                 }
+                let opens: (Data) -> Bool = { [repository] data in
+                    repository.opensSyncedFile(file, profileID: id, data: data)
+                }
                 try await syncFile(name: "profile/\(id.uuidString)/\(file.rawValue)", url: repository.url(of: file, for: id),
-                                   merge: merge, newer: newer, check: check, remote: remote, state: &state, report: &report)
+                                   profileID: id, neededToStart: file.isNeededToStart,
+                                   merge: merge, newer: newer, check: check, opens: opens, remote: remote, state: &state, report: &report)
             }
         }
 
@@ -248,9 +276,17 @@ public final class SyncEngine: @unchecked Sendable {
     /// remote copy before it is used — pulled, merged, compared, or written over — and on this
     /// device's copy before the two are merged or compared, so such a copy stops the sync with
     /// nothing written on either side.
-    private func syncFile(name: String, url: URL, merge: ((Data, Data) throws -> Data)?,
+    ///
+    /// `opens` tells whether a copy opens with the profile's key. This device's copy, whenever it is
+    /// to be pushed, merged, compared or written over (it or the server's changed), is looked at
+    /// first, and one that does not open goes to `takeServerCopy`: never pushed — it once was, over
+    /// the server's good copy, the one a person could take back with Sync Now — and never written
+    /// over. A copy unchanged on both sides is not opened: nothing is done with it. `neededToStart`
+    /// (the settings): this device's copy lost, the server's is taken back.
+    private func syncFile(name: String, url: URL, profileID: UUID, neededToStart: Bool,
+                          merge: ((Data, Data) throws -> Data)?,
                           newer: ((Data, Data) throws -> ProfileRepository.NewerVersion?)?,
-                          check: (Data) throws -> Void,
+                          check: (Data) throws -> Void, opens: (Data) -> Bool,
                           remote: [String: Int], state: inout [String: ItemState], report: inout SyncReport) async throws {
         let objectID = codec.objectID(for: name)
         let localData = FileManager.default.fileExists(atPath: url.path) ? try SecureFile.read(url) : nil
@@ -258,6 +294,19 @@ public final class SyncEngine: @unchecked Sendable {
         let remoteRevision = remote[objectID]
         let localChanged = localData.map { Self.hash($0) != known?.sha256 } ?? false
         let remoteChanged = remoteRevision != nil && remoteRevision != known?.revision
+
+        // The settings lost here (a backup put back without them, a stop between moving an
+        // unreadable copy aside and writing the server's): the profile does not start without
+        // them, so the server's copy is taken whether or not it changed since this device had it.
+        if localData == nil, neededToStart, remoteRevision != nil {
+            try await pull(name: name, objectID: objectID, url: url, check: check, state: &state, report: &report)
+            return
+        }
+        if localChanged || remoteChanged, let localData, !opens(localData) {
+            try await takeServerCopy(name: name, objectID: objectID, url: url, profileID: profileID, remoteRevision: remoteRevision,
+                                     check: check, opens: opens, state: &state, report: &report)
+            return
+        }
 
         switch (localChanged, remoteChanged) {
         case (false, false):
@@ -323,6 +372,32 @@ public final class SyncEngine: @unchecked Sendable {
                 try await pull(name: name, objectID: objectID, url: url, check: check, state: &state, report: &report)
             }
         }
+    }
+
+    /// This device's copy of a profile file does not open. The server's copy, when there is one
+    /// that opens, is taken in its place, and this device's kept beside it as `<file>.unreadable`
+    /// (`-2`, `-3`, … when one is there already): nothing unreadable is ever deleted or written
+    /// over. Without one, nothing is written on either side. Either way the report says so. A
+    /// newer version's copy on the server stops the sync, as everywhere (`check`).
+    private func takeServerCopy(name: String, objectID: String, url: URL, profileID: UUID, remoteRevision: Int?,
+                                check: (Data) throws -> Void, opens: (Data) -> Bool,
+                                state: inout [String: ItemState], report: inout SyncReport) async throws {
+        var decoded: (payload: SyncPayload, revision: Int, objectID: String)?
+        if remoteRevision != nil, let blob = try await transport.fetch(objectID: objectID) {
+            let found = try codec.decode(blob)
+            guard found.payload.logicalName == name else { throw CoreError.corruptData("unexpected object \(found.payload.logicalName)") }
+            decoded = found
+        }
+        guard let decoded, !decoded.payload.deleted, opens(decoded.payload.data) else {
+            report.unreadable.append(.init(profileID: profileID, file: url.lastPathComponent, keptAs: nil))
+            return
+        }
+        try check(decoded.payload.data)
+        let aside = try SecureFile.moveAside(url, suffix: "unreadable")
+        try SecureFile.write(decoded.payload.data, to: url)
+        state[name] = ItemState(revision: decoded.revision, sha256: Self.hash(decoded.payload.data))
+        report.pulled.append(name)
+        report.unreadable.append(.init(profileID: profileID, file: url.lastPathComponent, keptAs: aside.lastPathComponent))
     }
 
     private func pull(name: String, objectID: String, url: URL, check: (Data) throws -> Void,

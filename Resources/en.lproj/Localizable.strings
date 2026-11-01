@@ -243,6 +243,7 @@
 "error.core.syncServer" = "The sync server answered with error %1$ld (%2$@).";
 "error.core.io" = "A read or write failed (%@).";
 "error.core.notGranted" = "Not available to a single profile's process (%@).";
+"error.core.unreadableSettings" = "The settings of the profile “%1$@” could not be read: the file is damaged or missing. The profile does not start, and nothing writes over its settings — without them it would go online without its proxy, from this Mac's own address. To get them back, put %2$@ from a backup into the vault's folder or, if this vault is synced, choose %3$@ in the %4$@ menu: the settings are taken from the server, and the unreadable file is kept beside them as config.bin.unreadable.";
 "passwords.error.notFound" = "This password was deleted meanwhile.";
 "error.update.notAnAppcast" = "this is not an update feed";
 "error.update.newerAppcastFormat" = "the update feed has format %ld, which only a newer version reads";
@@ -259,6 +260,10 @@
 "sync.error.rememberFolder" = "Could not remember the sync folder: %@";
 "sync.error.profilesRunning" = "Stop all profiles before syncing.";
 "sync.error.failed" = "Sync failed: %@";
+"sync.unreadable.settings.taken" = "The settings of the profile “%1$@” could not be read on this Mac — their copy from the sync location was taken. The unreadable file is kept beside it as %2$@.";
+"sync.unreadable.settings.none" = "The settings of the profile “%1$@” cannot be read, and the sync location has no readable copy of them. The file was neither sent nor written over. The profile does not start until the file is back from a backup: %2$@ in the vault's folder.";
+"sync.unreadable.file.taken" = "The file %2$@ of the profile “%1$@” could not be read on this Mac — its copy from the sync location was taken. The unreadable file is kept beside it as %3$@.";
+"sync.unreadable.file.none" = "The file %2$@ of the profile “%1$@” cannot be read, and the sync location has no readable copy of it. The file was neither sent nor written over; it can be put back from a backup: %3$@ in the vault's folder.";
 "history.error.save" = "Could not save history: %@";
 "webdata.error.stillInUse" = "WebKit did not release the profile's data: it stays unencrypted on disk until the next stop or unlock seals it.";
 "error.newerFormat" = "The file %@ was saved by a newer version of Lumen. This version neither reads nor changes it: install the newer version to open it.";
@@ -473,6 +478,8 @@
 "profiles.exit.direct" = "Direct";
 "profiles.exit.unknownCountry" = "The exit country shows after a launch that looks the proxy up (time zone from the proxy, or the exit-IP warning).";
 "profiles.exit.viaProxy" = "Through the proxy %@";
+"profiles.exit.unreadable" = "Settings unreadable";
+"profiles.exit.unreadable.help" = "This profile's settings could not be read, so where it goes online is not known. It does not start until they are back: from a backup, or with %1$@ in the %2$@ menu.";
 "profiles.filter.all" = "All Profiles";
 "profiles.filter.ephemeral" = "Ephemeral";
 "profiles.filter.proxied" = "Through a Proxy";

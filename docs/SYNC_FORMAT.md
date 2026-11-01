@@ -179,6 +179,16 @@ revision and the SHA-256 of the last synced bytes.
 
 A lost CAS race leaves the object in `report.deferred`; the next sync retries it.
 
+A profile file this device cannot open — damaged, cut short, under another key — is handled before
+any of the above, and never pushed: it once was, over the server's good copy of the settings, which
+was then on no device at all, and with it the way back by Sync Now. When the server holds a copy
+that opens, that copy is taken, and this device's is moved beside it as `<file>.unreadable` (then
+`-2`, …): nothing unreadable is deleted or written over. When the server has none that opens,
+nothing is written on either side. Either way `report.unreadable` names the file, and the app says
+which and what was done. Settings (`config.bin`) missing here are taken back from the server even
+when its copy has not changed since this device last had it: the profile does not start without
+them (docs/DESTRUCTIVE_PATHS.md, R1).
+
 Before a remote copy is pulled, merged, compared or written over — and before this device's copy
 is merged or compared with it — its `format` is checked (the index's, and each profile file's
 inside its envelope). A copy a newer version wrote stops the sync with `CoreError.newerFormat`:

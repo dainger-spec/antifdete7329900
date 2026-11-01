@@ -315,6 +315,7 @@ final class SelfTest {
         await group("fingerprint surface") { try await fingerprintSurface(repository) }
         await group("recovery sealing") { try await recoverySealing(repository) }
         await group("format policy") { try formatPolicy(repository) }
+        await group("unreadable settings") { try await unreadableSettings(repository) }
         await group("Safari's home: a restore that fails") { try safariHomeRestoreFailure(repository) }
         await group("a seal whose deletion stops part-way") { try await sealWithAFailedDeletion(repository) }
         await group("earlier versions' Safari keys") { earlierVersionsSafariKeys() }
@@ -3403,6 +3404,44 @@ final class SelfTest {
         try? FileManager.default.removeItem(at: home)
     }
 
+    /// A profile's settings that cannot be read — damaged, or not there — never start the profile
+    /// with defaults (no proxy: this Mac's own address) and are never written over (R1,
+    /// docs/DESTRUCTIVE_PATHS.md). The launch refuses before anything is decrypted, and says how to
+    /// get them back: the file from a backup, at its path, or Sync Now, by its menu item's name.
+    private func unreadableSettings(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Unreadable settings", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .socks5, host: "127.0.0.1", port: 9)))
+        defer { try? repository.delete(profile.id) }
+        let url = repository.configURL(for: profile.id)
+        var damaged = try Data(contentsOf: url)
+        damaged[damaged.count - 1] ^= 0x01
+        try damaged.write(to: url)
+        let manager = ProfileManager(repository: repository)
+
+        for missing in [false, true] {
+            if missing { try FileManager.default.removeItem(at: url) }
+            let state = missing ? "missing" : "damaged"
+            var refusal: Error?
+            do { try await manager.launch(profile.id) } catch { refusal = error }
+            var refusedAsUnreadable = false
+            if case .unreadableSettings(profile.id, "Unreadable settings", _)? = refusal as? CoreError { refusedAsUnreadable = true }
+            check("unreadable settings: a profile whose settings are \(state) does not start",
+                  refusedAsUnreadable && !manager.isRunning(profile.id) && WebDataStoreVault.discoverDirectories(for: profile.id).isEmpty,
+                  refusal.map { String(describing: $0) } ?? "launched")
+            let text = refusal.map(errorText) ?? ""
+            check("unreadable settings: the refusal says both ways back — the file at its path, and Sync Now by its name (\(state))",
+                  text.contains("profiles/\(profile.id.uuidString)/config.bin") && text.contains(L("profiles.menu.syncNow"))
+                    && text.contains(L("profiles.menu.more")), text)
+            var saveRefusal: Error?
+            do { try repository.saveConfiguration(ProfileConfiguration(), for: profile.id) } catch { saveRefusal = error }
+            var saveRefused = false
+            if case .unreadableSettings? = saveRefusal as? CoreError { saveRefused = true }
+            let onDisk = try? Data(contentsOf: url)
+            check("unreadable settings: a save is refused and writes nothing (\(state))",
+                  saveRefused && onDisk == (missing ? nil : damaged), saveRefusal.map { String(describing: $0) } ?? "saved")
+        }
+    }
+
     /// Safari's home archive that cannot be restored — damaged, not a newer version's: the launch
     /// fails and leaves no home, and the seals that follow (a stop, the recovery at unlock) keep the
     /// archive as it was. Before, the failed restore left an empty home and the next unlock sealed
@@ -3536,6 +3575,7 @@ final class SelfTest {
             .invalidConfiguration("x"), .profileNotFound(UUID()), .unsupportedFormat("x"),
             .newerFormat(what: "x.bin", found: 3, supported: 2), .unsafeArchivePath("x"), .syncConflict(objectID: "x", remoteRevision: 2),
             .syncServer(status: 403, message: ""), .syncServer(status: 500, message: "x"), .io("x"), .notGranted("x"),
+            .unreadableSettings(profileID: UUID(), profile: "x", reason: "x"),
         ]
         let update: [UpdateError] = [
             .notAnAppcast, .newerAppcastFormat(3), .unknownKey("x"), .badSignature("appcast"), .badSignature("archive"),

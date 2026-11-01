@@ -74,6 +74,8 @@ struct ProfileEditorForm: View {
     var onDropCookieFile: (URL) -> Void = { _ in }
     /// Saved, and its cookies being imported: Save waits.
     var isSaving = false
+    /// The profile's settings could not be read: Save would put the form's defaults in their place.
+    var saveRefused = false
     /// What sites see of the profile as it is saved (an existing profile; nil for a new one).
     var onWhatSitesSee: (() -> Void)?
 
@@ -261,7 +263,7 @@ struct ProfileEditorForm: View {
                 Button(L("common.save"), action: onSave)
                     .buttonStyle(.lumenPrimary)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(checkingProxy || isSaving)
+                    .disabled(checkingProxy || isSaving || saveRefused)
             }
             .padding(.horizontal, 24)
             .frame(height: 60)
