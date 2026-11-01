@@ -5,10 +5,15 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     /// The Profiles window comes in a moment after the vault opens: "Vault open" shows meanwhile,
-    /// while the eclipses part (the design's unlock). No click is asked for.
+    /// while the eclipses part (the design's unlock). No click is asked for; any key or click goes
+    /// on at once, and under Reduce Motion (or with the animations off) it is not shown at all
+    /// (the owner, 1 November: a second twenty times a day is a price too).
     @State private var showsProfiles = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let minimumHeight: CGFloat = 560
+    /// How long "Vault open" shows before the profiles.
+    static let openPause: UInt64 = 400_000_000
 
     var body: some View {
         ZStack {
@@ -25,19 +30,29 @@ struct RootView: View {
                     }
                 }
                 .transition(.opacity)
+                .overlay {
+                    // "Vault open": a key or a click goes on to the profiles at once.
+                    if model.phase == .unlocked && !showsProfiles {
+                        SkipLayer(skip: { showProfiles() })
+                    }
+                }
             }
         }
         .animation(Theme.appearAnimation, value: model.phase)
-        .animation(.easeOut(duration: 0.5), value: showsProfiles)
+        .animation(.easeOut(duration: 0.25), value: showsProfiles)
         .onAppear { showsProfiles = model.phase == .unlocked }
         .onChange(of: model.phase) { _, phase in
             guard phase == .unlocked else {
                 showsProfiles = false
                 return
             }
+            guard !Motion.isReduced(reduceMotion) else {
+                showsProfiles = true
+                return
+            }
             Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 800_000_000)
-                if model.phase == .unlocked { showsProfiles = true }
+                try? await Task.sleep(nanoseconds: Self.openPause)
+                if model.phase == .unlocked { showProfiles() }
             }
         }
         .frame(minWidth: ProfilesScreen.minimumWindowWidth, minHeight: Self.minimumHeight)
@@ -56,6 +71,32 @@ struct RootView: View {
     private var lockPhase: EclipseLight.Phase {
         if model.phase == .unlocked { return .open }
         return model.isWorking ? .busy : .idle
+    }
+
+    private func showProfiles() {
+        if model.phase == .unlocked { showsProfiles = true }
+    }
+}
+
+/// Over "Vault open": any key or click calls `skip`. It takes the keyboard's focus while it is
+/// there, without a focus ring; VoiceOver does not meet it (the moment is short and goes on alone).
+private struct SkipLayer: View {
+    let skip: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture(perform: skip)
+            .focusable()
+            .focused($focused)
+            .focusEffectDisabled()
+            .onKeyPress(phases: .down) { _ in
+                skip()
+                return .handled
+            }
+            .onAppear { focused = true }
+            .accessibilityHidden(true)
     }
 }
 
