@@ -1252,8 +1252,10 @@ private struct ProfilesSidebar: View {
                     }
                 }
                 .scrollIndicators(.automatic)
-                // Eight rows, then the rest scrolls.
-                .frame(height: CGFloat(min(tags.count, 8)) * 32)
+                // Up to eight rows, then the rest scrolls; fewer in a short window, never fewer
+                // than two — a fixed eight pushed Lock and Settings out at the window's foot (CI
+                // run 557, a 1024 × 768 screen; the window may be 560 pt tall).
+                .frame(minHeight: CGFloat(min(tags.count, 2)) * 32, maxHeight: CGFloat(min(tags.count, 8)) * 32)
             }
             Spacer(minLength: 16)
             SyncStatusButton(sync: sync, action: actions.openSync)

@@ -23,13 +23,18 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             sidebar
             Rectangle().fill(Theme.divider).frame(width: 1)
+            // The page scrolls below the title bar's band, beside the search field: a scroll view
+            // that reaches under the title bar gets macOS 26's edge effect there, which a window's
+            // picture does not draw — the whole page came out empty in CI run 557, as the
+            // inspector had in 555 (ProfilesScreen.inspectorTop).
             ScrollView {
                 pane
                     .frame(maxWidth: 640, alignment: .leading)
                     .padding(.horizontal, 56)
-                    .padding(.vertical, 40)
+                    .padding(.bottom, 40)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(.top, ProfilesScreen.inspectorTop)
             .id(section)
         }
         // The window's whole content area, not a fixed 1000 × 700 in it: with the title bar made

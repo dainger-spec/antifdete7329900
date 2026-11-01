@@ -11,9 +11,11 @@ struct LockBackdrop<Content: View>: View {
 
     var body: some View {
         ZStack {
-            Theme.backdrop
+            // To the window's edges, under the title bar too: the window's own background is not
+            // to show there (CI run 557, the snapshots' edge check).
+            Theme.backdrop.ignoresSafeArea()
             if appearance.entryLight {
-                EclipseLight(place: .lock, phase: phase)
+                EclipseLight(place: .lock, phase: phase).ignoresSafeArea()
             }
             content()
         }
