@@ -6,6 +6,10 @@ import XCTest
 /// next unlock deleted every profile folder (`removeOrphanedDirectories` swept every folder the
 /// empty index did not list). Each test opens the repository the way unlocking does
 /// (`ProfileRepository.openedAtUnlock`, which AppModel's unlock runs).
+///
+/// The profiles here have no key copy in their folders (`key.bin`), as in a vault from before the
+/// copies, or with the copies lost too: what happens to folders whose key is in no file but the
+/// index. `ProfileKeyCopyTests` has the index put together again from the copies.
 final class ProfileIndexLossTests: XCTestCase {
     var root: URL!
     let password = "pw"
@@ -28,7 +32,16 @@ final class ProfileIndexLossTests: XCTestCase {
         let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: password, iterations: 1_000))
         let a = try repository.create(name: "A", configuration: ProfileConfiguration(timeZoneIdentifier: "Europe/Paris"))
         let b = try repository.create(name: "B", configuration: ProfileConfiguration())
+        try removeKeyCopies()
         return (repository, a, b)
+    }
+
+    /// Every profile folder's `key.bin` gone: a vault from before the copies.
+    private func removeKeyCopies() throws {
+        let profiles = root.appendingPathComponent("profiles", isDirectory: true)
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: profiles.path)) ?? [] {
+            try? FileManager.default.removeItem(at: profiles.appendingPathComponent(name).appendingPathComponent("key.bin"))
+        }
     }
 
     /// The profile's folder with its encrypted settings in it.
@@ -112,6 +125,7 @@ final class ProfileIndexLossTests: XCTestCase {
         let (repository, a, b) = try vaultWithTwoProfiles()
         let older = try Data(contentsOf: indexURL)
         let c = try repository.create(name: "C", configuration: ProfileConfiguration())
+        try removeKeyCopies()
         try older.write(to: indexURL)
 
         let unlocked = try unlock()
@@ -150,10 +164,12 @@ final class ProfileIndexLossTests: XCTestCase {
 
         let unlocked = try unlock()
         XCTAssertEqual(unlocked.indexState, .read)
-        XCTAssertEqual(unlocked.list().map(\.id), [a.id, b.id])
         XCTAssertTrue(kept(unlocked, a.id, b.id, d.id))
         XCTAssertEqual(Set(unlocked.profileFolderIDs()), [a.id, b.id, d.id], "a profile refused left a folder behind")
-        XCTAssertEqual(unlocked.unlistedProfileFolders(), [d.id])
+        // D, made after the copies came in, has its key in its folder: the index put back lists it again.
+        XCTAssertEqual(unlocked.list().map(\.id), [a.id, b.id, d.id])
+        XCTAssertEqual(unlocked.takenInFromKeyCopies, [d.id])
+        XCTAssertEqual(unlocked.list().last?.name, "D2")
     }
 
     func testSyncPutsAMissingIndexBack() async throws {

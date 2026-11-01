@@ -257,6 +257,8 @@
 "index.unlisted.title" = "Some profile folders are not in the list";
 "index.unlisted.text" = "Profile folders not in the profile list (index.bin): %ld. This happens when the list was replaced with an older copy, or made anew while the old one was missing. Nothing was deleted. These profiles' keys are only in a copy of index.bin that lists them. If you have one, keep the current index.bin aside, put that copy back and restart Lumen. Profiles made after that copy will then be outside the list; their folders are kept too.";
 "index.reveal" = "Show in Finder";
+"index.takenIn.text" = "The profile list (index.bin) was missing, or an older copy of it was put back. %ld profiles were put back into it from the copy of its key each profile keeps in its own folder, with their names; when each was last used is not known. Their data is as it was.";
+"index.takenIn.title" = "Profiles put back into the list from their own folders — nothing was lost";
 "index.path" = "Vault folder: %@";
 "index.unreadable.cannotCreate" = "The profile was not created: the profile list (index.bin) could not be read, and it is not written over until it is restored. The Profiles window says how.";
 "settings.device.unreadable" = "This Mac's settings (settings.bin: sync, the automation API) could not be read, so the defaults are shown. The file is not written over: at the first change of settings it is kept beside as settings.bin.unreadable.";

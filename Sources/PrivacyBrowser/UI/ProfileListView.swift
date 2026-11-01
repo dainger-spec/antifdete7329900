@@ -1184,6 +1184,7 @@ struct IndexNoticeBox: View {
         case .missing: return L("index.missing.title")
         case .unreadable: return L("index.unreadable.title")
         case .unlisted: return L("index.unlisted.title")
+        case .takenIn: return L("index.takenIn.title")
         }
     }
 
@@ -1192,6 +1193,7 @@ struct IndexNoticeBox: View {
         case .missing: return String(format: L("index.missing.text"), notice.folders)
         case .unreadable: return String(format: L("index.unreadable.text"), notice.folders)
         case .unlisted: return String(format: L("index.unlisted.text"), notice.folders)
+        case .takenIn: return String(format: L("index.takenIn.text"), notice.folders)
         }
     }
 }

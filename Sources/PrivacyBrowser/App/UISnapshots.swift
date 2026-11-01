@@ -181,6 +181,9 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-index-unlisted", size: CGSize(width: 1180, height: 740)) {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: AppModel.IndexNotice(kind: .unlisted, folders: 3, vaultPath: vaultPath))
         }.capture(into: folder)
+        problems += await Shot(name: "profiles-index-taken-in", size: CGSize(width: 1180, height: 740)) {
+            ProfilesPreview(rows: rows, sync: .off, indexNotice: AppModel.IndexNotice(kind: .takenIn, folders: 2, vaultPath: vaultPath))
+        }.capture(into: folder)
         problems += await Shot(name: "profiles-no-matches", size: CGSize(width: 1180, height: 520)) {
             ProfilesPreview(rows: rows, search: "zzz", sync: .syncing)
         }.capture(into: folder)

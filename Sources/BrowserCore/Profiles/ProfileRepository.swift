@@ -22,6 +22,20 @@ struct ProfileIndexEntry: Codable, Equatable {
     var wrappedKey: Data
 }
 
+/// `profiles/<id>/key.bin`: a copy of what the index holds of the profile — its key, wrapped as the
+/// index wraps it, its name and when it was made — sealed under the vault's index key (AAD
+/// `"profile-key-copy:v1:<vaultID>:<id>"`). The index was the only place the profile's key was:
+/// losing that one file lost every profile. With the copies, a vault unlocked without its index
+/// puts it together again from the profiles' folders (`takeInProfilesFromKeyCopies`).
+struct ProfileKeyCopy: Codable, Equatable {
+    var format = 1
+    var id: UUID
+    var name: String
+    var createdAt: Date
+    /// As in the index: AEAD(profileKeyWrappingKey, profileKey), AAD `"profile-key:v1:<uuid>"`.
+    var wrappedKey: Data
+}
+
 struct ProfileIndex: Codable, Equatable {
     var format: Int = 1
     var entries: [ProfileIndexEntry] = []
@@ -69,6 +83,8 @@ struct ProfileIndex: Codable, Equatable {
 ///                                  (this device only)
 /// profiles/<uuid>/warmup-schedule.bin AEAD(warmUpScheduleKey, WarmUpSchedule JSON): "warm up every
 ///                                  N hours" and when it last ran (this device only, not exported)
+/// profiles/<uuid>/key.bin          AEAD(indexKey, ProfileKeyCopy JSON): the profile's wrapped key, name
+///                                  and creation date, as the index has them (`takeInProfilesFromKeyCopies`)
 /// ```
 /// Profile names are only readable after unlock. Profile configurations are only
 /// decrypted when launched or edited.
@@ -99,10 +115,15 @@ public final class ProfileRepository: @unchecked Sendable {
     public var indexState: IndexState { lock.withLock { state } }
     /// `indexState`, under `lock`.
     private var state: IndexState = .read
-    /// With the index missing: the SHA-256 of the `index.bin` this repository wrote since (a profile
+    /// With the index missing when the vault was unlocked: the SHA-256 of the `index.bin` this
+    /// repository wrote since (one put together from the profiles' key copies, or a profile
     /// created). A file there with other bytes was put back by someone — a backup restored, as the
     /// app tells a person to — and is never written over: the next unlock reads it.
     private var writtenWhileMissing: Data?
+    /// The profiles the index was put together from, at unlock, out of their key copies: the index
+    /// was missing, or an older one was put back (`takeInProfilesFromKeyCopies`). The Profiles
+    /// window says so.
+    public private(set) var takenInFromKeyCopies: [UUID] = []
 
     /// In a repository on a granted vault: the profile's settings were saved. The manager's index
     /// counts that as a new revision of the profile (sync's merge of the index goes by it), and
@@ -128,6 +149,8 @@ public final class ProfileRepository: @unchecked Sendable {
         try vault.raiseGenerationIfNeeded()
         let repository = try ProfileRepository(vault: vault)
         repository.removeOrphanedDirectories()
+        repository.takeInProfilesFromKeyCopies()
+        repository.writeMissingKeyCopies()
         return repository
     }
 
@@ -181,6 +204,9 @@ public final class ProfileRepository: @unchecked Sendable {
         }
         try SecureFile.ensureDirectory(directory(for: id))
         do {
+            // Its key in its own folder too, before the index: a folder left by a create that
+            // stopped before the index is a profile the next unlock takes in.
+            try writeKeyCopy(ProfileKeyCopy(id: id, name: cleanName, createdAt: summary.createdAt, wrappedKey: wrapped))
             try writeConfiguration(configuration, id: id, key: profileKey)
             try lock.withLock {
                 var updated = index
@@ -200,6 +226,8 @@ public final class ProfileRepository: @unchecked Sendable {
     public func rename(_ id: UUID, to name: String) throws {
         let cleanName = try Self.validatedName(name)
         try mutateSummary(id) { $0.name = cleanName; $0.revision += 1 }
+        // The copy's name follows (a stale one would only be the name a lost index comes back with).
+        try? writeKeyCopy(for: id)
     }
 
     public func markLaunched(_ id: UUID) throws {
@@ -492,6 +520,86 @@ public final class ProfileRepository: @unchecked Sendable {
             state = .read
             writtenWhileMissing = nil
         }
+        // Profiles the sync brought, renamed, or wrapped anew: their copies follow.
+        writeMissingKeyCopies()
+    }
+
+    // MARK: Key copies
+
+    func keyCopyURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("key.bin") }
+    private func keyCopyAAD(_ id: UUID) -> String { "profile-key-copy:v1:\(vault.vaultID.uuidString):\(id.uuidString)" }
+
+    private func writeKeyCopy(_ copy: ProfileKeyCopy) throws {
+        try SecureFile.ensureDirectory(directory(for: copy.id))
+        try SecureFile.write(AEAD.seal(JSONCoding.encoder.encode(copy), key: vault.indexKey, aad: keyCopyAAD(copy.id)),
+                             to: keyCopyURL(for: copy.id))
+    }
+
+    private func writeKeyCopy(for id: UUID) throws {
+        let entry = try lock.withLock { try self.entry(for: id) }
+        try writeKeyCopy(ProfileKeyCopy(id: id, name: entry.summary.name, createdAt: entry.summary.createdAt, wrappedKey: entry.wrappedKey))
+    }
+
+    /// The copy in `id`'s folder, when this vault's key opens it and the key it holds unwraps.
+    func readKeyCopy(_ id: UUID) -> ProfileKeyCopy? {
+        guard let sealed = try? SecureFile.read(keyCopyURL(for: id)),
+              let plaintext = try? AEAD.open(sealed, key: vault.indexKey, aad: keyCopyAAD(id)),
+              (try? DocumentFormat.check(plaintext, supported: 1, what: "key.bin")) != nil,
+              let copy = try? JSONCoding.decoder.decode(ProfileKeyCopy.self, from: plaintext), copy.id == id,
+              let raw = try? AEAD.open(copy.wrappedKey, key: vault.profileKeyWrappingKey, aad: Self.keyAAD(id)), raw.count == 32
+        else { return nil }
+        return copy
+    }
+
+    /// Every profile of the index gets its copy, or a new one when its name or key changed (an
+    /// index from before the copies, a profile sync brought). Not on a granted vault.
+    func writeMissingKeyCopies() {
+        guard vault.grant == nil else { return }
+        for entry in lock.withLock({ index.entries }) {
+            let copy = ProfileKeyCopy(id: entry.summary.id, name: entry.summary.name, createdAt: entry.summary.createdAt,
+                                      wrappedKey: entry.wrappedKey)
+            // Dates are kept to the second (ISO 8601): compared so, or every copy were written again.
+            let onDisk = readKeyCopy(entry.summary.id)
+            let same = onDisk.map { ($0.name, $0.wrappedKey, Int($0.createdAt.timeIntervalSince1970))
+                == (copy.name, copy.wrappedKey, Int(copy.createdAt.timeIntervalSince1970)) } ?? false
+            if !same { try? writeKeyCopy(copy) }
+        }
+    }
+
+    /// Profiles whose folder holds a key copy this vault opens, and whom the index does not list:
+    /// the index was missing (it is put together from the copies, and written), or an older one
+    /// was put back (the profiles made since are listed again). Never with an index that could not
+    /// be read (kept as it is, as before), never a profile the index records as deleted; a folder
+    /// without a copy this vault opens stays out of the list, kept, as before. The summary comes
+    /// back with its name and when it was made; when it was last used does not. Returns the
+    /// profiles taken in.
+    @discardableResult
+    func takeInProfilesFromKeyCopies() -> [UUID] {
+        guard vault.grant == nil else { return [] }
+        if case .unreadable = indexState { return [] }
+        let found = unlistedProfileFolders().compactMap(readKeyCopy).sorted { $0.createdAt < $1.createdAt }
+        guard !found.isEmpty else { return [] }
+        return lock.withLock {
+            var updated = index
+            for copy in found {
+                updated.entries.append(ProfileIndexEntry(summary: ProfileSummary(id: copy.id, name: copy.name, createdAt: copy.createdAt,
+                                                                                lastLaunchedAt: nil, revision: 0),
+                                                         wrappedKey: copy.wrappedKey))
+            }
+            do {
+                try saveIndex(updated)
+            } catch {
+                return []
+            }
+            index = updated
+            if case .missing = state {
+                // Read from now on (the sweep, sync), but a file put back meanwhile is still not
+                // written over (saveIndex: `writtenWhileMissing`, set as it wrote).
+                state = .read
+            }
+            takenInFromKeyCopies = found.map(\.id)
+            return takenInFromKeyCopies
+        }
     }
 
     func passwordsURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("passwords.bin") }
@@ -650,7 +758,10 @@ public final class ProfileRepository: @unchecked Sendable {
     private func saveIndex(_ index: ProfileIndex) throws {
         switch state {
         case .read:
-            break
+            // Put together from the key copies while it was missing: a file put back since is not written over.
+            if let written = writtenWhileMissing, let onDisk = try? SecureFile.read(indexURL), Data(SHA256.hash(data: onDisk)) != written {
+                throw CoreError.corruptData("an index.bin was put back after the vault was unlocked without one; it is read at the next unlock, not written over")
+            }
         case .unreadable:
             // Kept as it is: it may be readable again (a transient read error, a backup restored
             // over it), and the profiles' keys are in it.

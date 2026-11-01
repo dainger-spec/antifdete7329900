@@ -40,6 +40,9 @@ final class AppModel: ObservableObject {
             /// The index was read, and profile folders are there that it neither lists nor
             /// records as deleted (an older index put back, or one made anew while it was missing).
             case unlisted
+            /// Profiles put back into the index from the key copies in their own folders, at this
+            /// unlock: the index was missing, or an older one was put back (`folders`: how many).
+            case takenIn
         }
         let kind: Kind
         /// The profile folders kept: all of them (missing, unreadable), or those not listed.
@@ -212,7 +215,9 @@ final class AppModel: ObservableObject {
         case .missing:
             notice = unlisted > 0 ? IndexNotice(kind: .missing, folders: unlisted, vaultPath: vaultPathDescription) : nil
         case .read:
-            notice = unlisted > 0 ? IndexNotice(kind: .unlisted, folders: unlisted, vaultPath: vaultPathDescription) : nil
+            let takenIn = repository.takenInFromKeyCopies.count
+            notice = unlisted > 0 ? IndexNotice(kind: .unlisted, folders: unlisted, vaultPath: vaultPathDescription)
+                : takenIn > 0 ? IndexNotice(kind: .takenIn, folders: takenIn, vaultPath: vaultPathDescription) : nil
         }
         if notice != indexNotice { indexNotice = notice }
     }

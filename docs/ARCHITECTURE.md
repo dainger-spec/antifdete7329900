@@ -149,6 +149,8 @@ build, `~/Library/Containers/<bundle-id>/Data/Library` for the sandboxed (defaul
 Application Support/PrivacyBrowser/      (0700)
   vault.json                      plaintext: format, vaultID, KDF params, wrapped VMK
   index.bin                       AES-GCM(index key, ProfileIndex JSON)
+  profiles/<uuid>/key.bin         AES-GCM(index key, ProfileKeyCopy JSON): the profile's wrapped key, name and creation date,
+                                  as the index has them; what a lost index is put together from
   settings.bin                    AES-GCM(device-settings key, DeviceSettings JSON)   [after configuring sync]
   settings.bin.unreadable         a settings.bin that could not be read, moved aside at the next change of settings, never written over
   proxies.bin                     AES-GCM(proxy-list key, ProxyList JSON)             [after the first proxy is added; this Mac only]
@@ -187,16 +189,29 @@ deletes it — and which format each file carries: docs/UPDATES.md §4 (`Documen
 
 ### `index.bin` missing or unreadable
 
-The profiles' keys are only in `index.bin` (wrapped by the profile-key wrapping key), so a profile
-folder without its entry cannot be opened — and an index that is missing or cannot be read is not
-"no profiles". `ProfileRepository.IndexState` tells the cases apart, and nothing deletes a profile
-folder on the strength of an index it did not read:
+A profile's key is in `index.bin` (wrapped by the profile-key wrapping key) and, since the key
+copies, in the profile's own folder too: `key.bin` holds it wrapped the same way, with the profile's
+name and when it was made, sealed under the index key (AAD `"profile-key-copy:v1:<vaultID>:<id>"`).
+It is written when the profile is made (before the index, so a create that stops in between leaves a
+folder the next unlock takes in), when it is renamed, after a sync brings or changes profiles, and at
+each unlock for every listed profile that has none (a vault from before the copies). At unlock, the
+profiles whose folder holds a copy this vault opens and whom the index does not list are taken back
+into it (`takeInProfilesFromKeyCopies`): an index that was missing is put together again from the
+copies and written, an older index put back gets the profiles made since listed again — with their
+names; when each was last used is not known (it comes back from the server's index at the next
+sync, where there is one). A profile the index records as deleted is never taken in; a folder
+without a copy this vault opens stays out of the list, kept, as before.
+
+An index that is missing or cannot be read is not "no profiles". `ProfileRepository.IndexState`
+tells the cases apart, and nothing deletes a profile folder on the strength of an index it did not
+read:
 
 | `index.bin` at unlock | `indexState` | Profile folders | `index.bin` | The Profiles window |
 |---|---|---|---|---|
-| read | `.read` | only those the index records as deleted (`deletedProfileIDs`) are swept — a deletion that stopped between the index and the folder | written as usual | folders the index neither lists nor records as deleted (an older index put back, or one made anew while it was missing): kept, and said, with how to get them back |
+| read | `.read` | only those the index records as deleted (`deletedProfileIDs`) are swept — a deletion that stopped between the index and the folder | written as usual; the profiles it does not list whose key copy opens are taken back into it | profiles taken back from their folders: "put back into the list from their own folders — nothing was lost"; folders still neither listed nor recorded as deleted (no copy this vault opens): kept, and said, with how to get them back |
 | none, and no profile folder | `.read` | — | a new vault's | — |
-| none, with profile folders | `.missing` | all kept | not written over if one is put back while the vault is unlocked (a backup restored, as the window says to); a profile made meanwhile writes a new one | "Profile list not found — nothing was deleted", the folders' count, the vault's folder, and how to restore it: a backup's `index.bin`, or Sync Now |
+| none, with profile folders that hold key copies | `.read` once put together | all kept | put together from the copies and written; one put back while the vault is unlocked is still not written over | as for an older index put back: the profiles taken back are said |
+| none, with profile folders without copies | `.missing` | all kept | not written over if one is put back while the vault is unlocked (a backup restored, as the window says to); a profile made meanwhile writes a new one | "Profile list not found — nothing was deleted", the folders' count, the vault's folder, and how to restore it: a backup's `index.bin`, or Sync Now |
 | there, not readable (damaged, another vault's) | `.unreadable` | all kept | never written over; no new profile | "Profile list can't be read — nothing was deleted", and how: a backup's copy, or, with sync, the file renamed and Sync Now |
 | a newer version's | — | — | unlock refuses (`newerFormat`), as before | — |
 
@@ -204,7 +219,9 @@ Sync (`SyncEngine.syncIndex`) never pushes an index that was not read: with `.mi
 `.unreadable` it fetches the server's whatever its revision, merges, and pushes only the merge. (Before
 this was fixed, an index that went missing read as empty, the next unlock swept every profile folder,
 and a sync with the server unchanged since the last one pushed the empty index over the server's copy.)
-Tests: `ProfileIndexLossTests`.
+An index put together from the key copies is a read one, and syncs as one: its entries carry revision
+0, so the server's summaries (names, last use) win the merge. Tests: `ProfileIndexLossTests` (folders
+without copies), `ProfileKeyCopyTests`.
 
 ### `webdata.pbsa` format
 
