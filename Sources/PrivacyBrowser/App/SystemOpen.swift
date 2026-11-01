@@ -27,6 +27,9 @@ enum SystemOpen {
         case systemSettings
         /// The update's installer (this app's own helper).
         case updateInstaller
+        /// System Settings › Date & Time: this Mac's clock is off from the account server's
+        /// (`clock.skew`, the server's CONTRACT §8.3).
+        case dateAndTime
     }
 
     struct Request: Equatable, Sendable {
@@ -109,6 +112,17 @@ enum SystemOpen {
             if let url = URL(string: candidate), NSWorkspace.shared.open(url) { return }
         }
         NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+    }
+
+    /// System Settings at Date & Time.
+    static func openSystemSettingsForDateAndTime() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Date-Time-Settings.extension") else { return }
+        guard admit(.dateAndTime, url.absoluteString) else { return }
+        if let standIn {
+            Task { _ = await standIn(.dateAndTime, url) }
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     /// The update's installer, this app's own helper, started without being brought forward.

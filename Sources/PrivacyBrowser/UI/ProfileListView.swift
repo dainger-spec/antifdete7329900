@@ -24,6 +24,12 @@ struct RootView: View {
                 // password is checked and part when the vault opens.
                 LockBackdrop(phase: lockPhase) {
                     switch model.phase {
+                    case .setup where !model.accountStepDone:
+                        // The first launch: sign in and connect this Mac, then the master password
+                        // (the owner's order, CONTRACT §10.1); no way past it — without a connected
+                        // Mac no profile can be made (§8.4).
+                        SignInFlow(license: model.license, onFinished: { model.accountStepDone = true }, standalone: false)
+                            .transition(.opacity)
                     case .setup: SetupView().transition(.opacity)
                     case .locked: UnlockView().transition(.opacity)
                     case .unlocked: VaultOpenView().transition(.opacity)
@@ -121,6 +127,8 @@ struct ProfileListView: View {
     @State private var removingDeleted: ProfileRepository.KeptDeletedProfile?
     @State private var changingPassword = false
     @State private var showingSync = false
+    /// "Sign in" from a license's banner: the sign-in over the Profiles window.
+    @State private var signingIn = false
     @State private var showingTunnel = false
     @State private var showingAutomation = false
     @State private var filter: ProfileFilter = .all
@@ -161,6 +169,10 @@ struct ProfileListView: View {
             }
             .sheet(isPresented: $changingPassword) { ChangePasswordView() }
             .sheet(isPresented: $showingSync) { SyncSettingsView() }
+            .sheet(isPresented: $signingIn) {
+                SignInFlow(license: model.license, onFinished: { signingIn = false }, onCancel: { signingIn = false })
+                    .frame(width: 560, height: 720)
+            }
             .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
             .sheet(isPresented: $showingAutomation) { AutomationSettingsView() }
             .confirmationDialog(String(format: L("profiles.delete.title"), pendingDelete?.name ?? ""),
@@ -278,6 +290,13 @@ struct ProfileListView: View {
         }
     }
 
+    /// The sidebar's line about the rights (CONTRACT §17.4): nil in a build without licensing.
+    private var rightsLine: RightsLine? {
+        guard let state = model.license.state else { return nil }
+        let line = LicenseText.sidebar(state, record: model.license.record)
+        return RightsLine(title: line.title, caption: line.caption, warning: state.mode != .full)
+    }
+
     private func profilesScreen(proxyCount: Int?, proxyAlerts: Int = 0, proxyEntries: [ProxyListEntry] = []) -> ProfilesScreen {
         ProfilesScreen(rows: rows(with: proxyEntries), isWorking: model.isWorking, sync: syncLine,
                        filter: $filter, search: $search, actions: actions,
@@ -308,6 +327,12 @@ struct ProfileListView: View {
                                             problem.proxy.displayAddress),
                                notStarted: problem.notStarted, more: model.proxyProblems.count - 1)
                        },
+                       licenseBanners: model.license.state?.banners ?? [],
+                       license: model.license,
+                       signIn: { signingIn = true },
+                       openSystemSettings: { SystemOpen.openSystemSettingsForDateAndTime() },
+                       updateApp: { Task { await model.updater?.checkNow() } },
+                       rights: rightsLine,
                        openProxyProblem: { proxySheet = .problems },
                        retryProxyProblem: {
                            guard let problem = model.proxyProblems.first else { return }
@@ -408,7 +433,8 @@ struct ProfileListView: View {
                     String(format: $0.notStarted ? L("proxyProblem.subtitle.notStarted") : L("proxyProblem.subtitle"),
                            $0.proxy.displayAddress)
                 },
-                deviceSymbol: details.flatMap { ProfileRowItem.deviceSymbol($0.deviceGeneration) })
+                deviceSymbol: details.flatMap { ProfileRowItem.deviceSymbol($0.deviceGeneration) },
+                exportOnly: model.license.isExportOnly(profile.id))
         }
     }
 
@@ -453,6 +479,10 @@ struct ProfileListView: View {
             openTunnel: { showingTunnel = true },
             openAutomation: { showingAutomation = true },
             openSettings: { openSettings() },
+            openAccount: {
+                model.settingsSection = .account
+                openSettings()
+            },
             changePassword: { changingPassword = true },
             warmUpQueue: { queuePreselection = []; warmingUpSeveral = true },
             openProxies: { showProxies(selecting: []) },
@@ -518,6 +548,9 @@ struct ProfileRowItem: Identifiable {
     var problem: String?
     /// The device it presents as, by its symbol, when not a Mac ("iphone", "ipad").
     var deviceSymbol: String?
+    /// The license lets it open only for export (CONTRACT §8.4, the owner's decision of 1 November):
+    /// the row says "Export only" where a stopped profile's state is; an open one keeps working.
+    var exportOnly = false
 
     var isRunning: Bool { activity == .running }
     /// Grouped under "Need attention": its last launch failed, or its settings cannot be read (R1).
@@ -664,6 +697,8 @@ struct ProfileActions {
     /// The local automation API's settings (`AutomationSettingsView`).
     var openAutomation: () -> Void = {}
     var openSettings: () -> Void = {}
+    /// Settings › Account (the sidebar's line about the rights).
+    var openAccount: () -> Void = {}
     var changePassword: () -> Void = {}
     /// Several profiles warmed up one after the other (`WarmUpQueueView`).
     var warmUpQueue: () -> Void = {}
@@ -729,6 +764,14 @@ struct ProfilesScreen: View {
     var initialBannersExpanded = false
     /// A profile whose proxy does not work, said above the list (`ProxyProblemBanner`).
     var proxyProblem: ProxyProblemBanner.Item?
+    /// The license's banners (CONTRACT §8.5), most important first, and what they do.
+    var licenseBanners: [LicenseBanner] = []
+    var license: LicenseModel?
+    var signIn: () -> Void = {}
+    var openSystemSettings: () -> Void = {}
+    var updateApp: () -> Void = {}
+    /// The sidebar's line about the rights (§17.4); nil in a build without licensing.
+    var rights: RightsLine?
     var openProxyProblem: () -> Void = {}
     var retryProxyProblem: () -> Void = {}
     var dismissProxyProblem: () -> Void = {}
@@ -764,7 +807,7 @@ struct ProfilesScreen: View {
             let inspectorFits = geometry.size.width - Self.sidebarWidth - Self.inspectorWidth >= ProfileColumns.minimumContentWidth
             HStack(spacing: 0) {
                 ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
-                                proxyAlerts: proxyAlerts, actions: actions)
+                                proxyAlerts: proxyAlerts, actions: actions, rights: rights)
                     .frame(width: Self.sidebarWidth)
                     .lumenFrost()
                     .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
@@ -848,12 +891,14 @@ struct ProfilesScreen: View {
     /// list shows may be incomplete), then a profile whose proxy does not work (it was just
     /// launched), then deleted profiles whose folders are kept (R3: a decision that can wait).
     private enum ProfilesBanner: Identifiable {
+        case license(LicenseBanner)
         case index(AppModel.IndexNotice)
         case proxyProblem(ProxyProblemBanner.Item)
         case keptDeleted
 
         var id: String {
             switch self {
+            case .license(let banner): return "license-\(banner.rank)"
             case .index: return "index"
             case .proxyProblem: return "proxy"
             case .keptDeleted: return "kept"
@@ -861,10 +906,13 @@ struct ProfilesScreen: View {
         }
     }
 
+    /// The license's banners that stop work (§8.5's 1–6) come first, then the vault's index and a
+    /// proxy that does not work, then the license's warnings (7–11), then kept folders.
     private var banners: [ProfilesBanner] {
-        var banners: [ProfilesBanner] = []
+        var banners: [ProfilesBanner] = licenseBanners.filter { $0.rank <= 6 }.map { .license($0) }
         if let indexNotice { banners.append(.index(indexNotice)) }
         if let proxyProblem { banners.append(.proxyProblem(proxyProblem)) }
+        banners += licenseBanners.filter { $0.rank > 6 }.map { .license($0) }
         if !keptDeleted.isEmpty { banners.append(.keptDeleted) }
         return banners
     }
@@ -893,6 +941,10 @@ struct ProfilesScreen: View {
     @ViewBuilder
     private func bannerView(_ banner: ProfilesBanner) -> some View {
         switch banner {
+        case let .license(item):
+            if let license {
+                LicenseBannerView(license: license, banner: item, signIn: signIn, openSystemSettings: openSystemSettings, update: updateApp)
+            }
         case let .index(notice):
             IndexNoticeBox(notice: notice, reveal: revealVault)
         case let .proxyProblem(item):
@@ -1228,6 +1280,7 @@ private struct ProfilesSidebar: View {
     let proxyCount: Int?
     var proxyAlerts = 0
     let actions: ProfileActions
+    var rights: RightsLine?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -1259,7 +1312,11 @@ private struct ProfilesSidebar: View {
             }
             Spacer(minLength: 16)
             SyncStatusButton(sync: sync, action: actions.openSync)
-                .padding(.bottom, 8)
+                .padding(.bottom, rights == nil ? 8 : 2)
+            if let rights {
+                RightsStatusButton(title: rights.title, caption: rights.caption, warning: rights.warning, action: actions.openAccount)
+                    .padding(.bottom, 8)
+            }
             HStack(spacing: 8) {
                 Button(action: actions.lock) {
                     Label(L("profiles.action.lock"), systemImage: "lock")
@@ -1584,7 +1641,13 @@ private struct ProfileRow: View {
 
     @ViewBuilder
     private var stateCell: some View {
-        if let problem = row.problem, row.activity == .stopped {
+        if row.exportOnly, row.activity == .stopped {
+            Label(L("contract.profile.export_only.badge"), systemImage: "square.and.arrow.up")
+                .font(.lumenBody)
+                .foregroundStyle(Theme.warning)
+                .lineLimit(1)
+                .help(L("license.refusal.exportOnly"))
+        } else if let problem = row.problem, row.activity == .stopped {
             Text(L("profiles.row.failed"))
                 .font(.lumenBody)
                 .foregroundStyle(Theme.danger)

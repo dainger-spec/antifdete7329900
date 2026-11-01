@@ -99,6 +99,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var pane: some View {
         switch section {
+        case .account: AccountSettingsPage(license: model.license)
         case .startup: StartupSettings(settings: model.settings)
         case .newProfiles: NewProfileSettings(settings: model.settings)
         case .behavior: BehaviorSettings(settings: model.settings)
@@ -166,6 +167,7 @@ struct NewBadge: View {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
+    case account
     case startup, newProfiles, behavior, appearance, downloads
     case proxies, webRTC = "webrtc", sync, security
     case automation, shortcuts, diagnostics, updates, about
@@ -188,7 +190,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var group: Group {
         switch self {
-        case .startup, .newProfiles, .behavior, .appearance, .downloads: return .app
+        case .account, .startup, .newProfiles, .behavior, .appearance, .downloads: return .app
         case .proxies, .webRTC, .sync, .security: return .network
         case .automation, .shortcuts, .diagnostics, .updates, .about: return .more
         }
@@ -199,6 +201,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var titleKey: String {
         switch self {
+        case .account: return "settings.section.account"
         case .startup: return "settings.section.startup"
         case .newProfiles: return "settings.section.newProfiles"
         case .behavior: return "settings.section.behavior"
@@ -218,6 +221,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
+        case .account: return "person.crop.circle"
         case .startup: return "power"
         case .newProfiles: return "person.badge.plus"
         case .behavior: return "macwindow"

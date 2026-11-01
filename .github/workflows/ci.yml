@@ -354,6 +354,13 @@ jobs:
           echo "$out" | grep '^RELEASE-CHECK' || echo "$out" | tail -n 20
           echo "$out" | grep -F "window is the app's own" >/dev/null \
             || { echo "::error title=Release gate::the control did not fail for its window"; status=1; }
+          # A build without an account server (every development build) is never released: its
+          # license would not be checked (CONTRACT §2, §7.2).
+          out=$(build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --release-check 2>&1) \
+            && { echo "::error title=Release gate::a build without an account server passed the release check"; status=1; }
+          echo "$out" | grep '^RELEASE-CHECK' || echo "$out" | tail -n 20
+          echo "$out" | grep -F 'no account server in this build' >/dev/null \
+            || { echo "::error title=Release gate::the build without an account server did not fail for it"; status=1; }
           if SANDBOX=1 VERSION=0.1.1 BUILD=2 OUT=build/release-sandboxed scripts/release.sh > build/release-sandboxed.log 2>&1; then
             echo "::error title=Release gate::release.sh made a release of the sandboxed build"; status=1
           fi

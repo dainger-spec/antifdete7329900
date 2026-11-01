@@ -359,6 +359,13 @@ final class SelfTest {
         await group("warm-up queue") { try await warmUpQueue(repository) }
         await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
         await group("Safari's app-link banner tracker") { try await safariAppLinkTracker(repository) }
+        // The license: signed in with a key against a server played on the loopback; where the key
+        // is not (account.json, the defaults, the diagnostics); without the server; revoked.
+        await group("licensing") {
+            for result in await LicenseSelfTest.run(scratch: FileManager.default.temporaryDirectory) {
+                check(result.name, result.passed, result.detail)
+            }
+        }
         await group("a mobile view in its own process") { try await mobileViewInItsOwnProcess(repository) }
         await group("lock during launch") { try await lockDuringLaunch(repository) }
         await group("quit") { try await quitFromFocusedPage(repository) }

@@ -95,6 +95,13 @@ final class AppModel: ObservableObject {
 
     /// See `AppEnvironment.vaultDirectory` (inside the container when sandboxed).
     let root: URL
+    /// This Mac's license (`LicenseModel`, the server's docs/CONTRACT.md §8): read from
+    /// `account.json` before the vault is unlocked, and decided here every minute.
+    let license: LicenseModel
+    /// The first launch's sign-in and this Mac's connection are done — or this build has no account
+    /// server: the master password's screen comes next (§10.1, the owner's order).
+    @Published var accountStepDone: Bool
+    private var licenseObservation: AnyCancellable?
 
     init() {
         // Before the vault is looked for: a vault a sandboxed build of this app left in its
@@ -105,11 +112,23 @@ final class AppModel: ObservableObject {
         // Partial plaintext an unseal that did not finish left (R8): no profile runs yet.
         AppEnvironment.removeUnsealLeftovers(vault: root)
         phase = MasterVault.exists(in: root) ? .locked : .setup
+        license = LicenseModel(root: root)
+        accountStepDone = !license.isConfigured || license.record.isSignedIn
         // No profile's page is handed to Quick Look, Services or another app (`HandOffs`).
         HandOffs.closeForWebViews()
         // Profiles in processes of their own get changed browsing settings at once.
         settings.onBrowsingChange = { [weak self] preferences in self?.manager?.sendPreferences(preferences) }
+        // The license counts this Mac's profiles (sent with each refresh, §6.2; the limit, §8.4) and
+        // asks for an update when the server sent what this version cannot judge (§9.4).
+        license.profilesHere = { [weak self] in self?.profiles ?? [] }
+        // The windows that show the license redraw with it.
+        licenseObservation = license.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        license.onAppOutdated = { [weak self] in Task { await self?.updater?.checkNow() } }
+        license.start()
     }
+
+    /// The unlocked vault, for the license's key (`AccountKeyVault`); nil while locked.
+    var unlockedVaultForAccount: UnlockedVault? { repository?.vault }
 
     /// Settings → Proxies → the list: the Profiles window shows its Proxies section.
     func showProxyList() {
@@ -132,6 +151,12 @@ final class AppModel: ObservableObject {
 
     func createVault(password: String) async {
         guard !isWorking else { return }
+        // §10.1, the owner's decision: the account's password, typed in this session, is not
+        // accepted as the master password — compared directly, never used to open anything.
+        if license.isAccountPassword(password) {
+            errorMessage = L("contract.master_password.same_as_account")
+            return
+        }
         let root = root
         await perform {
             // Argon2id (64 MiB, 3 passes) takes a fraction of a second; keep it off the main thread.
@@ -139,6 +164,7 @@ final class AppModel: ObservableObject {
                 try MasterVault.create(in: root, password: password)
             }.value
             try self.didUnlock(vault)
+            self.license.forgetAccountPassword()
         }
     }
 
@@ -170,6 +196,12 @@ final class AppModel: ObservableObject {
                 throw CoreError.wrongPassword
             }
             try self.didUnlock(vault)
+            // §10.1 later: the account's password and the master password typed in one session are
+            // the same — the data is already locked with it, so it is said, not refused.
+            if self.license.isAccountPassword(password) {
+                self.errorMessage = L("contract.master_password.same_as_account_existing")
+            }
+            self.license.forgetAccountPassword()
         }
     }
 
@@ -294,6 +326,9 @@ final class AppModel: ObservableObject {
                 .error("The profile index could not be read: \(Int(folders), privacy: .public) profile folders kept, none deleted, the index not written over")
         }
         let manager = ProfileManager(repository: repository)
+        // The license decides whether a profile opens (§8): here, before its process starts.
+        manager.launchGate = { [weak self] id in self?.license.refusalToOpen(id) }
+        license.vaultOpened(vault)
         manager.onError = { [weak self] message in self?.showError(message) }
         manager.onReturnToProfiles = { [weak self] in
             self?.activateProfilesWindow()
@@ -412,6 +447,7 @@ final class AppModel: ObservableObject {
     var hasActivity: Bool { lockTask != nil || (manager?.hasActivity ?? false) }
 
     private func performLock() async {
+        license.vaultLocked()
         // First: no script may start a profile while they are being stopped and sealed.
         automationServer?.stop()
         automationServer = nil
@@ -510,6 +546,7 @@ final class AppModel: ObservableObject {
     func createProfile(name: String, configuration: ProfileConfiguration) throws -> UUID? {
         guard let repository else { return nil }
         try refuseWhileTheIndexIsUnreadable(repository)
+        if let refusal = license.refusalToCreate() { throw refusal }
         let summary = try repository.create(name: name, configuration: configuration)
         refresh()
         return summary.id
@@ -524,6 +561,10 @@ final class AppModel: ObservableObject {
     /// main thread: everything it carries is re-encrypted. The old folder stays, marked brought back.
     func bringBackDeletedProfile(_ id: UUID) async {
         guard let repository else { return }
+        if let refusal = license.refusalToCreate() {
+            errorMessage = refusal.text
+            return
+        }
         await perform {
             _ = try await Task.detached(priority: .userInitiated) { try ProfileTransfer.bringBack(id, in: repository) }.value
         }
@@ -624,6 +665,7 @@ final class AppModel: ObservableObject {
     func importProfile(from url: URL, password: String, name: String?) async throws -> ProfileSummary {
         guard let repository else { throw CoreError.vaultNotFound }
         try refuseWhileTheIndexIsUnreadable(repository)
+        if let refusal = license.refusalToCreate() { throw refusal }
         let summary = try await Task.detached(priority: .userInitiated) {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }

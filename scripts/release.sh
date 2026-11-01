@@ -67,6 +67,19 @@ read -r KEY_ID KEY_PUBLIC < <("$PBUPDATE" public-key "$KEY")
 PUBLIC_KEYS="$KEY_ID=$KEY_PUBLIC"
 [[ -z "${UPDATE_EXTRA_PUBLIC_KEYS:-}" ]] || PUBLIC_KEYS="$PUBLIC_KEYS,$UPDATE_EXTRA_PUBLIC_KEYS"
 
+# The account server and the keys of its documents of rights (the server's docs/CONTRACT.md §2,
+# §7.2): the release's, printed by `lumen-api pubkey` on the owner's server; a throwaway key for a
+# dry run. Never the development server's key (445c6300da0205b1): --release-check refuses it.
+ACCOUNT_SERVER_URL="${ACCOUNT_SERVER_URL:-https://api.lumenbrowser.io}"
+ACCOUNT_SITE_URL="${ACCOUNT_SITE_URL:-https://lumenbrowser.io}"
+if [[ -z "${ENTITLEMENT_PUBLIC_KEYS:-}" ]]; then
+  [[ "$SIGN_IDENTITY" == "-" ]] || { echo "error: a release needs ENTITLEMENT_PUBLIC_KEYS (lumen-api pubkey)" >&2; exit 1; }
+  "$PBUPDATE" keygen "$OUT/throwaway-entitlement.key" >/dev/null
+  read -r ENT_ID ENT_PUBLIC < <("$PBUPDATE" public-key "$OUT/throwaway-entitlement.key")
+  ENTITLEMENT_PUBLIC_KEYS="$ENT_ID=$ENT_PUBLIC"
+  DRY+=("the documents of rights are trusted under a throwaway key (no ENTITLEMENT_PUBLIC_KEYS): no server signs with it")
+fi
+
 # 1. Build and sign (the installer helper first, then the app: build-app.sh).
 TEAM_FOR_UPDATES=""
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
@@ -77,6 +90,7 @@ else
 fi
 APP_VERSION="$VERSION" APP_BUILD="$BUILD" SANDBOX="$SANDBOX" APP_DIR="$OUT/app" SIGN_IDENTITY="$SIGN_IDENTITY" \
   UPDATE_FEED_URL="$FEED_URL" UPDATE_PUBLIC_KEYS="$PUBLIC_KEYS" UPDATE_TEAM_ID="$TEAM_FOR_UPDATES" \
+  ACCOUNT_SERVER_URL="$ACCOUNT_SERVER_URL" ACCOUNT_SITE_URL="$ACCOUNT_SITE_URL" ENTITLEMENT_PUBLIC_KEYS="$ENTITLEMENT_PUBLIC_KEYS" \
   scripts/build-app.sh
 APP="$OUT/app/Lumen.app"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")" == "$BUILD" ]] \

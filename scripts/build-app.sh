@@ -94,6 +94,24 @@ if [[ -n "${UPDATE_PUBLIC_KEYS:-}" ]]; then
   done
 fi
 [[ -z "${UPDATE_TEAM_ID:-}" ]] || /usr/libexec/PlistBuddy -c "Add :PBUpdateTeamID string $UPDATE_TEAM_ID" "$PLIST"
+# The account server and the keys of its documents of rights (the server's docs/CONTRACT.md §2,
+# §7.2): with them the build is licensed, and nothing in the environment changes them
+# (AccountConfiguration). Without them — every development build — there is no licensing.
+if [[ -n "${ACCOUNT_SERVER_URL:-}" ]]; then
+  [[ "$ACCOUNT_SERVER_URL" == https://* ]] || { echo "error: ACCOUNT_SERVER_URL must be https" >&2; exit 1; }
+  [[ -n "${ENTITLEMENT_PUBLIC_KEYS:-}" ]] || { echo "error: ACCOUNT_SERVER_URL needs ENTITLEMENT_PUBLIC_KEYS" >&2; exit 1; }
+  /usr/libexec/PlistBuddy -c "Add :PBAccountServerURL string $ACCOUNT_SERVER_URL" "$PLIST"
+  [[ -z "${ACCOUNT_SITE_URL:-}" ]] || /usr/libexec/PlistBuddy -c "Add :PBAccountSiteURL string $ACCOUNT_SITE_URL" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Add :PBEntitlementPublicKeys dict" "$PLIST"
+  IFS=',' read -ra ENTITLEMENT_KEYS <<< "$ENTITLEMENT_PUBLIC_KEYS"
+  for entry in "${ENTITLEMENT_KEYS[@]}"; do
+    id="${entry%%=*}"
+    key="${entry#*=}"
+    [[ "$id" =~ ^[0-9a-f]{16}$ && -n "$key" && "$key" != "$entry" ]] \
+      || { echo "error: ENTITLEMENT_PUBLIC_KEYS: '$entry' is not <key id>=<base64>" >&2; exit 1; }
+    /usr/libexec/PlistBuddy -c "Add :PBEntitlementPublicKeys:$id string $key" "$PLIST"
+  done
+fi
 # Settings → About links to these; https only, as the app reads them.
 for link in "WEBSITE_URL:PBWebsiteURL" "SUPPORT_URL:PBSupportURL"; do
   variable="${link%%:*}" key="${link#*:}"

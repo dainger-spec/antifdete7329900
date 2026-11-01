@@ -16,6 +16,17 @@ public struct LicenseState: Equatable, Sendable {
     /// The effective time the state was made at.
     public var now: Date
 
+    public init(mode: LicenseMode, entitlement: Entitlement?, check: EntitlementCheck?, banners: [LicenseBanner],
+                allowedProfilesHere: Int, worksWithoutServerUntil: Date?, now: Date) {
+        self.mode = mode
+        self.entitlement = entitlement
+        self.check = check
+        self.banners = banners
+        self.allowedProfilesHere = allowedProfilesHere
+        self.worksWithoutServerUntil = worksWithoutServerUntil
+        self.now = now
+    }
+
     /// §8.2–§8.5 for `record`, at the effective time `t`, with this app's `keys` and this Mac's
     /// `machineID`.
     public static func of(_ record: AccountRecord, keys: [String: Data], machineID: String, at t: Date) -> LicenseState {

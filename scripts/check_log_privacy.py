@@ -35,6 +35,7 @@ ALLOWED_EXPRESSIONS = {
     # Numbers and yes/no values.
     "carried": "how many proxy configurations a store carries",
     "restored": "a count of restored items",
+    "confirmed": "whether the account server confirmed this Mac's sign-out (yes or no)",
     "sitesAdded": "a count",
     "self.cookiesCollected": "a count",
     "installed": "a yes/no or a count of hooks",

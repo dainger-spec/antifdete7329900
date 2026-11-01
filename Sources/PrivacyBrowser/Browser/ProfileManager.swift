@@ -70,6 +70,11 @@ final class ProfileManager: ObservableObject {
     /// A profile that was started has a proxy that does not work, and the probe says how
     /// (`diagnoseProxy`): it would load no page — fail-closed — and this is what says why.
     var onProxyProblem: ((UUID, ProxySettings, ProxyDiagnosis) -> Void)?
+    /// Whether a profile may start (the license, `LicenseModel.refusalToOpen`): asked before a
+    /// profile that is not running starts; an open one keeps working whatever it says (the owner:
+    /// work in the middle of something is not cut off). Nil: every profile starts (the self-test's
+    /// own managers, a build without licensing).
+    var launchGate: ((UUID) -> Error?)?
 
     private let repository: ProfileRepository
     private let webDataVault: WebDataStoreVault
@@ -171,7 +176,10 @@ final class ProfileManager: ObservableObject {
 
     // MARK: Launch
 
-    func launch(_ id: UUID, openingWindow: Bool = true) async throws {
+    /// `forExport`: started without a window only to take its data out (the cookies' export) — the
+    /// license's export-only mode allows that (CONTRACT §8.1, the owner's decision), so the gate is
+    /// not asked; nothing is navigated.
+    func launch(_ id: UUID, openingWindow: Bool = true, forExport: Bool = false) async throws {
         guard !isShuttingDown else { return }
         if sessions[id] == nil, children[id] == nil { proxyLocationUnknown.remove(id) }
         if let session = sessions[id] {
@@ -190,6 +198,7 @@ final class ProfileManager: ObservableObject {
             return
         }
         guard !busyProfileIDs.contains(id) else { return }
+        if !forExport, let refusal = launchGate?(id) { throw refusal }
         busyProfileIDs.insert(id)
         defer { busyProfileIDs.remove(id) }
 
@@ -1054,7 +1063,7 @@ final class ProfileManager: ObservableObject {
         let wasRunning = isRunning(id)
         if !wasRunning {
             guard !busyProfileIDs.contains(id), !isShuttingDown else { throw CookieImportError.busy }
-            try await launch(id, openingWindow: false)
+            try await launch(id, openingWindow: false, forExport: true)
         }
         do {
             let cookies = try await cookiesOf(id)

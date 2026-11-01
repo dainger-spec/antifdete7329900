@@ -62,6 +62,19 @@ enum ReleaseCheck {
         guard ProfileProcess.isEnabled else {
             return fail("a profile does not get a process of its own by default in this build")
         }
+        // The license (the server's docs/CONTRACT.md §2, §7.2): a released build talks to its account
+        // server over https and trusts the keys of the server's documents — never the development
+        // server's, which anyone knows (and the production server refuses to sign with it).
+        guard let account = AccountConfiguration.resolve(info: info, environment: [:], arguments: []), account.source == .build else {
+            return fail("no account server in this build (PBAccountServerURL, https): its license would not be checked")
+        }
+        guard !account.keys.isEmpty else {
+            return fail("no keys of the documents of rights in this build (PBEntitlementPublicKeys): no license could be accepted")
+        }
+        guard account.keys[EntitlementKeys.developmentKeyID] == nil else {
+            return fail("the development server's key (\(EntitlementKeys.developmentKeyID)) is trusted by this build: anyone can sign documents with it")
+        }
+        print("RELEASE-CHECK INFO the account server \(account.serverURL.host ?? "?"), \(account.keys.count) key(s) of documents of rights")
         // Inherited by the profile's process: its window is then this app's own (the control).
         if control { setenv("PB_SAFARI_CHROME", "0", 1) }
 

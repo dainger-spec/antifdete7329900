@@ -254,7 +254,7 @@ private struct LockPressStyle: ButtonStyle {
 
 /// A quiet link under the action ("I don't remember the password"): `t2`, white and underlined
 /// under the pointer.
-private struct LockLink: View {
+struct LockLink: View {
     let title: String
     let action: () -> Void
     @State private var hovered = false
@@ -275,7 +275,7 @@ private struct LockLink: View {
 }
 
 /// A note with its symbol (the key under the unlock form, the warning under the setup form).
-private struct LockNote: View {
+struct LockNote: View {
     let symbol: String
     var tint: Color = Theme.textSecondary
     let text: String

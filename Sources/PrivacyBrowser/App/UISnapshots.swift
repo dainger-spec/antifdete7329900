@@ -38,6 +38,34 @@ enum UISnapshots {
     /// The Settings window, a picture per section; Updates three times: a release downloaded and
     /// ready, with its notes; up to date with automatic checks off; and a build without an update
     /// feed. Previews fetch nothing.
+    /// A Mac signed out, and one on the Professional plan with two Macs — previews: nothing asked.
+    private static func previewLicenses() -> (signedOut: LicenseModel, signedIn: LicenseModel) {
+        let now = Date()
+        let p = Entitlement(deviceID: "d1", machineID: "m", role: "owner", plan: "pro", status: .active, exportReason: nil,
+                            limits: .init(profiles: 50, devices: 3, seats: 1), profilesOnOtherDevices: 12,
+                            periodEndsAt: now.addingTimeInterval(28 * 86_400), issuedAt: now.addingTimeInterval(-3_600),
+                            refreshAfter: now.addingTimeInterval(20 * 3_600), expiresAt: now.addingTimeInterval(95 * 3_600),
+                            graceEndsAt: now.addingTimeInterval(167 * 3_600))
+        var record = AccountRecord()
+        record.deviceID = "d1"
+        record.code = "B119"
+        record.deviceToken = ServerToken("lmd_preview")
+        record.lastSuccessAt = now.addingTimeInterval(-3_600)
+        record.signedInWith = .email
+        record.session = .init(sessionToken: ServerToken("lms_preview"), expiresAt: now.addingTimeInterval(20 * 86_400), idleTimeoutSeconds: 604_800)
+        let devices = AccountDevices(devices: [
+            AccountDevice(deviceID: "d1", code: "B119", label: "Studio", lastSeenAt: now, profileCount: 21, mine: true), // l10n: not text
+            AccountDevice(deviceID: "d2", code: "3KQ9", label: "", lastSeenAt: now.addingTimeInterval(-3 * 86_400), profileCount: 9, mine: true),
+        ], limit: 3, used: 2, unlinkAvailableAt: nil, unlinkCooldownSeconds: 604_800, offlineWorkSeconds: 604_800)
+        let signedIn = LicenseModel(preview: record, state: LicenseState(mode: .full, entitlement: p, check: .valid(p), banners: [],
+                                                                         allowedProfilesHere: 38, worksWithoutServerUntil: p.graceEndsAt, now: now),
+                                    devices: devices)
+        let signedOut = LicenseModel(preview: AccountRecord(), state: LicenseState(mode: .notSignedIn, entitlement: nil, check: nil,
+                                                                                    banners: [.notSignedIn], allowedProfilesHere: 0,
+                                                                                    worksWithoutServerUntil: nil, now: now))
+        return (signedOut, signedIn)
+    }
+
     private static func settings(into folder: URL, model: AppModel) async -> Int {
         var problems = 0
         for section in SettingsSection.allCases where section != .updates {
@@ -58,6 +86,27 @@ enum UISnapshots {
             notes: "• Safari's chrome: the proxy hook holds on macOS 27.\n• Proxies: a proxy that stays silent after the connection is named as such.\n"
                 + "• Files a newer version wrote are refused, never written over.")
         let ready = AppUpdater(preview: .ready(item), configuration: configuration)
+        // The account (docs/LICENSING.md): the sign-in with an email and with a key, and Settings ›
+        // Account with a plan running — the contract's texts word for word.
+        let licenses = previewLicenses()
+        problems += await Shot(name: "account-sign-in", size: CGSize(width: 560, height: 780), titled: false) {
+            SignInFlow(license: licenses.signedOut, onFinished: {}).environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "account-sign-in-key", size: CGSize(width: 560, height: 780), titled: false) {
+            SignInFlow(license: licenses.signedOut, onFinished: {}, method: .key,
+                       keyText: "LMK-0123-4567-89AB-CDEF-GHJK-MNMT").environmentObject(model) // l10n: not text
+        }.capture(into: folder)
+        problems += await Shot(name: "account-page", size: SettingsView.size, edges: true) {
+            ScrollView {
+                AccountSettingsPage(license: licenses.signedIn)
+                    .frame(maxWidth: 640, alignment: .leading)
+                    .padding(.horizontal, 56)
+                    .padding(.vertical, 40)
+            }
+            .background(Theme.backdrop)
+            .environment(\.colorScheme, .dark)
+            .environmentObject(model)
+        }.capture(into: folder)
         problems += await Shot(name: "settings-updates-ready", size: SettingsView.size, edges: true) {
             SettingsView(section: .updates, previewUpdater: ready).environmentObject(model)
         }.capture(into: folder)

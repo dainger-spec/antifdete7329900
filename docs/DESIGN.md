@@ -92,6 +92,11 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   colour and opacity change (`Motion.isReduced`).
 - Density (`AppearancePreferences.density`): rows of 52 or 40 pt.
 
+- Account (`AccountViews.swift`, docs/LICENSING.md): sign-in and this Mac's connection in the lock
+  screen's pieces (`LockScreen`, `LockPasswordField`, `AccountTextField`, `LockActionButton`); Settings
+  › Account as rows; the license's banners in `LumenBanner` by CONTRACT §8.5, the ones that stop work
+  first; the sidebar's line about the rights (`RightsStatusButton`) between sync and Lock.
+
 ## What the design keeps that its pictures do not show
 
 Each of these stays, in the design's own style (the owner, 1 November):
