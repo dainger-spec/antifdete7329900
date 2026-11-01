@@ -317,6 +317,7 @@ final class SelfTest {
         await group("format policy") { try formatPolicy(repository) }
         await group("unreadable settings") { try await unreadableSettings(repository) }
         await group("unseal leftovers") { try await unsealLeftovers(repository) }
+        await group("kept deleted profiles") { try await keptDeletedProfiles(repository) }
         await group("Safari's home: a restore that fails") { try safariHomeRestoreFailure(repository) }
         await group("a seal whose deletion stops part-way") { try await sealWithAFailedDeletion(repository) }
         await group("earlier versions' Safari keys") { earlierVersionsSafariKeys() }
@@ -3495,6 +3496,42 @@ final class SelfTest {
         check("unseal leftovers: the app's launch and unlock remove every profile's, and neither a store nor an archive",
               removed >= others.count && others.allSatisfy { !exists($0) } && exists(store.appendingPathComponent("data")) && exists(archive),
               "removed \(removed); left: \(others.filter(exists).map(\.lastPathComponent)); store \(exists(store)), archive \(exists(archive))")
+    }
+
+    /// A deleted profile's folder put back — from a backup, or kept because the deletion came from
+    /// another device — is not removed by the sweep that runs at unlock and after a sync (R3,
+    /// docs/DESTRUCTIVE_PATHS.md). It is listed for the person, who brings it back as a new profile
+    /// (the old folder kept, marked) or removes it. Deleted by the app's own path, as the Profiles
+    /// window deletes.
+    private func keptDeletedProfiles(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Kept deleted", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .socks5, host: "127.0.0.1", port: 9)))
+        let folder = repository.directory(for: profile.id)
+        let copy = repository.root.appendingPathComponent("kept-deleted-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.copyItem(at: folder, to: copy)
+        defer { try? FileManager.default.removeItem(at: copy) }
+        try await ProfileManager(repository: repository).delete(profile.id)
+        let goneAfterDeletion = !FileManager.default.fileExists(atPath: folder.path)
+        try FileManager.default.copyItem(at: copy, to: folder) // put back from a backup
+        defer { try? FileManager.default.removeItem(at: folder) }
+        repository.removeOrphanedDirectories() // the sweep an unlock and a sync run
+        let kept = repository.keptDeletedProfiles().first { $0.id == profile.id }
+        check("kept deleted profiles: a deleted profile's folder put back is not removed by the sweep, and is listed by its name",
+              goneAfterDeletion && FileManager.default.fileExists(atPath: folder.path) && kept?.name == "Kept deleted" && kept?.isReadable == true,
+              "gone after the deletion: \(goneAfterDeletion); listed: \(kept.map { "\($0)" } ?? "no")")
+
+        let back = try ProfileTransfer.bringBack(profile.id, in: repository)
+        defer { try? repository.delete(back.id) }
+        let marked = repository.keptDeletedProfiles().first { $0.id == profile.id }?.broughtBack == true
+        let port = (try? repository.loadConfiguration(back.id))?.proxy?.port
+        check("kept deleted profiles: brought back as a new profile with its settings; the old folder kept, marked brought back",
+              back.id != profile.id && port == 9 && marked && FileManager.default.fileExists(atPath: folder.path),
+              "new id \(back.id != profile.id), proxy port \(port.map(String.init) ?? "none"), marked \(marked)")
+
+        try repository.removeKeptDeletedProfile(profile.id)
+        check("kept deleted profiles: the old folder goes by the person's hand",
+              !FileManager.default.fileExists(atPath: folder.path) && !repository.keptDeletedProfiles().contains { $0.id == profile.id },
+              "folder there: \(FileManager.default.fileExists(atPath: folder.path))")
     }
 
     /// Safari's home archive that cannot be restored — damaged, not a newer version's: the launch

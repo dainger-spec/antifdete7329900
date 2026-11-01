@@ -184,6 +184,14 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-index-taken-in", size: CGSize(width: 1180, height: 740)) {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: AppModel.IndexNotice(kind: .takenIn, folders: 2, vaultPath: vaultPath))
         }.capture(into: folder)
+        // Deleted profiles whose folders are kept (R3): one to bring back or remove, one brought back
+        // (its old folder kept until removed), one whose folder cannot be read (the Finder only).
+        problems += await Shot(name: "profiles-deleted-kept", size: CGSize(width: 1180, height: 900)) {
+            ProfilesPreview(rows: rows, sync: .off, keptDeleted: [
+                .init(id: UUID(), name: "Retail Audit", createdAt: Date().addingTimeInterval(-40 * 86_400)),
+                .init(id: UUID(), name: "Fall Promo", createdAt: Date().addingTimeInterval(-90 * 86_400), broughtBack: true),
+                .init(id: UUID(), name: nil, createdAt: nil)])
+        }.capture(into: folder)
         problems += await Shot(name: "profiles-no-matches", size: CGSize(width: 1180, height: 520)) {
             ProfilesPreview(rows: rows, search: "zzz", sync: .syncing)
         }.capture(into: folder)
@@ -927,10 +935,12 @@ private struct ProfilesPreview: View {
     var proxyCount: Int? = 9
     var proxies: AnyView?
     var indexNotice: AppModel.IndexNotice?
+    var keptDeleted: [ProfileRepository.KeptDeletedProfile] = []
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
-                       section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice)
+                       section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice,
+                       keptDeleted: keptDeleted)
     }
 }
 

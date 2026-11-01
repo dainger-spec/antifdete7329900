@@ -47,6 +47,8 @@ struct ProfileListView: View {
     @State private var exportingCookies: ProfileSummary?
     @State private var importingProfile = false
     @State private var pendingDelete: ProfileSummary?
+    /// A kept deleted profile (R3) the person asked to remove for good: confirmed first.
+    @State private var removingDeleted: ProfileRepository.KeptDeletedProfile?
     @State private var changingPassword = false
     @State private var showingSync = false
     @State private var showingTunnel = false
@@ -95,6 +97,15 @@ struct ProfileListView: View {
                 }
             } message: { _ in
                 Text(L("profiles.delete.message"))
+            }
+            .confirmationDialog(removingDeleted.map(KeptDeletedBox.removeTitle) ?? "",
+                                isPresented: Binding(get: { removingDeleted != nil }, set: { if !$0 { removingDeleted = nil } }),
+                                presenting: removingDeleted) { profile in
+                Button(profile.broughtBack ? L("profiles.kept.removeOld") : L("profiles.kept.removeConfirm"), role: .destructive) {
+                    model.removeDeletedProfileForGood(profile.id)
+                }
+            } message: { profile in
+                Text(profile.broughtBack ? L("profiles.kept.removeMessage.broughtBack") : L("profiles.kept.removeMessage"))
             }
             .sheet(item: $proxySheet, onDismiss: showProxyProblems) { _ in
                 ProxyProblemView { id in showProxies(selecting: [id]) }
@@ -200,7 +211,11 @@ struct ProfileListView: View {
                        filter: $filter, search: $search, actions: actions,
                        section: $section, proxyCount: proxyCount,
                        proxies: AnyView(ProxyListView(selection: $proxySelection)),
-                       indexNotice: model.indexNotice, revealVault: { model.revealVaultFolder() })
+                       indexNotice: model.indexNotice, revealVault: { model.revealVaultFolder() },
+                       keptDeleted: model.keptDeletedProfiles,
+                       bringBack: { id in Task { await model.bringBackDeletedProfile(id) } },
+                       removeForGood: { removingDeleted = $0 },
+                       revealKeptDeleted: { model.revealProfileFolder($0) })
     }
 
     /// The window's Proxies section; with `ids`, those proxies selected (else the selection it had).
@@ -486,6 +501,11 @@ struct ProfilesScreen: View {
     /// (AppModel.indexNotice): said above the list, with the vault's folder in the Finder.
     var indexNotice: AppModel.IndexNotice?
     var revealVault: () -> Void = {}
+    /// Deleted profiles whose folders are kept (R3), each with what can be done with it.
+    var keptDeleted: [ProfileRepository.KeptDeletedProfile] = []
+    var bringBack: (UUID) -> Void = { _ in }
+    var removeForGood: (ProfileRepository.KeptDeletedProfile) -> Void = { _ in }
+    var revealKeptDeleted: (UUID) -> Void = { _ in }
     /// Rows selected with ⌘- and ⇧-click; with two or more, `ProfileBulkBar` acts on them all.
     @State private var selection = ProfileSelection()
 
@@ -506,6 +526,10 @@ struct ProfilesScreen: View {
                     Rectangle().fill(Theme.divider).frame(height: 1)
                     if let indexNotice {
                         IndexNoticeBox(notice: indexNotice, reveal: revealVault)
+                    }
+                    if !keptDeleted.isEmpty {
+                        KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack, removeForGood: removeForGood,
+                                       reveal: revealKeptDeleted)
                     }
                     if selectedRows.count >= 2 {
                         ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
@@ -1221,6 +1245,87 @@ struct IndexNoticeBox: View {
         case .unlisted: return String(format: L("index.unlisted.text"), notice.folders)
         case .takenIn: return String(format: L("index.takenIn.text"), notice.folders)
         }
+    }
+}
+
+/// Deleted profiles whose folders are kept (R3, docs/DESTRUCTIVE_PATHS.md): deleted on another
+/// device, or their folder put back from a backup. Not removed by anything but the person: each can
+/// be brought back (as a new profile; its old folder stays until removed) or removed for good. One
+/// whose folder cannot be read is never removed by the app: it can be shown in the Finder.
+struct KeptDeletedBox: View {
+    let profiles: [ProfileRepository.KeptDeletedProfile]
+    var isWorking = false
+    let bringBack: (UUID) -> Void
+    let removeForGood: (ProfileRepository.KeptDeletedProfile) -> Void
+    let reveal: (UUID) -> Void
+
+    static func name(_ profile: ProfileRepository.KeptDeletedProfile) -> String {
+        profile.name ?? L("profiles.kept.unnamed")
+    }
+
+    static func removeTitle(_ profile: ProfileRepository.KeptDeletedProfile) -> String {
+        String(format: profile.broughtBack ? L("profiles.kept.removeTitle.broughtBack") : L("profiles.kept.removeTitle"), name(profile))
+    }
+
+    /// What is said under its name: that it cannot be read, that it was brought back, or when it was made.
+    static func state(_ profile: ProfileRepository.KeptDeletedProfile) -> String? {
+        if !profile.isReadable { return L("profiles.kept.unreadable") }
+        if profile.broughtBack { return L("profiles.kept.broughtBack") }
+        return profile.createdAt.map { String(format: L("profiles.kept.made"), $0.shown(date: .abbreviated, time: .omitted)) }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.warning)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L("profiles.kept.title"))
+                    .font(.lumenLabel)
+                    .foregroundStyle(Theme.textPrimary)
+                Text(L("profiles.kept.text"))
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(profiles, id: \.id) { profile in
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(Self.name(profile))
+                                .font(.lumenLabel)
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(1)
+                            if let state = Self.state(profile) {
+                                Text(state)
+                                    .font(.lumenSecondary)
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        Spacer(minLength: 12)
+                        if profile.isReadable {
+                            if !profile.broughtBack {
+                                Button(L("profiles.kept.bringBack")) { bringBack(profile.id) }
+                                    .buttonStyle(.lumenSecondary)
+                            }
+                            Button(profile.broughtBack ? L("profiles.kept.removeOld") : L("profiles.kept.remove")) { removeForGood(profile) }
+                                .buttonStyle(.lumenSecondary)
+                        } else {
+                            Button(L("profiles.kept.reveal")) { reveal(profile.id) }
+                                .buttonStyle(.lumenSecondary)
+                        }
+                    }
+                    .disabled(isWorking)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Theme.warning.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).strokeBorder(Theme.warning.opacity(0.4), lineWidth: 1))
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .contain)
     }
 }
 

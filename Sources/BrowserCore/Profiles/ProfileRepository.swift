@@ -96,6 +96,8 @@ struct ProfileIndex: Codable, Equatable {
 public final class ProfileRepository: @unchecked Sendable {
     public let vault: UnlockedVault
     private let lock = NSLock()
+    /// Kept deleted profiles being brought back now (`beginBringingBack`).
+    private var bringingBack: Set<UUID> = []
     private var index: ProfileIndex
 
     /// How the vault's profile index was found when this repository was opened. An index that
@@ -249,19 +251,39 @@ public final class ProfileRepository: @unchecked Sendable {
     /// The caller (app layer) is responsible for removing WebKit's own data store
     /// via `WKWebsiteDataStore.remove(forIdentifier:)` first.
     public func delete(_ id: UUID) throws {
-        try lock.withLock {
-            var updated = index
-            guard let position = updated.entries.firstIndex(where: { $0.summary.id == id }) else {
-                throw CoreError.profileNotFound(id)
-            }
-            updated.entries.remove(at: position)
-            updated.deletedProfileIDs.append(id)
-            try saveIndex(updated)
-            index = updated
-        }
+        try recordDeletion(id)
         // Index is updated first: a crash here leaves orphaned *encrypted* files,
         // which are harmless and cleaned up by `removeOrphanedDirectories()`.
         try? FileManager.default.removeItem(at: directory(for: id))
+    }
+
+    /// `delete` up to the folder — what a deletion that stopped there leaves.
+    func recordDeletion(_ id: UUID) throws {
+        // Marked first as this Mac's own deletion: should it stop between the index and the folder,
+        // the sweep finishes it. A deleted profile's folder without the mark — the deletion came
+        // from another device, or the folder was put back from a backup — is not removed by
+        // anything but the person (R3, `keptDeletedProfiles`). A mark that cannot be written leaves
+        // the folder to be asked about, never removed unasked. Only in a folder that is there: no
+        // folder is made for it.
+        let marked = FileManager.default.fileExists(atPath: directory(for: id).path)
+            && (try? SecureFile.write(Data(), to: deletionMarkURL(for: id))) != nil
+        do {
+            try lock.withLock {
+                var updated = index
+                guard let position = updated.entries.firstIndex(where: { $0.summary.id == id }) else {
+                    throw CoreError.profileNotFound(id)
+                }
+                updated.entries.remove(at: position)
+                updated.deletedProfileIDs.append(id)
+                try saveIndex(updated)
+                index = updated
+            }
+        } catch {
+            // Not deleted after all (not a listed profile, or the index not written): the mark goes,
+            // or a deletion of it made elsewhere would later look like this Mac's.
+            if marked { try? FileManager.default.removeItem(at: deletionMarkURL(for: id)) }
+            throw error
+        }
     }
 
     /// Deletes the folders of profiles the index records as deleted (`deletedProfileIDs`) that are
@@ -274,17 +296,87 @@ public final class ProfileRepository: @unchecked Sendable {
     /// the index may be missing or unreadable (nothing at all is deleted then), restored from an
     /// older copy, or written new while it was missing. Such a folder is kept, and said
     /// (`unlistedProfileFolders`).
+    ///
+    /// And of those, only a deletion made on this Mac, which marked the folder before it touched
+    /// the index (`delete`). A deleted profile's folder without the mark — the deletion came from
+    /// another device through sync, or the folder was put back from a backup — is kept, and the
+    /// person decides: bring the profile back, or remove it for good (R3, `keptDeletedProfiles`).
     @discardableResult
     public func removeOrphanedDirectories() -> [UUID] {
         // A granted vault's index is one profile: every other profile's directory would look orphaned.
         guard vault.grant == nil, indexState == .read else { return [] }
         let (listed, deleted) = lock.withLock { (Set(index.entries.map(\.summary.id)), Set(index.deletedProfileIDs)) }
         var removed: [UUID] = []
-        for id in profileFolderIDs() where deleted.contains(id) && !listed.contains(id) {
-            if (try? FileManager.default.removeItem(at: directory(for: id))) != nil { removed.append(id) }
+        for id in profileFolderIDs() {
+            let marked = FileManager.default.fileExists(atPath: deletionMarkURL(for: id).path)
+            if listed.contains(id) {
+                // A deletion that stopped before the index: the profile is still there, and so is
+                // its mark, which must not make a later deletion elsewhere look like this Mac's.
+                if marked { try? FileManager.default.removeItem(at: deletionMarkURL(for: id)) }
+            } else if deleted.contains(id), marked {
+                if (try? FileManager.default.removeItem(at: directory(for: id))) != nil { removed.append(id) }
+            }
         }
         return removed
     }
+
+    /// The folder of a deleted profile that is kept (R3): the index records the profile as
+    /// deleted, but not by this Mac (no mark), and its folder is here.
+    public struct KeptDeletedProfile: Equatable, Sendable {
+        public let id: UUID
+        /// Its name and when it was made, from its key copy; nil when the copy does not open —
+        /// then nothing in the folder can be read.
+        public let name: String?
+        public let createdAt: Date?
+        /// Brought back already, as a new profile (`ProfileTransfer.bringBack`). The folder stays
+        /// for what was not carried over, until the person removes it.
+        public let broughtBack: Bool
+
+        public init(id: UUID, name: String?, createdAt: Date?, broughtBack: Bool = false) {
+            self.id = id
+            self.name = name
+            self.createdAt = createdAt
+            self.broughtBack = broughtBack
+        }
+
+        /// Its key copy opens. A folder that cannot be read is never removed by the app, even when
+        /// asked (docs/DESTRUCTIVE_PATHS.md): it can only be shown in the Finder.
+        public var isReadable: Bool { name != nil }
+    }
+
+    /// The deleted profiles whose folders are kept, for the person to bring back or remove.
+    public func keptDeletedProfiles() -> [KeptDeletedProfile] {
+        guard vault.grant == nil, indexState == .read else { return [] }
+        let (listed, deleted) = lock.withLock { (Set(index.entries.map(\.summary.id)), Set(index.deletedProfileIDs)) }
+        return profileFolderIDs()
+            .filter { deleted.contains($0) && !listed.contains($0) && !FileManager.default.fileExists(atPath: deletionMarkURL(for: $0).path) }
+            .map { id in
+                let copy = readKeyCopy(id)
+                return KeptDeletedProfile(id: id, name: copy?.name, createdAt: copy?.createdAt,
+                                          broughtBack: FileManager.default.fileExists(atPath: broughtBackMarkURL(for: id).path))
+            }
+    }
+
+    /// The person removes a kept deleted profile's folder for good, having been asked. One whose
+    /// key copy does not open is refused: what cannot be read is never deleted.
+    public func removeKeptDeletedProfile(_ id: UUID) throws {
+        guard let kept = keptDeletedProfiles().first(where: { $0.id == id }) else { throw CoreError.profileNotFound(id) }
+        guard kept.isReadable else {
+            throw CoreError.corruptData("profiles/\(id.uuidString) cannot be read; it is kept as it is")
+        }
+        try FileManager.default.removeItem(at: directory(for: id))
+    }
+
+    /// Written in a profile's folder by `delete` before the index: the deletion is this Mac's own.
+    func deletionMarkURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("deleted-here") }
+
+    /// Written in a kept deleted profile's folder once it was brought back (the new profile's id).
+    func broughtBackMarkURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("brought-back") }
+
+    /// One bring-back of a folder at a time in this process (`ProfileTransfer.bringBack`): a second
+    /// one at once would make the profile twice.
+    func beginBringingBack(_ id: UUID) -> Bool { lock.withLock { bringingBack.insert(id).inserted } }
+    func endBringingBack(_ id: UUID) { lock.withLock { _ = bringingBack.remove(id) } }
 
     /// The profile folders on disk (folders of `profiles/` named by a UUID).
     public func profileFolderIDs() -> [UUID] {
@@ -495,7 +587,11 @@ public final class ProfileRepository: @unchecked Sendable {
     func warmUpPlanURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("warmup.bin") }
 
     func warmUpPlanFile(for id: UUID) throws -> EncryptedDocumentFile<WarmUpPlan> {
-        EncryptedDocumentFile(url: warmUpPlanURL(for: id), key: try profileKey(for: id).derive(info: "warm-up", salt: id.rawBytes),
+        warmUpPlanFile(for: id, key: try profileKey(for: id))
+    }
+
+    func warmUpPlanFile(for id: UUID, key: SymmetricKey) -> EncryptedDocumentFile<WarmUpPlan> {
+        EncryptedDocumentFile(url: warmUpPlanURL(for: id), key: key.derive(info: "warm-up", salt: id.rawBytes),
                               aad: "warm-up:v1:\(id.uuidString)")
     }
 

@@ -345,12 +345,18 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(Set(repoA.list().map(\.name)), ["Renamed", "OnlyA"])
         XCTAssertEqual(Set(repoB.list().map(\.name)), ["Renamed", "OnlyA"])
 
-        // Deletion propagates and is not resurrected.
+        // Deletion propagates and is not resurrected. On the other device the profile's folder is
+        // kept, for the person to bring back or remove for good (R3); on the device that deleted
+        // it, it is gone.
         try repoA.delete(second.id)
         _ = try await engineA.sync()
         let report = try await engineB.sync()
         XCTAssertEqual(report.deletedProfileIDs, [second.id])
         XCTAssertEqual(repoB.list().map(\.name), ["Renamed"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repoA.directory(for: second.id).path))
+        XCTAssertEqual(repoB.keptDeletedProfiles().map(\.id), [second.id])
+        XCTAssertEqual(repoB.keptDeletedProfiles().map(\.name), ["OnlyA"])
+        try repoB.removeKeptDeletedProfile(second.id)
         XCTAssertFalse(FileManager.default.fileExists(atPath: repoB.directory(for: second.id).path))
     }
 

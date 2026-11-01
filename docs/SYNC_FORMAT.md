@@ -150,7 +150,8 @@ revision and the SHA-256 of the last synced bytes.
    (`SyncReport.passwordHeader`), and the sync goes on.
 2. **Index:** if the remote revision changed, fetch it and merge with the local index:
    the union by profile ID, the higher summary revision wins, and profiles in either
-   side's `deletedProfileIDs` are dropped. Save the result locally, and push it if it
+   side's `deletedProfileIDs` are dropped (their folders on this Mac are kept, for the person to
+   bring back as a new profile or remove: R3, docs/DESTRUCTIVE_PATHS.md). Save the result locally, and push it if it
    differs from the remote copy. If only the local index changed, push it. A local index that
    was not read (missing or unreadable, `ProfileRepository.IndexState`) is never pushed: the
    remote one is fetched and merged whatever its revision (docs/ARCHITECTURE.md, `index.bin`

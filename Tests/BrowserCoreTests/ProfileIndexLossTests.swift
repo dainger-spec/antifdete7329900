@@ -103,12 +103,8 @@ final class ProfileIndexLossTests: XCTestCase {
     func testOnlyAProfileTheIndexSaysWasDeletedHasItsFolderSwept() throws {
         let (repository, a, b) = try vaultWithTwoProfiles()
         // A deletion that stopped between the index and the folder: the index says deleted, the folder is there.
-        let leftover = try FileManager.default.contentsOfDirectory(atPath: repository.directory(for: b.id).path)
-        let saved = repository.directory(for: b.id).deletingLastPathComponent().appendingPathComponent("saved-\(UUID().uuidString)")
-        try FileManager.default.copyItem(at: repository.directory(for: b.id), to: saved)
-        try repository.delete(b.id)
-        try FileManager.default.moveItem(at: saved, to: repository.directory(for: b.id))
-        XCTAssertFalse(leftover.isEmpty)
+        try repository.recordDeletion(b.id)
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: repository.directory(for: b.id).path).isEmpty)
         // A folder no index ever listed nor deleted: unknown, so kept.
         let stranger = UUID()
         try FileManager.default.createDirectory(at: repository.directory(for: stranger), withIntermediateDirectories: true)

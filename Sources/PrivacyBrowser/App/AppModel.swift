@@ -30,6 +30,9 @@ final class AppModel: ObservableObject {
     /// The vault's profile index not read as it should be, or profile folders on disk that it does
     /// not list: said in the Profiles window with the vault's folder and what to do (nil: all is well).
     @Published private(set) var indexNotice: IndexNotice?
+    /// Deleted profiles whose folders are kept (R3): deleted on another device, or their folder put
+    /// back from a backup. The Profiles window asks what to do with each: bring it back, or remove it.
+    @Published private(set) var keptDeletedProfiles: [ProfileRepository.KeptDeletedProfile] = []
 
     struct IndexNotice: Equatable {
         enum Kind: Equatable {
@@ -233,6 +236,13 @@ final class AppModel: ObservableObject {
     /// The vault's folder in the Finder (the Profiles window's notice about the index).
     func revealVaultFolder() {
         NSWorkspace.shared.activateFileViewerSelecting([root])
+    }
+
+    /// A kept deleted profile's folder (R3), in the Finder: the one that cannot be read is not
+    /// removed by the app, so this is where the person sees it.
+    func revealProfileFolder(_ id: UUID) {
+        guard let repository else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([repository.directory(for: id)])
     }
 
     private static func displayPath(_ url: URL) -> String {
@@ -469,6 +479,8 @@ final class AppModel: ObservableObject {
     func refresh() {
         profiles = repository?.list() ?? []
         updateIndexNotice()
+        let kept = repository?.keptDeletedProfiles() ?? []
+        if kept != keptDeletedProfiles { keptDeletedProfiles = kept }
         var details: [UUID: ProfileDetails] = [:]
         if let repository {
             for profile in profiles {
@@ -493,6 +505,28 @@ final class AppModel: ObservableObject {
     func configuration(for id: UUID) throws -> ProfileConfiguration {
         guard let repository else { throw CoreError.vaultNotFound }
         return try repository.loadConfiguration(id)
+    }
+
+    /// Brings a kept deleted profile back as a new profile (`ProfileTransfer.bringBack`), off the
+    /// main thread: everything it carries is re-encrypted. The old folder stays, marked brought back.
+    func bringBackDeletedProfile(_ id: UUID) async {
+        guard let repository else { return }
+        await perform {
+            _ = try await Task.detached(priority: .userInitiated) { try ProfileTransfer.bringBack(id, in: repository) }.value
+        }
+        refresh()
+    }
+
+    /// Removes a kept deleted profile's folder for good, once the person said so (refused for one
+    /// that cannot be read).
+    func removeDeletedProfileForGood(_ id: UUID) {
+        guard let repository else { return }
+        do {
+            try repository.removeKeptDeletedProfile(id)
+        } catch {
+            showError(errorText(error))
+        }
+        refresh()
     }
 
     /// The versions of the profile's settings kept beside them (R4, R2).

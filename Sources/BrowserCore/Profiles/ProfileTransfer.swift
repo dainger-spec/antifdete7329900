@@ -96,15 +96,23 @@ public enum ProfileTransfer {
     @discardableResult
     public static func export(_ id: UUID, from repository: ProfileRepository, to destination: URL, password: String,
                               kdf: KDFParameters = .recommended(), now: Date = Date()) throws -> Manifest {
-        guard !password.isEmpty else { throw CoreError.invalidConfiguration("an export needs a password") }
-        let key = try repository.profileKey(for: id)
         let summary = try repository.summary(for: id)
+        return try export(id, key: repository.profileKey(for: id), name: summary.name, createdAt: summary.createdAt,
+                          from: repository, to: destination, password: password, kdf: kdf, now: now)
+    }
+
+    /// The export of the profile `id` whose folder is in `repository`, with its key, name and date
+    /// given rather than read from the index: also for a deleted profile's kept folder (R3).
+    @discardableResult
+    static func export(_ id: UUID, key: SymmetricKey, name: String, createdAt: Date, from repository: ProfileRepository,
+                       to destination: URL, password: String, kdf: KDFParameters, now: Date = Date()) throws -> Manifest {
+        guard !password.isEmpty else { throw CoreError.invalidConfiguration("an export needs a password") }
         let configuration = try repository.loadConfiguration(id, key: key)
         let documents = Documents(
-            passwords: try repository.passwordVault(for: id).allEntries(),
+            passwords: try PasswordVault(fileURL: repository.passwordsURL(for: id), profileID: id, profileKey: key).allEntries(),
             history: try HistoryStore.file(url: repository.historyURL(for: id), profileID: id, profileKey: key).load(),
             bookmarks: try BookmarkStore.file(url: repository.bookmarksURL(for: id), profileID: id, profileKey: key).load(),
-            warmUpPlan: try repository.warmUpPlan(for: id))
+            warmUpPlan: try repository.warmUpPlanFile(for: id, key: key).load())
 
         let webData = repository.webDataArchiveURL(for: id)
         let safariHome = repository.safariHomeArchiveURL(for: id)
@@ -118,7 +126,7 @@ public enum ProfileTransfer {
             sources.append(.init(url: safariHome, key: key))
             kinds.append(safariHomeRoot)
         }
-        let manifest = Manifest(name: summary.name, configuration: configuration, profileCreatedAt: summary.createdAt,
+        let manifest = Manifest(name: name, configuration: configuration, profileCreatedAt: createdAt,
                                 exportedAt: now, passwordCount: documents.passwords.count,
                                 historyCount: documents.history?.entries.count ?? 0,
                                 bookmarkCount: documents.bookmarks?.bookmarks.count ?? 0,
@@ -201,6 +209,48 @@ public enum ProfileTransfer {
             }
         } catch {
             try? repository.delete(id)
+            throw error
+        }
+        return summary
+    }
+
+    // MARK: A deleted profile brought back (R3)
+
+    /// Brings back a deleted profile whose folder is kept (`ProfileRepository.keptDeletedProfiles`)
+    /// as a new profile — its own id and key — with everything an export carries: settings,
+    /// passwords, bookmarks, history, the warm-up plan, website data and Safari's state. The
+    /// deletion stays recorded for the old id, everywhere (it is permanent, and sync merges it), so
+    /// the profile cannot come back under it.
+    ///
+    /// The old folder is not removed: what an export does not carry — the open tabs, the warm-up
+    /// schedule, kept versions of the settings, files set aside as unreadable — is still in it,
+    /// under the old profile's key. It is marked brought back, and goes only by the person's hand
+    /// (`ProfileRepository.removeKeptDeletedProfile`). Through an export and an import: the export
+    /// in the temporary folder, under a random password, removed at once. On any failure nothing of
+    /// the new profile is left behind.
+    @discardableResult
+    public static func bringBack(_ id: UUID, in repository: ProfileRepository) throws -> ProfileSummary {
+        guard let kept = repository.keptDeletedProfiles().first(where: { $0.id == id }) else { throw CoreError.profileNotFound(id) }
+        guard !kept.broughtBack else { throw CoreError.invalidConfiguration("the profile was brought back already") }
+        guard repository.beginBringingBack(id) else { throw CoreError.invalidConfiguration("the profile is being brought back") }
+        defer { repository.endBringingBack(id) }
+        guard let copy = repository.readKeyCopy(id) else {
+            throw CoreError.corruptData("the profile's key copy cannot be read: it cannot be brought back")
+        }
+        let key = SymmetricKey(data: try AEAD.open(copy.wrappedKey, key: repository.vault.profileKeyWrappingKey,
+                                                    aad: ProfileRepository.keyAAD(id)))
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-bring-back-\(UUID().uuidString).\(fileExtension)")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let password = UUID().uuidString + UUID().uuidString
+        try export(id, key: key, name: copy.name, createdAt: copy.createdAt, from: repository, to: file, password: password,
+                   kdf: .generate(iterations: 1_000))
+        let summary = try importProfile(from: file, password: password, into: repository, name: copy.name)
+        do {
+            try SecureFile.write(Data(summary.id.uuidString.utf8), to: repository.broughtBackMarkURL(for: id))
+        } catch {
+            // Unmarked, the folder would be offered again and brought back twice: the new profile —
+            // made from it a moment ago, nothing else in it yet — goes; the folder stays as it was.
+            try? repository.delete(summary.id)
             throw error
         }
         return summary
