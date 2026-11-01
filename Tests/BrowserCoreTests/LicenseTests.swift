@@ -158,6 +158,11 @@ final class LicenseTests: XCTestCase {
         XCTAssertEqual(check(try document(payload(["graceEndsAt": nil]))), .malformed)
         XCTAssertEqual(check(try document(payload(["limits": ["profiles": 50]]))), .malformed)
         XCTAssertEqual(check(try document(payload(["issuedAt": "2026-11-01T10:00:00.500Z"]))), .malformed)
+        // Every other form a parser may take besides (macOS's took the fraction above, CI run 578).
+        for other in ["2026-11-01T10:00:00+00:00", "2026-11-01 10:00:00Z", "2026-11-01T10:00Z", "2026-11-01t10:00:00z",
+                      "2026-11-01T10:00:00.5Z", "20261101T100000Z", " 2026-11-01T10:00:00Z", "２０２6-11-01T10:00:00Z"] {
+            XCTAssertEqual(check(try document(payload(["refreshAfter": other]))), .malformed, other)
+        }
         XCTAssertEqual(check(try document(payload(["periodEndsAt": 5]))), .malformed)
         // A period that never was is not malformed: it decides export-only (§8.2).
         let noPeriod = try XCTUnwrap(check(try document(payload(["periodEndsAt": NSNull()]))).entitlement)

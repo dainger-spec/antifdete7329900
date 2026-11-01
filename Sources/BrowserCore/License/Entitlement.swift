@@ -334,9 +334,27 @@ public enum EntitlementVerifier {
                                refreshAfter: refreshAfter, expiresAt: expiresAt, graceEndsAt: graceEndsAt)
         }
 
-        /// RFC 3339 in UTC, `Z`, no fractions of a second (§2) — anything else is unreadable.
+        /// RFC 3339 in UTC, `Z`, no fractions of a second (§2) — anything else is unreadable. The
+        /// form is checked here, character by character: what a parser takes besides differs by
+        /// platform (macOS's took "2026-11-01T10:00:00.500Z", CI run 578; Linux's did not).
         static func time(_ text: String) -> Date? {
-            guard text.hasSuffix("Z") else { return nil }
+            let characters = Array(text.utf8)
+            guard characters.count == 20 else { return nil }
+            for (index, character) in characters.enumerated() {
+                let expected: UInt8?
+                switch index {
+                case 4, 7: expected = UInt8(ascii: "-")
+                case 10: expected = UInt8(ascii: "T")
+                case 13, 16: expected = UInt8(ascii: ":")
+                case 19: expected = UInt8(ascii: "Z")
+                default: expected = nil
+                }
+                if let expected {
+                    guard character == expected else { return nil }
+                } else {
+                    guard (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(character) else { return nil }
+                }
+            }
             return try? Date.ISO8601FormatStyle().parse(text)
         }
     }
