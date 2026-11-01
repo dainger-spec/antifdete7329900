@@ -1064,9 +1064,6 @@ struct ProfileDetails: Equatable {
     var window: String
     var syncsCookies: Bool
     var historyPolicy: HistoryStore.Policy
-    /// Which proxy of the list it uses (`ProxyList.identity`): its last check says the city and
-    /// the latency.
-    var proxyIdentity: String?
 
     init(_ configuration: ProfileConfiguration) {
         proxyEndpoint = configuration.proxy.map { "\($0.host):\($0.port)" }
@@ -1095,6 +1092,5 @@ struct ProfileDetails: Equatable {
         window = configuration.windowSize.map { "\($0.frame.width) × \($0.frame.height)" } ?? L("editor.window.app")
         syncsCookies = configuration.syncsCookies
         historyPolicy = configuration.historyPolicy
-        proxyIdentity = configuration.proxy.map(ProxyList.identity(of:))
     }
 }

@@ -1022,7 +1022,7 @@ struct ProfileColumns {
 
     /// The narrowest list whose rows keep every column but "Appears as": 20 pt page margins and the
     /// rows' own padding on both sides, the columns, the narrowest name.
-    static let minimumContentWidth: CGFloat = 2 * 20 + 2 * rowPadding + exit + state + actions + 3 * gap + minimumName
+    static let minimumContentWidth: CGFloat = 2 * 20 + 2 * Self.rowPadding + Self.exit + Self.state + Self.actions + 3 * Self.gap + Self.minimumName
 
     init(contentWidth: CGFloat) {
         showsAppearsAs = contentWidth >= Self.minimumContentWidth + Self.appearsAs + Self.gap
