@@ -352,16 +352,16 @@ enum UISnapshots {
             print("FAIL could not make a sample profile summary")
             problems += 1
         }
-        problems += await Shot(name: "sheet-sync", size: CGSize(width: 540, height: 460), titled: false) {
+        problems += await Shot(name: "sheet-sync", size: CGSize(width: 620, height: 640), titled: false) {
             SyncSettingsView().environmentObject(model)
         }.capture(into: folder)
-        problems += await Shot(name: "sheet-automation", size: CGSize(width: 560, height: 620), titled: false) {
+        problems += await Shot(name: "sheet-automation", size: CGSize(width: 620, height: 640), titled: false) {
             AutomationSettingsView().environmentObject(model)
         }.capture(into: folder)
-        problems += await Shot(name: "narrow-sheet-automation", size: narrow(CGSize(width: 560, height: 620)), titled: false) {
+        problems += await Shot(name: "narrow-sheet-automation", size: narrow(CGSize(width: 620, height: 640)), titled: false) {
             AutomationSettingsView().environmentObject(model).environment(\.sheetRoom, narrowRoom)
         }.capture(into: folder)
-        problems += await Shot(name: "sheet-change-password", size: CGSize(width: 420, height: 520), titled: false) {
+        problems += await Shot(name: "sheet-change-password", size: CGSize(width: 480, height: 660), titled: false) {
             ChangePasswordView().environmentObject(model)
         }.capture(into: folder)
         problems += await settings(into: folder, model: model)
