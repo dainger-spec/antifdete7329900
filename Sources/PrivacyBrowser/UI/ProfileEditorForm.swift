@@ -138,22 +138,22 @@ struct ProfileEditorForm: View {
                     HStack(spacing: 8) {
                         Image(systemName: part.symbol)
                             .font(.system(size: 12))
-                            .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
+                            .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
                             .frame(width: 16)
                         // Two lines rather than cut ("Location and L…"), between words: the index
                         // is as wide as its longest word (`indexWidth`).
                         Text(L(part.titleKey))
                             .font(.system(size: 13, weight: selected ? .medium : .regular))
-                            .foregroundStyle(Theme.textPrimary)
+                            .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .frame(minHeight: 28)
-                    .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                        .fill(selected ? Color.white.opacity(0.08) : .clear))
+                    .frame(minHeight: 30)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(selected ? Theme.rowSelected : .clear))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -165,14 +165,12 @@ struct ProfileEditorForm: View {
         .padding(.vertical, 14)
         .frame(width: Self.indexWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Theme.surface)
     }
 
     private func section(_ part: Topic) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             Text(L(part.titleKey))
-                .font(.lumenSection)
-                .foregroundStyle(Theme.textPrimary)
+                .lumenCaps()
                 .accessibilityAddTraits(.isHeader)
             sectionContent(part)
         }
@@ -193,12 +191,16 @@ struct ProfileEditorForm: View {
 
     // MARK: Header and footer
 
+    /// The design's header: the profile's letters, what this is ("Edit profile", "New profile") in
+    /// capitals, its name, where it exits and how it appears; What sites see at the right.
     private var header: some View {
-        HStack(spacing: 12) {
-            ProfileAvatar(name: draft.name.isEmpty ? "?" : draft.name, id: avatarID, size: 36, style: draft.avatarStyle)
+        HStack(alignment: .center, spacing: 14) {
+            ProfileAvatar(name: draft.name.isEmpty ? "?" : draft.name, id: avatarID, size: 40, style: draft.avatarStyle)
             VStack(alignment: .leading, spacing: 3) {
-                Text(isNew ? L("editor.title.new") : (draft.name.isEmpty ? L("editor.title.edit") : draft.name))
-                    .font(.lumenSheetTitle)
+                Text(isNew ? L("editor.title.new") : L("editor.title.edit"))
+                    .lumenCaps()
+                Text(draft.name.isEmpty ? (isNew ? L("editor.title.new") : L("editor.title.edit")) : draft.name)
+                    .lumenHeadingTitle()
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 subtitle
@@ -208,13 +210,13 @@ struct ProfileEditorForm: View {
                 Button(action: onWhatSitesSee) {
                     Label(L("profiles.row.whatSitesSee"), systemImage: "eye")
                 }
-                .buttonStyle(.lumenSecondary)
+                .buttonStyle(.lumenGhost)
                 .help(L("editor.whatSitesSee.help"))
             }
         }
         .padding(.horizontal, 24)
         .padding(.top, 22)
-        .padding(.bottom, 16)
+        .padding(.bottom, 18)
     }
 
     @ViewBuilder
@@ -232,6 +234,9 @@ struct ProfileEditorForm: View {
                 Image(systemName: "arrow.right").font(.system(size: 10, weight: .medium))
                 Text(L("editor.subtitle.direct"))
             }
+            // How sites see it: "Mac · Safari 26".
+            Text(verbatim: "·").foregroundStyle(Theme.textTertiary)
+            Text(ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: draft.deviceGenerationID)))
         }
         .font(.lumenSecondary)
         .foregroundStyle(Theme.textSecondary)
@@ -263,7 +268,7 @@ struct ProfileEditorForm: View {
                 }
                 Spacer(minLength: 12)
                 Button(L("common.cancel"), action: onCancel)
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(.lumenGhost)
                     .keyboardShortcut(.cancelAction)
                 Button(L("common.save"), action: onSave)
                     .buttonStyle(.lumenPrimary)
@@ -454,12 +459,10 @@ struct ProfileEditorForm: View {
     private var connection: some View {
         VStack(alignment: .leading, spacing: 14) {
             EditorField(L("editor.proxy.connection")) {
-                Picker(L("editor.proxy.connection"), selection: $draft.proxyMode) {
-                    ForEach(ProfileDraft.ProxyMode.allCases) { Text(L($0.labelKey)).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 380)
+                LumenSegmented(selection: $draft.proxyMode,
+                               options: ProfileDraft.ProxyMode.allCases.map { (value: $0, title: L($0.labelKey)) })
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(L("editor.proxy.connection"))
             }
             switch draft.proxyMode {
             case .direct:
@@ -615,14 +618,12 @@ struct ProfileEditorForm: View {
             Text(L("editor.locale"))
                 .font(.lumenLabel)
                 .foregroundStyle(Theme.textPrimary)
-            Picker(L("editor.locale"), selection: localeMode) {
-                Text(L("editor.locale.connection")).tag(LocaleSource.connection)
-                Text(L("editor.locale.manual")).tag(LocaleSource.manual)
-                Text(L("editor.locale.random")).tag(LocaleSource.random)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+            LumenSegmented(selection: localeMode,
+                           options: [(value: LocaleSource.connection, title: L("editor.locale.connection")),
+                                     (value: LocaleSource.manual, title: L("editor.locale.manual")),
+                                     (value: LocaleSource.random, title: L("editor.locale.random"))])
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(L("editor.locale"))
         }
         switch draft.localeMode {
         case .connection:
@@ -706,13 +707,11 @@ struct ProfileEditorForm: View {
     private var privacy: some View {
         VStack(alignment: .leading, spacing: 14) {
             EditorRow(L("editor.local")) {
-                Picker(L("editor.local"), selection: $draft.localRequests) {
-                    Text(L("editor.local.protected")).tag(LocalRequests.protected)
-                    Text(L("editor.local.allowed")).tag(LocalRequests.allowed)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
+                LumenSegmented(selection: $draft.localRequests,
+                               options: [(value: LocalRequests.protected, title: L("editor.local.protected")),
+                                         (value: LocalRequests.allowed, title: L("editor.local.allowed"))])
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(L("editor.local"))
             }
             if draft.localRequests == .allowed && !draft.hasProxy {
                 EditorNote(L("editor.local.allowedWarning"), tone: .warning)
