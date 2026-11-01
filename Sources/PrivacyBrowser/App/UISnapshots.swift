@@ -134,6 +134,8 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-inspector-over", size: CGSize(width: 1180, height: 740), edges: true) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [northwind], inspectorInfo: info)
         }.capture(into: folder)
+        // The list after a profile's window closed (the owner, 1 November: blank until scrolled up).
+        problems += await listAfterReturn(into: folder)
         // The command palette (⌘K), as it opens and with something typed.
         let paletteCommands = paletteSample(rows)
         problems += await Shot(name: "palette", size: CommandPaletteView.size, titled: false) {
@@ -602,6 +604,221 @@ enum UISnapshots {
             print("FAIL could not make the sample proxy list: \(error)")
             return 1
         }
+    }
+
+    // MARK: The list after a profile comes back
+
+    /// The owner, 1 November: a profile's window closed and the Profiles window came back with
+    /// "Profiles: 29" over a blank list, its rows there only once scrolled up. The same steps in a
+    /// window of the app's: 29 profiles, none running, the list scrolled to its foot; the last one
+    /// launched (its row goes up to Running, at the list's top, out of sight), its window over this
+    /// one; stopped (sealing, still among Running), this window back in front; sealed (back among
+    /// the others, Running gone). Where the list is scrolled to it must show rows, back in front
+    /// and once sealed (`list-return-back.png`, `list-return.png`). The control takes the same
+    /// steps with the list in its former shape (`lazyProfileListControl`): blank there, the steps
+    /// leave that list as the owner saw it and the check sees it; rows there too, they do not here,
+    /// and the check cannot tell — said, not passed.
+    private static func listAfterReturn(into folder: URL) async -> Int {
+        guard let list = await returnSteps(name: "list-return", lazy: false, into: folder) else { return 1 }
+        var problems = 0
+        for (moment, sight) in [("back in front", list.back), ("once sealed", list.sealed)] {
+            if sight.showsRows {
+                print("PASS list-return: \(moment), the list shows its rows where it is scrolled to — \(sight.said)")
+            } else {
+                print("FAIL list-return: \(moment), the list is blank where it is scrolled to — \(sight.said)")
+                problems += 1
+            }
+        }
+        guard let control = await returnSteps(name: "list-return-control", lazy: true, into: folder) else {
+            print("FAIL list-return-control: its steps could not be taken — the check cannot tell")
+            return problems + 1
+        }
+        if control.back.showsRows && control.sealed.showsRows {
+            print("WARN list-return-control: the list's former shape shows its rows too (back in front: \(control.back.said); "
+                + "once sealed: \(control.sealed.said)) — here the steps do not leave it blank, so the check cannot tell")
+        } else {
+            print("PASS list-return-control: the list's former shape is blank after the same steps (back in front: "
+                + "\(control.back.said); once sealed: \(control.sealed.said)) — the check sees what the owner saw")
+        }
+        return problems
+    }
+
+    /// What the list's viewport showed: how far down it was scrolled, and the share of bright
+    /// pixels — the rows' text — in its upper and lower halves.
+    private struct ReturnSight {
+        var scrolledDown: CGFloat
+        var contentHeight: CGFloat
+        var upper: Double
+        var lower: Double
+
+        /// Rows' names are 0.9–3 % of a band of the list in CI run 556's pictures of it; where only
+        /// the window's black and its eclipses are drawn, 0 %.
+        static let rowsShare = 0.0015
+        var showsRows: Bool { upper >= Self.rowsShare && lower >= Self.rowsShare }
+        var said: String {
+            String(format: "bright %.2f %% above, %.2f %% below, scrolled %ld pt down of %ld", upper * 100, lower * 100,
+                   Int(scrolledDown), Int(contentHeight))
+        }
+    }
+
+    private struct ReturnSights {
+        var back: ReturnSight
+        var sealed: ReturnSight
+    }
+
+    /// 29 profiles, none running, each with a name in the rows' brightest text.
+    private static func returnRows() -> [ProfileRowItem] {
+        let mac = ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: "macos-26"), hostSafariVersion: HostSafari.version)
+        let countries: [String?] = ["DE", "NL", "US", "PT", nil, "FR", "PL"]
+        let now = Date()
+        return (1...29).map { n -> ProfileRowItem in
+            let byte = UInt8(n)
+            let exit: ProfileExit = countries[n % countries.count].map {
+                .proxy(endpoint: "\($0.lowercased()).gateway.example:1080", countryCode: $0) // l10n: not text
+            } ?? .direct
+            return ProfileRowItem(id: UUID(uuid: (0x29, byte, 0x5E, 0x17, 0, byte, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, byte)),
+                                  name: String(format: "Account %02d", n), activity: .stopped, exit: exit, // l10n: not text
+                                  ephemeral: false, appearsAs: mac, lastUsed: now.addingTimeInterval(TimeInterval(-n * 3_600)))
+        }
+    }
+
+    /// The steps in a window of the app's, the list as it is or (`lazy`) in its former shape; nil
+    /// when they could not be taken, which is said.
+    private static func returnSteps(name: String, lazy: Bool, into folder: URL) async -> ReturnSights? {
+        let live = LiveRows(returnRows())
+        guard let last = live.rows.last?.id else { return nil }
+        let size = CGSize(width: 1180, height: 740)
+        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: 60, y: 60), size: size),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        Theme.applyAppWindow(to: window)
+        let host = NSHostingView(rootView: LiveProfilesPreview(live: live)
+            .environment(\.colorScheme, .dark)
+            .environment(\.lumenStillFrame, true)
+            .environment(\.lazyProfileListControl, lazy)
+            .environment(\.tagColors, sampleTagColors)
+            .tint(Theme.accentFill))
+        host.sizingOptions = []
+        window.contentView = host
+        window.setContentSize(size)
+        window.orderFrontRegardless()
+        window.makeKey()
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        guard let scroll = listScrollView(in: host) else {
+            print("FAIL \(name): the list's scroll view was not found — the check cannot tell")
+            return nil
+        }
+        scrollToFoot(scroll)
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        guard scrolledDown(scroll) > 200 else {
+            print("FAIL \(name): the list did not scroll down (\(Int(scrolledDown(scroll))) pt of \(Int(contentHeight(scroll)))) — the check cannot tell")
+            return nil
+        }
+        // Launched: its row goes up to Running, at the list's top.
+        live.set(last, .starting)
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        // Its window comes over this one.
+        let profileWindow = NSWindow(contentRect: window.frame.insetBy(dx: -20, dy: -20), styleMask: [.borderless],
+                                     backing: .buffered, defer: false)
+        profileWindow.isReleasedWhenClosed = false
+        profileWindow.backgroundColor = .white
+        profileWindow.orderFrontRegardless()
+        live.set(last, .running)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        // Stopped: sealing, still among Running.
+        live.set(last, .sealing)
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        // Its window closes; this one comes back in front (AppModel.activateProfilesWindow).
+        profileWindow.orderOut(nil)
+        profileWindow.close()
+        window.orderFrontRegardless()
+        window.makeKey()
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        guard let back = sight(of: host, scroll: scroll, name: "\(name)-back", into: folder) else { return nil }
+        // Sealed: back among the others, Running gone.
+        live.set(last, .stopped)
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        guard let sealed = sight(of: host, scroll: scroll, name: name, into: folder) else { return nil }
+        return ReturnSights(back: back, sealed: sealed)
+    }
+
+    /// The list's scroll view: of those in the window, the one with the tallest content.
+    private static func listScrollView(in view: NSView) -> NSScrollView? {
+        func all(_ view: NSView) -> [NSScrollView] {
+            var found = view.subviews.flatMap(all)
+            if let scroll = view as? NSScrollView { found.append(scroll) }
+            return found
+        }
+        return all(view).max { contentHeight($0) < contentHeight($1) }
+    }
+
+    private static func contentHeight(_ scroll: NSScrollView) -> CGFloat {
+        scroll.documentView?.frame.height ?? 0
+    }
+
+    /// How far from the top of its content the list is scrolled.
+    private static func scrolledDown(_ scroll: NSScrollView) -> CGFloat {
+        let clip = scroll.contentView.bounds
+        guard let document = scroll.documentView else { return 0 }
+        return document.isFlipped ? clip.minY : document.frame.height - clip.maxY
+    }
+
+    private static func scrollToFoot(_ scroll: NSScrollView) {
+        guard let document = scroll.documentView else { return }
+        let clip = scroll.contentView
+        let y = document.isFlipped ? max(0, document.frame.height - clip.bounds.height) : 0
+        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: y))
+        scroll.reflectScrolledClipView(clip)
+    }
+
+    /// The window's picture now (`<name>.png`) and what the list's viewport shows in it, without
+    /// the rows' left inset and the scroller.
+    private static func sight(of host: NSView, scroll: NSScrollView, name: String, into folder: URL) -> ReturnSight? {
+        host.layoutSubtreeIfNeeded()
+        host.display()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            print("FAIL no bitmap for \(name)")
+            return nil
+        }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        if let data = rep.representation(using: .png, properties: [:]),
+           (try? data.write(to: folder.appendingPathComponent("\(name).png"))) != nil {
+            print("WROTE \(name).png (\(rep.pixelsWide)×\(rep.pixelsHigh))")
+        } else {
+            print("FAIL could not write \(name).png")
+            return nil
+        }
+        let frame = scroll.convert(scroll.bounds, to: host)
+        let top = host.isFlipped ? frame.minY : host.bounds.height - frame.maxY
+        let scale = CGFloat(rep.pixelsWide) / max(1, host.bounds.width)
+        let x0 = Int((frame.minX + 24) * scale), x1 = Int((frame.maxX - 24) * scale)
+        let y0 = Int((top + 8) * scale), y1 = Int((top + frame.height - 8) * scale)
+        guard x1 - x0 > 100, y1 - y0 > 100 else {
+            print("FAIL \(name): the list's viewport is \(Int(frame.width))×\(Int(frame.height)) pt — the check cannot tell")
+            return nil
+        }
+        func share(_ from: Int, _ to: Int) -> Double {
+            var bright = 0, all = 0
+            for y in stride(from: from, to: to, by: 2) {
+                for x in stride(from: x0, to: x1, by: 2) {
+                    guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    all += 1
+                    let luminance = 0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
+                    if luminance > 0.6 { bright += 1 }
+                }
+            }
+            return all == 0 ? 0 : Double(bright) / Double(all)
+        }
+        let middle = (y0 + y1) / 2
+        return ReturnSight(scrolledDown: scrolledDown(scroll), contentHeight: contentHeight(scroll),
+                           upper: share(y0, middle), lower: share(middle, y1))
     }
 
     // MARK: Click test
@@ -1110,6 +1327,32 @@ private struct ProfilesPreview: View {
                        keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
                        tunnelCarriesWebRTC: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
                        proxyProblem: proxyProblem)
+    }
+}
+
+/// Rows that change while their window is shown, as the app's model changes them
+/// (`UISnapshots.listAfterReturn`).
+@MainActor
+private final class LiveRows: ObservableObject {
+    @Published var rows: [ProfileRowItem]
+
+    init(_ rows: [ProfileRowItem]) {
+        self.rows = rows
+    }
+
+    func set(_ id: UUID, _ activity: ProfileRowItem.Activity) {
+        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
+        rows[index].activity = activity
+    }
+}
+
+private struct LiveProfilesPreview: View {
+    @ObservedObject var live: LiveRows
+    @State private var filter: ProfileFilter = .all
+    @State private var search = ""
+
+    var body: some View {
+        ProfilesScreen(rows: live.rows, filter: $filter, search: $search)
     }
 }
 

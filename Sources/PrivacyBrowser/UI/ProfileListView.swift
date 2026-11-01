@@ -741,6 +741,7 @@ struct ProfilesScreen: View {
     @ObservedObject private var appearance = AppearancePreferences.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.lumenStillFrame) private var stillFrame
+    @Environment(\.lazyProfileListControl) private var lazyListControl
 
     static let sidebarWidth: CGFloat = 232
     static let inspectorWidth: CGFloat = 320
@@ -1090,22 +1091,42 @@ struct ProfilesScreen: View {
             GeometryReader { geometry in
                 let columns = ProfileColumns(contentWidth: geometry.size.width)
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
-                        columnHeader(columns)
-                        ForEach(groups) { group in
-                            groupView(group.kind, group.rows, columns)
-                        }
-                        footnote
-                    }
-                    .padding(.horizontal, 20)
-                    // The last row stays above the floating bar.
-                    .padding(.bottom, selectedRows.count >= 2 ? 88 : 24)
+                    listStack(columns)
+                        .padding(.horizontal, 20)
+                        // The last row stays above the floating bar.
+                        .padding(.bottom, selectedRows.count >= 2 ? 88 : 24)
                 }
                 .scrollIndicators(.automatic)
                 .animation(Motion.isReduced(reduceMotion) ? nil : Motion.reflow, value: displayOrder.map(\.id))
             }
             .transition(.opacity)
         }
+    }
+
+    /// The column header, the groups and the footnote in a plain stack, every row laid out. Not a
+    /// lazy one: its items were the whole groups, so it spared nothing (a group's rows were all made
+    /// as soon as any of it showed), and it is what the list was when the owner came back from a
+    /// profile's window to "Profiles: 29" over a blank list, its rows there only once scrolled up
+    /// (1 November) — a profile's row goes up to Running and back while the list is scrolled down.
+    /// A plain stack keeps no range of made items for that to leave behind.
+    /// `UISnapshots.listAfterReturn` takes those steps in both, `lazyListControl` being the former
+    /// shape, for that check's control only.
+    @ViewBuilder
+    private func listStack(_ columns: ProfileColumns) -> some View {
+        if lazyListControl {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) { listItems(columns) }
+        } else {
+            VStack(alignment: .leading, spacing: 0) { listItems(columns) }
+        }
+    }
+
+    @ViewBuilder
+    private func listItems(_ columns: ProfileColumns) -> some View {
+        columnHeader(columns)
+        ForEach(groups) { group in
+            groupView(group.kind, group.rows, columns)
+        }
+        footnote
     }
 
     private func columnHeader(_ columns: ProfileColumns) -> some View {

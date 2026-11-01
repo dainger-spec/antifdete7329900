@@ -380,8 +380,9 @@ jobs:
           if-no-files-found: ignore
       - name: UI snapshots for design review, and clicks through the transparent title bar
         # The app's screens rendered with sample data (UISnapshots.swift) in both UI languages, uploaded
-        # as the ui-snapshots artifact. A click that does not reach its button, or a real sheet that
-        # does not fit in the narrowest Profiles window, fails the job at the end.
+        # as the ui-snapshots artifact. A click that does not reach its button, a real sheet that
+        # does not fit in the narrowest Profiles window, or the list blank after a profile came back,
+        # fails the job at the end.
         id: ui
         continue-on-error: true
         timeout-minutes: 8
@@ -393,9 +394,13 @@ jobs:
             PRIVACYBROWSER_LANG=$lang build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --render-ui-snapshots "$PWD/build/ui-snapshots/$lang" \
               | tee "build/ui-snapshots/$lang.log" || status=1
           done
-          # The sheet in the narrowest window, and its control, as notices on the job.
-          grep -hE '^(PASS|FAIL|WARN) .*(sheet|window)' build/ui-snapshots/en.log | grep -v 'click' | head -4 | cut -c1-400 \
+          # The sheet in the narrowest window, and its control, as notices on the job (by "sheet": the
+          # edge checks' lines say "window" too).
+          grep -hE '^(PASS|FAIL|WARN) .*sheet' build/ui-snapshots/en.log | grep -v 'click' | head -4 | cut -c1-400 \
             | sed 's/^/::notice title=UI snapshots - a sheet in the narrowest window::/' || true
+          # The list after a profile comes back (blank until scrolled, the owner 1 November), and its control.
+          grep -hE '^(PASS|FAIL|WARN) list-return' build/ui-snapshots/*.log | head -6 | cut -c1-400 \
+            | sed 's/^/::notice title=UI snapshots - the list after a profile comes back::/' || true
           exit $status
       - uses: actions/upload-artifact@v4
         if: always()
@@ -871,7 +876,7 @@ jobs:
       - name: UI snapshot checks
         if: always() && steps.ui.outcome == 'failure'
         run: |
-          echo "::error::the UI snapshot step failed (a capture was not written, a click did not reach its button or a sheet did not fit its window); see its log"
+          echo "::error::the UI snapshot step failed (a capture was not written, a click did not reach its button, a sheet did not fit its window, a window's own background showed at its edge, or the profile list was blank after a profile came back); see its log"
           exit 1
       - name: The self-test's notes (what it measured, skipped, or could not show on this runner)
         # Its INFO lines, last in the log, so that they can be read without the whole log.

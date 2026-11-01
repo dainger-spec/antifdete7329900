@@ -73,11 +73,23 @@ private struct StillFrameKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct LazyProfileListKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     /// Draw the state a window settles in, with no entry animation: the self-test's snapshots.
     var lumenStillFrame: Bool {
         get { self[StillFrameKey.self] }
         set { self[StillFrameKey.self] = newValue }
+    }
+
+    /// The profile list in its former shape, a lazy stack of whole groups: the control of the UI
+    /// snapshots' check that the list shows its rows after a profile came back
+    /// (`UISnapshots.listAfterReturn`). The app never sets it.
+    var lazyProfileListControl: Bool {
+        get { self[LazyProfileListKey.self] }
+        set { self[LazyProfileListKey.self] = newValue }
     }
 }
 
