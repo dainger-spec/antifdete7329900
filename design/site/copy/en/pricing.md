@@ -4,7 +4,7 @@
 
 Window title: Pricing — Lumen
 
-Search description: Lumen pricing: every protection in every plan; plans differ by the number of profiles and devices. 7 days free, crypto payments, refunds.
+Search description: Lumen pricing: every protection in every plan; plans differ by the number of profiles and devices and the space for sync. 7 days free, crypto payments, refunds.
 
 ---
 
@@ -12,7 +12,7 @@ Pricing
 
 # Simple plans, every feature in each
 
-Plans differ only by the number of profiles and devices. Start with 7 free days.
+Plans differ only by their limits: profiles, devices and space for sync. Start with 7 free days.
 
 Monthly
 
@@ -35,6 +35,10 @@ Profiles
 Devices
 
 2
+
+Sync
+
+200 MB
 
 Seats
 
@@ -60,6 +64,10 @@ Devices
 
 3
 
+Sync
+
+1 GB
+
 Seats
 
 1
@@ -81,6 +89,10 @@ Profiles
 Devices
 
 10
+
+Sync
+
+4 GB
 
 Seats
 
@@ -124,7 +136,11 @@ In your account: choose a month or a year and pay in crypto on our payment page.
 
 **How many people are in a Team?**
 
-Five seats, including the owner. Each person signs in with their own email and password; the profile and device limits are shared by the team. The owner pays; members don’t see the team’s invoices.
+Five seats, including the owner. Each person signs in with their own email and password; the profile and device limits and the space for sync are shared by the team. The owner pays; members don’t see the team’s invoices.
+
+**How much space is there for sync?**
+
+20 MB for each profile in your plan, and never less than 100 MB: 200 MB on Personal, 1 GB on Professional, 4 GB for the whole Team, 100 MB during the trial. Sync carries settings, passwords, bookmarks, history and persistent cookies — no cache and no other website data. If the space runs out, changes that need more space stop syncing, and everything already saved stays available. Your account shows how much is used.
 
 **Can I move profiles to another Mac?**
 

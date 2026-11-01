@@ -42,6 +42,7 @@ A profile gets its language, region and time zone when it starts, like any Mac a
 - Its own folder and temporary files
 - Language and time zone from the proxy’s country
 - The process knows only its own profile’s key
+- How many profiles run at once is up to your Mac, not your plan
 
 - Lumen the vault and the profile list
 

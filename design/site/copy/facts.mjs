@@ -45,7 +45,7 @@ export const FACTS = [
   { value: '26', what: 'Safari 26 (геометрия окна, «Mac · Safari 26» в образцах)', source: 'docs/ISOLATION_AND_LIMITATIONS.md §2; UISnapshots.swift' },
   { value: '10', what: 'символов — минимум мастер-пароля', source: 'Localizable.strings setup.rule.length: «Используйте не менее 10 символов.»' },
   { value: '32', what: 'МБ — предел файла cookies', source: 'Localizable.strings cookies.reason.fileTooLarge: «не больше 32 МБ»' },
-  // The owner's decisions (questions 2, 3, 10)
+  // The owner's decisions (questions 2, 3, 10, 16)
   { value: ['19', '59', '149'], what: 'цена в месяц, $: Личный, Профессиональный, Команда', source: 'решение владельца, вопрос 2' },
   { value: ['190', '590', '1490', '1 490', '1,490'], what: 'цена за год, $ — цена десяти месяцев', source: 'решение владельца, вопрос 2: «Годовая оплата — цена десяти месяцев»' },
   { value: ['10', '50', '200'], what: 'профилей в тарифе: Личный, Профессиональный, Команда', source: 'решение владельца, вопрос 2' },
@@ -53,6 +53,7 @@ export const FACTS = [
   { value: ['5', '1'], what: 'мест: Команда — 5, Личный и Профессиональный — 1', source: 'решение владельца, вопрос 2' },
   { value: ['7', '3'], what: 'пробный период: 7 дней, до 3 профилей', source: 'решение владельца, вопрос 3' },
   { value: ['14', '7'], what: 'возврат: 14 дней с первой оплаты, 7 дней после продления', source: 'решение владельца, вопрос 10' },
+  { value: ['20', '100', '200', '1', '4'], what: 'место для синхронизации: 20 МБ на профиль тарифа, не меньше 100 МБ — 200 МБ на «Личном», 1 ГБ на «Профессиональном», 4 ГБ на всю «Команду», 100 МБ в пробном периоде', source: 'решение владельца, вопрос 16 (1 ноября 2026): «20 МиБ на профиль тарифа, не меньше 100 МиБ. Получается 200 МБ на «Личном», 1 ГБ на «Профессиональном», 4 ГБ на «Команде»»; так считает сервер — lumen-api-server docs/SYNC_SERVER.md, «Квота»: max(100 МиБ, профилей в тарифе × 20 МиБ)' },
   // The documentation (docs-*.html), from the browser's code at 194828b and docs/SCALE.md; every source in
   // design/site/docs-sources/<article>.md
   { value: ['27', '26.1'], what: 'Safari 27 и macOS 27 (вид iPhone, раннеры CI); iOS 26.1 и новее (замороженный токен ОС)', source: 'Sources/BrowserCore/…/DeviceGeneration.swift:23-24, 128-138 (gen.ios27); docs/SCALE.md (раннеры macOS 26.6.2 и 27.0.1); docs/ISOLATION_AND_LIMITATIONS.md:304-308' },

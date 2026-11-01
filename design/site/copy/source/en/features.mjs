@@ -1,5 +1,7 @@
 // Features — short, and by benefit. Numbers from copy/facts.mjs. Samples in the illustrations come from
 // UISnapshots.swift (the Berlin 1, Tokyo, Whitelisted and Old provider proxies, as of 7064cca).
+// Running profiles at once is the owner's decision: say plainly that the Mac decides it, not the plan (naming no one);
+// the measurements are in the article «Several profiles at once», #scale.
 export default {
   title: 'Features',
   description: '{{name}} features: real Safari in every profile, a process of its own, encryption, a proxy that never leaks, verification on every build, warm-up, cookie import, passwords and sync.',
@@ -38,6 +40,7 @@ export default {
       'Its own folder and temporary files',
       'Language and time zone from the proxy’s country',
       'The process knows only its own profile’s key',
+      'How many profiles run at once is up to [your Mac](docs-multiple.html#scale), not your plan',
     ],
     tree: {
       manager: '{{name}}',
