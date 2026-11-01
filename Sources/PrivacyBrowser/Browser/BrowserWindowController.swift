@@ -95,7 +95,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         Theme.applyChrome(to: window)
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .line
-        window.backgroundColor = Theme.NS.toolbar
+        window.backgroundColor = ProfileWindowTheme.NS.toolbar
         buildInterface(in: window)
         WebContentAppearance.shared.follow(webContainer)
         // The profile's window size (Profile editor → Window), a real frame; a mobile generation's
@@ -134,7 +134,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
         addressField.placeholderAttributedString = NSAttributedString(
             string: L("toolbar.address.placeholder"),
-            attributes: [.foregroundColor: Theme.NS.textTertiary, .font: NSFont.systemFont(ofSize: 13)])
+            attributes: [.foregroundColor: ProfileWindowTheme.NS.textTertiary, .font: NSFont.systemFont(ofSize: 13)])
         addressField.delegate = self
         addressField.lineBreakMode = .byTruncatingTail
         addressField.cell?.usesSingleLineMode = true

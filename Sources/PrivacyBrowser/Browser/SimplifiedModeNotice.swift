@@ -73,11 +73,11 @@ struct SimplifiedModeChip: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
             }
-            .foregroundStyle(Theme.warning)
+            .foregroundStyle(ProfileWindowTheme.warning)
             .padding(.horizontal, 8)
             .frame(height: 24)
-            .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.warning.opacity(0.12)))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.warning.opacity(0.4), lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: ProfileWindowTheme.controlRadius, style: .continuous).fill(ProfileWindowTheme.warning.opacity(0.12)))
+            .overlay(RoundedRectangle(cornerRadius: ProfileWindowTheme.controlRadius, style: .continuous).strokeBorder(ProfileWindowTheme.warning.opacity(0.4), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .fixedSize()
@@ -98,15 +98,15 @@ struct SimplifiedModeExplanation: View {
             Label {
                 Text(L("simplified.title")).font(.lumenSheetTitle)
             } icon: {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.warning)
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(ProfileWindowTheme.warning)
             }
             Text(L("simplified.body"))
                 .font(.lumenBody)
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(ProfileWindowTheme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(String(format: L("simplified.why"), SimplifiedModeNotice.reasonText(reason)))
                 .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(ProfileWindowTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)

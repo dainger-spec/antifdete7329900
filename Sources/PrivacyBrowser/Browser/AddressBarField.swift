@@ -23,7 +23,7 @@ final class AddressBarField: NSTextField {
         isSelectable = true
         focusRingType = .none
         font = .systemFont(ofSize: 13)
-        textColor = Theme.NS.textPrimary
+        textColor = ProfileWindowTheme.NS.textPrimary
         cell?.isScrollable = true
         cell?.wraps = false
     }
@@ -33,9 +33,9 @@ final class AddressBarField: NSTextField {
 
     override func draw(_ dirtyRect: NSRect) {
         let box = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
-        Theme.NS.field.setFill()
+        ProfileWindowTheme.NS.field.setFill()
         box.fill()
-        (isEditingText ? Theme.NS.accent : Theme.NS.fieldBorder).setStroke()
+        (isEditingText ? ProfileWindowTheme.NS.accent : ProfileWindowTheme.NS.fieldBorder).setStroke()
         box.lineWidth = 1
         box.stroke()
         super.draw(dirtyRect)
