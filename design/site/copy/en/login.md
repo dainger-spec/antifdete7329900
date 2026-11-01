@@ -8,9 +8,13 @@ Search description: Sign in to your Lumen account with your email and password. 
 
 ---
 
-# Sign in
+Home
 
-The email and password of your Lumen account.
+RU
+
+# Sign in to Lumen
+
+No account yet? Create one
 
 Email
 
@@ -20,12 +24,4 @@ Forgot your password?
 
 [Sign in]
 
-No account yet? Create one
-
-## What the account holds
-
-- Your plan, paid period and payments
-- Your devices: their code, when they were last online and how many profiles each has — only the number
-- Encrypted sync blocks — only you can read them
-
-The master password of your profiles is never entered here. It never leaves your Mac — not even to sign in.
+Your profiles’ master password is never entered here: it never leaves your Mac.

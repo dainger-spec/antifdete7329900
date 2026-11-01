@@ -807,23 +807,7 @@ select.input { appearance: none; padding-right: 36px; background-image: none; }
 .post-head .meta { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; font: var(--t-caption); color: var(--text-tertiary); margin-top: var(--s5); }
 .byline { display: inline-flex; align-items: center; gap: 8px; }
 
-/* MARK: Auth */
-
-.auth { min-height: calc(100vh - var(--header-h)); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-.auth-main { display: flex; flex-direction: column; justify-content: center; padding: var(--s8) var(--s8); }
-.auth-card { width: 100%; max-width: 400px; margin-inline: auto; }
-.auth-card .h1 { font: 600 30px/36px var(--font-display); letter-spacing: -0.015em; }
-.auth-card .lead { font: var(--t-body); margin-top: var(--s3); }
-.auth-card .seg { margin-top: var(--s6); }
-.auth-card .form { margin-top: var(--s5); }
-.auth-card .alt { margin-top: var(--s5); font: var(--t-small); color: var(--text-tertiary); }
-.auth-side { border-left: 1px solid var(--hairline); background: var(--sidebar); display: flex; flex-direction: column; justify-content: center; padding: var(--s8); }
-.auth-side .inner { max-width: 440px; }
-@media (max-width: 899px) {
-  .auth { grid-template-columns: minmax(0, 1fr); min-height: 0; }
-  .auth-main { padding: var(--s7) var(--pad-inline); }
-  .auth-side { border-left: 0; border-top: 1px solid var(--hairline); padding: var(--s7) var(--pad-inline); }
-}
+/* MARK: Auth — see «Sign-in and sign-up, focused» at the end */
 
 /* MARK: Account */
 
@@ -1169,10 +1153,6 @@ body { background: var(--backdrop); }
 .local-nav a, .docs-nav a, .account-nav a { border-radius: 10px; }
 .chipnav { background: rgba(6, 7, 9, 0.78); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
 
-/* Sign-in: both halves run up under the glass header */
-.auth { margin-top: calc(-1 * var(--header-stack)); min-height: 100vh; }
-.auth-main, .auth-side { padding-top: calc(var(--header-stack) + var(--s8)); }
-@media (max-width: 899px) { .auth-main { padding-top: calc(var(--header-stack) + var(--s7)); } .auth-side { padding-top: var(--s7); } }
 
 .art-fallback { display: none; }
 .no-js .art-fallback { display: flex; }
@@ -1483,13 +1463,6 @@ label.acc-row { cursor: pointer; }
 .swin { border-color: transparent; box-shadow: var(--lg-drop); }
 .appwin::after, .swin::after { --rim: var(--lg-rim-strong); }
 
-/* Sign-in: the «without email» offer is a line and a button beside it, stacked on a phone; on a phone the side
-   loses its big mark, and the page where you type the code has no side at all (the code is the only task there) */
-.key-offer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; }
-@media (max-width: 599px) { .key-offer { grid-template-columns: minmax(0, 1fr); } .key-offer .btn { justify-self: start; } }
-@media (max-width: 899px) { .auth-side > .inner > svg:first-child { display: none; } .auth-side .h3 { margin-top: 0 !important; } .auth-side.quiet { display: none; } }
-/* Sign-in: the side that says what the account keeps is a pane of the same glass, not a grey slab */
-.auth-side { background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)); border-color: rgba(255, 255, 255, 0.07); }
 
 /* The home page's tiles */
 .sc-bento .bx { background: var(--lg-sheen), var(--lg-tint); box-shadow: var(--lg-edge), var(--lg-drop); }
@@ -1584,4 +1557,74 @@ textarea.input { border-radius: 18px; }
   .acc-tabs a span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .acc-tabs a[aria-current="page"] { flex: 0 0 auto; padding: 0 14px 0 12px; }
   .acc-tabs a[aria-current="page"] span { position: static; width: auto; height: auto; overflow: visible; clip-path: none; font: 600 13px/18px var(--font); }
+}
+
+/* ===================================================================================================
+   MARK: Sign-in and sign-up, focused. The owner, showing Resend's sign-up page: «мне нравится … сделаем что-то
+   наподобие». One column on a dark field, nothing else on the page; behind it two arcs of light — the mark's own
+   circle, lit like a bent sheet: a sharp crest, a soft glow on the inside, a falloff outside — drawn in CSS, with
+   grain, and a dark centre so the fields always read. Lumen's drawing, not Resend's art.
+   =================================================================================================== */
+.page-auth .site-header { display: none; }
+.auth2 { position: relative; isolation: isolate; overflow: hidden; min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; background: #050506; }
+.auth2-bg { position: absolute; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.auth2-bg i { position: absolute; border-radius: 50%; }
+.auth2-bg .r1 {
+  width: 1640px; height: 1640px; right: -820px; top: -1040px;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0) 0 60%, rgba(140, 150, 178, 0.10) 68%, rgba(196, 204, 224, 0.36) 75.5%, rgba(238, 241, 248, 0.88) 79.8%, #FFFFFF 80.4%, rgba(176, 184, 204, 0.46) 81.8%, rgba(104, 124, 178, 0.18) 85.5%, rgba(40, 46, 66, 0.08) 90%, rgba(255, 255, 255, 0) 94%);
+  -webkit-mask: conic-gradient(from 0deg, transparent 0deg 164deg, #000 192deg 238deg, transparent 266deg 360deg);
+  mask: conic-gradient(from 0deg, transparent 0deg 164deg, #000 192deg 238deg, transparent 266deg 360deg);
+}
+.auth2-bg .r2 {
+  width: 1280px; height: 1280px; left: -900px; bottom: -760px;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0) 0 62%, rgba(140, 150, 178, 0.08) 70%, rgba(190, 198, 218, 0.28) 76.5%, rgba(226, 230, 240, 0.72) 80%, rgba(246, 247, 251, 0.9) 80.5%, rgba(160, 168, 190, 0.34) 82%, rgba(96, 116, 170, 0.14) 86%, rgba(255, 255, 255, 0) 93%);
+  -webkit-mask: conic-gradient(from 0deg, transparent 0deg 4deg, #000 26deg 62deg, transparent 88deg 360deg);
+  mask: conic-gradient(from 0deg, transparent 0deg 4deg, #000 26deg 62deg, transparent 88deg 360deg);
+}
+.auth2-bg::before { content: ""; position: absolute; inset: 0; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); opacity: 0.07; }
+.auth2-bg::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse 34% 46% at 50% 52%, rgba(5, 5, 6, 0.9) 0 52%, rgba(5, 5, 6, 0) 100%); }
+.auth2-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 28px 0; }
+.auth2-back, .auth2-lang { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px 0 8px; border-radius: var(--r-pill); font: 500 15px/20px var(--font); color: var(--text-secondary); white-space: nowrap; }
+.auth2-back { margin-left: -8px; }
+.auth2-lang { font-size: 13px; color: var(--text-tertiary); padding: 0 12px; margin-right: -12px; }
+.auth2-back:hover, .auth2-lang:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.07); text-decoration: none; }
+.auth2-mid { flex: 1; display: grid; place-items: center; padding: 32px 16px 96px; }
+.auth2-card { width: 100%; max-width: 400px; text-align: center; }
+.auth2-mark { display: inline-block; line-height: 0; filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.6)); }
+.auth2-title { margin-top: 26px; font: 600 30px/36px var(--font-display); letter-spacing: -0.015em; color: var(--text-primary); text-wrap: balance; }
+.auth2-alt { margin-top: 10px; font: var(--t-body); color: var(--text-secondary); }
+.auth2-alt a { color: var(--text-primary); font-weight: 600; }
+.auth2-alt.small { margin-top: 22px; font: var(--t-small); }
+.auth2-lead { margin-top: 12px; font: var(--t-small); color: var(--text-secondary); text-wrap: pretty; }
+.auth2-form { margin-top: 32px; text-align: left; display: grid; gap: 18px; }
+.auth2-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.auth2-form .input { height: 48px; border-radius: 14px; font-size: 16px; }
+.auth2-form .otp .input { height: 56px; }
+.auth2-form .hint { margin-top: 8px; }
+.auth2 .pw { position: relative; }
+.auth2 .pw .input { padding-right: 48px; }
+.pw-eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 10px; background: transparent; color: var(--text-tertiary); cursor: pointer; }
+.pw-eye:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.07); }
+.pw-eye .icon:last-child, .pw-eye.on .icon:first-child { display: none; }
+.pw-eye.on .icon:last-child { display: block; }
+.auth2-form .btn[type="submit"] { margin-top: 6px; transition: background var(--d-fast) var(--ease-out), color var(--d-fast) var(--ease-out), box-shadow var(--d-fast) var(--ease-out); }
+/* dim until the form is filled, as on Resend's page: nothing to press yet */
+.auth2-form:invalid .btn[type="submit"] { background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.36); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06); pointer-events: none; }
+.auth2-note { margin-top: 22px; display: inline-flex; align-items: flex-start; gap: 8px; text-align: left; font: var(--t-caption); color: var(--text-tertiary); }
+.auth2-note .icon { flex: none; margin-top: 2px; color: var(--accent); }
+.auth2-legal { margin: 26px auto 0; max-width: 360px; font: var(--t-caption); color: var(--text-tertiary); text-wrap: pretty; }
+.auth2-legal a { color: var(--text-secondary); text-decoration: underline; text-decoration-color: rgba(255, 255, 255, 0.28); text-underline-offset: 2px; }
+.auth2-legal a:hover { color: var(--text-primary); }
+/* narrower screens: smaller arcs, so the light stays in the corners and never runs under the text */
+@media (max-width: 1099px) {
+  .auth2-bg .r1 { width: 900px; height: 900px; right: -460px; top: -600px; }
+  .auth2-bg .r2 { width: 760px; height: 760px; left: -520px; bottom: -470px; }
+}
+@media (max-width: 599px) {
+  .auth2-top { padding: 14px 16px 0; }
+  .auth2-mid { place-items: start center; padding: 28px 16px 150px; }
+  .auth2-title { font-size: 26px; line-height: 32px; }
+  .auth2-bg .r1 { width: 860px; height: 860px; right: -470px; top: -610px; }
+  .auth2-bg .r2 { width: 560px; height: 560px; left: -380px; bottom: -330px; }
+  .auth2-bg::after { background: radial-gradient(ellipse 70% 42% at 50% 46%, rgba(5, 5, 6, 0.92) 0 50%, rgba(5, 5, 6, 0) 100%); }
 }

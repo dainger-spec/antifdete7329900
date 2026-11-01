@@ -10,6 +10,8 @@ Search description: Sign in to your Lumen account with your email and password. 
 
 Another email
 
+RU
+
 # Check your email
 
 We sent an email to **you@example.com**. If there is no account with that email yet, it has a six-digit code — enter it to confirm your registration.
@@ -19,11 +21,3 @@ Code from the email
 [Confirm]
 
 No email? Check your spam folder. After five wrong tries the code stops working — then start the registration again.
-
-## What the account holds
-
-- Your plan, paid period and payments
-- Your devices: their code, when they were last online and how many profiles each has — only the number
-- Encrypted sync blocks — only you can read them
-
-The master password of your profiles is never entered here. It never leaves your Mac — not even to sign in.

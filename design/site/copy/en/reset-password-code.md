@@ -10,6 +10,8 @@ Search description: Sign in to your Lumen account with your email and password. 
 
 Another email
 
+RU
+
 # Check your email
 
 If there is an account with **you@example.com**, we sent a code to it. Enter it and a new password.
@@ -25,11 +27,3 @@ Repeat new password
 [Change password and sign in]
 
 Every earlier session on the site ends. Your Macs stay in the account: resetting the password doesn’t unlink them.
-
-## What the account holds
-
-- Your plan, paid period and payments
-- Your devices: their code, when they were last online and how many profiles each has — only the number
-- Encrypted sync blocks — only you can read them
-
-The master password of your profiles is never entered here. It never leaves your Mac — not even to sign in.

@@ -2,13 +2,19 @@
 // email and password; a code from the email only confirms a registration and resets a password. The account is the
 // email: no licence-key sign-in, no account without email. A password has at least 10 characters. The server answers a
 // sign-up or a reset the same way whether an account with that email exists or not, so the page always says "Check
-// your email".
+// your email". The look, as the owner asked, follows Resend's sign-up page in Lumen's own drawing: one column, the mark
+// in its tile, «Already have an account? Sign in», a button that stays dim until the fields are filled, small print
+// under it. No Google or GitHub sign-in — the server has none; no «send me news» box — there are no marketing emails.
+// Accepting the terms is a line under the button, not a checkbox.
 export default {
   title: 'Sign in',
   description: 'Sign in to your {{name}} account with your email and password. Sign-up and password resets use a code from an email.',
+  home: 'Home',
+  note: 'Your profiles’ master password is never entered here: it never leaves your Mac.',
+  eye: { show: 'Show password', hide: 'Hide password' },
   email: {
-    title: 'Sign in',
-    lead: 'The email and password of your {{name}} account.',
+    doc: 'Sign in',
+    title: 'Sign in to {{name}}',
     label: 'Email',
     placeholder: 'you@example.com',
     password: 'Password',
@@ -17,14 +23,14 @@ export default {
     alt: 'No account yet? [Create one](signup.html)',
   },
   signup: {
-    title: 'Create an account',
-    lead: 'You need an account to pay, for your devices and for sync. Profiles and their data stay encrypted on your Mac.',
+    doc: 'Sign up',
+    title: 'Create a {{name}} account',
     label: 'Email',
     placeholder: 'you@example.com',
     password: 'Password',
     passwordHint: 'At least 10 characters. This is the account’s password, not your profiles’ master password.',
-    agree: 'I accept the [terms of use](terms.html) and the [privacy policy](privacy.html)',
-    action: 'Continue',
+    action: 'Create account',
+    legal: 'By creating an account, you accept the [terms of use](terms.html) and the [privacy policy](privacy.html).',
     alt: 'Already have an account? [Sign in](login.html)',
   },
   code: {
@@ -52,14 +58,5 @@ export default {
     passwordHint: 'At least 10 characters.',
     action: 'Change password and sign in',
     note: 'Every earlier session on the site ends. Your Macs stay in the account: resetting the password doesn’t unlink them.',
-  },
-  side: {
-    title: 'What the account holds',
-    items: [
-      ['wallet', 'Your plan, paid period and payments'],
-      ['laptop', 'Your devices: their code, when they were last online and how many profiles each has — only the number'],
-      ['server', 'Encrypted sync blocks — only you can read them'],
-    ],
-    note: 'The master password of your profiles is never entered here. It never leaves your Mac — not even to sign in.',
   },
 };

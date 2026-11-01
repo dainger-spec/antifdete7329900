@@ -2,15 +2,19 @@
 
 # Sign up
 
-Window title: Create an account — Lumen
+Window title: Sign up — Lumen
 
 Search description: Sign in to your Lumen account with your email and password. Sign-up and password resets use a code from an email.
 
 ---
 
-# Create an account
+Home
 
-You need an account to pay, for your devices and for sync. Profiles and their data stay encrypted on your Mac.
+RU
+
+# Create a Lumen account
+
+Already have an account? Sign in
 
 Email
 
@@ -18,16 +22,8 @@ Password
 
 At least 10 characters. This is the account’s password, not your profiles’ master password.
 
-I accept the terms of use and the privacy policy
+[Create account]
 
-[Continue]
+Your profiles’ master password is never entered here: it never leaves your Mac.
 
-Already have an account? Sign in
-
-## What the account holds
-
-- Your plan, paid period and payments
-- Your devices: their code, when they were last online and how many profiles each has — only the number
-- Encrypted sync blocks — only you can read them
-
-The master password of your profiles is never entered here. It never leaves your Mac — not even to sign in.
+By creating an account, you accept the terms of use and the privacy policy.

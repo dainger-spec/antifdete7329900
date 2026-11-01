@@ -8,6 +8,10 @@ Search description: Sign in to your Lumen account with your email and password. 
 
 ---
 
+Home
+
+RU
+
 # Reset your password
 
 We send a code to the account’s email. This is the account’s password — your profiles’ master password can’t be reset like this: nobody but you knows it.
@@ -17,11 +21,3 @@ Email
 [Get a code]
 
 Remembered it? Sign in
-
-## What the account holds
-
-- Your plan, paid period and payments
-- Your devices: their code, when they were last online and how many profiles each has — only the number
-- Encrypted sync blocks — only you can read them
-
-The master password of your profiles is never entered here. It never leaves your Mac — not even to sign in.
