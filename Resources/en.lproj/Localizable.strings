@@ -867,15 +867,12 @@
 "sync.status.downloaded" = "%ld downloaded";
 "sync.status.failed" = "Last attempt %@ failed: %@";
 "sync.status.merged" = "%ld merged";
-"sync.status.never" = "Never synced.";
-"sync.status.ok" = "Last sync %@: %@";
 "sync.status.passwordDifferentElsewhere" = "The sync location keeps another Mac's master password (changed there at the same time as here, or with an earlier version of Lumen): new devices join with that one. Change the password here to put this Mac's there.";
 "sync.status.passwordNewerElsewhere" = "The master password was changed on another Mac: new devices join with that one. This Mac still opens with its own until the password is changed here too.";
 "sync.status.passwordPublished" = "This Mac's new master password is on the sync location: new devices join with it.";
 "sync.status.uploaded" = "%ld uploaded";
 "sync.stopFirst" = "Stop all profiles first.";
 "sync.title" = "Sync";
-"sync.status.row" = "Last sync";
 "sync.what" = "What is synced";
 "sync.what.row" = "End-to-end encrypted";
 "sync.folder.row" = "Encrypted blocks are written to";

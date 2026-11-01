@@ -117,11 +117,13 @@ struct SyncSettingsView: View {
             }
 
             SettingsCaption(L("sync.status"))
-            SettingCustomRow(L("sync.status.row")) {
-                Text(statusText)
-                    .font(.lumenBody)
-                    .foregroundStyle(model.lastSyncStatus?.error == nil ? Theme.textSecondary : Theme.danger)
-                    .fixedSize(horizontal: false, vertical: true)
+            SettingCustomRow(statusTitle) {
+                if let statusText {
+                    Text(statusText)
+                        .font(.lumenBody)
+                        .foregroundStyle(model.lastSyncStatus?.error == nil ? Theme.textSecondary : Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if model.hasRunningProfiles {
                     Text(L("sync.stopFirst"))
                         .font(.lumenSecondary)
@@ -156,8 +158,17 @@ struct SyncSettingsView: View {
         return nil
     }
 
-    private var statusText: String {
-        guard let status = model.lastSyncStatus else { return L("sync.status.never") }
+    /// The last sync as the row's title, as the sidebar says it ("Synced 4 minutes ago").
+    private var statusTitle: String {
+        guard let status = model.lastSyncStatus else { return L("profiles.sync.notYet") }
+        if status.error != nil { return L("profiles.sync.failed") }
+        return String(format: L("profiles.sync.synced"), status.date.shownRelative)
+    }
+
+    /// Under it: what went and came, or when and why it failed; and with whose master password a
+    /// new device joins.
+    private var statusText: String? {
+        guard let status = model.lastSyncStatus else { return nil }
         let when = status.date.shown(date: .abbreviated, time: .shortened)
         if let error = status.error { return String(format: L("sync.status.failed"), when, error) }
         var parts = [String(format: L("sync.status.uploaded"), status.pushed),
@@ -165,7 +176,7 @@ struct SyncSettingsView: View {
         if status.merged > 0 { parts.append(String(format: L("sync.status.merged"), status.merged)) }
         if status.conflicts > 0 { parts.append(String(format: L("sync.status.conflicts"), status.conflicts)) }
         if status.deferred > 0 { parts.append(String(format: L("sync.status.deferred"), status.deferred)) }
-        let synced = String(format: L("sync.status.ok"), when, parts.joined(separator: ", "))
+        let synced = parts.joined(separator: " · ")
         // Whose master password a new device joins with (SyncReport.PasswordHeader).
         switch status.passwordHeader {
         case .published?: return synced + "\n" + L("sync.status.passwordPublished")
