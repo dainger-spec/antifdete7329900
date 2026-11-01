@@ -17,8 +17,10 @@
 // into the letter itself (LogoURL = cid:lumen-mark-1, a template.URL), or, with LogoURL empty, the
 // mark is the word «Lumen»; nothing is loaded from outside. Colours, type and the mark come from the site prototype (prototype/assets/site.css,
 // the Liquid Glass tokens). html/template drops HTML comments, so there are no Outlook conditional
-// comments: the 600 px column is width="600" with max-width:100%, and the button is a link with
-// thick borders, which Outlook draws.
+// comments: the column is width="600" (for Outlook) with style width:100%;max-width:600px — a table
+// never shrinks below a width set in CSS, so width:600px would leave a phone a letter wider than its
+// screen (docs/SITE_API.md §11; the server agent caught it) — and the button is a link with thick
+// borders, which Outlook draws.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -283,7 +285,7 @@ function html(lang, m) {
 ${pre}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.page}" style="width:100%;background-color:${C.page};border-collapse:collapse;">
 <tr><td align="center" bgcolor="${C.page}" style="padding:40px 16px 48px;background-color:${C.page};">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.page}" style="width:600px;max-width:100%;background-color:${C.page};border-collapse:collapse;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.page}" style="width:100%;max-width:600px;background-color:${C.page};border-collapse:collapse;">
 ${rows.join('\n')}
 </table>
 </td></tr>

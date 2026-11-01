@@ -36,9 +36,14 @@ for (const name of NAMES) {
     if (/gradient\(/i.test(h)) fail(f, 'a gradient');
     if (/background(-image)?\s*:\s*url|background=/i.test(h)) fail(f, 'a picture as a background');
     for (const m of h.matchAll(/<table\b[^>]*>/gi)) if (!/role="presentation"/.test(m[0])) fail(f, 'a layout table without role="presentation"');
-    // One column, at most 600 px.
+    // One column, at most 600 px, that a phone can shrink (docs/SITE_API.md §11): a table never gets narrower than
+    // a width set in CSS, so no CSS width or min-width over 320 px, and a width attribute over 320 only on a tag whose
+    // style gives a width in % (the column: width="600" for Outlook, style width:100%;max-width:600px).
     for (const m of h.matchAll(/\swidth="(\d+)(%?)"/g)) if (!m[2] && +m[1] > 600) fail(f, `width="${m[1]}" — wider than 600`);
-    for (const m of h.matchAll(/(?:^|[;"\s])width:\s*(\d+)px/g)) if (+m[1] > 600) fail(f, `width:${m[1]}px — wider than 600`);
+    for (const m of h.matchAll(/(?:^|[;"\s])(min-)?width:\s*(\d+)px/g)) if (+m[2] > 320) fail(f, `${m[1] || ''}width:${m[2]}px — a phone can't shrink it`);
+    for (const m of h.matchAll(/<[a-z]+\b[^>]*\swidth="(\d+)"[^>]*>/gi)) {
+      if (+m[1] > 320 && !/style="(?:[^"]*[;\s])?width:\s*\d+%/.test(m[0])) fail(f, `width="${m[1]}" without a width in % in its style`);
+    }
     // cells of each row, nested tables counted as their own rows: two side by side only where a row is
     // a label and its value, or a button and its link
     const rows = [], open = [];
@@ -92,8 +97,28 @@ else {
 const extra = fs.readdirSync(DIR).filter((x) => x !== 'lumen-mark-1.png' && !NAMES.some((n) => x.startsWith(`${n}.`)));
 if (extra.length) errors.push(`unknown files: ${extra.join(', ')}`);
 
+// Measured, not only read: every letter, as rendered, is no wider than a 320, 375 or 414 px screen.
+{
+  const { createRequire } = await import('node:module');
+  const { chromium } = createRequire(import.meta.url)('playwright');
+  const PREVIEW = path.resolve(DIR, '..', '..', 'prototype', 'email');
+  const browser = await chromium.launch();
+  for (const w of [320, 375, 414]) {
+    const page = await browser.newPage({ viewport: { width: w, height: 800 } });
+    for (const name of NAMES) for (const lang of ['ru', 'en']) {
+      const file = path.join(PREVIEW, `${name}.${lang}.html`);
+      if (!fs.existsSync(file)) { errors.push(`${name}.${lang}: no preview to measure`); continue; }
+      await page.goto(`file://${file}`);
+      const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+      if (sw > w) errors.push(`${name}.${lang}.html: ${sw} px wide on a ${w} px screen`);
+    }
+    await page.close();
+  }
+  await browser.close();
+}
+
 if (errors.length) {
   console.error(`MAIL CHECK FAILED:\n  ${errors.join('\n  ')}`);
   process.exit(1);
 }
-console.log(`MAIL CHECK PASSED: ${NAMES.length} letters × ru/en × HTML and text, and the logo — tables and inline styles only, one column ≤ 600 px, hex colours set on every text and background, the logo from LogoURL with alt «Lumen» and the word in its place, nothing loaded from outside, no outside links, the code large and monospaced`);
+console.log(`MAIL CHECK PASSED: ${NAMES.length} letters × ru/en × HTML and text, and the logo — tables and inline styles only, one column ≤ 600 px that fits 320, 375 and 414 px screens, hex colours set on every text and background, the logo from LogoURL with alt «Lumen» and the word in its place, nothing loaded from outside, no outside links, the code large and monospaced`);
