@@ -708,7 +708,7 @@
 "proxies.check.help" = "Each proxy is checked through itself, step by step — its address, a connection, a SOCKS5 and an HTTP handshake, the login, a tunnel — and then a geolocation service is asked through it: where it exits and how fast it answers. Never directly.";
 "proxies.assign" = "Assign to Profiles…";
 "proxies.delete" = "Delete";
-"proxies.search" = "Search";
+"proxies.search" = "Search proxies";
 "proxies.empty" = "No proxies yet. Paste a list, one per line: host:port, host:port:user:password, user:password@host:port or socks5://…";
 "proxies.noMatches" = "No proxies match";
 "proxies.menu.check" = "Check";
@@ -1392,3 +1392,11 @@
 "palette.hint.choose" = "choose";
 "palette.hint.run" = "run";
 "palette.hint.close" = "close";
+"proxies.column.state" = "State";
+"inspector.proxy.title" = "Proxy panel";
+"inspector.proxy.steps" = "Check, step by step";
+"inspector.proxy.throughItself" = "The check goes through the proxy itself — never directly.";
+"inspector.proxy.origin" = "From";
+"inspector.proxy.profiles" = "Profiles with this proxy";
+"inspector.proxy.noProfiles" = "No profile uses this proxy.";
+"inspector.proxy.empty" = "Select a proxy to see its check, step by step, and the profiles that use it.";

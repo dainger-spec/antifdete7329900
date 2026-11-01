@@ -708,7 +708,7 @@
 "proxies.check.help" = "Каждый прокси проверяется через себя, по шагам — адрес, соединение, рукопожатие SOCKS5 и HTTP, логин, туннель, — а затем через него запрашивается сервис геолокации: где он выходит в сеть и как быстро отвечает. Напрямую — никогда.";
 "proxies.assign" = "Назначить профилям…";
 "proxies.delete" = "Удалить";
-"proxies.search" = "Поиск";
+"proxies.search" = "Поиск прокси";
 "proxies.empty" = "Список пуст. Вставьте прокси списком, по одному в строке: хост:порт, хост:порт:логин:пароль, логин:пароль@хост:порт или socks5://…";
 "proxies.noMatches" = "Подходящих прокси нет";
 "proxies.menu.check" = "Проверить";
@@ -720,7 +720,7 @@
 "proxies.checking.progress" = "Проверено %1$ld из %2$ld";
 "proxies.summary" = "Прокси: %1$ld · отвечают: %2$ld · не отвечают: %3$ld";
 "proxies.column.proxy" = "Прокси";
-"proxies.column.exit" = "Выход в сеть";
+"proxies.column.exit" = "Выход";
 "proxies.column.ip" = "Внешний IP";
 "proxies.column.latency" = "Задержка";
 "proxies.column.checked" = "Проверен";
@@ -1392,3 +1392,11 @@
 "palette.hint.choose" = "выбрать";
 "palette.hint.run" = "выполнить";
 "palette.hint.close" = "закрыть";
+"proxies.column.state" = "Состояние";
+"inspector.proxy.title" = "Панель прокси";
+"inspector.proxy.steps" = "Проверка по шагам";
+"inspector.proxy.throughItself" = "Проверка идёт через сам прокси — никогда напрямую.";
+"inspector.proxy.origin" = "Откуда";
+"inspector.proxy.profiles" = "Профили с этим прокси";
+"inspector.proxy.noProfiles" = "Ни один профиль не использует этот прокси.";
+"inspector.proxy.empty" = "Выберите прокси: здесь будет его проверка по шагам и профили, которые его используют.";

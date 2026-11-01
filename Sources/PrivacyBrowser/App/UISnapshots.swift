@@ -518,24 +518,34 @@ enum UISnapshots {
             let proxies = ProxyListModel(vault: vault) { print("FAIL sample proxy list: \($0)") }
             let counts = [ProxyList.identity(of: berlin.proxy): 3, ProxyList.identity(of: silent.proxy): 2,
                           ProxyList.identity(of: entries[1].proxy): 1]
+            let names = [ProxyList.identity(of: berlin.proxy): ["Northwind", "Launch Review", "Travel"], // l10n: not text
+                         ProxyList.identity(of: silent.proxy): ["Marketplace US", "Banking"], // l10n: not text
+                         ProxyList.identity(of: entries[1].proxy): ["Research"]] // l10n: not text
             var problems = 0
-            // The Profiles window's Proxies section: wide, with a proxy that stays silent selected; in
-            // the narrowest window, with one that works.
+            // The Profiles window's Proxies section with its inspector: wide, with a proxy that stays
+            // silent selected; in the narrowest window, with one that works (the inspector over the list).
             let rows = sampleRows()
-            func section(selecting id: UUID) -> AnyView {
-                AnyView(ProxyListPanel(proxies: proxies, profileCounts: counts, selection: .constant([id])))
+            func section(selecting ids: Set<UUID>) -> AnyView {
+                AnyView(ProxyListPanel(proxies: proxies, profileCounts: counts, profileNames: names, selection: .constant(ids)))
             }
-            problems += await Shot(name: "proxies", size: CGSize(width: 1180, height: 740)) {
-                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: silent.id))
+            problems += await Shot(name: "proxies", size: CGSize(width: 1400, height: 860)) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [silent.id]))
             }.capture(into: folder)
-            problems += await Shot(name: "proxies-substitute-dns", size: CGSize(width: 1180, height: 740)) {
-                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: substitute.id))
+            problems += await Shot(name: "proxies-substitute-dns", size: CGSize(width: 1400, height: 860)) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [substitute.id]))
             }.capture(into: folder)
-            problems += await Shot(name: "proxies-service", size: CGSize(width: 1180, height: 740)) {
-                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: service.id))
+            problems += await Shot(name: "proxies-service", size: CGSize(width: 1400, height: 860)) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [service.id]))
+            }.capture(into: folder)
+            problems += await Shot(name: "proxies-working", size: CGSize(width: 1400, height: 860)) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [berlin.id]))
+            }.capture(into: folder)
+            problems += await Shot(name: "proxies-several", size: CGSize(width: 1400, height: 860)) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count,
+                                proxies: section(selecting: [berlin.id, silent.id, entries[1].id]))
             }.capture(into: folder)
             problems += await Shot(name: "proxies-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620)) {
-                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: berlin.id))
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [berlin.id]))
             }.capture(into: folder)
             problems += await Shot(name: "sheet-proxy-edit", size: CGSize(width: 560, height: 400), titled: false) {
                 ProxyEditView(proxies: proxies, entry: berlin, profileCount: 3)
