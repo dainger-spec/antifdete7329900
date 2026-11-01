@@ -4758,26 +4758,19 @@ final class SelfTest {
                         try? await Task.sleep(nanoseconds: 1_000_000_000)
                     }
                 }
-                // Addresses an app on every Mac opens (Music, App Store, News, Podcasts, TV), and the
-                // owner's: Safari's app-link banner ("Open in …") is what brings its tracker up.
+                // Addresses an app on every Mac opens, and the owner's (round 2: none had an app link
+                // on a runner, and nothing past -decideOpenStrategyWithCompletionHandler: ran).
                 let started = Date()
-                for address in ["http://music.apple.com/us/album/pb-selftest/1", "http://apps.apple.com/app/id544007664",
-                                "http://apple.news/A0000000000000000000000", "http://podcasts.apple.com/us/podcast/pb/id1",
-                                "http://tv.apple.com/", "http://www.youtube.com/watch?v=pbselftest"] where exited == nil {
+                for address in ["http://music.apple.com/us/album/pb-selftest/1", "http://www.youtube.com/watch?v=pbselftest"] where exited == nil {
                     info("app banner [\(mode)]: opening \(address)")
                     manager.openWindow(profile.id, url: URL(string: address)!)
                     _ = await waitUntil(timeout: 6) { exited != nil }
                     if let exited { info("app banner [\(mode)]: the process ENDED (\(exited)) after \(address)") }
                 }
-                // The measurement asks the tracker directly 55 s after the process started.
-                _ = await waitUntil(timeout: max(5, 62 - Date().timeIntervalSince(started))) { exited != nil }
                 if exited == nil {
                     _ = manager.checkNetwork(profile.id)
                     _ = await waitUntil(timeout: 30) { report != nil || exited != nil }
                 }
-                info("app banner [\(mode)]: \(hostsChrome.map { $0 ? "Safari's window" : "our own window" } ?? "no window reported"); "
-                     + "the page \(served ? "was" : "was NOT") asked for through the proxy; the process "
-                     + "\(exited.map { "ENDED with status \($0)" } ?? "is running"); stubs reached \(report?.stubsReached ?? [:])")
                 // What Safari brought up in the profile's process (its objects, by class and image),
                 // and what it wrote in the profile's home: the census for the table of Safari's
                 // subsystems. The build must be debuggable (DEBUGGABLE=1) for heap to read it.
@@ -4812,6 +4805,18 @@ final class SelfTest {
                     try? lines.joined(separator: "\n").write(to: folder.appendingPathComponent("home-\(mode).txt"), atomically: true, encoding: .utf8)
                     info("app banner [\(mode)]: \(lines.count) files and folders in the profile's home while it runs")
                 }
+                info("app banner [\(mode)]: \(hostsChrome.map { $0 ? "Safari's window" : "our own window" } ?? "no window reported"); "
+                     + "the page \(served ? "was" : "was NOT") asked for through the proxy; the process "
+                     + "\(exited.map { "ENDED with status \($0)" } ?? "is running"); stubs reached \(report?.stubsReached ?? [:])")
+                // The measurement asks the tracker directly 75 s after the process started.
+                _ = await waitUntil(timeout: max(5, 90 - Date().timeIntervalSince(started))) { exited != nil }
+                if exited == nil {
+                    report = nil
+                    _ = manager.checkNetwork(profile.id)
+                    _ = await waitUntil(timeout: 30) { report != nil || exited != nil }
+                }
+                info("app banner [\(mode)]: after Safari's tracker was asked directly, the process "
+                     + "\(exited.map { "ENDED with status \($0)" } ?? "is running"); stubs reached \(report?.stubsReached ?? [:])")
                 if mode == "fix" {
                     check(name, hostsChrome == true && served && exited == nil && report != nil,
                           "window \(String(describing: hostsChrome)), page served \(served), ended \(exited.map(String.init) ?? "no"), report \(report != nil)")

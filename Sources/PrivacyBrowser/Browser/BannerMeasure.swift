@@ -29,6 +29,7 @@ enum BannerMeasure {
         Self.mode = mode
         say("mode \(mode)")
         watchFileURLs(answeringNil: mode == "nil")
+        watchApplicationListings()
         ExceptionLog.onThrown = { name, reason, frames in
             say("thrown on \(threadName()): \(name): \(reason) | from: \(frames.prefix(12).map(short).joined(separator: " | "))")
         }
@@ -44,7 +45,7 @@ enum BannerMeasure {
                 say("after 4 s: tracker classes hooked \(hooked.sorted()); stubs reached \(SafariStubCount.snapshot)")
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 55) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 75) {
             MainActor.assumeIsolated { askTrackerDirectly() }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 14) {
@@ -184,10 +185,13 @@ enum BannerMeasure {
         return NSStringFromClass(type(of: receiver))
     }
 
-    /// After the pages: Safari's app-link tracker asked for directly, as its banner asks — what its
-    /// file path is, and (with no fix) whether it ends the process.
+    /// After the pages: Safari's app-link tracker asked directly, as its banner asks it
+    /// (-isBannerBlockedForIdentifier:completion:), with what it answers on the way; and how
+    /// Safari tells a web app of a site (the keys it reads from a bundle's Info dictionary, and the
+    /// folders it looks in).
     static func askTrackerDirectly() {
         guard !mode.isEmpty else { return }
+        probeWebAppLookup()
         guard let cls: AnyObject = NSClassFromString("WBSAppLinkBannerTracker") else {
             say("direct: no WBSAppLinkBannerTracker in this process")
             return
@@ -197,15 +201,76 @@ enum BannerMeasure {
             say("direct: sharedTracker is nil")
             return
         }
-        for getter in ["categoryName", "basis", "_filePath"] where tracker.responds(to: NSSelectorFromString(getter)) {
+        for getter in ["categoryName", "_filePath"] where tracker.responds(to: NSSelectorFromString(getter)) {
             let value = tracker.perform(NSSelectorFromString(getter))?.takeUnretainedValue()
             say("direct: -\(getter) -> \(value.map { "\"\($0)\" (\(NSStringFromClass(type(of: $0))))" } ?? "nil")")
         }
+        typealias IntegerGetter = @convention(c) (AnyObject, Selector) -> Int
+        let basis = NSSelectorFromString("basis")
+        if let method = class_getInstanceMethod(type(of: tracker), basis) {
+            let call = unsafeBitCast(method_getImplementation(method), to: IntegerGetter.self)
+            say("direct: -basis -> \(call(tracker, basis))")
+        }
         say("direct: the tracker holds: \(holdings(of: tracker))")
+        // As the banner asks it: is the banner for this identifier blocked?
+        typealias Ask = @convention(c) (AnyObject, Selector, NSString, Any?) -> Void
+        let askSelector = NSSelectorFromString("isBannerBlockedForIdentifier:completion:")
+        if let method = class_getInstanceMethod(type(of: tracker), askSelector) {
+            let ask = unsafeBitCast(method_getImplementation(method), to: Ask.self)
+            let completion: @convention(block) (Bool) -> Void = { blocked in
+                say("direct: the tracker answered blocked=\(blocked) on \(threadName())")
+            }
+            say("direct: -isBannerBlockedForIdentifier:completion: (\"selftest.invalid\")")
+            ask(tracker, askSelector, "selftest.invalid" as NSString, completion)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
             say("direct: 5 s later, still running; stubs reached \(SafariStubCount.snapshot)")
         }
     }
+
+    /// The keys Safari reads from a web app's Info dictionary to find its scope: a dictionary that
+    /// says which keys it was asked for, and answers each with another such dictionary, handed to
+    /// -[WBSAppLink _scopeURLFromInfoDictionary:] on a bare instance (no initializer run).
+    private static func probeWebAppLookup() {
+        guard let linkClass = NSClassFromString("WBSAppLink"), let bare = class_createInstance(linkClass, 0) else { return }
+        let scopeSelector = NSSelectorFromString("_scopeURLFromInfoDictionary:")
+        guard bare.responds(to: scopeSelector) else { return }
+        let spy = KeySpy(path: "Info")
+        let answer = bare.perform(scopeSelector, with: spy)?.takeUnretainedValue()
+        say("web app: -_scopeURLFromInfoDictionary: read \(KeySpy.asked) and answered \(answer.map { String(describing: $0) } ?? "nil")")
+    }
+
+    /// Folders listed by anyone in this process whose path names applications or web apps, with
+    /// who listed them: where Safari looks for a web app of a site.
+    nonisolated private static func watchApplicationListings() {
+        typealias ListPath = @convention(c) (AnyObject, Selector, NSString?, UnsafeMutableRawPointer?) -> AnyObject?
+        typealias ListURL = @convention(c) (AnyObject, Selector, NSURL?, AnyObject?, UInt, UnsafeMutableRawPointer?) -> AnyObject?
+        func interesting(_ path: String?) -> Bool {
+            guard let path else { return false }
+            return path.range(of: "Application", options: .caseInsensitive) != nil || path.range(of: "WebApp", options: .caseInsensitive) != nil
+                || path.range(of: "Web App", options: .caseInsensitive) != nil
+        }
+        let byPath = NSSelectorFromString("contentsOfDirectoryAtPath:error:")
+        if let method = class_getInstanceMethod(FileManager.self, byPath) {
+            let original = unsafeBitCast(method_getImplementation(method), to: ListPath.self)
+            let block: @convention(block) (AnyObject, NSString?, UnsafeMutableRawPointer?) -> AnyObject? = { manager, path, error in
+                if interesting(path as String?) { say("listing \(path ?? "nil") on \(threadName()), from: \(callers(8))") }
+                return original(manager, byPath, path, error)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(block))
+        }
+        let byURL = NSSelectorFromString("contentsOfDirectoryAtURL:includingPropertiesForKeys:options:error:")
+        if let method = class_getInstanceMethod(FileManager.self, byURL) {
+            let original = unsafeBitCast(method_getImplementation(method), to: ListURL.self)
+            let block: @convention(block) (AnyObject, NSURL?, AnyObject?, UInt, UnsafeMutableRawPointer?) -> AnyObject? = { manager, url, keys, options, error in
+                if interesting(url?.path) { say("listing \(url?.path ?? "nil") on \(threadName()), from: \(callers(8))") }
+                return original(manager, byURL, url, keys, options, error)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(block))
+        }
+    }
+
+    nonisolated(unsafe) static var listingsSaid = false
 
     // MARK: Classes
 
@@ -372,4 +437,25 @@ enum BannerMeasure {
     nonisolated private static func short(_ line: String) -> String {
         line.split(separator: " ", omittingEmptySubsequences: true).dropFirst().filter { !$0.hasPrefix("0x") }.joined(separator: " ")
     }
+}
+
+/// MEASUREMENT BRANCH ONLY. A dictionary that says which keys it was asked for, by path, and
+/// answers each with another such dictionary.
+final class KeySpy: NSDictionary {
+    nonisolated(unsafe) static var asked: [String] = []
+    private var path = ""
+
+    convenience init(path: String) {
+        self.init()
+        self.path = path
+    }
+
+    override var count: Int { 0 }
+    override func object(forKey key: Any) -> Any? {
+        let name = "\(path).\(key)"
+        KeySpy.asked.append(name)
+        return KeySpy(path: name)
+    }
+    override func keyEnumerator() -> NSEnumerator { NSArray().objectEnumerator() }
+    override func value(forKey key: String) -> Any? { object(forKey: key) }
 }
