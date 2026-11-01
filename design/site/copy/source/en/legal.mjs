@@ -5,7 +5,9 @@
 // renewal, in the same coin and the same amount. What the server keeps and doesn't, sync, the periods and the payment
 // service are the ready wording of lumen-api-server, docs/SITE_API.md §9, word for word (it may be rearranged for the
 // page, but no point may go and the paragraph on the number of profiles may not be softened); the rights log goes on the
-// payments' schedule (internal/core/retention.go). Service names and how long support mail is kept: question 12.
+// payments' schedule (internal/core/retention.go). The Cloudflare paragraph (§9, 69169f0) stays only while Cloudflare
+// stands in front of the server: Cloudflare gone, the paragraph goes. Service names and how long support mail is kept:
+// question 12.
 export default {
   title: 'Legal',
   tabs: [['privacy.html', 'Privacy'], ['terms.html', 'Terms of use'], ['refunds.html', 'Refunds']],
@@ -15,12 +17,12 @@ export default {
   privacy: {
     title: 'Privacy policy',
     lead: 'What we know about you, why, and for how long. And what we don’t know and can’t find out.',
-    toc: [['short', 'In short'], ['who', 'Who is responsible'], ['server', 'What the server keeps'], ['devices', 'About your Macs'], ['sync', 'Sync'], ['not', 'What the server doesn’t keep'], ['terms', 'How long'], ['app', 'The app'], ['site', 'The site'], ['processors', 'Who we share data with'], ['rights', 'Your rights'], ['changes', 'Changes']],
+    toc: [['short', 'In short'], ['who', 'Who is responsible'], ['server', 'What the server keeps'], ['devices', 'About your Macs'], ['sync', 'Sync'], ['not', 'What the server doesn’t keep'], ['cloudflare', 'Cloudflare'], ['terms', 'How long'], ['app', 'The app'], ['site', 'The site'], ['processors', 'Who we share data with'], ['rights', 'Your rights'], ['changes', 'Changes']],
     body: `## In short {#short}
 
 - Profiles, what’s in them and your master password stay on your Macs. Turn on sync and only ciphertext goes to the server: the key never leaves your Macs.
 - The server knows your email, a hash of your password, your plan and paid period, your invoices and your devices — and **how many profiles each Mac has**. That number is all it knows about your profiles.
-- The server doesn’t keep IP addresses. It has no computer names.
+- The server doesn’t keep IP addresses, though Cloudflare, which requests to the server pass through, sees them. The server has no computer names.
 - **A forgotten master password can’t be recovered.** Not by us, not by anyone.
 - The site has no analytics, no cookies and no third-party scripts. The app sends us no analytics and no crash reports.
 
@@ -54,6 +56,10 @@ IP addresses (used only in memory, to limit request rates), computer names, prof
 
 The server never receives your master password. We can’t reset it: without it profile data can’t be decrypted — not by you, not by us.
 
+## Cloudflare {#cloudflare}
+
+Requests to the server pass through Cloudflare: it shields the server from overload, and sees your IP address, the time of each request and its contents — your password when you sign in included. It cannot read your sync data: that is encrypted on your Mac. Cloudflare keeps request logs under its own policy: cloudflare.com/privacypolicy.
+
 ## How long {#terms}
 
 - **Your account** is deleted 7 days after you ask (until then you can cancel), and your sync data with it. You ask in your account; the account is blocked at once.
@@ -78,6 +84,7 @@ The server never receives your master password. We can’t reset it: without it 
 ## Who we share data with {#processors}
 
 - **The payment service** ({{tbd:q12:[name]}}) receives from us only the amount in dollars, the coin, the invoice number and the plan’s name — not your email address, nothing else about you. It issues the address for the transfer.
+- **Cloudflare** — requests to the server pass through it; what it sees is under [Cloudflare](#cloudflare).
 - **The email service** — {{tbd:q12:[name]}} — to send codes, receipts and reminders.
 - **Hosting** — {{tbd:q12:[name and country]}} — where the servers run.
 

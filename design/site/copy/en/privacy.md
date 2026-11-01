@@ -34,6 +34,8 @@ Sync
 
 What the server doesn’t keep
 
+Cloudflare
+
 How long
 
 The app
@@ -54,18 +56,19 @@ Changes
 4. About your Macs
 5. Sync
 6. What the server doesn’t keep
-7. How long
-8. The app
-9. The site
-10. Who we share data with
-11. Your rights
-12. Changes
+7. Cloudflare
+8. How long
+9. The app
+10. The site
+11. Who we share data with
+12. Your rights
+13. Changes
 
 ## In short
 
 - Profiles, what’s in them and your master password stay on your Macs. Turn on sync and only ciphertext goes to the server: the key never leaves your Macs.
 - The server knows your email, a hash of your password, your plan and paid period, your invoices and your devices — and **how many profiles each Mac has**. That number is all it knows about your profiles.
-- The server doesn’t keep IP addresses. It has no computer names.
+- The server doesn’t keep IP addresses, though Cloudflare, which requests to the server pass through, sees them. The server has no computer names.
 - **A forgotten master password can’t be recovered.** Not by us, not by anyone.
 - The site has no analytics, no cookies and no third-party scripts. The app sends us no analytics and no crash reports.
 
@@ -99,6 +102,10 @@ IP addresses (used only in memory, to limit request rates), computer names, prof
 
 The server never receives your master password. We can’t reset it: without it profile data can’t be decrypted — not by you, not by us.
 
+## Cloudflare
+
+Requests to the server pass through Cloudflare: it shields the server from overload, and sees your IP address, the time of each request and its contents — your password when you sign in included. It cannot read your sync data: that is encrypted on your Mac. Cloudflare keeps request logs under its own policy: cloudflare.com/privacypolicy.
+
 ## How long
 
 - **Your account** is deleted 7 days after you ask (until then you can cancel), and your sync data with it. You ask in your account; the account is blocked at once.
@@ -123,6 +130,7 @@ The server never receives your master password. We can’t reset it: without it 
 ## Who we share data with
 
 - **The payment service** (⟦q12: [name]⟧) receives from us only the amount in dollars, the coin, the invoice number and the plan’s name — not your email address, nothing else about you. It issues the address for the transfer.
+- **Cloudflare** — requests to the server pass through it; what it sees is under Cloudflare.
 - **The email service** — ⟦q12: [name]⟧ — to send codes, receipts and reminders.
 - **Hosting** — ⟦q12: [name and country]⟧ — where the servers run.
 

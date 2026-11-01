@@ -83,7 +83,7 @@ en 895).
 | Profile list, settings, passwords, bookmarks, history and persistent cookies go encrypted (profile files twice), under opaque names | `docs/SYNC_FORMAT.md:95-103` (objects table, “yes (twice)”), `:110-126` (envelope, AES-256-GCM, HMAC object ids), `:202-206` (persistent cookies only; per-profile switch, on by default); `SyncEngine.swift:46-47`. |
 | No profile names, site addresses, proxies, passwords or cookies are visible | `docs/SYNC_FORMAT.md:131-132` (“The server doesn't learn: profile names or count…, settings, proxy credentials, passwords, URLs, or cookies”). |
 | Other website data doesn't sync | `docs/SYNC_FORMAT.md:105-108`; `SyncEngine.swift:50-51`. |
-| The {{name}} server keeps no IP address (memory only, for rate limits), nor which Mac synced when — only when a vault last changed; the account's Sync page shows what it sees | lumen-api-server 00327fb: `docs/SYNC_SERVER.md`, «Что сервер хранит и что пишет в журнал» (approved by the owner 1 November 2026; checked by `TestSyncKeepsNoTrace`); `docs/SITE_API.md` §9, §10. |
+| The {{name}} server keeps no IP address (memory only, for rate limits), nor which Mac synced when — only when a vault last changed; the account's Sync page shows what it sees | lumen-api-server 00327fb: `docs/SYNC_SERVER.md`, «Что сервер хранит и что пишет в журнал» (approved by the owner 1 November 2026; checked by `TestSyncKeepsNoTrace`); `docs/SITE_API.md` §9, §10. Cloudflare in front of the server, seeing the IP address but unable to read sync data: `docs/SITE_API.md` §9, the Cloudflare paragraph (69169f0). |
 
 ## Numbers in visible text
 

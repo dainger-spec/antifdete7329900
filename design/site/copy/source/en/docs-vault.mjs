@@ -82,5 +82,5 @@ A sync location sees the vault header in plain text, there so another Mac can op
 
 The profile list, settings, passwords, bookmarks, history and persistent cookies arrive encrypted (the profiles’ files twice) under opaque names: no profile names, site addresses, proxies, passwords or cookies are visible. Other website data doesn’t sync.
 
-The {{name}} server doesn’t keep the IP address: it is used only in memory, to limit request rates. Nor does it keep which Mac synced when — only when the vault last changed. What it sees is on the [Sync page of your account](account-sync.html).`,
+The {{name}} server doesn’t keep the IP address: it is used only in memory, to limit request rates. Requests to the server pass through Cloudflare, which sees the IP address too but cannot read your sync data — that is encrypted on your Mac. Nor does the server keep which Mac synced when — only when the vault last changed. What it sees is on the [Sync page of your account](account-sync.html).`,
 };
