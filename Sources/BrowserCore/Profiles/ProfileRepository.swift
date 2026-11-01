@@ -577,7 +577,11 @@ public final class ProfileRepository: @unchecked Sendable {
     func takeInProfilesFromKeyCopies() -> [UUID] {
         guard vault.grant == nil else { return [] }
         if case .unreadable = indexState { return [] }
-        let found = unlistedProfileFolders().compactMap(readKeyCopy).sorted { $0.createdAt < $1.createdAt }
+        // Oldest first, as the index lists profiles. A copy keeps when its profile was made to the
+        // second only, so profiles made in one second go in by name, then id: the same order at every
+        // unlock, whatever order the folders are listed in (they swapped in CI run 543).
+        let found = unlistedProfileFolders().compactMap(readKeyCopy)
+            .sorted { ($0.createdAt, $0.name, $0.id.uuidString) < ($1.createdAt, $1.name, $1.id.uuidString) }
         guard !found.isEmpty else { return [] }
         return lock.withLock {
             var updated = index
