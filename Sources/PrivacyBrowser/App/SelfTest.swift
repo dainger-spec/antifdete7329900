@@ -4721,7 +4721,7 @@ final class SelfTest {
             return
         }
         let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
-        for mode in ["watch", "nil", "fix"] {
+        for mode in ["watch", "loadonly", "fix"] {
             let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
             let host = "banner-\(run).selftest.invalid"
             let profile = try repository.create(name: "App banner \(mode)", configuration: ProfileConfiguration(

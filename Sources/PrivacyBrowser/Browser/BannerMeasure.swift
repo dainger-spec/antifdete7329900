@@ -100,6 +100,9 @@ enum BannerMeasure {
                 } else {
                     empty = false
                 }
+                if insideFilePath {
+                    say("inside -_filePath: \(entry) answered \(value.map { String(describing: $0) } ?? "nil")")
+                }
                 if empty {
                     let first = lock.withLock { () -> Bool in
                         defer { said = true }
@@ -115,6 +118,21 @@ enum BannerMeasure {
             count += 1
         }
         say("watching \(count) of Safari's path getters for nil or empty answers")
+        // What -[WBSBannerTracker _filePath] asks on its way to nil: every path getter it calls, and
+        // what each answered.
+        let filePath = NSSelectorFromString("_filePath")
+        if let trackerClass = NSClassFromString("WBSBannerTracker"), let method = class_getInstanceMethod(trackerClass, filePath) {
+            typealias Getter = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
+            let original = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+            let block: @convention(block) (AnyObject) -> Unmanaged<AnyObject>? = { tracker in
+                insideFilePath = true
+                let result = original(tracker, filePath)
+                insideFilePath = false
+                say("-[WBSBannerTracker _filePath] answered \(result.map { String(describing: $0.takeUnretainedValue()) } ?? "nil")")
+                return result
+            }
+            method_setImplementation(method, imp_implementationWithBlock(block))
+        }
     }
 
     // MARK: The app-link banner's chain
@@ -230,8 +248,17 @@ enum BannerMeasure {
             say("direct: -isBannerBlockedForIdentifier:completion: (\"selftest.invalid\")")
             ask(tracker, askSelector, "selftest.invalid" as NSString, completion)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-            say("direct: 5 s later, still running; stubs reached \(SafariStubCount.snapshot)")
+        // As a person's dismissal does: the banner blocked, then unblocked (each saves the file).
+        for (selectorName, delay) in [("blockBannerForIdentifier:", 2.0), ("unblockBannerForIdentifier:", 4.0)] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                MainActor.assumeIsolated {
+                    say("direct: -\(selectorName) (\"selftest.invalid\")")
+                    _ = tracker.perform(NSSelectorFromString(selectorName), with: "selftest.invalid" as NSString)
+                }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            say("direct: 8 s later, still running; stubs reached \(SafariStubCount.snapshot)")
         }
     }
 
@@ -311,6 +338,7 @@ enum BannerMeasure {
     }
 
     nonisolated(unsafe) static var listingsSaid = false
+    nonisolated(unsafe) static var insideFilePath = false
 
     // MARK: Classes
 

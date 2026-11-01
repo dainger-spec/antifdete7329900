@@ -938,10 +938,12 @@ enum SafariChrome {
             replaceWithConstant(className, selectorName) { nil }
             lateStubsMade.insert(className + " " + selectorName)
         }
-        // MEASUREMENT BRANCH: the fix is left out where the measurement asks to see the tracker as
-        // a user's profile had it ("watch", "nil").
-        if !["watch", "nil"].contains(ProcessInfo.processInfo.environment["PB_MEASURE_BANNER"] ?? "") {
-            closeAppBannerTrackers()
+        // MEASUREMENT BRANCH: the fix as the product has it ("fix": -load and -_saveOnInteralQueue),
+        // -load alone ("loadonly"), or none ("watch", "nil").
+        switch ProcessInfo.processInfo.environment["PB_MEASURE_BANNER"] ?? "fix" {
+        case "fix": closeAppBannerTrackers(saving: true)
+        case "loadonly": closeAppBannerTrackers(saving: false)
+        default: break
         }
     }
 
@@ -958,15 +960,17 @@ enum SafariChrome {
 
     /// The trackers' `-load`, wherever a tracker class implements its own, replaced by a counted
     /// nothing; again as images load (`stubLateFeatures`).
-    static func closeAppBannerTrackers() {
+    static func closeAppBannerTrackers(saving: Bool) {
         for name in bannerTrackers where !bannerTrackersSeen.contains(name) {
             guard let cls = NSClassFromString(name) else { continue }
             bannerTrackersSeen.insert(name)
-            let selector = NSSelectorFromString("load")
-            guard implementsOwn(cls, selector), let method = class_getInstanceMethod(cls, selector) else { continue }
-            let key = "-[\(name) load]"
-            let replacement: @convention(block) (AnyObject) -> Void = { _ in SafariStubCount.reached(key) }
-            method_setImplementation(method, imp_implementationWithBlock(replacement))
+            for selectorName in saving ? ["load", "_saveOnInteralQueue"] : ["load"] {
+                let selector = NSSelectorFromString(selectorName)
+                guard implementsOwn(cls, selector), let method = class_getInstanceMethod(cls, selector) else { continue }
+                let key = "-[\(name) \(selectorName)]"
+                let replacement: @convention(block) (AnyObject) -> Void = { _ in SafariStubCount.reached(key) }
+                method_setImplementation(method, imp_implementationWithBlock(replacement))
+            }
             log.notice("Replaced -[\(name, privacy: .public) load]: a profile's process keeps no record of Safari's app banners")
         }
     }
