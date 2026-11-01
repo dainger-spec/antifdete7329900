@@ -140,13 +140,10 @@ struct ProfileListView: View {
                 Text(Self.deletionMessage(profile.broughtBack ? L("profiles.kept.removeMessage.broughtBack") : L("profiles.kept.removeMessage"),
                                           unreadable: model.unreadableFiles(for: profile.id)))
             }
-            .sheet(item: $proxySheet, onDismiss: showProxyProblems) { _ in
+            // A profile whose proxy does not work is said by the banner above the list; its check,
+            // step by step, opens from there.
+            .sheet(item: $proxySheet) { _ in
                 ProxyProblemView { id in showProxies(selecting: [id]) }
-            }
-            .onChange(of: section) { _, _ in showProxyProblems() }
-            // A profile that was started with a proxy that does not work.
-            .onReceive(model.$proxyProblems) { problems in
-                if !problems.isEmpty, proxySheet == nil { proxySheet = .problems }
             }
             // Settings → Proxies → the list.
             .onReceive(model.$proxiesRequest) { requested in
@@ -225,13 +222,6 @@ struct ProfileListView: View {
         return commands
     }
 
-    /// After the Proxies section: what profiles said about their proxies meanwhile.
-    /// The next profile whose proxy does not work — not over the Proxies section that "Show in
-    /// Proxies" opened: the rest come when the profiles show again.
-    private func showProxyProblems() {
-        if proxySheet == nil, section == .profiles, !model.proxyProblems.isEmpty { proxySheet = .problems }
-    }
-
     /// The screen, with the sidebar's count of proxies kept current as the list changes.
     @ViewBuilder
     private var screen: some View {
@@ -267,7 +257,24 @@ struct ProfileListView: View {
                            return InspectorInfo(details: details, counts: model.inspectorCounts[id], proxyCheck: check)
                        },
                        onInspect: { model.loadInspectorCounts(for: $0) },
-                       tunnelCarriesWebRTC: tunnel.canCarryWebRTC)
+                       tunnelCarriesWebRTC: tunnel.canCarryWebRTC,
+                       proxyProblem: model.proxyProblems.first.map { problem in
+                           ProxyProblemBanner.Item(
+                               title: String(format: problem.notStarted ? L("proxyProblem.title.notStarted") : L("proxyProblem.title"),
+                                             problem.profileName),
+                               text: String(format: problem.notStarted ? L("proxyProblem.subtitle.notStarted") : L("proxyProblem.subtitle"),
+                                            problem.proxy.displayAddress),
+                               notStarted: problem.notStarted, more: model.proxyProblems.count - 1)
+                       },
+                       openProxyProblem: { proxySheet = .problems },
+                       retryProxyProblem: {
+                           guard let problem = model.proxyProblems.first else { return }
+                           model.dismissProxyProblem(problem)
+                           Task { await model.launch(problem.profileID) }
+                       },
+                       dismissProxyProblem: {
+                           if let problem = model.proxyProblems.first { model.dismissProxyProblem(problem) }
+                       })
     }
 
     /// The window's Proxies section; with `ids`, those proxies selected (else the selection it had).
@@ -630,6 +637,11 @@ struct ProfilesScreen: View {
     var tunnelCarriesWebRTC = false
     /// The profiles selected as the window opens (the snapshots).
     var initialSelection: [UUID] = []
+    /// A profile whose proxy does not work, said above the list (`ProxyProblemBanner`).
+    var proxyProblem: ProxyProblemBanner.Item?
+    var openProxyProblem: () -> Void = {}
+    var retryProxyProblem: () -> Void = {}
+    var dismissProxyProblem: () -> Void = {}
     /// Rows selected with a click, ⌘- and ⇧-click or their checkboxes; one is what the inspector
     /// shows, with two or more `ProfileBulkBar` acts on them all.
     @State private var selection = ProfileSelection()
@@ -705,6 +717,10 @@ struct ProfilesScreen: View {
             } else {
                 VStack(spacing: 0) {
                     header
+                    if let proxyProblem {
+                        ProxyProblemBanner(item: proxyProblem, open: openProxyProblem, retry: retryProxyProblem,
+                                           dismiss: dismissProxyProblem)
+                    }
                     if let indexNotice {
                         IndexNoticeBox(notice: indexNotice, reveal: revealVault)
                     }
@@ -712,15 +728,20 @@ struct ProfilesScreen: View {
                         KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack,
                                        removeForGood: removeForGood, reveal: revealKeptDeleted)
                     }
-                    if selectedRows.count >= 2 {
-                        ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
-                                       selectAll: { selection.select(displayOrder.map(\.id)) },
-                                       clear: { selection.clear() })
-                            .transition(.opacity)
-                    }
                     content
+                        .overlay(alignment: .bottom) {
+                            // Floating over the list's foot, while several are selected.
+                            if selectedRows.count >= 2 {
+                                ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
+                                               selectAll: { selection.select(displayOrder.map(\.id)) },
+                                               clear: { selection.clear() })
+                                    .padding(.horizontal, 20)
+                                    .padding(.bottom, 18)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
+                        }
                 }
-                .animation(Theme.hoverAnimation, value: selectedRows.count >= 2)
+                .animation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation, value: selectedRows.count >= 2)
             }
         }
         .opacity(appeared ? 1 : 0)
@@ -903,7 +924,7 @@ struct ProfilesScreen: View {
         } else if rows.isEmpty {
             EmptyProfilesView(onNew: actions.newProfile)
         } else if visibleRows.isEmpty {
-            NoMatchesView {
+            NoMatchesView(query: search.trimmingCharacters(in: .whitespacesAndNewlines)) {
                 withAnimation(Theme.appearAnimation) {
                     filter = .all
                     search = ""
@@ -921,7 +942,8 @@ struct ProfilesScreen: View {
                         footnote
                     }
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 24)
+                    // The last row stays above the floating bar.
+                    .padding(.bottom, selectedRows.count >= 2 ? 88 : 24)
                 }
                 .scrollIndicators(.automatic)
                 .animation(Motion.isReduced(reduceMotion) ? nil : Motion.reflow, value: displayOrder.map(\.id))
@@ -1588,36 +1610,31 @@ struct IndexNoticeBox: View {
     let reveal: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Theme.warning)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(Self.title(notice))
-                    .font(.lumenLabel)
-                    .foregroundStyle(Theme.textPrimary)
-                Text(Self.text(notice))
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(String(format: L("index.path"), notice.vaultPath))
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textSecondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+        LumenBanner(tone: .warning) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.warning)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(Self.title(notice))
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(Self.text(notice))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(String(format: L("index.path"), notice.vaultPath))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                Button(L("index.reveal"), action: reveal)
+                    .buttonStyle(.lumenSecondary)
             }
-            Spacer(minLength: 12)
-            Button(L("index.reveal"), action: reveal)
-                .buttonStyle(.lumenSecondary)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Theme.warning.opacity(0.12)))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).strokeBorder(Theme.warning.opacity(0.4), lineWidth: 1))
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
-        .accessibilityElement(children: .contain)
     }
 
     static func title(_ notice: AppModel.IndexNotice) -> String {
@@ -1666,57 +1683,126 @@ struct KeptDeletedBox: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Theme.warning)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L("profiles.kept.title"))
-                    .font(.lumenLabel)
-                    .foregroundStyle(Theme.textPrimary)
-                Text(L("profiles.kept.text"))
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                ForEach(profiles, id: \.id) { profile in
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(Self.name(profile))
-                                .font(.lumenLabel)
-                                .foregroundStyle(Theme.textPrimary)
-                                .lineLimit(1)
-                            if let state = Self.state(profile) {
-                                Text(state)
-                                    .font(.lumenSecondary)
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+        LumenBanner(tone: .warning) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.warning)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L("profiles.kept.title"))
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(L("profiles.kept.text"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(profiles, id: \.id) { profile in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(Self.name(profile))
+                                    .font(.lumenLabel)
+                                    .foregroundStyle(Theme.textPrimary)
+                                    .lineLimit(1)
+                                if let state = Self.state(profile) {
+                                    Text(state)
+                                        .font(.lumenSecondary)
+                                        .foregroundStyle(Theme.textSecondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
-                        }
-                        Spacer(minLength: 12)
-                        if profile.isReadable {
-                            if !profile.broughtBack {
-                                Button(L("profiles.kept.bringBack")) { bringBack(profile.id) }
+                            Spacer(minLength: 12)
+                            if profile.isReadable {
+                                if !profile.broughtBack {
+                                    Button(L("profiles.kept.bringBack")) { bringBack(profile.id) }
+                                        .buttonStyle(.lumenSecondary)
+                                }
+                                Button(profile.broughtBack ? L("profiles.kept.removeOld") : L("profiles.kept.remove")) { removeForGood(profile) }
+                                    .buttonStyle(.lumenSecondary)
+                            } else {
+                                Button(L("profiles.kept.reveal")) { reveal(profile.id) }
                                     .buttonStyle(.lumenSecondary)
                             }
-                            Button(profile.broughtBack ? L("profiles.kept.removeOld") : L("profiles.kept.remove")) { removeForGood(profile) }
-                                .buttonStyle(.lumenSecondary)
-                        } else {
-                            Button(L("profiles.kept.reveal")) { reveal(profile.id) }
-                                .buttonStyle(.lumenSecondary)
                         }
+                        .disabled(isWorking)
                     }
-                    .disabled(isWorking)
                 }
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Theme.warning.opacity(0.12)))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).strokeBorder(Theme.warning.opacity(0.4), lineWidth: 1))
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
-        .accessibilityElement(children: .contain)
+    }
+}
+
+/// A box above the list that asks for the person (the design's banner): a tint of its colour and
+/// its line, radius 12, its edges in line with the header's.
+struct LumenBanner<Content: View>: View {
+    enum Tone { case danger, warning }
+
+    let tone: Tone
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(tone == .danger ? Theme.dangerTint : Theme.warningTint))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(tone == .danger ? Theme.dangerLine : Theme.warningLine, lineWidth: 1))
+            .padding(.horizontal, ProfilesScreen.headerTrailing)
+            .padding(.bottom, 10)
+            .accessibilityElement(children: .contain)
+    }
+}
+
+/// A profile that did not start — or runs and loads nothing — because its proxy does not work
+/// (`AppModel.proxyProblems`), said above the list (the design's banner): which profile, which
+/// proxy, and what can be done: open the check (step by step, `ProxyProblemPanel`), launch it
+/// again, or put the banner away. Several: the first, and how many more.
+struct ProxyProblemBanner: View {
+    struct Item: Equatable {
+        var title: String
+        var text: String
+        /// Not started (Settings → Proxies): it can be launched again from here.
+        var notStarted: Bool
+        var more: Int
+    }
+
+    let item: Item
+    let open: () -> Void
+    let retry: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        LumenBanner(tone: .danger) {
+            HStack(alignment: .center, spacing: 12) {
+                Circle().fill(Theme.danger).frame(width: 6, height: 6).accessibilityHidden(true)
+                (Text(item.title + ".").font(.lumenLabel).foregroundStyle(Theme.textPrimary)
+                    + Text(verbatim: " ")
+                    + Text(item.text).font(.lumenBody).foregroundStyle(Theme.textSecondary))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if item.more > 0 {
+                    Text(String(format: L("proxyProblem.more.short"), item.more))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .monospacedDigit()
+                        .fixedSize()
+                }
+                Button(L("inspector.failed.open"), action: open)
+                    .buttonStyle(.lumenGhost)
+                    .fixedSize()
+                if item.notStarted {
+                    Button(L("inspector.failed.retry"), action: retry)
+                        .buttonStyle(.lumenGhost)
+                        .fixedSize()
+                }
+                Button(action: dismiss) { Image(systemName: "xmark") }
+                    .buttonStyle(LumenIconButtonStyle(size: 26))
+                    .help(L("common.close"))
+                    .accessibilityLabel(L("common.close"))
+            }
+        }
     }
 }
 
@@ -1745,21 +1831,30 @@ private struct EmptyProfilesView: View {
     }
 }
 
+/// Nothing the search and the chosen collection let through (the design's "Nothing found"): what
+/// was searched for, and one button that shows every profile again.
 private struct NoMatchesView: View {
+    let query: String
     let onShowAll: () -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 20))
-                .foregroundStyle(Theme.textTertiary)
+        VStack(spacing: 0) {
             Text(L("profiles.noMatches"))
-                .font(.lumenLabel)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.bottom, 8)
+            Text(query.isEmpty ? L("profiles.noMatches.filter") : String(format: L("profiles.noMatches.query"), query))
+                .font(.lumenBody)
                 .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 340)
+                .padding(.bottom, 18)
             Button(L("profiles.showAll"), action: onShowAll)
-                .buttonStyle(.lumenGhost)
+                .buttonStyle(.lumenSecondary)
         }
+        .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
     }
 }
 

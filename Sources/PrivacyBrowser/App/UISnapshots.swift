@@ -111,9 +111,13 @@ enum UISnapshots {
         let northwind = rows[1].id
         let inspected = inspectorSample()
         let info: (UUID) -> InspectorInfo = { $0 == northwind ? inspected : InspectorInfo() }
+        // With the banner of a profile whose proxy does not work (Marketplace US), as the design has it.
+        let banner = ProxyProblemBanner.Item(title: String(format: L("proxyProblem.title.notStarted"), rows[8].name),
+                                             text: String(format: L("proxyProblem.subtitle.notStarted"), "us-dal.proxy.example:1080"), // l10n: not text
+                                             notStarted: true, more: 0)
         problems += await Shot(name: "profiles-inspector", size: CGSize(width: 1400, height: 860)) {
             ProfilesPreview(rows: rows, sync: .synced(Date().addingTimeInterval(-4 * 60)), showsInspector: true,
-                            selected: [northwind], inspectorInfo: info)
+                            selected: [northwind], inspectorInfo: info, proxyProblem: banner)
         }.capture(into: folder)
         problems += await Shot(name: "profiles-inspector-unreadable", size: CGSize(width: 1400, height: 860)) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [rows[7].id])
@@ -123,6 +127,10 @@ enum UISnapshots {
         }.capture(into: folder)
         problems += await Shot(name: "profiles-inspector-over", size: CGSize(width: 1180, height: 740)) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [northwind], inspectorInfo: info)
+        }.capture(into: folder)
+        // A search that finds nothing.
+        problems += await Shot(name: "profiles-no-matches", size: CGSize(width: 1180, height: 560)) {
+            ProfilesPreview(rows: rows, search: "Brazil") // l10n: not text
         }.capture(into: folder)
         // The command palette (⌘K), as it opens and with something typed.
         let paletteCommands = paletteSample(rows)
@@ -1000,12 +1008,13 @@ private struct ProfilesPreview: View {
     var showsInspector = false
     var selected: [UUID] = []
     var inspectorInfo: (UUID) -> InspectorInfo = { _ in InspectorInfo() }
+    var proxyProblem: ProxyProblemBanner.Item?
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
                        section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice,
                        keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
-                       tunnelCarriesWebRTC: true, initialSelection: selected)
+                       tunnelCarriesWebRTC: true, initialSelection: selected, proxyProblem: proxyProblem)
     }
 }
 

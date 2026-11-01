@@ -541,7 +541,7 @@
 "profiles.menu.sync" = "Синхронизация…";
 "profiles.menu.syncNow" = "Синхронизировать сейчас";
 "profiles.menu.tunnel" = "WebRTC через прокси (сетевое расширение)…";
-"profiles.noMatches" = "Подходящих профилей нет";
+"profiles.noMatches" = "Ничего не найдено";
 "profiles.row.delete" = "Удалить…";
 "profiles.row.edit" = "Изменить…";
 "profiles.row.encrypting" = "Шифрование данных…";
@@ -564,7 +564,7 @@
 "profiles.row.warmingUp" = "Прогрев: страница %1$ld из %2$ld";
 "profiles.search" = "Поиск";
 "profiles.search.clear" = "Очистить поиск";
-"profiles.showAll" = "Показать все профили";
+"profiles.showAll" = "Сбросить фильтры";
 "profiles.sync.failed" = "Сбой синхронизации";
 "profiles.sync.notYet" = "Ещё не синхронизировано";
 "profiles.sync.off" = "Без синхронизации";
@@ -1383,3 +1383,6 @@
 "inspector.warmUpQueue" = "Прогреть по очереди…";
 "inspector.queueNote" = "Запускаются по %ld одновременно: следующий — когда у одного из них откроется окно.";
 "inspector.empty" = "Выберите профиль: здесь будет видно, как он выходит в сеть, каким его видят сайты и что в нём хранится.";
+"proxyProblem.more.short" = "и ещё %ld";
+"profiles.noMatches.query" = "По запросу «%@» в этой подборке профилей нет.";
+"profiles.noMatches.filter" = "В этой подборке профилей нет.";

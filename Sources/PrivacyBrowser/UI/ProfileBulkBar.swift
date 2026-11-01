@@ -61,10 +61,10 @@ struct ProfileSelection: Equatable {
     }
 }
 
-/// The bar over the Profiles list while several profiles are selected: how many, and what can be
-/// done to all of them at once — launch the stopped ones, stop the running ones, warm them up,
-/// give them proxies of the list, delete them. Each goes out through `ProfileActions` with the
-/// profiles in the order the list shows them.
+/// The bar floating at the bottom of the Profiles list while several profiles are selected (the
+/// design's `bulk`): how many, and what can be done to all of them at once — launch the stopped
+/// ones, stop the running ones, warm them up, give them proxies of the list, delete them. Each goes
+/// out through `ProfileActions` with the profiles in the order the list shows them.
 struct ProfileBulkBar: View {
     /// The selected rows, in the list's order.
     let rows: [ProfileRowItem]
@@ -79,49 +79,55 @@ struct ProfileBulkBar: View {
             bar(compact: false)
             bar(compact: true)
         }
-        .padding(.leading, 24)
-        .padding(.trailing, 16)
-        .frame(height: 44)
-        .background(Theme.accentTint)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.divider).frame(height: 1) }
+        .padding(5)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.raised))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+        .shadow(color: .black.opacity(0.55), radius: 24, y: 12)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(String(format: L("profiles.bulk.selected"), rows.count)))
     }
 
     private var ids: [UUID] { rows.map(\.id) }
-    private var stopped: [UUID] { rows.filter { $0.activity == .stopped }.map(\.id) }
+    // Settings that cannot be read do not start (R1): not counted among those to launch.
+    private var stopped: [UUID] { rows.filter { $0.activity == .stopped && $0.exit != .unreadable }.map(\.id) }
     private var running: [UUID] { rows.filter(\.isRunning).map(\.id) }
 
     private func bar(compact: Bool) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 2) {
             Text(String(format: L("profiles.bulk.selected"), rows.count))
                 .font(.lumenLabel)
                 .foregroundStyle(Theme.textPrimary)
                 .monospacedDigit()
                 .fixedSize()
-                .padding(.trailing, 4)
-            Button { actions.launchSeveral(stopped) } label: { label(L("profiles.bulk.launch"), "play.fill", compact) }
-                .buttonStyle(.lumenSecondary)
-                .disabled(stopped.isEmpty)
-                .help(L("profiles.bulk.launch.help"))
-            Button { actions.stopSeveral(running) } label: { label(L("profiles.bulk.stop"), "stop.fill", compact) }
-                .buttonStyle(.lumenSecondary)
-                .disabled(running.isEmpty)
-                .help(L("profiles.bulk.stop.help"))
+                .padding(.horizontal, 10)
+            separator
+            Button { actions.launchSeveral(stopped) } label: {
+                label(stopped.isEmpty ? L("profiles.bulk.launch") : String(format: L("inspector.launchSome"), stopped.count), "play.fill", compact)
+            }
+            .buttonStyle(.lumenGhost)
+            .disabled(stopped.isEmpty)
+            .help(L("profiles.bulk.launch.help"))
+            Button { actions.stopSeveral(running) } label: {
+                label(running.isEmpty ? L("profiles.bulk.stop") : String(format: L("inspector.stopSome"), running.count), "stop.fill", compact)
+            }
+            .buttonStyle(.lumenGhost)
+            .disabled(running.isEmpty)
+            .help(L("profiles.bulk.stop.help"))
             Button { actions.warmUpSeveral(ids) } label: { label(L("profiles.bulk.warmUp"), "flame", compact) }
-                .buttonStyle(.lumenSecondary)
+                .buttonStyle(.lumenGhost)
                 .help(L("profiles.bulk.warmUp.help"))
             Button { actions.assignProxies(ids) } label: { label(L("profiles.bulk.assignProxy"), "network", compact) }
-                .buttonStyle(.lumenSecondary)
+                .buttonStyle(.lumenGhost)
                 .help(L("profiles.bulk.assignProxy.help"))
             Button(role: .destructive) { actions.deleteSeveral(ids) } label: { label(L("profiles.bulk.delete"), "trash", compact) }
                 .buttonStyle(.lumenDestructive)
                 .help(L("profiles.bulk.delete.help"))
-            Spacer(minLength: 8)
             if !compact, rows.count < visibleCount {
+                separator
                 Button(L("profiles.bulk.selectAll"), action: selectAll)
                     .buttonStyle(.lumenGhost)
             }
+            separator
             Button(action: clear) { Image(systemName: "xmark") }
                 .buttonStyle(LumenIconButtonStyle())
                 .help(L("profiles.bulk.clear"))
@@ -129,12 +135,16 @@ struct ProfileBulkBar: View {
         }
     }
 
+    private var separator: some View {
+        Rectangle().fill(Color.white.opacity(0.10)).frame(width: 1, height: 18).padding(.horizontal, 4)
+    }
+
     @ViewBuilder
     private func label(_ title: String, _ symbol: String, _ compact: Bool) -> some View {
         if compact {
             Label(title, systemImage: symbol).labelStyle(.iconOnly)
         } else {
-            Label(title, systemImage: symbol)
+            Text(title)
         }
     }
 }

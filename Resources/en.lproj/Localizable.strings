@@ -541,7 +541,7 @@
 "profiles.menu.sync" = "Sync…";
 "profiles.menu.syncNow" = "Sync Now";
 "profiles.menu.tunnel" = "WebRTC through proxies (network extension)…";
-"profiles.noMatches" = "No profiles match";
+"profiles.noMatches" = "Nothing found";
 "profiles.row.delete" = "Delete…";
 "profiles.row.edit" = "Edit…";
 "profiles.row.encrypting" = "Encrypting data…";
@@ -564,7 +564,7 @@
 "profiles.row.warmingUp" = "Warming up: page %1$ld of %2$ld";
 "profiles.search" = "Search";
 "profiles.search.clear" = "Clear Search";
-"profiles.showAll" = "Show All Profiles";
+"profiles.showAll" = "Clear the filters";
 "profiles.sync.failed" = "Last sync failed";
 "profiles.sync.notYet" = "Not synced yet";
 "profiles.sync.off" = "Sync is off";
@@ -1383,3 +1383,6 @@
 "inspector.warmUpQueue" = "Warm up in turn…";
 "inspector.queueNote" = "They start %ld at a time: the next one when one of them has its window up.";
 "inspector.empty" = "Select a profile to see how it reaches the web, how sites see it and what it keeps.";
+"proxyProblem.more.short" = "and %ld more";
+"profiles.noMatches.query" = "No profile in this collection matches “%@”.";
+"profiles.noMatches.filter" = "This collection has no profiles.";
