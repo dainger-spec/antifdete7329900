@@ -119,6 +119,12 @@ enum UISnapshots {
             ProfilesPreview(rows: rows, sync: .synced(Date().addingTimeInterval(-4 * 60)), showsInspector: true,
                             selected: [northwind], inspectorInfo: info, proxyProblem: banner)
         }.capture(into: folder)
+        // The control: the same inspector alone, in a window without a title bar. Drawn here and not
+        // in the window above, the title bar's band is what hides it (CI run 555: the panel empty).
+        problems += await Shot(name: "inspector-alone", size: CGSize(width: ProfilesScreen.inspectorWidth, height: 760), titled: false) {
+            ProfileInspectorView(row: rows[1], info: inspected, actions: ProfileActions(), tunnelCarriesWebRTC: true)
+                .background(Theme.sidebar)
+        }.capture(into: folder)
         problems += await Shot(name: "profiles-inspector-unreadable", size: CGSize(width: 1400, height: 860)) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [rows[7].id])
         }.capture(into: folder)

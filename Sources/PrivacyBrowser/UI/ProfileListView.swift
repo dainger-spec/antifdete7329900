@@ -697,6 +697,11 @@ struct ProfilesScreen: View {
 
     static let sidebarWidth: CGFloat = 232
     static let inspectorWidth: CGFloat = 320
+    /// Where an inspector's content starts: under the title bar's band, as the sidebar's does. Its
+    /// panel still runs to the window's top. A scroll view that reaches under the title bar gets
+    /// macOS 26's edge effect there, which a window's picture (`cacheDisplay`, the self-test's
+    /// snapshots) does not draw: the whole panel came out empty (CI run 555).
+    static let inspectorTop: CGFloat = 44
     /// The table drops "Appears as" below these content widths.
     static let minimumWindowWidth: CGFloat = 920
     /// The header: below the title bar's band, its height, its right margin (the self-test clicks
@@ -884,7 +889,7 @@ struct ProfilesScreen: View {
         }
         .frame(width: Self.inspectorWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.top, 8)
+        .padding(.top, Self.inspectorTop)
         .background(Theme.sidebar.opacity(0.8))
         .overlay(alignment: .leading) { Rectangle().fill(Theme.divider).frame(width: 1) }
         .accessibilityElement(children: .contain)

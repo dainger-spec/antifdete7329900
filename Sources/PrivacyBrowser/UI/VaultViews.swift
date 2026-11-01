@@ -34,7 +34,9 @@ struct LockScreen<Content: View>: View {
     @Environment(\.lumenStillFrame) private var stillFrame
 
     var body: some View {
-        // Centred in the window; scrolls when the window is shorter than the screen's content.
+        // Centred in the window; scrolls when the window is shorter than the screen's content. The
+        // scrolling starts under the title bar's band: one that reaches under the title bar gets
+        // macOS 26's edge effect there (ProfilesScreen.inspectorTop).
         GeometryReader { geometry in
             ScrollView {
                 screen.frame(minHeight: geometry.size.height)
@@ -42,6 +44,7 @@ struct LockScreen<Content: View>: View {
             .scrollBounceBehavior(.basedOnSize)
             .scrollIndicators(.automatic)
         }
+        .padding(.top, ProfilesScreen.inspectorTop)
         .onAppear {
             guard !appeared else { return }
             if stillFrame {

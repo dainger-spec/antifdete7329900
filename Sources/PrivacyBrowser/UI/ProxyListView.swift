@@ -376,7 +376,7 @@ struct ProxyListPanel: View {
         }
         .frame(width: ProfilesScreen.inspectorWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.top, 8)
+        .padding(.top, ProfilesScreen.inspectorTop)
         .background(Theme.sidebar.opacity(0.8))
         .overlay(alignment: .leading) { Rectangle().fill(Theme.divider).frame(width: 1) }
         .accessibilityElement(children: .contain)
