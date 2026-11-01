@@ -4684,10 +4684,10 @@ final class SelfTest {
 
     /// The window server's processor time so far, in seconds (`ps`); nil where it cannot be read.
     private func windowServerCPUSeconds() async -> Double? {
-        let (output, status, _) = await runOwnExecutable(URL(fileURLWithPath: "/bin/ps"), ["-A", "-o", "comm=,time="], timeout: 10)
+        // Short names (-c): the whole list then stays well within a pipe's buffer.
+        let (output, status, _) = await runOwnExecutable(URL(fileURLWithPath: "/bin/ps"), ["-A", "-c", "-o", "comm=,time="], timeout: 10)
         guard status == 0 else { return nil }
-        for line in output.split(separator: "\n") where line.trimmingCharacters(in: .whitespaces).hasPrefix("/System/Library/PrivateFrameworks/SkyLight.framework")
-            || line.contains("WindowServer") {
+        for line in output.split(separator: "\n") where line.trimmingCharacters(in: .whitespaces).hasPrefix("WindowServer") {
             guard let time = line.split(separator: " ").last else { continue }
             // [[dd-]hh:]mm:ss.ss
             let parts = time.split(separator: ":").map { Double($0.split(separator: "-").last ?? "") ?? 0 }
