@@ -54,6 +54,7 @@ ALLOWED_EXPRESSIONS = {
     "wanted": "a yes/no: whether the profile has a proxy",
     "exceptionName": "an Objective-C exception's name (its reason is logged privately)",
     "origin": "which initializer built a web view, a label in the code",
+    "self.lastTerminationReason": "why a page's process ended, WebKit's reason by a name in the code (BrowserTab.terminationReason)",
     "closures.sorted.joined(separator: \", \")": "which kernel closures applied, labels in the code",
     "enabled ? schedule.everyHours : 0": "a number of hours",
     "(message.body as? [String: Any])?[\"type\"] as? String ?? \"?\"":

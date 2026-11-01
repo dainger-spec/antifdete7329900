@@ -37,6 +37,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private let chrome: BrowserChromeModel
     /// Over the web views while the selected tab is an empty new tab.
     private var startPage: NSHostingView<StartPageView>!
+    /// Over the web views while the selected tab's page stopped (`BrowserTab.pageStopped`): its
+    /// process kept ending, and the tab no longer reloads it by itself.
+    private var stoppedPage: NSHostingView<StoppedPageView>!
     /// 0 with one tab: like Safari, the tab bar shows from the second tab on.
     private var tabStripHeight: NSLayoutConstraint!
     /// The address field's width: what the other toolbar items leave, up to 680 pt (`fitAddressField`).
@@ -190,7 +193,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         // Part of the chrome (dark), unlike the web views beside it (the system's appearance).
         startPage.appearance = Theme.chromeAppearance
         startPage.isHidden = true
-        for view in [tabStrip, webContainer, startPage] as [NSView] {
+        stoppedPage = NSHostingView(rootView: StoppedPageView(reload: { [weak self] in self?.reload() }))
+        stoppedPage.appearance = Theme.chromeAppearance
+        stoppedPage.isHidden = true
+        for view in [tabStrip, webContainer, startPage, stoppedPage] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
@@ -208,6 +214,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             startPage.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
             startPage.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
             startPage.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
+            stoppedPage.topAnchor.constraint(equalTo: webContainer.topAnchor),
+            stoppedPage.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+            stoppedPage.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+            stoppedPage.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
         ])
         window.contentView = container
         fitAddressField()
@@ -355,6 +365,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         tabStrip.isHidden = !showsTabStrip
         tabStripHeight.constant = showsTabStrip ? TabStripView.height : 0
         updateStartPage()
+        stoppedPage.isHidden = !(selectedTab?.pageStopped ?? false)
         tabStrip.update(items: tabs.map { tab in
             TabStripView.Item(title: tab.displayTitle,
                               toolTip: [tab.webView.title, tab.url?.absoluteString].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"),
@@ -428,9 +439,18 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     @objc func goForward() { selectedTab?.webView.goForward() }
 
     @objc func reload() {
-        guard let webView = selectedTab?.webView else { return }
-        if webView.isLoading { webView.stopLoading() } else { webView.reload() }
+        guard let tab = selectedTab else { return }
+        // A page that stopped (its process kept ending) is asked for again: counted afresh.
+        if tab.pageStopped {
+            tab.resumeAfterStop()
+            tab.webView.reload()
+            return
+        }
+        if tab.webView.isLoading { tab.webView.stopLoading() } else { tab.webView.reload() }
     }
+
+    /// Whether the window covers the selected tab with "This page stopped working" (the self-test).
+    var showsStoppedPage: Bool { !stoppedPage.isHidden }
 
     @objc private func addressEntered() {
         guard let url = addressURL(addressField.stringValue) else { return }
