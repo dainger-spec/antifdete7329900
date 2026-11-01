@@ -33,8 +33,8 @@ export default function howItWorks(c, { lang }) {
 
   const pt = c.process.table;
   const process = sec('process', c.process.title, `<div class="prose" style="margin-top:20px">${paras(c.process.paras)}</div>
-    <div class="table-wrap reveal" style="margin-top:28px"><table class="table stack-mobile"><thead><tr>${pt.head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
-    <tbody>${pt.rows.map((r) => `<tr><td class="strong" data-label="${esc(pt.head[0])}">${inline(r[0], lang)}</td><td data-label="${esc(pt.head[1])}">${inline(r[1], lang)}</td></tr>`).join('')}</tbody></table></div>`);
+    <details class="fold" style="margin-top:28px"><summary>${esc(pt.head[0])}${icon('chevronDown', 14)}</summary><div class="fold-in"><div class="table-wrap"><table class="table stack-mobile key-first"><thead><tr>${pt.head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+    <tbody>${pt.rows.map((r) => `<tr><td class="strong" data-label="${esc(pt.head[0])}">${inline(r[0], lang)}</td><td data-label="${esc(pt.head[1])}">${inline(r[1], lang)}</td></tr>`).join('')}</tbody></table></div></div></details>`);
 
   const k = c.keys.diagram;
   const keysDiagram = `<figure class="diagram reveal" style="margin-top:28px"><div class="dtitle">${inline(k.title, lang)}</div>
@@ -49,7 +49,7 @@ export default function howItWorks(c, { lang }) {
 
   const n = c.network;
   const network = sec('network', n.title, `<div class="prose" style="margin-top:20px">${paras(n.paras)}</div>
-    <div class="table-wrap reveal" style="margin-top:28px"><div class="table-scroll"><table class="table stack-mobile"><thead><tr>${n.head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+    <div class="table-wrap reveal" style="margin-top:28px"><div class="table-scroll"><table class="table stack-mobile key-first net-table"><thead><tr>${n.head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
     <tbody>${n.rows.map((r) => `<tr><td class="strong" data-label="${esc(n.head[0])}">${inline(r[0], lang)}</td><td data-label="${esc(n.head[1])}">${inline(r[1], lang)}</td><td data-label="${esc(n.head[2])}">${icon('check', 13)} ${inline(r[2], lang)}</td></tr>`).join('')}</tbody></table></div></div>
     <div class="row" style="justify-content:space-between;margin-top:18px"><span class="caption">${inline(n.note, lang)}</span>${linkArrow('verification.html', n.link, lang)}</div>`);
 

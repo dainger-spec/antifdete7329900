@@ -39,21 +39,9 @@ export default {
       ['Image SHA-256', '{{rel:9c1e4b7a…f03d2a68}} — published with every release'],
     ],
     code: '# Signature and Apple notarization\n$ codesign --verify --deep --strict --verbose=2 /Applications/{{name}}.app\n$ spctl --assess --type execute --verbose /Applications/{{name}}.app\n# Checksum of the downloaded image\n$ shasum -a 256 ~/Downloads/{{name}}.dmg',
+    check: 'Check it in Terminal',
     codeLabel: 'Terminal',
     expect: 'If the signature is intact, `codesign` answers `valid on disk` and `satisfies its Designated Requirement`, and `spctl` answers `accepted` and `source=Notarized Developer ID`: the app is signed with a developer certificate issued by Apple and notarized by Apple. If anyone changed the file, the check fails — don’t open it. The checksum of the downloaded image must match the one published here for this release.',
-  },
-  first: {
-    title: 'The first launch',
-    lead: 'This is the first screen: the vault is created once, on this Mac.',
-    screen: {
-      title: 'Create a master password',
-      subtitle: 'The master password encrypts the profile list, every profile’s settings, saved passwords, history, bookmarks and archived website data. It cannot be recovered — if you forget it, the data is lost.',
-      field: 'Master password',
-      repeat: 'Repeat master password',
-      rule: 'Use at least 10 characters.',
-      action: 'Create Vault',
-    },
-    caption: 'The text is the app’s own.',
   },
   help: {
     title: 'Something wrong?',

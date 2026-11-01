@@ -30,7 +30,7 @@ export default function verification(c, { lang }) {
 
   const df = c.differences;
   const kindTag = (k) => k === 'product' ? `<span class="tag accent">${inline(df.kinds.product, lang)}</span>` : `<span class="tag">${inline(df.kinds.bench, lang)}</span>`;
-  const differences = sec('differences', df.title, df.lead, `<div class="table-wrap reveal" style="margin-top:36px"><div class="table-scroll"><table class="table stack-mobile">
+  const differences = sec('differences', df.title, df.lead, `<div class="table-wrap reveal" style="margin-top:36px"><div class="table-scroll"><table class="table stack-mobile key-first">
     <thead><tr>${df.head.map((h, i) => `<th${i === 1 ? ' class="num"' : ''}>${esc(h)}</th>`).join('')}</tr></thead>
     <tbody>${df.rows.map((r) => `<tr>
       <td class="strong" data-label="${esc(df.head[0])}" style="min-width:200px">${inline(r.t, lang)}<span class="sub">${inline(r.keys, lang)}</span></td>
@@ -47,10 +47,11 @@ export default function verification(c, { lang }) {
   </div>`).join('')}</div>`);
 
   const eb = c.everyBuild;
-  const every = sec('every-build', eb.title, eb.lead, `<div class="table-wrap reveal" style="margin-top:36px"><div class="table-scroll"><table class="table stack-mobile">
+  // the steps of a build are the long list behind the sections above: one tap away
+  const every = sec('every-build', eb.title, eb.lead, `<details class="fold" style="margin-top:28px"><summary>${inline(eb.show, lang)}${icon('chevronDown', 14)}</summary><div class="fold-in"><div class="table-wrap"><div class="table-scroll"><table class="table stack-mobile key-first">
     <thead><tr>${eb.head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
     <tbody>${eb.rows.map((r) => `<tr><td class="strong" data-label="${esc(eb.head[0])}" style="min-width:180px">${inline(r[0], lang)}</td><td data-label="${esc(eb.head[1])}">${inline(r[1], lang)}</td><td data-label="${esc(eb.head[2])}" style="white-space:nowrap">${result('same', r[2], lang)}</td></tr>`).join('')}</tbody>
-  </table></div></div>`);
+  </table></div></div></div></details>`);
 
   const y = c.yourself;
   const r = c.reports;

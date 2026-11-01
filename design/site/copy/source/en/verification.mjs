@@ -6,7 +6,7 @@ export default {
   hero: {
     eyebrow: 'How we verify',
     title: 'Every build, against real Safari',
-    lead: 'We do not ask you to take our word for it. Every change to {{name}} is built on a Mac with real Safari: a profile is compared with it, every request around the proxy is looked for, and the results are recorded. Here is what is measured, how, and the numbers of the latest runs — including what differs.',
+    lead: 'We do not ask you to take our word for it. Every change to {{name}} is built on a Mac with real Safari: a profile is compared with it, every request around the proxy is looked for, and the results are recorded.',
   },
   run: {
     label: 'Latest runs',
@@ -33,7 +33,7 @@ export default {
       { t: 'Window geometry', s: 'with one tab and with two', score: '10', of: '10', res: ['same', 'and with two tabs'], d: 'Outer and inner window size, screen position, visualViewport. 52 px of toolbar with one tab and 90 px with two, as in Safari 26.' },
       { t: 'Permissions and APIs', s: 'permission states, storage quota, speech voices', score: '16', of: '17', res: ['diff', 'one difference'], d: 'Before permission, Safari lists a camera and a microphone, a profile only the microphone: macOS hides the camera from an app not yet allowed to use it. Allow {{name}} the camera once and the lists match.' },
     ],
-    legend: [['same', 'identical'], ['diff', 'differs, for a known reason'], ['na', 'not measured in this run']],
+    legend: [['same', 'identical'], ['diff', 'differs, for a known reason']],
   },
   differences: {
     title: 'What differs — and why',
@@ -65,6 +65,7 @@ export default {
   everyBuild: {
     title: 'What every build checks',
     lead: 'These steps run on every change to the code. If any required one fails, the build is red.',
+    show: 'Every step of a build',
     head: ['Step', 'What it checks', 'Latest run'],
     rows: [
       ['Core unit tests', 'Encryption, the vault, sync, cookie import, warm-up — on Linux and on macOS', '223 tests on macOS, 0 failures'],

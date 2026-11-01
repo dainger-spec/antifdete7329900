@@ -15,18 +15,12 @@ export default {
     ['encryption', 'Encryption'],
     ['proxy', 'Proxy'],
     ['verification', 'Verification'],
-    ['noise', 'No noise'],
     ['warmup', 'Warm-up'],
     ['data', 'Profile data'],
   ],
   safari: {
     title: 'Real Safari in every profile',
     lead: 'A profile opens in a Safari window and runs on your Mac’s system WebKit. Sites see Safari because that is what it is.',
-    points: [
-      'A Safari window: the address bar, tabs and menus',
-      'The network handshake and headers of Safari',
-      'The same Safari version as on your Mac',
-    ],
     table: {
       head: ['What a site sees', 'A Chromium browser', '{{name}}'],
       rows: [
@@ -104,9 +98,7 @@ export default {
       head: ['Proxy', 'Type', 'Exit', 'Latency'],
       rows: [
         { label: 'Berlin 1', host: '203.0.113.10:1080', kind: 'SOCKS5', exit: 'Germany', code: 'DE', ms: '84 ms' },
-        { label: '', host: 'proxy.example.net:3128', kind: 'HTTP', exit: 'Netherlands', code: 'NL', ms: '142 ms' },
         { label: 'Tokyo', host: '192.0.2.44:8443', kind: 'HTTPS', exit: 'Japan', code: 'JP', ms: '1,730 ms' },
-        { label: 'Whitelisted', host: '198.51.100.40:8000', kind: 'HTTP', dead: 'Silent after connecting' },
         { label: 'Old provider', host: '192.0.2.7:1080', kind: 'SOCKS5', dead: 'Login rejected' },
       ],
     },
@@ -120,14 +112,8 @@ export default {
       { n: '15', of: '15', t: 'TLS and HTTP/2 values' },
     ],
     link: 'How we verify',
-  },
-  noise: {
-    title: 'No noise in the fingerprint',
-    lead: 'Many browsers add random noise to canvas and WebGL, and fingerprint tests notice such forgeries. A {{name}} profile gives exactly what Safari on your Mac gives.',
-    paras: [
-      'Noise is easy to spot: a faked canvas does not agree with WebGL, the fonts, or what the page’s background scripts see.',
-      'A server sees the TLS handshake and headers before any script runs. A profile’s are Safari’s.',
-    ],
+    noise: 'Many browsers add random noise to canvas and WebGL, and fingerprint tests notice such forgeries. A {{name}} profile gives exactly what Safari on your Mac gives.',
+    noiseLink: 'Why a profile has no noise',
   },
   warmup: {
     title: 'Profile warm-up',
@@ -167,20 +153,8 @@ export default {
       { icon: 'hourglass', title: 'Ephemeral profiles', text: 'A profile that keeps nothing.' },
     ],
   },
-  steps: {
-    title: 'Getting started is simple',
-    items: [
-      { t: 'Create a profile', d: 'A name and a country. Every profile is a Safari of its own.' },
-      { t: 'Add proxies', d: 'Paste a list, and {{name}} checks every proxy.' },
-      { t: 'Work', d: 'Run profiles side by side, each in its own windows.' },
-    ],
-  },
   faqTitle: 'Questions',
   faq: [
-    { q: 'Is it really Safari?', a: 'Yes. {{name}} runs Safari’s interface and the system WebKit, the same engine as Safari on your Mac. We compare every build with real Safari and publish the results.' },
-    { q: 'What if the proxy goes down?', a: 'The profile opens no page until the proxy is back. It never goes online directly, with your IP.' },
-    { q: 'Can I bring accounts over from another browser?', a: 'Yes. Import cookies as JSON or cookies.txt: exports of popular extensions, Puppeteer, Playwright and Selenium all work.' },
-    { q: 'Where is my data kept?', a: 'On your Mac, encrypted. When you sync, only encrypted data goes to the server, and only you can read it.' },
     { q: 'Which Mac and macOS do I need?', a: 'A Mac with Apple Silicon and macOS 26 or later. Intel Macs are not supported.' },
     { q: 'How can I pay?', a: 'In crypto, on our own payment page — for a month or a whole year. You can skip the email: you get a licence key.' },
   ],

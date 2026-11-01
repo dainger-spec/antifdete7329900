@@ -32,10 +32,6 @@ export default {
       'Updates and email support',
     ],
   },
-  trial: {
-    title: 'Free trial',
-    text: '7 days free, up to 3 profiles, with every feature. If you like it, pick a plan and pay for a period.',
-  },
   payment: {
     title: 'Payment',
     items: [
@@ -55,9 +51,7 @@ export default {
   },
   faqTitle: 'Questions',
   faq: [
-    { q: 'What happens when my paid period ends?', a: 'Your profiles stay on your Mac, encrypted as they were. Until you renew, the app opens them for data export only. Your data is never deleted.' },
     { q: 'How do I renew?', a: 'In your account: choose a month or a year and pay in crypto on our payment page. We remind you by email in advance that your period is ending.' },
-    { q: 'How many profiles can I run at once?', a: 'As many as you need. Running profiles at once is unlimited on every plan: a plan only sets how many profiles and Macs you have.' },
     { q: 'Can I move profiles to another Mac?', a: 'Yes: by syncing between the Macs in your account, or by exporting a profile to a file under its own password. Importing creates a new profile.' },
     { q: 'Why sign in with a key and no email?', a: 'So that we don’t even have your email. The key is the only way in: lose it and access can’t be restored. Keep it as carefully as your master password. There is no reminder email in that case — the end of your period is shown in your account.' },
     { q: 'Can the server see my profiles?', a: 'No. It stores encrypted blocks and knows only their size and when they changed. The key comes from your master password and never leaves your Mac.' },

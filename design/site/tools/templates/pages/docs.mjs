@@ -13,7 +13,6 @@ export default function docs(c, { lang }) {
     <form class="search" role="search" style="max-width:560px;margin-top:32px" action="${first}.html">
       ${icon('magnifyingglass', 14)}<input class="input" type="search" name="q" placeholder="${esc(x.search)}" aria-label="${esc(x.search)}" style="height:48px;font-size:15px;padding-left:38px"><kbd>/</kbd>
     </form>
-    <div class="row" style="margin-top:20px;gap:8px 10px"><span class="caption">${inline(x.popularTitle, lang)}:</span>${x.popular.map(([slug, t]) => `<a class="chip" href="${slug}.html" style="color:var(--text-secondary)">${inline(t, lang)}</a>`).join('')}</div>
   </div></section>`;
 
   const sections = `<section style="padding-bottom:var(--section-pad)"><div class="container">

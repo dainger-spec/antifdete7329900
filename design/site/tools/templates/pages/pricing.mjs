@@ -32,11 +32,10 @@ export default function pricing(c, { lang }) {
     <div>${checkList(c.included.items, lang, { accent: true })}</div>
   </div></div></section>`;
 
-  // Four cards, two by two: the trial, how to pay (crypto only), what happens when a period ends (no automatic
-  // charges: a reminder, export only, data kept), refunds.
+  // Three cards: how to pay (crypto only), what happens when a period ends (no automatic charges: a reminder, export
+  // only, data kept), refunds. The trial isn't a card: the hero, the line under the plans and the last call say it.
   const terms = `<section class="section"><div class="container">
-    <div class="grid c2">
-      <div class="card pad-lg reveal"><span class="tile-icon">${icon('clock', 18)}</span><h3 class="h3">${inline(c.trial.title, lang)}</h3><p style="margin-top:10px">${inline(c.trial.text, lang)}</p></div>
+    <div class="grid c3">
       <div class="card pad-lg reveal"><span class="tile-icon">${icon('wallet', 18)}</span><h3 class="h3">${inline(c.payment.title, lang)}</h3>
         <ul class="list-check" style="margin-top:14px">${c.payment.items.map((i) => `<li>${icon(i.icon, 16)}<span><strong>${inline(i.t, lang)}.</strong> ${inline(i.d, lang)}</span></li>`).join('')}</ul></div>
       <div class="card pad-lg reveal"><span class="tile-icon">${icon('calendar', 18)}</span><h3 class="h3">${inline(c.period.title, lang)}</h3><p style="margin-top:10px">${inline(c.period.text, lang)}</p></div>
@@ -46,7 +45,7 @@ export default function pricing(c, { lang }) {
 
   const faq = `<section class="section"><div class="container medium">
     <h2 class="h2" style="margin-bottom:32px">${inline(c.faqTitle, lang)}</h2>
-    <div class="faq">${c.faq.map((f, i) => `<details${i === 0 ? ' open' : ''}><summary>${inline(f.q, lang)}${icon('chevronDown', 16)}</summary><div class="answer"><p>${inline(f.a, lang)}</p></div></details>`).join('')}</div>
+    <div class="faq">${c.faq.map((f, i) => `<details><summary>${inline(f.q, lang)}${icon('chevronDown', 16)}</summary><div class="answer"><p>${inline(f.a, lang)}</p></div></details>`).join('')}</div>
   </div></section>`;
 
   const ct = c.cta;

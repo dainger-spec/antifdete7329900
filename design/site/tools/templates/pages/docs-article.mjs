@@ -23,17 +23,23 @@ export default async function docsArticle(a, { lang, slug, copy }) {
       ${prev ? `<a href="${prev.slug}.html"><div class="k">← ${esc(ui.prevLabel)} · ${inline(prev.section, lang)}</div><div class="t">${inline(prev.title, lang)}</div></a>` : '<span></span>'}
       ${next ? `<a class="next" href="${next.slug}.html"><div class="k">${inline(next.section, lang)} · ${esc(ui.nextLabel)} →</div><div class="t">${inline(next.title, lang)}</div></a>` : '<span></span>'}
     </nav>`;
+  const onPage = lang === 'ru' ? 'На этой странице' : 'On this page';
+  const tocItems = a.toc.map(([id, t]) => `<li><a href="#${id}">${inline(t, lang)}</a></li>`).join('');
+  // where the column «On this page» doesn't fit (under 1200), the same list folds under the title
+  const tocMini = a.toc.length ? `<details class="toc-mini"><summary>${onPage}${icon('chevronDown', 14)}</summary><ul>${tocItems}</ul></details>` : '';
   const article = `<article>
     ${crumbs}
     <h1 class="h1" style="font-size:40px;line-height:46px">${inline(a.title, lang)}</h1>
     <p class="lead" style="margin-top:14px;max-width:720px">${inline(a.lead, lang)}</p>
-    <p class="doc-meta">${meta.map((m) => `<span>${inline(m, lang)}</span>`).join('')}${unv ? `<span class="unv-count" title="${esc(ui.unv)}">${icon('exclamationTriangle', 12)} ${esc(ui.unv)}</span>` : ''}</p>
+    <p class="doc-meta">${meta.map((m) => `<span>${inline(m, lang)}</span>`).join('')}</p>
+    ${tocMini}
     <hr style="margin:32px 0 8px">
     <div class="prose">${markdown(a.body, lang, { icon })}</div>
-    <p class="caption" style="margin-top:48px">${inline(ui.feedback, lang)}</p>
+    ${unv ? `<p class="unv-foot">${icon('exclamationTriangle', 12)}<span>${esc(ui.unv)}</span></p>` : ''}
+    <p class="caption" style="margin-top:${unv ? 12 : 48}px">${inline(ui.feedback, lang)}</p>
     ${pager}
   </article>`;
-  const toc = `<aside class="toc" data-toc><h2>${lang === 'ru' ? 'На этой странице' : 'On this page'}</h2><ul>${a.toc.map(([id, t]) => `<li><a href="#${id}">${inline(t, lang)}</a></li>`).join('')}</ul></aside>`;
+  const toc = `<aside class="toc" data-toc><h2>${onPage}</h2><ul>${tocItems}</ul></aside>`;
   return {
     title: a.title,
     description: a.lead,

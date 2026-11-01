@@ -45,6 +45,7 @@
     <h1 class="h1" style="font-size:40px;line-height:46px">The vault and the master password</h1>
     <p class="lead" style="margin-top:14px;max-width:720px">What Lumen encrypts and how, how to unlock and lock the vault and change the master password — and what to do if you’ve forgotten it.</p>
     <p class="doc-meta"><span>From the code as of 31 October 2026</span><span>Reading time: five minutes</span></p>
+    <details class="toc-mini"><summary>On this page<svg class="icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.2 6.2L8 10l3.8-3.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></summary><ul><li><a href="#contents">What the vault holds</a></li><li><a href="#keys">How the data is encrypted</a></li><li><a href="#lock">Unlocking and locking</a></li><li><a href="#change">Changing the master password</a></li><li><a href="#forgot">If you forgot the master password</a></li><li><a href="#sync">What a sync location sees</a></li></ul></details>
     <hr style="margin:32px 0 8px">
     <div class="prose"><h2 id="contents">What the vault holds</h2>
 <p>The vault is a folder named <code>PrivacyBrowser</code> in your account’s Application Support: <code>~/Library/Containers/…/Data/Library/Application Support/PrivacyBrowser</code> in a build with the App Sandbox, <code>~/Library/Application Support/PrivacyBrowser</code> without it. <strong>Settings → About → Build</strong> shows which build you have.</p>
@@ -74,6 +75,7 @@
 <p>Sync is off until you choose <strong>Folder (local-only)</strong> or <strong>Server</strong> in <strong>⋯ → Sync…</strong>. Lumen has no sync server of its own yet: the app is a client for a documented protocol.</p>
 <p>A sync location sees the vault header in plain text, there so another Mac can open the vault with the same password (the app can’t yet set up a second Mac like this); how many objects there are, their sizes, versions and when they change; and, for a server, this Mac’s IP address — sync goes directly, not through a profile’s proxy.</p>
 <p>The profile list, settings, passwords, bookmarks, history and persistent cookies arrive encrypted (the profiles’ files twice) under opaque names: no profile names, site addresses, proxies, passwords or cookies are visible. Other website data doesn’t sync.</p></div>
+    
     <p class="caption" style="margin-top:48px">Found a mistake, or is something missing? <a href="support.html">Write to us</a>.</p>
     <nav class="pager" aria-label="Nearby articles">
       <a href="docs-install.html"><div class="k">← Previous · Getting started</div><div class="t">Installing and the first launch</div></a>

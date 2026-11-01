@@ -13,7 +13,7 @@ export default function support(c, { lang }) {
   const t = c.topics;
   const topics = `<section class="section"><div class="container">
     <h2 class="h3" style="margin-bottom:24px">${inline(t.title, lang)}</h2>
-    <div class="grid c4">${t.items.map((i) => `<a class="card card-link reveal" href="${i.href}.html"><span class="tile-icon neutral">${icon(i.icon, 18)}</span><h3 class="h4">${inline(i.t, lang)}</h3><p>${inline(i.d, lang)}</p></a>`).join('')}</div>
+    <div class="grid c4 topics">${t.items.map((i) => `<a class="card card-link reveal" href="${i.href}.html"><span class="tile-icon neutral">${icon(i.icon, 18)}</span><h3 class="h4">${inline(i.t, lang)}</h3><p>${inline(i.d, lang)}</p>${icon('chevronRight', 14, 'go')}</a>`).join('')}</div>
   </div></section>`;
 
   const f = c.form;
@@ -30,8 +30,8 @@ export default function support(c, { lang }) {
 
   const k = c.contacts;
   const contacts = `<section class="section" id="contacts"><div class="container">
-    <h2 class="h2" style="margin-bottom:32px">${inline(k.title, lang)}</h2>
-    <div class="grid c3">${k.items.map((i) => `<div class="card reveal"><span class="tile-icon neutral">${icon(i.icon, 18)}</span><h3 class="h4">${inline(i.t, lang)}</h3><p><a href="mailto:${esc(plain(i.v))}">${inline(i.v, lang)}</a></p>${i.d ? `<p style="margin-top:8px">${inline(i.d, lang)}</p>` : ''}</div>`).join('')}</div>
+    <h2 class="h2" style="margin-bottom:24px">${inline(k.title, lang)}</h2>
+    <ul class="acc-list contacts reveal">${k.items.map((i) => `<li><a class="acc-row${i.d ? ' tall' : ''}" href="mailto:${esc(plain(i.v))}"><span class="ic">${icon(i.icon, 16)}</span><span class="k">${inline(i.t, lang)}${i.d ? `<span class="sub">${inline(i.d, lang)}</span>` : ''}</span><span class="v mail">${inline(i.v, lang)}</span></a></li>`).join('')}</ul>
   </div></section>`;
 
   return { body: hero + topics + form + contacts, bodyClass: 'page-support' };

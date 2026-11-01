@@ -32,9 +32,9 @@ export default function auth(c, { lang, state }) {
     main = `<h1 class="h1">${inline(k.title, lang)}</h1><p class="lead">${inline(k.lead, lang)}</p>${seg('login-key.html')}
       <form class="form" action="account.html">
         <div><label class="field-label" for="key">${inline(k.label, lang)}</label><input class="input mono" id="key" name="key" autocomplete="off" spellcheck="false" placeholder="${esc(k.placeholder)}"></div>
-        <div class="note warn">${icon('exclamationTriangle', 18)}<div><p>${inline(k.warn, lang)}</p></div></div>
         <button class="btn primary block lg" type="submit">${inline(k.action, lang)}</button>
       </form>
+      <div class="note warn" style="margin-top:20px">${icon('exclamationTriangle', 18)}<div><p>${inline(k.warn, lang)}</p></div></div>
       <p class="alt">${inline(k.alt, lang)}</p>`;
   } else {
     const s = c.signup;
@@ -46,11 +46,11 @@ export default function auth(c, { lang, state }) {
           <label class="check"><input type="checkbox" required><span>${inline(s.agree, lang)}</span></label>
           <button class="btn primary block" type="submit">${inline(s.action, lang)}</button>
         </form></div>
-      <div class="card" style="margin-top:12px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center"><div><h2 class="h4">${inline(s.keyTitle, lang)}</h2><p style="margin-top:4px">${inline(s.keyText, lang)}</p></div><a class="btn secondary" href="pricing.html">${inline(s.keyAction, lang)}</a></div>
+      <div class="card key-offer" style="margin-top:12px"><div><h2 class="h4">${inline(s.keyTitle, lang)}</h2><p style="margin-top:4px">${inline(s.keyText, lang)}</p></div><a class="btn secondary" href="pricing.html">${inline(s.keyAction, lang)}</a></div>
       <p class="alt">${inline(s.alt, lang)}</p>`;
   }
   const sd = c.side;
-  const side = `<aside class="auth-side"><div class="inner">
+  const side = `<aside class="auth-side${state === 'code' ? ' quiet' : ''}"><div class="inner">
     ${mark(40)}
     <h2 class="h3" style="margin-top:24px">${inline(sd.title, lang)}</h2>
     <ul class="list-check" style="margin-top:16px">${sd.items.map(([ic, t]) => `<li>${icon(ic, 16)}<span>${inline(t, lang)}</span></li>`).join('')}</ul>

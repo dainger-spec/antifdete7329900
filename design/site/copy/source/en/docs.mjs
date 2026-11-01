@@ -8,10 +8,8 @@ export default {
   index: {
     eyebrow: 'Docs',
     title: 'Using {{name}}',
-    lead: 'From installing to working with several profiles. Every article describes what the app has — in the words on its own buttons. Where behaviour isn’t confirmed by the code or a measurement, the article says so.',
+    lead: 'From installing to working with several profiles — in the words on the app’s own buttons.',
     search: 'Search the docs',
-    popularTitle: 'Read most often',
-    popular: [['docs-install', 'Installing and the first launch'], ['docs-proxy', 'Proxies: setup, and when one fails'], ['docs-cookies', 'Importing and exporting cookies'], ['docs-trouble', 'When something fails']],
   },
   sections: [
     { icon: 'download', title: 'Getting started', items: [['docs-install', 'Installing and the first launch'], ['docs-vault', 'The vault and the master password'], ['docs-updates', 'Updates']] },

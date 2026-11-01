@@ -6,7 +6,7 @@
 // ProxyGeoLookup.swift, README.
 export default {
   title: 'Правовое',
-  tabs: [['privacy.html', 'Конфиденциальность'], ['terms.html', 'Условия использования'], ['refunds.html', 'Возвраты']],
+  tabs: [['privacy.html', 'Конфиденциальность'], ['terms.html', 'Условия'], ['refunds.html', 'Возвраты']],
   updatedLabel: 'Действует с',
   updated: '{{tbd:q12:даты публикации}}',
   tocTitle: 'Разделы',

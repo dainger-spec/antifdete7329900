@@ -472,10 +472,16 @@ table.table { width: 100%; border-collapse: collapse; font: var(--t-small); }
   .table.stack-mobile tr:first-child { border-top: 0; }
   .table.stack-mobile td { display: block; padding: 3px 0; border: 0; }
   .table.stack-mobile td.num { text-align: left; }
-  /* A cell holds text, code and glyphs side by side, so the label goes above the value (a grid would make
-     every piece of the value an item of its own) */
-  .table.stack-mobile td[data-label] { display: block; padding: 6px 0; }
-  .table.stack-mobile td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; font: var(--t-label); color: var(--text-tertiary); }
+  /* The label sits to the left of its value, as in the rows of iOS Settings: the row is half as tall as with the
+     label above it. A cell holds text, code and glyphs side by side, so the label floats in the cell's left
+     padding (a grid would make every piece of the value an item of its own) and the cell, a flow root, grows to
+     hold a label longer than its value. */
+  .table.stack-mobile td[data-label] { display: flow-root; padding: 5px 0 5px 120px; }
+  .table.stack-mobile td[data-label]::before { content: attr(data-label); float: left; width: 108px; margin: 1px 0 0 -120px; font: var(--t-caption); color: var(--text-tertiary); }
+  /* tables whose first column names the row (the templates' tables, not the docs' markdown): that cell is the
+     row's title, without a label */
+  .table.stack-mobile.key-first td:first-child { padding-left: 0; padding-bottom: 6px; font-weight: 600; color: var(--text-primary); }
+  .table.stack-mobile.key-first td:first-child::before { content: none; }
   .table.stack-mobile td[data-label] code { white-space: normal; }
 }
 
@@ -934,6 +940,8 @@ select.input { appearance: none; padding-right: 36px; background-image: none; }
 
 .notfound { min-height: calc(100vh - var(--header-h) - 200px); display: flex; align-items: center; padding-block: var(--s9); }
 .notfound .art { display: flex; justify-content: center; }
+/* on a phone the mark shrinks, so the way out (home, docs, support, search) is on the first screen */
+@media (max-width: 599px) { .notfound { padding-block: var(--s6); } .notfound .art svg { width: 96px; height: 96px; } }
 .notfound .code404 { font: 600 13px/18px var(--font-mono); color: var(--text-tertiary); letter-spacing: 0.08em; }
 
 /* MARK: Final call to action */
@@ -1092,6 +1100,8 @@ html.shot .proto-bar, html.rec .proto-bar { display: none; }
 .assure { list-style: none; display: flex; justify-content: center; flex-wrap: wrap; gap: 12px 32px; margin-top: 32px; font: var(--t-ui); color: var(--text-secondary); }
 .assure li { display: inline-flex; align-items: center; gap: 8px; }
 .assure .icon { color: var(--running); }
+/* on a phone the promises are a list down the left edge: centred, their ticks would zigzag */
+@media (max-width: 599px) { .assure { flex-direction: column; align-items: flex-start; gap: 10px; max-width: 320px; margin-inline: auto; } }
 
 /* ===================================================================================================
    MARK: Glass and code (v4) — the owner's direction (references: figures set in characters of code):
@@ -1224,7 +1234,6 @@ body { background: var(--backdrop); }
 .acc-side a[aria-current="page"] { background: var(--control-fill); color: var(--text-primary); }
 .acc-side a[aria-current="page"] .icon { color: var(--accent); }
 .acc-side .acc-out { margin-top: 10px; border-top: 1px solid var(--divider); border-radius: 0; padding-top: 16px; }
-.acc-out.phone { display: none; }
 .acc-main { min-width: 0; max-width: 660px; }
 .acc-title { font: 600 30px/36px var(--font-display); letter-spacing: -0.015em; margin: 0 0 22px; }
 .acc-h { margin: 28px 4px 10px; font: 600 13px/18px var(--font); letter-spacing: 0.01em; color: var(--text-tertiary); }
@@ -1246,8 +1255,6 @@ body { background: var(--backdrop); }
 .plan-actions { margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .acc-hint { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; margin: 12px 6px 0; font: var(--t-caption); color: var(--text-tertiary); }
 .acc-hint .icon { margin-top: 2px; }
-.acc-offer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; }
-.acc-offer p { margin-top: 4px; font: var(--t-small); }
 .acc-list { list-style: none; margin: 16px 0 0; padding: 0; background: var(--surface); border: 1px solid var(--hairline); border-radius: 18px; overflow: hidden; }
 .acc-h + .acc-list { margin-top: 0; }
 .acc-list > li + li { border-top: 1px solid var(--divider); }
@@ -1268,14 +1275,89 @@ label.acc-row { cursor: pointer; }
 .acc-stats > div { padding: 14px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--hairline); }
 .acc-stats .n { font: 600 20px/26px var(--font-display); color: var(--text-primary); }
 .acc-stats .k { margin-top: 2px; font: var(--t-caption); color: var(--text-tertiary); }
-.server .lead-s { margin-top: 6px; font: var(--t-small); }
+/* what the server sees: folded under one row (the proof one tap away; the page is about the Macs) */
+.acc-card.server { padding: 0; }
+.server summary { list-style: none; display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 18px 10px 16px; cursor: pointer; border-radius: inherit; }
+.server summary::-webkit-details-marker { display: none; }
+.server summary .ic { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--lgc-tint); box-shadow: var(--lgs); color: var(--accent); }
+.server summary .k { flex: 1; min-width: 0; }
+.server summary .t { display: block; font: 500 15px/21px var(--font); color: var(--text-primary); }
+.server summary .sub { display: block; margin-top: 2px; font: var(--t-caption); color: var(--text-tertiary); }
+.server summary > .icon:last-child { flex: none; color: var(--text-tertiary); transition: transform var(--d-fast) var(--ease-out); }
+.server details[open] summary > .icon:last-child { transform: rotate(180deg); }
+.server summary:hover .t { color: #FFFFFF; }
+.server-in { padding: 0 18px 16px 60px; }
+.server-in .acc-hint { margin: 12px 0 0; }
+.server .lead-s { margin-top: 0; font: var(--t-small); color: var(--text-secondary); }
 .server-list { list-style: none; margin: 14px 0 0; padding: 0; border-top: 1px solid var(--divider); }
 .server-list li { display: flex; justify-content: space-between; gap: 16px; padding: 9px 0; border-bottom: 1px solid var(--divider); font: var(--t-small); color: var(--text-tertiary); }
 .server-list li .mono { color: var(--text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .server-list li.more { border-bottom: 0; padding-bottom: 0; }
-.server-names { margin-top: 14px; font: 500 14px/21px var(--font); color: var(--text-primary) !important; }
 .acc-danger { display: grid; gap: 4px; justify-items: start; margin: 24px 6px 0; font: var(--t-caption); color: var(--text-tertiary); }
 .acc-danger .btn { margin-left: -12px; }
+.acc-danger + .acc-danger { margin-top: 18px; }
+/* Features, «Everything Safari has»: on a phone the six cards are compact rows (the icon beside the title) */
+@media (max-width: 599px) {
+  .data-cards { gap: 10px; }
+  .data-cards .card { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 2px 14px; padding: 14px 16px; }
+  .data-cards .card .tile-icon { grid-row: span 2; margin: 2px 0 0; width: 32px; height: 32px; border-radius: 10px; }
+  .data-cards .card .tile-icon .icon { width: 16px; height: 16px; }
+  .data-cards .card .h4 + p { margin-top: 0; }
+}
+
+/* How it works: on a phone the channels table shows how each channel is closed; how it is tested is on the
+   verification page, one link below the table */
+@media (max-width: 599px) { .net-table td:nth-child(3) { display: none; } }
+
+/* A fold: secondary detail one tap away (a <details> of glass with a rim of shadows) */
+.fold { border-radius: 18px; background: var(--lg-sheen), var(--lg-tint); box-shadow: var(--lg-ring), var(--lg-drop); }
+.fold > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; font: var(--t-ui); color: var(--text-primary); cursor: pointer; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary .icon { flex: none; color: var(--text-tertiary); transition: transform var(--d-fast) var(--ease-out); }
+.fold[open] > summary .icon { transform: rotate(180deg); }
+.fold > .fold-in { padding: 0 18px 18px; }
+/* Download: on a phone the .dmg card repeats the line under the button, so it steps aside */
+@media (max-width: 599px) { .dmg-card { display: none !important; } }
+
+/* Docs: the article's own contents fold under its title where the column «On this page» is hidden; the line on
+   «Unconfirmed» marks goes to the end of the article (each mark says what it is) */
+.toc-mini { display: none; }
+@media (max-width: 1199px) {
+  .toc-mini { display: block; margin-top: 20px; max-width: 720px; border-radius: 18px; background: var(--lg-sheen), var(--lg-tint); box-shadow: var(--lg-ring), var(--lg-drop); }
+  .toc-mini > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; font: var(--t-ui); color: var(--text-primary); cursor: pointer; }
+  .toc-mini > summary::-webkit-details-marker { display: none; }
+  .toc-mini > summary .icon { color: var(--text-tertiary); transition: transform var(--d-fast) var(--ease-out); }
+  .toc-mini[open] > summary .icon { transform: rotate(180deg); }
+  .toc-mini ul { list-style: none; margin: 0; padding: 0 16px 12px; display: grid; gap: 0; }
+  .toc-mini li + li { border-top: 1px solid var(--divider); }
+  .toc-mini a { display: block; padding: 9px 0; font: var(--t-small); color: var(--text-secondary); }
+  .toc-mini a:hover { color: var(--text-primary); text-decoration: none; }
+}
+/* legal pages: the three tabs fit a phone's width; their column of sections stays down to 1100 */
+@media (max-width: 599px) { .page-legal .page-hero .seg a { padding: 0 9px; } }
+@media (min-width: 1100px) { .page-legal .toc-mini { display: none; } }
+.unv-foot { display: flex; align-items: flex-start; gap: 8px; margin-top: 48px; font: var(--t-caption); color: #EBD9A6; }
+.unv-foot .icon { flex: none; margin-top: 3px; color: #F2C13D; }
+
+/* Support: the topics are cards on a computer and compact rows on a phone (a title and a chevron); the contacts are
+   one list of rows — what, then the address */
+.topics .go { display: none; }
+.contacts { max-width: 760px; margin-top: 0; }
+.contacts .v.mail { max-width: none; color: var(--accent); }
+@media (max-width: 599px) {
+  .topics { gap: 10px; }
+  .topics .card { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+  .topics .card .tile-icon { margin: 0; width: 32px; height: 32px; border-radius: 10px; flex: none; }
+  .topics .card .tile-icon .icon { width: 16px; height: 16px; }
+  .topics .card .h4 { flex: 1; min-width: 0; font: 500 15px/21px var(--font); }
+  .topics .card p { display: none; }
+  .topics .go { display: block; flex: none; color: var(--text-tertiary); }
+  .contacts .acc-row { flex-wrap: wrap; }
+  .contacts .v.mail { flex-basis: 100%; padding-left: 44px; text-align: left; margin-top: -6px; }
+}
+/* rows that exist only on a phone, where the column with «Sign out» is gone */
+.phone-only { display: none; }
+@media (max-width: 899px) { .phone-only { display: revert; } }
 .acc-tabs { display: none; }
 /* the header of a signed-in page: the account instead of «Try it» and «Sign in» */
 .havatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(140deg, #5B7EE6, #2C3F87); color: #fff; font: 600 13px/1 var(--font); }
@@ -1292,14 +1374,11 @@ label.acc-row { cursor: pointer; }
   .acc-tabs a[aria-current="page"] { color: var(--accent); }
   .plan-actions .btn.primary { flex: 1 1 100%; justify-content: center; height: 48px; font-size: 16px; }
   .plan-actions .btn.ghost { flex: 1 1 100%; justify-content: center; }
-  .acc-offer { flex-direction: column; align-items: stretch; }
-  .acc-offer .btn { justify-content: center; }
   .acc-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .acc-stats > div { padding: 12px; }
   .acc-stats .n { font-size: 15px; line-height: 20px; }
   .plan-name { font-size: 22px; line-height: 28px; }
-  .acc-out.phone { display: flex; justify-content: center; margin-top: 24px; color: var(--danger); }
-  .acc-out.phone .icon { color: var(--danger); }
+  .server-in { padding-left: 18px; }
   .page-account .proto-bar { display: none; }
   /* in a full-page shot the tab bar sits at the end of the page, not across its middle */
   html.shot body.page-account { position: relative; }
@@ -1383,6 +1462,11 @@ label.acc-row { cursor: pointer; }
 .swin { border-color: transparent; box-shadow: var(--lg-drop); }
 .appwin::after, .swin::after { --rim: var(--lg-rim-strong); }
 
+/* Sign-in: the «without email» offer is a line and a button beside it, stacked on a phone; on a phone the side
+   loses its big mark, and the page where you type the code has no side at all (the code is the only task there) */
+.key-offer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; }
+@media (max-width: 599px) { .key-offer { grid-template-columns: minmax(0, 1fr); } .key-offer .btn { justify-self: start; } }
+@media (max-width: 899px) { .auth-side > .inner > svg:first-child { display: none; } .auth-side .h3 { margin-top: 0 !important; } .auth-side.quiet { display: none; } }
 /* Sign-in: the side that says what the account keeps is a pane of the same glass, not a grey slab */
 .auth-side { background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)); border-color: rgba(255, 255, 255, 0.07); }
 
@@ -1427,7 +1511,7 @@ label.acc-row { cursor: pointer; }
 .tile-icon { border-radius: 12px; background: linear-gradient(180deg, rgba(111, 143, 234, 0.30), rgba(111, 143, 234, 0.12)); box-shadow: inset 0 1px 0 rgba(200, 214, 255, 0.22), inset 0 0 0 1px rgba(143, 178, 255, 0.18); }
 .tile-icon.neutral, .acc-row .ic, .device .dicon, .keys .kl .ki { border-color: transparent; background: var(--lgc-tint); box-shadow: var(--lgs); }
 .acc-row .ic, .device .dicon { border-radius: 10px; }
-.steps > li::before, .steps3 li::before { border-color: transparent; background: var(--lgc-tint); box-shadow: var(--lgs); }
+.steps > li::before, .steps3 li::before { border-color: transparent; background: var(--lgc-tint); box-shadow: var(--lgs); color: var(--text-primary); }
 
 /* Fields: glass you type into — clear, with a lit upper lip; search fields are capsules */
 .input { background: linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.035)); border-color: rgba(255, 255, 255, 0.10); border-radius: 14px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08); }

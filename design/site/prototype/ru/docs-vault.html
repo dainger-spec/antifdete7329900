@@ -45,6 +45,7 @@
     <h1 class="h1" style="font-size:40px;line-height:46px">Хранилище и мастер-пароль</h1>
     <p class="lead" style="margin-top:14px;max-width:720px">Что Lumen хранит зашифрованным и как мастер-пароль становится ключами. Как разблокировать и заблокировать хранилище, сменить пароль — и что делать, если он забыт.</p>
     <p class="doc-meta"><span>По коду от 31 октября 2026</span><span>Читать: пять минут</span></p>
+    <details class="toc-mini"><summary>На этой странице<svg class="icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.2 6.2L8 10l3.8-3.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></summary><ul><li><a href="#contents">Что лежит в хранилище</a></li><li><a href="#keys">Как шифруются данные</a></li><li><a href="#lock">Разблокировка и блокировка</a></li><li><a href="#change">Смена мастер-пароля</a></li><li><a href="#forgot">Если вы забыли мастер-пароль</a></li><li><a href="#sync">Что видит место синхронизации</a></li></ul></details>
     <hr style="margin:32px 0 8px">
     <div class="prose"><h2 id="contents">Что лежит в хранилище</h2>
 <p>Хранилище — папка <code>PrivacyBrowser</code> в Application Support вашей учётной записи. В сборке с песочницей App Sandbox это <code>~/Library/Containers/…/Data/Library/Application Support/PrivacyBrowser</code>, в сборке без песочницы — <code>~/Library/Application Support/PrivacyBrowser</code>. Какая у вас сборка, видно в <strong>Настройки → О приложении → Сборка</strong>.</p>
@@ -76,6 +77,7 @@
 <p>Место синхронизации видит:</p>
 <ul><li>заголовок хранилища — открыто, как <code>vault.json</code>: он нужен, чтобы другой Mac открыл хранилище тем же паролем (подключить так второй Mac в самом приложении пока нельзя);</li><li>сколько там объектов, их размеры, номера версий и когда они меняются;</li><li>сервер — ещё и IP-адрес этого Mac: синхронизация идёт напрямую, не через прокси профилей.</li></ul>
 <p>Список профилей, настройки, пароли, закладки, история и постоянные cookies уходят зашифрованными (файлы профилей — дважды), а имена объектов заменены непрозрачными метками. Названий профилей, адресов сайтов, прокси, паролей и cookies место синхронизации не видит. Остальные данные сайтов не синхронизируются.</p></div>
+    
     <p class="caption" style="margin-top:48px">Нашли ошибку или чего-то не хватает? <a href="support.html">Напишите нам</a>.</p>
     <nav class="pager" aria-label="Соседние статьи">
       <a href="docs-install.html"><div class="k">← Назад · Начало работы</div><div class="t">Установка и первый запуск</div></a>

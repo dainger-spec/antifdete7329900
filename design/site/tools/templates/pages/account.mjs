@@ -28,7 +28,6 @@ export default function account(c, { lang, slug, state }) {
         <div class="plan-actions"><a class="btn primary" href="checkout.html">${icon('wallet', 15)}${inline(o.renew, lang)}</a><a class="btn ghost" href="pricing.html">${inline(o.change, lang)}</a></div>
       </section>
       <p class="acc-hint">${icon('envelope', 14)}<span>${inline(o.hint, lang)}</span></p>
-      <section class="acc-card acc-offer"><div><div class="t">${icon('calendar', 15)}${inline(o.year.t, lang)}</div><p>${inline(o.year.d, lang)}</p></div><a class="btn secondary sm" href="checkout.html">${inline(o.year.action, lang)}</a></section>
       <ul class="acc-list">${o.rows.map(([href, ic, k, v]) => row(href, ic, k, v)).join('')}</ul>`;
   } else if (state === 'devices') {
     const d = c.devices, s = d.sync;
@@ -38,13 +37,14 @@ export default function account(c, { lang, slug, state }) {
       <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(d.note, lang)}</span></p>
       <h2 class="acc-h" id="sync" style="margin-top:36px">${inline(s.title, lang)}</h2>
       <div class="acc-stats" data-sample>${s.stats.map(([k, v]) => `<div><div class="n">${inline(v, lang)}</div><div class="k">${inline(k, lang)}</div></div>`).join('')}</div>
-      <section class="acc-card server">
-        <div class="t">${icon('lockFill', 15)}${inline(s.serverTitle, lang)}</div>
-        <p class="lead-s">${inline(s.serverLead, lang)}</p>
-        <ul class="server-list" data-sample>${s.rows.map(([n, z]) => `<li><span class="mono">${esc(n)}</span><span>${esc(z)}</span></li>`).join('')}<li class="more">${inline(s.more, lang)}</li></ul>
-        <p class="server-names">${inline(s.names, lang)}</p>
-      </section>
-      <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(s.headerNote, lang)}</span></p>
+      <section class="acc-card server"><details>
+        <summary><span class="ic">${icon('lockFill', 15)}</span><span class="k"><span class="t">${inline(s.serverTitle, lang)}</span><span class="sub">${inline(s.serverSub, lang)}</span></span>${icon('chevronDown', 14)}</summary>
+        <div class="server-in">
+          <p class="lead-s">${inline(s.serverLead, lang)}</p>
+          <ul class="server-list" data-sample>${s.rows.map(([n, z]) => `<li><span class="mono">${esc(n)}</span><span>${esc(z)}</span></li>`).join('')}<li class="more">${inline(s.more, lang)}</li></ul>
+          <p class="acc-hint">${icon('infoCircle', 14)}<span>${inline(s.headerNote, lang)}</span></p>
+        </div>
+      </details></section>
       <div class="acc-danger"><a class="btn ghost sm danger-text" href="account-devices.html">${inline(s.danger.action, lang)}</a><span>${inline(s.danger.text, lang)}</span></div>`;
   } else if (state === 'invoices') {
     const v = c.invoices;
@@ -55,16 +55,16 @@ export default function account(c, { lang, slug, state }) {
     const s = c.settings;
     content = `<h1 class="acc-title">${inline(s.title, lang)}</h1>
       <h2 class="acc-h">${inline(s.signin.title, lang)}</h2>
-      <ul class="acc-list" data-sample>${s.signin.rows.map(([k, v], i) => `<li><div class="acc-row"><span class="k">${inline(k, lang)}</span><span class="v">${inline(v, lang)}</span>${i === 0 ? `<a class="btn ghost sm" href="account-settings.html">${inline(s.signin.change, lang)}</a>` : ''}</div></li>`).join('')}
-        <li><a class="acc-row" href="login-key.html"><span class="ic">${icon('key', 16)}</span><span class="k">${inline(s.signin.toKey, lang)}<span class="sub">${inline(s.signin.toKeyText, lang)}</span></span>${icon('chevronRight', 14)}</a></li></ul>
+      <ul class="acc-list" data-sample>${s.signin.rows.map(([k, v], i) => `<li><div class="acc-row"><span class="k">${inline(k, lang)}</span><span class="v">${inline(v, lang)}</span>${i === 0 ? `<a class="btn ghost sm" href="account-settings.html">${inline(s.signin.change, lang)}</a>` : ''}</div></li>`).join('')}</ul>
       <h2 class="acc-h">${inline(s.email.title, lang)}</h2>
-      <ul class="acc-list">${s.email.items.map(([t, on, locked]) => `<li><label class="acc-row"><span class="k">${inline(t, lang)}</span><input class="switch" type="checkbox"${on ? ' checked' : ''}${locked ? ' disabled' : ''}></label></li>`).join('')}
+      <ul class="acc-list">${s.email.items.map(([t, on, locked]) => locked ? `<li><div class="acc-row"><span class="k">${inline(t, lang)}</span><span class="v">${inline(s.email.always, lang)}</span></div></li>` : `<li><label class="acc-row"><span class="k">${inline(t, lang)}</span><input class="switch" type="checkbox"${on ? ' checked' : ''}></label></li>`).join('')}
         <li><div class="acc-row"><span class="k">${inline(s.email.lang, lang)}</span><span class="seg"><a aria-current="${lang === 'ru'}">RU</a><a aria-current="${lang === 'en'}">EN</a></span></div></li></ul>
       <h2 class="acc-h">${inline(s.sessions.title, lang)}</h2>
       <ul class="acc-list"><li><div class="acc-row"><span class="ic">${icon('globe', 16)}</span><span class="k">${inline(s.sessions.current, lang)}</span></div></li>
+        <li class="phone-only"><a class="acc-row" href="index.html"><span class="ic">${icon('logout', 16)}</span><span class="k">${inline(s.sessions.out, lang)}</span>${icon('chevronRight', 14)}</a></li>
         <li><a class="acc-row" href="login.html"><span class="ic">${icon('logout', 16)}</span><span class="k">${inline(s.sessions.all, lang)}</span>${icon('chevronRight', 14)}</a></li></ul>
-      <div class="acc-danger" style="margin-top:36px"><a class="btn ghost sm danger-text" href="account-settings.html">${inline(s.danger.action, lang)}</a><span>${inline(s.danger.text, lang)}</span></div>
-      <a class="acc-out phone" href="index.html">${icon('logout', 16)}${esc(c.logout)}</a>`;
+      <div class="acc-danger" style="margin-top:36px"><a class="btn ghost sm" href="account-settings.html">${inline(s.key.action, lang)}</a><span>${inline(s.key.text, lang)}</span></div>
+      <div class="acc-danger"><a class="btn ghost sm danger-text" href="account-settings.html">${inline(s.danger.action, lang)}</a><span>${inline(s.danger.text, lang)}</span></div>`;
   }
   return { title: c.title, body: `<div class="container"><div class="acc">${side}<div class="acc-main">${content}</div></div></div>${tabs}`, bodyClass: 'page-account', hideFooter: true };
 }

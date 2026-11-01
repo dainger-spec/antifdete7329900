@@ -9,6 +9,7 @@ export default function legal(c, { lang, slug, state }) {
     <h1 class="h1">${inline(doc.title, lang)}</h1>
     <p class="lead">${inline(doc.lead, lang)}</p>
     <p class="doc-meta"><span>${inline(c.updatedLabel, lang)} ${inline(c.updated, lang)}</span></p>
+    <details class="toc-mini"><summary>${esc(c.tocTitle)}${icon('chevronDown', 14)}</summary><ul>${doc.toc.map(([id, t]) => `<li><a href="#${id}">${inline(t, lang)}</a></li>`).join('')}</ul></details>
   </div></section>`;
   const toc = `<aside class="local-nav" data-localnav aria-label="${esc(c.tocTitle)}"><h2>${esc(c.tocTitle)}</h2><div class="track"><ol>${doc.toc.map(([id, t]) => `<li><a href="#${id}">${inline(t, lang)}</a></li>`).join('')}</ol><span class="indicator" style="opacity:0"></span></div></aside>`;
   const body = `<div class="container"><div class="with-nav" style="padding-bottom:96px;border-top:1px solid var(--divider);padding-top:48px">${toc}<div class="prose legal">${markdown(doc.body, lang, { icon })}</div></div></div>`;

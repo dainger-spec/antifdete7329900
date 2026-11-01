@@ -6,7 +6,7 @@ export default {
   hero: {
     eyebrow: 'How it works',
     title: 'How {{name}} keeps profiles apart',
-    lead: 'For technical readers: which processes start, where the keys are, how a profile’s traffic reaches its proxy, and what the sync server sees. And where all of it stops.',
+    lead: 'For technical readers: which processes start, where the keys are, how a profile’s traffic reaches its proxy, and what the sync server sees.',
   },
   navTitle: 'Sections',
   nav: [

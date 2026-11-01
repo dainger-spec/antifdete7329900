@@ -22,8 +22,7 @@ export default async function features(c, { lang, copy }) {
   const s = c.safari;
   const safari = `<section class="fblock" id="safari">${head(s)}
   <div class="fgrid single">
-    <div class="measure">${checkList(s.points, lang, { accent: true })}</div>
-    <div class="table-wrap reveal"><table class="table compact stack-mobile">
+    <div class="table-wrap reveal"><table class="table compact stack-mobile key-first">
       <thead><tr>${s.table.head.map((h, i) => `<th${i === 2 ? ' style="color:var(--text-primary)"' : ''}>${inline(h, lang)}</th>`).join('')}</tr></thead>
       <tbody>${s.table.rows.map((r) => `<tr><td data-label="${esc(s.table.head[0])}">${inline(r[0], lang)}</td><td data-label="${esc(plain(s.table.head[1]))}">${inline(r[1], lang)}</td><td class="strong" data-label="${esc(plain(s.table.head[2]))}">${inline(r[2], lang)}</td></tr>`).join('')}</tbody>
     </table></div>
@@ -86,12 +85,12 @@ export default async function features(c, { lang, copy }) {
     </div>
   </div>`;
   const l = x.list;
-  const plist = `<div class="table-wrap reveal"><table class="table compact stack-mobile">
+  const plist = `<div class="table-wrap reveal"><div class="table-scroll"><table class="table compact stack-mobile key-first">
     <thead><tr><th>${esc(l.head[0])}</th><th>${esc(l.head[2])}</th><th class="num">${esc(l.head[3])}</th></tr></thead>
     <tbody>${l.rows.map((r) => `<tr>
-      <td data-label="${esc(l.head[0])}"><span style="display:block;color:var(--text-primary);font-weight:500">${esc(r.label || r.host)}</span><span class="sub">${esc(r.kind)}${r.label ? ` · <span class="mono">${esc(r.host)}</span>` : ''}</span></td>
+      <td data-label="${esc(l.head[0])}"><span style="display:block;color:var(--text-primary);font-weight:500">${esc(r.label || r.host)}</span><span class="sub">${esc(r.kind)}</span></td>
       <td data-label="${esc(l.head[2])}">${r.dead ? result('fail', r.dead, lang) : `<span class="row" style="gap:7px;flex-wrap:nowrap">${flag(r.code, 14)}${esc(r.exit)}</span>`}</td>
-      <td data-label="${esc(l.head[3])}" class="num">${r.ms ? esc(r.ms) : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+      <td data-label="${esc(l.head[3])}" class="num">${r.ms ? esc(r.ms) : '—'}</td></tr>`).join('')}</tbody></table></div></div>`;
   const proxy = `<section class="fblock" id="proxy">${head(x)}
   <div class="fgrid">
     <div>${checkList(x.points, lang, { accent: true, glyph: 'shieldCheck' })}</div>
@@ -108,22 +107,8 @@ export default async function features(c, { lang, copy }) {
   const v = c.verification;
   const verification = `<section class="fblock" id="verification">${head(v)}
   <div class="stats c3 reveal" style="margin-top:40px">${v.stats.map((st) => stat(st, lang)).join('')}</div>
-  <p style="margin-top:20px">${linkArrow('verification.html', v.link, lang)}</p>
-</section>`;
-
-  // 6. Noise
-  const n = c.noise;
-  const same = ru
-    ? [['Canvas', 'тот же data URL, байт в байт'], ['WebGL', 'производитель, рендерер, расширения, параметры'], ['Шрифты', 'метрики текста'], ['Navigator и экран', 'все значения']]
-    : [['Canvas', 'the same data URL, byte for byte'], ['WebGL', 'vendor, renderer, extensions, parameters'], ['Fonts', 'text metrics'], ['Navigator and screen', 'every value']];
-  const noise = `<section class="fblock" id="noise">${head(n)}
-  <div class="fgrid">
-    <div class="stack-lg">${n.paras.map((t) => `<p class="muted">${inline(t, lang)}</p>`).join('')}</div>
-    <div class="stack">
-      <div class="table-wrap reveal"><div class="panel-head" style="border-bottom:1px solid var(--hairline)"><div><h3 style="font:600 15px/22px var(--font)">${ru ? 'Профиль против Safari на том же Mac' : 'A profile against Safari on the same Mac'}</h3><p>${ru ? 'Каждая сборка, страница-зонд' : 'Every build, the probe page'}</p></div></div>
-        <table class="table compact"><tbody>${same.map(([k, d]) => `<tr><td class="strong">${esc(k)}<span class="sub">${esc(d)}</span></td><td class="num">${result('same', ru ? 'совпадает' : 'identical', lang)}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  </div>
+  <p class="muted" style="margin-top:24px;max-width:760px">${inline(v.noise, lang)}</p>
+  <p class="row" style="margin-top:16px;gap:10px 28px">${linkArrow('verification.html', v.link, lang)}${linkArrow('blog-no-noise.html', v.noiseLink, lang)}</p>
 </section>`;
 
   // 7. Warm-up
@@ -138,18 +123,13 @@ export default async function features(c, { lang, copy }) {
   // 8. Data
   const d = c.data;
   const data = `<section class="fblock" id="data">${head(d)}
-  <div class="grid c3" style="margin-top:40px">${d.items.map((it) => `<div class="card reveal"><span class="tile-icon">${icon(it.icon, 18)}</span><h3 class="h4">${inline(it.title, lang)}</h3><p>${inline(it.text, lang)}</p></div>`).join('')}</div>
+  <div class="grid c3 data-cards" style="margin-top:40px">${d.items.map((it) => `<div class="card reveal"><span class="tile-icon">${icon(it.icon, 18)}</span><h3 class="h4">${inline(it.title, lang)}</h3><p>${inline(it.text, lang)}</p></div>`).join('')}</div>
 </section>`;
 
   const ct = c.cta;
-  const st = c.steps;
-  const steps = `<section class="band"><div class="container">
-    <h2 class="h2 big center-text">${inline(st.title, lang)}</h2>
-    <ol class="steps3">${st.items.map((it) => `<li class="reveal"><h3>${inline(it.t, lang)}</h3><p>${inline(it.d, lang)}</p></li>`).join('')}</ol>
-  </div></section>`;
   const faq = `<section class="section" id="faq"><div class="container medium">
     <h2 class="h2 big" style="margin-bottom:32px">${inline(c.faqTitle, lang)}</h2>
-    <div class="faq">${c.faq.map((f, i) => `<details${i === 0 ? ' open' : ''}><summary>${inline(f.q, lang)}${icon('chevronDown', 16)}</summary><div class="answer"><p>${inline(f.a, lang)}</p></div></details>`).join('')}</div>
+    <div class="faq">${c.faq.map((f) => `<details><summary>${inline(f.q, lang)}${icon('chevronDown', 16)}</summary><div class="answer"><p>${inline(f.a, lang)}</p></div></details>`).join('')}</div>
   </div></section>`;
 
   const cta = `<section class="cta-band"><div class="container"><div class="inner">
@@ -158,7 +138,7 @@ export default async function features(c, { lang, copy }) {
   </div></div></section>`;
 
   return {
-    body: `${hero}\n${chipnav}\n<div class="container"><div class="with-nav" style="padding-top:56px;padding-bottom:40px">${localnav}<div class="fblocks">${[safari, process, encryption, proxy, verification, noise, warmup, data].join('\n')}</div></div></div>\n${steps}\n${faq}\n${cta}`,
+    body: `${hero}\n${chipnav}\n<div class="container"><div class="with-nav" style="padding-top:56px;padding-bottom:40px">${localnav}<div class="fblocks">${[safari, process, encryption, proxy, verification, warmup, data].join('\n')}</div></div></div>\n${faq}\n${cta}`,
     bodyClass: 'page-features',
   };
 }
