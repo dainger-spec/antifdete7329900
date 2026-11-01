@@ -20,7 +20,7 @@ Code from the email
 
 New password
 
-At least 10 characters.
+10 to 256 characters.
 
 Repeat new password
 

@@ -20,7 +20,7 @@ Email
 
 Password
 
-At least 10 characters. This is the account’s password, not your profiles’ master password.
+10 to 256 characters. This is the account’s password, not your profiles’ master password.
 
 [Create account]
 

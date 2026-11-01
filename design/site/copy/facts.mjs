@@ -54,6 +54,8 @@ export const FACTS = [
   { value: ['7', '3'], what: 'пробный период: 7 дней, до 3 профилей', source: 'решение владельца, вопрос 3' },
   { value: ['14', '7'], what: 'возврат: 14 дней с первой оплаты, 7 дней после продления', source: 'решение владельца, вопрос 10' },
   { value: ['20', '100', '200', '1', '4'], what: 'место для синхронизации: 20 МБ на профиль тарифа, не меньше 100 МБ — 200 МБ на «Личном», 1 ГБ на «Профессиональном», 4 ГБ на всю «Команду», 100 МБ в пробном периоде', source: 'решение владельца, вопрос 16 (1 ноября 2026): «20 МиБ на профиль тарифа, не меньше 100 МиБ. Получается 200 МБ на «Личном», 1 ГБ на «Профессиональном», 4 ГБ на «Команде»»; так считает сервер — lumen-api-server docs/SYNC_SERVER.md, «Квота»: max(100 МиБ, профилей в тарифе × 20 МиБ)' },
+  { value: ['15', '5'], what: 'код из письма: действует 15 минут, ввести можно 5 раз', source: 'lumen-api-server docs/CONTRACT.md §15: «Код из письма | 6 цифр, 15 минут, 5 попыток»; §3 invalid_code' },
+  { value: ['10', '256'], what: 'символов в пароле аккаунта: от 10 до 256', source: 'lumen-api-server docs/CONTRACT.md §3: invalid_password «Пароль — от 10 до 256 символов»; §5.1' },
   // The documentation (docs-*.html), from the browser's code at 194828b and docs/SCALE.md; every source in
   // design/site/docs-sources/<article>.md
   { value: ['27', '26.1'], what: 'Safari 27 и macOS 27 (вид iPhone, раннеры CI); iOS 26.1 и новее (замороженный токен ОС)', source: 'Sources/BrowserCore/…/DeviceGeneration.swift:23-24, 128-138 (gen.ios27); docs/SCALE.md (раннеры macOS 26.6.2 и 27.0.1); docs/ISOLATION_AND_LIMITATIONS.md:304-308' },
