@@ -67,6 +67,23 @@ def run(command, env=None, timeout=None, log=None):
     return status, output
 
 
+def run_live(command, env, log):
+    """(exit status, output) of a long command, its output shown as it comes and kept in `log`."""
+    collected = []
+    try:
+        process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    except OSError as error:
+        return -1, str(error)
+    with open(log, "w") as handle:
+        for raw in process.stdout:
+            line = raw.decode("utf-8", "replace")
+            sys.stdout.write("  | " + line)
+            sys.stdout.flush()
+            handle.write(line)
+            collected.append(line)
+    return process.wait(), "".join(collected)
+
+
 def decode_profile(path):
     status, _ = run(["security", "cms", "-D", "-i", path, "-o", path + ".plist"])
     if status != 0 or not os.path.exists(path + ".plist"):
@@ -229,7 +246,8 @@ def main():
                        OUT=os.path.join(out, "release"))
     release_env.pop("UPDATE_KEY_FILE", None)  # a throwaway update key: a check of signing, not a release
     started = time.time()
-    status, log = run(["scripts/release.sh"], env=release_env, log=os.path.join(out, "release.log"))
+    say("(about ten minutes: the build, then Apple's notary service)")
+    status, log = run_live(["scripts/release.sh"], release_env, os.path.join(out, "release.log"))
     say("exit status %d after %d s" % (status, time.time() - started))
     app = os.path.join(out, "release", "app", "Lumen.app")
     sysext = os.path.join(app, "Contents", "Library", "SystemExtensions", extension + ".systemextension")
