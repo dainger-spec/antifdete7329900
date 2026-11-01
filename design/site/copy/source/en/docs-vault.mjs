@@ -51,11 +51,17 @@ Even with the vault open, the app asks for the master password before showing sa
 2. Fill in **Current password**, **New password** and **Repeat new password**.
 3. Click **Change** — available once the new password has at least 10 characters and both new fields match.
 
-As the window says: “Only the wrapped vault key is re-encrypted; profile data is unchanged.” The new password gets a new salt.
+Only the key that opens the vault is encrypted anew with the new password; your data and its keys stay as they are. The new password goes to the sync location, so new devices join with it.
+
+It does not reach copies made before: an earlier copy of \`vault.json\` (a backup, Time Machine, a Mac that already syncs) still opens the vault with the old password, including what you save after the change.
 
 ::: warn
-The vault key stays the same. An old copy of \`vault.json\` — from a Mac backup, say — still opens with the old password, and the current data with it. A sync location gets the header at the first sync, and the app doesn’t update it after a change: there it stays under the old password.
+If such a copy may be in someone else's hands, changing the password is not enough: move your profiles to a new vault (export each profile, create a new vault, import them; an import encrypts everything under new keys).
 :::
+
+If it can't be sent to the sync location, the app says: “The new master password is set on this Mac. It could not be sent to the sync location now (…): it goes there at the next sync. Until then, new devices join with the old one.”
+
+If the sync location keeps another Mac's password: “The new master password is set on this Mac, but the sync location keeps another Mac's, changed there later or at the same time: new devices join with that one.”
 
 ## If you forgot the master password {#forgot}
 

@@ -1,6 +1,6 @@
 # docs-vault — facts
 
-Source: `/home/user/product-src` at 194828b (branch `claude/secret-partner-setup-e505tc`), read-only. Paths are relative to it
+Source: `/home/user/product-src` at 194828b (branch `claude/secret-partner-setup-e505tc`), read-only; #change follows the same branch at 83f931a (the fix of the password change and sync). Paths are relative to it
 unless they start with `/`. `Localizable.strings` keys sit on the same line in `Resources/ru.lproj` and `Resources/en.lproj`.
 
 Word count (lead + body; tokens containing letters, markdown markers excluded): ru 806, en 883 (with numbers counted: ru 821,
@@ -57,9 +57,8 @@ en 895).
 |---|---|
 | **⋯** (**Ещё**) → **Сменить мастер-пароль…** | `ProfileListView.swift:548-569` (the ⋯ menu; `profiles.menu.changePassword` at :558; tooltip `profiles.menu.more`), `:86` (sheet `ChangePasswordView`). |
 | Fields **Текущий пароль**, **Новый пароль**, **Повторите новый пароль**; **Сменить** available once new ≥ 10 characters and both new fields match | `VaultViews.swift:178-213` (`.disabled(current.isEmpty \|\| new.count < 10 \|\| new != confirmation)` at :207). A wrong current password is refused by `MasterVault.changePassword` (`:205`) and shown in the error alert (`AppModel.swift:331-338`). |
-| «Перешифровывается только обёрнутый ключ хранилища; данные профилей не меняются.»; the new password gets a new salt | `changepw.note` (33); `MasterVault.swift:200-208, 222-232` (`rewrap` with `.recommended()` → new random 16-byte salt, same VMK); `Tests/BrowserCoreTests/BrowserCoreTests.swift:69-80` (`testChangePasswordKeepsData`). |
-| Warn: the vault key doesn't change, so an old copy of `vault.json` still opens with the old password, and the current data with it | `MasterVault.swift:225` (`masterKey.rawBytes` — the same VMK re-wrapped); profile keys are wrapped under HKDF(VMK) (`:180`), unchanged; `docs/ARCHITECTURE.md:113-115` (“Changing the master password re-wraps only the VMK”). Consequence derived from these lines: old header + old password → VMK → every current key. |
-| Warn: a sync location gets the header at the first sync; the app doesn't update it after a change — it stays under the old password | `Sources/BrowserCore/Sync/SyncEngine.swift:111-118` (`sync()` publishes `vault-header` only when it is absent), `:88-104` (`publishVaultHeader()` — the update path — has **no caller in the app**: `grep -rn publishVaultHeader Sources/` finds only its definition and the call at :113); `AppModel.swift:331-338` (`changePassword` does not touch sync). `docs/SYNC_FORMAT.md:251-253` says to call `publishVaultHeader()` after a change — the app doesn't. |
+| The window's note, quoted word for word in both languages (three paragraphs, the last one in a warn box): «Новым паролем заново шифруется только ключ, который открывает хранилище; …» / “Only the key that opens the vault is encrypted anew with the new password; …” | `changepw.note` (33) at **83f931a** (branch `claude/secret-partner-setup-e505tc`, 1 November 2026: the fix). The developer's account of the same behaviour: `docs/ARCHITECTURE.md:116-141`, «Changing the master password: what it does, and what it does not». Code: `MasterVault.swift:230-237` (`changePassword` re-verifies the current password, re-wraps the VMK, `passwordRevision` one above both headers); `AppModel.swift:410-430` (`changePassword` then `publishPasswordChange` to the sync location right away). Inserted verbatim at the developer's request (relayed by the owner); not marked unconfirmed — the developer confirms it by reading the code and by the fix. |
+| The two messages after a change, quoted word for word: the location out of reach (`(…)` stands for the error the app inserts), and another Mac's password kept there | `changepw.sync.later` (34), `changepw.sync.notThere` (35) at 83f931a; shown by `AppModel.swift:445-460` (`publishPasswordChange`: `publishVaultHeader() != .published` → `notThere`; an error → `later` with the error's text). |
 
 ### #forgot — If you forgot the master password
 
@@ -136,7 +135,7 @@ None. Every statement above is backed by code, a test or a repository doc; thing
 
 ## Discrepancies found while writing (not in the article)
 
-- **Password change vs. sync:** `docs/SYNC_FORMAT.md:251-253` says to call `publishVaultHeader()` after a master-password change; nothing in the app does, and `sync()` only publishes a missing header. The sync location keeps the old header for good, so the old password keeps opening it (and a new device bootstrapped from it would need the old password). Worth a fix or at least a decision.
+- **Password change vs. sync — fixed at 83f931a:** at 194828b nothing in the app called `publishVaultHeader()` after a master-password change, so the sync location kept the old header. The fix publishes it right after the change (`AppModel.swift:410-460`), and a header with fewer changes is never put back (`SyncEngine.publishVaultHeader`); #change now quotes the app's own text about it.
 - **`sync.footer` is wrong about cookies:** both languages (line 751) say cookies are not synced («Не синхронизируется: данные сайтов (cookie, хранилище, кэш)»), but persistent cookies do sync (`ProfileRepository.swift:573-576` `ProfileSyncFile.cookies`; `docs/SYNC_FORMAT.md:189-206`; README.md:278). The article follows the code.
 - **No UI joins a second Mac to a sync location** although `docs/ARCHITECTURE.md:113-115` presents “a new device unlocks with the same password” as a feature: the core has it (`SyncEngine.bootstrap`), the app does not.
 - **ROADMAP 0.3 wording:** the article avoids the positioning words the ROADMAP warns about; nothing in the vault code needed them.
