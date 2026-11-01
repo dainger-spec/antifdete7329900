@@ -719,6 +719,7 @@
 "proxies.assign.planRotation" = "Отмеченные профили (%1$ld) получат прокси (%2$ld) по очереди:";
 "proxies.assign.note" = "Запущенный профиль перейдёт на новый прокси при следующем запуске.";
 "proxies.assign.action" = "Назначить (%ld)";
+"proxies.assign.failed.typeUnknown" = "тип прокси ещё не известен: сначала проверьте его";
 "proxies.assign.failed" = "Прокси для профиля «%1$@» не назначен: %2$@";
 "profiles.bulk.selected" = "Выбрано: %ld";
 "profiles.bulk.launch" = "Запустить";

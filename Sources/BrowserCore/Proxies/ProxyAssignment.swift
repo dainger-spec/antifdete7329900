@@ -77,7 +77,7 @@ extension ProfileRepository {
                 try saveConfiguration(assigned, for: id)
                 outcome.changed.append(id)
             } catch {
-                outcome.failed[id] = (error as? CoreError)?.description ?? error.localizedDescription
+                outcome.failed[id] = error.localizedDescription
             }
         }
         return outcome
@@ -106,7 +106,7 @@ extension ProfileRepository {
                 try saveConfiguration(followed, for: summary.id)
                 outcome.changed.append(summary.id)
             } catch {
-                outcome.failed[summary.id] = (error as? CoreError)?.description ?? error.localizedDescription
+                outcome.failed[summary.id] = error.localizedDescription
             }
         }
         return outcome

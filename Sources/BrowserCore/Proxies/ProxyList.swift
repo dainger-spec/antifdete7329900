@@ -322,7 +322,8 @@ public struct ProxyList: Codable, Equatable, Sendable {
     @discardableResult
     public mutating func update(_ id: UUID, label: String, proxy: ProxySettings, kindKnown: Bool = true) throws -> ProxySettings {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { throw EditProblem.notFound }
-        do { try proxy.validate() } catch { throw EditProblem.invalid((error as? CoreError)?.description ?? "\(error)") }
+        // Shown to the person: in their language (`CoreErrorText`), never `description`, which is the logs' English.
+        do { try proxy.validate() } catch { throw EditProblem.invalid(error.localizedDescription) }
         let identity = Self.identity(of: proxy)
         if let other = entries.first(where: { $0.id != id && Self.identity(of: $0.proxy) == identity }) {
             throw EditProblem.alreadyListed(other.id)

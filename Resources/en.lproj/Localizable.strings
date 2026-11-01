@@ -719,6 +719,7 @@
 "proxies.assign.planRotation" = "The ticked profiles (%1$ld) get the proxies (%2$ld) in turn:";
 "proxies.assign.note" = "A running profile uses its new proxy from its next launch.";
 "proxies.assign.action" = "Assign (%ld)";
+"proxies.assign.failed.typeUnknown" = "the proxy's type is not known yet: check it first";
 "proxies.assign.failed" = "No proxy was assigned to “%1$@”: %2$@";
 "profiles.bulk.selected" = "Selected: %ld";
 "profiles.bulk.launch" = "Launch";
