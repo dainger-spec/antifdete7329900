@@ -27,7 +27,7 @@ jobs:
       - name: Build the app without the App Sandbox
         timeout-minutes: 30
         run: DEBUGGABLE=1 SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
-      - name: Pages in a profile's own process: a Smart App Banner, and addresses apps of this Mac open (watch, nil, fix)
+      - name: "Pages in a profile's own process — a Smart App Banner, and addresses apps of this Mac open (watch, nil, fix)"
         continue-on-error: true
         timeout-minutes: 20
         run: |
