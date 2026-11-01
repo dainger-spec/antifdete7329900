@@ -32,8 +32,12 @@ struct SettingsView: View {
             }
             .id(section)
         }
-        .frame(width: Self.size.width, height: Self.size.height)
-        .background(Theme.backdrop)
+        // The window's whole content area, not a fixed 1000 × 700 in it: with the title bar made
+        // transparent (fullSizeContentView, PrivacyBrowserApp) the area grows by the bar's height,
+        // and a fixed frame left a band of the window's own grey at the foot (the owner, 1 November).
+        .frame(minWidth: Self.size.width, idealWidth: Self.size.width, maxWidth: .infinity,
+               minHeight: Self.size.height, idealHeight: Self.size.height, maxHeight: .infinity)
+        .background(Theme.backdrop.ignoresSafeArea())
         .ignoresSafeArea(.container, edges: .top)
         .environment(\.colorScheme, .dark)
         .tint(Theme.accentFill)

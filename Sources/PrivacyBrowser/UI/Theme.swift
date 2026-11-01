@@ -136,6 +136,16 @@ enum Theme {
         window.appearance = chromeAppearance
     }
 
+    /// The app's own windows (Profiles, Settings): dark, and the window itself in the backdrop's
+    /// tone, so that nothing of the system's grey can show where the content does not reach — the
+    /// owner's Settings window had a light grey band at its foot (1 November). A profile's window
+    /// keeps its own (`ProfileWindowTheme`).
+    @MainActor
+    static func applyAppWindow(to window: NSWindow) {
+        applyChrome(to: window)
+        window.backgroundColor = NS.backdrop
+    }
+
     /// The same tokens for AppKit-drawn chrome (browser windows, the tab strip).
     enum NS {
         static let backdrop = NSColor(hex: 0x08090B)

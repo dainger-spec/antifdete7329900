@@ -15,7 +15,7 @@ struct PrivacyBrowserApp: App {
                 .background(WindowReader { window in
                     appDelegate.model = model
                     model.profilesWindow = window
-                    Theme.applyChrome(to: window)
+                    Theme.applyAppWindow(to: window)
                     model.startUpdates()
                 })
         }
@@ -74,7 +74,7 @@ struct PrivacyBrowserApp: App {
                 .environmentObject(model)
                 .preferredColorScheme(.dark)
                 .background(WindowReader { window in
-                    Theme.applyChrome(to: window)
+                    Theme.applyAppWindow(to: window)
                     // The design's settings: the sidebar runs to the top, under the traffic lights.
                     window.styleMask.insert(.fullSizeContentView)
                     window.titlebarAppearsTransparent = true

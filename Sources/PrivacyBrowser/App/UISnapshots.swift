@@ -40,7 +40,7 @@ enum UISnapshots {
     private static func settings(into folder: URL, model: AppModel) async -> Int {
         var problems = 0
         for section in SettingsSection.allCases where section != .updates {
-            problems += await Shot(name: "settings-\(section.rawValue)", size: SettingsView.size, titled: false) {
+            problems += await Shot(name: "settings-\(section.rawValue)", size: SettingsView.size, edges: true) {
                 SettingsView(section: section).environmentObject(model)
             }.capture(into: folder)
         }
@@ -57,15 +57,15 @@ enum UISnapshots {
             notes: "• Safari's chrome: the proxy hook holds on macOS 27.\n• Proxies: a proxy that stays silent after the connection is named as such.\n"
                 + "• Files a newer version wrote are refused, never written over.")
         let ready = AppUpdater(preview: .ready(item), configuration: configuration)
-        problems += await Shot(name: "settings-updates-ready", size: SettingsView.size, titled: false) {
+        problems += await Shot(name: "settings-updates-ready", size: SettingsView.size, edges: true) {
             SettingsView(section: .updates, previewUpdater: ready).environmentObject(model)
         }.capture(into: folder)
         let upToDate = AppUpdater(preview: .upToDate(checkedAt: Date().addingTimeInterval(-25 * 60)), configuration: configuration,
                                   automaticChecks: false, installPolicy: .notifyOnly)
-        problems += await Shot(name: "settings-updates-up-to-date", size: SettingsView.size, titled: false) {
+        problems += await Shot(name: "settings-updates-up-to-date", size: SettingsView.size, edges: true) {
             SettingsView(section: .updates, previewUpdater: upToDate).environmentObject(model)
         }.capture(into: folder)
-        problems += await Shot(name: "settings-updates-unavailable", size: SettingsView.size, titled: false) {
+        problems += await Shot(name: "settings-updates-unavailable", size: SettingsView.size, edges: true) {
             SettingsView(section: .updates).environmentObject(model)
         }.capture(into: folder)
         return problems
@@ -94,16 +94,16 @@ enum UISnapshots {
         actions.lock = { clicks.lock += 1 }
 
         // The Profiles window, wide enough for every column.
-        let profiles = Shot(name: "profiles", size: CGSize(width: 1180, height: 740)) {
+        let profiles = Shot(name: "profiles", size: CGSize(width: 1180, height: 740), edges: true) {
             ProfilesPreview(rows: rows, sync: .synced(Date().addingTimeInterval(-4 * 60)), actions: actions)
         }
         problems += await profiles.capture(into: folder) { window in
             await clickTest(window, clicks: clicks)
         }
-        problems += await Shot(name: "profiles-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620)) {
+        problems += await Shot(name: "profiles-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, isWorking: true)
         }.capture(into: folder)
-        problems += await Shot(name: "profiles-proxied", size: CGSize(width: 1180, height: 560)) {
+        problems += await Shot(name: "profiles-proxied", size: CGSize(width: 1180, height: 560), edges: true) {
             ProfilesPreview(rows: rows, filter: .proxied, sync: .failed)
         }.capture(into: folder)
         // The inspector: one profile (Northwind), one whose settings cannot be read (R1: said there
@@ -115,7 +115,7 @@ enum UISnapshots {
         let banner = ProxyProblemBanner.Item(title: String(format: L("proxyProblem.title.notStarted"), rows[8].name),
                                              text: String(format: L("proxyProblem.subtitle.notStarted"), "us-dal.proxy.example:1080"), // l10n: not text
                                              notStarted: true, more: 0)
-        problems += await Shot(name: "profiles-inspector", size: CGSize(width: 1400, height: 860)) {
+        problems += await Shot(name: "profiles-inspector", size: CGSize(width: 1400, height: 860), edges: true) {
             ProfilesPreview(rows: rows, sync: .synced(Date().addingTimeInterval(-4 * 60)), showsInspector: true,
                             selected: [northwind], inspectorInfo: info, proxyProblem: banner)
         }.capture(into: folder)
@@ -125,13 +125,13 @@ enum UISnapshots {
             ProfileInspectorView(row: rows[1], info: inspected, actions: ProfileActions(), tunnelCarriesWebRTC: true)
                 .background(Theme.sidebar)
         }.capture(into: folder)
-        problems += await Shot(name: "profiles-inspector-unreadable", size: CGSize(width: 1400, height: 860)) {
+        problems += await Shot(name: "profiles-inspector-unreadable", size: CGSize(width: 1400, height: 860), edges: true) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [rows[7].id])
         }.capture(into: folder)
-        problems += await Shot(name: "profiles-inspector-several", size: CGSize(width: 1400, height: 860)) {
+        problems += await Shot(name: "profiles-inspector-several", size: CGSize(width: 1400, height: 860), edges: true) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [rows[1].id, rows[3].id, rows[5].id])
         }.capture(into: folder)
-        problems += await Shot(name: "profiles-inspector-over", size: CGSize(width: 1180, height: 740)) {
+        problems += await Shot(name: "profiles-inspector-over", size: CGSize(width: 1180, height: 740), edges: true) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [northwind], inspectorInfo: info)
         }.capture(into: folder)
         // The command palette (⌘K), as it opens and with something typed.
@@ -188,33 +188,33 @@ enum UISnapshots {
             }
         }
         // A tag chosen in the sidebar; the search also finds a profile by its tags and notes.
-        problems += await Shot(name: "profiles-tag", size: CGSize(width: 1180, height: 560)) {
+        problems += await Shot(name: "profiles-tag", size: CGSize(width: 1180, height: 560), edges: true) {
             ProfilesPreview(rows: rows, filter: .tag("ads"), sync: .off)
         }.capture(into: folder)
-        problems += await Shot(name: "profiles-search-notes", size: CGSize(width: 1180, height: 520)) {
+        problems += await Shot(name: "profiles-search-notes", size: CGSize(width: 1180, height: 520), edges: true) {
             ProfilesPreview(rows: rows, search: "renews", sync: .off)
         }.capture(into: folder)
-        problems += await Shot(name: "profiles-empty", size: CGSize(width: 1180, height: 640)) {
+        problems += await Shot(name: "profiles-empty", size: CGSize(width: 1180, height: 640), edges: true) {
             ProfilesPreview(rows: [], sync: .notYet)
         }.capture(into: folder)
         // The profile index missing, or unreadable, with the profiles' folders kept (never "no
         // profiles yet"); and profile folders a restored, older index does not list.
         let vaultPath = "~/Library/Application Support/Lumen"
-        problems += await Shot(name: "profiles-index-missing", size: CGSize(width: 1180, height: 640)) {
+        problems += await Shot(name: "profiles-index-missing", size: CGSize(width: 1180, height: 640), edges: true) {
             ProfilesPreview(rows: [], sync: .off, indexNotice: AppModel.IndexNotice(kind: .missing, folders: 12, vaultPath: vaultPath))
         }.capture(into: folder)
-        problems += await Shot(name: "profiles-index-unreadable", size: CGSize(width: 1180, height: 640)) {
+        problems += await Shot(name: "profiles-index-unreadable", size: CGSize(width: 1180, height: 640), edges: true) {
             ProfilesPreview(rows: [], sync: .off, indexNotice: AppModel.IndexNotice(kind: .unreadable, folders: 12, vaultPath: vaultPath))
         }.capture(into: folder)
-        problems += await Shot(name: "profiles-index-unlisted", size: CGSize(width: 1180, height: 740)) {
+        problems += await Shot(name: "profiles-index-unlisted", size: CGSize(width: 1180, height: 740), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: AppModel.IndexNotice(kind: .unlisted, folders: 3, vaultPath: vaultPath))
         }.capture(into: folder)
-        problems += await Shot(name: "profiles-index-taken-in", size: CGSize(width: 1180, height: 740)) {
+        problems += await Shot(name: "profiles-index-taken-in", size: CGSize(width: 1180, height: 740), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: AppModel.IndexNotice(kind: .takenIn, folders: 2, vaultPath: vaultPath))
         }.capture(into: folder)
         // Deleted profiles whose folders are kept (R3): one to bring back or remove, one brought back
         // (its old folder kept until removed), one whose folder cannot be read (the Finder only).
-        problems += await Shot(name: "profiles-deleted-kept", size: CGSize(width: 1180, height: 900)) {
+        problems += await Shot(name: "profiles-deleted-kept", size: CGSize(width: 1180, height: 900), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, keptDeleted: [
                 .init(id: UUID(), name: "Retail Audit", createdAt: Date().addingTimeInterval(-40 * 86_400)),
                 .init(id: UUID(), name: "Fall Promo", createdAt: Date().addingTimeInterval(-90 * 86_400), broughtBack: true),
@@ -228,14 +228,14 @@ enum UISnapshots {
         let keptOne: [ProfileRepository.KeptDeletedProfile] = [
             .init(id: UUID(), name: "Retail Audit", createdAt: Date().addingTimeInterval(-40 * 86_400))]
         let unlisted = AppModel.IndexNotice(kind: .unlisted, folders: 3, vaultPath: vaultPath)
-        problems += await Shot(name: "profiles-banners", size: CGSize(width: 1180, height: 640)) {
+        problems += await Shot(name: "profiles-banners", size: CGSize(width: 1180, height: 640), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: unlisted, keptDeleted: keptOne, proxyProblem: threeAtOnce)
         }.capture(into: folder)
-        problems += await Shot(name: "profiles-banners-open", size: CGSize(width: 1180, height: 900)) {
+        problems += await Shot(name: "profiles-banners-open", size: CGSize(width: 1180, height: 900), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: unlisted, keptDeleted: keptOne, proxyProblem: threeAtOnce,
                             bannersExpanded: true)
         }.capture(into: folder)
-        problems += await Shot(name: "profiles-no-matches", size: CGSize(width: 1180, height: 520)) {
+        problems += await Shot(name: "profiles-no-matches", size: CGSize(width: 1180, height: 520), edges: true) {
             ProfilesPreview(rows: rows, search: "zzz", sync: .syncing)
         }.capture(into: folder)
         // The profile editor: one screen, a picture opened on each of its parts (sheets have no
@@ -371,14 +371,14 @@ enum UISnapshots {
         // The launch screen (the Profiles window before unlocking), also while the vault opens.
         let lockModel = AppModel()
         // The lock screen (the design's "Lock and first launch"), on its eclipses.
-        problems += await Shot(name: "launch-unlock", size: CGSize(width: 1180, height: 740)) {
+        problems += await Shot(name: "launch-unlock", size: CGSize(width: 1180, height: 740), edges: true) {
             LockBackdrop { UnlockView().environmentObject(lockModel) }
         }.capture(into: folder)
-        problems += await Shot(name: "launch-setup", size: CGSize(width: 1180, height: 820)) {
+        problems += await Shot(name: "launch-setup", size: CGSize(width: 1180, height: 820), edges: true) {
             LockBackdrop { SetupView().environmentObject(lockModel) }
         }.capture(into: folder)
         // While the password is checked the eclipses close in; once the vault opens they part.
-        problems += await Shot(name: "launch-working", size: CGSize(width: 1180, height: 740)) {
+        problems += await Shot(name: "launch-working", size: CGSize(width: 1180, height: 740), edges: true) {
             LockBackdrop(phase: .busy) {
                 LockScreen(title: L("unlock.title"), subtitle: L("unlock.subtitle")) {
                     LockActionButton(title: L("unlock.action.unlock"), working: true, workingTitle: L("unlock.working")) {}
@@ -386,7 +386,7 @@ enum UISnapshots {
                 }
             }
         }.capture(into: folder)
-        problems += await Shot(name: "launch-open", size: CGSize(width: 1180, height: 740)) {
+        problems += await Shot(name: "launch-open", size: CGSize(width: 1180, height: 740), edges: true) {
             LockBackdrop(phase: .open) { VaultOpenView() }
         }.capture(into: folder)
         problems += await Shot(name: "app-icon", size: CGSize(width: 900, height: 640), titled: false) {
@@ -550,23 +550,23 @@ enum UISnapshots {
             func section(selecting ids: Set<UUID>) -> AnyView {
                 AnyView(ProxyListPanel(proxies: proxies, profileCounts: counts, profilesUsing: names, selection: .constant(ids)))
             }
-            problems += await Shot(name: "proxies", size: CGSize(width: 1400, height: 860)) {
+            problems += await Shot(name: "proxies", size: CGSize(width: 1400, height: 860), edges: true) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [silent.id]))
             }.capture(into: folder)
-            problems += await Shot(name: "proxies-substitute-dns", size: CGSize(width: 1400, height: 860)) {
+            problems += await Shot(name: "proxies-substitute-dns", size: CGSize(width: 1400, height: 860), edges: true) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [substitute.id]))
             }.capture(into: folder)
-            problems += await Shot(name: "proxies-service", size: CGSize(width: 1400, height: 860)) {
+            problems += await Shot(name: "proxies-service", size: CGSize(width: 1400, height: 860), edges: true) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [service.id]))
             }.capture(into: folder)
-            problems += await Shot(name: "proxies-working", size: CGSize(width: 1400, height: 860)) {
+            problems += await Shot(name: "proxies-working", size: CGSize(width: 1400, height: 860), edges: true) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [berlin.id]))
             }.capture(into: folder)
-            problems += await Shot(name: "proxies-several", size: CGSize(width: 1400, height: 860)) {
+            problems += await Shot(name: "proxies-several", size: CGSize(width: 1400, height: 860), edges: true) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count,
                                 proxies: section(selecting: [berlin.id, silent.id, entries[1].id]))
             }.capture(into: folder)
-            problems += await Shot(name: "proxies-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620)) {
+            problems += await Shot(name: "proxies-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [berlin.id]))
             }.capture(into: folder)
             problems += await Shot(name: "sheet-proxy-edit", size: CGSize(width: 560, height: 400), titled: false) {
@@ -929,14 +929,26 @@ private struct Shot {
     let name: String
     let size: CGSize
     var titled = true
+    /// A window of the app's own (Profiles, Settings, the lock screen): hosted as the app hosts it —
+    /// filling whatever the window gives, not forced to `size` — over a window background in a probe
+    /// colour no screen uses. Where that colour, or nothing at all, shows along an edge, the content
+    /// does not reach the window's edge there (`edgeProblems`): the owner's Settings window had a
+    /// band of the system's grey at its foot (1 November), and a window background in the content's
+    /// own tone had hidden it from every snapshot.
+    var edges = false
     let content: () -> AnyView
 
-    init<V: View>(name: String, size: CGSize, titled: Bool = true, @ViewBuilder content: @escaping () -> V) {
+    init<V: View>(name: String, size: CGSize, titled: Bool = true, edges: Bool = false,
+                  @ViewBuilder content: @escaping () -> V) {
         self.name = name
         self.size = size
         self.titled = titled
+        self.edges = edges
         self.content = { AnyView(content()) }
     }
+
+    /// A colour no screen of the app uses.
+    private static let probe = NSColor(srgbRed: 1, green: 0, blue: 1, alpha: 1)
 
     /// Shows the window, lets SwiftUI and AppKit settle, writes `<name>.png` (the whole window,
     /// title bar included) and returns the number of problems (`extra` runs before the window closes).
@@ -950,14 +962,17 @@ private struct Shot {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         Theme.applyChrome(to: window)
-        window.backgroundColor = Theme.NS.backdrop
+        window.backgroundColor = edges ? Self.probe : Theme.NS.backdrop
         // The state a window settles in: no entry animation is caught half-way.
-        let host = NSHostingView(rootView: content()
-            .frame(width: size.width, height: size.height)
+        let root = edges ? AnyView(content().frame(maxWidth: .infinity, maxHeight: .infinity))
+            : AnyView(content().frame(width: size.width, height: size.height))
+        let host = NSHostingView(rootView: root
             .environment(\.colorScheme, .dark)
             .environment(\.lumenStillFrame, true)
             .environment(\.tagColors, UISnapshots.sampleTagColors)
             .tint(Theme.accentFill))
+        // The window keeps the size it is given; the content does not set it.
+        if edges { host.sizingOptions = [] }
         window.contentView = host
         window.setContentSize(size)
         window.orderFrontRegardless()
@@ -969,6 +984,7 @@ private struct Shot {
         if let rep = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) {
             frameView.cacheDisplay(in: frameView.bounds, to: rep)
             problems += write(rep, to: folder.appendingPathComponent("\(name).png"))
+            if edges { problems += Self.edgeProblems(rep, name: name) }
         } else {
             print("FAIL no bitmap for \(name)")
             problems += 1
@@ -977,6 +993,38 @@ private struct Shot {
         window.orderOut(nil)
         window.close()
         return problems
+    }
+
+    /// Each edge of the picture, in a band of 3 pixels and without its corners (the window's
+    /// rounding): any pixel there in the probe's colour, or not drawn at all, is the window's own
+    /// background showing — the content stops short of that edge.
+    private static func edgeProblems(_ rep: NSBitmapImageRep, name: String) -> Int {
+        let width = rep.pixelsWide, height = rep.pixelsHigh
+        let band = 3, corner = 16
+        guard width > 2 * corner, height > 2 * corner else { return 0 }
+        func showsWindow(_ x: Int, _ y: Int) -> Bool {
+            guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return true }
+            if color.alphaComponent < 0.98 { return true }
+            return color.redComponent > 0.8 && color.greenComponent < 0.3 && color.blueComponent > 0.8
+        }
+        var found: [String] = []
+        let across = corner..<(width - corner), down = corner..<(height - corner)
+        let edges: [(String, [(Int, Int)])] = [
+            ("top", across.flatMap { x in (0..<band).map { (x, $0) } }),
+            ("bottom", across.flatMap { x in (0..<band).map { (x, height - 1 - $0) } }),
+            ("left", down.flatMap { y in (0..<band).map { ($0, y) } }),
+            ("right", down.flatMap { y in (0..<band).map { (width - 1 - $0, y) } }),
+        ]
+        for (edge, points) in edges {
+            let showing = points.filter { showsWindow($0.0, $0.1) }.count
+            if showing > 0 { found.append("\(edge) \(showing) px") }
+        }
+        guard found.isEmpty else {
+            print("FAIL \(name): the window's own background shows at its edges — \(found.joined(separator: ", ")) (the content does not reach the window's edge)")
+            return 1
+        }
+        print("PASS \(name): the content reaches every edge of its window")
+        return 0
     }
 
     private func write(_ rep: NSBitmapImageRep, to url: URL) -> Int {
