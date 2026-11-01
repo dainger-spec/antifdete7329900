@@ -1,69 +1,305 @@
+import AppKit
 import SwiftUI
 
-/// The app's launch screen, around the setup and unlock forms: the Lumen mark, a title and the
-/// form centred on the window's backdrop, the wordmark at the foot. It rises in once when the
-/// window opens; while the vault opens (or is created) the form gives way to a progress line, and
-/// the Profiles window then fades in (RootView).
+/// The lock screen's backdrop: the window's black and, with the light on (Settings → Appearance),
+/// the two eclipses. One for the setup, unlock and "open" states, so the eclipses close in while
+/// the password is checked and part when the vault opens without starting over (RootView).
+struct LockBackdrop<Content: View>: View {
+    var phase: EclipseLight.Phase = .idle
+    @ViewBuilder let content: () -> Content
+    @ObservedObject private var appearance = AppearancePreferences.shared
+
+    var body: some View {
+        ZStack {
+            Theme.backdrop
+            if appearance.entryLight {
+                EclipseLight(place: .lock, phase: phase)
+            }
+            content()
+        }
+    }
+}
+
+/// The lock screen (the design's "Lock and first launch"): the Lumen mark, a large title and the
+/// form in a 400 pt column, centred; a footer line at the foot. It rises in once when the window
+/// opens.
 struct LockScreen<Content: View>: View {
     let title: String
     let subtitle: String
-    let isWorking: Bool
-    let workingLabel: String
+    /// The line at the foot: which vault this is, or where it is made.
+    var footer: String?
     @ViewBuilder let content: () -> Content
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.lumenStillFrame) private var stillFrame
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 32)
+            Spacer(minLength: 40)
             VStack(spacing: 0) {
                 LumenMark(size: 64)
-                    .padding(.bottom, 24)
                 Text(title)
-                    .font(.lumenTitle)
+                    .lumenDisplayTitle()
                     .foregroundStyle(Theme.textPrimary)
                     .multilineTextAlignment(.center)
-                    .padding(.bottom, 8)
+                    .frame(maxWidth: 340)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 28)
                 Text(subtitle)
-                    .font(.lumenBody)
+                    .font(.system(size: 15))
+                    .lineSpacing(3)
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
-                    .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 28)
-                ZStack(alignment: .top) {
-                    content()
-                        .opacity(isWorking ? 0 : 1)
-                        .allowsHitTesting(!isWorking)
-                        .accessibilityHidden(isWorking)
-                    if isWorking {
-                        VStack(spacing: 12) {
-                            LumenActivityLine(width: 180)
-                            Text(workingLabel)
-                                .font(.lumenSecondary)
-                                .foregroundStyle(Theme.textTertiary)
-                        }
-                        .padding(.top, 14)
-                        .transition(.opacity)
-                    }
-                }
-                .animation(Theme.appearAnimation, value: isWorking)
+                    .padding(.top, 10)
+                content()
             }
-            .frame(width: 360)
+            .frame(maxWidth: 400)
+            .padding(.horizontal, 24)
             .opacity(appeared ? 1 : 0)
-            .offset(y: appeared || reduceMotion ? 0 : 10)
-            Spacer(minLength: 32)
-            LumenWordmark(height: 10, color: Theme.textDisabled)
-                .padding(.bottom, 28)
-                .accessibilityHidden(true)
+            .offset(y: appeared || Motion.isReduced(reduceMotion) ? 0 : 10)
+            Spacer(minLength: 40)
+            if let footer {
+                Text(footer)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 24)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.backdrop)
         .onAppear {
             guard !appeared else { return }
-            withAnimation(reduceMotion ? nil : Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.42).delay(0.06)) {
+            if stillFrame {
+                appeared = true
+                return
+            }
+            withAnimation(Motion.isReduced(reduceMotion) ? nil : Motion.entry(duration: 0.9).delay(0.2)) {
                 appeared = true
             }
+        }
+    }
+}
+
+/// The lock screen's field (the design's `fld`): 48 pt, radius 12, a 16 % edge; focused — the
+/// edge at 50 % and a 4 pt ring; `error` — red, and it shakes once (not under Reduce Motion).
+/// An eye shows the password; "Caps Lock" says itself while the key is down.
+struct LockPasswordField: View {
+    let label: String
+    @Binding var password: String
+    var error = false
+    /// Changes when a wrong password was tried: the field shakes once.
+    var attempts = 0
+    var onSubmit: () -> Void = {}
+    @State private var revealed = false
+    @FocusState private var focused: Bool
+    @StateObject private var capsLock = CapsLockState()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            HStack(spacing: 8) {
+                Group {
+                    if revealed {
+                        TextField(label, text: $password, prompt: Text(verbatim: ""))
+                    } else {
+                        SecureField(label, text: $password, prompt: Text(verbatim: ""))
+                    }
+                }
+                .textFieldStyle(.plain)
+                .font(.system(size: 15))
+                .foregroundStyle(Theme.textPrimary)
+                .focused($focused)
+                .onSubmit(onSubmit)
+                if capsLock.isOn {
+                    Text(L("unlock.capsLock"))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.warning)
+                        .padding(.horizontal, 6)
+                }
+                Button {
+                    revealed.toggle()
+                } label: {
+                    Image(systemName: revealed ? "eye.slash" : "eye")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(LumenIconButtonStyle(size: 34))
+                .accessibilityLabel(revealed ? L("unlock.password.hide") : L("unlock.password.show"))
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 6)
+            .frame(height: 48)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.field))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(error ? Theme.danger : (focused ? Theme.edgeStrong : Theme.strongBorder), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(error ? Theme.dangerTint : Color.white.opacity(focused ? 0.06 : 0), lineWidth: 4)
+                .padding(-4))
+            .modifier(ShakeEffect(shakes: CGFloat(Motion.isReduced(reduceMotion) ? 0 : attempts)))
+            .animation(Theme.hoverAnimation, value: focused)
+            .animation(.linear(duration: 0.42), value: attempts)
+        }
+        .onAppear { focused = true }
+    }
+}
+
+/// One shake: the field moves −1, 3, −6, 6 … pt and back (the design's 420 ms).
+private struct ShakeEffect: GeometryEffect {
+    var shakes: CGFloat
+    var animatableData: CGFloat {
+        get { shakes }
+        set { shakes = newValue }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        let phase = shakes - shakes.rounded(.down)
+        guard phase > 0 else { return ProjectionTransform(.identity) }
+        let amplitude = 6 * sin(phase * .pi)
+        return ProjectionTransform(CGAffineTransform(translationX: amplitude * sin(phase * .pi * 8), y: 0))
+    }
+}
+
+/// Whether Caps Lock is down, kept current while the lock screen shows.
+@MainActor
+private final class CapsLockState: ObservableObject {
+    @Published private(set) var isOn = NSEvent.modifierFlags.contains(.capsLock)
+    nonisolated(unsafe) private var monitor: Any?
+
+    init() {
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.isOn = event.modifierFlags.contains(.capsLock)
+            return event
+        }
+    }
+
+    deinit {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+    }
+}
+
+/// The lock screen's action (the design's `cta`): 50 pt, radius 14, a contour on near-black, 15 /
+/// medium; light gathers under it on hover. `working`: a spinner and its label, not pressable.
+struct LockActionButton: View {
+    let title: String
+    var working = false
+    var workingTitle = ""
+    var enabled = true
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                if working {
+                    ProgressView().controlSize(.small)
+                }
+                Text(working ? workingTitle : title)
+                    .font(.system(size: 15, weight: .medium))
+            }
+            .foregroundStyle(Theme.textPrimary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 50)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(hovered ? Color(hex: 0x15161A) : Color(hex: 0x0F1013)))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(hovered ? Theme.edgeStrong : Theme.edge, lineWidth: 1))
+            .shadow(color: Theme.rim.opacity(hovered ? 0.18 : 0), radius: 20, y: 10)
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(LockPressStyle(reduced: Motion.isReduced(reduceMotion)))
+        .disabled(working || !enabled)
+        .opacity(working || enabled ? 1 : 0.5)
+        .onHover { hovered = enabled && !working && $0 }
+        .animation(Motion.hover(hovered), value: hovered)
+    }
+}
+
+/// A press: 98.5 % for 80 ms.
+private struct LockPressStyle: ButtonStyle {
+    let reduced: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduced ? 0.985 : 1)
+            .animation(Motion.press, value: configuration.isPressed)
+    }
+}
+
+/// A quiet link under the action ("I don't remember the password"): `t2`, white and underlined
+/// under the pointer.
+private struct LockLink: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13))
+                .underline(hovered)
+                .foregroundStyle(hovered ? Theme.textPrimary : Theme.textSecondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+    }
+}
+
+/// A note with its symbol (the key under the unlock form, the warning under the setup form).
+private struct LockNote: View {
+    let symbol: String
+    var tint: Color = Theme.textSecondary
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 13))
+                .foregroundStyle(tint)
+                .padding(.top, 2)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.system(size: 13))
+                .lineSpacing(3)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// How strong a new master password looks: four steps, from its length and the kinds of
+/// characters in it. A rough guide shown as the person types; the rule that decides is the
+/// length (10 at least).
+enum PasswordStrength {
+    static func score(_ password: String) -> Int {
+        guard !password.isEmpty else { return 0 }
+        let kinds = [password.contains { $0.isLowercase }, password.contains { $0.isUppercase },
+                     password.contains { $0.isNumber }, password.contains { !$0.isLetter && !$0.isNumber }]
+            .filter { $0 }.count
+        var score = password.count >= 10 ? 1 : 0
+        if password.count >= 14 { score += 1 }
+        if password.count >= 20 { score += 1 }
+        if kinds >= 3 { score += 1 }
+        return min(max(score, 1), 4)
+    }
+
+    static func word(_ score: Int) -> String {
+        switch score {
+        case 4: return L("setup.strength.4")
+        case 3: return L("setup.strength.3")
+        case 2: return L("setup.strength.2")
+        default: return L("setup.strength.1")
         }
     }
 }
@@ -73,46 +309,87 @@ struct SetupView: View {
     @State private var password = ""
     @State private var confirmation = ""
 
-    private var problem: String? {
-        if password.count < 10 { return L("setup.rule.length") }
-        if password != confirmation { return L("setup.rule.match") }
-        return nil
-    }
+    private var longEnough: Bool { password.count >= 10 }
+    private var matches: Bool { !confirmation.isEmpty && password == confirmation }
 
     var body: some View {
-        LockScreen(title: L("setup.title"), subtitle: L("setup.subtitle"), isWorking: model.isWorking,
-                   workingLabel: L("setup.working")) {
-            VStack(spacing: 12) {
+        LockScreen(title: L("setup.title"), subtitle: L("setup.subtitle"), footer: L("setup.footer")) {
+            VStack(alignment: .leading, spacing: 0) {
                 if let moved = model.movedAsideVaultPath {
                     // After "forgot password": the previous vault was moved, not deleted.
-                    Text(String(format: L("setup.movedAside"), moved))
-                        .font(.lumenCaption)
-                        .foregroundStyle(Theme.textTertiary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
+                    LockNote(symbol: "archivebox", text: String(format: L("setup.movedAside"), moved))
                         .textSelection(.enabled)
-                        .padding(.bottom, 4)
+                        .padding(.top, 24)
                 }
-                SecureField(L("setup.field.password"), text: $password, prompt: Text(verbatim: ""))
-                    .lumenField(L("setup.field.password"), isEmpty: password.isEmpty, height: 36)
-                SecureField(L("setup.field.repeat"), text: $confirmation, prompt: Text(verbatim: ""))
-                    .lumenField(L("setup.field.repeat"), isEmpty: confirmation.isEmpty, height: 36)
-                if let problem, !password.isEmpty {
-                    Label(problem, systemImage: "info.circle")
-                        .font(.lumenCaption)
-                        .foregroundStyle(Theme.textTertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                LockPasswordField(label: L("setup.field.password"), password: $password)
+                    .padding(.top, 34)
+                StrengthMeter(score: PasswordStrength.score(password))
+                    .padding(.top, 10)
+                LockPasswordField(label: L("setup.field.repeat"), password: $confirmation, onSubmit: create)
+                    .padding(.top, 20)
+                VStack(alignment: .leading, spacing: 6) {
+                    requirement(L("setup.req.length"), met: longEnough, shown: !password.isEmpty)
+                    requirement(L("setup.req.match"), met: matches, shown: !confirmation.isEmpty)
                 }
-                Button(L("setup.action.create")) {
-                    Task { await model.createVault(password: password) }
-                }
-                .buttonStyle(LumenButtonStyle(kind: .primary, fullWidth: true, height: 36))
-                .keyboardShortcut(.defaultAction)
-                .disabled(problem != nil || model.isWorking)
-                .padding(.top, 4)
+                .padding(.top, 14)
+                LockActionButton(title: L("setup.action.create"), working: model.isWorking,
+                                 workingTitle: L("setup.working"), enabled: longEnough && matches, action: create)
+                    .keyboardShortcut(.defaultAction)
+                    .padding(.top, 28)
+                LockNote(symbol: "exclamationmark.triangle", tint: Theme.warning, text: L("setup.warning"))
+                    .padding(.top, 26)
             }
-            .frame(width: 300)
         }
+    }
+
+    private func requirement(_ text: String, met: Bool, shown: Bool) -> some View {
+        let failed = shown && !met
+        return HStack(spacing: 7) {
+            Image(systemName: failed ? "xmark" : "checkmark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(failed ? Theme.danger : (met ? Theme.textPrimary : Theme.textTertiary))
+                .frame(width: 12)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.system(size: 12.5))
+                .foregroundStyle(failed ? Theme.danger : (met ? Theme.textPrimary : Theme.textTertiary))
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(Text(met ? L("setup.req.met") : L("setup.req.notMet")))
+    }
+
+    private func create() {
+        guard longEnough, matches, !model.isWorking else { return }
+        Task { await model.createVault(password: password) }
+    }
+}
+
+/// Four 3 pt steps filled white by strength, "Strength" and its word under them.
+private struct StrengthMeter: View {
+    let score: Int
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 4) {
+                ForEach(1...4, id: \.self) { step in
+                    Capsule()
+                        .fill(step <= score ? Theme.textPrimary : Color.white.opacity(0.10))
+                        .frame(height: 3)
+                }
+            }
+            .animation(.easeOut(duration: 0.25), value: score)
+            HStack {
+                Text(L("setup.strength"))
+                    .foregroundStyle(Theme.textTertiary)
+                Spacer()
+                if score > 0 {
+                    Text(PasswordStrength.word(score))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+            .font(.system(size: 12))
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -120,42 +397,61 @@ struct UnlockView: View {
     @EnvironmentObject private var model: AppModel
     @State private var password = ""
     @State private var confirmingReset = false
+    @State private var attempts = 0
 
     var body: some View {
-        LockScreen(title: L("unlock.title"), subtitle: L("unlock.subtitle"), isWorking: model.isWorking,
-                   workingLabel: L("unlock.working")) {
-            VStack(spacing: 12) {
-                SecureField(L("setup.field.password"), text: $password, prompt: Text(verbatim: ""))
-                    .lumenField(L("setup.field.password"), isEmpty: password.isEmpty, height: 36)
-                    .onSubmit(unlock)
-                Button(L("unlock.action.unlock"), action: unlock)
-                    .buttonStyle(LumenButtonStyle(kind: .primary, fullWidth: true, height: 36))
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(password.isEmpty || model.isWorking)
+        LockScreen(title: L("unlock.title"), subtitle: L("unlock.subtitle"), footer: footer) {
+            VStack(alignment: .leading, spacing: 0) {
+                LockPasswordField(label: L("setup.field.password"), password: $password,
+                                  error: model.unlockFailed && password.isEmpty, attempts: attempts, onSubmit: unlock)
+                    .padding(.top, 36)
+                if model.unlockFailed && password.isEmpty {
+                    Label(L("unlock.wrong"), systemImage: "exclamationmark.circle")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.danger)
+                        .padding(.top, 10)
+                        .transition(.opacity)
+                } else {
+                    Text(L("unlock.help"))
+                        .font(.system(size: 13))
+                        .lineSpacing(3)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 10)
+                }
+                if model.unlockFailed && model.vaultLooksLikeTestVault {
+                    Label(L("unlock.vault.test"), systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 10)
+                }
+                VStack(spacing: 14) {
+                    LockActionButton(title: L("unlock.action.unlock"), working: model.isWorking,
+                                     workingTitle: L("unlock.working"), enabled: !password.isEmpty, action: unlock)
+                        .keyboardShortcut(.defaultAction)
+                    LockLink(title: L("unlock.reset.action")) { confirmingReset = true }
+                        .disabled(model.isWorking)
+                }
+                .padding(.top, 28)
                 if model.unlockFailed {
-                    VStack(spacing: 10) {
-                        // Which vault was tried: another build (sandboxed or not, other bundle id)
-                        // opens a different folder with a vault of its own.
-                        Text(String(format: L("unlock.vault.info"), model.vaultCreatedDescription, model.vaultPathDescription))
-                            .font(.lumenCaption)
-                            .foregroundStyle(Theme.textTertiary)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                        if model.vaultLooksLikeTestVault {
-                            Label(L("unlock.vault.test"), systemImage: "exclamationmark.triangle")
-                                .font(.lumenCaption)
-                                .foregroundStyle(Theme.warning)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Button(L("unlock.reset.action")) { confirmingReset = true }
-                            .buttonStyle(.lumenGhost)
-                            .disabled(model.isWorking)
-                    }
-                    .padding(.top, 8)
+                    // Which vault was tried: another build (sandboxed or not, other bundle id)
+                    // opens a different folder with a vault of its own.
+                    Text(String(format: L("unlock.vault.info"), model.vaultCreatedDescription, model.vaultPathDescription))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .padding(.top, 18)
+                } else {
+                    LockNote(symbol: "key", text: L("unlock.keys"))
+                        .padding(.top, 26)
                 }
             }
-            .frame(width: 300)
+            .animation(Theme.appearAnimation, value: model.unlockFailed)
+        }
+        .onChange(of: model.isWorking) { _, working in
+            if !working && model.unlockFailed { attempts += 1 }
         }
         .confirmationDialog(L("unlock.reset.title"), isPresented: $confirmingReset, titleVisibility: .visible) {
             Button(L("unlock.reset.confirm"), role: .destructive) { model.startOver() }
@@ -165,6 +461,10 @@ struct UnlockView: View {
         }
     }
 
+    private var footer: String {
+        String(format: L("unlock.footer"), model.vaultCreatedDay ?? "?", model.vaultPathDescription)
+    }
+
     private func unlock() {
         let entered = password
         // Return reaches both `.onSubmit` and the default button: the second call finds the
@@ -172,6 +472,16 @@ struct UnlockView: View {
         guard !entered.isEmpty, !model.isWorking else { return }
         password = ""
         Task { await model.unlock(password: entered) }
+    }
+}
+
+/// The vault is open: said for a moment while the eclipses part, before the Profiles window
+/// comes in (RootView).
+struct VaultOpenView: View {
+    var body: some View {
+        LockScreen(title: L("open.title"), subtitle: L("open.subtitle")) {
+            EmptyView()
+        }
     }
 }
 

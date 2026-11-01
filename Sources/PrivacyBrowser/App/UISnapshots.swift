@@ -327,15 +327,24 @@ enum UISnapshots {
         problems += await browserWindows(into: folder)
         // The launch screen (the Profiles window before unlocking), also while the vault opens.
         let lockModel = AppModel()
+        // The lock screen (the design's "Lock and first launch"), on its eclipses.
         problems += await Shot(name: "launch-unlock", size: CGSize(width: 1180, height: 740)) {
-            UnlockView().environmentObject(lockModel)
+            LockBackdrop { UnlockView().environmentObject(lockModel) }
         }.capture(into: folder)
-        problems += await Shot(name: "launch-setup", size: CGSize(width: 1180, height: 740)) {
-            SetupView().environmentObject(lockModel)
+        problems += await Shot(name: "launch-setup", size: CGSize(width: 1180, height: 820)) {
+            LockBackdrop { SetupView().environmentObject(lockModel) }
         }.capture(into: folder)
+        // While the password is checked the eclipses close in; once the vault opens they part.
         problems += await Shot(name: "launch-working", size: CGSize(width: 1180, height: 740)) {
-            LockScreen(title: L("unlock.title"), subtitle: L("unlock.subtitle"), isWorking: true,
-                       workingLabel: L("unlock.working")) { Color.clear.frame(width: 300, height: 80) }
+            LockBackdrop(phase: .busy) {
+                LockScreen(title: L("unlock.title"), subtitle: L("unlock.subtitle")) {
+                    LockActionButton(title: L("unlock.action.unlock"), working: true, workingTitle: L("unlock.working")) {}
+                        .padding(.top, 36)
+                }
+            }
+        }.capture(into: folder)
+        problems += await Shot(name: "launch-open", size: CGSize(width: 1180, height: 740)) {
+            LockBackdrop(phase: .open) { VaultOpenView() }
         }.capture(into: folder)
         problems += await Shot(name: "app-icon", size: CGSize(width: 900, height: 640), titled: false) {
             AppIconSheet()

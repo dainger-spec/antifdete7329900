@@ -178,6 +178,12 @@ final class AppModel: ObservableObject {
         return header.createdAt.shown(date: .abbreviated, time: .shortened)
     }
 
+    /// The lock screen's footer: the day the vault was made ("12 March 2026"); nil when its
+    /// header cannot be read.
+    var vaultCreatedDay: String? {
+        (try? MasterVault.readHeader(in: root)).map { $0.createdAt.shown(date: .long, time: .omitted) }
+    }
+
     /// The vault folder, with the real home directory shown as `~` (inside the App Sandbox
     /// `homeDirectoryForCurrentUser` is the container, so the passwd entry is used instead).
     var vaultPathDescription: String {

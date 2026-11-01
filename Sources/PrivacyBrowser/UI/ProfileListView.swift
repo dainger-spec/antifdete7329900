@@ -4,18 +4,42 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    /// The Profiles window comes in a moment after the vault opens: "Vault open" shows meanwhile,
+    /// while the eclipses part (the design's unlock). No click is asked for.
+    @State private var showsProfiles = false
 
     static let minimumHeight: CGFloat = 560
 
     var body: some View {
         ZStack {
-            switch model.phase {
-            case .setup: SetupView().transition(.opacity)
-            case .locked: UnlockView().transition(.opacity)
-            case .unlocked: ProfileListView().transition(.opacity)
+            if model.phase == .unlocked && showsProfiles {
+                ProfileListView().transition(.opacity)
+            } else {
+                // One backdrop for setup, unlock and "open": its eclipses close in while the
+                // password is checked and part when the vault opens.
+                LockBackdrop(phase: lockPhase) {
+                    switch model.phase {
+                    case .setup: SetupView().transition(.opacity)
+                    case .locked: UnlockView().transition(.opacity)
+                    case .unlocked: VaultOpenView().transition(.opacity)
+                    }
+                }
+                .transition(.opacity)
             }
         }
         .animation(Theme.appearAnimation, value: model.phase)
+        .animation(.easeOut(duration: 0.5), value: showsProfiles)
+        .onAppear { showsProfiles = model.phase == .unlocked }
+        .onChange(of: model.phase) { _, phase in
+            guard phase == .unlocked else {
+                showsProfiles = false
+                return
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                if model.phase == .unlocked { showsProfiles = true }
+            }
+        }
         .frame(minWidth: ProfilesScreen.minimumWindowWidth, minHeight: Self.minimumHeight)
         .background(Theme.surface)
         // Every sheet of the window takes the size it asks for, but never more than this room.
@@ -27,6 +51,11 @@ struct RootView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+    }
+
+    private var lockPhase: EclipseLight.Phase {
+        if model.phase == .unlocked { return .open }
+        return model.isWorking ? .busy : .idle
     }
 }
 
