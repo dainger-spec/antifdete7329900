@@ -423,6 +423,11 @@ enum UISnapshots {
         problems += await Shot(name: "launch-setup", size: CGSize(width: 1180, height: 820), edges: true) {
             LockBackdrop { SetupView().environmentObject(lockModel) }
         }.capture(into: folder)
+        // The first launch's first screen with an account server: the sign-in, the interface's
+        // language on it (FirstLaunchLanguagePicker).
+        problems += await Shot(name: "launch-sign-in", size: CGSize(width: 1180, height: 820), edges: true) {
+            LockBackdrop { SignInFlow(license: previewLicenses().signedOut, onFinished: {}, standalone: false).environmentObject(lockModel) }
+        }.capture(into: folder)
         // While the password is checked the eclipses close in; once the vault opens they part.
         problems += await Shot(name: "launch-working", size: CGSize(width: 1180, height: 740), edges: true) {
             LockBackdrop(phase: .busy) {
