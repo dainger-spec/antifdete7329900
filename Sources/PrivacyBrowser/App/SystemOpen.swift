@@ -30,6 +30,8 @@ enum SystemOpen {
         /// System Settings › Date & Time: this Mac's clock is off from the account server's
         /// (`clock.skew`, the server's CONTRACT §8.3).
         case dateAndTime
+        /// This app again, once it has quit: the interface's language takes a restart.
+        case relaunch
     }
 
     struct Request: Equatable, Sendable {
@@ -123,6 +125,33 @@ enum SystemOpen {
             return
         }
         NSWorkspace.shared.open(url)
+    }
+
+    /// Quits the app as ⌘Q does — its profiles stopped and sealed — and opens it again once this
+    /// process has ended: a shell waits for it (at most two minutes; a quit that was cancelled
+    /// opens nothing), then opens this same app. Where the shell cannot be started (the App
+    /// Sandbox), the app only quits: the person opens it again. Returns whether it will reopen.
+    @discardableResult
+    static func relaunchAfterQuit() -> Bool {
+        let app = Bundle.main.bundleURL
+        guard admit(.relaunch, app.path) else { return false }
+        if let standIn {
+            Task { _ = await standIn(.relaunch, app) }
+            return true
+        }
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let waiter = Process()
+        waiter.executableURL = URL(fileURLWithPath: "/bin/sh")
+        waiter.arguments = ["-c", "for i in $(seq 1 600); do kill -0 \(pid) 2>/dev/null || exec /usr/bin/open -n \"$0\"; sleep 0.2; done", app.path]
+        var reopens = true
+        do {
+            try waiter.run()
+        } catch {
+            reopens = false
+            log.notice("The app could not be set to open again after it quits: \(error.logKind, privacy: .public)")
+        }
+        NSApp.terminate(nil)
+        return reopens
     }
 
     /// The update's installer, this app's own helper, started without being brought forward.

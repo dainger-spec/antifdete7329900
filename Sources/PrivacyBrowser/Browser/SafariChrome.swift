@@ -706,6 +706,10 @@ enum SafariChrome {
             // that what the nib itself refers to still resolves.
             if let url = nibURL(named: name as String), let data = try? Data(contentsOf: url) {
                 let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
+                if let localized = localizedNib(named: name as String, data: data, owner: owner) {
+                    log.notice("\(name, privacy: .public).nib from \(url.path, privacy: .public), by name, in this process's language")
+                    return localized
+                }
                 log.notice("\(name, privacy: .public).nib from \(url.path, privacy: .public)")
                 return NSNib(nibData: data, bundle: owner)
             }
@@ -820,6 +824,18 @@ enum SafariChrome {
     }
 
     private static var nibURLs: [String: URL?] = [:]
+
+    /// Safari's nib `name`, made by AppKit from `owner` by name — so with the words of the language
+    /// this process took — when `owner` answers for a file of these very bytes; nil otherwise, and
+    /// the caller makes it from the bytes. Safari's nibs are Base nibs with a strings table per
+    /// language (`ru.lproj/MainMenu.strings`, CI run 580), which AppKit applies only to a nib it
+    /// loads by name: made from the bytes, a nib keeps Base's English. The bytes are compared
+    /// rather than the paths, which differ through the Safari cryptex's links.
+    private static func localizedNib(named name: String, data: Data, owner: Bundle?) -> NSNib? {
+        guard let owner, let answered = owner.url(forResource: name, withExtension: "nib"),
+              (try? Data(contentsOf: answered)) == data else { return nil }
+        return NSNib(nibNamed: name, bundle: owner)
+    }
 
     /// Safari's providers, kept for the lifetime of the process because `+shared` hands them out.
     private static var searchProviders: NSObject?
@@ -1237,9 +1253,12 @@ enum SafariChrome {
             return false
         }
         let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
+        // In this process's language where Safari.app answers for the file: made from the bytes,
+        // the menu kept Base's English — "File | Edit | View" over Russian items (CI runs 579, 580).
+        let nib = localizedNib(named: "MainMenu", data: data, owner: owner) ?? NSNib(nibData: data, bundle: owner)
         // This overload takes an NSArray, not [Any].
         var objects: NSArray?
-        guard NSNib(nibData: data, bundle: owner).instantiate(withOwner: NSApplication.shared, topLevelObjects: &objects) else {
+        guard nib.instantiate(withOwner: NSApplication.shared, topLevelObjects: &objects) else {
             log.error("Safari's MainMenu.nib did not instantiate")
             return false
         }
@@ -1263,6 +1282,13 @@ enum SafariChrome {
     }
 
     private static var menuObjects: [Any]?
+
+    /// The language Safari's chrome took in this process — its framework's localization, which its
+    /// toolbar's and menus' words come from — or nil when the chrome is not hosted here.
+    static var chromeLanguage: String? {
+        guard SafariChromeHost.isHosting, let controller = NSClassFromString("BrowserWindowController") else { return nil }
+        return Bundle(for: controller).preferredLocalizations.first
+    }
 
     /// Safari's Edit menu has Paste as Typed (the profile's process reports it).
     private(set) static var pasteAsTypedInMenu = false
