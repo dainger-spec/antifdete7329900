@@ -14,10 +14,10 @@ RU
 
 # Check your email
 
-We sent an email to **you@example.com**. If there is no account with that email yet, it has a six-digit code. If there is one, the email tells you how to sign in.
+We sent an email to **you@example.com**. If there is no account with this address yet, the email has a six-digit code. If there already is one, the email tells you how to sign in.
 
 Code from the email
 
 [Confirm]
 
-The code works for 15 minutes, and you can enter it 5 times. After that, start the registration again. No email? Check your spam folder.
+The code is valid for 15 minutes; you have 5 attempts to enter it. No email? Check your spam folder.

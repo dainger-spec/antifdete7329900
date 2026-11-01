@@ -52,7 +52,7 @@ export default {
     thisMac: 'This Mac',
     unlink: 'Unlink',
     note: 'We have no computer names and no IP addresses: a device is known by its code and label. The app shows the code in Settings → Account.',
-    cooldown: 'An unlinked Mac without internet can keep working for up to 7 days. So the next unlink can be made 7 days after the previous one.',
+    cooldown: 'An unlinked Mac without internet can keep working for 7 more days. So the next unlink can be made 7 days after the previous one.',
   },
   sync: {
     title: 'Sync',
