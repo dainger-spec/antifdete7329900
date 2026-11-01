@@ -1400,3 +1400,36 @@
 "inspector.proxy.profiles" = "Profiles with this proxy";
 "inspector.proxy.noProfiles" = "No profile uses this proxy.";
 "inspector.proxy.empty" = "Select a proxy to see its check, step by step, and the profiles that use it.";
+
+/* Settings in the design: groups, search, Appearance, Security */
+"settings.search" = "Search";
+"settings.search.none" = "Nothing found";
+"settings.badge.new" = "new";
+"settings.group.app" = "App";
+"settings.group.network" = "Network and data";
+"settings.group.more" = "More";
+"settings.section.appearance" = "Appearance";
+"settings.section.webRTC" = "WebRTC through the proxy";
+"settings.section.sync" = "Sync";
+"settings.section.security" = "Security";
+"settings.section.automation" = "Automation API";
+"settings.webRTC.subtitle" = "The network extension that carries the WebRTC of profiles with a SOCKS5 proxy through that proxy.";
+"settings.sync.subtitle" = "Where this Mac syncs its profiles to, and a sync now.";
+"settings.automation.subtitle" = "A local API for scripts on this Mac: off until you turn it on.";
+"settings.appearance.subtitle" = "Dark monochrome, the light at entry and the list's density — for the app's own windows. Pages follow macOS, as in Safari.";
+"settings.appearance.entry" = "Entry screen";
+"settings.appearance.light" = "Lumen's light at entry";
+"settings.appearance.light.detail" = "Two eclipses in the corners of the entry screen and the profiles window. They come in once, as the app opens, and stay as a dimmed background.";
+"settings.appearance.listAndMotion" = "List and motion";
+"settings.appearance.density" = "Profile list density";
+"settings.appearance.density.detail" = "Compact: lower rows, more profiles on the screen.";
+"settings.appearance.density.comfortable" = "Comfortable";
+"settings.appearance.density.compact" = "Compact";
+"settings.appearance.animations" = "Interface animations";
+"settings.appearance.animations.detail" = "Short transitions, up to 250 ms. Off — and under Reduce Motion in macOS — only colour and opacity change.";
+"settings.security.subtitle" = "The master password, locking, and where the vault is.";
+"settings.security.password" = "Master password";
+"settings.security.password.detail" = "It encrypts the profiles, their passwords and proxies. It cannot be recovered: forgotten, the profiles' data cannot be opened.";
+"settings.security.password.change" = "Change…";
+"settings.security.lock" = "Lock now";
+"settings.security.vault" = "Vault";

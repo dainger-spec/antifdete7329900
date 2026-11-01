@@ -73,7 +73,13 @@ struct PrivacyBrowserApp: App {
             SettingsView()
                 .environmentObject(model)
                 .preferredColorScheme(.dark)
-                .background(WindowReader { window in Theme.applyChrome(to: window) })
+                .background(WindowReader { window in
+                    Theme.applyChrome(to: window)
+                    // The design's settings: the sidebar runs to the top, under the traffic lights.
+                    window.styleMask.insert(.fullSizeContentView)
+                    window.titlebarAppearsTransparent = true
+                    window.titleVisibility = .hidden
+                })
         }
     }
 

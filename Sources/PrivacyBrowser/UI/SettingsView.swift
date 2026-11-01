@@ -4,30 +4,52 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
 
-/// The app's settings, in one window (⌘, or ⋯ → Settings…): a section per subject, and every
-/// setting with a sentence on what it does and when that takes effect.
+/// The app's settings, in one window (⌘, or the gear in the Profiles window): a section per subject
+/// in three groups — the app, network and data, more — and every setting with a sentence on what it
+/// does and when that takes effect (the design's Settings). Sync, WebRTC through the proxy, the
+/// master password and the automation API are sections here too; their sheets in the Profiles
+/// window's ⋯ show the same.
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State var section: SettingsSection = .startup
     /// The screenshots' updater, in place of the app's (`--render-ui-snapshots`).
     var previewUpdater: AppUpdater?
+    @State private var search = ""
 
-    static let size = CGSize(width: 840, height: 620)
+    static let size = CGSize(width: 1000, height: 700)
+    static let sidebarWidth: CGFloat = 248
 
     var body: some View {
         HStack(spacing: 0) {
             sidebar
             Rectangle().fill(Theme.divider).frame(width: 1)
-            ScrollView {
-                pane
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 24)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .id(section)
+            Group {
+                if section.scrollsItself {
+                    // A form that scrolls on its own, under the page's title.
+                    VStack(alignment: .leading, spacing: 0) {
+                        SettingsPageHeader(section: section)
+                            .padding(.horizontal, 56)
+                            .padding(.top, 40)
+                        pane
+                            .padding(.horizontal, 40)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                } else {
+                    ScrollView {
+                        pane
+                            .frame(maxWidth: 640, alignment: .leading)
+                            .padding(.horizontal, 56)
+                            .padding(.vertical, 40)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             }
+            .id(section)
         }
         .frame(width: Self.size.width, height: Self.size.height)
-        .background(Theme.raised)
+        .background(Theme.backdrop)
+        .ignoresSafeArea(.container, edges: .top)
+        .environment(\.colorScheme, .dark)
         .tint(Theme.accentFill)
         // A section asked for from elsewhere (the command palette).
         .onReceive(model.$settingsSection.compactMap { $0 }) { requested in
@@ -38,32 +60,45 @@ struct SettingsView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(L("settings.title"))
-                .font(.lumenSheetTitle)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.horizontal, 12)
-                .padding(.top, 34)
-                .padding(.bottom, 14)
-            ForEach(SettingsSection.allCases) { item in
-                Button { section = item } label: {
-                    Label(L(item.titleKey), systemImage: item.symbol)
-                        .font(.lumenLabel)
-                        .foregroundStyle(section == item ? Theme.textPrimary : Theme.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .frame(height: 30)
-                        .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                            .fill(section == item ? Theme.raisedInset : Color.clear))
-                        .contentShape(Rectangle())
+            // The window's traffic lights sit in this band.
+            Color.clear.frame(height: 40)
+            LumenSearchField(text: $search, prompt: L("settings.search"))
+                .padding(.bottom, 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(SettingsSection.Group.allCases, id: \.self) { group in
+                        let items = group.sections.filter(matches)
+                        if !items.isEmpty {
+                            Text(group.title)
+                                .lumenCaps()
+                                .padding(.leading, 10)
+                                .padding(.top, 18)
+                                .padding(.bottom, 6)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(items) { item in
+                                SettingsSidebarItem(section: item, selected: section == item) { section = item }
+                            }
+                        }
+                    }
+                    if SettingsSection.allCases.allSatisfy({ !matches($0) }) {
+                        Text(L("settings.search.none"))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textTertiary)
+                            .padding(10)
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(section == item ? .isSelected : [])
             }
-            Spacer(minLength: 0)
+            .scrollIndicators(.never)
         }
-        .padding(.horizontal, 10)
-        .frame(width: 210)
-        .background(Theme.surface)
+        .padding(.horizontal, 12)
+        .frame(width: Self.sidebarWidth)
+        .background(Theme.sidebar)
+    }
+
+    /// A section the search finds: by its title.
+    private func matches(_ section: SettingsSection) -> Bool {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty || L(section.titleKey).localizedCaseInsensitiveContains(query)
     }
 
     @ViewBuilder
@@ -72,31 +107,130 @@ struct SettingsView: View {
         case .startup: StartupSettings(settings: model.settings)
         case .newProfiles: NewProfileSettings(settings: model.settings)
         case .behavior: BehaviorSettings(settings: model.settings)
-        case .proxies: ProxySettingsPane(settings: model.settings)
+        case .appearance: AppearanceSettings()
         case .downloads: DownloadSettings(settings: model.settings)
-        case .updates: UpdateSettings(previewUpdater: previewUpdater)
+        case .proxies: ProxySettingsPane(settings: model.settings)
+        case .webRTC: TunnelSettingsView(embedded: true)
+        case .sync: SyncSettingsView(embedded: true)
+        case .security: SecuritySettings()
+        case .automation: AutomationSettingsView(embedded: true)
         case .shortcuts: ShortcutSettings()
         case .diagnostics: DiagnosticsSettings()
+        case .updates: UpdateSettings(previewUpdater: previewUpdater)
         case .about: AboutSettings()
         }
     }
 }
 
+/// One of the settings window's sections (the design's `nav`): its symbol and title, `t2`, white
+/// when chosen (on 6.5 % white), a tone of white under the pointer; "new" beside a new section.
+private struct SettingsSidebarItem: View {
+    let section: SettingsSection
+    let selected: Bool
+    let choose: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: choose) {
+            HStack(spacing: 10) {
+                Image(systemName: section.symbol)
+                    .font(.system(size: 13))
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+                Text(L(section.titleKey))
+                    .font(.lumenBody)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if section.isNew { NewBadge() }
+            }
+            .foregroundStyle(selected || hovered ? Theme.textPrimary : Theme.textSecondary)
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(selected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(Motion.hover(hovered), value: hovered)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// "new", beside a section or a setting the design adds.
+struct NewBadge: View {
+    var body: some View {
+        Text(L("settings.badge.new"))
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, 7)
+            .frame(height: 17)
+            .overlay(Capsule().strokeBorder(Theme.edge, lineWidth: 1))
+            .fixedSize()
+    }
+}
+
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case startup, newProfiles, behavior, proxies, downloads, updates, shortcuts, diagnostics, about
+    case startup, newProfiles, behavior, appearance, downloads
+    case proxies, webRTC = "webrtc", sync, security
+    case automation, shortcuts, diagnostics, updates, about
     var id: String { rawValue }
+
+    /// The sidebar's three groups (the design's): the app, network and data, more.
+    enum Group: CaseIterable {
+        case app, network, more
+
+        var title: String {
+            switch self {
+            case .app: return L("settings.group.app")
+            case .network: return L("settings.group.network")
+            case .more: return L("settings.group.more")
+            }
+        }
+
+        var sections: [SettingsSection] { SettingsSection.allCases.filter { $0.group == self } }
+    }
+
+    var group: Group {
+        switch self {
+        case .startup, .newProfiles, .behavior, .appearance, .downloads: return .app
+        case .proxies, .webRTC, .sync, .security: return .network
+        case .automation, .shortcuts, .diagnostics, .updates, .about: return .more
+        }
+    }
+
+    /// New in this design: said beside it.
+    var isNew: Bool { self == .appearance }
+
+    /// A form of its own that scrolls (the sheets' content, shown here): no scroll view around it.
+    var scrollsItself: Bool { self == .webRTC || self == .sync || self == .automation }
 
     var titleKey: String {
         switch self {
         case .startup: return "settings.section.startup"
         case .newProfiles: return "settings.section.newProfiles"
         case .behavior: return "settings.section.behavior"
-        case .proxies: return "settings.section.proxies"
+        case .appearance: return "settings.section.appearance"
         case .downloads: return "settings.section.downloads"
+        case .proxies: return "settings.section.proxies"
+        case .webRTC: return "settings.section.webRTC"
+        case .sync: return "settings.section.sync"
+        case .security: return "settings.section.security"
+        case .automation: return "settings.section.automation"
         case .updates: return "settings.section.updates"
         case .shortcuts: return "settings.section.shortcuts"
         case .diagnostics: return "settings.section.diagnostics"
         case .about: return "settings.section.about"
+        }
+    }
+
+    /// The sentence under the title of a section whose page is a form of its own.
+    var subtitleKey: String? {
+        switch self {
+        case .webRTC: return "settings.webRTC.subtitle"
+        case .sync: return "settings.sync.subtitle"
+        case .automation: return "settings.automation.subtitle"
+        default: return nil
         }
     }
 
@@ -105,12 +239,38 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .startup: return "power"
         case .newProfiles: return "person.badge.plus"
         case .behavior: return "macwindow"
-        case .proxies: return "network"
+        case .appearance: return "circle.lefthalf.filled"
         case .downloads: return "arrow.down.circle"
-        case .updates: return "arrow.triangle.2.circlepath"
+        case .proxies: return "globe"
+        case .webRTC: return "dot.radiowaves.left.and.right"
+        case .sync: return "arrow.triangle.2.circlepath"
+        case .security: return "lock"
+        case .automation: return "chevron.left.forwardslash.chevron.right"
+        case .updates: return "arrow.down.to.line"
         case .shortcuts: return "keyboard"
         case .diagnostics: return "stethoscope"
         case .about: return "info.circle"
+        }
+    }
+}
+
+/// The title of a section whose page is a form of its own, with its sentence.
+private struct SettingsPageHeader: View {
+    let section: SettingsSection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L(section.titleKey))
+                .lumenPageTitle()
+                .foregroundStyle(Theme.textPrimary)
+                .accessibilityAddTraits(.isHeader)
+            if let key = section.subtitleKey {
+                Text(L(key))
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 640, alignment: .leading)
+            }
         }
     }
 }
@@ -155,40 +315,62 @@ enum SettingEffect {
     }
 }
 
-/// A section's page: its title, a sentence about it, and its settings one under the other.
+/// A section's page: its title (30 pt, "new" beside a new section), a sentence about it, and its
+/// settings one under the other.
 struct SettingsPage<Content: View>: View {
     let title: String
     let subtitle: String?
+    var isNew = false
     let content: Content
 
-    init(title: String, subtitle: String?, @ViewBuilder content: () -> Content) {
+    init(title: String, subtitle: String?, isNew: Bool = false, @ViewBuilder content: () -> Content) {
         self.title = title
         self.subtitle = subtitle
+        self.isNew = isNew
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.lumenSheetTitle)
-                .foregroundStyle(Theme.textPrimary)
-                .accessibilityAddTraits(.isHeader)
+            HStack(alignment: .center, spacing: 10) {
+                Text(title)
+                    .lumenPageTitle()
+                    .foregroundStyle(Theme.textPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                if isNew { NewBadge() }
+            }
             if let subtitle {
                 Text(subtitle)
-                    .font(.lumenSecondary)
+                    .font(.system(size: 14))
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
+                    .padding(.top, 8)
             }
             VStack(alignment: .leading, spacing: 0) {
                 content
             }
-            .padding(.top, 10)
+            .padding(.top, 18)
         }
     }
 }
 
-/// One setting: its title and its control, a sentence on what it does, and when that takes effect.
+/// A group of settings in a page, under its caption (the design's "Entry screen", "List and motion").
+struct SettingsCaption: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .lumenCaps()
+            .padding(.top, 26)
+            .padding(.bottom, 12)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// One setting (the design's row): its title, a sentence on what it does, when that takes effect,
+/// and its control at the right.
 struct SettingRow<Control: View>: View {
     let title: String
     let detail: String
@@ -203,27 +385,28 @@ struct SettingRow<Control: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: 24) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.lumenLabel)
+                    .font(.lumenRowTitle)
                     .foregroundStyle(Theme.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 12)
-                control
+                Text(detail)
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let effect {
+                    Label(effect.text, systemImage: effect.symbol)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .padding(.top, 4)
+                }
             }
-            Text(detail)
-                .font(.lumenSecondary)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let effect {
-                Label(effect.text, systemImage: effect.symbol)
-                    .font(.lumenCaption)
-                    .foregroundStyle(Theme.textTertiary)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            control
         }
-        .padding(.vertical, 12)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.divider).frame(height: 1) }
+        .padding(.vertical, 18)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
         .accessibilityElement(children: .contain)
     }
 }

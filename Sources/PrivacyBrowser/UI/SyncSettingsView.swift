@@ -7,6 +7,8 @@ import SwiftUI
 /// Folder = local-only transport (works today, no server). Server = client for
 /// docs/SYNC_SERVER_API.md (ready for a future server; none is included).
 struct SyncSettingsView: View {
+    /// Shown as a section of Settings: the form alone, without the sheet's title and Done.
+    var embedded = false
     enum Mode: String, CaseIterable, Identifiable {
         case off, folder, server
         var id: String { rawValue }
@@ -27,58 +29,68 @@ struct SyncSettingsView: View {
     @State private var loaded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(title: L("sync.title"))
-            Form {
-                Picker(L("sync.to"), selection: $mode) {
-                    ForEach(Mode.allCases) { Text(L($0.labelKey)).tag($0) }
+        if embedded {
+            form
+                .onAppear(perform: load)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                SheetHeader(title: L("sync.title"))
+                form
+                SheetFooter {
+                    Button(L("common.done")) { dismiss() }
+                        .buttonStyle(.lumenPrimary)
+                        .keyboardShortcut(.defaultAction)
                 }
-                .onChange(of: mode) { _, newValue in
-                    if newValue == .off, model.syncTarget != nil { model.clearSyncTarget() }
-                }
-
-                switch mode {
-                case .off:
-                    Text(L("sync.off.note")).foregroundStyle(.secondary)
-                case .folder:
-                    LabeledContent(L("sync.folder.label")) {
-                        HStack {
-                            Text(folderPath ?? L("sync.folder.none")).lineLimit(1).truncationMode(.middle)
-                            Button(L("sync.folder.choose"), action: chooseFolder)
-                        }
-                    }
-                    Text(L("sync.folder.note")).font(.caption).foregroundStyle(.secondary)
-                case .server:
-                    TextField(L("sync.server.url"), text: $serverURL, prompt: Text(verbatim: "https://sync.example.com"))
-                    SecureField(L("sync.server.token"), text: $token)
-                    Button(L("sync.server.save")) { model.setSyncServer(baseURL: serverURL, token: token) }
-                        .disabled(serverURL.isEmpty)
-                    Text(L("sync.server.note")).font(.caption).foregroundStyle(.secondary)
-                }
-
-                Section(L("sync.status")) {
-                    Text(statusText).foregroundStyle(model.lastSyncStatus?.error == nil ? Color.secondary : Theme.danger)
-                    HStack {
-                        Button(L("sync.now")) { Task { await model.syncNow() } }
-                            .disabled(model.syncTarget == nil || model.isWorking || model.hasRunningProfiles)
-                        if model.isWorking { ProgressView().controlSize(.small) }
-                        if model.hasRunningProfiles {
-                            Text(L("sync.stopFirst")).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                Text(L("sync.footer")).font(.caption).foregroundStyle(.secondary)
             }
-            .lumenForm()
-            SheetFooter {
-                Button(L("common.done")) { dismiss() }
-                    .buttonStyle(.lumenPrimary)
-                    .keyboardShortcut(.defaultAction)
-            }
+            .sheetFrame(width: 540)
+            .background(Theme.raised)
+            .onAppear(perform: load)
         }
-        .sheetFrame(width: 540)
-        .background(Theme.raised)
-        .onAppear(perform: load)
+    }
+
+    /// The form, as the sheet shows it and as Settings shows it (`embedded`).
+    private var form: some View {
+        Form {
+            Picker(L("sync.to"), selection: $mode) {
+                ForEach(Mode.allCases) { Text(L($0.labelKey)).tag($0) }
+            }
+            .onChange(of: mode) { _, newValue in
+                if newValue == .off, model.syncTarget != nil { model.clearSyncTarget() }
+            }
+
+            switch mode {
+            case .off:
+                Text(L("sync.off.note")).foregroundStyle(.secondary)
+            case .folder:
+                LabeledContent(L("sync.folder.label")) {
+                    HStack {
+                        Text(folderPath ?? L("sync.folder.none")).lineLimit(1).truncationMode(.middle)
+                        Button(L("sync.folder.choose"), action: chooseFolder)
+                    }
+                }
+                Text(L("sync.folder.note")).font(.caption).foregroundStyle(.secondary)
+            case .server:
+                TextField(L("sync.server.url"), text: $serverURL, prompt: Text(verbatim: "https://sync.example.com"))
+                SecureField(L("sync.server.token"), text: $token)
+                Button(L("sync.server.save")) { model.setSyncServer(baseURL: serverURL, token: token) }
+                    .disabled(serverURL.isEmpty)
+                Text(L("sync.server.note")).font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section(L("sync.status")) {
+                Text(statusText).foregroundStyle(model.lastSyncStatus?.error == nil ? Color.secondary : Theme.danger)
+                HStack {
+                    Button(L("sync.now")) { Task { await model.syncNow() } }
+                        .disabled(model.syncTarget == nil || model.isWorking || model.hasRunningProfiles)
+                    if model.isWorking { ProgressView().controlSize(.small) }
+                    if model.hasRunningProfiles {
+                        Text(L("sync.stopFirst")).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Text(L("sync.footer")).font(.caption).foregroundStyle(.secondary)
+        }
+        .lumenForm()
     }
 
     private var folderPath: String? {

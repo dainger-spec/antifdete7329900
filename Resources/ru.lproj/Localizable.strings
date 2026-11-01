@@ -1400,3 +1400,36 @@
 "inspector.proxy.profiles" = "Профили с этим прокси";
 "inspector.proxy.noProfiles" = "Ни один профиль не использует этот прокси.";
 "inspector.proxy.empty" = "Выберите прокси: здесь будет его проверка по шагам и профили, которые его используют.";
+
+/* Settings in the design: groups, search, Appearance, Security */
+"settings.search" = "Поиск";
+"settings.search.none" = "Ничего не найдено";
+"settings.badge.new" = "новое";
+"settings.group.app" = "Приложение";
+"settings.group.network" = "Сеть и данные";
+"settings.group.more" = "Дополнительно";
+"settings.section.appearance" = "Оформление";
+"settings.section.webRTC" = "WebRTC через прокси";
+"settings.section.sync" = "Синхронизация";
+"settings.section.security" = "Безопасность";
+"settings.section.automation" = "API автоматизации";
+"settings.webRTC.subtitle" = "Сетевое расширение, через которое WebRTC профилей с SOCKS5-прокси идёт через их прокси.";
+"settings.sync.subtitle" = "Куда этот Mac синхронизирует профили, и синхронизация сейчас.";
+"settings.automation.subtitle" = "Локальный API для скриптов на этом Mac: выключен, пока вы его не включите.";
+"settings.appearance.subtitle" = "Тёмный монохром, свет при входе и плотность списка — для окон самого приложения. Страницы сайтов следуют настройке macOS, как в Safari.";
+"settings.appearance.entry" = "Экран входа";
+"settings.appearance.light" = "Свет Lumen при входе";
+"settings.appearance.light.detail" = "Два затмения в углах экрана входа и окна профилей. Появляются один раз, когда открываете приложение, и остаются приглушённым фоном.";
+"settings.appearance.listAndMotion" = "Список и движение";
+"settings.appearance.density" = "Плотность списка профилей";
+"settings.appearance.density.detail" = "Компактно — строки ниже, на экране больше профилей.";
+"settings.appearance.density.comfortable" = "Просторно";
+"settings.appearance.density.compact" = "Компактно";
+"settings.appearance.animations" = "Анимации интерфейса";
+"settings.appearance.animations.detail" = "Короткие переходы до 250 мс. Выключены — и при «Уменьшить движение» в macOS — меняются только цвет и прозрачность.";
+"settings.security.subtitle" = "Мастер-пароль, блокировка и где лежит хранилище.";
+"settings.security.password" = "Мастер-пароль";
+"settings.security.password.detail" = "Шифрует профили, их пароли и прокси. Восстановить его нельзя: если забыт, данные профилей не открыть.";
+"settings.security.password.change" = "Сменить…";
+"settings.security.lock" = "Заблокировать сейчас";
+"settings.security.vault" = "Хранилище";

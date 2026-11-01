@@ -5,6 +5,8 @@ import SwiftUI
 /// The local automation API (`AutomationServer`): on or off, its port, its token, and a command
 /// to try it with. Off until turned on here.
 struct AutomationSettingsView: View {
+    /// Shown as a section of Settings: the form alone, without the sheet's title and Done.
+    var embedded = false
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var enabled = false
@@ -13,55 +15,65 @@ struct AutomationSettingsView: View {
     @State private var loaded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(title: L("automation.title"))
-            Form {
-                Text(L("automation.note")).font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if AutomationServer.isAvailable {
-                    Toggle(L("automation.enabled"), isOn: $enabled)
-                        .toggleStyle(.lumenSwitch)
-                        .onChange(of: enabled) { _, on in apply(enabled: on) }
-                    LabeledContent(L("automation.port")) {
-                        HStack {
-                            TextField(L("automation.port"), text: $port)
-                                .labelsHidden()
-                                .frame(width: 90)
-                                .onSubmit { apply(enabled: enabled) }
-                            Button(L("automation.port.apply")) { apply(enabled: enabled) }
-                                .disabled(portValue == nil || portValue == settings?.port)
-                        }
-                    }
-                    if portValue == nil {
-                        Text(String(format: L("automation.error.port.range"), AutomationSettings.ports.lowerBound, AutomationSettings.ports.upperBound))
-                            .font(.caption).foregroundStyle(Theme.danger)
-                    }
-                    tokenRow
-                    Section(L("automation.state")) {
-                        Text(stateText).foregroundStyle(stateColor)
-                    }
-                    Section(L("automation.example")) {
-                        Text(verbatim: exampleCommand) // l10n: not text
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button(L("automation.example.copy")) { Self.copy(exampleCommand, concealed: true) }
-                        Text(L("automation.docs")).font(.caption).foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text(L("automation.error.sandboxed")).foregroundStyle(Theme.warning)
+        if embedded {
+            form
+                .onAppear(perform: load)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                SheetHeader(title: L("automation.title"))
+                form
+                SheetFooter {
+                    Button(L("common.done")) { dismiss() }
+                        .buttonStyle(.lumenPrimary)
+                        .keyboardShortcut(.defaultAction)
                 }
             }
-            .lumenForm()
-            SheetFooter {
-                Button(L("common.done")) { dismiss() }
-                    .buttonStyle(.lumenPrimary)
-                    .keyboardShortcut(.defaultAction)
+            .sheetFrame(width: 560)
+            .background(Theme.raised)
+            .onAppear(perform: load)
+        }
+    }
+
+    /// The form, as the sheet shows it and as Settings shows it (`embedded`).
+    private var form: some View {
+        Form {
+            Text(L("automation.note")).font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if AutomationServer.isAvailable {
+                Toggle(L("automation.enabled"), isOn: $enabled)
+                    .toggleStyle(.lumenSwitch)
+                    .onChange(of: enabled) { _, on in apply(enabled: on) }
+                LabeledContent(L("automation.port")) {
+                    HStack {
+                        TextField(L("automation.port"), text: $port)
+                            .labelsHidden()
+                            .frame(width: 90)
+                            .onSubmit { apply(enabled: enabled) }
+                        Button(L("automation.port.apply")) { apply(enabled: enabled) }
+                            .disabled(portValue == nil || portValue == settings?.port)
+                    }
+                }
+                if portValue == nil {
+                    Text(String(format: L("automation.error.port.range"), AutomationSettings.ports.lowerBound, AutomationSettings.ports.upperBound))
+                        .font(.caption).foregroundStyle(Theme.danger)
+                }
+                tokenRow
+                Section(L("automation.state")) {
+                    Text(stateText).foregroundStyle(stateColor)
+                }
+                Section(L("automation.example")) {
+                    Text(verbatim: exampleCommand) // l10n: not text
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(L("automation.example.copy")) { Self.copy(exampleCommand, concealed: true) }
+                    Text(L("automation.docs")).font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Text(L("automation.error.sandboxed")).foregroundStyle(Theme.warning)
             }
         }
-        .sheetFrame(width: 560)
-        .background(Theme.raised)
-        .onAppear(perform: load)
+        .lumenForm()
     }
 
     private var settings: AutomationSettings? { model.automationSettings }

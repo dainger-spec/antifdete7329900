@@ -5,48 +5,60 @@ import SwiftUI
 /// its state, the Enable button (system prompts), where to allow it in System Settings, and what
 /// happens while it is off.
 struct TunnelSettingsView: View {
+    /// Shown as a section of Settings: the form alone, without the sheet's title and Done.
+    var embedded = false
     @ObservedObject private var tunnel = TunnelManager.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(title: L("tunnel.title"))
-            Form {
-                Text(L("tunnel.intro")).fixedSize(horizontal: false, vertical: true)
-
-                Section(L("tunnel.status")) {
-                    Label(statusText, systemImage: statusSymbol).foregroundStyle(statusColor)
-                    if tunnel.state != .notBuilt {
-                        HStack {
-                            Button(L("tunnel.enable")) { tunnel.enable() }
-                                .disabled(tunnel.state == .checking || tunnel.canCarryWebRTC)
-                            Button(L("tunnel.openSettings")) { tunnel.openSystemSettings() }
-                            Button(L("tunnel.refresh")) { tunnel.refresh() }
-                        }
-                        Text(L("tunnel.instructions")).font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        Text(L("tunnel.notBuilt.note")).font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+        if embedded {
+            form
+                .onAppear { tunnel.refresh() }
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                SheetHeader(title: L("tunnel.title"))
+                form
+                SheetFooter {
+                    Button(L("common.done")) { dismiss() }
+                        .buttonStyle(.lumenPrimary)
+                        .keyboardShortcut(.defaultAction)
                 }
-
-                if !tunnel.canCarryWebRTC {
-                    Label(L("tunnel.warning.off"), systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(Theme.warning).fixedSize(horizontal: false, vertical: true)
-                }
-                Text(L("tunnel.limits")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            .lumenForm()
-            SheetFooter {
-                Button(L("common.done")) { dismiss() }
-                    .buttonStyle(.lumenPrimary)
-                    .keyboardShortcut(.defaultAction)
-            }
+            .sheetFrame(width: 560)
+            .background(Theme.raised)
+            .onAppear { tunnel.refresh() }
         }
-        .sheetFrame(width: 560)
-        .background(Theme.raised)
-        .onAppear { tunnel.refresh() }
+    }
+
+    /// The form, as the sheet shows it and as Settings shows it (`embedded`).
+    private var form: some View {
+        Form {
+            Text(L("tunnel.intro")).fixedSize(horizontal: false, vertical: true)
+
+            Section(L("tunnel.status")) {
+                Label(statusText, systemImage: statusSymbol).foregroundStyle(statusColor)
+                if tunnel.state != .notBuilt {
+                    HStack {
+                        Button(L("tunnel.enable")) { tunnel.enable() }
+                            .disabled(tunnel.state == .checking || tunnel.canCarryWebRTC)
+                        Button(L("tunnel.openSettings")) { tunnel.openSystemSettings() }
+                        Button(L("tunnel.refresh")) { tunnel.refresh() }
+                    }
+                    Text(L("tunnel.instructions")).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(L("tunnel.notBuilt.note")).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if !tunnel.canCarryWebRTC {
+                Label(L("tunnel.warning.off"), systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Theme.warning).fixedSize(horizontal: false, vertical: true)
+            }
+            Text(L("tunnel.limits")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .lumenForm()
     }
 
     private var statusText: String {
