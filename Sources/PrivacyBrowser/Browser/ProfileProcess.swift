@@ -83,9 +83,10 @@ final class ProfileProcess {
 
     /// Starts the profile's process. `home` is the directory Safari's frameworks and the child's
     /// own Application Support lookups resolve into; `languages`, `locale` and `timeZone` are what
-    /// the profile's proxy location asks for, as far as it is known before the launch (the child
-    /// looks the proxy up again, and a different answer applies at the next launch — the same
-    /// limitation the single-process path has, only now it is per profile rather than per run).
+    /// websites are to see — the profile's own settings, else what its proxy location asks for, as
+    /// far as it is known before the launch (the child looks the proxy up again, and a different
+    /// answer applies at the next launch — the same limitation the single-process path has, only
+    /// now it is per profile rather than per run).
     static func start(profileID: UUID,
                       executable: URL,
                       vaultRoot: URL,

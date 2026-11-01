@@ -1634,6 +1634,10 @@ it is updated when a lookup finishes after launch.
 - Run outside the app bundle (`swift run`, or Xcode's SwiftPM scheme), the strings tables
   are missing and keys are shown instead.
 - Pluralisation is simplified ("Профилей: 3"); there is no `.stringsdict` yet.
-- The UI language does **not** change what web pages see: `navigator.language` and
-  `Accept-Language` follow the app's language list, and there is no per-profile override (§2).
+- What web pages see — `navigator.language` and `Accept-Language` — follows the profile: its own
+  language (its editor, set by hand or at random), else its proxy country's, else this Mac's. Until
+  1 November a profile's own language did not reach its own process: the manager gave the process
+  its proxy country's language or this Mac's, and the profile's own came too late inside it, after
+  WebKit had read the list (CI run 583). The self-test's group "interface and websites' languages"
+  starts profiles in their own processes with a language of their own and checks what pages see.
 

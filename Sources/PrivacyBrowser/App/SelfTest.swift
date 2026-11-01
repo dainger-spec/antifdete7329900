@@ -367,6 +367,7 @@ final class SelfTest {
             }
         }
         await group("a mobile view in its own process") { try await mobileViewInItsOwnProcess(repository) }
+        await group("interface and websites' languages") { try await interfaceApartFromWebsites(repository) }
         await group("lock during launch") { try await lockDuringLaunch(repository) }
         await group("quit") { try await quitFromFocusedPage(repository) }
         await group("forced seal") { try await forcedSealAtQuit(repository) }
@@ -4877,6 +4878,56 @@ final class SelfTest {
             skip(name, "the iPhone view's process did not come up")
         }
         try? await manager.stop(profile.id)
+    }
+
+    /// The language websites see in a profile's own process is the profile's own — its editor's —
+    /// never this Mac's or the app's interface's in its place. A profile's own process, started as
+    /// the app starts one, twice: the interface Russian and the profile's language German, then the
+    /// interface English and the profile's language Russian — neither this Mac's (CI's runners are
+    /// English). Its pages must see the profile's language (`navigator.language`,
+    /// `navigator.languages`, `Accept-Language`, as "What sites see" reads them). Until 1 November
+    /// they saw this Mac's: the manager gave the process its proxy country's language or this Mac's,
+    /// and the profile's own came too late inside it (CI run 583).
+    private func interfaceApartFromWebsites(_ repository: ProfileRepository) async throws {
+        guard !AppEnvironment.isSandboxed else {
+            skip("languages: the profile's language in its own process", "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        let given = ProcessInfo.processInfo.environment["PRIVACYBROWSER_LANG"]
+        defer {
+            if let given { setenv("PRIVACYBROWSER_LANG", given, 1) } else { unsetenv("PRIVACYBROWSER_LANG") }
+        }
+        for (interface, websites) in [("ru", "de-DE"), ("en", "ru-RU")] {
+            let pair = "interface \(interface), the profile's language \(websites)"
+            var configuration = ProfileConfiguration(ephemeral: true)
+            configuration.languageOverride = websites
+            let profile = try repository.create(name: "Languages \(interface) \(websites)", configuration: configuration)
+            defer { try? repository.delete(profile.id) }
+            let manager = ProfileManager(repository: repository)
+            var launchError = ""
+            let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
+                do { try await manager.launch(id) } catch { launchError = String(describing: error) }
+            })
+            // This process's interface stays as it is; the profile's process is given this one.
+            setenv("PRIVACYBROWSER_LANG", interface, 1)
+            setenv("PB_PROFILE_PROCESS", "1", 1)
+            await snapshot.take()
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            let ownProcess = manager.processIdentifier(of: profile.id) != nil
+            let values = snapshot.profileSnapshot?.values ?? [:]
+            let language = values["probe.language"] ?? "nil", languages = values["probe.languages"] ?? "nil"
+            let accept = values["headers.navigation.accept-language"] ?? "nil"
+            // By the language itself: WebKit gives a page "ru" for (ru-RU) and "de-DE" for (de-DE)
+            // (CI run 580), as Safari does for the same list.
+            func primary(_ tag: String) -> String { String(tag.lowercased().prefix { $0.isLetter }) }
+            let wanted = primary(websites)
+            info("languages: \(pair): pages see navigator.language \(language), navigator.languages \(languages), Accept-Language \(accept)")
+            check("languages: \(pair) — its pages see \(websites) (navigator.language, navigator.languages, Accept-Language)",
+                  ownProcess && primary(language) == wanted && primary(languages) == wanted && primary(accept) == wanted,
+                  "own process \(ownProcess), navigator.language \(language), navigator.languages \(languages), "
+                  + "Accept-Language \(accept), step \(snapshot.step)\(launchError.isEmpty ? "" : ", launch \(launchError)")")
+            try? await manager.stop(profile.id)
+        }
     }
 
     /// The window server's processor time so far, in seconds (`ps`); nil where it cannot be read.

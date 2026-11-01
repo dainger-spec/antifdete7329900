@@ -386,7 +386,11 @@ final class ProfileManager: ObservableObject {
                                    forWarmUpOnly: Bool = false, proxyLocationFound: Bool = false) throws {
         guard let executable = Bundle.main.executableURL else { throw CoreError.corruptData("no executable path") }
         let location = stored.needsProxyLocation ? stored.rememberedProxyLocation : nil
-        let languages = location.map { [$0.webLanguage] } ?? WebContentLanguage.systemLanguages
+        // The profile's own language first (its editor: set by hand or at random), as a launch in
+        // this process takes it (`webLanguage(for:)`). Inside the child it is too late to change:
+        // WebKit has read the command line's list before the launch there decides anything (CI runs
+        // 579, 583).
+        let languages = stored.webLanguage(for: location).map { [$0] } ?? WebContentLanguage.systemLanguages
         // Safari's own state has to be on disk before its frameworks read it, which happens while
         // the child builds its window — before the launch inside the child unseals the WebKit data.
         let key = try repository.profileKey(for: id)
