@@ -44,10 +44,24 @@ enum BannerMeasure {
                 say("after 4 s: tracker classes hooked \(hooked.sorted()); stubs reached \(SafariStubCount.snapshot)")
             }
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 55) {
+            MainActor.assumeIsolated { askTrackerDirectly() }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 14) {
             MainActor.assumeIsolated {
                 scanImages()
                 say("after 14 s: stubs reached \(SafariStubCount.snapshot); still running")
+                var images: [String] = []
+                for index in 0..<_dyld_image_count() {
+                    guard let image = _dyld_get_image_name(index) else { continue }
+                    let path = String(cString: image)
+                    if path.range(of: "Safari", options: .caseInsensitive) != nil || path.contains("WebBookmarks")
+                        || path.contains("BrowserKit") || path.contains("AppleMediaServices") || path.contains("StoreKit")
+                        || path.contains("CloudKit") || path.contains("Intelligence") || path.contains("Siri") {
+                        images.append((path as NSString).lastPathComponent)
+                    }
+                }
+                say("loaded images of note (\(images.count)): \(images.sorted().joined(separator: ", "))")
             }
         }
     }
@@ -101,6 +115,98 @@ enum BannerMeasure {
         say("watching \(count) of Safari's path getters for nil or empty answers")
     }
 
+    // MARK: The app-link banner's chain
+
+    private static var chainWatched: Set<String> = []
+
+    /// Safari's app-link banner, from the link to the tracker: each step said with who called it.
+    private static func watchChain(of cls: AnyClass, name: String) {
+        let steps: [(String, String, Bool)] = [
+            ("WBSAppLink", "decideOpenStrategyWithCompletionHandler:", false),
+            ("WBSAppLink", "getAppLinkAttributesWithCompletionHandler:", false),
+            // (-_getAppLinkForBanner:withCompletionHandler: takes a BOOL first: not watched here, where
+            // every argument is taken as an object.)
+            ("AppLinkBannerController", "getBannerWithCompletionHandler:", false),
+            ("WBSBannerTracker", "isBannerBlockedForIdentifier:completion:", false),
+            ("WBSBannerTracker", "blockBannerForIdentifier:", false),
+            ("WBSBannerTracker", "_saveOnInteralQueue", false),
+            ("WBSBannerTracker", "sharedTracker", true),
+            ("WBSAppLinkBannerTracker", "sharedTracker", true),
+        ]
+        for (owner, selectorName, isClassMethod) in steps where owner == name {
+            let key = "\(isClassMethod ? "+" : "-")[\(owner) \(selectorName)]"
+            guard !chainWatched.contains(key) else { continue }
+            chainWatched.insert(key)
+            let selector = NSSelectorFromString(selectorName)
+            guard let target: AnyClass = isClassMethod ? object_getClass(cls) : cls,
+                  let method = class_getInstanceMethod(target, selector) else {
+                say("no \(key)")
+                continue
+            }
+            let arguments = selectorName.filter { $0 == ":" }.count
+            let implementation = method_getImplementation(method)
+            switch arguments {
+            case 0:
+                typealias Call = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
+                let original = unsafeBitCast(implementation, to: Call.self)
+                let block: @convention(block) (AnyObject) -> Unmanaged<AnyObject>? = { receiver in
+                    say("\(key) on \(threadName()), from: \(callers(10))")
+                    return original(receiver, selector)
+                }
+                method_setImplementation(method, imp_implementationWithBlock(block))
+            case 1:
+                typealias Call = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+                let original = unsafeBitCast(implementation, to: Call.self)
+                let block: @convention(block) (AnyObject, AnyObject?) -> Void = { receiver, first in
+                    say("\(key) for \(describeLink(receiver)) on \(threadName()), from: \(callers(10))")
+                    original(receiver, selector, first)
+                }
+                method_setImplementation(method, imp_implementationWithBlock(block))
+            default:
+                typealias Call = @convention(c) (AnyObject, Selector, AnyObject?, AnyObject?) -> Void
+                let original = unsafeBitCast(implementation, to: Call.self)
+                let block: @convention(block) (AnyObject, AnyObject?, AnyObject?) -> Void = { receiver, first, second in
+                    say("\(key) (\(first.map { String(describing: $0).prefix(120) } ?? "nil")) for \(describeLink(receiver)) on \(threadName()), from: \(callers(10))")
+                    original(receiver, selector, first, second)
+                }
+                method_setImplementation(method, imp_implementationWithBlock(block))
+            }
+            say("watching \(key)")
+        }
+    }
+
+    /// A WBSAppLink's URL, or what the receiver is.
+    nonisolated private static func describeLink(_ receiver: AnyObject) -> String {
+        if NSStringFromClass(type(of: receiver)) == "WBSAppLink", receiver.responds(to: NSSelectorFromString("url")),
+           let url = receiver.perform(NSSelectorFromString("url"))?.takeUnretainedValue() as? URL {
+            return "\(url.scheme ?? "?")://\(url.host ?? "?")\(url.path)"
+        }
+        return NSStringFromClass(type(of: receiver))
+    }
+
+    /// After the pages: Safari's app-link tracker asked for directly, as its banner asks — what its
+    /// file path is, and (with no fix) whether it ends the process.
+    static func askTrackerDirectly() {
+        guard !mode.isEmpty else { return }
+        guard let cls: AnyObject = NSClassFromString("WBSAppLinkBannerTracker") else {
+            say("direct: no WBSAppLinkBannerTracker in this process")
+            return
+        }
+        say("direct: +[WBSAppLinkBannerTracker sharedTracker] (mode \(mode))")
+        guard let tracker = cls.perform(NSSelectorFromString("sharedTracker"))?.takeUnretainedValue() else {
+            say("direct: sharedTracker is nil")
+            return
+        }
+        for getter in ["categoryName", "basis", "_filePath"] where tracker.responds(to: NSSelectorFromString(getter)) {
+            let value = tracker.perform(NSSelectorFromString(getter))?.takeUnretainedValue()
+            say("direct: -\(getter) -> \(value.map { "\"\($0)\" (\(NSStringFromClass(type(of: $0))))" } ?? "nil")")
+        }
+        say("direct: the tracker holds: \(holdings(of: tracker))")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            say("direct: 5 s later, still running; stubs reached \(SafariStubCount.snapshot)")
+        }
+    }
+
     // MARK: Classes
 
     /// Classes of Safari's images loaded since the last look: those named for banners or app
@@ -123,6 +229,7 @@ enum BannerMeasure {
                 guard let cls = objc_lookUpClass(names[position]) else { continue }
                 describe(cls, name: name, image: (path as NSString).lastPathComponent)
                 if name.contains("Tracker") { watchLoad(of: cls, name: name) }
+                watchChain(of: cls, name: name)
             }
         }
         imagesSeen = total

@@ -4758,8 +4758,19 @@ final class SelfTest {
                         try? await Task.sleep(nanoseconds: 1_000_000_000)
                     }
                 }
-                // The tracker reads on a queue of its own, soon after the page.
-                _ = await waitUntil(timeout: 14) { exited != nil }
+                // Addresses an app on every Mac opens (Music, App Store, News, Podcasts, TV), and the
+                // owner's: Safari's app-link banner ("Open in …") is what brings its tracker up.
+                let started = Date()
+                for address in ["http://music.apple.com/us/album/pb-selftest/1", "http://apps.apple.com/app/id544007664",
+                                "http://apple.news/A0000000000000000000000", "http://podcasts.apple.com/us/podcast/pb/id1",
+                                "http://tv.apple.com/", "http://www.youtube.com/watch?v=pbselftest"] where exited == nil {
+                    info("app banner [\(mode)]: opening \(address)")
+                    manager.openWindow(profile.id, url: URL(string: address)!)
+                    _ = await waitUntil(timeout: 6) { exited != nil }
+                    if let exited { info("app banner [\(mode)]: the process ENDED (\(exited)) after \(address)") }
+                }
+                // The measurement asks the tracker directly 55 s after the process started.
+                _ = await waitUntil(timeout: max(5, 62 - Date().timeIntervalSince(started))) { exited != nil }
                 if exited == nil {
                     _ = manager.checkNetwork(profile.id)
                     _ = await waitUntil(timeout: 30) { report != nil || exited != nil }
@@ -4767,6 +4778,40 @@ final class SelfTest {
                 info("app banner [\(mode)]: \(hostsChrome.map { $0 ? "Safari's window" : "our own window" } ?? "no window reported"); "
                      + "the page \(served ? "was" : "was NOT") asked for through the proxy; the process "
                      + "\(exited.map { "ENDED with status \($0)" } ?? "is running"); stubs reached \(report?.stubsReached ?? [:])")
+                // What Safari brought up in the profile's process (its objects, by class and image),
+                // and what it wrote in the profile's home: the census for the table of Safari's
+                // subsystems. The build must be debuggable (DEBUGGABLE=1) for heap to read it.
+                if mode == "fix", exited == nil, let pid = manager.processIdentifier(of: profile.id) {
+                    let folder = URL(fileURLWithPath: ProcessInfo.processInfo.environment["PB_MEASURE_OUT"] ?? NSTemporaryDirectory(),
+                                     isDirectory: true)
+                    let heapFile = folder.appendingPathComponent("heap-\(mode).txt")
+                    FileManager.default.createFile(atPath: heapFile.path, contents: nil)
+                    if let handle = try? FileHandle(forWritingTo: heapFile) {
+                        let heap = Process()
+                        heap.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+                        heap.arguments = ["-n", "/usr/bin/heap", String(pid)]
+                        heap.standardOutput = handle
+                        heap.standardError = handle
+                        do {
+                            try heap.run()
+                            heap.waitUntilExit()
+                            info("app banner [\(mode)]: heap of the profile's process (exit \(heap.terminationStatus)) in \(heapFile.path)")
+                        } catch {
+                            info("app banner [\(mode)]: heap did not run: \(error)")
+                        }
+                        try? handle.close()
+                    }
+                    let home = SafariHomeVault(repository: repository).homeDirectory(for: profile.id)
+                    var lines: [String] = []
+                    if let walk = FileManager.default.enumerator(at: home, includingPropertiesForKeys: [.fileSizeKey]) {
+                        for case let url as URL in walk {
+                            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? nil
+                            lines.append("\(url.path.replacingOccurrences(of: home.path, with: "~"))\(size.map { " \($0)" } ?? "/")")
+                        }
+                    }
+                    try? lines.joined(separator: "\n").write(to: folder.appendingPathComponent("home-\(mode).txt"), atomically: true, encoding: .utf8)
+                    info("app banner [\(mode)]: \(lines.count) files and folders in the profile's home while it runs")
+                }
                 if mode == "fix" {
                     check(name, hostsChrome == true && served && exited == nil && report != nil,
                           "window \(String(describing: hostsChrome)), page served \(served), ended \(exited.map(String.init) ?? "no"), report \(report != nil)")

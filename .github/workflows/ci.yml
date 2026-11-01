@@ -26,23 +26,33 @@ jobs:
           defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
       - name: Build the app without the App Sandbox
         timeout-minutes: 30
-        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
-      - name: A page with a Smart App Banner in a profile's own process (watch, nil, fix)
+        run: DEBUGGABLE=1 SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Pages in a profile's own process: a Smart App Banner, and addresses apps of this Mac open (watch, nil, fix)
         continue-on-error: true
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: |
+          set +e
           mkdir -p build/banner
           date -u +%Y-%m-%dT%H:%M:%S > build/banner/since
           python3 scripts/selftest_proxy.py --http 18080 --socks 18081 > build/banner/proxy.txt 2>&1 &
           PROXY_PID=$!
           for attempt in $(seq 1 40); do nc -z 127.0.0.1 18081 && break; sleep 0.5; done
           export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081
+          export PB_MEASURE_OUT="$PWD/build/banner"
           PB_SELFTEST_ONLY="Safari's app banners" build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test > build/banner/selftest.txt 2>&1
           echo "self-test exit $?"
           kill $PROXY_PID || true
           grep -E '^(PASS|FAIL|SKIP|INFO|SELFTEST)' build/banner/selftest.txt | grep -iv 'egress-' | cut -c1-1200
           echo "::group::BANNER-MEASURE lines"
           grep 'BANNER-MEASURE' build/banner/selftest.txt | cut -c1-4000
+          echo "::endgroup::"
+          echo "::group::heap of the profile's process (fix): classes of Safari's images, and the rest by image"
+          grep -E '^ +[0-9]+ ' build/banner/heap-fix.txt | awk '{print $NF}' | sort | uniq -c | sort -rn | head -60
+          grep -E '^ +[0-9]+ .*(Safari|WebBookmarks|BrowserKit)[A-Za-z]*$' build/banner/heap-fix.txt | head -400 | cut -c1-200
+          head -30 build/banner/heap-fix.txt
+          echo "::endgroup::"
+          echo "::group::the profile's home while it runs"
+          cat build/banner/home-fix.txt | head -300
           echo "::endgroup::"
           echo "::group::proxy"
           grep -E 'pb-app-banner|served' build/banner/proxy.txt | head -40
