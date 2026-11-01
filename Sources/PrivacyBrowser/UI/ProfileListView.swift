@@ -721,16 +721,9 @@ struct ProfilesScreen: View {
                     .lumenFrost()
                     .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
                     .opacity(appeared ? 1 : 0)
-                main
-                    .overlay(alignment: .trailing) {
-                        if inspectorShown && !inspectorFits {
-                            inspector
-                                .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
-                        }
-                    }
+                main(inspectorOver: inspectorShown && !inspectorFits)
                 if inspectorShown && inspectorFits {
-                    inspector
+                    inspector(top: Self.inspectorTop)
                         .opacity(appeared ? 1 : 0)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
@@ -760,8 +753,10 @@ struct ProfilesScreen: View {
         }
     }
 
-    /// The list (or the proxies), under the header.
-    private var main: some View {
+    /// The list (or the proxies), under the header. `inspectorOver`: the window has no room for the
+    /// inspector beside the list, so it lies over the list's right side — the list's only: the
+    /// header and the banners above it, with their buttons, stay within reach.
+    private func main(inspectorOver: Bool) -> some View {
         Group {
             if section.wrappedValue == .proxies, let proxies {
                 proxies
@@ -770,6 +765,13 @@ struct ProfilesScreen: View {
                     header
                     bannerStack
                     content
+                        .overlay(alignment: .trailing) {
+                            if inspectorOver {
+                                inspector(top: 8)
+                                    .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
+                                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                            }
+                        }
                         .overlay(alignment: .bottom) {
                             // Floating over the list's foot, while several are selected.
                             if selectedRows.count >= 2 {
@@ -875,7 +877,9 @@ struct ProfilesScreen: View {
         if let inspectedID { onInspect(inspectedID) }
     }
 
-    private var inspector: some View {
+    /// `top`: where its content starts — under the title bar's band beside the list
+    /// (`inspectorTop`), just under the header over it.
+    private func inspector(top: CGFloat) -> some View {
         Group {
             if selectedRows.count == 1, let row = selectedRows.first {
                 ProfileInspectorView(row: row, info: inspectorInfo(row.id), actions: actions,
@@ -889,7 +893,7 @@ struct ProfilesScreen: View {
         }
         .frame(width: Self.inspectorWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.top, Self.inspectorTop)
+        .padding(.top, top)
         .background(Theme.sidebar.opacity(0.8))
         .overlay(alignment: .leading) { Rectangle().fill(Theme.divider).frame(width: 1) }
         .accessibilityElement(children: .contain)

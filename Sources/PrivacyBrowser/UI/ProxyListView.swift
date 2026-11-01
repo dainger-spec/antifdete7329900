@@ -65,16 +65,9 @@ struct ProxyListPanel: View {
         GeometryReader { geometry in
             let inspectorFits = geometry.size.width - ProfilesScreen.inspectorWidth >= ProxyColumns.minimumContentWidth
             HStack(spacing: 0) {
-                main
-                    .overlay(alignment: .trailing) {
-                        if inspectorShown && !inspectorFits {
-                            inspector
-                                .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
-                        }
-                    }
+                main(inspectorOver: inspectorShown && !inspectorFits)
                 if inspectorShown && inspectorFits {
-                    inspector
+                    inspector(top: ProfilesScreen.inspectorTop)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
@@ -106,7 +99,9 @@ struct ProxyListPanel: View {
         }
     }
 
-    private var main: some View {
+    /// `inspectorOver`: no room beside the table — the inspector lies over the table only, and the
+    /// header's buttons (Import…, Check all) stay within reach.
+    private func main(inspectorOver: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             if let loadError = proxies.loadError {
@@ -121,6 +116,13 @@ struct ProxyListPanel: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 16)
                 .frame(maxHeight: .infinity)
+                .overlay(alignment: .trailing) {
+                    if inspectorOver {
+                        inspector(top: 8)
+                            .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -355,7 +357,8 @@ struct ProxyListPanel: View {
         showsInspector.wrappedValue && !proxies.entries.isEmpty
     }
 
-    private var inspector: some View {
+    /// `top`: where its content starts (`ProfilesScreen.inspector(top:)`).
+    private func inspector(top: CGFloat) -> some View {
         Group {
             if let entry = single {
                 ProxyInspectorView(entry: entry, checking: proxies.checking.contains(entry.id),
@@ -376,7 +379,7 @@ struct ProxyListPanel: View {
         }
         .frame(width: ProfilesScreen.inspectorWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.top, ProfilesScreen.inspectorTop)
+        .padding(.top, top)
         .background(Theme.sidebar.opacity(0.8))
         .overlay(alignment: .leading) { Rectangle().fill(Theme.divider).frame(width: 1) }
         .accessibilityElement(children: .contain)
