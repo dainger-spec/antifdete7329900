@@ -50,6 +50,11 @@ jobs:
       # cannot be made is a counted SKIP, never a quiet INFO (scripts/check_selftest_skips.py).
       - name: The self-test never stops a check quietly
         run: python3 scripts/check_selftest_skips.py
+      # Nothing in the app asks the system to open an address, a file or an app except through
+      # SystemOpen, which a profile's process is refused (scripts/check_system_opens.py). Its
+      # self-check first: the scan must find each forbidden form planted for it.
+      - name: Nothing is handed to the system except through SystemOpen
+        run: python3 scripts/check_system_opens.py --self-check && python3 scripts/check_system_opens.py
 
   macos-27:
     name: macOS 27 — the self-test on the newest macOS (preview image; fails the build only on a certificate fetched outside the proxy)

@@ -245,14 +245,14 @@ final class AppModel: ObservableObject {
 
     /// The vault's folder in the Finder (the Profiles window's notice about the index).
     func revealVaultFolder() {
-        NSWorkspace.shared.activateFileViewerSelecting([root])
+        SystemOpen.revealInFinder([root])
     }
 
     /// A kept deleted profile's folder (R3), in the Finder: the one that cannot be read is not
     /// removed by the app, so this is where the person sees it.
     func revealProfileFolder(_ id: UUID) {
         guard let repository else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([repository.directory(for: id)])
+        SystemOpen.revealInFinder([repository.directory(for: id)])
     }
 
     private static func displayPath(_ url: URL) -> String {

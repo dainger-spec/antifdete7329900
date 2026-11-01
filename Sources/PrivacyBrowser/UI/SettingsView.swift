@@ -843,9 +843,12 @@ private struct AboutSettings: View {
             if !Self.links.isEmpty {
                 HStack(spacing: 16) {
                     ForEach(Self.links) { link in
-                        Link(link.name, destination: link.url)
+                        // Through the app's one place for what it hands the system (SystemOpen).
+                        Button(link.name) { SystemOpen.openWebsite(link.url) }
+                            .buttonStyle(.plain)
                             .font(.lumenLabel)
                             .foregroundStyle(Theme.accent)
+                            .accessibilityAddTraits(.isLink)
                     }
                 }
                 .padding(.top, 14)

@@ -1,8 +1,8 @@
 import BrowserCore
 import SwiftUI
 
-/// "What sites see" (a profile's ⋯ menu, the command palette): the profile's snapshot next to
-/// this Mac's Safari's, signal by signal — same, or how it differs (`WhatSitesSee`). For an
+/// "What sites see" (a profile's ⋯ menu, the command palette): the profile's snapshot — and, only
+/// on "Compare with Safari", next to this Mac's own Safari's, signal by signal (`WhatSitesSee`). For an
 /// iPhone or iPad view this Mac's Safari is the wrong reference, and the panel says so, with what
 /// it cannot see of the real device, rather than "the same" (the owner's decision).
 struct WhatSitesSeeView: View {
@@ -47,6 +47,19 @@ struct WhatSitesSeeView: View {
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 12)
+            // This Mac's own Safari only on the person's word, with what it means said first.
+            if snapshot.takenAt != nil, !snapshot.isTaking, !mobileView {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Button(L("whatSites.compare")) { Task { await snapshot.compareWithSafari() } }
+                        .buttonStyle(.lumenSecondary)
+                    Text(L("whatSites.compare.note"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 12)
+            }
             if mobileView {
                 Text(L("whatSites.mobileView"))
                     .font(.lumenSecondary)
@@ -86,14 +99,16 @@ struct WhatSitesSeeView: View {
         case .failed(let reason): return reason
         case .done:
             let taken = snapshot.takenAt.map { $0.shown(date: .omitted, time: .standard) } ?? ""
-            return String(format: L(snapshot.comparedWithSafari ? "whatSites.done" : "whatSites.doneWithoutSafari"), taken)
+            let key = snapshot.comparedWithSafari ? "whatSites.done"
+                : snapshot.safariDidNotAnswer ? "whatSites.doneWithoutSafari" : "whatSites.doneProfileOnly"
+            return String(format: L(key), taken)
         }
     }
 
     private var statusColor: Color {
         switch snapshot.step {
         case .failed: return Theme.danger
-        case .done where !snapshot.comparedWithSafari: return Theme.warning
+        case .done where snapshot.safariDidNotAnswer: return Theme.warning
         default: return Theme.textSecondary
         }
     }
