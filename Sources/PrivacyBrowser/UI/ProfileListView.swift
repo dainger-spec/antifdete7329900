@@ -1012,7 +1012,8 @@ struct ProfileColumns {
     static let rowPadding: CGFloat = 8
     /// The checkbox's slot plus the letters' circle: where names start.
     static let nameInset: CGFloat = 20 + 12 + 30 + 12
-    static let exit: CGFloat = 170
+    /// Wide enough for "Settings cannot be read" with its sign, whole (R1).
+    static let exit: CGFloat = 192
     static let appearsAs: CGFloat = 150
     static let state: CGFloat = 196
     static let actions: CGFloat = 68

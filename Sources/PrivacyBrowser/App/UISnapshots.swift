@@ -128,10 +128,6 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-inspector-over", size: CGSize(width: 1180, height: 740)) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [northwind], inspectorInfo: info)
         }.capture(into: folder)
-        // A search that finds nothing.
-        problems += await Shot(name: "profiles-no-matches", size: CGSize(width: 1180, height: 560)) {
-            ProfilesPreview(rows: rows, search: "Brazil") // l10n: not text
-        }.capture(into: folder)
         // The command palette (⌘K), as it opens and with something typed.
         let paletteCommands = paletteSample(rows)
         problems += await Shot(name: "palette", size: CommandPaletteView.size, titled: false) {
