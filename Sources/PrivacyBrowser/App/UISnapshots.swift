@@ -96,16 +96,10 @@ enum UISnapshots {
             SignInFlow(license: licenses.signedOut, onFinished: {}, method: .key,
                        keyText: "LMK-0123-4567-89AB-CDEF-GHJK-MNMT").environmentObject(model) // l10n: not text
         }.capture(into: folder)
+        // Signed in, in the Settings window as the app shows it: a bare scroll view did not reach
+        // the window's edges (CI run 585's edge check).
         problems += await Shot(name: "account-page", size: SettingsView.size, edges: true) {
-            ScrollView {
-                AccountSettingsPage(license: licenses.signedIn)
-                    .frame(maxWidth: 640, alignment: .leading)
-                    .padding(.horizontal, 56)
-                    .padding(.vertical, 40)
-            }
-            .background(Theme.backdrop)
-            .environment(\.colorScheme, .dark)
-            .environmentObject(model)
+            SettingsView(section: .account, previewLicense: licenses.signedIn).environmentObject(model)
         }.capture(into: folder)
         problems += await Shot(name: "settings-updates-ready", size: SettingsView.size, edges: true) {
             SettingsView(section: .updates, previewUpdater: ready).environmentObject(model)

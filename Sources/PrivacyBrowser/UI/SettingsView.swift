@@ -14,6 +14,8 @@ struct SettingsView: View {
     @State var section: SettingsSection = .startup
     /// The screenshots' updater, in place of the app's (`--render-ui-snapshots`).
     var previewUpdater: AppUpdater?
+    /// The account page's license, for the UI snapshots; the app's own otherwise.
+    var previewLicense: LicenseModel?
     @State private var search = ""
 
     static let size = CGSize(width: 1000, height: 700)
@@ -99,7 +101,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var pane: some View {
         switch section {
-        case .account: AccountSettingsPage(license: model.license)
+        case .account: AccountSettingsPage(license: previewLicense ?? model.license)
         case .startup: StartupSettings(settings: model.settings)
         case .newProfiles: NewProfileSettings(settings: model.settings)
         case .behavior: BehaviorSettings(settings: model.settings)
