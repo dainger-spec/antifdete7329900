@@ -540,6 +540,21 @@ final class AppModel: ObservableObject {
         repository?.unreadableFiles(for: id) ?? []
     }
 
+    /// What the inspector counts of each profile it has shown (`ProfileRepository.counts`): read
+    /// when a profile is inspected, off the main thread, and only read — nothing is written, moved
+    /// aside or taken in.
+    @Published private(set) var inspectorCounts: [UUID: ProfileCounts] = [:]
+
+    func loadInspectorCounts(for id: UUID) {
+        guard let repository, let details = details[id] else { return }
+        let historyPolicy = details.historyPolicy
+        let cookies = details.syncsCookies
+        Task.detached(priority: .utility) {
+            let counts = repository.counts(for: id, historyPolicy: historyPolicy, cookies: cookies)
+            await MainActor.run { self.inspectorCounts[id] = counts }
+        }
+    }
+
     /// The versions of the profile's settings kept beside them (R4, R2).
     func keptSettings(for id: UUID) -> [KeptSettings] {
         repository?.keptSettings(for: id) ?? []
@@ -1034,6 +1049,24 @@ struct ProfileDetails: Equatable {
     var tags: [String]
     var notes: String
     var avatar: ProfileAvatarStyle?
+    // What the inspector says of how it reaches the web and how sites see it.
+    /// "SOCKS5", "HTTP", "HTTPS": the proxy's kind, as the proxy list names it.
+    var proxyKind: String?
+    /// A SOCKS5 proxy: the kind that carries UDP, so WebRTC through the tunnel's relay.
+    var proxyCarriesUDP: Bool
+    /// The address sites saw it come from at its last launch through its proxy, when known.
+    var exitIP: String?
+    var timeZone: String
+    /// The WebRTC choice stored; what it amounts to with a proxy depends on the tunnel at launch
+    /// (`ProfileConfiguration.webRTCRouting`), which the inspector says as the editor does.
+    var webRTCChoice: WebRTCPolicy
+    var languages: String
+    var window: String
+    var syncsCookies: Bool
+    var historyPolicy: HistoryStore.Policy
+    /// Which proxy of the list it uses (`ProxyList.identity`): its last check says the city and
+    /// the latency.
+    var proxyIdentity: String?
 
     init(_ configuration: ProfileConfiguration) {
         proxyEndpoint = configuration.proxy.map { "\($0.host):\($0.port)" }
@@ -1044,5 +1077,24 @@ struct ProfileDetails: Equatable {
         tags = configuration.tags
         notes = configuration.notes
         avatar = configuration.avatar
+        proxyKind = configuration.proxy.map { ProxyReport.kindName($0.kind, tls: $0.tlsToProxy) }
+        proxyCarriesUDP = configuration.proxy?.kind == .socks5
+        exitIP = configuration.rememberedProxyLocation?.exitIP
+        if let zone = configuration.timeZoneIdentifier {
+            timeZone = zone
+        } else if configuration.needsProxyLocation {
+            timeZone = configuration.rememberedProxyLocation.map { String(format: L("inspector.timeZone.fromProxy"), $0.timeZoneIdentifier) }
+                ?? L("inspector.fromProxy")
+        } else {
+            timeZone = L("inspector.asThisMac")
+        }
+        webRTCChoice = configuration.webRTCPolicy
+        // Nil: the connection's — its proxy's country when the profile follows it — else this Mac's.
+        languages = configuration.languageOverride
+            ?? (configuration.needsProxyLocation ? L("inspector.languages.fromProxy") : L("inspector.asThisMac"))
+        window = configuration.windowSize.map { "\($0.frame.width) × \($0.frame.height)" } ?? L("editor.window.app")
+        syncsCookies = configuration.syncsCookies
+        historyPolicy = configuration.historyPolicy
+        proxyIdentity = configuration.proxy.map(ProxyList.identity(of:))
     }
 }

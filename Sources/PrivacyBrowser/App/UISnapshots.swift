@@ -106,6 +106,24 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-proxied", size: CGSize(width: 1180, height: 560)) {
             ProfilesPreview(rows: rows, filter: .proxied, sync: .failed)
         }.capture(into: folder)
+        // The inspector: one profile (Northwind), one whose settings cannot be read (R1: said there
+        // too, and it does not start), several, and over the list in a window too narrow for both.
+        let northwind = rows[1].id
+        let inspected = inspectorSample()
+        let info: (UUID) -> InspectorInfo = { $0 == northwind ? inspected : InspectorInfo() }
+        problems += await Shot(name: "profiles-inspector", size: CGSize(width: 1400, height: 860)) {
+            ProfilesPreview(rows: rows, sync: .synced(Date().addingTimeInterval(-4 * 60)), showsInspector: true,
+                            selected: [northwind], inspectorInfo: info)
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-inspector-unreadable", size: CGSize(width: 1400, height: 860)) {
+            ProfilesPreview(rows: rows, showsInspector: true, selected: [rows[7].id])
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-inspector-several", size: CGSize(width: 1400, height: 860)) {
+            ProfilesPreview(rows: rows, showsInspector: true, selected: [rows[1].id, rows[3].id, rows[5].id])
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-inspector-over", size: CGSize(width: 1180, height: 740)) {
+            ProfilesPreview(rows: rows, showsInspector: true, selected: [northwind], inspectorInfo: info)
+        }.capture(into: folder)
         // The command palette (⌘K), as it opens and with something typed.
         let paletteCommands = paletteSample(rows)
         problems += await Shot(name: "palette", size: CommandPaletteView.size, titled: false) {
@@ -556,10 +574,12 @@ enum UISnapshots {
         // The content view runs under the title bar (full-size content): its top is the window's top.
         let height = window.contentView?.bounds.height ?? window.frame.height
         let width = window.contentView?.bounds.width ?? window.frame.width
-        // New Profile: right-aligned 16 pt from the edge, centred in the 52 pt header.
-        click(window, at: NSPoint(x: width - 16 - 50, y: height - 26))
-        // Lock: full sidebar width, 14 pt above the bottom, 28 pt high.
-        click(window, at: NSPoint(x: ProfilesScreen.sidebarWidth / 2, y: 14 + 14))
+        // New Profile: the header's last button, its right edge `headerTrailing` from the window's,
+        // in the middle of the header's height (the layout's own numbers, `ProfilesScreen`).
+        click(window, at: NSPoint(x: width - ProfilesScreen.headerTrailing - 30,
+                                  y: height - ProfilesScreen.headerTop - ProfilesScreen.headerHeight / 2))
+        // Lock: the sidebar's last row, from 12 pt to the Settings button, 14 pt above the bottom, 30 pt high.
+        click(window, at: NSPoint(x: ProfilesScreen.sidebarWidth / 2, y: 14 + 15))
         try? await Task.sleep(nanoseconds: 600_000_000)
         var problems = 0
         for (name, count) in [("header New Profile (under the title bar)", clicks.newProfile), ("sidebar Lock", clicks.lock)] {
@@ -789,6 +809,26 @@ enum UISnapshots {
         return commands
     }
 
+    /// What the inspector shows of the sample's Northwind: its settings, what it keeps, its proxy's
+    /// last check.
+    static func inspectorSample() -> InspectorInfo {
+        let proxy = ProxySettings(kind: .socks5, host: "proxy.northwind.example", port: 1080) // l10n: not text
+        var configuration = ProfileConfiguration(proxy: proxy)
+        configuration.matchProxyLocation = true
+        configuration.webRTCPolicy = .relayOnly
+        configuration.lastProxyLocation = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", // l10n: not text
+                                                        proxyEndpoint: ProxyLocation.endpoint(of: proxy), exitIP: "203.0.113.47")
+        configuration.languageOverride = "de-DE" // l10n: not text
+        configuration.windowSize = .custom(width: 1440, height: 900)
+        configuration.tags = ["ads", "DE"] // l10n: not text
+        let check = ProxyCheckResult(checkedAt: Date().addingTimeInterval(-40 * 60), exitIP: "203.0.113.47", countryCode: "DE",
+                                     timeZoneIdentifier: "Europe/Berlin", latencyMilliseconds: 84,
+                                     city: "Frankfurt am Main") // l10n: not text
+        return InspectorInfo(details: ProfileDetails(configuration),
+                             counts: ProfileCounts(logins: 6, bookmarks: 41, historyEntries: 271, syncedCookies: 1_284),
+                             proxyCheck: check)
+    }
+
     static func sampleRows() -> [ProfileRowItem] {
         func id(_ n: UInt8) -> UUID { UUID(uuid: (n, 0x1C, 0x5E, 0x17, 0, n, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, n)) }
         let mac = ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: "macos-26"))
@@ -957,11 +997,15 @@ private struct ProfilesPreview: View {
     var proxies: AnyView?
     var indexNotice: AppModel.IndexNotice?
     var keptDeleted: [ProfileRepository.KeptDeletedProfile] = []
+    var showsInspector = false
+    var selected: [UUID] = []
+    var inspectorInfo: (UUID) -> InspectorInfo = { _ in InspectorInfo() }
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
                        section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice,
-                       keptDeleted: keptDeleted)
+                       keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
+                       tunnelCarriesWebRTC: true, initialSelection: selected)
     }
 }
 

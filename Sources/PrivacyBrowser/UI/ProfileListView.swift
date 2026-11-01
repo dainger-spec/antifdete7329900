@@ -93,6 +93,9 @@ struct ProfileListView: View {
     @State private var assigningProxies: ProxyAssignView.Request?
     /// Profiles of the selection waiting for the one confirmation that deletes them all.
     @State private var pendingBulkDelete: [UUID] = []
+    /// The inspector at the window's right, as the person left it.
+    @AppStorage("profiles.inspector") private var showsInspector = true
+    @ObservedObject private var tunnel = TunnelManager.shared
 
     var body: some View {
         screen
@@ -235,14 +238,15 @@ struct ProfileListView: View {
         if let proxyList = model.proxyList {
             ObservingProxyList(proxies: proxyList) { list in
                 profilesScreen(proxyCount: list.entries.count,
-                               proxyAlerts: list.entries.filter { $0.lastCheck?.failure != nil }.count)
+                               proxyAlerts: list.entries.filter { $0.lastCheck?.failure != nil }.count,
+                               proxyEntries: list.entries)
             }
         } else {
             profilesScreen(proxyCount: nil)
         }
     }
 
-    private func profilesScreen(proxyCount: Int?, proxyAlerts: Int = 0) -> ProfilesScreen {
+    private func profilesScreen(proxyCount: Int?, proxyAlerts: Int = 0, proxyEntries: [ProxyListEntry] = []) -> ProfilesScreen {
         ProfilesScreen(rows: rows, isWorking: model.isWorking, sync: syncLine,
                        filter: $filter, search: $search, actions: actions,
                        section: $section, proxyCount: proxyCount,
@@ -252,7 +256,18 @@ struct ProfileListView: View {
                        bringBack: { id in Task { await model.bringBackDeletedProfile(id) } },
                        removeForGood: { removingDeleted = $0 },
                        revealKeptDeleted: { model.revealProfileFolder($0) },
-                       proxyAlerts: proxyAlerts)
+                       proxyAlerts: proxyAlerts,
+                       showsInspector: $showsInspector,
+                       inspectorInfo: { id in
+                           let details = model.details[id]
+                           // The proxy list's last check of the profile's proxy: its city and latency.
+                           let check = details?.proxyIdentity.flatMap { identity in
+                               proxyEntries.first { ProxyList.identity(of: $0.proxy) == identity }?.lastCheck
+                           }
+                           return InspectorInfo(details: details, counts: model.inspectorCounts[id], proxyCheck: check)
+                       },
+                       onInspect: { model.loadInspectorCounts(for: $0) },
+                       tunnelCarriesWebRTC: tunnel.canCarryWebRTC)
     }
 
     /// The window's Proxies section; with `ids`, those proxies selected (else the selection it had).
@@ -372,6 +387,14 @@ struct ProfileListView: View {
             changePassword: { changingPassword = true },
             warmUpQueue: { queuePreselection = []; warmingUpSeveral = true },
             openProxies: { showProxies(selecting: []) },
+            showProxy: { id in
+                // Looked up, never added: the list is only read here.
+                let identity = model.details[id]?.proxyIdentity
+                let entry = identity.flatMap { identity in
+                    model.proxyList?.entries.first { ProxyList.identity(of: $0.proxy) == identity }
+                }
+                showProxies(selecting: entry.map { [$0.id] } ?? [])
+            },
             launchSeveral: { ids in Task { await model.launchProfiles(ids) } },
             stopSeveral: { ids in Task { await model.stopProfiles(ids) } },
             warmUpSeveral: { ids in warmUpSeveral(ids) },
@@ -553,6 +576,8 @@ struct ProfileActions {
     var warmUpQueue: () -> Void = {}
     /// The proxy list (import, checks, assignment).
     var openProxies: () -> Void = {}
+    /// The proxy list with this profile's proxy selected (its check, step by step).
+    var showProxy: (UUID) -> Void = { _ in }
     // Several selected profiles at once (`ProfileBulkBar`), in the order the list shows them.
     var launchSeveral: ([UUID]) -> Void = { _ in }
     var stopSeveral: ([UUID]) -> Void = { _ in }
@@ -594,8 +619,19 @@ struct ProfilesScreen: View {
     var revealKeptDeleted: (UUID) -> Void = { _ in }
     /// Proxies whose last check failed: said in red beside Proxies.
     var proxyAlerts = 0
-    /// Rows selected with ⌘- and ⇧-click or their checkboxes; with two or more, `ProfileBulkBar`
-    /// acts on them all.
+    /// The inspector at the right (`ProfileInspectorView`), shown while this is on — the header's
+    /// button: beside the list when the window has room for both, over the list's right side when
+    /// it has not (the rows keep their columns).
+    var showsInspector: Binding<Bool> = .constant(false)
+    /// What the inspector shows of a profile beyond its row.
+    var inspectorInfo: (UUID) -> InspectorInfo = { _ in InspectorInfo() }
+    /// A profile is inspected: what it keeps is counted (`AppModel.loadInspectorCounts`).
+    var onInspect: (UUID) -> Void = { _ in }
+    var tunnelCarriesWebRTC = false
+    /// The profiles selected as the window opens (the snapshots).
+    var initialSelection: [UUID] = []
+    /// Rows selected with a click, ⌘- and ⇧-click or their checkboxes; one is what the inspector
+    /// shows, with two or more `ProfileBulkBar` acts on them all.
     @State private var selection = ProfileSelection()
     @State private var appeared = false
     @ObservedObject private var appearance = AppearancePreferences.shared
@@ -603,43 +639,41 @@ struct ProfilesScreen: View {
     @Environment(\.lumenStillFrame) private var stillFrame
 
     static let sidebarWidth: CGFloat = 232
+    static let inspectorWidth: CGFloat = 320
     /// The table drops "Appears as" below these content widths.
     static let minimumWindowWidth: CGFloat = 920
+    /// The header: below the title bar's band, its height, its right margin (the self-test clicks
+    /// New profile by them).
+    static let headerTop: CGFloat = 36
+    static let headerHeight: CGFloat = 56
+    static let headerTrailing: CGFloat = 28
 
     var body: some View {
-        HStack(spacing: 0) {
-            ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
-                            proxyAlerts: proxyAlerts, actions: actions)
-                .frame(width: Self.sidebarWidth)
-                .lumenFrost()
-                .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
-                .opacity(appeared ? 1 : 0)
-            Group {
-                if section.wrappedValue == .proxies, let proxies {
-                    proxies
-                } else {
-                    VStack(spacing: 0) {
-                        header
-                        if let indexNotice {
-                            IndexNoticeBox(notice: indexNotice, reveal: revealVault)
+        GeometryReader { geometry in
+            // Beside the list only when the rows keep their columns.
+            let inspectorFits = geometry.size.width - Self.sidebarWidth - Self.inspectorWidth >= ProfileColumns.minimumContentWidth
+            HStack(spacing: 0) {
+                ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
+                                proxyAlerts: proxyAlerts, actions: actions)
+                    .frame(width: Self.sidebarWidth)
+                    .lumenFrost()
+                    .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
+                    .opacity(appeared ? 1 : 0)
+                main
+                    .overlay(alignment: .trailing) {
+                        if inspectorShown && !inspectorFits {
+                            inspector
+                                .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
                         }
-                        if !keptDeleted.isEmpty {
-                            KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack,
-                                           removeForGood: removeForGood, reveal: revealKeptDeleted)
-                        }
-                        if selectedRows.count >= 2 {
-                            ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
-                                           selectAll: { selection.select(displayOrder.map(\.id)) },
-                                           clear: { selection.clear() })
-                                .transition(.opacity)
-                        }
-                        content
                     }
-                    .animation(Theme.hoverAnimation, value: selectedRows.count >= 2)
+                if inspectorShown && inspectorFits {
+                    inspector
+                        .opacity(appeared ? 1 : 0)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            .opacity(appeared ? 1 : 0)
-            .offset(y: appeared || Motion.isReduced(reduceMotion) ? 0 : 10)
+            .animation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation, value: inspectorShown)
         }
         .background {
             ZStack {
@@ -653,7 +687,87 @@ struct ProfilesScreen: View {
         .ignoresSafeArea(.container, edges: .top)
         .environment(\.colorScheme, .dark)
         .onChange(of: rows.map(\.id)) { _, ids in selection.keep(only: Set(ids)) }
-        .onAppear(perform: enter)
+        .onChange(of: inspectedID) { _, _ in inspect() }
+        .onChange(of: inspectedActivity) { _, _ in inspect() }
+        .onChange(of: inspectorShown) { _, _ in inspect() }
+        .onAppear {
+            if selection.isEmpty, !initialSelection.isEmpty { selection.select(initialSelection) }
+            enter()
+            inspect()
+        }
+    }
+
+    /// The list (or the proxies), under the header.
+    private var main: some View {
+        Group {
+            if section.wrappedValue == .proxies, let proxies {
+                proxies
+            } else {
+                VStack(spacing: 0) {
+                    header
+                    if let indexNotice {
+                        IndexNoticeBox(notice: indexNotice, reveal: revealVault)
+                    }
+                    if !keptDeleted.isEmpty {
+                        KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack,
+                                       removeForGood: removeForGood, reveal: revealKeptDeleted)
+                    }
+                    if selectedRows.count >= 2 {
+                        ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
+                                       selectAll: { selection.select(displayOrder.map(\.id)) },
+                                       clear: { selection.clear() })
+                            .transition(.opacity)
+                    }
+                    content
+                }
+                .animation(Theme.hoverAnimation, value: selectedRows.count >= 2)
+            }
+        }
+        .opacity(appeared ? 1 : 0)
+        .offset(y: appeared || Motion.isReduced(reduceMotion) ? 0 : 10)
+    }
+
+    // MARK: The inspector
+
+    /// Shown: turned on, over the profiles (not the proxies), and there are profiles.
+    private var inspectorShown: Bool {
+        showsInspector.wrappedValue && section.wrappedValue == .profiles && !rows.isEmpty
+    }
+
+    /// The one profile selected, which the inspector shows.
+    private var inspectedID: UUID? {
+        guard inspectorShown, selectedRows.count == 1 else { return nil }
+        return selectedRows.first?.id
+    }
+
+    /// It stopped or started: what it keeps may have changed.
+    private var inspectedActivity: ProfileRowItem.Activity? {
+        inspectedID.flatMap { id in rows.first { $0.id == id }?.activity }
+    }
+
+    private func inspect() {
+        if let inspectedID { onInspect(inspectedID) }
+    }
+
+    private var inspector: some View {
+        Group {
+            if selectedRows.count == 1, let row = selectedRows.first {
+                ProfileInspectorView(row: row, info: inspectorInfo(row.id), actions: actions,
+                                     tunnelCarriesWebRTC: tunnelCarriesWebRTC)
+                    .id(row.id)
+            } else if selectedRows.count > 1 {
+                SelectionInspectorView(rows: selectedRows, actions: actions)
+            } else {
+                EmptyInspectorView()
+            }
+        }
+        .frame(width: Self.inspectorWidth)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(.top, 8)
+        .background(Theme.sidebar.opacity(0.8))
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.divider).frame(width: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(L("inspector.title"))
     }
 
     /// The window comes in: the sidebar fades in, the list rises 10 pt (the design's 0.9 s); under
@@ -727,6 +841,14 @@ struct ProfilesScreen: View {
             }
             LumenSearchField(text: $search, prompt: L("profiles.search"), shortcut: "⌘K")
                 .frame(maxWidth: 280)
+            Button {
+                showsInspector.wrappedValue.toggle()
+            } label: {
+                Image(systemName: "sidebar.right")
+            }
+            .buttonStyle(LumenIconButtonStyle(size: 32, isOn: showsInspector.wrappedValue))
+            .help(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
+            .accessibilityLabel(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
             // Only what is done rarely, in groups: import, sync, the tunnel, automation and the
             // master password (they are in Settings and ⌘K too).
             Menu {
@@ -757,9 +879,10 @@ struct ProfilesScreen: View {
             .buttonStyle(.lumenPrimary)
             .keyboardShortcut("n")
         }
+        .frame(height: Self.headerHeight)
         .padding(.leading, 28)
-        .padding(.trailing, 28)
-        .padding(.top, 36)
+        .padding(.trailing, Self.headerTrailing)
+        .padding(.top, Self.headerTop)
         .padding(.bottom, 16)
         .animation(Theme.hoverAnimation, value: isWorking)
     }
@@ -838,7 +961,7 @@ struct ProfilesScreen: View {
             .accessibilityAddTraits(.isHeader)
             ForEach(rows) { row in
                 ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
-                           showsCheckbox: selectedRows.count >= 1, height: appearance.density.rowHeight,
+                           showsCheckbox: selectedRows.count >= 2, height: appearance.density.rowHeight,
                            onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) })
             }
         }
@@ -875,10 +998,12 @@ struct ProfileColumns {
 
     let showsAppearsAs: Bool
 
+    /// The narrowest list whose rows keep every column but "Appears as": 20 pt page margins and the
+    /// rows' own padding on both sides, the columns, the narrowest name.
+    static let minimumContentWidth: CGFloat = 2 * 20 + 2 * rowPadding + exit + state + actions + 3 * gap + minimumName
+
     init(contentWidth: CGFloat) {
-        // 20 pt page margins and the rows' own padding on both sides.
-        let fixed = 2 * 20 + 2 * Self.rowPadding + Self.exit + Self.state + Self.actions + 3 * Self.gap + Self.minimumName
-        showsAppearsAs = contentWidth >= fixed + Self.appearsAs + Self.gap
+        showsAppearsAs = contentWidth >= Self.minimumContentWidth + Self.appearsAs + Self.gap
     }
 }
 
@@ -1081,7 +1206,7 @@ private struct ProfileRow: View {
     let columns: ProfileColumns
     let actions: ProfileActions
     var isSelected = false
-    /// Some rows are selected: every row shows its checkbox.
+    /// Several rows are selected: every row shows its checkbox (one selected — the inspector's — shows its own).
     var showsCheckbox = false
     var height: CGFloat = 52
     /// A click on the row itself (not on its buttons or menu): selects it (`ProfileSelection`).

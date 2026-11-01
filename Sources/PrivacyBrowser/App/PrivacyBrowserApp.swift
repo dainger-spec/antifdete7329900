@@ -21,7 +21,9 @@ struct PrivacyBrowserApp: App {
         }
         // The sidebar runs to the top of the window, under the traffic lights.
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1180, height: 740)
+        // Room for the list and the inspector side by side (ProfilesScreen), within a 13-inch
+        // MacBook Air's screen.
+        .defaultSize(width: 1400, height: 840)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
