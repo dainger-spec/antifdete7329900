@@ -2252,9 +2252,9 @@ final class SelfTest {
         info("plain WKWebView: plugins \(string(reference, "plugins")), languages \(string(reference, "languages")), WebGL \(string(reference, "webgl.unmaskedRenderer"))")
         check("language: navigator.language is the language WebKit was given",
               string(reference, "language") == WebContentLanguage.decided?.first, string(reference, "language"))
-        // A profile without a proxy country: this Mac's languages, as Safari has them — not the
-        // app's UI language, which Localization.applyProcessLanguage keeps in the app's domain.
-        // (scripts/live_compare.py checks the result against Safari's navigator.language.)
+        // A profile without a proxy country: this Mac's languages, as Safari has them — never the
+        // app's interface language (the group "interface and websites' languages" checks that in
+        // a profile's own process). (scripts/live_compare.py checks the result against Safari's.)
         let systemLanguages = WebContentLanguage.languages(for: nil)
         check("language: without a proxy country, websites get this Mac's languages, not the app's UI language",
               !systemLanguages.isEmpty && systemLanguages == WebContentLanguage.systemLanguages, systemLanguages.joined(separator: ","))
@@ -4880,17 +4880,19 @@ final class SelfTest {
         try? await manager.stop(profile.id)
     }
 
-    /// The language websites see in a profile's own process is the profile's own — its editor's —
-    /// never this Mac's or the app's interface's in its place. A profile's own process, started as
-    /// the app starts one, twice: the interface Russian and the profile's language German, then the
-    /// interface English and the profile's language Russian — neither this Mac's (CI's runners are
-    /// English). Its pages must see the profile's language (`navigator.language`,
-    /// `navigator.languages`, `Accept-Language`, as "What sites see" reads them). Until 1 November
-    /// they saw this Mac's: the manager gave the process its proxy country's language or this Mac's,
-    /// and the profile's own came too late inside it (CI run 583).
+    /// The interface's language and the language websites see are apart, both ways (the owner, 1
+    /// November: an interface in Russian, a profile that looks American to every site). A profile's
+    /// own process, started as the app starts one, twice: the interface Russian and the profile's
+    /// language German, then the interface English and the profile's language Russian — in each
+    /// pair the language the other side would show were they linked either way, and neither this
+    /// Mac's (CI's runners are English). Its pages must see the profile's language
+    /// (`navigator.language`, `navigator.languages`, `Accept-Language`, as "What sites see" reads
+    /// them), and the process must say it took the interface's: its own words, its bundles' (AppKit),
+    /// Safari's chrome's.
     private func interfaceApartFromWebsites(_ repository: ProfileRepository) async throws {
         guard !AppEnvironment.isSandboxed else {
-            skip("languages: the profile's language in its own process", "the sandboxed build runs no process per profile", .build)
+            skip("languages: the interface's and the websites' apart in a profile's own process",
+                 "the sandboxed build runs no process per profile", .build)
             return
         }
         let given = ProcessInfo.processInfo.environment["PRIVACYBROWSER_LANG"]
@@ -4904,6 +4906,8 @@ final class SelfTest {
             let profile = try repository.create(name: "Languages \(interface) \(websites)", configuration: configuration)
             defer { try? repository.delete(profile.id) }
             let manager = ProfileManager(repository: repository)
+            var reported: (code: String, bundles: String, chrome: String?)?
+            manager.onInterfaceLanguage = { _, code, bundles, chrome in reported = (code, bundles, chrome) }
             var launchError = ""
             let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
                 do { try await manager.launch(id) } catch { launchError = String(describing: error) }
@@ -4914,6 +4918,7 @@ final class SelfTest {
             await snapshot.take()
             setenv("PB_PROFILE_PROCESS", "0", 1)
             let ownProcess = manager.processIdentifier(of: profile.id) != nil
+            _ = await waitUntil(timeout: 10) { reported != nil }
             let values = snapshot.profileSnapshot?.values ?? [:]
             let language = values["probe.language"] ?? "nil", languages = values["probe.languages"] ?? "nil"
             let accept = values["headers.navigation.accept-language"] ?? "nil"
@@ -4921,11 +4926,21 @@ final class SelfTest {
             // (CI run 580), as Safari does for the same list.
             func primary(_ tag: String) -> String { String(tag.lowercased().prefix { $0.isLetter }) }
             let wanted = primary(websites)
-            info("languages: \(pair): pages see navigator.language \(language), navigator.languages \(languages), Accept-Language \(accept)")
+            info("languages: \(pair): pages see navigator.language \(language), navigator.languages \(languages), "
+                 + "Accept-Language \(accept); its process: \(reported.map { "words \($0.code), bundles \($0.bundles), chrome \($0.chrome ?? "not hosted")" } ?? "said nothing")")
             check("languages: \(pair) — its pages see \(websites) (navigator.language, navigator.languages, Accept-Language)",
                   ownProcess && primary(language) == wanted && primary(languages) == wanted && primary(accept) == wanted,
                   "own process \(ownProcess), navigator.language \(language), navigator.languages \(languages), "
                   + "Accept-Language \(accept), step \(snapshot.step)\(launchError.isEmpty ? "" : ", launch \(launchError)")")
+            check("languages: \(pair) — its process took the interface's: its words and its bundles' (AppKit) \(interface)",
+                  reported?.code == interface && reported?.bundles == interface,
+                  reported.map { "words \($0.code), bundles \($0.bundles)" } ?? "the process did not say")
+            if let chrome = reported?.chrome {
+                check("languages: \(pair) — Safari's chrome in its window \(interface)", chrome == interface, chrome)
+            } else {
+                skip("languages: \(pair) — Safari's chrome in its window \(interface)",
+                     reported == nil ? "the process did not say" : "Safari's chrome is not hosted in this process")
+            }
             try? await manager.stop(profile.id)
         }
     }

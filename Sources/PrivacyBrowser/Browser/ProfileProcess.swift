@@ -186,11 +186,24 @@ final class ProfileProcess {
     /// process does not ask the geolocation services a second time (`ProfileManager.launch`).
     static let proxyLocationFoundVariable = "PB_PROXY_LOCATION_FOUND"
 
+    /// The interface's language a profile's process is given: this process's own
+    /// (`Localization.languageCode`) — or, the self-test choosing one for a profile's process, a
+    /// language the app speaks in this process's `PRIVACYBROWSER_LANG` as it is now. Never anything
+    /// of the profile's.
+    static func interfaceLanguage(parent: [String: String]) -> String {
+        if let asked = parent["PRIVACYBROWSER_LANG"]?.lowercased(), InterfaceLanguage.supported.contains(asked) { return asked }
+        return Localization.languageCode
+    }
+
     /// The environment of a profile's process, built from `inheritedEnvironment` and the profile.
     static func childEnvironment(inheriting parent: [String: String], home: URL, vaultRoot: URL,
                                  timeZone: String?, forWarmUpOnly: Bool, proxyLocationFound: Bool = false,
                                  preferences: BrowsingPreferences = BrowsingPreferences()) throws -> [String: String] {
         var environment = parent.filter { inheritedEnvironment.contains($0.key) }
+        // The interface's language, by name: the child's `-AppleLanguages` is the websites' list,
+        // and the two never decide each other (`InterfaceLanguage`; the child fixes it first thing,
+        // `Localization.pinInterfaceLanguage`).
+        environment["PRIVACYBROWSER_LANG"] = interfaceLanguage(parent: parent)
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         // Safari's frameworks, and anything else asking for the user's home through Foundation,
         // land here; POSIX code reading HOME as well, and temporary files go into the home too, so

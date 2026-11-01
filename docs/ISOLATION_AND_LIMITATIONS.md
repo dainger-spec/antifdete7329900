@@ -1618,13 +1618,30 @@ it is updated when a lookup finishes after launch.
   checks it.
 
 **Language.**
-- The UI defaults to Russian, with English as the fallback. Strings live in
-  `Resources/{ru,en}.lproj/Localizable.strings` (both languages complete), which
-  `build-app.sh` copies into the app bundle.
-- Lookups go through an explicitly chosen bundle (`Localization.swift`), so the language is
-  deterministic within a launch. Setting `AppleLanguages` makes AppKit's own menus and
-  panels follow too.
-- `PRIVACYBROWSER_LANG=en` switches the UI to English.
+- The interface is in Russian or English: Settings › Application › Language — as the system, Russian,
+  English — and the same choice on the first screen, before the vault exists. "As the system" is the
+  first of the Mac's own languages the app is translated into, else English. `-AppleLanguages` on
+  the command line (`open Lumen.app --args -AppleLanguages "(en)"`) sets it for that run;
+  `PRIVACYBROWSER_LANG` for the self-test and CI. A change takes a restart, which the setting offers:
+  menus and windows take their language when the app starts.
+- Until 1 November the interface was Russian whatever the Mac or the command line said, and every
+  start wrote `AppleLanguages = (ru, en)` into the app's preferences on disk — which is why
+  `open … --args -AppleLanguages "(en)"` came up in Russian (CI run 577: the English tables were in
+  the bundle; the code chose Russian). The value earlier versions wrote is removed once, at the next
+  start; a list the person set stays. `scripts/interface_language_check.sh` (CI) starts the app
+  every way it can be started and fails on any other language than the expected one.
+- Strings live in `Resources/{ru,en}.lproj/Localizable.strings` (both languages complete), which
+  `build-app.sh` copies into the app bundle. Lookups go through an explicitly chosen bundle
+  (`Localization.swift`), so the language is the same everywhere in a run; AppKit's own menus and
+  panels follow it through this run's `AppleLanguages` (the argument domain, never the preferences
+  on disk).
+- A profile's own window takes the interface's language too: Safari's toolbar and its menu bar
+  (measured on macOS 26.6.2 and 27.0.1, CI run 580). Safari's nibs are Base nibs with a strings
+  table per language; made from the file's bytes, as the chrome's nibs had been, a nib kept Base's
+  English — "File | Edit | View" over Russian items (CI run 579). Where Safari's bundle answers for
+  the nib — Safari.app's, the menu bar's among them — it is now loaded by name and comes in the
+  interface's language; nibs of Safari's frameworks, which do not answer from the cryptex, keep
+  Base's words.
 - Dates, times, sizes and numbers in the app's own windows are written in the interface's
   language with this Mac's region (`Localization.locale`, `Date.shown`), not in the Mac's
   language: a Russian interface on a Mac set to English said "yesterday" and "Oct 31" among
@@ -1634,10 +1651,24 @@ it is updated when a lookup finishes after launch.
 - Run outside the app bundle (`swift run`, or Xcode's SwiftPM scheme), the strings tables
   are missing and keys are shown instead.
 - Pluralisation is simplified ("Профилей: 3"); there is no `.stringsdict` yet.
-- What web pages see — `navigator.language` and `Accept-Language` — follows the profile: its own
-  language (its editor, set by hand or at random), else its proxy country's, else this Mac's. Until
-  1 November a profile's own language did not reach its own process: the manager gave the process
-  its proxy country's language or this Mac's, and the profile's own came too late inside it, after
-  WebKit had read the list (CI run 583). The self-test's group "interface and websites' languages"
-  starts profiles in their own processes with a language of their own and checks what pages see.
+- The interface's language and the language websites see are apart, both ways: an interface in
+  Russian with a profile that looks American to every site, or the other way round.
+  `navigator.language` and `Accept-Language` follow the profile — its own language (its editor),
+  else its proxy country's, else this Mac's — never the interface's; and the profile's language
+  never changes its window's. A profile's process is started with the websites' list on its
+  command line, which WebKit reads; its interface's language is given apart and fixed before any
+  bundle is asked for its words (`Localization.pinInterfaceLanguage`): a bundle keeps the
+  language it is first asked in, and Safari's frameworks follow the app's. Switching the list
+  after Safari's chrome is up is too late for WebKit, which has read it by then (CI run 579). The
+  self-test's group "interface and websites' languages" starts profiles in their own processes
+  with the two apart — interface Russian and profile German, interface English and profile
+  Russian — and fails if either side shows the other's language. CI run 583 (a measurement branch)
+  ran it on the build as committed, green on macOS 26.6.2 and 27.0.1, and on three builds broken on
+  purpose, each red: the interface's language given to websites (pages saw "ru" for a German
+  profile); the process's bundles left to its command line (Safari's chrome German-profile English,
+  Russian-profile Russian, whatever the interface); and the manager's old way, below.
+- Until 1 November, a profile's own language (set by hand or at random in its editor) did not
+  reach its own process: the manager gave the process its proxy country's language or this Mac's,
+  and the profile's own came too late inside it, after WebKit had read the list — a German profile
+  showed websites "en-US" on CI's English runners (CI run 583).
 

@@ -66,6 +66,12 @@ struct SignInFlow: View {
                 .buttonStyle(.lumenGhost)
                 .padding(.top, ProfilesScreen.inspectorTop)
                 .padding(.trailing, 20)
+            } else if onCancel == nil, !standalone, step == .credentials {
+                // The first launch's first screen: the interface's language, on it (the owner).
+                // Not past this step: a restart would lose the sign-in under way.
+                FirstLaunchLanguagePicker()
+                    .padding(.top, ProfilesScreen.inspectorTop)
+                    .padding(.trailing, 20)
             }
         }
         .sheet(isPresented: $keyHelp) { KeyRecoveryNote(siteURL: license.configuration?.site("/")) { keyHelp = false } }

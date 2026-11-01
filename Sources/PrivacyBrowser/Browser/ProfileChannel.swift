@@ -47,6 +47,10 @@ enum ProfileEvent: Codable {
     /// The profile is up and its first window is on screen; `hostsSafariChrome` says whether that
     /// window is Safari's own chrome (the self-test checks the chrome's web views use the proxy).
     case running(hostsSafariChrome: Bool)
+    /// Sent with `running`: the interface's language this process was given (`code`), the one its
+    /// bundles took — AppKit's words and, when hosted, Safari's chrome (`bundles`, `chrome`). The
+    /// self-test checks them against what the profile's pages see, which is never decided by them.
+    case interfaceLanguage(code: String, bundles: String, chrome: String?)
     /// Where the warm-up of this profile has got to; sent as the run goes on, and once more when
     /// it ends. Everything the warm-up screen and the profile list show comes from here.
     case warmUp(WarmUpStatus)

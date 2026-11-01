@@ -34,6 +34,9 @@ final class ProfileManager: ObservableObject {
     /// A profile's own process reported that it is up, and whether its window is Safari's chrome
     /// (the self-test checks that the chrome's own web views load through the profile's proxy).
     var onProfileRunning: ((UUID, Bool) -> Void)?
+    /// A profile's process said which language its interface took (`ProfileEvent.interfaceLanguage`):
+    /// the language given, its bundles', Safari's chrome's. The self-test's.
+    var onInterfaceLanguage: ((UUID, String, String, String?) -> Void)?
     /// A profile's own process answered `checkNetwork` (`ProfileNetworkGuard.report`).
     var onNetworkReport: ((UUID, ProfileNetworkReport) -> Void)?
     /// This manager is the one inside a profile's own process (`ProfileSessionHost`), where the
@@ -388,8 +391,8 @@ final class ProfileManager: ObservableObject {
         let location = stored.needsProxyLocation ? stored.rememberedProxyLocation : nil
         // The profile's own language first (its editor: set by hand or at random), as a launch in
         // this process takes it (`webLanguage(for:)`). Inside the child it is too late to change:
-        // WebKit has read the command line's list before the launch there decides anything (CI runs
-        // 579, 583).
+        // WebKit has read the command line's list before the launch there decides anything (CI run
+        // 579). Never the interface's language, which the child is given apart (`ProfileProcess`).
         let languages = stored.webLanguage(for: location).map { [$0] } ?? WebContentLanguage.systemLanguages
         // Safari's own state has to be on disk before its frameworks read it, which happens while
         // the child builds its window — before the launch inside the child unseals the WebKit data.
@@ -417,6 +420,9 @@ final class ProfileManager: ObservableObject {
                 self.resumeWindowWaiters(of: id, up: true)
                 self.onProfileRunning?(id, hostsSafariChrome)
                 self.objectWillChange.send()
+            case .interfaceLanguage(let code, let bundles, let chrome):
+                self.log.info("Profile \(id.uuidString, privacy: .public)'s process: interface \(code, privacy: .private), its bundles \(bundles, privacy: .private), Safari's chrome \(chrome ?? "not hosted", privacy: .private)")
+                self.onInterfaceLanguage?(id, code, bundles, chrome)
             case .warmUp(let status):
                 self.reportedWarmUp[id] = status
                 self.onWarmUpProgress?(id)

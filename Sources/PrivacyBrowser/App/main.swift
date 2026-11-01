@@ -8,6 +8,9 @@ import SystemConfiguration
 // Top-level code runs on the main thread; Swift 5 mode does not infer main-actor isolation for it.
 MainActor.assumeIsolated {
     let arguments = CommandLine.arguments
+    // A profile's process: started with the websites' languages, its interface's language fixed
+    // before anything asks a bundle for its own (Localization.pinInterfaceLanguage).
+    if arguments.contains("--profile-session") { Localization.pinInterfaceLanguage() }
     // The core's errors in the person's language wherever one is shown (Localization.swift).
     installErrorTranslation()
     if arguments.contains("--sdk-check") {
@@ -116,6 +119,10 @@ MainActor.assumeIsolated {
         // The update scenarios of docs/UPDATES.md §8, driven by scripts/update_check.py on a CI
         // runner (UpdateSelfTest.swift): they replace this very app with another build.
         UpdateSelfTest.start(arguments: arguments)
+    } else if arguments.contains("--interface-language-check") {
+        // Which language this app's interface takes, and from where, as it starts (CI: plain, with
+        // -AppleLanguages, after an earlier version's write; InterfaceLanguageCheck.swift).
+        InterfaceLanguageCheck.run()
     } else if arguments.contains("--render-ui-snapshots") {
         // The app's screens with sample data, as PNG files for design review (UISnapshots.swift).
         UISnapshots.start(arguments: arguments)
@@ -139,7 +146,8 @@ MainActor.assumeIsolated {
         WebContentLanguage.decide(nil)
         SiteCapture.start(arguments: arguments)
     } else {
-        // Russian by default (English fallback); must be set before AppKit builds its menus.
+        // The interface's language (Localization: the person's choice, else this Mac's, else
+        // English); set before AppKit builds its menus.
         Localization.applyProcessLanguage()
         SimplifiedModeNotice.presentsAutomatically = true
         PrivacyBrowserApp.main()

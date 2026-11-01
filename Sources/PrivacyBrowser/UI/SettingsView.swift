@@ -106,6 +106,7 @@ struct SettingsView: View {
         case .newProfiles: NewProfileSettings(settings: model.settings)
         case .behavior: BehaviorSettings(settings: model.settings)
         case .appearance: AppearanceSettings()
+        case .language: LanguageSettings()
         case .downloads: DownloadSettings(settings: model.settings)
         case .proxies: ProxySettingsPane(settings: model.settings)
         case .webRTC: TunnelSettingsView(embedded: true)
@@ -170,7 +171,7 @@ struct NewBadge: View {
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case account
-    case startup, newProfiles, behavior, appearance, downloads
+    case startup, newProfiles, behavior, appearance, language, downloads
     case proxies, webRTC = "webrtc", sync, security
     case automation, shortcuts, diagnostics, updates, about
     var id: String { rawValue }
@@ -192,7 +193,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var group: Group {
         switch self {
-        case .account, .startup, .newProfiles, .behavior, .appearance, .downloads: return .app
+        case .account, .startup, .newProfiles, .behavior, .appearance, .language, .downloads: return .app
         case .proxies, .webRTC, .sync, .security: return .network
         case .automation, .shortcuts, .diagnostics, .updates, .about: return .more
         }
@@ -208,6 +209,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .newProfiles: return "settings.section.newProfiles"
         case .behavior: return "settings.section.behavior"
         case .appearance: return "settings.section.appearance"
+        case .language: return "settings.section.language"
         case .downloads: return "settings.section.downloads"
         case .proxies: return "settings.section.proxies"
         case .webRTC: return "settings.section.webRTC"
@@ -228,6 +230,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .newProfiles: return "person.badge.plus"
         case .behavior: return "macwindow"
         case .appearance: return "circle.lefthalf.filled"
+        case .language: return "character.bubble"
         case .downloads: return "arrow.down.circle"
         case .proxies: return "globe"
         case .webRTC: return "dot.radiowaves.left.and.right"
