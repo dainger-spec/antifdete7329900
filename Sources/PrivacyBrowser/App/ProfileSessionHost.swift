@@ -79,6 +79,11 @@ enum ProfileSessionHost {
         ProfileNetworkGuard.onWebViewOffProfile = {
             ProfileSessionHost.send(.error(L("network.webViewOffProfile")))
         }
+        // Safari's services are refused to this process (ProfileNetworkGuard), and a view of
+        // theirs that WebKit brings in (SafariPlatformSupport's completion list) asked for itself
+        // again each time its service ended: in our own window, an iPhone view's, for ever. Its
+        // stub is made here for every profile, not only where Safari's chrome is hosted.
+        SafariChrome.stopRefusedServiceLoops()
         // Before NSApplication exists: hosting Safari's chrome means this process has to *be* the
         // kind of application its chrome expects, starting with NSApp itself.
         if SafariChromeHost.prepareForChildProcess(configuration: stored) {
