@@ -870,6 +870,17 @@ enum UISnapshots {
                              proxyCheck: check)
     }
 
+    /// The sample vault's tags' colours: some coloured, some not, as a person leaves them.
+    static let sampleTagColors: TagColors = {
+        var colors = TagColors()
+        let chosen = Date(timeIntervalSince1970: 1_800_000_000)
+        colors.set(0, for: "ads", at: chosen)
+        colors.set(1, for: "clients", at: chosen)
+        colors.set(2, for: "warm-up", at: chosen)
+        colors.set(6, for: "Q4 campaign", at: chosen)
+        return colors
+    }()
+
     static func sampleRows() -> [ProfileRowItem] {
         func id(_ n: UInt8) -> UUID { UUID(uuid: (n, 0x1C, 0x5E, 0x17, 0, n, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, n)) }
         let mac = ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: "macos-26"))
@@ -945,6 +956,7 @@ private struct Shot {
             .frame(width: size.width, height: size.height)
             .environment(\.colorScheme, .dark)
             .environment(\.lumenStillFrame, true)
+            .environment(\.tagColors, UISnapshots.sampleTagColors)
             .tint(Theme.accentFill))
         window.contentView = host
         window.setContentSize(size)

@@ -22,6 +22,10 @@ final class AppModel: ObservableObject {
     /// Profiles that were started with a proxy that does not work, and what the probe found
     /// (`ProfileManager.onProxyProblem`): the Profiles window says it in words, with Check.
     @Published var proxyProblems: [ProxyProblem] = []
+    /// The tags' colours (`labels.bin`): the vault's, for every view that shows tags.
+    @Published private(set) var tagColors = TagColors()
+    /// `labels.bin` is a newer version's: shown as none, and no choice is written over it.
+    private var tagColorsRefused = false
     /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
     /// vault it tried).
     @Published private(set) var unlockFailed = false
@@ -322,6 +326,7 @@ final class AppModel: ObservableObject {
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis)
         }
         manager.refusesFailingProxy = { [weak self] in self?.settings.proxyFailure == .doNotLaunch }
+        loadTagColors(from: vault)
         manager.onProxyLaunchRefused = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis, notStarted: true)
         }
@@ -418,6 +423,8 @@ final class AppModel: ObservableObject {
         proxyList?.stopChecking()
         proxyList = nil
         proxyProblems = []
+        tagColors = TagColors()
+        tagColorsRefused = false
         managerObservation = nil
         manager = nil
         repository = nil
@@ -803,6 +810,7 @@ final class AppModel: ObservableObject {
             let (transport, folder) = try syncTransport(for: target, vaultID: repository.vault.vaultID)
             scopedFolder = folder
             let report = try await SyncEngine(repository: repository, transport: transport).sync()
+            if report.pulled.contains("labels") { loadTagColors(from: repository.vault) }
             for id in report.deletedProfileIDs {
                 await manager.removeWebData(for: id)
             }
@@ -824,6 +832,47 @@ final class AppModel: ObservableObject {
         }
         try? updateDeviceSettings { $0.lastSync = status }
         refresh()
+    }
+
+    // MARK: Tags' colours
+
+    /// `labels.bin` as it is. One that does not open is kept as it is and said once; the next
+    /// choice of a colour moves it aside as `labels.bin.unreadable` (`TagColors.save`), never over
+    /// it. A newer version's is said, and no choice is written over it.
+    private func loadTagColors(from vault: UnlockedVault) {
+        do {
+            tagColors = try TagColors.load(from: vault)
+            tagColorsRefused = false
+        } catch {
+            tagColors = TagColors()
+            if case CoreError.newerFormat = error {
+                tagColorsRefused = true
+                showError(errorText(error))
+            } else {
+                Logger(subsystem: "PrivacyBrowser", category: "Vault")
+                    .error("labels.bin could not be read: \(error.logKind, privacy: .public); kept, moved aside at the next choice")
+                showError(L("tags.colors.unreadable"))
+            }
+        }
+    }
+
+    /// Gives `tag` a colour of the palette, or takes its colour away (nil), for the whole vault.
+    func setTagColor(_ color: Int?, for tag: String) {
+        guard let repository else { return }
+        guard !tagColorsRefused else {
+            showError(L("tags.colors.newer"))
+            return
+        }
+        let wanted = color.flatMap { (0..<ProfileAvatarStyle.colorCount).contains($0) ? $0 : nil }
+        guard tagColors.color(of: tag) != wanted else { return }
+        var next = tagColors
+        next.set(wanted, for: tag)
+        do {
+            try next.save(to: repository.vault)
+            tagColors = next
+        } catch {
+            showError(errorText(error))
+        }
     }
 
     /// A profile file that did not open on this Mac, as a sync left it (`SyncReport.unreadable`):

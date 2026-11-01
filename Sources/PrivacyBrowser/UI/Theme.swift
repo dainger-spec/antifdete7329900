@@ -576,6 +576,7 @@ struct ProfileAvatar: View {
 struct TagChips: View {
     let tags: [String]
     var limit = Int.max
+    @Environment(\.tagColors) private var tagColors
 
     var body: some View {
         if !tags.isEmpty {
@@ -591,7 +592,7 @@ struct TagChips: View {
     private func chips(_ shown: Int) -> some View {
         HStack(spacing: 4) {
             ForEach(tags.prefix(shown), id: \.self) { tag in
-                TagChip(text: tag).fixedSize()
+                TagChip(text: tag, color: tagColors.color(of: tag)).fixedSize()
             }
             if tags.count > shown {
                 Text(verbatim: "+\(tags.count - shown)")
@@ -603,13 +604,73 @@ struct TagChips: View {
     }
 }
 
-/// One tag; with `onRemove`, a button that removes it.
+/// A tag's colour (`TagColors`): a small dot in the palette's light tone. A dot, never a circle with
+/// letters, so that it is not read as a profile's glyph: tags group by meaning, a glyph tells
+/// profiles apart within a group (the owner, 1 November). Decoration: the tag's name says it.
+struct TagDot: View {
+    let color: Int
+    var size: CGFloat = 7
+
+    var body: some View {
+        Circle()
+            .fill(Self.tone(color))
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+
+    static func tone(_ color: Int) -> Color {
+        let palette = ProfileAvatar.palette
+        return Color(hex: palette[((color % palette.count) + palette.count) % palette.count].text)
+    }
+
+    /// The colour's name, for the menu that chooses it.
+    static func name(_ color: Int) -> String {
+        L("tags.color.\(color)")
+    }
+}
+
+/// A profile's tags as one line of text, each coloured one after its dot — a glyph inside the text,
+/// so that the line still truncates as one: "● ads · DE".
+enum TagLine {
+    static func text(_ tags: [String], colors: TagColors) -> Text {
+        var line = Text(verbatim: "")
+        for (index, tag) in tags.enumerated() {
+            if index > 0 { line = line + Text(verbatim: " · ") }
+            if let color = colors.color(of: tag) {
+                line = line
+                    + Text(Image(systemName: "circle.fill")).font(.system(size: 6)).baselineOffset(1).foregroundStyle(TagDot.tone(color))
+                    + Text(verbatim: "\u{2009}")
+            }
+            line = line + Text(verbatim: tag)
+        }
+        return line
+    }
+}
+
+/// The tags' colours (`AppModel.tagColors`) for every view that shows tags.
+private struct TagColorsKey: EnvironmentKey {
+    static let defaultValue = TagColors()
+}
+
+extension EnvironmentValues {
+    var tagColors: TagColors {
+        get { self[TagColorsKey.self] }
+        set { self[TagColorsKey.self] = newValue }
+    }
+}
+
+/// One tag, with its colour's dot when it has one; with `onRemove`, a button that removes it.
 struct TagChip: View {
     let text: String
+    var color: Int?
     var onRemove: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 3) {
+            if let color {
+                TagDot(color: color, size: 6)
+                    .padding(.trailing, 1)
+            }
             Text(text)
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)

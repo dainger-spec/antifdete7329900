@@ -1451,3 +1451,15 @@
 "banners.collapse" = "свернуть";
 "banners.more.help" = "Показать остальные уведомления — по порядку важности";
 "banners.collapse.help" = "Оставить одно, самое важное";
+"tags.color.menu" = "Цвет метки";
+"tags.color.none" = "Без цвета";
+"tags.color.0" = "Синий";
+"tags.color.1" = "Зелёный";
+"tags.color.2" = "Песочный";
+"tags.color.3" = "Лавандовый";
+"tags.color.4" = "Серый";
+"tags.color.5" = "Бирюзовый";
+"tags.color.6" = "Розовый";
+"tags.color.7" = "Оливковый";
+"tags.colors.unreadable" = "Цвета меток не прочитались: файл labels.bin оставлен как есть. При первом новом выборе цвета он будет сохранён рядом как labels.bin.unreadable, а не перезаписан.";
+"tags.colors.newer" = "Цвета меток записала более новая версия Lumen: эта версия их не меняет. Обновите Lumen.";

@@ -859,13 +859,15 @@ private struct TagEditor: View {
     @Binding var tags: [String]
     var suggestions: [String]
     @State private var text = ""
+    /// The tags' colours (the vault's): each chip with its dot.
+    @Environment(\.tagColors) private var tagColors
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if !tags.isEmpty {
                 FlowLayout(spacing: 6, lineSpacing: 6) {
                     ForEach(tags, id: \.self) { tag in
-                        TagChip(text: tag) { tags.removeAll { $0 == tag } }
+                        TagChip(text: tag, color: tagColors.color(of: tag)) { tags.removeAll { $0 == tag } }
                     }
                 }
             }
@@ -885,7 +887,7 @@ private struct TagEditor: View {
                     FlowLayout(spacing: 6, lineSpacing: 6) {
                         ForEach(offered.prefix(12), id: \.self) { tag in
                             Button { tags = ProfileTags.normalized(tags + [tag]) } label: {
-                                TagChip(text: tag)
+                                TagChip(text: tag, color: tagColors.color(of: tag))
                             }
                             .buttonStyle(.plain)
                             .help(String(format: L("editor.tags.addSuggested"), tag))

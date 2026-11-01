@@ -24,6 +24,12 @@ restyled later.
   them given by an id when the person chose none) — the quickest way to tell profiles apart by eye,
   which the search, the collections and the tags do only through reading or a click (the owner,
   1 November). The colour chosen is kept in the profile's settings as it was.
+- Tags' colours: the same eight (owner, 1 November: tags group by meaning, a profile's glyph tells
+  apart within a group), told apart from a glyph by their form — a tag's colour is a small dot in
+  the palette's light tone (`TagDot`), never a circle with letters. The dot stands in place of "#"
+  in the sidebar, before the tag's name in a row's tag line (`TagLine`), in the inspector and on
+  the editor's chips. Chosen from the tag's menu in the sidebar (Tag Colour), for the whole vault
+  (`TagColors`, `labels.bin`, synced as its own object); a tag without one stays grey.
 
 ## Type
 

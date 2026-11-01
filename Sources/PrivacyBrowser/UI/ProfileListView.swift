@@ -140,7 +140,8 @@ struct ProfileListView: View {
 
     var body: some View {
         screen
-            .sheet(item: $editing) { target in ProfileEditorView(target: target) }
+            .environment(\.tagColors, model.tagColors)
+            .sheet(item: $editing) { target in ProfileEditorView(target: target).environment(\.tagColors, model.tagColors) }
             .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
             .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
             .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
@@ -447,7 +448,8 @@ struct ProfileListView: View {
             stopSeveral: { ids in Task { await model.stopProfiles(ids) } },
             warmUpSeveral: { ids in warmUpSeveral(ids) },
             assignProxies: { ids in assigningProxies = ProxyAssignView.Request(profileIDs: Set(ids), proxyIDs: []) },
-            deleteSeveral: { ids in pendingBulkDelete = ids })
+            deleteSeveral: { ids in pendingBulkDelete = ids },
+            setTagColor: { tag, color in model.setTagColor(color, for: tag) })
     }
 }
 
@@ -635,6 +637,8 @@ struct ProfileActions {
     var assignProxies: ([UUID]) -> Void = { _ in }
     /// Asks once, naming how many, before deleting.
     var deleteSeveral: ([UUID]) -> Void = { _ in }
+    /// A tag's colour for the whole vault (`TagColors`); nil takes it away.
+    var setTagColor: (String, Int?) -> Void = { _, _ in }
 }
 
 // MARK: - The screen
@@ -1151,6 +1155,7 @@ struct ProfileColumns {
 // MARK: - Sidebar
 
 private struct ProfilesSidebar: View {
+    @Environment(\.tagColors) private var tagColors
     let rows: [ProfileRowItem]
     let sync: SyncLine
     @Binding var filter: ProfileFilter
@@ -1179,7 +1184,7 @@ private struct ProfilesSidebar: View {
                 caption(L("profiles.tags"))
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
-                        ForEach(tags, id: \.self) { tag in item(.tag(tag)) }
+                        ForEach(tags, id: \.self) { tag in tagItem(tag) }
                     }
                 }
                 .scrollIndicators(.automatic)
@@ -1225,6 +1230,44 @@ private struct ProfilesSidebar: View {
         }
     }
 
+    /// A tag: its colour's dot in place of "#", and its menu, where the colour is chosen for every
+    /// profile with the tag.
+    private func tagItem(_ tag: String) -> some View {
+        let value = ProfileFilter.tag(tag)
+        let color = tagColors.color(of: tag)
+        return SidebarItem(symbol: value.symbol, dot: color, title: tag, count: rows.filter(value.includes).count,
+                           selected: section == .profiles && filter == value) {
+            withAnimation(Theme.appearAnimation) {
+                filter = value
+                section = .profiles
+            }
+        }
+        .contextMenu {
+            Menu(L("tags.color.menu")) {
+                ForEach(0..<ProfileAvatarStyle.colorCount, id: \.self) { index in
+                    Toggle(isOn: Binding(get: { color == index }, set: { _ in actions.setTagColor(tag, index) })) {
+                        Label { Text(TagDot.name(index)) } icon: { Image(nsImage: Self.dotImage(index)) }
+                    }
+                }
+                Divider()
+                Button(L("tags.color.none")) { actions.setTagColor(tag, nil) }
+                    .disabled(color == nil)
+            }
+        }
+    }
+
+    /// A colour's dot for a menu item: drawn in its colour, not as a template the menu would tint.
+    private static func dotImage(_ color: Int) -> NSImage {
+        let tone = NSColor(hex: ProfileAvatar.palette[color % ProfileAvatar.palette.count].text)
+        let image = NSImage(size: NSSize(width: 10, height: 10), flipped: false) { rect in
+            tone.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
     /// The proxy list: a section of the window, beside the profiles. Proxies whose last check
     /// failed are counted in red.
     private func proxiesItem(_ count: Int) -> some View {
@@ -1246,6 +1289,8 @@ private struct ProfilesSidebar: View {
 /// (on 6.5 % white); its count at the end, in red with a dot when it is an alert.
 private struct SidebarItem: View {
     let symbol: String
+    /// A tag's colour: its dot in place of the symbol.
+    var dot: Int?
     let title: String
     let count: Int
     var alert = false
@@ -1256,10 +1301,16 @@ private struct SidebarItem: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: symbol)
-                    .font(.system(size: 13))
-                    .foregroundStyle(selected || hovered ? Theme.textPrimary : Theme.textTertiary)
-                    .frame(width: 18)
+                Group {
+                    if let dot {
+                        TagDot(color: dot, size: 8)
+                    } else {
+                        Image(systemName: symbol)
+                            .font(.system(size: 13))
+                            .foregroundStyle(selected || hovered ? Theme.textPrimary : Theme.textTertiary)
+                    }
+                }
+                .frame(width: 18)
                 Text(title)
                     .font(.lumenBody)
                     .foregroundStyle(selected || hovered ? Theme.textPrimary : Theme.textSecondary)
@@ -1343,6 +1394,7 @@ private struct SyncStatusButton: View {
 /// its letters with the running dot, its name and tags; where it exits; how sites see it; its
 /// state; and, under the pointer or selected, Launch or Stop and the ⋯ menu.
 private struct ProfileRow: View {
+    @Environment(\.tagColors) private var tagColors
     let row: ProfileRowItem
     let columns: ProfileColumns
     let actions: ProfileActions
@@ -1425,7 +1477,7 @@ private struct ProfileRow: View {
                         .accessibilityLabel(L("profiles.row.hasNotes"))
                 }
                 if !row.tags.isEmpty || row.ephemeral {
-                    Text((row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : [])).joined(separator: " · "))
+                    TagLine.text(row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : []), colors: tagColors)
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)

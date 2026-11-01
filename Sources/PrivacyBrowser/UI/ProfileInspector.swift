@@ -14,6 +14,7 @@ struct InspectorInfo {
 /// is and does, at a glance — how it reaches the web, how sites see it, what it keeps — with its
 /// actions. 320 pt, over the light at 80 % like the sidebar.
 struct ProfileInspectorView: View {
+    @Environment(\.tagColors) private var tagColors
     let row: ProfileRowItem
     let info: InspectorInfo
     let actions: ProfileActions
@@ -91,7 +92,7 @@ struct ProfileInspectorView: View {
             }
             .padding(.top, 6)
             if !row.tags.isEmpty || row.ephemeral {
-                Text(((row.ephemeral ? [L("profiles.row.ephemeralTag")] : []) + row.tags).joined(separator: " · "))
+                TagLine.text((row.ephemeral ? [L("profiles.row.ephemeralTag")] : []) + row.tags, colors: tagColors)
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.textTertiary)
                     .padding(.top, 4)

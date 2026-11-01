@@ -1451,3 +1451,15 @@
 "banners.collapse" = "collapse";
 "banners.more.help" = "Show the other notices, most important first";
 "banners.collapse.help" = "Keep only the most important one";
+"tags.color.menu" = "Tag Colour";
+"tags.color.none" = "No Colour";
+"tags.color.0" = "Blue";
+"tags.color.1" = "Green";
+"tags.color.2" = "Sand";
+"tags.color.3" = "Lavender";
+"tags.color.4" = "Grey";
+"tags.color.5" = "Teal";
+"tags.color.6" = "Rose";
+"tags.color.7" = "Olive";
+"tags.colors.unreadable" = "The tags’ colours could not be read: labels.bin is left as it is. At the next choice of a colour it is kept beside as labels.bin.unreadable, never written over.";
+"tags.colors.newer" = "A newer version of Lumen wrote the tags’ colours: this version does not change them. Update Lumen.";
