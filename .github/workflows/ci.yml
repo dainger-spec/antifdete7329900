@@ -338,6 +338,13 @@ jobs:
         # signed, both checked with the app's own code (pbupdate verify). Notarization and stapling
         # are skipped and said so.
         run: VERSION=0.1.1 BUILD=2 OUT=build/release scripts/release.sh
+      - name: The disk image as someone downloads it — the control (not notarized, so Gatekeeper must refuse it)
+        # scripts/download_check.sh on the dry run's image, marked as a browser marks a download: a
+        # check that cannot fail proves nothing, and an image signed ad hoc is the one it must fail
+        # on. After a real release, .github/workflows/download-check.yml runs the same check on the
+        # published image with --expect accepted, on runners that have never seen Lumen.
+        timeout-minutes: 10
+        run: scripts/download_check.sh build/release/Lumen-0.1.1.dmg --expect rejected
       - name: The release gate fails where Safari's chrome is not hosted (its controls)
         # A gate that cannot fail proves nothing. The sandboxed build, and the release with Safari's
         # chrome turned off for the profile's process (--control), must each come back FAIL, for

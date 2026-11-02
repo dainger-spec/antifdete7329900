@@ -1,0 +1,33 @@
+name: Download check
+
+# The published disk image, downloaded on runners that have never seen Lumen and marked as a
+# browser marks a download (scripts/download_check.sh): it must open without a word from
+# Gatekeeper — the image notarized and stapled, the app inside too. Run by hand after a release:
+#   Actions › Download check › Run workflow, with the image's address (download.json's "url").
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: The disk image's address (https://dl.lumenbrowser.io/Lumen-<version>.dmg)
+        required: true
+
+jobs:
+  download:
+    name: Download check — ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        run: sw_vers
+      - name: The image as someone downloads it
+        env:
+          IMAGE_URL: ${{ github.event.inputs.url }}
+        run: |
+          [[ "$IMAGE_URL" == https://dl.lumenbrowser.io/* ]] || { echo "::error::not an address at dl.lumenbrowser.io: $IMAGE_URL"; exit 1; }
+          scripts/download_check.sh "$IMAGE_URL" --expect accepted

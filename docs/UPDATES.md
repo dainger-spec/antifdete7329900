@@ -332,6 +332,49 @@ Developer ID — the Team ID updates must be signed by (and a secure timestamp, 
 needs). At the end the appcast and the zip are checked with `pbupdate verify`, the code the app
 itself checks them with, and the script lists what a real release still needs when it ran dry.
 
+### What is published, and where (the owner, 1 November)
+
+Everything is at **`https://dl.lumenbrowser.io/`**, a Cloudflare R2 bucket under its own name: the
+appcast (`appcast.json`), the zip the updater downloads (`Lumen-<version>.zip`, unchanged) and the
+**disk image the website offers** (`Lumen-<version>.dmg`). A real release (`SIGN_IDENTITY` given)
+takes these addresses unless `FEED_URL` / `DOWNLOAD_URL` say otherwise; a dry run keeps
+`updates.invalid`, so that no build CI makes looks anywhere real.
+
+**Why a disk image.** From a zip people leave the app in Downloads; macOS runs an app from there
+translocated — from a read-only copy elsewhere — and an update cannot replace it. The image holds
+the app and a link to Applications, laid out by Finder over a picture with an arrow
+(`scripts/make_dmg.sh`, the picture drawn by `Lumen --render-dmg-background`): drag the one onto
+the other. The layout lives in the image's `.DS_Store`, which only Finder writes, so the script
+asks Finder over AppleScript; on the release's Mac macOS asks once whether Terminal may control
+Finder. A release fails without the layout; CI's dry run says when it could not have it.
+
+**The image is signed, notarized and stapled too**, after the app inside it was: `codesign` with
+the Developer ID and a timestamp, `notarytool submit … --wait`, `stapler staple`, `stapler validate`
+and `spctl --assess --type open --context context:primary-signature` on the image. The app keeps
+its own ticket inside (`make_dmg.sh` checks that the copy in the image is the same signature and
+still stapled), so it opens offline once copied out.
+
+**Uploaded** when `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` are given
+(curl's own S3 signing, nothing installed): the zip and the image first, the appcast last — a feed
+never names a file not there yet — each read back from `dl.lumenbrowser.io` and compared byte for
+byte; the versioned files cached for a year, the appcast never. Without the keys the script says
+what goes where, in that order.
+
+**For the website**, at the end, in one piece to copy (and in `download.json`): the image's
+address, the version, its size in megabytes (decimal, as Finder counts) and in bytes, its SHA-256,
+the minimum macOS.
+
+**Checked as downloaded**: `scripts/download_check.sh` fetches the image, marks it as a browser
+marks a download, and asks Gatekeeper what macOS asks when it is opened — the image (`spctl
+--type open`), its ticket, then the app copied out and marked the same way (`spctl --type
+execute`, `syspolicy_check distribution`). CI runs it on every push on the dry run's image with
+`--expect rejected`: an image that is not notarized must be refused, or the check (or the
+runner's Gatekeeper) proves nothing. After a release, the workflow "Download check" runs it on
+the published image with `--expect accepted`, on runners that have never seen Lumen.
+
+**Not yet done once for real**: nothing of signing with a Developer ID, notarizing or stapling
+has run with a live Apple account — CI has none, and every run so far was dry.
+
 ### Which build is released
 
 **The build without the App Sandbox** (`SANDBOX=0`). `release.sh` refuses `SANDBOX=1` before it
