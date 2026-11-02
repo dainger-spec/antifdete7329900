@@ -23,7 +23,7 @@ enum SystemOpen {
         case website
         /// A folder of the app's own in the Finder (the vault's, a kept deleted profile's).
         case revealInFinder
-        /// System Settings, where network extensions are allowed (the tunnel).
+        /// System Settings, where network extensions are allowed (the network guard).
         case systemSettings
         /// The update's installer (this app's own helper).
         case updateInstaller

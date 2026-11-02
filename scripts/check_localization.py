@@ -34,7 +34,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TABLES = {lang: os.path.join(ROOT, "Resources", f"{lang}.lproj", "Localizable.strings") for lang in ("ru", "en")}
 SOURCES = os.path.join(ROOT, "Sources", "PrivacyBrowser")
 # Never shown to a user of the app: test and CI harnesses.
-NOT_UI = {"SelfTest.swift", "SiteCapture.swift", "UTunRelayHarness.swift"}
+NOT_UI = {"SelfTest.swift", "SiteCapture.swift"}
 ENTRY = re.compile(r'^\s*"((?:[^"\\]|\\.)*)"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;\s*$')
 SPECIFIER = re.compile(r"%(?:\d+\$)?[-+ 0#]*\d*(?:\.\d+)?(?:hh|h|ll|l|q|z|t|j)?[@dDiuUxXoOfeEgGcCsSpaA%]")
 USE = re.compile(r'\bL\("((?:[^"\\]|\\.)*)"\)')

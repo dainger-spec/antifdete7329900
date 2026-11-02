@@ -2,10 +2,9 @@ import Darwin
 import Foundation
 import TunnelCore
 
-/// One route's TURN server on a UDP socket of this Mac, outside any tunnel. The CI harness
-/// (`--capture-sites`, `scripts/leak_check.py`) drives WebKit through it: the same TURN server
-/// and SOCKS5 relay the packet tunnel runs, without the Network Extension entitlement a CI
-/// runner cannot have. Not used by the browser itself.
+/// One route's TURN server on a UDP socket of this Mac: the relay that carries a proxied profile's
+/// WebRTC (`WebRTCRelays`, bound to 127.0.0.1), sending each allocation through the profile's
+/// SOCKS5 proxy (`SOCKS5RelayFactory`).
 public final class TURNUDPHost {
     public enum HostError: Error { case socket(String) }
 
@@ -100,25 +99,5 @@ public final class TURNUDPHost {
         result.sin_port = address.port.bigEndian
         result.sin_addr = in_addr(s_addr: address.ip.bytes.withUnsafeBytes { $0.load(as: UInt32.self) })
         return result
-    }
-
-    /// The first IPv4 address of an interface that is up and not the loopback (en0 on a Mac).
-    public static func primaryIPv4() -> IPAddr? {
-        var list: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&list) == 0, let first = list else { return nil }
-        defer { freeifaddrs(first) }
-        var node: UnsafeMutablePointer<ifaddrs>? = first
-        while let entry = node {
-            let flags = Int32(entry.pointee.ifa_flags)
-            if let address = entry.pointee.ifa_addr, address.pointee.sa_family == sa_family_t(AF_INET),
-               flags & IFF_UP != 0, flags & IFF_RUNNING != 0, flags & IFF_LOOPBACK == 0 {
-                let ip = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
-                    withUnsafeBytes(of: $0.pointee.sin_addr.s_addr) { IPAddr(bytes: Array($0)) }
-                }
-                if let ip { return ip }
-            }
-            node = entry.pointee.ifa_next
-        }
-        return nil
     }
 }

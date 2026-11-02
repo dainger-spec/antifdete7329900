@@ -3,7 +3,7 @@
 (docs/IDENTITY.md, "What to register with Apple").
 
     TEAM_ID=<TEAM_ID> SIGN_IDENTITY="Developer ID Application: <name> (<TEAM_ID>)" \\
-      APP_PROFILE=lumen.provisionprofile EXTENSION_PROFILE=lumen-tunnel.provisionprofile \\
+      APP_PROFILE=lumen.provisionprofile EXTENSION_PROFILE=lumen-guard.provisionprofile \\
       NOTARY_PROFILE=lumen-notary python3 scripts/signing_check.py
 
 Then send build/signing-check/report.txt (and notary-log.json, if notarization refused).
@@ -34,7 +34,8 @@ import subprocess
 import sys
 import time
 
-NE_PROVIDER = "packet-tunnel-provider-systemextension"
+# The network guard is a content filter (docs/TUNNEL.md); its App ID is still $BUNDLE_ID.PacketTunnel.
+NE_PROVIDER = "content-filter-provider-systemextension"
 lines = []
 
 
@@ -127,13 +128,13 @@ def claims(team, bundle, extension, group):
         "com.apple.developer.system-extension.install": True,
         "com.apple.security.application-groups": [group],
     }
-    tunnel = {
+    guard = {
         "com.apple.application-identifier": team + "." + extension,
         "com.apple.developer.team-identifier": team,
         "com.apple.developer.networking.networkextension": [NE_PROVIDER],
         "com.apple.security.application-groups": [group],
     }
-    return app, tunnel
+    return app, guard
 
 
 def describe_profile(label, path, identity_sha1, claimed):
@@ -221,11 +222,11 @@ def main():
             say("  " + line.strip())
     summary.append(("identity", "OK" if identity_sha1 else "FAIL"))
 
-    app_claims, tunnel_claims = claims(team, bundle, extension, group)
+    app_claims, guard_claims = claims(team, bundle, extension, group)
     app_verdicts = describe_profile("the app, APP_PROFILE", env["APP_PROFILE"], identity_sha1, app_claims)
-    tunnel_verdicts = describe_profile("the extension, EXTENSION_PROFILE", env["EXTENSION_PROFILE"], identity_sha1,
-                                       tunnel_claims)
-    for label, verdicts in (("app profile", app_verdicts), ("extension profile", tunnel_verdicts)):
+    guard_verdicts = describe_profile("the extension, EXTENSION_PROFILE", env["EXTENSION_PROFILE"], identity_sha1,
+                                      guard_claims)
+    for label, verdicts in (("app profile", app_verdicts), ("extension profile", guard_verdicts)):
         # A restricted entitlement the profile does not list is refused at launch, like a wrong value.
         others = [v for k, v in verdicts.items() if k != "com.apple.security.application-groups"]
         summary.append((label, "OK" if others and all(v == "OK" for v in others) else "FAIL"))
@@ -317,7 +318,7 @@ def main():
                 % (status_policy, " | ".join(policy.strip().splitlines()[-6:])))
             summary.append(("syspolicy_check distribution", "OK" if status_policy == 0 else "FAIL"))
 
-        binary = os.path.join(sysext, "Contents", "MacOS", "PacketTunnelExtension")
+        binary = os.path.join(sysext, "Contents", "MacOS", "NetworkGuardExtension")
         if os.path.exists(binary):
             section("The extension's binary started for 4 s (AMFI; nothing is installed)")
             started = time.time()
@@ -347,9 +348,9 @@ def main():
                 verdict = "UNCLEAR"
                 say("UNCLEAR it exited with %d after %.2f s (not an AMFI kill by its look; see the log lines)" % (code, lived))
             _, amfi = run(["log", "show", "--last", "2m", "--style", "compact", "--predicate",
-                           'eventMessage CONTAINS[c] "PacketTunnel" AND '
+                           'eventMessage CONTAINS[c] "NetworkGuard" AND '
                            '(process == "kernel" OR process == "amfid" OR process == "taskgated-helper")'], timeout=120)
-            for line in [l for l in amfi.splitlines() if "PacketTunnel" in l][-10:]:
+            for line in [l for l in amfi.splitlines() if "NetworkGuard" in l][-10:]:
                 say("  log: " + line.strip()[:400])
             summary.append(("extension binary starts with its entitlements (AMFI hint)", verdict))
 

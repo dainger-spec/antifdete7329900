@@ -12,8 +12,8 @@ enum BuildKind {
         return !server.isEmpty
     }()
 
-    /// The packet-tunnel system extension is inside this build (`NE=1`): WebRTC of a profile with a
-    /// SOCKS5 proxy can go through it once the person turns it on. Without it, nothing can turn it
-    /// on, and no text may ask the person to.
-    @MainActor static var carriesTunnel: Bool { TunnelManager.shared.extensionIdentifier != nil }
+    /// The network guard's system extension is inside this build (`NE=1`): WebRTC of a profile with
+    /// a SOCKS5 proxy can go through that proxy once the person installs it. Without it, nothing can
+    /// install it, and no text may ask the person to.
+    @MainActor static var carriesGuard: Bool { NetworkGuard.shared.extensionIdentifier != nil }
 }

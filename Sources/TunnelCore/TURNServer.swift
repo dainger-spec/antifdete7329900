@@ -5,8 +5,8 @@ import Crypto
 #endif
 import Foundation
 
-/// The UDP path from an allocation to the Internet: in the tunnel, a SOCKS5 UDP association
-/// through the profile's proxy. Implementations call back on the queue the TURN server runs on.
+/// The UDP path from an allocation to the Internet: a SOCKS5 UDP association through the
+/// profile's proxy. Implementations call back on the queue the TURN server runs on.
 public protocol PeerRelay: AnyObject {
     func send(_ payload: [UInt8], to peer: SocketAddress)
     func close()
@@ -252,7 +252,7 @@ public final class TURNServer {
             respondError(to: message, tuple: tuple, code: 400, reason: "Bad Request")
             return
         }
-        guard transport[0] == IPPacket.udp else {
+        guard transport[0] == 17 else { // UDP (IANA protocol number), the only transport relayed
             respondError(to: message, tuple: tuple, code: 442, reason: "Unsupported Transport Protocol")
             return
         }

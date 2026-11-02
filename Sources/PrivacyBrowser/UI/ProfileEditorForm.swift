@@ -55,11 +55,11 @@ struct ProfileEditorForm: View {
     /// Keeps the glyph's colour the same as in the Profiles list.
     var avatarID: UUID
     var error: String?
-    /// The network extension can carry WebRTC through a SOCKS5 proxy (TunnelManager).
-    var tunnelCarriesWebRTC: Bool
+    /// The network guard is ready: WebRTC can go through a SOCKS5 proxy (`NetworkGuard`).
+    var guardReady: Bool
     var onCancel: () -> Void = {}
     var onSave: () -> Void = {}
-    var onTunnelSettings: () -> Void = {}
+    var onGuardSettings: () -> Void = {}
     /// The proxy list, for "From the list"; proxies whose type no check has found yet cannot be
     /// chosen (they are given to no profile).
     var savedProxies: [ProxyListEntry] = []
@@ -454,10 +454,10 @@ struct ProfileEditorForm: View {
             ? String(format: L("editor.safari.risky"), version) : version
     }
 
-    /// With a proxy, WebRTC can only be on through the network extension's relay, and only for
+    /// With a proxy, WebRTC can only be on through the relay, held there by the network guard, and only for
     /// SOCKS5 (a proxy whose type is not known yet is not taken for one).
     private var webRTCLocked: Bool {
-        draft.hasProxy && !(draft.chosenProxy?.kind == .socks5 && tunnelCarriesWebRTC)
+        draft.hasProxy && !(draft.chosenProxy?.kind == .socks5 && guardReady)
     }
 
     // MARK: Connection
@@ -509,14 +509,14 @@ struct ProfileEditorForm: View {
             if draft.hasProxy, let kind = draft.chosenProxy?.kind {
                 if kind != .socks5 {
                     EditorNote(L("editor.webrtc.httpProxy"))
-                } else if tunnelCarriesWebRTC {
-                    EditorNote(L("editor.webrtc.viaTunnel"))
-                } else if !BuildKind.carriesTunnel {
-                    // Nothing to turn on in this build: said as it is, with no button to an extension it lacks.
-                    EditorNote(L("editor.webrtc.noTunnelInBuild"), tone: .warning)
+                } else if guardReady {
+                    EditorNote(L("editor.webrtc.viaGuard"))
+                } else if !BuildKind.carriesGuard {
+                    // Nothing to turn on in this build: said as it is, with no button to a guard it lacks.
+                    EditorNote(L("editor.webrtc.noGuardInBuild"), tone: .warning)
                 } else {
-                    EditorNote(L("editor.webrtc.tunnelOff"), tone: .warning)
-                    Button(L("editor.webrtc.tunnelSettings"), action: onTunnelSettings)
+                    EditorNote(L("editor.webrtc.guardNotReady"), tone: .warning)
+                    Button(L("editor.webrtc.guardSettings"), action: onGuardSettings)
                         .buttonStyle(.link)
                         .foregroundStyle(Theme.accent)
                 }

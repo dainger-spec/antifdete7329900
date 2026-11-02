@@ -9,14 +9,17 @@
 #   BUNDLE_ID=org.me.PB scripts/build-app.sh
 #   SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
 #
-# With the packet-tunnel system extension (WebRTC through SOCKS5 proxies, docs/TUNNEL.md) —
-# needs a paid Apple Developer team with the Network Extensions capability:
+# With the network guard, the content-filter system extension that holds a profile whose WebRTC
+# goes through its proxy to that proxy (docs/TUNNEL.md) — needs the team's Network Extensions
+# capability (content filter) and provisioning profiles for the app and the extension:
 #   NE=1 TEAM_ID=ABCDE12345 SIGN_IDENTITY="Developer ID Application: … (ABCDE12345)" \
-#     APP_PROFILE=path/app.provisionprofile EXTENSION_PROFILE=path/tunnel.provisionprofile \
+#     APP_PROFILE=path/app.provisionprofile EXTENSION_PROFILE=path/guard.provisionprofile \
 #     scripts/build-app.sh
-#   (EXTENSION_ID defaults to $BUNDLE_ID.PacketTunnel, APP_GROUP to $TEAM_ID.$BUNDLE_ID.
-#   NE_SIGNING=development with an "Apple Development: …" identity and Development profiles,
-#   for testing on a registered Mac; the default, developer-id, is what can be notarized.)
+#   (EXTENSION_ID defaults to $BUNDLE_ID.PacketTunnel — the App ID registered for the extension
+#   on 31 October, whose profile carries the content-filter entitlement too — and APP_GROUP to
+#   $TEAM_ID.$BUNDLE_ID. NE_SIGNING=development with an "Apple Development: …" identity and
+#   Development profiles, for testing on a registered Mac; the default, developer-id, is what can
+#   be notarized.)
 #   NE=check scripts/build-app.sh   # builds the extension and its bundle unsigned, for CI
 #
 # Versions and updates (docs/UPDATES.md; scripts/release.sh sets these):
@@ -46,8 +49,8 @@ fi
 TEAM_ID="${TEAM_ID:-XXXXXXXXXX}"
 APP_GROUP="${APP_GROUP:-$TEAM_ID.$BUNDLE_ID}"
 case "${NE_SIGNING:-developer-id}" in
-  developer-id) NE_PROVIDER=packet-tunnel-provider-systemextension ;;
-  development) NE_PROVIDER=packet-tunnel-provider ;;
+  developer-id) NE_PROVIDER=content-filter-provider-systemextension ;;
+  development) NE_PROVIDER=content-filter-provider ;;
   *) echo "error: NE_SIGNING is developer-id or development" >&2; exit 1 ;;
 esac
 EXTENSION_VERSION="${EXTENSION_VERSION:-$(date -u +%Y%m%d.%H%M%S)}"
@@ -151,10 +154,10 @@ if [[ "$SANDBOX" == "1" ]]; then
   plutil -lint "$APP/Contents/Resources/container-migration.plist" >/dev/null
 fi
 
-# The packet-tunnel system extension (NE=1: signed and embedded; NE=check: built and laid out
+# The network guard's system extension (NE=1: signed and embedded; NE=check: built and laid out
 # beside the app, unsigned, so CI checks it compiles against the SDK and its plists are valid).
 if [[ "$NE" == "1" || "$NE" == "check" ]]; then
-  swift build -c "$CONFIG" --product PacketTunnelExtension
+  swift build -c "$CONFIG" --product NetworkGuardExtension
   if [[ "$NE" == "1" ]]; then
     SYSEXT="$APP/Contents/Library/SystemExtensions/$EXTENSION_ID.systemextension"
   else
@@ -162,19 +165,32 @@ if [[ "$NE" == "1" || "$NE" == "check" ]]; then
     rm -rf "$SYSEXT"
   fi
   mkdir -p "$SYSEXT/Contents/MacOS"
-  cp "$BIN_DIR/PacketTunnelExtension" "$SYSEXT/Contents/MacOS/PacketTunnelExtension"
+  cp "$BIN_DIR/NetworkGuardExtension" "$SYSEXT/Contents/MacOS/NetworkGuardExtension"
   sed -e "s/\$(EXTENSION_ID)/$EXTENSION_ID/g" -e "s/\$(APP_GROUP)/$APP_GROUP/g" -e "s/\$(EXTENSION_VERSION)/$EXTENSION_VERSION/g" \
-    Resources/PacketTunnel/Info.plist > "$SYSEXT/Contents/Info.plist"
+    -e "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/NetworkGuard/Info.plist > "$SYSEXT/Contents/Info.plist"
   plutil -lint "$SYSEXT/Contents/Info.plist" >/dev/null
-  # NEProviderClasses names PacketTunnelExtension.PacketTunnelProvider: the Objective-C runtime
+  # A content filter, and nothing that carries traffic: the one provider class is the filter's.
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :NetworkExtension:NEProviderClasses:com.apple.networkextension.filter-data' "$SYSEXT/Contents/Info.plist")" \
+     == "NetworkGuardExtension.GuardFilterProvider" ]] \
+    || { echo "error: the extension's Info.plist does not name its filter class" >&2; exit 1; }
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :NetworkExtension:NEProviderClasses' "$SYSEXT/Contents/Info.plist" | grep -c ' = ')" == "1" ]] \
+    || { echo "error: the network guard declares a provider other than its filter" >&2; exit 1; }
+  # NEProviderClasses names NetworkGuardExtension.GuardFilterProvider: the Objective-C runtime
   # knows a Swift class by its mangled name, which must be in the binary.
   # (grep reads all of it: `grep -q` stopping early would fail the pipe under pipefail.)
-  strings "$SYSEXT/Contents/MacOS/PacketTunnelExtension" | grep -x '_TtC21PacketTunnelExtension20PacketTunnelProvider' >/dev/null \
-    || { echo "error: the extension has no PacketTunnelExtension.PacketTunnelProvider class" >&2; exit 1; }
-  EXT_ENTITLEMENTS="$(mktemp -t pbtunnel).entitlements"
+  strings "$SYSEXT/Contents/MacOS/NetworkGuardExtension" | grep -x '_TtC21NetworkGuardExtension19GuardFilterProvider' >/dev/null \
+    || { echo "error: the extension has no NetworkGuardExtension.GuardFilterProvider class" >&2; exit 1; }
+  EXT_ENTITLEMENTS="$(mktemp -t pbguard).entitlements"
   sed -e "s/\$(EXTENSION_ID)/$EXTENSION_ID/g" -e "s/\$(APP_GROUP)/$APP_GROUP/g" -e "s/\$(TEAM_ID)/$TEAM_ID/g" \
-    -e "s/\$(NE_PROVIDER)/$NE_PROVIDER/g" Resources/PacketTunnel/PacketTunnel.entitlements > "$EXT_ENTITLEMENTS"
+    -e "s/\$(NE_PROVIDER)/$NE_PROVIDER/g" Resources/NetworkGuard/NetworkGuard.entitlements > "$EXT_ENTITLEMENTS"
   plutil -lint "$EXT_ENTITLEMENTS" >/dev/null
+  # The guard opens no connection of its own: without these it cannot carry a byte anywhere. The
+  # keys themselves are read (a comment that names them is not a claim).
+  for key in com.apple.security.network.client com.apple.security.network.server; do
+    if /usr/libexec/PlistBuddy -c "Print :$key" "$EXT_ENTITLEMENTS" >/dev/null 2>&1; then
+      echo "error: the network guard must not be entitled to open connections ($key)" >&2; exit 1
+    fi
+  done
   if [[ "$NE" == "1" ]]; then
     cp "$EXTENSION_PROFILE" "$SYSEXT/Contents/embedded.provisionprofile"
     codesign --force --options runtime --timestamp --entitlements "$EXT_ENTITLEMENTS" --sign "$SIGN_IDENTITY" "$SYSEXT"
@@ -190,7 +206,7 @@ if [[ "$NE" == "1" || "$NE" == "check" ]]; then
     /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $TEAM_ID.$BUNDLE_ID" \
       -c "Add :com.apple.developer.team-identifier string $TEAM_ID" "$ENTITLEMENTS_NE"
     ENTITLEMENTS="$ENTITLEMENTS_NE"
-    /usr/libexec/PlistBuddy -c "Add :PBTunnelExtensionBundleIdentifier string $EXTENSION_ID" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :PBGuardExtensionBundleIdentifier string $EXTENSION_ID" "$APP/Contents/Info.plist"
   fi
 fi
 

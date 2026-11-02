@@ -129,7 +129,7 @@ struct ProfileListView: View {
     @State private var showingSync = false
     /// "Sign in" from a license's banner: the sign-in over the Profiles window.
     @State private var signingIn = false
-    @State private var showingTunnel = false
+    @State private var showingGuard = false
     @State private var showingAutomation = false
     @State private var filter: ProfileFilter = .all
     @State private var search = ""
@@ -144,7 +144,7 @@ struct ProfileListView: View {
     @State private var pendingBulkDelete: [UUID] = []
     /// The inspector at the window's right, as the person left it.
     @AppStorage("profiles.inspector") private var showsInspector = true
-    @ObservedObject private var tunnel = TunnelManager.shared
+    @ObservedObject private var networkGuard = NetworkGuard.shared
 
     var body: some View {
         screen
@@ -185,7 +185,7 @@ struct ProfileListView: View {
                 SignInFlow(license: model.license, onFinished: { signingIn = false }, onCancel: { signingIn = false })
                     .frame(width: 560, height: 720)
             }
-            .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
+            .sheet(isPresented: $showingGuard) { NetworkGuardSettingsView() }
             .sheet(isPresented: $showingAutomation) { AutomationSettingsView() }
             .confirmationDialog(String(format: L("profiles.delete.title"), pendingDelete?.name ?? ""),
                                 isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -330,7 +330,7 @@ struct ProfileListView: View {
                            return InspectorInfo(details: details, counts: model.inspectorCounts[id], proxyCheck: check)
                        },
                        onInspect: { model.loadInspectorCounts(for: $0) },
-                       tunnelCarriesWebRTC: tunnel.canCarryWebRTC,
+                       guardReady: networkGuard.state == .ready,
                        proxyProblem: model.proxyProblems.first.map { problem in
                            ProxyProblemBanner.Item(
                                title: String(format: problem.notStarted ? L("proxyProblem.title.notStarted") : L("proxyProblem.title"),
@@ -488,7 +488,7 @@ struct ProfileListView: View {
             lock: { Task { await model.lock() } },
             openSync: { showingSync = true },
             syncNow: model.syncTarget == nil ? nil : { Task { await model.syncNow() } },
-            openTunnel: { showingTunnel = true },
+            openGuard: { showingGuard = true },
             openAutomation: { showingAutomation = true },
             openSettings: { openSettings() },
             openAccount: {
@@ -705,7 +705,7 @@ struct ProfileActions {
     var openSync: () -> Void = {}
     /// Nil while no sync target is set.
     var syncNow: (() -> Void)?
-    var openTunnel: () -> Void = {}
+    var openGuard: () -> Void = {}
     /// The local automation API's settings (`AutomationSettingsView`).
     var openAutomation: () -> Void = {}
     var openSettings: () -> Void = {}
@@ -769,7 +769,7 @@ struct ProfilesScreen: View {
     var inspectorInfo: (UUID) -> InspectorInfo = { _ in InspectorInfo() }
     /// A profile is inspected: what it keeps is counted (`AppModel.loadInspectorCounts`).
     var onInspect: (UUID) -> Void = { _ in }
-    var tunnelCarriesWebRTC = false
+    var guardReady = false
     /// The profiles selected as the window opens (the snapshots).
     var initialSelection: [UUID] = []
     /// The banners open behind "N more" as the window opens (the snapshots).
@@ -995,7 +995,7 @@ struct ProfilesScreen: View {
         Group {
             if selectedRows.count == 1, let row = selectedRows.first {
                 ProfileInspectorView(row: row, info: inspectorInfo(row.id), actions: actions,
-                                     tunnelCarriesWebRTC: tunnelCarriesWebRTC)
+                                     guardReady: guardReady)
                     .id(row.id)
             } else if selectedRows.count > 1 {
                 SelectionInspectorView(rows: selectedRows, actions: actions)
@@ -1091,7 +1091,7 @@ struct ProfilesScreen: View {
             .buttonStyle(LumenIconButtonStyle(size: 32, isOn: showsInspector.wrappedValue))
             .help(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
             .accessibilityLabel(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
-            // Only what is done rarely, in groups: import, sync, the tunnel, automation and the
+            // Only what is done rarely, in groups: import, sync, the network guard, automation and the
             // master password (they are in Settings and ⌘K too).
             Menu {
                 Button(L("profiles.menu.import"), action: actions.importProfile)
@@ -1100,7 +1100,7 @@ struct ProfilesScreen: View {
                 Button(L("profiles.menu.syncNow")) { actions.syncNow?() }
                     .disabled(actions.syncNow == nil)
                 Divider()
-                Button(L("profiles.menu.tunnel"), action: actions.openTunnel)
+                Button(L("profiles.menu.guard"), action: actions.openGuard)
                 Button(L("profiles.menu.automation"), action: actions.openAutomation)
                 Divider()
                 Button(L("profiles.menu.changePassword"), action: actions.changePassword)

@@ -1,12 +1,9 @@
 import Foundation
 
-/// A profile's way out for WebRTC, as the app hands it to the packet tunnel: the virtual TURN
-/// address the profile's pages are pointed at, the credentials only those pages know, and the
-/// profile's SOCKS5 proxy the relayed UDP leaves through.
-///
-/// One route per running profile, so several profiles with different proxies relay at the same
-/// time: the tunnel tells them apart by the virtual address their TURN traffic is sent to (and
-/// each one's credentials), not by anything the packets would have to carry.
+/// A profile's way out for WebRTC: the TURN server the profile's pages are pointed at (on
+/// 127.0.0.1, in the app's own process, `WebRTCRelays`), the credentials only those pages know, and
+/// the profile's SOCKS5 proxy the relayed UDP leaves through. One route per running profile, each
+/// with its own server, credentials and proxy: profiles behind different proxies relay side by side.
 public struct TunnelRoute: Codable, Equatable, Sendable {
     /// Random per profile launch; the extension never learns which profile it is.
     public var id: String
@@ -69,9 +66,9 @@ public struct SOCKSProxy: Codable, Equatable, Sendable {
     }
 }
 
-/// The tunnel's addresses. Only these networks are routed into it, so it carries nothing but
-/// the pages' TURN traffic to their virtual relays — every other app, and the profiles' own
-/// TCP (which goes to their proxies directly), stays on the normal network.
+/// Addresses and names of the relay. The TEST-NET-1 /24 and the unique-local /64 were the packet
+/// tunnel's virtual relays (until 2 November 2026); the TURN server still refuses them as peers, and
+/// the tests use them as relay addresses.
 public enum TunnelAddressing {
     /// TEST-NET-1 (RFC 5737): never routed on the Internet, never handed out on a LAN. Not the
     /// benchmarking range 198.18.0.0/15, which sing-box, Clash and Surge use for their fake IPs:
@@ -99,31 +96,5 @@ public enum TunnelAddressing {
 
     public static func relayIPv6(slot: Int) -> IPAddr {
         IPAddr(bytes: Array(ipv6Network.bytes[0..<15]) + [UInt8(10 + slot)])!
-    }
-}
-
-/// What the app sends the extension (`NETunnelProviderSession.sendProviderMessage`), as JSON.
-public enum TunnelControlMessage: Codable, Equatable, Sendable {
-    case register(TunnelRoute)
-    case unregister(id: String)
-    case status
-
-    public func encoded() throws -> Data { try JSONEncoder().encode(self) }
-    public static func decode(_ data: Data) throws -> TunnelControlMessage { try JSONDecoder().decode(Self.self, from: data) }
-}
-
-/// The extension's answer to every control message.
-public struct TunnelStatusReply: Codable, Equatable, Sendable {
-    public static let currentVersion = 1
-    public var version: Int
-    public var routes: [String]
-    public var allocations: Int
-    public var error: String?
-
-    public init(version: Int = TunnelStatusReply.currentVersion, routes: [String], allocations: Int, error: String? = nil) {
-        self.version = version
-        self.routes = routes
-        self.allocations = allocations
-        self.error = error
     }
 }

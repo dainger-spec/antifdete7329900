@@ -18,9 +18,9 @@ struct ProfileInspectorView: View {
     let row: ProfileRowItem
     let info: InspectorInfo
     let actions: ProfileActions
-    /// The network extension carries a SOCKS5 profile's WebRTC now (`TunnelManager.canCarryWebRTC`):
+    /// The network guard is ready (`NetworkGuard`): a SOCKS5 profile's WebRTC can go through its proxy
     /// what its WebRTC amounts to, as the editor says it.
-    var tunnelCarriesWebRTC = false
+    var guardReady = false
 
     var body: some View {
         ScrollView {
@@ -209,7 +209,7 @@ struct ProfileInspectorView: View {
     }
 
     /// As the editor says it (`ProfileEditorForm`): with a proxy, WebRTC goes only through the
-    /// network extension's relay, and only for SOCKS5; otherwise it is off.
+    /// relay, held there by the network guard, and only for SOCKS5; otherwise it is off.
     private func webRTCText(_ details: ProfileDetails) -> String {
         if details.webRTCChoice == .disabled { return L("editor.webrtc.disabled") }
         guard details.proxyEndpoint != nil else {
@@ -220,8 +220,8 @@ struct ProfileInspectorView: View {
             }
         }
         guard details.proxyCarriesUDP else { return L("inspector.webRTC.offHTTP") }
-        if tunnelCarriesWebRTC { return L("inspector.webRTC.viaProxy") }
-        return BuildKind.carriesTunnel ? L("inspector.webRTC.offTunnel") : L("inspector.webRTC.offNoTunnelInBuild")
+        if guardReady { return L("inspector.webRTC.viaProxy") }
+        return BuildKind.carriesGuard ? L("inspector.webRTC.guardNotReady") : L("inspector.webRTC.noGuardInBuild")
     }
 
     // MARK: What it keeps
