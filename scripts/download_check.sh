@@ -14,7 +14,7 @@
 # is the control that shows this check can fail (and that Gatekeeper is on, on this Mac).
 set -uo pipefail
 
-SOURCE="${1:?the image's address or file}"
+SOURCE="${1:?the address or the file of the disk image}"
 EXPECT="accepted"
 if [[ "${2:-}" == "--expect" ]]; then EXPECT="${3:?accepted or rejected}"; fi
 [[ "$EXPECT" == accepted || "$EXPECT" == rejected ]] || { echo "error: --expect accepted|rejected" >&2; exit 2; }

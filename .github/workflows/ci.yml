@@ -26,46 +26,6 @@ jobs:
       - name: Build the app without the App Sandbox
         timeout-minutes: 30
         run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
-      - name: The background picture
-        run: |
-          mkdir -p build/dmg-shots
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --render-dmg-background build/dmg-shots/background
-          ls -la build/dmg-shots/background
-      - name: The disk image (Finder's layout optional here)
-        timeout-minutes: 10
-        run: |
-          set +e
-          time scripts/make_dmg.sh build/unsandboxed/Lumen.app build/Lumen-test.dmg --layout optional
-          echo "exit $?"
-          ls -la build/Lumen-test.dmg
-      - name: The window, light and dark
-        continue-on-error: true
-        timeout-minutes: 10
-        run: |
-          set +e
-          shot() {
-            hdiutil attach build/Lumen-test.dmg -readonly -noverify > build/dmg-shots/attach-$1.txt
-            sleep 2; open /Volumes/Lumen; sleep 4
-            screencapture -x build/dmg-shots/screen-$1.png; echo "screencapture $1: $?"
-            osascript -e 'tell application "Finder" to get bounds of window 1' 2>&1 | sed "s/^/bounds $1: /"
-            hdiutil detach /Volumes/Lumen -force -quiet
-          }
-          shot light
-          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'; echo "dark mode via System Events: $?"
-          osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode'
-          sleep 3
-          shot dark
-          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
-          ls -la build/dmg-shots
-      - name: Gatekeeper on an image that is not notarized (quarantined as a browser would)
-        continue-on-error: true
-        run: |
-          set +e
-          cp build/Lumen-test.dmg build/Lumen-quarantined.dmg
-          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" build/Lumen-quarantined.dmg
-          spctl --assess --type open --context context:primary-signature --verbose=4 build/Lumen-quarantined.dmg; echo "spctl dmg: $?"
-          xcrun stapler validate build/Lumen-quarantined.dmg; echo "stapler: $?"
-          command -v syspolicy_check && { syspolicy_check distribution build/unsandboxed/Lumen.app; echo "syspolicy_check: $?"; }
       - name: The release, dry run, with its disk image (scripts/release.sh as committed)
         timeout-minutes: 40
         run: VERSION=0.1.1 BUILD=2 OUT=build/release scripts/release.sh
