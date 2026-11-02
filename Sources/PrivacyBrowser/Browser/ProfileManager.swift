@@ -57,6 +57,9 @@ final class ProfileManager: ObservableObject {
     /// A profile's process ended on its own (a quit of its own, or a crash: `status` is not 0),
     /// after its home was sealed. Not called for a stop asked for from here (`--menu-walk`).
     var onChildExited: ((UUID, Int32) -> Void)?
+    /// A profile's process ended after a stop asked for from here, and how: 0 when it quit by itself,
+    /// else the signal that ended it (a crash on its way out, or the kill after 30 s). The self-test's.
+    var onChildStopped: ((UUID, Int32) -> Void)?
     /// A profile's process told how it sealed its data, just before it exited (the self-test).
     var onChildSealed: ((UUID, ProfileSealReport) -> Void)?
     /// Profiles whose proxy's exit no geolocation service could tell at their last launch (they
@@ -853,6 +856,15 @@ final class ProfileManager: ObservableObject {
         return true
     }
 
+    /// Asks a profile running in its own process to close its windows as their close buttons do
+    /// (`ProfileCommand.closeWindows`, the self-test's). False when it has no process of its own.
+    @discardableResult
+    func closeWindows(_ id: UUID) -> Bool {
+        guard let child = children[id] else { return false }
+        child.send(.closeWindows)
+        return true
+    }
+
     /// Asks a profile running in its own process to walk Safari's menu bar from item `from` on;
     /// each step comes back through `onMenuWalk`. False when it does not run in a process of its own.
     @discardableResult
@@ -939,6 +951,7 @@ final class ProfileManager: ObservableObject {
             child.onExit = nil
             child.terminate()
             await child.waitUntilExit(timeout: 30)
+            if let status = child.terminationStatus { onChildStopped?(id, status) }
             if let key = try? repository.profileKey(for: id) {
                 try safariHomeVault.seal(profileID: id, key: key)
             }
