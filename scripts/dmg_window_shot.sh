@@ -26,7 +26,7 @@ shot() {
   echo "$appearance: Finder's window $bounds"
   if [[ "$bounds" =~ ^(-?[0-9]+),(-?[0-9]+),(-?[0-9]+),(-?[0-9]+)$ ]]; then
     local x="${BASH_REMATCH[1]}" y="${BASH_REMATCH[2]}" right="${BASH_REMATCH[3]}" bottom="${BASH_REMATCH[4]}"
-    screencapture -x -R"$((x - 8)),$((y - 40)),$((right - x + 16)),$((bottom - y + 48))" "$OUT/dmg-window-$appearance.png"
+    screencapture -x -R "$((x - 8)),$((y - 40)),$((right - x + 16)),$((bottom - y + 48))" "$OUT/dmg-window-$appearance.png"
   else
     screencapture -x "$OUT/dmg-window-$appearance.png"
   fi
