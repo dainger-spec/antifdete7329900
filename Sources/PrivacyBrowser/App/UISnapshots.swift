@@ -281,12 +281,14 @@ enum UISnapshots {
         problems += await Shot(name: "simplified-mode-sandboxed", size: CGSize(width: 360, height: 260), titled: false) {
             SimplifiedModeExplanation(reason: .sandboxed)
         }.capture(into: folder)
-        // What sites see: before a snapshot, its differences, every signal, and Safari silent.
+        // What sites see: before a check; checked, not yet compared; compared (and with what is the
+        // same as Safari's open); narrow. The sample plays Germany on a Mac in Moscow.
         func seen(comparedWithSafari: Bool = true) -> WhatSitesSee {
             let snapshot = WhatSitesSee(profileID: UUID(), manager: { nil }, launch: { _ in })
             let sample = whatSitesSeeSample()
             snapshot.show(SiteComparison.compare(profile: sample.profile, safari: comparedWithSafari ? sample.safari : nil),
-                          comparedWithSafari: comparedWithSafari, takenAt: Date(timeIntervalSince1970: 1_793_000_000))
+                          comparedWithSafari: comparedWithSafari, takenAt: Date(timeIntervalSince1970: 1_793_000_000),
+                          expected: ExpectedIdentity(timeZone: "Europe/Berlin", language: "de-DE"), countryCode: "DE")
             return snapshot
         }
         problems += await Shot(name: "what-sites-see-empty", size: WhatSitesSeeView.size, titled: false) {
@@ -296,10 +298,10 @@ enum UISnapshots {
             WhatSitesSeeView(name: "Northwind", snapshot: seen())
         }.capture(into: folder)
         problems += await Shot(name: "what-sites-see-all", size: WhatSitesSeeView.size, titled: false) {
-            WhatSitesSeeView(name: "Northwind", snapshot: seen(), onlyDifferences: false)
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(), showsSame: true)
         }.capture(into: folder)
         problems += await Shot(name: "what-sites-see-no-safari", size: WhatSitesSeeView.size, titled: false) {
-            WhatSitesSeeView(name: "Northwind", snapshot: seen(comparedWithSafari: false), onlyDifferences: false)
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(comparedWithSafari: false))
         }.capture(into: folder)
         problems += await Shot(name: "narrow-what-sites-see", size: narrow(WhatSitesSeeView.size), titled: false) {
             WhatSitesSeeView(name: "Northwind", snapshot: seen()).environment(\.sheetRoom, narrowRoom)
@@ -1159,17 +1161,19 @@ enum UISnapshots {
 
     // MARK: Sample data
 
-    /// A profile in this app's window and Safari, as a snapshot of each might read: the same
-    /// engine, Safari's own interfaces missing, the window's bars of another height.
+    /// A profile that plays Germany, on a Mac in Moscow, and this Mac's Safari, as a snapshot of
+    /// each might read: the same engine; the profile's time and language its own, on purpose; Safari's
+    /// own interfaces and one property of navigator missing; the window's bars of another height.
     static func whatSitesSeeSample() -> (profile: SiteSnapshot, safari: SiteSnapshot) {
         let ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15"
+        let navigator = "appCodeName,appName,appVersion,cookieEnabled,geolocation,hardwareConcurrency,language,languages,platform,userAgent"
         let shared: [String: String] = [
-            "probe.ua": ua, "probe.platform": "MacIntel", "probe.language": "de-DE", "probe.languages": "de-DE",
-            "probe.hardwareConcurrency": "8", "probe.timeZone": "Europe/Berlin", "probe.tzOffset": "-60",
+            "probe.ua": ua, "probe.platform": "MacIntel",
+            "probe.hardwareConcurrency": "8",
             "probe.screen": "1512x982", "probe.colorDepth": "30", "geometry.devicePixelRatio": "2",
             "geometry.screen": "1512x982x1512x944x0x38", "probe.webgl.renderer": "Apple GPU", "probe.fonts": "13",
             "headers.navigation.order": "Host,Upgrade-Insecure-Requests,Accept,User-Agent,Accept-Language,Priority,Accept-Encoding,Connection",
-            "headers.navigation.user-agent": ua, "headers.navigation.accept-language": "de-DE,de;q=0.9",
+            "headers.navigation.user-agent": ua,
             "tls.ja4": "t13d2014h2_a09f3c656075_e42f34c56612", "tls.alpn": "h2,http/1.1",
             "tls.supportedGroups": "0x11ec,0x001d,0x0017,0x0018,0x0019", "apis.quota": "1006632960",
             "apis.permission.geolocation": "prompt",
@@ -1179,8 +1183,16 @@ enum UISnapshots {
         safari["probe.safari"] = "[object SafariRemoteNotification]|pushNotification"
         profile["probe.features.window.ApplePaySetup"] = "undefined"
         safari["probe.features.window.ApplePaySetup"] = "function"
-        profile["probe.windowOwnCount"] = "1029"
-        safari["probe.windowOwnCount"] = "1044"
+        profile["probe.navigatorProperties"] = navigator
+        safari["probe.navigatorProperties"] = navigator + ",credentials"
+        for (key, mine, theirs) in [
+            ("probe.timeZone", "Europe/Berlin", "Europe/Moscow"), ("probe.tzOffset", "-60/-120", "-180/-180"),
+            ("probe.language", "de-DE", "ru-RU"), ("probe.languages", "de-DE,de", "ru-RU,ru"),
+            ("headers.navigation.accept-language", "de-DE,de;q=0.9", "ru-RU,ru;q=0.9"),
+        ] {
+            profile[key] = mine
+            safari[key] = theirs
+        }
         profile["geometry.chrome"] = "0x80"
         safari["geometry.chrome"] = "0x87"
         profile["geometry.outer"] = "1470x919"

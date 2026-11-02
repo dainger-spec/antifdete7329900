@@ -30,6 +30,11 @@ final class WhatSitesSee: ObservableObject {
     /// Safari answered: without it the list is the profile's alone.
     @Published private(set) var comparedWithSafari = false
     @Published private(set) var takenAt: Date?
+    /// What the profile was launched to show sites (its time zone, its first language), from the
+    /// manager: an identity signal that is not this is worth a look, not "as it should be".
+    @Published private(set) var expected: ExpectedIdentity?
+    /// The country the profile takes its place from (its proxy's), for "as it should be"'s why.
+    @Published private(set) var countryCode: String?
 
     let profileID: UUID
     private let manager: () -> ProfileManager?
@@ -90,7 +95,9 @@ final class WhatSitesSee: ObservableObject {
         }
         profileSnapshot = profile
         closeMeasuringWindows(manager)
-        show(SiteComparison.compare(profile: profile, safari: nil), comparedWithSafari: false, takenAt: Date())
+        let identity = manager.launchedIdentities[profileID]
+        show(SiteComparison.compare(profile: profile, safari: nil), comparedWithSafari: false, takenAt: Date(),
+             expected: identity?.expected, countryCode: identity?.countryCode)
     }
 
     /// The person's "Compare with Safari": the same page in a window of this Mac's own Safari, its
@@ -119,17 +126,21 @@ final class WhatSitesSee: ObservableObject {
         }
         NSApp.activate(ignoringOtherApps: true)
         safariDidNotAnswer = safari == nil
-        show(SiteComparison.compare(profile: profile, safari: safari), comparedWithSafari: safari != nil, takenAt: takenAt ?? Date())
+        show(SiteComparison.compare(profile: profile, safari: safari), comparedWithSafari: safari != nil, takenAt: takenAt ?? Date(),
+             expected: expected, countryCode: countryCode)
     }
 
     /// The last "Compare with Safari" got nothing back from Safari.
     @Published private(set) var safariDidNotAnswer = false
 
     /// A finished snapshot's list (the UI snapshots show one of sample values).
-    func show(_ signals: [SiteSignal], comparedWithSafari: Bool, takenAt: Date) {
+    func show(_ signals: [SiteSignal], comparedWithSafari: Bool, takenAt: Date,
+              expected: ExpectedIdentity? = nil, countryCode: String? = nil) {
         self.signals = signals
         self.comparedWithSafari = comparedWithSafari
         self.takenAt = takenAt
+        self.expected = expected
+        self.countryCode = countryCode
         step = .done
     }
 

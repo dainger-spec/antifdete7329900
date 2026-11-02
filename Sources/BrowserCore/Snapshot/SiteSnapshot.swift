@@ -141,7 +141,7 @@ public enum SiteComparison {
             case "screen", "colorDepth", "orientation", "pointer", "touch", "ownScreen": return .screen
             case "innerSize", "outerSize": return .window
             case "canvas", "canvasText", "webgl", "audio", "fonts": return .rendering
-            case "features", "natives", "safari", "safariShape", "webkitObject", "windowOwnCount", "errorStack": return .apis
+            case "features", "natives", "safari", "safariShape", "webkitObject", "windowProperties", "errorStack": return .apis
             default: return .navigator
             }
         default:
@@ -165,7 +165,10 @@ public enum SiteComparison {
         case "probe.safari", "probe.safariShape", "probe.features.window.ApplePaySetup",
              "probe.features.window.MerchantValidationEvent", "probe.features.window.ApplePaySession":
             return "whatSites.note.safariOnly"
-        case "probe.windowOwnCount": return "whatSites.note.windowCount"
+        // Absent exactly when the profile's WebRTC is off.
+        case "probe.features.RTCPeerConnection", "probe.features.webkitRTCPeerConnection", "probe.features.RTCDataChannel",
+             "probe.features.window.webkitRTCPeerConnection", "probe.natives.RTCPeerConnection":
+            return "whatSites.note.webrtc"
         case "geometry.chrome": return "whatSites.note.chrome"
         case "probe.webdriver": return "whatSites.note.webdriver"
         default:

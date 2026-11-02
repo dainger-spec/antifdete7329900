@@ -29,7 +29,7 @@ PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Resource
 
 # Differ by design between the self-test (which gives WebKit a fixed language, uses a hidden
 # window) and a Safari window: reported, never fatal.
-INFO_KEYS = {"language", "languages", "intlLocale", "innerSize", "outerSize", "windowOwnCount", "errorStack",
+INFO_KEYS = {"language", "languages", "intlLocale", "innerSize", "outerSize", "windowProperties", "errorStack",
              "orientation", "audio", "cookieEnabled",
              # Date#toString names the zone in the default locale, which the self-test overrides.
              "dateString",
@@ -41,9 +41,11 @@ INFO_KEYS = {"language", "languages", "intlLocale", "innerSize", "outerSize", "w
 # What a page measures of the engine and the Mac: must be identical.
 MUST_MATCH = {"ua", "appVersion", "vendor", "platform", "hardwareConcurrency", "deviceMemory", "maxTouchPoints",
               "pdfViewerEnabled", "plugins", "mimeTypes", "webdriver", "standalone", "doNotTrack", "ownNavigator",
-              "ownScreen", "navigatorProtoCount", "screen", "colorDepth", "pointer", "touch", "timeZone", "tzOffset",
+              "ownScreen", "navigatorProperties", "screen", "colorDepth", "pointer", "touch", "timeZone", "tzOffset",
               "canvas.colors", "canvas.urlLength", "canvas.url", "canvasText", "fonts", "webkitObject", "safari"}
 MUST_MATCH_PREFIXES = ("webgl.", "natives.")
+# Lists of names, comma-separated: a difference is printed as the names only one side has.
+NAME_LISTS = {"navigatorProperties", "windowProperties"}
 
 
 def flat(value):
@@ -161,6 +163,11 @@ def compare(safari, ours):
             same += 1
             continue
         line = f"{key}: Safari={json.dumps(a)[:160]}  profile={json.dumps(b)[:160]}"
+        if key in NAME_LISTS:
+            # A list of names is told by the names that differ: its start says nothing.
+            safari_names, profile_names = set(a.split(",")), set(b.split(","))
+            line = (f"{key}: only Safari has {sorted(safari_names - profile_names)}; "
+                    f"only the profile has {sorted(profile_names - safari_names)}")
         must = key in MUST_MATCH or key.startswith(MUST_MATCH_PREFIXES)
         if key in INFO_KEYS or key.split(".")[0] in INFO_KEYS and key.split(".")[0] not in ("features", "natives"):
             diffs.append("INFO " + line)

@@ -90,6 +90,14 @@ final class ProfileManager: ObservableObject {
     /// inspector; said once when it is decided. Gone when the profile stops.
     @Published private(set) var webRTCRefusals: [UUID: WebRTCRefusal] = [:]
     private var sessions: [UUID: BrowserSession] = [:]
+    /// What each running profile was launched to show sites: its time zone, its first language, and
+    /// the country its proxy comes out in when the profile takes its place from the proxy. "What
+    /// sites see" tells the profile's identity from a value that is not what it was set to by it.
+    struct LaunchedIdentity: Equatable {
+        var expected: ExpectedIdentity
+        var countryCode: String?
+    }
+    private(set) var launchedIdentities: [UUID: LaunchedIdentity] = [:]
     /// Profiles running in their own process (`ProfileProcess`, off unless asked for). A profile is
     /// in this or in `sessions`, never both.
     private var children: [UUID: ProfileProcess] = [:]
@@ -365,6 +373,10 @@ final class ProfileManager: ObservableObject {
             Task { @MainActor in await self?.stopReportingErrors(id) }
         }
         sessions[id] = session
+        launchedIdentities[id] = LaunchedIdentity(
+            expected: ExpectedIdentity(timeZone: configuration.timeZoneIdentifier ?? TimeZone.current.identifier,
+                                       language: language ?? WebContentLanguage.systemLanguages.first),
+            countryCode: stored.effectiveLocaleSource == .connection ? location?.countryCode : nil)
         // Before any web view of this process exists: in a profile's own process every web view is
         // built with this session's data store, which is what carries its proxy (ProfileNetworkGuard).
         ProfileNetworkGuard.register(session: session)
@@ -428,6 +440,10 @@ final class ProfileManager: ObservableObject {
             forWarmUpOnly: forWarmUpOnly,
             proxyLocationFound: proxyLocationFound,
             preferences: BrowsingPreferences.current.forProfileProcess)
+        launchedIdentities[id] = LaunchedIdentity(
+            expected: ExpectedIdentity(timeZone: stored.timeZoneIdentifier ?? location?.timeZoneIdentifier ?? TimeZone.current.identifier,
+                                       language: languages.first),
+            countryCode: stored.effectiveLocaleSource == .connection ? location?.countryCode : nil)
         child.onEvent = { [weak self] event in
             guard let self else { return }
             switch event {
@@ -487,6 +503,7 @@ final class ProfileManager: ObservableObject {
             self.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.children[id] = nil
+            self.launchedIdentities[id] = nil
             self.releaseWebRTC(of: id, pid: child.processIdentifier)
             self.windowsUp.remove(id)
             self.resumeWindowWaiters(of: id, up: false)
@@ -973,6 +990,7 @@ final class ProfileManager: ObservableObject {
     // MARK: Stop
 
     func stop(_ id: UUID) async throws {
+        launchedIdentities[id] = nil
         if let child = children.removeValue(forKey: id) {
             runningProfileIDs.remove(id)
             releaseWebRTC(of: id, pid: child.processIdentifier)

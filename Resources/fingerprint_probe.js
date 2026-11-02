@@ -29,7 +29,8 @@ safe('doNotTrack', () => typeof navigator.doNotTrack);
 safe('cookieEnabled', () => navigator.cookieEnabled);
 safe('ownNavigator', () => Object.getOwnPropertyNames(navigator).join(','));
 safe('ownScreen', () => Object.getOwnPropertyNames(screen).join(','));
-safe('navigatorProtoCount', () => Object.getOwnPropertyNames(Navigator.prototype).length);
+// By name, not by count: which one is missing is what matters.
+safe('navigatorProperties', () => Object.getOwnPropertyNames(Navigator.prototype).sort().join(','));
 
 // Screen and window
 safe('screen', () => [screen.width, screen.height, screen.availWidth, screen.availHeight, devicePixelRatio].join('x'));
@@ -229,7 +230,7 @@ safe('safariShape', () => {
           push && typeof push.permission === 'function' ? JSON.stringify(push.permission('web.example.test')) : '-'].join('|');
 });
 safe('webkitObject', () => typeof window.webkit);
-safe('windowOwnCount', () => Object.getOwnPropertyNames(window).length);
+safe('windowProperties', () => Object.getOwnPropertyNames(window).sort().join(','));
 
 // Native-looking functions (CreepJS "lies"): toString, name, length, own property names
 safe('natives', () => {

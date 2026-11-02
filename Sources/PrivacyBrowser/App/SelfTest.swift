@@ -2473,7 +2473,7 @@ final class SelfTest {
         // Everything a page measures of the engine and the Mac, which no profile may change.
         let engineKeys = reference.keys.filter { key in
             ["plugins", "mimeTypes", "pdfViewerEnabled", "language", "languages", "deviceMemory", "ownNavigator", "ownScreen",
-             "navigatorProtoCount", "colorDepth", "canvas.colors", "canvas.urlLength", "canvas.url", "canvasText", "fonts",
+             "navigatorProperties", "colorDepth", "canvas.colors", "canvas.urlLength", "canvas.url", "canvasText", "fonts",
              "webkitObject", "webdriver", "doNotTrack"].contains(key) || key.hasPrefix("webgl.")
                 || (key.hasPrefix("features.") && key != "features.safari") // window.safari is added on purpose (macOS)
         }.sorted()
@@ -4455,7 +4455,7 @@ final class SelfTest {
               snapshot.comparedWithSafari && ja4?.verdict == .same,
               "compared \(snapshot.comparedWithSafari), ja4 \(ja4?.profile ?? "nil") / \(ja4?.safari ?? "nil")")
         info("what sites see: the profile next to a plain WebKit view — " + SiteSignalCategory.allCases.map { category in
-            "\(category.rawValue) \(WhatSitesSeeView.summary(snapshot.signals.filter { $0.category == category }))"
+            "\(category.rawValue) \(SiteComparison.counts(snapshot.signals.filter { $0.category == category }))"
         }.joined(separator: "; "))
         let session = manager.session(for: profile.id)
         let inHistory = session?.library.historyEntries(matching: "127.0.0.1") ?? []
@@ -4555,12 +4555,25 @@ final class SelfTest {
             return 1
         }
         await snapshot.compareWithSafari()
-        // First, with the categories after it: what CI turns into notices on the job.
-        let count = snapshot.signals.first { $0.key == "probe.windowOwnCount" }
-        print("WHAT-SITES-SEE the window's own properties: profile \(count?.profile ?? "-"), Safari \(count?.safari ?? "-")")
+        // First, with the categories after it: what CI turns into notices on the job. The panel's
+        // verdict and what it would show as worth a look, by name.
+        let verdict = SiteComparison.verdict(snapshot.signals, expected: snapshot.expected)
+        print("WHAT-SITES-SEE verdict: \(verdict.same) of \(verdict.compared) as in Safari, \(verdict.intended.count) on purpose "
+              + "(\(verdict.aspects.map(\.rawValue).joined(separator: " and "))), \(verdict.attention.count) worth a look")
+        for signal in verdict.attention {
+            let difference = SiteComparison.difference(of: signal, expected: snapshot.expected).map { "\($0)" } ?? "-"
+            print("WHAT-SITES-SEE worth a look: \(signal.key): \(String(difference.prefix(400)))")
+        }
+        // By name: which of the window's own properties only one side has.
+        if let windowProperties = snapshot.signals.first(where: { $0.key == "probe.windowProperties" }) {
+            let difference = SiteComparison.difference(of: windowProperties).map { "\($0)" } ?? "the same as Safari's"
+            print("WHAT-SITES-SEE the window's own properties: \(difference)")
+        } else {
+            print("WHAT-SITES-SEE the window's own properties: not measured")
+        }
         for category in SiteSignalCategory.allCases {
             let signals = snapshot.signals.filter { $0.category == category }
-            print("WHAT-SITES-SEE \(category.rawValue): \(WhatSitesSeeView.summary(signals))")
+            print("WHAT-SITES-SEE \(category.rawValue): \(SiteComparison.counts(signals))")
             for signal in signals where signal.verdict != .same {
                 print("  \(signal.verdict) \(signal.key): profile=\(String((signal.profile ?? "-").prefix(160))) safari=\(String((signal.safari ?? "-").prefix(160)))")
             }
