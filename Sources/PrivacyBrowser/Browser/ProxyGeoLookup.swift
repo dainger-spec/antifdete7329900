@@ -7,7 +7,9 @@ import os
 /// proxy's exit IP and answers with it, its time zone and country (`ProxyLocation`).
 ///
 /// PRIVACY: the query goes to a third-party service (below), over HTTPS, only through the
-/// profile's proxy — never direct: `ProxyConfigurationFactory` sets `allowFailover = false` —
+/// profile's proxy — never direct: `ProxyConfigurationFactory` sets `allowFailover = false`, and
+/// the profile's bypass list, which is for its pages, does not apply (`makeWithoutBypass`): a
+/// service on it was asked from this Mac's own address, and answered with this Mac's location —
 /// with the profile's User-Agent, no cookies and no cache. It runs when a profile with a proxy
 /// launches with `matchProxyLocation` or `warnOnProxyIPChange` (`needsProxyLookup`). Each lookup
 /// has its own URLSession with that profile's proxy: lookups of profiles launched together do
@@ -79,7 +81,7 @@ enum ProxyGeoLookup {
     }
 
     static func lookUp(proxy: ProxySettings, userAgent: String, timeout: TimeInterval = 12) async -> Result {
-        guard let proxies = try? ProxyConfigurationFactory.make(proxy), !proxies.isEmpty else { return Result() }
+        guard let proxies = try? ProxyConfigurationFactory.makeWithoutBypass(proxy), !proxies.isEmpty else { return Result() }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.proxyConfigurations = proxies
         configuration.httpCookieStorage = nil

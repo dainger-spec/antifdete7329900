@@ -52,4 +52,13 @@ enum ProxyConfigurationFactory {
         configuration.excludedDomains = settings.excludedDomains
         return [configuration]
     }
+
+    /// For the app's own requests about a profile's proxy (where it exits): through the proxy
+    /// whatever the profile's bypass list says. A request that went around it would come from this
+    /// Mac's own address — and be answered with it.
+    static func makeWithoutBypass(_ settings: ProxySettings) throws -> [ProxyConfiguration] {
+        var settings = settings
+        settings.excludedDomains = []
+        return try make(settings)
+    }
 }
