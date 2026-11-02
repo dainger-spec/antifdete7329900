@@ -1,9 +1,9 @@
 #!/bin/bash
-# The disk image as someone downloads it, on a Mac that has never seen Lumen (the owner, 1 November:
-# it must open without a word about an unidentified developer).
+# The disk image as someone downloads it, on a Mac that has never seen Lumen (the owner, 1 and 2
+# November: it must open without a word about an unidentified developer).
 #
-#   scripts/download_check.sh https://dl.lumenbrowser.io/Lumen-1.2.3.dmg --expect accepted
-#   scripts/download_check.sh build/release/Lumen-0.1.1.dmg --expect rejected     (CI's control)
+#   scripts/download_check.sh https://dl.lumenbrowser.io/Lumen-1.2.3.dmg --expect accepted [--shots folder]
+#   scripts/download_check.sh build/release/Lumen-0.1.1.dmg --expect rejected --shots folder   (CI's control)
 #
 # The image is fetched (or copied) and marked as a browser marks a download (com.apple.quarantine,
 # as Safari writes it), then judged as macOS judges it when it is opened: Gatekeeper's verdict on
@@ -12,17 +12,34 @@
 # syspolicy_check where this macOS has it). `accepted` wants all of it to pass and Gatekeeper to say
 # "Notarized Developer ID"; `rejected` wants Gatekeeper to refuse — an image that is not notarized
 # is the control that shows this check can fail (and that Gatekeeper is on, on this Mac).
+#
+# Then what a person does, with `--shots`: the image opened as a double-click opens it, and the app
+# opened from Applications as a first launch opens it, the screen captured after each
+# (after-opening-the-image.png, after-opening-the-app.png) with what Gatekeeper logged. Nobody
+# answers the dialogs; what is on the screen is what the person would be asked. The app is copied to
+# Applications as the person drags it, and removed at the end.
 set -uo pipefail
 
 SOURCE="${1:?the address or the file of the disk image}"
+shift
 EXPECT="accepted"
-if [[ "${2:-}" == "--expect" ]]; then EXPECT="${3:?accepted or rejected}"; fi
+SHOTS=""
+while (( $# )); do
+  case "$1" in
+    --expect) EXPECT="${2:?accepted or rejected}"; shift 2 ;;
+    --shots) SHOTS="${2:?a folder for the screens}"; shift 2 ;;
+    *) echo "error: unknown argument $1" >&2; exit 2 ;;
+  esac
+done
 [[ "$EXPECT" == accepted || "$EXPECT" == rejected ]] || { echo "error: --expect accepted|rejected" >&2; exit 2; }
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/lumen-download.XXXXXX")"
 MOUNT=""
+INSTALLED=""
 cleanup() {
   [[ -n "$MOUNT" ]] && hdiutil detach "$MOUNT" -force -quiet 2>/dev/null
+  for volume in /Volumes/Lumen*; do [[ -d "$volume" ]] && hdiutil detach "$volume" -force -quiet 2>/dev/null; done
+  [[ -n "$INSTALLED" ]] && rm -rf "$INSTALLED"
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -80,6 +97,47 @@ else
     (( app_status != 0 )) && pass "the control: Gatekeeper refuses the app of an image that is not notarized" \
       || fail "Gatekeeper accepted an app that is not notarized"
   fi
+  hdiutil detach "$MOUNT" -force -quiet 2>/dev/null
+  MOUNT=""
+fi
+
+# What the person sees: the image double-clicked, then the app opened from Applications. The screen
+# after each, and what Gatekeeper logged; whether the image mounted is what it let the person do.
+if [[ -n "$SHOTS" ]]; then
+  mkdir -p "$SHOTS"
+  since="$(date '+%Y-%m-%d %H:%M:%S')"
+  open "$DMG"
+  sleep 10
+  screencapture -x "$SHOTS/after-opening-the-image.png" && echo "screen after opening the image: $SHOTS/after-opening-the-image.png"
+  opened="$(find /Volumes -maxdepth 1 -name 'Lumen*' 2>/dev/null | head -n 1)"
+  if [[ -n "$opened" ]]; then
+    echo "the image opened: $opened, as Finder shows it ($(ls "$opened" | tr '\n' ' '))"
+  else
+    echo "the image did not open: nothing mounted after the double-click"
+  fi
+  if [[ "$EXPECT" == accepted && -z "$opened" ]]; then fail "the image did not open on a double-click"; fi
+  # The app as the person drags it to Applications, then opened as a first launch: what macOS asks.
+  if [[ -d "$WORK/Applications/Lumen.app" ]]; then
+    if [[ ! -e /Applications/Lumen.app ]]; then
+      INSTALLED=/Applications/Lumen.app
+      ditto "$WORK/Applications/Lumen.app" "$INSTALLED" && quarantine "$INSTALLED"
+      open "$INSTALLED"
+      sleep 10
+      screencapture -x "$SHOTS/after-opening-the-app.png" && echo "screen after opening the app: $SHOTS/after-opening-the-app.png"
+      pgrep -x Lumen >/dev/null && echo "the app is running (no question was asked, or it was let through)" \
+        || echo "the app is not running: macOS is asking about it, or refused it (the screen shows which)"
+      pkill -x Lumen 2>/dev/null
+    else
+      echo "Applications already holds a Lumen.app: the app's first launch is not shown on this Mac"
+    fi
+  fi
+  log show --style compact --start "$since" \
+    --predicate 'process == "syspolicyd" OR process == "CoreServicesUIAgent" OR process == "DiskImageMounter"' 2>/dev/null \
+    | grep -iE 'notar|assess|gatekeeper|prompt|quarantine|denied|allowed|malware|developer' | head -n 40 > "$SHOTS/gatekeeper-log.txt"
+  echo "what Gatekeeper logged ($SHOTS/gatekeeper-log.txt):"
+  sed 's/^/  /' "$SHOTS/gatekeeper-log.txt" | cut -c1-300 | head -n 12
+  # Leave no dialog behind for the next step.
+  killall CoreServicesUIAgent 2>/dev/null
 fi
 
 if (( failures )); then

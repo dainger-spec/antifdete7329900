@@ -2,7 +2,8 @@ name: Download check
 
 # The published disk image, downloaded on runners that have never seen Lumen and marked as a
 # browser marks a download (scripts/download_check.sh): it must open without a word from
-# Gatekeeper — the image notarized and stapled, the app inside too. Run by hand after a release:
+# Gatekeeper — the image notarized and stapled, the app inside too — and the screen after opening
+# the image and the app is kept (the download-check-* artifacts). Run by hand after a release:
 #   Actions › Download check › Run workflow, with the image's address (download.json's "url").
 
 on:
@@ -30,4 +31,10 @@ jobs:
           IMAGE_URL: ${{ github.event.inputs.url }}
         run: |
           [[ "$IMAGE_URL" == https://dl.lumenbrowser.io/* ]] || { echo "::error::not an address at dl.lumenbrowser.io: $IMAGE_URL"; exit 1; }
-          scripts/download_check.sh "$IMAGE_URL" --expect accepted
+          scripts/download_check.sh "$IMAGE_URL" --expect accepted --shots build/download-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: download-check-${{ matrix.runner }}
+          path: build/download-shots
+          if-no-files-found: ignore

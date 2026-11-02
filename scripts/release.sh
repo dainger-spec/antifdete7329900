@@ -25,8 +25,8 @@
 #
 # What it makes: the zip the app's updater downloads (unchanged), the disk image the website
 # offers — Lumen and a link to Applications, signed, notarized and stapled like the app inside
-# (scripts/make_dmg.sh; the owner, 1 November) — the appcast, and at the end one block for the
-# website: the image's address, the version, its size in megabytes, its SHA-256 (download.json).
+# (scripts/make_dmg.sh; the owner, 1 and 2 November) — the appcast, and at the end one block for
+# the website: the image's address, the version, its size in megabytes, its SHA-256 (download.json).
 #
 # What is released is always the build without the App Sandbox: only there does a profile get a
 # process of its own and Safari's own window, which is what Lumen is. SANDBOX=1 is refused, and so
@@ -188,15 +188,14 @@ MINIMUM_SYSTEM="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$A
   --minimum-system "$MINIMUM_SYSTEM" --url "$DOWNLOAD_URL$ZIP_NAME" --notes-file "$NOTES" > "$OUT/item.json"
 
 # 3b. The disk image the website offers: the app as it ships — signed, notarized, stapled — and a
-# link to Applications, laid out by Finder (scripts/make_dmg.sh; required for a release). Then the
-# image itself is signed, notarized and stapled, so that a downloaded image opens without a word
-# from Gatekeeper even before the app inside is looked at.
+# link to Applications (scripts/make_dmg.sh). Then the image itself is signed, notarized and
+# stapled, so that a downloaded image opens without a word from Gatekeeper even before the app
+# inside is looked at.
 DMG_NAME="Lumen-$VERSION.dmg"
+scripts/make_dmg.sh "$APP" "$OUT/$DMG_NAME"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
-  scripts/make_dmg.sh "$APP" "$OUT/$DMG_NAME" --layout optional
   codesign --force --sign - "$OUT/$DMG_NAME"
 else
-  scripts/make_dmg.sh "$APP" "$OUT/$DMG_NAME" --layout required
   codesign --force --sign "$SIGN_IDENTITY" --timestamp "$OUT/$DMG_NAME"
 fi
 codesign --verify --verbose=2 "$OUT/$DMG_NAME"

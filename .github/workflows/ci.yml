@@ -360,8 +360,16 @@ jobs:
         # check that cannot fail proves nothing, and an image signed ad hoc is the one it must fail
         # on. After a real release, .github/workflows/download-check.yml runs the same check on the
         # published image with --expect accepted, on runners that have never seen Lumen.
+        # With --shots, what a person does too: the image double-clicked, the app opened from
+        # Applications, the screen after each — what the control's person would be told.
         timeout-minutes: 10
-        run: scripts/download_check.sh build/release/Lumen-0.1.1.dmg --expect rejected
+        run: scripts/download_check.sh build/release/Lumen-0.1.1.dmg --expect rejected --shots build/download-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: download-check-control
+          path: build/download-shots
+          if-no-files-found: ignore
       - name: The release gate fails where Safari's chrome is not hosted (its controls)
         # A gate that cannot fail proves nothing. The sandboxed build, and the release with Safari's
         # chrome turned off for the profile's process (--control), must each come back FAIL, for

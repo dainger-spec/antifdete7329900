@@ -342,11 +342,11 @@ takes these addresses unless `FEED_URL` / `DOWNLOAD_URL` say otherwise; a dry ru
 
 **Why a disk image.** From a zip people leave the app in Downloads; macOS runs an app from there
 translocated — from a read-only copy elsewhere — and an update cannot replace it. The image holds
-the app and a link to Applications, laid out by Finder over a picture with an arrow
-(`scripts/make_dmg.sh`, the picture drawn by `Lumen --render-dmg-background`): drag the one onto
-the other. The layout lives in the image's `.DS_Store`, which only Finder writes, so the script
-asks Finder over AppleScript; on the release's Mac macOS asks once whether Terminal may control
-Finder. A release fails without the layout; CI's dry run says when it could not have it.
+the app and a link to Applications (`scripts/make_dmg.sh`): drag the one onto the other. In two
+steps (the owner, 2 November): first this plain image — Finder's own window, the two icons in it —
+with the whole release path brought to its end on it, the check on a clean Mac included; then, as a
+change of its own on top, the window's picture and layout, so that a failure there never stops a
+release.
 
 **The image is signed, notarized and stapled too**, after the app inside it was: `codesign` with
 the Developer ID and a timestamp, `notarytool submit … --wait`, `stapler staple`, `stapler validate`
@@ -367,13 +367,67 @@ the minimum macOS.
 **Checked as downloaded**: `scripts/download_check.sh` fetches the image, marks it as a browser
 marks a download, and asks Gatekeeper what macOS asks when it is opened — the image (`spctl
 --type open`), its ticket, then the app copied out and marked the same way (`spctl --type
-execute`, `syspolicy_check distribution`). CI runs it on every push on the dry run's image with
-`--expect rejected`: an image that is not notarized must be refused, or the check (or the
-runner's Gatekeeper) proves nothing. After a release, the workflow "Download check" runs it on
-the published image with `--expect accepted`, on runners that have never seen Lumen.
+execute`, `syspolicy_check distribution`). With `--shots` it then does what the person does —
+double-clicks the image, opens the app from Applications — and keeps the screen after each, with
+what Gatekeeper logged; nobody answers the dialogs, so the screen shows what the person would be
+asked. CI runs it on every push on the dry run's image with `--expect rejected`: an image that is
+not notarized must be refused, or the check (or the runner's Gatekeeper) proves nothing; its
+screens are the `download-check-control` artifact. After a release, the workflow "Download check"
+runs it on the published image with `--expect accepted`, on runners that have never seen Lumen,
+and keeps their screens.
 
 **Not yet done once for real**: nothing of signing with a Developer ID, notarizing or stapling
-has run with a live Apple account — CI has none, and every run so far was dry.
+has run with a live Apple account — CI has none, and every run so far was dry. The first real
+runs are expected to need a second try: `xcrun notarytool log <submission id> --keychain-profile
+lumen-notary` says why Apple refused one.
+
+### What the owner provides for a real release (the owner, 2 November)
+
+Without the network extension (`NE=1` is not in the first release: no App IDs, no provisioning
+profiles — docs/IDENTITY.md has those for later). On the Mac that runs `release.sh`:
+
+1. **The Developer ID Application certificate, with its private key, in the login keychain.**
+   Made by the team's Account Holder: Xcode › Settings › Accounts › the team › Manage
+   Certificates… › + › *Developer ID Application* (Xcode makes the key and the request); or on
+   developer.apple.com › Account › Certificates, Identifiers & Profiles › Certificates › + ›
+   *Developer ID Application*, with a request from Keychain Access › Certificate Assistant ›
+   Request a Certificate From a Certificate Authority (saved to disk), the downloaded `.cer`
+   double-clicked. Then `security find-identity -v -p codesigning` lists
+   `Developer ID Application: <name> (<TEAM_ID>)` — that text is `SIGN_IDENTITY`.
+2. **The Team ID**: developer.apple.com › Account › Membership details › Team ID (ten characters)
+   — `TEAM_ID`.
+3. **The notary's credentials, stored once in the login keychain** under the name `lumen-notary`
+   (`NOTARY_PROFILE=lumen-notary`), either way:
+   - an app-specific password: account.apple.com › Sign-In and Security › App-Specific Passwords ›
+     + (shown once), then
+     `xcrun notarytool store-credentials lumen-notary --apple-id <the Apple Account's email> --team-id <TEAM_ID>`
+     and the password when asked;
+   - or an App Store Connect API key: appstoreconnect.apple.com › Users and Access › Integrations ›
+     App Store Connect API › Team Keys › + (role Developer), the `.p8` downloaded (once), then
+     `xcrun notarytool store-credentials lumen-notary --key <path to AuthKey_….p8> --key-id <Key ID> --issuer <Issuer ID>`.
+   Nothing of it goes into a file of the repository; `notarytool` reads it from the keychain.
+4. **The update key**: `pbupdate keygen <file>` once, the file kept outside the repository
+   (owner-only, and a copy offline) — `UPDATE_KEY_FILE`. Its public half is built into every
+   release; losing it means the next key can only come in an update signed with this one.
+5. **The keys of the documents of rights**, as the account server prints them (`lumen-api pubkey`)
+   — `ENTITLEMENT_PUBLIC_KEYS`; never the development key, which the release refuses.
+6. **R2's keys** for `dl.lumenbrowser.io` — `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`,
+   `R2_SECRET_ACCESS_KEY` — in the environment of the run only.
+7. **Xcode 27**, the active one (`xcode-select -p`): its SwiftPM declares SDK 14.0, and a release of
+   a build declaring 15 or newer is refused (the certificate fetched outside a profile's proxy on
+   macOS 27, docs/ISOLATION_AND_LIMITATIONS.md §2).
+
+Then:
+
+```sh
+TEAM_ID=<TEAM_ID> SIGN_IDENTITY="Developer ID Application: <name> (<TEAM_ID>)" NOTARY_PROFILE=lumen-notary \
+  UPDATE_KEY_FILE=<file> ENTITLEMENT_PUBLIC_KEYS=<id>=<base64> \
+  R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com R2_BUCKET=<bucket> R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… \
+  VERSION=0.1.0 BUILD=1 scripts/release.sh
+```
+
+At the end it prints the block for the website; then Actions › Download check › Run workflow with
+its `url` checks the published image on clean Macs.
 
 ### Which build is released
 
