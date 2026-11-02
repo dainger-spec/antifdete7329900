@@ -409,7 +409,7 @@ enum LicenseSelfTest {
         if case .code(let code) = asked { shown = code }
         check("a sign-in whose password waits for the letter's code gives the code's screen — its challenge, until when, how many tries, three"
               + " resends — not \"the Lumen server isn't responding\"",
-              shown?.challenge?.unredacted() == server.challenge && shown?.codeAttempts == 5 && shown?.resendsLeft == 3 && shown?.canResend == true
+              shown?.challenge == ServerToken(server.challenge) && shown?.codeAttempts == 5 && shown?.resendsLeft == 3 && shown?.canResend == true
               && shown?.codeExpiresAt != nil && !String(describing: shown as Any).contains(server.challenge),
               "\(asked)")
         let wrongLoginCode = await coded.confirmLogin(email: server.codeEmail, code: "000000")
@@ -439,6 +439,9 @@ enum LicenseSelfTest {
                   resent == ["sent, 2 left", "sent, 1 left", "sent, 0 left", "resend_limit"] && overText == L("contract.error.login_expired")
                   && server.bodies.contains { contains($0, [server.challenge]) },
                   "\(resent), another attempt: \(over)")
+        } else {
+            check("the same code sent again by the attempt's challenge, three times, then no more (resend_limit); another attempt's challenge"
+                  + " is over (login_expired: error.login_expired, back to the password)", false, "no code's screen to send it again from")
         }
 
         let (older, _) = person("sign-in-older-server")

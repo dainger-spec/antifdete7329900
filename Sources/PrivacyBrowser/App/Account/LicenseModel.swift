@@ -533,7 +533,8 @@ final class LicenseModel: ObservableObject {
         if let vault { try? AccountKeyVault.remove(from: vault) }
         key = nil
         pendingSession = nil
-        log.notice("Signed out of the account on this Mac (server confirmed: \(outcome == .signedOut(confirmed: true), privacy: .public))")
+        let confirmed = outcome == .signedOut(confirmed: true)
+        log.notice("Signed out of the account on this Mac (server confirmed: \(confirmed, privacy: .public))")
         recompute()
         return outcome
     }
