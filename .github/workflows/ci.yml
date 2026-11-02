@@ -25,12 +25,13 @@ jobs:
           SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: The sandboxed build runs once (its container is made), as the release gate's control does
         run: |
-          build/sandboxed/Lumen.app/Contents/MacOS/Lumen --release-check 2>&1 | grep '^RELEASE-CHECK' || true
-          ls -d ~/Library/Containers/io.lumenbrowser.Lumen && echo "container: present"
+          # Through LaunchServices, as the update scenarios start it.
+          open -W -n build/sandboxed/Lumen.app --args --interface-language-check || true
+          ls -d ~/Library/Containers/io.lumenbrowser.Lumen && echo "container: present" || echo "container: absent"
           # What `defaults write <bundle id>` does now: the measurement of 588's cause.
           defaults write io.lumenbrowser.Lumen PBMeasureDomain -string written
           ls ~/Library/Containers/io.lumenbrowser.Lumen/Data/Library/Preferences/ 2>/dev/null
           plutil -p ~/Library/Preferences/io.lumenbrowser.Lumen.plist 2>/dev/null | grep PBMeasureDomain || echo "not in ~/Library/Preferences"
-          defaults delete io.lumenbrowser.Lumen PBMeasureDomain
+          defaults delete io.lumenbrowser.Lumen PBMeasureDomain || true
       - name: The interface's language as the app starts
         run: scripts/interface_language_check.sh build/unsandboxed/Lumen.app
