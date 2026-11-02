@@ -184,10 +184,13 @@ if [[ "$NE" == "1" || "$NE" == "check" ]]; then
   sed -e "s/\$(EXTENSION_ID)/$EXTENSION_ID/g" -e "s/\$(APP_GROUP)/$APP_GROUP/g" -e "s/\$(TEAM_ID)/$TEAM_ID/g" \
     -e "s/\$(NE_PROVIDER)/$NE_PROVIDER/g" Resources/NetworkGuard/NetworkGuard.entitlements > "$EXT_ENTITLEMENTS"
   plutil -lint "$EXT_ENTITLEMENTS" >/dev/null
-  # The guard opens no connection of its own: without these it cannot carry a byte anywhere.
-  if grep -E "com\.apple\.security\.network\.(client|server)" "$EXT_ENTITLEMENTS" >/dev/null; then
-    echo "error: the network guard must not be entitled to open connections" >&2; exit 1
-  fi
+  # The guard opens no connection of its own: without these it cannot carry a byte anywhere. The
+  # keys themselves are read (a comment that names them is not a claim).
+  for key in com.apple.security.network.client com.apple.security.network.server; do
+    if /usr/libexec/PlistBuddy -c "Print :$key" "$EXT_ENTITLEMENTS" >/dev/null 2>&1; then
+      echo "error: the network guard must not be entitled to open connections ($key)" >&2; exit 1
+    fi
+  done
   if [[ "$NE" == "1" ]]; then
     cp "$EXTENSION_PROFILE" "$SYSEXT/Contents/embedded.provisionprofile"
     codesign --force --options runtime --timestamp --entitlements "$EXT_ENTITLEMENTS" --sign "$SIGN_IDENTITY" "$SYSEXT"
