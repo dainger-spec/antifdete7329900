@@ -324,7 +324,15 @@ signing, notarization and stapling skipped and said so, a throwaway Ed25519 key 
 every push and the release path is not untested code on the day there is an account.
 
 As built: `VERSION` and `BUILD` are required; `FEED_URL` and `DOWNLOAD_URL` (https only) say where
-the appcast and the zips are published; `UPDATE_KEY_FILE` is the private key from `pbupdate keygen`
+the appcast and the zips are published — for a release (the owner, 2 November):
+
+| | Value | So that |
+|---|---|---|
+| `FEED_URL` | `https://dl.lumenbrowser.io/appcast.json` | the app looks for updates there (built into it) |
+| `DOWNLOAD_URL` | `https://dl.lumenbrowser.io/` (the folder) | the disk image the website offers is `https://dl.lumenbrowser.io/Lumen-<version>.dmg`, the zip the updater downloads `https://dl.lumenbrowser.io/Lumen-<version>.zip` |
+
+Both are the defaults of a release (`SIGN_IDENTITY` given), so neither has to be set; a dry run keeps
+`updates.invalid`. `UPDATE_KEY_FILE` is the private key from `pbupdate keygen`
 (kept out of the repository and of CI); `UPDATE_EXTRA_PUBLIC_KEYS` adds keys the app also trusts
 (rotation); `PREVIOUS_APPCAST` keeps the releases of the appcast published now; `NOTES_FILE` is the
 release notes (`docs/release-notes-next.txt` gathers what the next release's are to say). The app is built by `build-app.sh` with the feed, the public keys and — with a
@@ -336,7 +344,10 @@ itself checks them with, and the script lists what a real release still needs wh
 
 Everything is at **`https://dl.lumenbrowser.io/`**, a Cloudflare R2 bucket under its own name: the
 appcast (`appcast.json`), the zip the updater downloads (`Lumen-<version>.zip`, unchanged) and the
-**disk image the website offers** (`Lumen-<version>.dmg`). A real release (`SIGN_IDENTITY` given)
+**disk image the website offers** (`Lumen-<version>.dmg`). Made and checked by the owner on
+2 November: the bucket is `lumen-downloads`, the domain `dl.lumenbrowser.io` with TLS 1.2 at least,
+publishing through R2's S3 API with a key that may only read and write the objects of this bucket
+(Object Read & Write); an upload and its download over the domain were tried live. A real release (`SIGN_IDENTITY` given)
 takes these addresses unless `FEED_URL` / `DOWNLOAD_URL` say otherwise; a dry run keeps
 `updates.invalid`, so that no build CI makes looks anywhere real.
 
@@ -362,11 +373,42 @@ and `spctl --assess --type open --context context:primary-signature` on the imag
 its own ticket inside (`make_dmg.sh` checks that the copy in the image is the same signature and
 still stapled), so it opens offline once copied out.
 
-**Uploaded** when `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` are given
-(curl's own S3 signing, nothing installed): the zip and the image first, the appcast last — a feed
-never names a file not there yet — each read back from `dl.lumenbrowser.io` and compared byte for
-byte; the versioned files cached for a year, the appcast never. Without the keys the script says
-what goes where, in that order.
+**Uploaded** when R2's keys are in the environment of the run — `R2_ENDPOINT`
+(`https://<account>.r2.cloudflarestorage.com`, without the bucket), `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`; `R2_BUCKET` is `lumen-downloads` unless given — by `scripts/r2_publish.sh`,
+with curl's own S3 signing (nothing installed):
+
+- **Before anything is built**, the release's two names are checked free in the bucket (which
+  also tries the keys), and the appcast published now is fetched from it, so that the new appcast
+  keeps its releases (`PREVIOUS_APPCAST` still names another). A VERSION already published stops
+  the release there, not after notarization.
+- **At the end**, the zip and the image first, the appcast last — a feed never names a file not
+  there yet. Each upload signs the file's SHA-256 (`x-amz-content-sha256`), so R2 itself refuses
+  bytes that did not arrive as built; the object keeps it (`x-amz-meta-sha256`). The versioned
+  files are cached for a year, the appcast never.
+- **Each file is then downloaded from its public address** — `dl.lumenbrowser.io`, through
+  Cloudflare, as anyone gets it — and its SHA-256 compared with the built file's. What is served
+  must be, byte for byte, what was built; otherwise the release has failed, and the script says
+  what was served instead (its SHA-256, its size, and Cloudflare's cache status).
+- **A published version is never replaced.** If `Lumen-<version>.zip` or `.dmg` is in the bucket
+  already, the release stops: people downloaded those bytes, the website names their SHA-256, and
+  Cloudflare keeps them for a year. Only the appcast is rewritten (`--replace`). The same bytes are
+  left as they are and only read back, so a publication that failed half way is finished by
+  running `scripts/r2_publish.sh` again on the files in `build/release`, in the same order.
+- **The keys reach curl on its standard input**, as its configuration, never on its command line,
+  which `ps` shows every user of the Mac. They are in no file the script writes.
+
+Without the keys the script says what goes where, in that order.
+
+**No secret of a release in the repository**, which is public: `scripts/check_secrets.py` runs before
+anything else and stops the release on any finding. It looks for the values of `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY` and the update key (the file `UPDATE_KEY_FILE` names) as this run has them,
+and for anything shaped like R2's keys whatever its value (one of R2's variables or an `aws_*_key`
+setting given 32 to 64 hex digits, an `ID:SECRET` pair of R2's shape) — in every file of every
+commit any ref reaches, in the index, and in what `git add -A` would take next (files `.gitignore`
+does not exclude); a file it excludes is where such keys may live. A finding names the commit, the
+file and the line, never the value; a key that was pushed is public, so it is rotated first. The
+whole history (all branches, 1.5 GB of files) takes about 15 seconds.
 
 **For the website**, at the end, in one piece to copy (and in `download.json`): the image's
 address, the version, its size in megabytes (decimal, as Finder counts) and in bytes, its SHA-256,
@@ -419,8 +461,11 @@ profiles — docs/IDENTITY.md has those for later). On the Mac that runs `releas
    release; losing it means the next key can only come in an update signed with this one.
 5. **The keys of the documents of rights**, as the account server prints them (`lumen-api pubkey`)
    — `ENTITLEMENT_PUBLIC_KEYS`; never the development key, which the release refuses.
-6. **R2's keys** for `dl.lumenbrowser.io` — `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`,
-   `R2_SECRET_ACCESS_KEY` — in the environment of the run only.
+6. **R2's keys** for `dl.lumenbrowser.io` — `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`,
+   `R2_SECRET_ACCESS_KEY` (the bucket, `lumen-downloads`, is the default `R2_BUCKET`) — in the
+   environment of the run only: typed or read from a password manager into the shell that runs
+   the release, never into a file of the repository. The release refuses to start if one is in a
+   commit.
 7. **Xcode 27**, the active one (`xcode-select -p`): its SwiftPM declares SDK 14.0, and a release of
    a build declaring 15 or newer is refused (the certificate fetched outside a profile's proxy on
    macOS 27, docs/ISOLATION_AND_LIMITATIONS.md §2).
@@ -430,7 +475,7 @@ Then:
 ```sh
 TEAM_ID=<TEAM_ID> SIGN_IDENTITY="Developer ID Application: <name> (<TEAM_ID>)" NOTARY_PROFILE=lumen-notary \
   UPDATE_KEY_FILE=<file> ENTITLEMENT_PUBLIC_KEYS=<id>=<base64> \
-  R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com R2_BUCKET=<bucket> R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… \
+  R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… \
   VERSION=0.1.0 BUILD=1 scripts/release.sh
 ```
 
@@ -524,6 +569,21 @@ handed over at the last quit — is said once at the next launch. In the UI snap
 
 ## 8. How it is proven
 
+- **Publishing (CI, Linux, every push):** `scripts/test_r2_publish.sh` runs `scripts/r2_publish.sh`
+  against a local R2 (`scripts/r2_local.py`) that computes every request's AWS signature again with
+  the secret and refuses one that does not match, and refuses an upload whose body is not the
+  SHA-256 it signed, as R2 does. Made to work: a name checked free, the image uploaded with its
+  SHA-256 signed, its type and a year's cache, read back the same; the same bytes not uploaded
+  twice; the appcast replaced, and fetched back as the latest. Made to fail: other bytes under a
+  published name, a public address serving other bytes (one byte changed), an address that is not
+  the bucket's, a wrong secret, another bucket, an endpoint with the bucket in it, an http address,
+  a key with a quote in it. And curl, run through a wrapper that keeps its arguments, never had a
+  key among them; nothing printed holds the secret.
+- **The secret check (CI, Linux, every push):** `scripts/check_secrets.py --self-check` plants the
+  secrets — in a commit a later one deletes, on a branch not checked out, in the index, in an
+  untracked file, in a changed tracked one, in an ignored one — beside look-alikes, and fails unless
+  every planted one is found, the ignored one and the look-alikes are not, and no value is printed;
+  then the check runs on the repository itself (shapes only: CI has no key).
 - **Unit tests (BrowserCore, Linux and macOS):** the appcast envelope and its items; Ed25519 of the
   appcast and of a zip, a forged or tampered one refused; versions compared component by component;
   no downgrade; an appcast older than the last accepted refused; R1–R4 for every file in §4

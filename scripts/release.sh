@@ -14,11 +14,16 @@
 #   UPDATE_EXTRA_PUBLIC_KEYS="<id>=<base64>,…"   keys the app also trusts (a key being rotated in or out)
 #   FEED_URL=https://…/appcast.json    where the app looks for updates (default: a release's
 #                              https://dl.lumenbrowser.io/appcast.json; a dry run's https://updates.invalid/…)
-#   DOWNLOAD_URL=https://…/            where the zip and the disk image are published (default: next to FEED_URL)
-#   R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
-#                              upload to Cloudflare R2 (the bucket behind dl.lumenbrowser.io): the zip and
-#                              the disk image first, the appcast last, each read back over https; without
-#                              them the script says what goes where
+#   DOWNLOAD_URL=https://…/            the folder the zip and the disk image are published in (default: next
+#                              to FEED_URL — a release's image is https://dl.lumenbrowser.io/Lumen-<version>.dmg)
+#   R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY   (and R2_BUCKET, default lumen-downloads)
+#                              publish in Cloudflare R2, the bucket behind dl.lumenbrowser.io
+#                              (scripts/r2_publish.sh): before anything is built, the release's names are
+#                              checked free and the appcast published now is fetched, its releases kept;
+#                              at the end the zip and the disk image first, the appcast last, each read
+#                              back from its public address and its SHA-256 compared with the built
+#                              file's — any difference fails the release. Without them the script says
+#                              what goes where. From the environment only: never written anywhere
 #   PREVIOUS_APPCAST=path      the appcast published now: its releases are kept in the new one
 #   NOTES_FILE=path            the release notes, plain text
 #   OUT=build/release          where everything goes
@@ -33,7 +38,9 @@
 # is an app that, signed as it ships, does not host Safari's chrome on this Mac (step 2b;
 # docs/UPDATES.md §6, "Which build is released").
 #
-# The private key never enters the repository, CI or the app; only its public half is built in.
+# The private key never enters the repository, CI or the app; only its public half is built in. Nor
+# do R2's keys: the release stops first if any of them, or anything shaped like R2's, is in a commit
+# (scripts/check_secrets.py).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -63,9 +70,37 @@ fi
 SANDBOX=0
 DRY=()
 
+# 0. No secret of a release in the repository, which is public: the keys in this environment and
+# anything shaped like R2's, in every commit any ref reaches, the index and what `git add -A` would
+# take (scripts/check_secrets.py). A finding stops the release before anything is built.
+python3 scripts/check_secrets.py
+
+# Published when R2's keys are given (scripts/r2_publish.sh reads them from the environment, and
+# R2_BUCKET defaults to lumen-downloads); a dry run never is.
+PUBLISH=""
+if [[ -n "${R2_ENDPOINT:-}${R2_ACCESS_KEY_ID:-}${R2_SECRET_ACCESS_KEY:-}" ]]; then
+  : "${R2_ENDPOINT:?R2_ENDPOINT (https://<account>.r2.cloudflarestorage.com)}"
+  : "${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY}"
+  [[ "$SIGN_IDENTITY" != "-" ]] || { echo "error: a dry run is never uploaded" >&2; exit 1; }
+  PUBLISH=1
+fi
+
 rm -rf "$OUT"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
+
+# Before the build (it and notarization take a while): the release's names are free in the bucket —
+# a published version is never replaced, so a VERSION already there stops it here, and R2's keys are
+# tried — and the appcast published now is fetched from the bucket, so that the new one keeps its
+# releases (unless PREVIOUS_APPCAST names another).
+if [[ -n "$PUBLISH" ]]; then
+  scripts/r2_publish.sh --free "${DOWNLOAD_URL}Lumen-$VERSION.zip"
+  scripts/r2_publish.sh --free "${DOWNLOAD_URL}Lumen-$VERSION.dmg"
+  if [[ -z "${PREVIOUS_APPCAST:-}" ]]; then
+    scripts/r2_publish.sh --current "$FEED_URL" "$OUT/previous-appcast.json"
+    [[ ! -f "$OUT/previous-appcast.json" ]] || PREVIOUS_APPCAST="$OUT/previous-appcast.json"
+  fi
+fi
 
 # The tool that signs and checks the feed, from this package.
 swift build -c release --product pbupdate
@@ -82,6 +117,15 @@ fi
 read -r KEY_ID KEY_PUBLIC < <("$PBUPDATE" public-key "$KEY")
 PUBLIC_KEYS="$KEY_ID=$KEY_PUBLIC"
 [[ -z "${UPDATE_EXTRA_PUBLIC_KEYS:-}" ]] || PUBLIC_KEYS="$PUBLIC_KEYS,$UPDATE_EXTRA_PUBLIC_KEYS"
+# The appcast whose releases the new one keeps must check with these keys — now, not after the
+# build and notarization (step 4 reads it the same way).
+if [[ -n "${PREVIOUS_APPCAST:-}" ]]; then
+  IFS=',' read -ra TRUSTED <<< "$PUBLIC_KEYS"
+  VERIFY_KEYS=()
+  for entry in "${TRUSTED[@]}"; do [[ -z "$entry" ]] || VERIFY_KEYS+=(--public-key "$entry"); done
+  "$PBUPDATE" verify --appcast "$PREVIOUS_APPCAST" "${VERIFY_KEYS[@]}" \
+    || { echo "error: $PREVIOUS_APPCAST does not check with this update key or UPDATE_EXTRA_PUBLIC_KEYS: its releases cannot be kept" >&2; exit 1; }
+fi
 
 # The account server and the keys of its documents of rights (the server's docs/CONTRACT.md §2,
 # §7.2): the release's, printed by `lumen-api pubkey` on the owner's server; a throwaway key for a
@@ -223,27 +267,15 @@ fi
 [[ -n "${UPDATE_KEY_FILE:-}" ]] || rm -f "$KEY"
 
 # 6. Published: the zip and the image first, the appcast last — never a feed naming a file that is
-# not there yet — each read back over https and compared byte for byte (R2, when its keys are
-# given). Cache: the versioned files for a year, the appcast never.
-if [[ -n "${R2_ENDPOINT:-}${R2_BUCKET:-}${R2_ACCESS_KEY_ID:-}${R2_SECRET_ACCESS_KEY:-}" ]]; then
-  : "${R2_ENDPOINT:?R2_ENDPOINT (https://<account>.r2.cloudflarestorage.com)}" "${R2_BUCKET:?R2_BUCKET}"
-  : "${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY}"
-  [[ "$SIGN_IDENTITY" != "-" ]] || { echo "error: a dry run is never uploaded" >&2; exit 1; }
-  upload() { # file, its name in the bucket, content type, cache control
-    curl --fail --silent --show-error --aws-sigv4 "aws:amz:auto:s3" --user "$R2_ACCESS_KEY_ID:$R2_SECRET_ACCESS_KEY" \
-      -H "Content-Type: $3" -H "Cache-Control: $4" --upload-file "$1" "${R2_ENDPOINT%/}/$R2_BUCKET/$2"
-  }
-  published() { # file, its address: what is served there is this file
-    [[ "$(curl --fail --silent --show-error -H 'Cache-Control: no-cache' "$2" | shasum -a 256 | cut -d' ' -f1)" \
-       == "$(shasum -a 256 "$1" | cut -d' ' -f1)" ]] || { echo "error: $2 does not serve $(basename "$1")" >&2; exit 1; }
-  }
-  upload "$OUT/$ZIP_NAME" "${DOWNLOAD_URL#https://*/}$ZIP_NAME" application/zip "public, max-age=31536000, immutable"
-  upload "$OUT/$DMG_NAME" "${DOWNLOAD_URL#https://*/}$DMG_NAME" application/x-apple-diskimage "public, max-age=31536000, immutable"
-  published "$OUT/$ZIP_NAME" "$DOWNLOAD_URL$ZIP_NAME"
-  published "$OUT/$DMG_NAME" "$DOWNLOAD_URL$DMG_NAME"
-  upload "$OUT/appcast.json" "${FEED_URL#https://*/}" application/json "no-cache"
-  published "$OUT/appcast.json" "$FEED_URL"
-  PUBLISHED="uploaded and read back"
+# not there yet — each read back from its public address and its SHA-256 compared with the built
+# file's; any difference fails the release (scripts/r2_publish.sh). Cache: the versioned files for a
+# year, the appcast never. If this step fails, the files are still in $OUT: running r2_publish.sh on
+# them again, in the same order, finishes the publication (the same bytes are only read back).
+if [[ -n "$PUBLISH" ]]; then
+  scripts/r2_publish.sh "$OUT/$ZIP_NAME" "$DOWNLOAD_URL$ZIP_NAME" application/zip "public, max-age=31536000, immutable"
+  scripts/r2_publish.sh "$OUT/$DMG_NAME" "$DOWNLOAD_URL$DMG_NAME" application/x-apple-diskimage "public, max-age=31536000, immutable"
+  scripts/r2_publish.sh "$OUT/appcast.json" "$FEED_URL" application/json "no-cache" --replace
+  PUBLISHED="published and read back: what $DOWNLOAD_URL serves is, byte for byte, what was built"
 else
   PUBLISHED="not uploaded (no R2_* keys): publish the zip and the image first, the appcast last"
 fi

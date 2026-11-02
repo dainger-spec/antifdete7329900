@@ -59,6 +59,13 @@ jobs:
       # tokens', come out only where a request or the vault needs them (scripts/check_account_key.py).
       - name: The account's key and tokens are text only where they must be
         run: python3 scripts/check_account_key.py --self-check && python3 scripts/check_account_key.py
+      # A release's publication on dl.lumenbrowser.io (scripts/r2_publish.sh), against a local R2 that
+      # checks every request's signature and every upload's SHA-256 as R2 does: uploaded, read back
+      # from the public address and compared, a published version never replaced, R2's keys never on
+      # curl's command line (scripts/test_r2_publish.sh). Then no secret of a release in the
+      # repository (scripts/check_secrets.py): its planted ones found first.
+      - name: A release's publication, and no secret in the repository
+        run: scripts/test_r2_publish.sh && python3 scripts/check_secrets.py --self-check && python3 scripts/check_secrets.py
 
   macos-27:
     name: macOS 27 — the self-test on the newest macOS (preview image; fails the build only on a certificate fetched outside the proxy)
