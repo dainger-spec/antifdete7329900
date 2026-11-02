@@ -48,6 +48,14 @@ const paint = setInterval(() => {
 }, 33);
 const stream = canvas.captureStream(30);
 for (const track of stream.getTracks()) a.addTrack(track, stream);
+// VP8 first: libwebrtc encodes it in software, where a runner's VM may have no H.264 encoder.
+let preferred = 'default';
+try {
+  const caps = RTCRtpSender.getCapabilities('video');
+  const vp8 = caps.codecs.filter((c) => c.mimeType.toLowerCase() === 'video/vp8');
+  const rest = caps.codecs.filter((c) => c.mimeType.toLowerCase() !== 'video/vp8');
+  if (PREFER_VP8 && vp8.length) { a.getTransceivers()[0].setCodecPreferences(vp8.concat(rest)); preferred = 'vp8'; }
+} catch (e) { preferred = 'error: ' + e; }
 const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve(value), ms));
 const remote = new Promise((resolve) => { b.ontrack = (event) => resolve(event.track); });
 await a.setLocalDescription(await a.createOffer());
@@ -56,18 +64,26 @@ await b.setLocalDescription(await b.createAnswer());
 await a.setRemoteDescription(b.localDescription);
 const track = await Promise.race([remote, timeout(20000, null)]);
 await timeout(10000);
-let inbound = null;
+let inbound = null, outbound = null, codecs = [];
 try {
   (await b.getStats()).forEach((s) => {
     if (s.type === 'inbound-rtp' && s.kind === 'video') {
-      inbound = { framesDecoded: s.framesDecoded, bytesReceived: s.bytesReceived, packetsReceived: s.packetsReceived };
+      inbound = { framesDecoded: s.framesDecoded, bytesReceived: s.bytesReceived, packetsReceived: s.packetsReceived,
+                  decoder: s.decoderImplementation };
+    }
+    if (s.type === 'codec') codecs.push(s.mimeType);
+  });
+  (await a.getStats()).forEach((s) => {
+    if (s.type === 'outbound-rtp' && s.kind === 'video') {
+      outbound = { framesEncoded: s.framesEncoded, bytesSent: s.bytesSent, encoder: s.encoderImplementation,
+                   limitation: s.qualityLimitationReason };
     }
   });
 } catch (e) { inbound = { error: String(e) }; }
 const ice = a.iceConnectionState;
 clearInterval(paint);
 a.close(); b.close();
-return { available: true, track: !!track, ice, inbound, painted, candidateTypes: [...new Set(types)].sort() };
+return { available: true, track: !!track, ice, inbound, outbound, codecs, preferred, painted, candidateTypes: [...new Set(types)].sort() };
 """
 
 
@@ -78,7 +94,8 @@ def capture_run(app, variant, out):
     pages = [
         {"name": "webrtc", "url": QUIC_SITE, "script": WEBRTC_SCRIPT, "timeoutMs": 30000},
         {"name": "webrtc-loop", "url": QUIC_SITE, "script": LOOP_SCRIPT, "timeoutMs": 45000},
-        {"name": "webrtc-video", "url": QUIC_SITE, "script": VIDEO_SCRIPT, "timeoutMs": 60000},
+        {"name": "webrtc-video", "url": QUIC_SITE, "script": VIDEO_SCRIPT.replace("PREFER_VP8", "false"), "timeoutMs": 60000},
+        {"name": "webrtc-video-vp8", "url": QUIC_SITE, "script": VIDEO_SCRIPT.replace("PREFER_VP8", "true"), "timeoutMs": 60000},
     ]
     spec = {"window": {"width": 1000, "height": 600}, "profiles": [profile], "pages": pages}
     capture_path = os.path.join(out, f"capture-{variant}.txt")
@@ -111,6 +128,7 @@ def capture_run(app, variant, out):
         "webrtc": result.get("webrtc"),
         "loop": result.get("webrtc-loop"),
         "video": result.get("webrtc-video"),
+        "videoVP8": result.get("webrtc-video-vp8"),
         "appPacketsOutsideLoopback": len(app_packets),
         "appPacketSamples": app_packets[:25],
     }
@@ -126,14 +144,17 @@ def main():
     with open(os.path.join(args.out, "report.json"), "w") as handle:
         json.dump(report, handle, indent=1, sort_keys=True)
     lines = ["### TURN on loopback vs the physical interface", "",
-             "| relay bound to | candidates | relay at proxy address | data channel | video: frames decoded | proxy UDP assoc./datagrams | app packets outside loopback |",
-             "|---|---|---|---|---|---|---|"]
+             "| relay bound to | candidates | relay at proxy address | data channel | video: frames decoded | video VP8 first: frames decoded | proxy UDP assoc./datagrams | app packets outside loopback |",
+             "|---|---|---|---|---|---|---|---|"]
     for r in report:
         w, loop, video = r["webrtc"] or {}, r["loop"] or {}, r["video"] or {}
         inbound = video.get("inbound") or {}
+        vp8 = r.get("videoVP8") or {}
         lines.append(f"| {r['variant']} | {w.get('candidates')} | {w.get('relayIsProxyAddress')} | "
                      f"{loop.get('delivered')} ({loop.get('ice')}) | {inbound.get('framesDecoded')} "
-                     f"({video.get('ice')}, track {video.get('track')}) | {r['proxyUdpAssociations']}/{r['proxyUdpDatagrams']} | "
+                     f"({video.get('ice')}, track {video.get('track')}, out {video.get('outbound')}, codecs {video.get('codecs')}) | "
+                     f"{(vp8.get('inbound') or {}).get('framesDecoded')} ({vp8.get('preferred')}, out {vp8.get('outbound')}, codecs {vp8.get('codecs')}) | "
+                     f"{r['proxyUdpAssociations']}/{r['proxyUdpDatagrams']} | "
                      f"{r['appPacketsOutsideLoopback']} |")
     text = "\n".join(lines) + "\n"
     print(text)
