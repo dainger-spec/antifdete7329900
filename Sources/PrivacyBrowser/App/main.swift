@@ -41,6 +41,11 @@ MainActor.assumeIsolated {
         SelfTest.migrationStep(write: true)
     } else if arguments.contains("--selftest-read-vault") {
         SelfTest.migrationStep(write: false)
+    } else if arguments.contains("--keychain-probe") {
+        // One look at the data-protection keychain from this process: the entitlements it holds that
+        // give one, and what the keychain lets it do under the probe's service (KeychainCheck; the
+        // self-test and the release check run it from each of the bundle's executables).
+        KeychainCheck.runFromCommandLine(arguments: arguments)
     } else if arguments.contains("--guard-probe") {
         // The process the network guard's check on this Mac holds: one WebRTC request of WebKit's,
         // to a documentation address, made on its behalf (GuardProbe.swift; NetworkGuard.prove).

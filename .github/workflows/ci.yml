@@ -10,7 +10,10 @@ env:
   # world is driven directly), and Safari fetches neither a page's touch icon nor its OpenSearch
   # description there. Each is still a SKIP line with its reason and in the summary; under
   # PB_SELFTEST_STRICT any other check skipped on the runner fails the step.
-  PB_SELFTEST_EXPECTED_SKIPS: "passwords: a person's own clicks and keys|Safari chrome: its touch icon|Safari chrome: its OpenSearch description"
+  # And no ad hoc signature opens the data-protection keychain, even with the app group (run 646):
+  # the keychain between profiles is shown on the build signed for release (release.sh's release
+  # check), here only the entitlements are.
+  PB_SELFTEST_EXPECTED_SKIPS: "passwords: a person's own clicks and keys|Safari chrome: its touch icon|Safari chrome: its OpenSearch description|keychain between profiles"
 
 jobs:
   core-linux:
@@ -82,7 +85,9 @@ jobs:
       - name: Build the app without the App Sandbox (the build that runs profiles in Safari's window)
         continue-on-error: true
         timeout-minutes: 30
-        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+        # NE=check: the app holds the app group, as an NE=1 build holds the app's keychain, and its
+        # profiles must not (the self-test's keychain check).
+        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: The Settings window on macOS 27, as the person gets it (the control must fail)
         # The same check as the macOS 26 job's: SwiftUI's Settings scene drew the title bar's band in
         # another grey here, and hiding the toolbar did not take it away here (CI run 596).
@@ -222,7 +227,7 @@ jobs:
         timeout-minutes: 6
         run: |
           set +e
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --safari-inventory > build/egress27/safari-inventory.txt 2> build/egress27/safari-inventory.err
+          build/unsandboxed/Lumen.app/Contents/MacOS/LumenProfile --safari-inventory > build/egress27/safari-inventory.txt 2> build/egress27/safari-inventory.err
           echo "exit $?"
           grep -E '^(INVENTORY|LS) ' build/egress27/safari-inventory.txt | head -10 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - Safari inventory::/'
           grep -E '^XPC [^ ]*Safari' build/egress27/safari-inventory.txt | head -10 | cut -c1-600 | sed 's/^/::notice title=macOS 27 - XPC services of Safari frameworks::/'
@@ -260,7 +265,7 @@ jobs:
         timeout-minutes: 3
         run: |
           set +e
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --paths-check > build/egress27/paths-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/LumenProfile --paths-check > build/egress27/paths-check.txt 2>/dev/null
           echo "exit $?"; cat build/egress27/paths-check.txt
           grep '^PATHS-CHECK' build/egress27/paths-check.txt | grep -v '^PATHS-CHECK log ' | head -16 | cut -c1-900 | sed 's/^/::notice title=macOS 27 - paths in a profile process::/'
           # A run that saw nothing (Safari's window did not open) says so: SKIPPED, on the job's page and in its summary.
@@ -277,10 +282,10 @@ jobs:
           set +e
           # A run that dies leaves a crash report: which one is new since here, and its summary.
           since="$(mktemp)"
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --history-check > build/egress27/history-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/LumenProfile --history-check > build/egress27/history-check.txt 2>/dev/null
           echo "exit $?"; cat build/egress27/history-check.txt
           grep '^HISTORY-CHECK' build/egress27/history-check.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - history in a profile process::/'
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --history-check --in-process-fallback > build/egress27/history-check-fallback.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/LumenProfile --history-check --in-process-fallback > build/egress27/history-check-fallback.txt 2>/dev/null
           echo "exit $?"; cat build/egress27/history-check-fallback.txt
           grep '^HISTORY-CHECK' build/egress27/history-check-fallback.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - history in a profile process (fallback)::/'
           find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -name '*Lumen*.ips' -newer "$since" 2>/dev/null \
@@ -326,7 +331,7 @@ jobs:
         timeout-minutes: 3
         run: |
           set +e
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --export-check > build/egress27/export-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/LumenProfile --export-check > build/egress27/export-check.txt 2>/dev/null
           echo "exit $?"; cat build/egress27/export-check.txt
           grep '^EXPORT-CHECK' build/egress27/export-check.txt | head -20 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - export in a profile process::/'
           exit 0
@@ -432,6 +437,24 @@ jobs:
               || { echo "::error title=Release gate::the release with $name did not fail for it"; status=1; }
           }
           gate "no-keys" "Delete :PBEntitlementPublicKeys" "no keys of the documents of rights"
+          # The release's own app with its profile's executable signed with the app group — what an
+          # NE=1 build's app carries — must not start a profile at all: every profile would share the
+          # app's keychain (ProfileExecutable.swift). The manager reads the signature before a start.
+          copy="build/release-gate-profile-keychain/Lumen.app"
+          rm -rf build/release-gate-profile-keychain; mkdir -p build/release-gate-profile-keychain
+          ditto build/release/app/Lumen.app "$copy"
+          codesign -d --entitlements - --xml "$copy/Contents/MacOS/LumenProfile" > build/release-gate-profile-keychain/entitlements.plist 2>/dev/null
+          /usr/libexec/PlistBuddy -c "Add :com.apple.security.application-groups array" \
+            -c "Add :com.apple.security.application-groups:0 string XXXXXXXXXX.io.lumenbrowser.Lumen" \
+            build/release-gate-profile-keychain/entitlements.plist
+          codesign --force --options runtime --timestamp=none --identifier io.lumenbrowser.Lumen \
+            --entitlements build/release-gate-profile-keychain/entitlements.plist --sign - "$copy/Contents/MacOS/LumenProfile" 2>&1 | tail -n 2
+          codesign --force --sign - --preserve-metadata=entitlements,flags,runtime "$copy" 2>&1 | tail -n 2
+          out=$("$copy/Contents/MacOS/Lumen" --release-check 2>&1) \
+            && { echo "::error title=Release gate::a profile's executable with the app's keychain passed the release check"; status=1; }
+          echo "$out" | grep '^RELEASE-CHECK' || echo "$out" | tail -n 20
+          echo "$out" | grep -F "keychain of its own" >/dev/null \
+            || { echo "::error title=Release gate::the profile's executable with the app's keychain did not fail for it"; status=1; }
           gate "development-key" "Add :PBEntitlementPublicKeys:445c6300da0205b1 string /+/sbiH55nmy+2gRqQz12E0spl9L/YDWvjnecaN2M1c=" \
             "the development server's key"
           if SANDBOX=1 VERSION=0.1.1 BUILD=2 OUT=build/release-sandboxed scripts/release.sh > build/release-sandboxed.log 2>&1; then
@@ -581,7 +604,8 @@ jobs:
               # scripts/disk_check.py: nothing may be written where the real Safari keeps its data.
               # One fs_usage for all three (the kernel trace is exclusive: a second one gets
               # "ktrace_start: Resource busy" and sees nothing).
-              sudo fs_usage -w -f filesys Lumen com.apple.WebKit cfprefsd > build/egress/fs.txt 2>&1 &
+              # LumenProfile: a profile's own process (ProfileExecutable), by its own name.
+              sudo fs_usage -w -f filesys Lumen LumenProfile com.apple.WebKit cfprefsd > build/egress/fs.txt 2>&1 &
               sleep 2
               # A preferences file cfprefsd writes through a directory descriptor, as it writes every
               # one: disk_check.py must name it, or the trace is blind to cfprefsd again.
@@ -650,7 +674,7 @@ jobs:
         # instead of a profile's window quietly degrading on a user's Mac. After the self-test, so
         # that a missing piece never hides what the self-test would have measured.
         if: always()
-        run: build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --check-safari-chrome
+        run: build/unsandboxed/Lumen.app/Contents/MacOS/LumenProfile --check-safari-chrome
       - name: What Safari's chrome brings into a profile's process (an inventory, never fails the build)
         # SafariChromeInventory.swift: Safari's menu as a profile's window has it, LaunchServices'
         # answers with a home of its own, the classes around AutoFill, history and export, and the
@@ -660,7 +684,7 @@ jobs:
         timeout-minutes: 6
         run: |
           set +e
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --safari-inventory > build/safari-inventory.txt 2> build/safari-inventory.err
+          build/unsandboxed/Lumen.app/Contents/MacOS/LumenProfile --safari-inventory > build/safari-inventory.txt 2> build/safari-inventory.err
           echo "exit $?"
           grep -E '^(INVENTORY|LS) ' build/safari-inventory.txt | head -10 | cut -c1-500 | sed 's/^/::notice title=Safari inventory::/'
           grep -E '^XPC [^ ]*Safari' build/safari-inventory.txt | head -10 | cut -c1-600 | sed 's/^/::notice title=XPC services of Safari frameworks::/'
@@ -719,7 +743,7 @@ jobs:
         timeout-minutes: 3
         run: |
           set +e
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --paths-check > build/paths-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/LumenProfile --paths-check > build/paths-check.txt 2>/dev/null
           echo "exit $?"; cat build/paths-check.txt
           grep '^PATHS-CHECK' build/paths-check.txt | grep -v '^PATHS-CHECK log ' | head -16 | cut -c1-900 | sed 's/^/::notice title=paths in a profile process::/'
           # A run that saw nothing (Safari's window did not open) says so: SKIPPED, on the job's page and in its summary.
@@ -738,10 +762,10 @@ jobs:
           set +e
           # A run that dies leaves a crash report: which one is new since here, and its summary.
           since="$(mktemp)"
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --history-check > build/history-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/LumenProfile --history-check > build/history-check.txt 2>/dev/null
           echo "exit $?"; cat build/history-check.txt
           grep '^HISTORY-CHECK' build/history-check.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=history in a profile process::/'
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --history-check --in-process-fallback > build/history-check-fallback.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/LumenProfile --history-check --in-process-fallback > build/history-check-fallback.txt 2>/dev/null
           echo "exit $?"; cat build/history-check-fallback.txt
           grep '^HISTORY-CHECK' build/history-check-fallback.txt | head -12 | cut -c1-500 | sed 's/^/::notice title=history in a profile process (fallback)::/'
           find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -name '*Lumen*.ips' -newer "$since" 2>/dev/null \
@@ -798,7 +822,7 @@ jobs:
         timeout-minutes: 3
         run: |
           set +e
-          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --export-check > build/export-check.txt 2>/dev/null
+          build/unsandboxed/Lumen.app/Contents/MacOS/LumenProfile --export-check > build/export-check.txt 2>/dev/null
           echo "exit $?"; cat build/export-check.txt
           grep '^EXPORT-CHECK' build/export-check.txt | head -20 | cut -c1-500 | sed 's/^/::notice title=export in a profile process::/'
           exit 0

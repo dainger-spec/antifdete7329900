@@ -29,6 +29,7 @@ always.
 """
 import argparse
 import os
+import plistlib
 import re
 import shutil
 import socket
@@ -39,6 +40,9 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BINARY = "Contents/MacOS/Lumen"
+# A profile's process runs from this one (ProfileExecutable.swift): it declares the SDK too, or the
+# profiles of a copy would run as built.
+PROFILE_BINARY = "Contents/MacOS/LumenProfile"
 PORTS = {"http": 18180, "socks": 18181, "tls-control": 18186, "canary": 18187}
 LINE = re.compile(r"^(\d+\.\d+) \(([^)]*)\)")
 
@@ -65,19 +69,34 @@ def declared_sdk(binary):
 
 
 def copy_declaring(app, sdk, folder, entitlements):
-    """A copy of `app` in `folder` whose executable declares `sdk`, or None."""
+    """A copy of `app` in `folder` whose executables declare `sdk`, or None: the app's own and, when
+    the bundle has it, the profile's (signed again with its own entitlements, under the app's
+    identifier, before the bundle is)."""
     copy = os.path.join(folder, "Lumen.app")
     shutil.copytree(app, copy, symlinks=True)
     binary = os.path.join(copy, BINARY)
     minos, _ = declared_sdk(binary)
     if not minos:
         return None
-    done = subprocess.run(["xcrun", "vtool", "-set-build-version", "macos", minos, sdk, "-replace",
-                           "-output", binary + ".declared", binary], capture_output=True, text=True)
-    if done.returncode != 0:
-        print(f"vtool: {done.stderr.strip()}", flush=True)
-        return None
-    os.replace(binary + ".declared", binary)
+    profile = os.path.join(copy, PROFILE_BINARY)
+    profile_entitlements = os.path.join(folder, "profile-entitlements.plist")
+    executables = [binary]
+    if os.path.exists(profile):
+        with open(profile_entitlements, "wb") as handle:
+            handle.write(subprocess.run(["codesign", "-d", "--entitlements", "-", "--xml", profile], capture_output=True).stdout)
+        executables.append(profile)
+    for executable in executables:
+        done = subprocess.run(["xcrun", "vtool", "-set-build-version", "macos", minos, sdk, "-replace",
+                               "-output", executable + ".declared", executable], capture_output=True, text=True)
+        if done.returncode != 0:
+            print(f"vtool: {done.stderr.strip()}", flush=True)
+            return None
+        os.replace(executable + ".declared", executable)
+    if os.path.exists(profile):
+        with open(os.path.join(copy, "Contents", "Info.plist"), "rb") as handle:
+            identifier = plistlib.load(handle)["CFBundleIdentifier"]
+        subprocess.run(["codesign", "--force", "--options", "runtime", "--timestamp=none", "--identifier", identifier,
+                        "--entitlements", profile_entitlements, "--sign", "-", profile], capture_output=True)
     subprocess.run(["codesign", "--force", "--options", "runtime", "--timestamp=none", "--entitlements", entitlements,
                     "--sign", "-", copy], capture_output=True)
     return copy

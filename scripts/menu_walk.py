@@ -44,6 +44,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The app's executable and bundle ID, from its Info.plist (main): what the trace, the crash reports
 # and the walk itself know the app's processes by.
 EXECUTABLE = None
+# The executables whose processes are the app's: its own, and the one a profile's process is started
+# from (Contents/MacOS/LumenProfile, ProfileExecutable.swift) when the bundle has it. fs_usage is
+# given each by name, and a write by either is the app's.
+EXECUTABLES = []
 PROXY_PORT = 18190
 # The walk's own limits, under the CI step's 30 minutes (and the app's own 40): past them it stops the
 # app itself and says where it was — a step killed from outside would print nothing (CI run 562, 640).
@@ -313,7 +317,7 @@ def start_trace(out):
     without sudo."""
     if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode != 0:
         return None
-    trace = subprocess.Popen(["sudo", "-n", "fs_usage", "-w", "-f", "filesys", EXECUTABLE, "com.apple.WebKit", "cfprefsd"],
+    trace = subprocess.Popen(["sudo", "-n", "fs_usage", "-w", "-f", "filesys", *EXECUTABLES, "com.apple.WebKit", "cfprefsd"],
                              stdout=open(os.path.join(out, "fs.txt"), "w"), stderr=subprocess.STDOUT)
     time.sleep(2)
     return trace
@@ -384,7 +388,7 @@ def traced_writes(out, canary=None):
         if not writes or disk_check.FAILED.match(line):
             continue
         process = fields[-1].rsplit(".", 1)[0]
-        if process[:16] == EXECUTABLE[:16]:
+        if any(process[:16] == name[:16] for name in EXECUTABLES):
             app_writes += 1
         if canary and process == "cfprefsd" and canary in paths:
             canary_seen = True
@@ -450,6 +454,8 @@ def main():
         with open(os.path.join(args.app, "Contents", "Info.plist"), "rb") as handle:
             info = plistlib.load(handle)
         BUNDLE_ID, EXECUTABLE = info["CFBundleIdentifier"], info["CFBundleExecutable"]
+        EXECUTABLES[:] = [EXECUTABLE] + [name for name in ("LumenProfile",)
+                                          if os.path.exists(os.path.join(args.app, "Contents", "MacOS", name))]
     except (OSError, ValueError, KeyError) as error:
         print(f"::error::menu walk: {args.app} has no readable Info.plist with its bundle ID and executable ({error})")
         return 1

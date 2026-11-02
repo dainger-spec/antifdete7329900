@@ -54,7 +54,10 @@ def main():
     parser.add_argument("--expect-pid", type=int, help="the checker's control: compare with this pid instead of the probe's")
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
-    binary = os.path.join(os.path.abspath(args.app), "Contents", "MacOS", "Lumen")
+    # The probe stands in for a profile's process, started as one is (ProfileExecutable.swift).
+    binary = os.path.join(os.path.abspath(args.app), "Contents", "MacOS", "LumenProfile")
+    if not os.path.exists(binary):
+        binary = os.path.join(os.path.abspath(args.app), "Contents", "MacOS", "Lumen")
     capture_path = os.path.join(args.out, "capture.txt")
     with open(capture_path, "w") as capture, open(capture_path + ".err", "w") as errors:
         tcpdump = subprocess.Popen(["sudo", "-n", "tcpdump", "-i", "pktap,all", "-k", "NP", "-n", "-tt", "-l",

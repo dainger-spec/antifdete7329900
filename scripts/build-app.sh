@@ -20,7 +20,14 @@
 #   $TEAM_ID.$BUNDLE_ID. NE_SIGNING=development with an "Apple Development: …" identity and
 #   Development profiles, for testing on a registered Mac; the default, developer-id, is what can
 #   be notarized.)
-#   NE=check scripts/build-app.sh   # builds the extension and its bundle unsigned, for CI
+#   NE=check scripts/build-app.sh   # builds the extension and its bundle unsigned, for CI; the app
+#                                   # gets the app group, the one keychain entitlement an ad hoc
+#                                   # signature can carry, so CI sees profiles started without it
+#
+# A profile's process — and every process that runs Safari's code — is started from
+# Contents/MacOS/LumenProfile, a copy of the executable signed with the base entitlements alone: never
+# the app's application identifier, app group or network extension rights, which would give every
+# profile the app's one data-protection keychain (ProfileExecutable.swift; docs/IDENTITY.md).
 #
 # Versions and updates (docs/UPDATES.md; scripts/release.sh sets these):
 #   APP_VERSION=0.2.0 APP_BUILD=2      CFBundleShortVersionString and CFBundleVersion
@@ -65,6 +72,11 @@ ENTITLEMENTS_BUILT="$(mktemp -t pbentitlements).entitlements"
 sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" "$ENTITLEMENTS" > "$ENTITLEMENTS_BUILT"
 plutil -lint "$ENTITLEMENTS_BUILT" >/dev/null
 ENTITLEMENTS="$ENTITLEMENTS_BUILT"
+# The profile's executable gets these and nothing the network guard adds below.
+PROFILE_ENTITLEMENTS="$(mktemp -t pbprofile).entitlements"
+cp "$ENTITLEMENTS_BUILT" "$PROFILE_ENTITLEMENTS"
+# The entitlements that put a process in a keychain access group (ProfileExecutable.keychainEntitlements).
+KEYCHAIN_KEYS=(com.apple.application-identifier keychain-access-groups com.apple.security.application-groups com.apple.developer.team-identifier)
 
 swift build -c "$CONFIG" --product PrivacyBrowser
 swift build -c "$CONFIG" --product PrivacyBrowserUpdater
@@ -74,6 +86,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # The product is built as PrivacyBrowser and named Lumen here (CFBundleExecutable in Info.plist).
 cp "$BIN_DIR/PrivacyBrowser" "$APP/Contents/MacOS/Lumen"
+# The same code, for a profile's process: signed apart, without the app's keychain (above).
+PROFILE_EXECUTABLE="$APP/Contents/MacOS/LumenProfile"
+cp "$BIN_DIR/PrivacyBrowser" "$PROFILE_EXECUTABLE"
 sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Info.plist > "$APP/Contents/Info.plist"
 PLIST="$APP/Contents/Info.plist"
 [[ -z "${APP_VERSION:-}" ]] || /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$PLIST"
@@ -207,6 +222,15 @@ if [[ "$NE" == "1" || "$NE" == "check" ]]; then
       -c "Add :com.apple.developer.team-identifier string $TEAM_ID" "$ENTITLEMENTS_NE"
     ENTITLEMENTS="$ENTITLEMENTS_NE"
     /usr/libexec/PlistBuddy -c "Add :PBGuardExtensionBundleIdentifier string $EXTENSION_ID" "$APP/Contents/Info.plist"
+  else
+    # CI: the app group alone, which an ad hoc signature can carry (the application identifier it
+    # cannot: such a binary is not let start). The app then holds a keychain entitlement its profiles
+    # must not, as an NE=1 build does, and the self-test's keychain check can tell them apart.
+    ENTITLEMENTS_CHECK="$(mktemp -t pbappcheck).entitlements"
+    cp "$ENTITLEMENTS" "$ENTITLEMENTS_CHECK"
+    /usr/libexec/PlistBuddy -c "Add :com.apple.security.application-groups array" \
+      -c "Add :com.apple.security.application-groups:0 string $APP_GROUP" "$ENTITLEMENTS_CHECK"
+    ENTITLEMENTS="$ENTITLEMENTS_CHECK"
   fi
 fi
 
@@ -219,17 +243,38 @@ if [[ "${DEBUGGABLE:-0}" == "1" ]]; then
   cp "$ENTITLEMENTS" "$ENTITLEMENTS_DEBUG"
   /usr/libexec/PlistBuddy -c "Add :com.apple.security.get-task-allow bool true" "$ENTITLEMENTS_DEBUG"
   ENTITLEMENTS="$ENTITLEMENTS_DEBUG"
+  # Safari's code is debugged in a profile's process.
+  /usr/libexec/PlistBuddy -c "Add :com.apple.security.get-task-allow bool true" "$PROFILE_ENTITLEMENTS"
 fi
 
 TIMESTAMP="--timestamp=none"
 # A Developer ID signature is notarized, and notarization needs a secure timestamp.
 [[ "$NE" != "1" && "$SIGN_IDENTITY" == "-" ]] || TIMESTAMP="--timestamp"
-# Inside out: the helper first (no entitlements: no sandbox), then the app, whose signature seals it.
+# Inside out: the helper first (no entitlements: no sandbox), the profile's executable (the base
+# entitlements, under the app's identifier: the network guard knows a profile's process by it), then
+# the app, whose signature seals both.
 codesign --force --options runtime "$TIMESTAMP" --sign "$SIGN_IDENTITY" "$HELPER"
+codesign --force --options runtime "$TIMESTAMP" --identifier "$BUNDLE_ID" \
+  --entitlements "$PROFILE_ENTITLEMENTS" \
+  --sign "$SIGN_IDENTITY" "$PROFILE_EXECUTABLE"
 codesign --force --options runtime "$TIMESTAMP" \
   --entitlements "$ENTITLEMENTS" \
   --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --strict --deep "$APP"
+codesign --verify --strict "$PROFILE_EXECUTABLE"
+# The profile's executable carries no keychain of its own, whatever the app carries: read back from
+# its signature, key by key (a comment or a string that names one is not the key itself).
+PROFILE_SIGNED="$(mktemp -t pbprofilesigned).plist"
+codesign -d --entitlements - --xml "$PROFILE_EXECUTABLE" > "$PROFILE_SIGNED" 2>/dev/null
+for key in "${KEYCHAIN_KEYS[@]}"; do
+  if /usr/libexec/PlistBuddy -c "Print :$key" "$PROFILE_SIGNED" >/dev/null 2>&1; then
+    echo "error: the profile's executable is signed with $key: every profile would share the app's keychain" >&2; exit 1
+  fi
+done
+[[ "$(codesign -d -v "$PROFILE_EXECUTABLE" 2>&1 | awk -F= '/^Identifier=/ { print $2 }')" == "$BUNDLE_ID" ]] \
+  || { echo "error: the profile's executable is not signed as $BUNDLE_ID (the network guard knows a profile by it)" >&2; exit 1; }
+APP_KEYCHAIN="$(for key in "${KEYCHAIN_KEYS[@]}"; do codesign -d --entitlements - --xml "$APP" 2>/dev/null | grep -qF "<key>$key</key>" && printf '%s ' "$key"; done)"
+echo "Keychain: the app's executable holds ${APP_KEYCHAIN:-none of the keychain entitlements}; LumenProfile holds none"
 if codesign -d --entitlements - --xml "$HELPER" 2>/dev/null | grep -F "com.apple.security.app-sandbox" >/dev/null; then
   echo "error: the installer helper must not be sandboxed (it replaces the app)" >&2; exit 1
 fi
