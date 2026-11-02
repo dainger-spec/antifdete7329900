@@ -57,6 +57,9 @@ final class ProfileManager: ObservableObject {
     /// A profile's process ended on its own (a quit of its own, or a crash: `status` is not 0),
     /// after its home was sealed. Not called for a stop asked for from here (`--menu-walk`).
     var onChildExited: ((UUID, Int32) -> Void)?
+    /// A profile's process ended after a stop asked for from here, and how: 0 when it quit by itself,
+    /// else the signal that ended it (a crash on its way out, or the kill after 30 s). The self-test's.
+    var onChildStopped: ((UUID, Int32) -> Void)?
     /// A profile's process told how it sealed its data, just before it exited (the self-test).
     var onChildSealed: ((UUID, ProfileSealReport) -> Void)?
     /// Profiles whose proxy's exit no geolocation service could tell at their last launch (they
@@ -948,6 +951,7 @@ final class ProfileManager: ObservableObject {
             child.onExit = nil
             child.terminate()
             await child.waitUntilExit(timeout: 30)
+            if let status = child.terminationStatus { onChildStopped?(id, status) }
             if let key = try? repository.profileKey(for: id) {
                 try safariHomeVault.seal(profileID: id, key: key)
             }

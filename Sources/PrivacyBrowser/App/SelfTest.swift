@@ -5021,15 +5021,24 @@ final class SelfTest {
         await manager.shutDown()
     }
 
-    /// A person ends a profile by closing its window. In Safari's chrome Safari keeps that window's
-    /// page for reopening it; the last window closing quits the process, whose quit closes every
-    /// page before the seal (`ProfileNetworkGuard.closeEveryPage`) and then lets Safari's chrome go
-    /// its own way out — which, on the owner's Mac (2 November, macOS 27.0.1), set the find delegate
-    /// of the page closed under it and trapped in -[WKWebView _setFindDelegate:]. Here: the window
-    /// closed as its close button does, and the process must end by itself, with no crash, and leave
-    /// nothing of the profile in plaintext on disk — its website data and Safari's home sealed.
+    /// A person ends a profile two ways: by closing its window, or with Stop in the Profiles window
+    /// while the window is open. Either quits the profile's process, whose quit closes every page
+    /// before the seal (`ProfileNetworkGuard.closeEveryPage`) and then lets Safari's chrome go its
+    /// own way out — which, on the owner's Mac (2 November, macOS 27.0.1), set the find delegate of
+    /// a page closed under it and trapped in -[WKWebView _setFindDelegate:] (the second terminate:
+    /// Safari's tryToTerminate tore its tabs down). Each way here: the process must end by itself,
+    /// status 0 — no crash, no kill — and leave nothing of the profile in plaintext on disk: its
+    /// website data and Safari's home sealed.
     private func closingTheWindowEndsTheProfile(_ repository: ProfileRepository) async throws {
-        let name = "Safari chrome: closing a profile's window as its close button does ends its process by itself — no crash, nothing left in plaintext"
+        for byStop in [false, true] {
+            try await endAProfile(repository, byStop: byStop)
+        }
+    }
+
+    private func endAProfile(_ repository: ProfileRepository, byStop: Bool) async throws {
+        let name = byStop
+            ? "Safari chrome: Stop with the profile's window open ends its process by itself — no crash, nothing left in plaintext"
+            : "Safari chrome: closing a profile's window as its close button does ends its process by itself — no crash, nothing left in plaintext"
         guard !AppEnvironment.isSandboxed else {
             skip(name, "the sandboxed build runs no process per profile", .build)
             return
@@ -5038,7 +5047,7 @@ final class SelfTest {
             skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
             return
         }
-        let profile = try repository.create(name: "Close the window", configuration: ProfileConfiguration(
+        let profile = try repository.create(name: byStop ? "Stop with the window open" : "Close the window", configuration: ProfileConfiguration(
             startURL: URL(string: "http://proxied.selftest.invalid/one"),
             proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), matchProxyLocation: false))
         defer { try? repository.delete(profile.id) }
@@ -5049,6 +5058,7 @@ final class SelfTest {
         manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
         var exited: Int32?
         manager.onChildExited = { _, status in exited = status }
+        manager.onChildStopped = { _, status in exited = status }
         var sealReport: ProfileSealReport?
         manager.onChildSealed = { _, report in sealReport = report }
         setenv("PB_PROFILE_PROCESS", "1", 1)
@@ -5067,15 +5077,19 @@ final class SelfTest {
             await manager.shutDown()
             return
         }
-        // The page loads; then the window is closed as a person closes it, and nothing else is asked.
+        // The page loads; then the profile is ended as a person ends it, and nothing else is asked.
         try? await Task.sleep(nanoseconds: 4_000_000_000)
-        _ = manager.closeWindows(profile.id)
+        if byStop {
+            try? await manager.stop(profile.id)
+        } else {
+            _ = manager.closeWindows(profile.id)
+        }
         let ended = await waitUntil(timeout: 60) { exited != nil }
         // Nothing of the profile in plaintext on disk, as the update's gate looks for it (UpdateGate).
         let folder = repository.directory(for: profile.id)
         let plaintext = WebDataStoreVault.discoverDirectories(for: profile.id).map(\.lastPathComponent)
             + ["home.noindex", "home"].filter { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
-        info("closing a profile's window: the process ended with status \(exited.map(String.init) ?? "none"), its seal "
+        info("\(byStop ? "stop with the window open" : "closing a profile's window"): the process ended with status \(exited.map(String.init) ?? "none"), its seal "
              + (sealReport.map { "\($0.forced ? "forced" : "not forced"), pages closed first \($0.pagesClosed)" } ?? "not reported"))
         check(name, ended && exited == 0 && sealReport != nil && plaintext.isEmpty,
               "ended \(ended ? "with status \(exited.map(String.init) ?? "?")" : "NOT within 60 s"), seal \(sealReport == nil ? "NOT reported" : "reported"), "
