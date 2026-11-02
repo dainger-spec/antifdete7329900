@@ -39,7 +39,7 @@ enum UISnapshots {
     /// ready, with its notes; up to date with automatic checks off; and a build without an update
     /// feed. Previews fetch nothing.
     /// A Mac signed out, and one on the Professional plan with two Macs — previews: nothing asked.
-    private static func previewLicenses() -> (signedOut: LicenseModel, signedIn: LicenseModel, signedInWithKey: LicenseModel) {
+    private static func previewLicenses() -> (signedOut: LicenseModel, signedIn: LicenseModel, signedInWithKey: LicenseModel, keyWithEmail: LicenseModel) {
         let now = Date()
         let p = Entitlement(deviceID: "d1", machineID: "m", role: "owner", plan: "pro", status: .active, exportReason: nil,
                             limits: .init(profiles: 50, devices: 3, seats: 1), profilesOnOtherDevices: 12,
@@ -70,7 +70,14 @@ enum UISnapshots {
         let signedInWithKey = LicenseModel(preview: keyRecord, state: LicenseState(mode: .full, entitlement: p, check: .valid(p), banners: [],
                                                                                     allowedProfilesHere: 38, worksWithoutServerUntil: p.graceEndsAt,
                                                                                     now: now))
-        return (signedOut, signedIn, signedInWithKey)
+        // An email linked to the key's purchase (§11.1): a session for the account screen, letters too.
+        var linkedRecord = keyRecord
+        linkedRecord.emailLinked = true
+        linkedRecord.session = record.session
+        let keyWithEmail = LicenseModel(preview: linkedRecord, state: LicenseState(mode: .full, entitlement: p, check: .valid(p), banners: [],
+                                                                                    allowedProfilesHere: 38, worksWithoutServerUntil: p.graceEndsAt,
+                                                                                    now: now), devices: devices)
+        return (signedOut, signedIn, signedInWithKey, keyWithEmail)
     }
 
     private static func settings(into folder: URL, model: AppModel) async -> Int {
@@ -148,10 +155,37 @@ enum UISnapshots {
                 try? png.write(to: folder.appendingPathComponent(name + ".png"))
             }
         }
-        // Signed in with a key alone: the subscription's reminders, offered again here.
+        // Signed in with a key alone: the subscription's reminders, offered again here; the key not at
+        // hand — the field that asks for it (`key.devices_need_key`); linking an email, a new key (§11.1).
         problems += await Shot(name: "account-page-key", size: SettingsView.size, edges: true) {
             SettingsView(section: .account, previewLicense: licenses.signedInWithKey).environmentObject(model)
         }.capture(into: folder)
+        problems += await Shot(name: "account-page-key-email", size: SettingsView.size, edges: true) {
+            SettingsView(section: .account, previewLicense: licenses.keyWithEmail).environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "sheet-email-link", size: CGSize(width: 500, height: 660), titled: false) {
+            EmailLinkSheet(license: licenses.signedInWithKey, close: {}).environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "sheet-key-replace", size: CGSize(width: 500, height: 600), titled: false) {
+            KeyReplaceSheet(license: licenses.signedInWithKey, label: "", close: {}).environmentObject(model)
+        }.capture(into: folder)
+        // The new key as it is shown once after a replacement — the server's test vector, not a key.
+        if let shownKey = AccountKey(typed: "LMK-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZWB") { // l10n: not text
+            problems += await Shot(name: "key-replaced", size: CGSize(width: 500, height: 220), titled: false) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(L("contract.key.replaced"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    NewKeyView(key: shownKey)
+                    Spacer(minLength: 0)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Theme.raised)
+                .environment(\.colorScheme, .dark)
+            }.capture(into: folder)
+        }
         problems += await Shot(name: "settings-updates-ready", size: SettingsView.size, edges: true) {
             SettingsView(section: .updates, previewUpdater: ready).environmentObject(model)
         }.capture(into: folder)
@@ -473,6 +507,12 @@ enum UISnapshots {
         }.capture(into: folder)
         problems += await Shot(name: "launch-setup", size: CGSize(width: 1180, height: 820), edges: true) {
             LockBackdrop { SetupView().environmentObject(lockModel) }
+        }.capture(into: folder)
+        // §10.1: a master password that is the license's key, refused under its field.
+        let refusedModel = AppModel()
+        refusedModel.masterPasswordRefusal = L("contract.master_password.same_as_key")
+        problems += await Shot(name: "launch-setup-same-as-key", size: CGSize(width: 1180, height: 900), edges: true) {
+            LockBackdrop { SetupView().environmentObject(refusedModel) }
         }.capture(into: folder)
         // The first launch's first screen with an account server: the sign-in, the interface's
         // language on it (FirstLaunchLanguagePicker).

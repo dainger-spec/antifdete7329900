@@ -17,7 +17,14 @@ import OSLog
 /// - the server's `device_revoked` signs this Mac out, and says why;
 /// - an expired document, one under a forged signature, another Mac's, and a stored one changed on
 ///   disk are each refused — no work, no profile opens — where the document of step 2, through the
-///   same activation and the same gate, passed: their control.
+///   same activation and the same gate, passed: their control;
+/// - the master password is not the key (§10.1): the key typed in this session, in every form it can
+///   be typed in, or kept in the vault — another key and a plain password are not it (the controls);
+/// - "don't remember the key": no copy in the vault, one kept before removed — where step 3 kept it;
+/// - an email linked only with this purchase's code, confirmed by the letter's; the key replaced, the
+///   vault keeping the new one, this Mac connected again with it; a kept key the server no longer
+///   knows removed; the key, the new key and the purchase code in no log, file or address — the
+///   searches first shown to find what they look for.
 @MainActor
 enum LicenseSelfTest {
     struct Result {
@@ -29,6 +36,11 @@ enum LicenseSelfTest {
     private static let keyText = "LMK-0123-4567-89AB-CDEF-GHJK-MNMT"
     /// Every form the key could be written in: as typed, without hyphens, in lower case.
     private static let keyForms = [keyText, "0123456789ABCDEFGHJKMNMT", "0123456789abcdefghjkmnmt", "0123-4567-89AB", "0123-4567-89ab"]
+    /// The key a replacement gives (the server's vector), and the purchase's code — in every form.
+    private static let newKeyText = "LMK-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZWB"
+    private static let newKeyForms = [newKeyText, "ZZZZZZZZZZZZZZZZZZZZZZWB", "zzzzzzzzzzzzzzzzzzzzzzwb", "ZZZZ-ZZWB", "zzzz-zzwb"]
+    private static let purchaseCodeText = "LPC-0123-4567-89AB-CDEF-GHSY"
+    private static let purchaseCodeForms = [purchaseCodeText, "0123456789ABCDEFGHSY", "0123456789abcdefghsy", "CDEF-GHSY", "cdef-ghsy"]
 
     static func run(scratch: URL) async -> [Result] {
         let began = Date()
@@ -238,6 +250,141 @@ enum LicenseSelfTest {
               storedMode == .full && storedOpens && changed && reread.state?.check == .badSignature && reread.mode == .exportOnly && rereadGate,
               "before: \(String(describing: storedMode)), opens \(storedOpens); changed: \(changed); after: \(String(describing: reread.state?.check)),"
               + " \(String(describing: reread.mode)), gate refused \(rereadGate)")
+
+        // 7. §10.1: the master password is not the license's key. "Don't remember the key": the key is
+        //    not held after its request, and no copy is in the vault — one kept before goes — where
+        //    step 3's remembered key was kept: the control. Its echo still knows it, in every form.
+        let unkeptFolder = root.appendingPathComponent("not-remembered", isDirectory: true)
+        try? FileManager.default.createDirectory(at: unkeptFolder, withIntermediateDirectories: true)
+        let unkept = LicenseModel(root: unkeptFolder, configuration: AccountConfiguration(
+            serverURL: serverURL, siteURL: configuration.siteURL, keys: configuration.keys, source: .environment))
+        unkept.profilesHere = { [profile] in [profile] }
+        unkept.useKey(key, remember: false)
+        let unkeptActivation = await unkept.activate(label: "", vault: nil)
+        let heldAfterRequest = unkept.key != nil
+        // A copy kept by an earlier sign-in, as a vault may hold one.
+        let unkeptVault = try? MasterVault.create(in: unkeptFolder.appendingPathComponent("vault"), password: "license-check-unkept", iterations: 1_000)
+        if let unkeptVault { try? AccountKeyVault.save(key, to: unkeptVault) }
+        let keptBefore = unkeptVault.map { (try? AccountKeyVault.load(from: $0)) == key } ?? false
+        if let unkeptVault { unkept.vaultOpened(unkeptVault) }
+        let keptAfter = unkeptVault.flatMap { try? AccountKeyVault.load(from: $0) }
+        let unkeptRecord = try? AccountFile(directory: unkeptFolder).load()
+        let unkeptFile = (try? Data(contentsOf: unkeptFolder.appendingPathComponent("account.json"))) ?? Data()
+        check("\"don't remember the key\": this Mac is connected, the key is not held after its request, the vault keeps no copy — the one kept before is"
+              + " removed (step 3 kept it: the control) — and account.json says so, with no form of the key",
+              (try? unkeptActivation.get()) != nil && !heldAfterRequest && keptBefore && unkeptVault != nil && keptAfter == nil
+              && unkeptRecord?.rememberKey == false && !unkeptFile.isEmpty && !contains(unkeptFile, keyForms),
+              "activation \(unkeptActivation), held after: \(heldAfterRequest), kept before: \(keptBefore), kept after: \(keptAfter != nil),"
+              + " rememberKey \(String(describing: unkeptRecord?.rememberKey))")
+        let typedForms = [keyText, keyText.lowercased(), keyText.replacingOccurrences(of: "-", with: ""), String(keyText.dropFirst(4)),
+                          keyText.replacingOccurrences(of: "-", with: " "), keyText.replacingOccurrences(of: "1", with: "I")]
+        let otherKey = "LMK-0000-0000-0000-0000-0000-0000"
+        let knowsTheKey = typedForms.filter { unkept.isLicenseKey($0) }.count
+        let takesOthers = unkept.isLicenseKey(otherKey) || unkept.isLicenseKey("correct horse battery staple") || unkept.isLicenseKey(keyText + "!")
+        unkept.forgetComparisons()
+        let afterForgetting = unkept.isLicenseKey(keyText)
+        check("§10.1: a master password that is the key is refused even when the key is not kept — the key's echo knows it in each of"
+              + " \(typedForms.count) forms it can be typed in; another key, a plain password and the key with a character more are not it"
+              + " (the controls); after the master password's step nothing is left to compare",
+              knowsTheKey == typedForms.count && !takesOthers && !afterForgetting,
+              "known in \(knowsTheKey) of \(typedForms.count) forms, others taken: \(takesOthers), after forgetting: \(afterForgetting)")
+        license.forgetComparisons()
+        let byKeptKey = license.isLicenseKey(keyText.lowercased())
+        license.vaultLocked()
+        let afterLock = license.isLicenseKey(keyText)
+        check("§10.1 at an unlock: the master password is compared with the key the vault keeps (no echo left): it is the key; after the lock,"
+              + " nothing held, it is not — compared in memory only, nothing tried on the vault",
+              byKeptKey && !afterLock, "with the kept key: \(byKeptKey), after the lock: \(afterLock)")
+
+        // 8. An email linked, then the key replaced (§11.1) — with the key the vault keeps.
+        guard let code = PurchaseCode(typed: purchaseCodeText.lowercased()), let otherCode = PurchaseCode(typed: "LPC-0000-0000-0000-0000-0000") else {
+            check("the self-test's purchase codes read", false, "they did not")
+            return results
+        }
+        let (linker, linkerFolder) = freshLicense("email-and-new-key")
+        let linkerActivation = await linker.activate(label: "", vault: nil)
+        guard (try? linkerActivation.get()) != nil,
+              let linkerVault = try? MasterVault.create(in: linkerFolder.appendingPathComponent("vault"), password: "license-check-link", iterations: 1_000) else {
+            check("a Mac connected with the key, its vault keeping it, to link an email from", false, "\(linkerActivation)")
+            return results
+        }
+        linker.vaultOpened(linkerVault)
+        // Another Mac of the license, its vault keeping the key too (the first license above talks to the
+        // server's first port, gone since step 4).
+        let (otherMac, otherMacFolder) = freshLicense("another-mac")
+        let otherMacActivation = await otherMac.activate(label: "", vault: nil)
+        let otherMacVault = try? MasterVault.create(in: otherMacFolder.appendingPathComponent("vault"), password: "license-check-other", iterations: 1_000)
+        if let otherMacVault { otherMac.vaultOpened(otherMacVault) }
+        let email = "person@example.com"
+        let refusedProof = await linker.linkEmail(typedKey: nil, purchaseCode: otherCode, email: email, password: "a long password 1")
+        let sent = await linker.linkEmail(typedKey: nil, purchaseCode: code, email: email, password: "a long password 1")
+        let refusedCode: String? = { if case .failure(.server(let error)) = refusedProof { return error.code }; return nil }()
+        check("an email is linked only with this purchase's code: another code is refused (proof_refused, error.proof_refused), this one"
+              + " sends the letter (202 check_email, its numbers)",
+              refusedCode == "proof_refused" && LicenseText.error(.server(AccountServerError(status: 403, code: "proof_refused")), withKey: true) == L("contract.error.proof_refused")
+              && (try? sent.get()) == AccountAPI.CodeSent(codeValidSeconds: 900, codeAttempts: 5),
+              "another code: \(refusedProof), this code: \(sent)")
+        let wrongDigits = await linker.confirmEmail(typedKey: nil, email: email, code: "000000")
+        let confirmed = await linker.confirmEmail(typedKey: nil, email: email, code: server.emailCode)
+        let wrongDigitsCode: String? = { if case .server(let error)? = wrongDigits { return error.code }; return nil }()
+        check("the letter's code confirms the address: a wrong one is refused (invalid_code); the right one links it — emailLinked, a session for"
+              + " the account screen — and nothing is reissued: the key still works, this Mac stays connected by it",
+              wrongDigitsCode == "invalid_code" && confirmed == nil && linker.record.emailLinked == true
+              && linker.record.session?.sessionToken == ServerToken(server.sessionToken) && linker.record.signedInWith == .key
+              && linker.mode == .full && linker.keyAtHand,
+              "wrong code: \(String(describing: wrongDigits)), right code: \(String(describing: confirmed)), emailLinked \(String(describing: linker.record.emailLinked)),"
+              + " mode \(String(describing: linker.mode))")
+        let replaced = await linker.replaceKey(.purchase(key, code), label: "")
+        let replacement = try? replaced.get()
+        let newKey = AccountKey(typed: newKeyText)
+        let keptNew = try? AccountKeyVault.load(from: linkerVault)
+        check("the key replaced with the key and the purchase code: the new key comes, the vault keeps it instead of the old one, and this Mac —"
+              + " unlinked with every other — is connected again with it; the email stays linked",
+              replacement != nil && replacement?.key == newKey && replacement?.kept == true && replacement?.reconnection == nil && keptNew == newKey
+              && server.lastActivation?.key == newKeyText && linker.mode == .full && linker.record.emailLinked == true,
+              "\(replaced), kept: \(keptNew == newKey), activation \(String(describing: server.lastActivation)), mode \(String(describing: linker.mode))")
+        // The old key, kept on the other Mac, is now unknown to the server.
+        let heldBefore = (try? otherMacActivation.get()) != nil && otherMac.key == key
+            && otherMacVault.map { (try? AccountKeyVault.load(from: $0)) == key } == true
+        let stale = await otherMac.devices()
+        let staleCode: String? = { if case .failure(.server(let error)) = stale { return error.code }; return nil }()
+        check("a kept key the server no longer knows (replaced on another Mac: key_not_found, key.not_found) goes from the vault and is asked"
+              + " for anew — it was kept and held before (the control)",
+              heldBefore && staleCode == "key_not_found"
+              && LicenseText.error(.server(AccountServerError(status: 404, code: "key_not_found")), withKey: true) == L("contract.key.not_found")
+              && otherMac.key == nil && otherMacVault.map { (try? AccountKeyVault.load(from: $0)) == nil } == true,
+              "held before: \(heldBefore), answer \(stale), held after: \(otherMac.key != nil)")
+        let retrieval = await linker.keyRetrievalSeconds()
+
+        // 9. Where the keys and the purchase code went: the requests' bodies, and the vault, sealed.
+        let secretForms = keyForms + newKeyForms + purchaseCodeForms
+        check("the key, the new key and the purchase code went in the requests' bodies only, never in an address — the purchase code was"
+              + " found in a body (the search can find it)",
+              server.bodies.contains { contains($0, purchaseCodeForms) } && !server.requests.contains { contains(Data($0.utf8), secretForms) },
+              "addresses: \(server.requests)")
+        let linkerFile = (try? Data(contentsOf: linkerFolder.appendingPathComponent("account.json"))) ?? Data()
+        check("account.json after the email and the new key holds no form of either key nor of the purchase code",
+              !linkerFile.isEmpty && !contains(linkerFile, secretForms), linkerFile.isEmpty ? "no account.json" : "a key or the code is in it")
+        let sealedNew = (try? Data(contentsOf: linkerVault.root.appendingPathComponent("account-key.bin"))) ?? Data()
+        check("the new key is kept sealed: account-key.bin holds no form of it", !sealedNew.isEmpty && !contains(sealedNew, newKeyForms),
+              sealedNew.isEmpty ? "no account-key.bin" : "it is not sealed")
+        let secondMarker = "lumen-key-log-check-\(UUID().uuidString)"
+        Logger(subsystem: "PrivacyBrowser", category: "SelfTest").notice("\(secondMarker, privacy: .public)")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        let finalLog = processLog(since: began)
+        check("this process's log after the email and the new key holds no form of either key, the purchase code or the session's token —"
+              + " a line just written in clear is found in it (the search can fail)",
+              finalLog.contains(secondMarker) && !contains(Data(finalLog.utf8), secretForms + [server.sessionToken]),
+              finalLog.contains(secondMarker) ? "a key, the code or the token is in the log" : "the marker was not found in \(finalLog.count) characters")
+        let finalBundle = await Diagnostics.bundle(Diagnostics.snapshot(repository: repository), logMinutes: 2)
+        check("the diagnostics ZIP after the email and the new key holds no form of either key, the purchase code or the session's token",
+              !finalBundle.isEmpty && !contains(finalBundle, secretForms + [server.sessionToken]), finalBundle.isEmpty ? "no ZIP" : "a secret is in it")
+        // "Lost your key?" says how long the site gives the key again — from the server only (§17.1).
+        server.stop()
+        let retrievalOffline = await linker.keyRetrievalSeconds()
+        check("\"Lost your key?\" takes the time the site gives the key again from GET /v1/plans (30 days here); the server silent, none — the screen"
+              + " then says error.unreachable, never a number of its own",
+              retrieval == 2_592_000 && retrievalOffline == nil, "from the server: \(String(describing: retrieval)), silent: \(String(describing: retrievalOffline))")
         manager.launchGate = { [weak license] id in license?.refusalToOpen(id) }
         return results
     }
@@ -318,8 +465,18 @@ final class FakeAccountServer {
     private let signer = Curve25519.Signing.PrivateKey()
     let deviceID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
     let deviceToken = "lmd_selftest_device_token"
+    /// The purchase this server plays (§11.1): its key — replaced by `/v1/anonymous/key/replace` — and
+    /// its purchase code; the letter's code; the session a linked email opens.
+    private(set) var currentKey = "LMK-0123-4567-89AB-CDEF-GHJK-MNMT"
+    let replacementKey = "LMK-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZWB"
+    let purchaseCode = "LPC-0123-4567-89AB-CDEF-GHSY"
+    let emailCode = "424242"
+    let sessionToken = "lms_selftest_session_token"
+    private(set) var emailLinked = false
     private(set) var port: UInt16 = 0
     private(set) var requests: [String] = []
+    /// Every request's body, as it came.
+    private(set) var bodies: [Data] = []
     private(set) var lastActivation: Activation?
     /// Refreshes answer `401 device_revoked`.
     var revoked = false
@@ -406,11 +563,45 @@ final class FakeAccountServer {
 
     private func answer(_ request: Request, on connection: NWConnection) {
         requests.append("\(request.method) \(request.path)")
+        bodies.append(request.body)
         let fields = (try? JSONSerialization.jsonObject(with: request.body) as? [String: Any]) ?? [:]
         let machineID = fields["machineID"] as? String ?? ""
+        let sentKey = fields["key"] as? String
+        let keyUnknown = sentKey != nil && sentKey != currentKey
+        func refusal(_ code: String) -> [String: Any] { ["error": ["code": code, "message": "self-test"]] }
         var status = 200
         var body: [String: Any]
         switch request.path {
+        case "/v1/devices/activate" where keyUnknown,
+             "/v1/anonymous/license" where keyUnknown,
+             "/v1/anonymous/email" where keyUnknown,
+             "/v1/anonymous/email/confirm" where keyUnknown,
+             "/v1/anonymous/key/replace" where keyUnknown:
+            status = 404
+            body = refusal("key_not_found")
+        case "/v1/anonymous/license":
+            body = ["devices": [["deviceID": deviceID, "code": "B119", "label": "", "mine": true]], "limit": 3, "used": 1,
+                    "unlinkAvailableAt": NSNull(), "unlinkCooldownSeconds": 604_800, "offlineWorkSeconds": 604_800, "emailLinked": emailLinked]
+        case "/v1/anonymous/email" where fields["purchaseCode"] as? String != purchaseCode,
+             "/v1/anonymous/key/replace" where fields["purchaseCode"] as? String != purchaseCode:
+            status = 403
+            body = refusal("proof_refused")
+        case "/v1/anonymous/email":
+            status = 202
+            body = ["status": "check_email", "codeValidSeconds": 900, "codeAttempts": 5]
+        case "/v1/anonymous/email/confirm" where fields["code"] as? String != emailCode:
+            status = 400
+            body = refusal("invalid_code")
+        case "/v1/anonymous/email/confirm":
+            emailLinked = true
+            status = 201
+            body = ["sessionToken": sessionToken, "expiresAt": Date().addingTimeInterval(30 * 86_400).formatted(.iso8601),
+                    "accountID": "a", "idleTimeoutSeconds": 604_800]
+        case "/v1/anonymous/key/replace":
+            currentKey = replacementKey
+            body = ["key": replacementKey]
+        case "/v1/plans":
+            body = ["withoutRegistration": ["plans": ["personal", "pro"], "keyRetrievalSeconds": 2_592_000]]
         case "/v1/devices/activate":
             lastActivation = Activation(hadAuthorization: request.headers["authorization"] != nil, key: fields["key"] as? String)
             body = ["device": ["deviceID": deviceID, "code": "B119", "label": "", "mine": true],
@@ -425,7 +616,7 @@ final class FakeAccountServer {
             body = ["error": ["code": "not_found", "message": "no such address"]]
         }
         let json = (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
-        var response = Data("HTTP/1.1 \(status) \(status == 200 ? "OK" : "Error")\r\nContent-Type: application/json\r\nContent-Length: \(json.count)\r\nConnection: close\r\n\r\n".utf8)
+        var response = Data("HTTP/1.1 \(status) \((200..<300).contains(status) ? "OK" : "Error")\r\nContent-Type: application/json\r\nContent-Length: \(json.count)\r\nConnection: close\r\n\r\n".utf8)
         response.append(json)
         connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
     }

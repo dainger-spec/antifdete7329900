@@ -17,6 +17,14 @@ final class AppModel: ObservableObject {
     /// A sync is running: launches wait for it (it replaces the profiles' files on disk).
     private var isSyncing = false
     @Published var errorMessage: String?
+    /// Why the master password just typed is not accepted (§10.1): it is the account's password or
+    /// the license's key. Shown under its field, on the setup screen and in "Change master password";
+    /// cleared as the password changes.
+    @Published var masterPasswordRefusal: String?
+    /// After an unlock (§10.1, later): the master password is the account's password or the license's
+    /// key, typed in this session. Said, not refused — the data is already locked with it — with the
+    /// action to change it beside the text.
+    @Published var masterPasswordWarning: String?
     /// A profile whose password manager should open (from "Passwords…" in a browser window).
     @Published var passwordsRequest: ProfileSummary?
     /// Profiles that were started with a proxy that does not work, and what the probe found
@@ -169,11 +177,13 @@ final class AppModel: ObservableObject {
     func createVault(password: String) async {
         guard !isWorking else { return }
         // §10.1, the owner's decision: the account's password, typed in this session, is not
-        // accepted as the master password — compared directly, never used to open anything.
-        if license.isAccountPassword(password) {
-            errorMessage = L("contract.master_password.same_as_account")
+        // accepted as the master password — compared directly, never used to open anything; nor is
+        // the license's key, which goes to the server at every activation.
+        if let refusal = refusalOfMasterPassword(password) {
+            masterPasswordRefusal = refusal
             return
         }
+        masterPasswordRefusal = nil
         let root = root
         await perform {
             // Argon2id (64 MiB, 3 passes) takes a fraction of a second; keep it off the main thread.
@@ -181,8 +191,17 @@ final class AppModel: ObservableObject {
                 try MasterVault.create(in: root, password: password)
             }.value
             try self.didUnlock(vault)
-            self.license.forgetAccountPassword()
+            self.license.forgetComparisons()
         }
+    }
+
+    /// §10.1: a new master password that is the account's password (typed in this session) or the
+    /// license's key (typed in this session, or kept in the vault) — the refusal's text; nil when it
+    /// is neither. Compared in memory only; nothing is derived from either, nothing is tried with them.
+    func refusalOfMasterPassword(_ password: String) -> String? {
+        if license.isAccountPassword(password) { return L("contract.master_password.same_as_account") }
+        if license.isLicenseKey(password) { return L("contract.master_password.same_as_key") }
+        return nil
     }
 
     func unlock(password: String) async {
@@ -214,11 +233,14 @@ final class AppModel: ObservableObject {
             }
             try self.didUnlock(vault)
             // §10.1 later: the account's password and the master password typed in one session are
-            // the same — the data is already locked with it, so it is said, not refused.
+            // the same — the data is already locked with it, so it is said, not refused; the same for
+            // the license's key (typed in this session, or kept in the vault just opened).
             if self.license.isAccountPassword(password) {
-                self.errorMessage = L("contract.master_password.same_as_account_existing")
+                self.masterPasswordWarning = L("contract.master_password.same_as_account_existing")
+            } else if self.license.isLicenseKey(password) {
+                self.masterPasswordWarning = L("contract.master_password.same_as_key")
             }
-            self.license.forgetAccountPassword()
+            self.license.forgetComparisons()
         }
     }
 
@@ -497,6 +519,12 @@ final class AppModel: ObservableObject {
     /// sync, and the person is told so.
     func changePassword(current: String, new: String) async {
         guard let repository else { return }
+        // §10.1: the new master password is held to the rule a first one is.
+        if let refusal = refusalOfMasterPassword(new) {
+            masterPasswordRefusal = refusal
+            return
+        }
+        masterPasswordRefusal = nil
         let vault = repository.vault
         let target = deviceSettings.syncTarget
         var changed = false

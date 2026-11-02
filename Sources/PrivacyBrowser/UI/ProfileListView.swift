@@ -168,6 +168,18 @@ struct ProfileListView: View {
                 model.passwordsRequest = nil
             }
             .sheet(isPresented: $changingPassword) { ChangePasswordView() }
+            // §10.1, later: the master password just typed is the account's password or the license's
+            // key — said, with the action to change it beside the text.
+            .alert(L("license.masterPassword.warningTitle"),
+                   isPresented: Binding(get: { model.masterPasswordWarning != nil }, set: { if !$0 { model.masterPasswordWarning = nil } })) {
+                Button(L("license.masterPassword.change")) {
+                    model.masterPasswordWarning = nil
+                    changingPassword = true
+                }
+                Button(L("license.masterPassword.later"), role: .cancel) { model.masterPasswordWarning = nil }
+            } message: {
+                Text(model.masterPasswordWarning ?? "")
+            }
             .sheet(isPresented: $showingSync) { SyncSettingsView() }
             .sheet(isPresented: $signingIn) {
                 SignInFlow(license: model.license, onFinished: { signingIn = false }, onCancel: { signingIn = false })

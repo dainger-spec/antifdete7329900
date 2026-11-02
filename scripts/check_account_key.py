@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The account's secrets come out as text in three places only.
+"""The account's secrets come out as text in a few places only, each named with why.
 
     python3 scripts/check_account_key.py [source root]     (default: Sources)
     python3 scripts/check_account_key.py --self-check       (the check against planted lines)
@@ -33,6 +33,8 @@ ALLOWED = {
         "the vault's file that keeps the key, encrypted under the vault's key",
     os.path.join("PrivacyBrowser", "App", "Account", "AccountHTTP.swift"):
         "the transport: a token in the Authorization header",
+    os.path.join("PrivacyBrowser", "UI", "NewKeyView.swift"):
+        "the new key shown once after a replacement, and copied at the person's click (CONTRACT §11.1, key.replaced)",
 }
 
 

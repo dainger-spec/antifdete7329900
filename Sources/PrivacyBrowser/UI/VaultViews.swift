@@ -346,8 +346,13 @@ struct SetupView: View {
                         .textSelection(.enabled)
                         .padding(.top, 20)
                 }
-                LockPasswordField(label: L("setup.field.password"), password: $password)
+                LockPasswordField(label: L("setup.field.password"), password: $password, error: model.masterPasswordRefusal != nil)
                     .padding(.top, 26)
+                if let refusal = model.masterPasswordRefusal {
+                    // §10.1: under the field — the account's password, or the license's key.
+                    MasterPasswordRefusalLine(text: refusal)
+                        .padding(.top, 10)
+                }
                 StrengthMeter(score: PasswordStrength.score(password))
                     .padding(.top, 10)
                 LockPasswordField(label: L("setup.field.repeat"), password: $confirmation, onSubmit: create,
@@ -373,7 +378,10 @@ struct SetupView: View {
                     .padding(.top, 22)
             }
         }
-        .onChange(of: password) { _, _ in writtenDown = false }
+        .onChange(of: password) { _, _ in
+            writtenDown = false
+            model.masterPasswordRefusal = nil
+        }
         .overlay(alignment: .topTrailing) {
             // The interface's language, when this is the run's first screen (the owner: on the
             // first screen, before the vault exists). Not after "forgot password": a restart would
@@ -389,6 +397,20 @@ struct SetupView: View {
     private func create() {
         guard longEnough, matches, writtenDown, !model.isWorking else { return }
         Task { await model.createVault(password: password) }
+    }
+}
+
+/// Why a new master password is not accepted (§10.1), under its field: the account's password, or the
+/// license's key — the contract's words, in the danger's colour.
+struct MasterPasswordRefusalLine: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "exclamationmark.circle")
+            .font(.system(size: 12.5))
+            .foregroundStyle(Theme.danger)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .combine)
     }
 }
 
@@ -601,8 +623,12 @@ struct ChangePasswordView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     LockPasswordField(label: L("changepw.current"), password: $current)
-                    LockPasswordField(label: L("changepw.new"), password: $new, takesFocus: false)
+                    LockPasswordField(label: L("changepw.new"), password: $new, error: model.masterPasswordRefusal != nil, takesFocus: false)
                         .padding(.top, 18)
+                    if let refusal = model.masterPasswordRefusal {
+                        MasterPasswordRefusalLine(text: refusal)
+                            .padding(.top, 10)
+                    }
                     StrengthMeter(score: PasswordStrength.score(new))
                         .padding(.top, 10)
                     LockPasswordField(label: L("changepw.repeat"), password: $confirmation, takesFocus: false)
@@ -636,6 +662,8 @@ struct ChangePasswordView: View {
         // Fits under the Settings window's title bar (700 pt) as well as the Profiles window's.
         .sheetFrame(width: 480, height: 660)
         .background(Theme.raised)
+        .onAppear { model.masterPasswordRefusal = nil }
+        .onChange(of: new) { _, _ in model.masterPasswordRefusal = nil }
     }
 
     private func change() {
@@ -644,7 +672,7 @@ struct ChangePasswordView: View {
         Task {
             await model.changePassword(current: current, new: new)
             changing = false
-            if model.errorMessage == nil { dismiss() }
+            if model.errorMessage == nil, model.masterPasswordRefusal == nil { dismiss() }
         }
     }
 }

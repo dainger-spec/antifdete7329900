@@ -33,6 +33,8 @@ struct SignInFlow: View {
     @State private var label = ""
     @State private var problem: String?
     @State private var keyHelp = false
+    /// "Don't remember the key" (§10.1): off — the vault keeps the key, as the contract's default.
+    @State private var dontRememberKey = false
     @State private var limit: AccountServerError?
     @State private var outcome: LicenseModel.ActivationOutcome?
 
@@ -74,7 +76,7 @@ struct SignInFlow: View {
                     .padding(.trailing, 20)
             }
         }
-        .sheet(isPresented: $keyHelp) { KeyRecoveryNote(siteURL: license.configuration?.site("/")) { keyHelp = false } }
+        .sheet(isPresented: $keyHelp) { KeyRecoveryNote(license: license) { keyHelp = false } }
     }
 
     @ViewBuilder
@@ -115,6 +117,20 @@ struct SignInFlow: View {
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
+                // §10.1: the key is kept in the vault unless the person says otherwise — what keeping
+                // it means is said beside the choice (`key.remember`).
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle(isOn: $dontRememberKey) {
+                        Text(L("license.key.rememberOff"))
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary)
+                    }
+                    .toggleStyle(.lumenCheckbox)
+                    Text(L("contract.key.remember"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if let problem { problemLine(problem) }
             LockActionButton(title: L("license.signIn.action"), working: license.isWorking,
@@ -152,13 +168,13 @@ struct SignInFlow: View {
             // Read here, before anything is sent: a typo is said without a request (the owner's rule).
             switch AccountKeyInput.classify(keyText) {
             case .key(let key):
-                license.useKey(key)
+                license.useKey(key, remember: !dontRememberKey)
                 keyText = ""
                 step = .activation
             case .purchaseCode: problem = L("license.key.purchaseCode")
             case .invoiceNumber: problem = L("license.key.invoice")
             case .cyrillic: problem = L("license.key.cyrillic")
-            case .typo, .empty: problem = L("license.key.typo")
+            case .typo, .empty: problem = L("contract.key.typo")
             }
         }
     }
@@ -203,7 +219,7 @@ struct SignInFlow: View {
                 limit = error
                 problem = LicenseText.error(.server(error))
             case .failure(let failure):
-                problem = LicenseText.error(failure)
+                problem = LicenseText.error(failure, withKey: method == .key)
             }
         }
     }
@@ -409,23 +425,34 @@ private struct DeviceLine: View {
     }
 }
 
-/// "Lost your key?": why no letter can bring it back, and what can (the owner: the screen says
-/// honestly why there is no such path for a key).
+/// "Lost your key?" (§11.1): an email linked to the purchase — sign in with it, and replace the key
+/// on the site (`key.no_reset.email`); else no letter can bring the key back, and the screen says so
+/// plainly with what can (`key.no_reset`): the site, within the time `GET /v1/plans` gives — from the
+/// server only (§17.1); it not answering, `error.unreachable`.
 private struct KeyRecoveryNote: View {
-    let siteURL: URL?
+    @ObservedObject var license: LicenseModel
     let close: () -> Void
+    @State private var retrievalSeconds: Int?
+    @State private var asked = false
+
+    private var linked: Bool { license.record.emailLinked == true }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(L("license.key.noReset.title"))
+            Text(L("license.key.forgot"))
                 .lumenHeadingTitle()
                 .foregroundStyle(Theme.textPrimary)
-            Text(L("license.key.noReset.text"))
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let text {
+                Text(text)
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ProgressView().controlSize(.small)
+            }
             HStack {
-                if let siteURL {
+                // The site's account to sign in to with the email, or its key page (§11.1).
+                if let siteURL = license.configuration?.site(linked ? "/account" : "/key") {
                     Button(L("license.key.noReset.site")) { SystemOpen.openWebsite(siteURL) }
                         .buttonStyle(.lumenSecondary)
                 }
@@ -439,6 +466,17 @@ private struct KeyRecoveryNote: View {
         .frame(width: 460)
         .background(Theme.raised)
         .environment(\.colorScheme, .dark)
+        .task {
+            guard !linked else { return }
+            retrievalSeconds = await license.keyRetrievalSeconds()
+            asked = true
+        }
+    }
+
+    private var text: String? {
+        if linked { return L("contract.key.no_reset.email") }
+        if let retrievalSeconds { return String(format: L("contract.key.no_reset"), LicenseText.duration(TimeInterval(retrievalSeconds))) }
+        return asked ? L("contract.error.unreachable") : nil
     }
 }
 
@@ -577,6 +615,14 @@ struct AccountSettingsPage: View {
     @State private var signingIn = false
     /// The system's answer about Lumen's notifications, read when the page shows (key accounts).
     @State private var reminderStatus: ExpiryNotifications.Status?
+    /// The key typed for one request when the vault keeps none, or is locked (`key.devices_need_key`,
+    /// §11.1): sent, then the field is emptied — the key is not held after its request (§10.1).
+    @State private var devicesKeyText = ""
+    /// The list on the page came with a key typed for it: unlinking asks for the key again.
+    @State private var devicesByTypedKey = false
+    @State private var unlinkKeyText = ""
+    @State private var linkingEmail = false
+    @State private var replacingKey = false
 
     var body: some View {
         SettingsPage(title: L("settings.section.account"), subtitle: L("license.account.subtitle")) {
@@ -585,8 +631,9 @@ struct AccountSettingsPage: View {
             } else if let state = license.state, state.mode != .notSignedIn {
                 plan(state)
                 offline(state)
-                if license.record.signedInWith == .key { reminders }
+                if license.hasNoEmail { reminders }
                 thisMac
+                if license.record.signedInWith == .key { keySection }
                 devicesSection
                 site
             } else {
@@ -607,15 +654,50 @@ struct AccountSettingsPage: View {
         } message: {
             Text(L("contract.signout.consequences"))
         }
+        .sheet(isPresented: $linkingEmail) {
+            EmailLinkSheet(license: license) {
+                linkingEmail = false
+                Task { await loadDevices() }
+            }
+        }
+        .sheet(isPresented: $replacingKey) {
+            KeyReplaceSheet(license: license, label: thisMacLabel) {
+                replacingKey = false
+                Task { await loadDevices() }
+            }
+        }
         .alert(confirmingUnlink.map { String(format: L("license.account.unlink.confirm"), $0.code) } ?? "",
                isPresented: Binding(get: { confirmingUnlink != nil }, set: { if !$0 { confirmingUnlink = nil } })) {
-            Button(L("license.account.cancel"), role: .cancel) { confirmingUnlink = nil }
+            if devicesByTypedKey {
+                // The key is not kept (§10.1): asked for again for this request, forgotten after it.
+                TextField(L("license.key.field"), text: $unlinkKeyText)
+            }
+            Button(L("license.account.cancel"), role: .cancel) {
+                confirmingUnlink = nil
+                unlinkKeyText = ""
+            }
             Button(L("license.activate.unlink"), role: .destructive) {
                 guard let device = confirmingUnlink else { return }
                 confirmingUnlink = nil
+                let input = AccountKeyInput.classify(unlinkKeyText)
+                unlinkKeyText = ""
+                let typedKey: AccountKey?
+                if !devicesByTypedKey {
+                    typedKey = nil
+                } else if case .key(let key) = input {
+                    typedKey = key
+                } else {
+                    devicesProblem = L("contract.key.typo")
+                    return
+                }
                 Task {
-                    if case .failure(let failure) = await license.unlink(device) { devicesProblem = LicenseText.error(failure) }
-                    await loadDevices()
+                    if case .failure(let failure) = await license.unlink(device, typedKey: typedKey) {
+                        devicesProblem = LicenseText.error(failure, withKey: license.record.signedInWith == .key)
+                    } else if !devicesByTypedKey {
+                        await loadDevices()
+                    } else {
+                        devices?.devices.removeAll { $0.deviceID == device.deviceID }
+                    }
                 }
             }
         } message: {
@@ -639,7 +721,8 @@ struct AccountSettingsPage: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if license.record.signedInWith == .key {
-                    Text(L("license.account.keyAccount"))
+                    // §11.1: a license by key — with an email linked, or without any.
+                    Text(license.record.emailLinked == true ? L("contract.account.key_license.email") : L("contract.account.key_license"))
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -755,12 +838,50 @@ struct AccountSettingsPage: View {
         }
     }
 
+    /// A license by key (§11.1): an email to link — a way to recover access, optional — and a new key
+    /// for whoever thinks the key has leaked.
+    @ViewBuilder
+    private var keySection: some View {
+        SettingsCaption(L("license.account.caption.key"))
+        if license.record.emailLinked == true {
+            SettingRow(L("license.emailLink.linked"), detail: nil, effect: nil) { EmptyView() }
+        } else {
+            SettingRow(L("license.emailLink.title"), detail: L("license.emailLink.detail"), effect: nil) {
+                Button(L("license.emailLink.action")) { linkingEmail = true }
+                    .buttonStyle(.lumenSecondary)
+                    .disabled(license.isWorking)
+            }
+        }
+        SettingRow(L("license.keyReplace.title"), detail: L("license.keyReplace.detail"), effect: nil) {
+            Button(L("license.keyReplace.action")) { replacingKey = true }
+                .buttonStyle(.lumenDestructive)
+                .disabled(license.isWorking)
+        }
+    }
+
+    /// This Mac's label as the license's list shows it: sent again when a new key connects it.
+    private var thisMacLabel: String {
+        devices?.devices.first { $0.deviceID == license.record.deviceID }?.label ?? ""
+    }
+
     @ViewBuilder
     private var devicesSection: some View {
         SettingsCaption(L("license.account.caption.devices"))
-        if license.record.signedInWith == .key, license.key == nil {
-            note(L("license.account.lockedForKey"))
-        } else if license.deviceCredential == nil {
+        if license.record.signedInWith == .key, license.deviceCredential == nil, !devicesByTypedKey {
+            // §11.1: the key not kept, or the vault locked — the key is asked for, for this request.
+            VStack(alignment: .leading, spacing: 10) {
+                note(L("contract.key.devices_need_key"))
+                HStack(alignment: .bottom, spacing: 10) {
+                    AccountTextField(label: L("license.key.field"), text: $devicesKeyText, monospaced: true,
+                                     prompt: "LMK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX", onSubmit: showDevicesWithTypedKey) // l10n: not text
+                    Button(L("license.account.showDevices"), action: showDevicesWithTypedKey)
+                        .buttonStyle(.lumenSecondary)
+                        .disabled(license.isWorking || AccountKeyInput.classify(devicesKeyText) == .empty)
+                        .padding(.bottom, 8)
+                }
+            }
+            .padding(.vertical, 8)
+        } else if license.deviceCredential == nil, !devicesByTypedKey {
             SettingRow(L("license.account.signIn"), detail: noSessionText, effect: nil) {
                 HStack(spacing: 8) {
                     Button(L("license.account.signIn")) { signingIn = true }.buttonStyle(.lumenSecondary)
@@ -830,14 +951,371 @@ struct AccountSettingsPage: View {
         switch await license.devices() {
         case .success(let list):
             devices = list
+            devicesByTypedKey = false
             devicesProblem = nil
         case .failure(let failure):
-            devicesProblem = LicenseText.error(failure)
+            devicesProblem = LicenseText.error(failure, withKey: license.record.signedInWith == .key)
+        }
+    }
+
+    /// The license's Macs with a key typed for this one request: read before anything is sent, sent,
+    /// and the field emptied whatever the answer (§10.1).
+    private func showDevicesWithTypedKey() {
+        guard !license.isWorking else { return }
+        guard case .key(let key) = AccountKeyInput.classify(devicesKeyText) else {
+            devicesProblem = L("contract.key.typo")
+            return
+        }
+        devicesKeyText = ""
+        devicesProblem = nil
+        Task {
+            loadingDevices = true
+            defer { loadingDevices = false }
+            switch await license.devices(typedKey: key) {
+            case .success(let list):
+                devices = list
+                devicesByTypedKey = true
+            case .failure(let failure):
+                devicesProblem = LicenseText.error(failure, withKey: true)
+            }
         }
     }
 
     private func open(_ path: String) {
         guard let url = license.configuration?.site(path) else { return }
         SystemOpen.openWebsite(url)
+    }
+}
+
+// MARK: - A purchase without registration: an email, a new key (§11.1)
+
+/// A problem under a sheet's fields, in the danger's colour.
+private struct SheetProblemLine: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "exclamationmark.circle")
+            .font(.lumenBody)
+            .foregroundStyle(Theme.danger)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A sentence under a field, quieter than the body.
+private struct SheetHint: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.lumenSecondary)
+            .foregroundStyle(Theme.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// "Link an email address" (§11.1; the site's SITE_API §12.9): optional — a way to recover access, not
+/// a new account. The key and the purchase code prove the purchase (the key alone is not enough); the
+/// six digits of the letter confirm the address. The key works on, this Mac stays connected by it.
+/// A key typed here when the vault keeps none is held for this sheet's two steps only; the purchase
+/// code is forgotten once its request is answered.
+struct EmailLinkSheet: View {
+    @ObservedObject var license: LicenseModel
+    let close: () -> Void
+
+    enum Step { case form, code }
+
+    @State private var step = Step.form
+    @State private var keyText = ""
+    @State private var purchaseCodeText = ""
+    @State private var email = ""
+    @State private var password = ""
+    @State private var code = ""
+    @State private var sent: AccountAPI.CodeSent?
+    @State private var typedKey: AccountKey?
+    @State private var problem: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SheetHeader(title: L("license.emailLink.title"))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    switch step {
+                    case .form: form
+                    case .code: codeStep
+                    }
+                    if let problem { SheetProblemLine(text: problem) }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 6)
+                .padding(.bottom, 18)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            SheetFooter {
+                Button(L("common.cancel"), action: close)
+                    .buttonStyle(.lumenSecondary)
+                    .keyboardShortcut(.cancelAction)
+                if step == .code {
+                    Button(L("license.emailLink.back")) {
+                        step = .form
+                        code = ""
+                        problem = nil
+                    }
+                    .buttonStyle(.lumenSecondary)
+                }
+                Button(step == .form ? L("license.emailLink.send") : L("license.emailLink.confirm"), action: step == .form ? send : confirm)
+                    .buttonStyle(.lumenPrimary)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(license.isWorking)
+            }
+        }
+        .sheetFrame(width: 500, height: 660)
+        .background(Theme.raised)
+        .onDisappear {
+            typedKey = nil
+            password = ""
+            purchaseCodeText = ""
+        }
+    }
+
+    @ViewBuilder
+    private var form: some View {
+        // Before the fields (§11.1).
+        Text(L("contract.email_link.explain"))
+            .font(.lumenBody)
+            .foregroundStyle(Theme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+        if !license.keyAtHand {
+            AccountTextField(label: L("license.key.field"), text: $keyText, monospaced: true,
+                             prompt: "LMK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX") // l10n: not text
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            AccountTextField(label: L("license.purchaseCode.field"), text: $purchaseCodeText, monospaced: true,
+                             prompt: "LPC-XXXX-XXXX-XXXX-XXXX-XXXX") // l10n: not text
+            SheetHint(text: L("license.purchaseCode.hint"))
+        }
+        AccountTextField(label: L("license.signIn.email"), text: $email)
+        VStack(alignment: .leading, spacing: 6) {
+            LockPasswordField(label: L("license.signIn.password"), password: $password, takesFocus: false)
+            SheetHint(text: L("license.emailLink.passwordHint"))
+        }
+    }
+
+    @ViewBuilder
+    private var codeStep: some View {
+        Text(String(format: L("contract.signup.check_email"), email.trimmingCharacters(in: .whitespacesAndNewlines)))
+            .font(.lumenBody)
+            .foregroundStyle(Theme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+        AccountTextField(label: L("license.emailLink.code"), text: $code, monospaced: true, prompt: "000000", onSubmit: confirm) // l10n: not text
+        // The numbers from the server's answer only (§17.1).
+        if let seconds = sent?.codeValidSeconds, let attempts = sent?.codeAttempts {
+            SheetHint(text: String(format: L("contract.signup.code_terms"), LicenseText.duration(TimeInterval(seconds)),
+                                   LicenseText.count(attempts, "time")))
+        }
+    }
+
+    /// The key: the one the vault keeps, or the one typed here — read before anything is sent.
+    private func keyForRequest() -> (ok: Bool, typed: AccountKey?) {
+        if license.keyAtHand { return (true, nil) }
+        if let typedKey { return (true, typedKey) }
+        guard case .key(let key) = AccountKeyInput.classify(keyText) else {
+            problem = L("contract.key.typo")
+            return (false, nil)
+        }
+        return (true, key)
+    }
+
+    private func send() {
+        guard !license.isWorking else { return }
+        problem = nil
+        let key = keyForRequest()
+        guard key.ok else { return }
+        guard let purchaseCode = PurchaseCode(typed: purchaseCodeText) else {
+            problem = L("contract.purchase_code.typo")
+            return
+        }
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard address.contains("@") else {
+            problem = L("contract.error.invalid_email")
+            return
+        }
+        guard (10...256).contains(password.count) else {
+            problem = L("contract.error.invalid_password")
+            return
+        }
+        Task {
+            switch await license.linkEmail(typedKey: key.typed, purchaseCode: purchaseCode, email: address, password: password) {
+            case .success(let answer):
+                sent = answer
+                typedKey = key.typed
+                keyText = ""
+                purchaseCodeText = ""
+                step = .code
+            case .failure(let failure):
+                problem = LicenseText.error(failure, withKey: true)
+            }
+        }
+    }
+
+    private func confirm() {
+        guard !license.isWorking else { return }
+        problem = nil
+        let digits = code.filter(\.isNumber)
+        guard digits.count == 6 else {
+            problem = L("contract.error.invalid_code")
+            return
+        }
+        Task {
+            if let failure = await license.confirmEmail(typedKey: typedKey, email: email, code: digits) {
+                problem = LicenseText.error(failure, withKey: true)
+            } else {
+                typedKey = nil
+                password = ""
+                close()
+            }
+        }
+    }
+}
+
+/// "Replace the key" (§11.1; SITE_API §12.10): for whoever thinks the key has leaked — a step taken
+/// knowingly, after `key.replace.confirm`. Proved with the key and the purchase code, or — an email
+/// linked and its session here — with the account's password. Then the new key, shown once
+/// (`key.replaced`); the vault keeps it instead of the old one when the key is remembered, and this
+/// Mac, unlinked with every other, is connected again with it.
+struct KeyReplaceSheet: View {
+    @ObservedObject var license: LicenseModel
+    /// This Mac's label, as the license's list showed it.
+    let label: String
+    let close: () -> Void
+
+    @State private var keyText = ""
+    @State private var purchaseCodeText = ""
+    @State private var password = ""
+    @State private var problem: String?
+    @State private var result: LicenseModel.KeyReplacement?
+
+    /// An email linked and its session on this Mac: the account's password proves it.
+    private var bySession: Bool { license.record.emailLinked == true && license.validSession != nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SheetHeader(title: L("license.keyReplace.title"))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let result {
+                        done(result)
+                    } else {
+                        form
+                    }
+                    if let problem { SheetProblemLine(text: problem) }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 6)
+                .padding(.bottom, 18)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            SheetFooter {
+                if result == nil {
+                    Button(L("common.cancel"), action: close)
+                        .buttonStyle(.lumenSecondary)
+                        .keyboardShortcut(.cancelAction)
+                    Button(L("license.keyReplace.button"), action: replace)
+                        .buttonStyle(.lumenDestructive)
+                        .disabled(license.isWorking || license.vaultNeededForKeyReplacement)
+                } else {
+                    Button(L("license.done"), action: close)
+                        .buttonStyle(.lumenPrimary)
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+        .sheetFrame(width: 500, height: 600)
+        .background(Theme.raised)
+        .onDisappear {
+            result = nil
+            password = ""
+            keyText = ""
+            purchaseCodeText = ""
+        }
+    }
+
+    @ViewBuilder
+    private var form: some View {
+        Text(L("contract.key.replace.confirm"))
+            .font(.lumenBody)
+            .foregroundStyle(Theme.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+        if bySession {
+            LockPasswordField(label: L("license.keyReplace.password"), password: $password, takesFocus: false)
+        } else {
+            if !license.keyAtHand {
+                AccountTextField(label: L("license.key.field"), text: $keyText, monospaced: true,
+                                 prompt: "LMK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX") // l10n: not text
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                AccountTextField(label: L("license.purchaseCode.field"), text: $purchaseCodeText, monospaced: true,
+                                 prompt: "LPC-XXXX-XXXX-XXXX-XXXX-XXXX") // l10n: not text
+                SheetHint(text: L("license.purchaseCode.hint"))
+            }
+        }
+        if license.vaultNeededForKeyReplacement {
+            SheetHint(text: L("license.keyReplace.vaultLocked"))
+        }
+    }
+
+    @ViewBuilder
+    private func done(_ replacement: LicenseModel.KeyReplacement) -> some View {
+        Text(L("contract.key.replaced"))
+            .font(.lumenBody)
+            .foregroundStyle(Theme.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+        NewKeyView(key: replacement.key)
+        if replacement.kept { SheetHint(text: L("license.keyReplace.kept")) }
+        if let failure = replacement.reconnection {
+            SheetProblemLine(text: LicenseText.error(failure, withKey: true))
+            SheetHint(text: L("license.keyReplace.notReconnected"))
+        } else {
+            SheetHint(text: L("license.keyReplace.reconnected"))
+        }
+    }
+
+    private func replace() {
+        guard !license.isWorking, !license.vaultNeededForKeyReplacement else { return }
+        problem = nil
+        let proof: AccountAPI.KeyReplacementProof
+        if bySession, let session = license.validSession {
+            guard !password.isEmpty else {
+                problem = L("contract.error.invalid_credentials")
+                return
+            }
+            proof = .account(session: session, password: password)
+        } else {
+            let key: AccountKey
+            if license.keyAtHand, let kept = license.key {
+                key = kept
+            } else if case .key(let typed) = AccountKeyInput.classify(keyText) {
+                key = typed
+            } else {
+                problem = L("contract.key.typo")
+                return
+            }
+            guard let code = PurchaseCode(typed: purchaseCodeText) else {
+                problem = L("contract.purchase_code.typo")
+                return
+            }
+            proof = .purchase(key, code)
+        }
+        let withKey = !bySession
+        Task {
+            switch await license.replaceKey(proof, label: label) {
+            case .success(let replacement):
+                result = replacement
+                keyText = ""
+                purchaseCodeText = ""
+                password = ""
+            case .failure(let failure):
+                problem = LicenseText.error(failure, withKey: withKey)
+            }
+        }
     }
 }

@@ -151,8 +151,9 @@ enum LicenseText {
 
     // MARK: §17.2 — errors
 
-    /// What a failed request says (§3, §17.2), by its code — never by the server's message.
-    static func error(_ failure: AccountFailure) -> String {
+    /// What a failed request says (§3, §17.2, §17.7), by its code — never by the server's message.
+    /// `withKey`: the request carried the license's key (`account_deletion_pending` then has its own text).
+    static func error(_ failure: AccountFailure, withKey: Bool = false) -> String {
         switch failure {
         case .unreachable:
             return L("contract.error.unreachable")
@@ -166,7 +167,18 @@ enum LicenseText {
             case "invalid_credentials": return L("contract.error.invalid_credentials")
             case "unauthorized": return L("contract.error.unauthorized")
             case "account_disabled": return L("contract.error.account_disabled")
-            case "account_deletion_pending": return L("contract.error.account_deletion_pending")
+            case "account_deletion_pending":
+                return withKey ? L("contract.error.account_deletion_pending.key") : L("contract.error.account_deletion_pending")
+            case "invalid_key": return L("contract.key.typo")
+            case "key_not_found": return L("contract.key.not_found")
+            case "invalid_purchase_code": return L("contract.purchase_code.typo")
+            case "invalid_request" where error.field == "purchaseCode": return L("contract.purchase_code.typo")
+            case "proof_refused": return L("contract.error.proof_refused")
+            case "email_already_linked": return L("contract.error.email_already_linked")
+            case "no_key": return L("contract.error.no_key")
+            case "invalid_code": return L("contract.error.invalid_code")
+            case "letters_busy":
+                return String(format: L("contract.error.letters_busy"), duration(TimeInterval(error.retryAfter ?? 60)))
             case "unlink_cooldown":
                 return String(format: L("contract.error.unlink_cooldown"), error.availableAt.map(date) ?? "—")
             case "device_limit_reached":

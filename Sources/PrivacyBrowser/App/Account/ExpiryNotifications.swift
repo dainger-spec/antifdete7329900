@@ -58,7 +58,9 @@ enum ExpiryNotifications {
             if case .periodEnding = banner { return true }
             return false
         } ?? false
-        if ExpiryReminders.shouldOffer(at: moment, signedInWithKey: isKeyAccount(license), alreadyOffered: offered,
+        // An email linked to the purchase (§11.1): letters remind of the period's end, the offer — "we have
+        // no other way to remind you" — would not be true.
+        if ExpiryReminders.shouldOffer(at: moment, signedInWithKey: isKeyAccount(license) && license.hasNoEmail, alreadyOffered: offered,
                                        periodEnding: periodEnding) {
             offered = true
             Task { await offer(license: license) }
