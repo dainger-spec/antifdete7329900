@@ -97,18 +97,23 @@ enum ProfileExecutable {
     }
 }
 
-/// One look at the data-protection keychain, from inside a process: which of the entitlements that
-/// give one this process holds — as the kernel has them, not as a file says — and what the keychain
-/// lets it do under a service of the check's own. The self-test and the release check ask it of a
-/// profile's process (`ProfileCommand.checkKeychain`), of a process of the app's own executable — a
-/// profile as it was started before LumenProfile (`--keychain-probe`) — and of the app itself.
+/// One look at the keychains, from inside a process: which of the entitlements that give one this
+/// process holds — as the kernel has them, not as a file says — whether it can reach securityd at all,
+/// and what each keychain lets it do under a service of the check's own: the data-protection keychain
+/// (opened by an application identifier, an access group or an app group) and the account's login
+/// keychain (the file-based one, open to any process of the account that securityd answers). The
+/// self-test and the release check ask it of a profile's process (`ProfileCommand.checkKeychain`), of
+/// processes of the profile's executable and of the app's own outside a profile's sandbox
+/// (`--keychain-probe`), and of the app itself.
 struct KeychainProbe: Codable, Equatable {
     /// The check's own service: items of no one else's.
     var service: String
-    /// An item to add under the service, with this account; nil adds none.
+    /// An item to add under the service, with this account, in each keychain; nil adds none.
     var add: String?
-    /// Afterwards, remove every item of the service this process can see.
-    var removeAfter = false
+    /// Afterwards, the items of these accounts to remove. Each process removes only what it kept: an
+    /// item of the login keychain is tied to the signature that made it, and removing another's
+    /// could ask the person.
+    var remove: [String] = []
 }
 
 struct KeychainReport: Codable, Equatable {
@@ -119,17 +124,35 @@ struct KeychainReport: Codable, Equatable {
     /// its executables: the reader's own control — a reader that cannot see that one cannot say
     /// that the others are not there.
     var readerSawItsControl = false
-    /// What adding the item answered (`OSStatus`), if one was to be added.
+    /// The data-protection keychain: what adding the item answered (`OSStatus`), if one was to be
+    /// added; what looking for the service's items answered, and the accounts of those shown; what
+    /// removing answered, if asked.
     var added: Int32?
-    /// What looking for the service's items answered, and the accounts of the items it was shown.
     var found: Int32 = 0
     var seen: [String] = []
-    /// What removing them answered, if asked.
     var removed: Int32?
+    /// The same in the account's login keychain.
+    var loginAdded: Int32?
+    var loginFound: Int32 = 0
+    var loginSeen: [String] = []
+    var loginRemoved: Int32?
+    /// Each of securityd's services (`KeychainCheck.securitydServices`) with what looking it up
+    /// answered in this process: 0 reached it, anything else did not (1100: the sandbox refused it).
+    var lookups: [String: Int32] = [:]
 
     var heldDescription: String {
         guard let held else { return "could not be read" }
         return held.isEmpty ? "none" : held.joined(separator: ", ")
+    }
+
+    /// securityd's services this process reached.
+    var reached: [String] { lookups.filter { $0.value == 0 }.map(\.key).sorted() }
+
+    var lookupsDescription: String {
+        lookups.keys.sorted().map { name in
+            let answer = lookups[name] ?? -1
+            return answer == 0 ? "\(name) reached" : "\(name) refused (\(answer))"
+        }.joined(separator: ", ")
     }
 }
 
@@ -137,43 +160,119 @@ enum KeychainCheck {
     /// Every build of the app signs every executable with it (Resources/*.entitlements).
     static let controlEntitlement = "com.apple.security.device.camera"
 
+    /// securityd's services: the one that serves the account's login keychain, and the XPC one of
+    /// the data-protection keychain (`secd`). A profile's process is refused every service of
+    /// securityd's by its sandbox (`ProfileNetworkGuard.closeTheProcess`); these two are the ones a
+    /// keychain call asks for, looked up to say whether the refusal holds.
+    static let securitydServices = ["com.apple.SecurityServer", "com.apple.securityd.xpc"]
+
     static func run(_ probe: KeychainProbe) -> KeychainReport {
         var report = KeychainReport()
         if let task = SecTaskCreateFromSelf(nil) {
             report.held = ProfileExecutable.keychainEntitlements.filter { SecTaskCopyValueForEntitlement(task, $0 as CFString, nil) != nil }
             report.readerSawItsControl = SecTaskCopyValueForEntitlement(task, controlEntitlement as CFString, nil) != nil
         }
+        for name in securitydServices { report.lookups[name] = lookUp(name) }
+        let dataProtection = items(dataProtection: true, probe)
+        report.added = dataProtection.added
+        report.found = dataProtection.found
+        report.seen = dataProtection.seen
+        report.removed = dataProtection.removed
+        let login = items(dataProtection: false, probe)
+        report.loginAdded = login.added
+        report.loginFound = login.found
+        report.loginSeen = login.seen
+        report.loginRemoved = login.removed
+        return report
+    }
+
+    /// Adds, looks for and removes the probe's items in one keychain. Never a dialog: what would ask
+    /// the person answers with an error instead; only attributes are read, never a secret.
+    ///
+    /// The login keychain is the account's, opened by its path, as any process of the account can
+    /// open it — never "the default keychain": in a profile's process, whose home is its own and
+    /// holds none, there is no default one, and asking for it left the process waiting on the
+    /// system's dialog (CI run 656, both macOS). What can reach the account's keychain is what the
+    /// check is about.
+    private static func items(dataProtection: Bool, _ probe: KeychainProbe)
+        -> (added: Int32?, found: Int32, seen: [String], removed: Int32?) {
+        var loginKeychain: SecKeychain?
+        if !dataProtection {
+            let opened = openLoginKeychain()
+            guard let keychain = opened.keychain else {
+                // Not opened: nothing was asked of it, and nothing could be kept or shown.
+                return (probe.add == nil ? nil : opened.status, opened.status, [], probe.remove.isEmpty ? nil : opened.status)
+            }
+            loginKeychain = keychain
+        }
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: probe.service,
-                                   kSecUseDataProtectionKeychain as String: true]
+                                   kSecUseDataProtectionKeychain as String: dataProtection]
+        var added: Int32?
         if let account = probe.add {
             var item = base
             item[kSecAttrAccount as String] = account
             item[kSecValueData as String] = Data("lumen keychain check".utf8)
-            report.added = SecItemAdd(item as CFDictionary, nil)
+            if let loginKeychain { item[kSecUseKeychain as String] = loginKeychain }
+            added = SecItemAdd(item as CFDictionary, nil)
         }
         var query = base
         query[kSecMatchLimit as String] = kSecMatchLimitAll
         query[kSecReturnAttributes as String] = true
+        query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+        if let loginKeychain { query[kSecMatchSearchList as String] = [loginKeychain] }
         var result: CFTypeRef?
-        report.found = SecItemCopyMatching(query as CFDictionary, &result)
-        report.seen = ((result as? [[String: Any]]) ?? []).compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
-        if probe.removeAfter {
-            report.removed = SecItemDelete(base as CFDictionary)
+        let found = SecItemCopyMatching(query as CFDictionary, &result)
+        let seen = ((result as? [[String: Any]]) ?? []).compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
+        var removed: Int32?
+        for account in probe.remove {
+            var item = base
+            item[kSecAttrAccount as String] = account
+            item[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+            if let loginKeychain { item[kSecMatchSearchList as String] = [loginKeychain] }
+            let status = SecItemDelete(item as CFDictionary)
+            // The first that did not go through, or 0.
+            if removed == nil || removed == errSecSuccess { removed = status }
         }
-        return report
+        return (added, found, seen, removed)
     }
 
-    /// `--keychain-probe <service> [--add <account>] [--remove]`: `run` in this process, its report
-    /// printed as one line of JSON after `KEYCHAIN-PROBE `.
+    /// The account's login keychain, opened by its path under the account's own home (not this
+    /// process's, which a profile's process has of its own), and what opening it answered.
+    private static func openLoginKeychain() -> (keychain: SecKeychain?, status: Int32) {
+        guard let home = SafariPaths.realHome else { return (nil, errSecNoSuchKeychain) }
+        var keychain: SecKeychain?
+        let status = SecKeychainOpen(home + "/Library/Keychains/login.keychain-db", &keychain)
+        return (status == errSecSuccess ? keychain : nil, status)
+    }
+
+    /// What looking `name` up answers in this process: 0 when it reached the service (the right
+    /// to send to it is let go at once), the refusal otherwise — 1100 (`BOOTSTRAP_NOT_PRIVILEGED`)
+    /// when a sandbox refuses it, -1 when the lookup itself is not there.
+    static func lookUp(_ name: String) -> Int32 {
+        typealias LookUp = @convention(c) (mach_port_t, UnsafePointer<CChar>, UnsafeMutablePointer<mach_port_t>) -> kern_return_t
+        let handle = dlopen(nil, RTLD_NOW)
+        guard let symbol = dlsym(handle, "bootstrap_look_up"), let portSymbol = dlsym(handle, "bootstrap_port") else { return -1 }
+        let lookUp = unsafeBitCast(symbol, to: LookUp.self)
+        let bootstrap = portSymbol.assumingMemoryBound(to: mach_port_t.self).pointee
+        var port: mach_port_t = 0
+        let status = name.withCString { lookUp(bootstrap, $0, &port) }
+        if status == KERN_SUCCESS, port != 0 {
+            mach_port_deallocate(mach_task_self_, port)
+        }
+        return status
+    }
+
+    /// `--keychain-probe <service> [--add <account>] [--remove <account>]…`: `run` in this process,
+    /// its report printed as one line of JSON after `KEYCHAIN-PROBE `.
     static func runFromCommandLine(arguments: [String]) -> Never {
         guard let index = arguments.firstIndex(of: "--keychain-probe"), arguments.indices.contains(index + 1) else {
-            print("KEYCHAIN-PROBE usage: --keychain-probe <service> [--add <account>] [--remove]")
+            print("KEYCHAIN-PROBE usage: --keychain-probe <service> [--add <account>] [--remove <account>]…")
             exit(64)
         }
         var probe = KeychainProbe(service: arguments[index + 1])
         if let add = arguments.firstIndex(of: "--add"), arguments.indices.contains(add + 1) { probe.add = arguments[add + 1] }
-        probe.removeAfter = arguments.contains("--remove")
+        probe.remove = arguments.indices.filter { arguments[$0] == "--remove" && arguments.indices.contains($0 + 1) }.map { arguments[$0 + 1] }
         let report = run(probe)
         guard let data = try? JSONEncoder().encode(report), let line = String(data: data, encoding: .utf8) else { exit(1) }
         print("KEYCHAIN-PROBE \(line)")
@@ -184,7 +283,7 @@ enum KeychainCheck {
     static func probe(_ executable: URL, _ probe: KeychainProbe) async -> KeychainReport? {
         var arguments = ["--keychain-probe", probe.service]
         if let account = probe.add { arguments += ["--add", account] }
-        if probe.removeAfter { arguments.append("--remove") }
+        for account in probe.remove { arguments += ["--remove", account] }
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments

@@ -274,10 +274,11 @@ def main():
     summary.append(("Gatekeeper (spctl, during the release)", "OK" if gatekeeper else "NOT-RUN"))
     summary.append(("the app as it ships starts (release check)",
                     ("FAIL " + failed[0][:160]) if failed else ("OK" if window else "NOT-RUN")))
-    # Shown only on a build the team signed: both of its checks PASS here, or this is not done.
+    # Shown in full only on a build the team signed: its three checks (the entitlements, the login
+    # keychain, the data-protection keychain) PASS here, or this is not done.
     summary.append(("keychain between profiles (release check)",
                     ("FAIL " + keychain_failed[0][:160]) if keychain_failed
-                    else "OK" if len(keychain_passed) >= 2 and not keychain_unshown
+                    else "OK" if len(keychain_passed) >= 3 and not keychain_unshown
                     else ("NOT-SHOWN " + keychain_unshown[0][:160]) if keychain_unshown
                     else "NOT-RUN"))
     if status != 0:

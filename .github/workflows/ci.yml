@@ -495,9 +495,13 @@ jobs:
           verdict accept 0 "a dry run: the window shown, the keychain not shown in this build" \
             "RELEASE-CHECK INFO io.lumenbrowser.Lumen 0.1.0 (1)" "$window" \
             "RELEASE-CHECK INFO not shown in this build: keychain between profiles: … the data-protection keychain takes no item from the app itself here"
-          verdict accept 0 "the team's build: the window and both keychain checks shown" "$window" \
+          verdict accept 0 "the team's build: the window and the three keychain checks shown" "$window" \
             "RELEASE-CHECK PASS keychain: a profile's process holds none of the entitlements that give a keychain" \
+            "RELEASE-CHECK PASS keychain: the account's login keychain is closed to a profile's process" \
             "RELEASE-CHECK PASS keychain between profiles: an item one profile tries to keep … is not kept"
+          verdict refuse 1 "the login keychain open to a profile, after the window's PASS" "$window" \
+            "RELEASE-CHECK PASS keychain: a profile's process holds none of the entitlements that give a keychain" \
+            "RELEASE-CHECK FAIL keychain: the account's login keychain is closed to a profile's process: profile A kept an item"
           verdict refuse 1 "the keychain between profiles failed after the window's PASS" "$window" \
             "RELEASE-CHECK FAIL keychain between profiles: profile A kept an item in the data-protection keychain: it has the app's keychain"
           verdict refuse 0 "a FAIL line, whatever the exit status" "$window" \
