@@ -486,6 +486,8 @@
 "whatSites.part.screen.pixelRatio" = "Плотность пикселей";
 "whatSites.part.screen.availLeft" = "Отступ рабочей области слева";
 "whatSites.part.screen.availTop" = "Отступ рабочей области сверху";
+"whatSites.part.screen.barsWidth" = "Ширина панелей браузера";
+"whatSites.part.screen.barsHeight" = "Высота панелей браузера";
 "whatSites.note.webrtc" = "Это WebRTC — звонки прямо в браузере. В этом профиле он сейчас выключен, поэтому этих функций нет; у настоящей Safari они есть.";
 "whatSites.request.navigation" = "когда открывается страница";
 "whatSites.request.fetch" = "в запросе скрипта (fetch)";

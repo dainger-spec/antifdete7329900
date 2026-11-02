@@ -127,6 +127,13 @@ extension SiteComparison {
         if signal.key == "probe.language", let language = expected?.language, !sameLanguage(mine, language) {
             return .notAsSet(expected: language)
         }
+        // Objects a page looks for (window.safari, window.webkit): "undefined" on one side is the
+        // object missing there, whatever the other side's value says of it.
+        if let object = objectName[signal.key] {
+            if mine == "undefined" { return .names(missing: [object], extra: []) }
+            if theirs == "undefined" { return .names(missing: [], extra: [object]) }
+            return .values
+        }
         let featurePrefix = "probe.features."
         if signal.key.hasPrefix(featurePrefix) {
             let name = String(signal.key.dropFirst(featurePrefix.count))
@@ -151,6 +158,10 @@ extension SiteComparison {
         }
         return .values
     }
+
+    /// The signals that are an object of the page's window, by the name a page reads it by.
+    static let objectName = ["probe.safari": "window.safari", "probe.safariShape": "window.safari",
+                             "probe.webkitObject": "window.webkit"]
 
     /// The signals whose value is a list, and what separates its items.
     static func listSeparator(for key: String) -> Character? {

@@ -89,6 +89,9 @@ final class SiteVerdictTests: XCTestCase {
                                   "TEXT:function getTimezoneOffset() { return zone", "native-text len=0 own=length+name proto=true"),
                        .replacedFunction("Date.prototype.getTimezoneOffset"))
         XCTAssertEqual(difference("headers.navigation.order", "host,accept,user-agent", "host,user-agent,accept"), .order)
+        XCTAssertEqual(difference("probe.safari", "undefined", "[object SafariRemoteNotification]|pushNotification"),
+                       .names(missing: ["window.safari"], extra: []))
+        XCTAssertEqual(difference("probe.webkitObject", "object", "undefined"), .names(missing: [], extra: ["window.webkit"]))
         XCTAssertEqual(difference("probe.hardwareConcurrency", "8", "10"), .values)
         XCTAssertEqual(SiteComparison.difference(of: signal("probe.webgl.kind", nil, "webgl2")), .onlyInSafari)
         XCTAssertNil(SiteComparison.difference(of: signal("probe.platform", "MacIntel", "MacIntel")))

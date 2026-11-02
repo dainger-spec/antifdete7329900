@@ -486,6 +486,8 @@
 "whatSites.part.screen.pixelRatio" = "Pixel density";
 "whatSites.part.screen.availLeft" = "Usable area's left offset";
 "whatSites.part.screen.availTop" = "Usable area's top offset";
+"whatSites.part.screen.barsWidth" = "Width of the browser's bars";
+"whatSites.part.screen.barsHeight" = "Height of the browser's bars";
 "whatSites.note.webrtc" = "This is WebRTC — calls right in the browser. It is off in this profile now, so these features are missing; the real Safari has them.";
 "whatSites.request.navigation" = "opening a page";
 "whatSites.request.fetch" = "a script's request (fetch)";

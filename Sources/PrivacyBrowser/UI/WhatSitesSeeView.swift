@@ -392,12 +392,14 @@ enum SiteSignalText {
         }
     }
 
-    /// The screen's numbers by name: "the usable area's height: 998 in the profile, 995 in Safari".
+    /// The screen's and the window bars' numbers by name: "the usable area's height: 998 in the
+    /// profile, 995 in Safari".
     private static func screenParts(_ signal: SiteSignal) -> [String]? {
         let names: [String]
         switch signal.key {
         case "probe.screen": names = ["width", "height", "availWidth", "availHeight", "pixelRatio"]
         case "geometry.screen": names = ["width", "height", "availWidth", "availHeight", "availLeft", "availTop"]
+        case "geometry.chrome": names = ["barsWidth", "barsHeight"]
         default: return nil
         }
         let mine = (signal.profile ?? "").split(separator: "x").map(String.init)
