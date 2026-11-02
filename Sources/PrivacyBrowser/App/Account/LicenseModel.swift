@@ -297,21 +297,62 @@ final class LicenseModel: ObservableObject {
 
     // MARK: Signing in
 
+    /// What the password gave.
+    enum SignInResult: Equatable {
+        /// A session: on to the activation.
+        case signedIn
+        /// The password is right; the server sent a code to the account's address first (§5.2).
+        case code(LoginCode)
+        case failed(AccountFailure)
+    }
+
     /// `POST /v1/auth/login` (§5.2). The session is kept for the activation that follows; the
-    /// password goes no further than the request and the comparison of §10.1.
-    func signIn(email: String, password: String) async -> AccountFailure? {
-        guard let client else { return .unreachable }
+    /// password goes no further than the request and the comparison of §10.1. `robotToken`: the robot
+    /// check's, after the server asked for one (§5.5) — good for this one request.
+    func signIn(email: String, password: String, robotToken: String? = nil) async -> SignInResult {
+        guard let client else { return .failed(.unreachable) }
         isWorking = true
         defer { isWorking = false }
-        switch await client.login(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password) {
-        case .success(let session):
+        switch await client.login(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password, robotToken: robotToken) {
+        case .success(.session(let session)):
             pendingSession = session
             key = nil
             rememberForComparison(password)
+            return .signedIn
+        case .success(.code(let code)):
+            // The password was right: §10.1's comparison holds it as for a session.
+            pendingSession = nil
+            key = nil
+            rememberForComparison(password)
+            return .code(code)
+        case .failure(let failure):
+            return .failed(failure)
+        }
+    }
+
+    /// `POST /v1/auth/login/confirm`: the letter's code (§5.2); its session kept for the activation.
+    func confirmLogin(email: String, code: String) async -> AccountFailure? {
+        guard let client else { return .unreachable }
+        isWorking = true
+        defer { isWorking = false }
+        let digits = code.filter { !$0.isWhitespace }
+        switch await client.confirmLogin(email: email.trimmingCharacters(in: .whitespacesAndNewlines), code: digits) {
+        case .success(let session):
+            pendingSession = session
+            key = nil
             return nil
         case .failure(let failure):
             return failure
         }
+    }
+
+    /// `POST /v1/auth/login/resend`: the same code once more, by the attempt's challenge (§5.2).
+    func resendLoginCode(_ code: LoginCode) async -> Result<LoginCode, AccountFailure> {
+        guard let client else { return .failure(.unreachable) }
+        guard let challenge = code.challenge else { return .failure(.server(AccountServerError(status: 400, code: "login_expired"))) }
+        isWorking = true
+        defer { isWorking = false }
+        return await client.resendLoginCode(challenge)
     }
 
     /// A key typed in: checked here before anything is sent, then kept in memory for the activation.
@@ -475,20 +516,26 @@ final class LicenseModel: ObservableObject {
 
     // MARK: Signing out, devices
 
-    /// `DELETE /v1/device` (§6.3): this Mac leaves the license whatever the server says; the key
-    /// goes from the vault; the profiles stay.
-    func signOut(vault: UnlockedVault?) async {
-        guard let client else { return }
+    /// `DELETE /v1/device` (§6.3): this Mac leaves the license whatever the server says — the key
+    /// goes from the vault, the profiles stay — except under the unlink cooldown: then nothing
+    /// changes, and the account screen says until when (`signout.cooldown`).
+    func signOut(vault: UnlockedVault?) async -> LicenseClient.SignOut? {
+        guard let client else { return nil }
         isWorking = true
         defer { isWorking = false }
-        let (updated, confirmed) = await client.signOut(record)
+        let (updated, outcome) = await client.signOut(record)
+        if case .cooldown = outcome {
+            log.notice("Signing out of the account on this Mac waits for the license's unlink cooldown")
+            return outcome
+        }
         record = updated
         save()
         if let vault { try? AccountKeyVault.remove(from: vault) }
         key = nil
         pendingSession = nil
-        log.notice("Signed out of the account on this Mac (server confirmed: \(confirmed, privacy: .public))")
+        log.notice("Signed out of the account on this Mac (server confirmed: \(outcome == .signedOut(confirmed: true), privacy: .public))")
         recompute()
+        return outcome
     }
 
     /// How the account screen asks for the license's Macs: the session, or the key — the one kept;
@@ -617,8 +664,13 @@ final class LicenseModel: ObservableObject {
         keyEcho = AccountKeyEcho(newKey)
         log.notice("The license's key was replaced; this Mac connects again with the new one")
         // Every Mac of the license is unlinked (§11.1): this one is connected again, with the new key.
-        let emailLinked = record.emailLinked
-        let session = record.session
+        // Replaced with the key and the purchase code, a linked email is unlinked and its sessions
+        // closed (v2026.11.04, F3): this Mac's session goes, and whether an email is linked is asked
+        // again — an older server kept it, and the license's view says which.
+        let emailUnlinked: Bool
+        if case .purchase = proof { emailUnlinked = true } else { emailUnlinked = false }
+        let emailLinked = emailUnlinked ? nil : record.emailLinked
+        let session = emailUnlinked ? nil : record.session
         let result = await client.activate(.key(newKey), label: String(label.prefix(64)), profileCount: profilesHere().count, record: record,
                                            wall: Date(), uptime: ProcessInfo.processInfo.systemUptime)
         var reconnection: AccountFailure?
@@ -670,6 +722,14 @@ final class LicenseModel: ObservableObject {
         record.session?.sessionToken = nil
         record.session?.expiresAt = nil
         save()
+    }
+
+    /// The period-end warning closed (§8.5 item 10): for this end of the period, at the level it
+    /// was shown — the week's comes back for the last day, the last day's does not.
+    func closePeriodEnding(endsAt: Date, final: Bool) {
+        record.periodEndingClosed = AccountRecord.PeriodEndingClosed(endsAt: endsAt, final: final)
+        save()
+        recompute()
     }
 
     /// The trial's banner closed (`trial.started` shows until then, §8.5).

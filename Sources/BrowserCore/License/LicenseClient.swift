@@ -41,7 +41,8 @@ public struct LicenseState: Equatable, Sendable {
         let banners = LicenseBanners.banners(.init(
             mode: mode, entitlement: entitlement, signedOutReason: record.signedOutReason, appOutdated: record.appOutdated,
             lastSuccessAt: record.lastSuccessAt, clockSkew: record.clockSkewSeconds,
-            trialNoticeClosed: entitlement.map { record.trialNoticeClosedFor == $0.licenseID } ?? false, now: t))
+            trialNoticeClosed: entitlement.map { record.trialNoticeClosedFor == $0.licenseID } ?? false,
+            periodEndingClosed: record.periodEndingClosed, now: t))
         return LicenseState(mode: mode, entitlement: entitlement, check: check, banners: banners,
                             allowedProfilesHere: entitlement.map(LicenseDecision.allowedProfilesHere) ?? 0,
                             worksWithoutServerUntil: LicenseDecision.worksWithoutServerUntil(mode: mode, entitlement: entitlement), now: t)
@@ -59,6 +60,9 @@ public struct LicenseClient: Sendable {
     /// `<version> (<build>)` (`AccountAPI.appVersion`).
     public var appVersion: String
 
+    /// The time an answer came at: what an older server's sign-in code is counted from (§5.2).
+    public var now: @Sendable () -> Date = { Date() }
+
     public init(transport: any AccountTransport, keys: [String: Data], machineID: String, appVersion: String) {
         self.transport = transport
         self.keys = keys
@@ -68,10 +72,24 @@ public struct LicenseClient: Sendable {
 
     // MARK: Signing in
 
-    /// `POST /v1/auth/login` (§5.2).
-    public func login(email: String, password: String) async -> Result<AccountSession, AccountFailure> {
-        guard let response = try? await transport.send(AccountAPI.login(email: email, password: password)) else { return .failure(.unreachable) }
+    /// `POST /v1/auth/login` (§5.2): a session, or a letter with a code to type first. `robotToken`:
+    /// after `403 robot_check` (§5.5).
+    public func login(email: String, password: String, robotToken: String? = nil) async -> Result<LoginAnswer, AccountFailure> {
+        let request = AccountAPI.login(email: email, password: password, robotToken: robotToken)
+        guard let response = try? await transport.send(request) else { return .failure(.unreachable) }
+        return AccountAPI.loginAnswer(from: response, receivedAt: now())
+    }
+
+    /// `POST /v1/auth/login/confirm`: the code from the letter (§5.2).
+    public func confirmLogin(email: String, code: String) async -> Result<AccountSession, AccountFailure> {
+        guard let response = try? await transport.send(AccountAPI.confirmLogin(email: email, code: code)) else { return .failure(.unreachable) }
         return AccountAPI.session(from: response)
+    }
+
+    /// `POST /v1/auth/login/resend`: the same code again; what the attempt is now (§5.2).
+    public func resendLoginCode(_ challenge: ServerToken) async -> Result<LoginCode, AccountFailure> {
+        guard let response = try? await transport.send(AccountAPI.resendLoginCode(challenge)) else { return .failure(.unreachable) }
+        return AccountAPI.loginCode(from: response, receivedAt: now())
     }
 
     /// What an activation did.
@@ -112,6 +130,7 @@ public struct LicenseClient: Sendable {
         updated.clock = .reset(serverTime: answer.serverTime, uptime: uptime)
         let skew = EffectiveClock.skew(wall: wall, serverTime: answer.serverTime)
         updated.clockSkewSeconds = skew
+        updated.unlinkCooldownSeconds = answer.unlinkCooldownSeconds
         switch credential {
         case .session:
             updated.signedInWith = .email
@@ -161,8 +180,9 @@ public struct LicenseClient: Sendable {
                 updated.signOut(because: .machineMismatch)
                 return (updated, .signedOut(.machineMismatch))
             default:
-                // 429 and every other 4xx: "unreachable" for a refresh (§3, §9.3).
-                return (record, .unreachable(retryAfter: error.code == "rate_limited" ? error.retryAfter : nil))
+                // 429, 503 server_busy and every other 4xx: "unreachable" for a refresh (§3, §9.3),
+                // not tried again before the server said.
+                return (record, .unreachable(retryAfter: ["rate_limited", "server_busy"].contains(error.code) ? error.retryAfter : nil))
             }
         case .failure:
             return (record, .unreachable(retryAfter: nil))
@@ -184,6 +204,7 @@ public struct LicenseClient: Sendable {
             updated.lastSuccessAt = answer.serverTime
             updated.clock = .reset(serverTime: answer.serverTime, uptime: uptime)
             updated.clockSkewSeconds = EffectiveClock.skew(wall: wall, serverTime: answer.serverTime)
+            updated.unlinkCooldownSeconds = answer.unlinkCooldownSeconds
             let paid = entitlement.plan != "trial" && entitlement.periodEndsAt.map { end in
                 previous?.periodEndsAt.map { end > $0 } ?? (previous != nil)
             } == true
@@ -193,17 +214,29 @@ public struct LicenseClient: Sendable {
 
     // MARK: Signing out
 
-    /// `DELETE /v1/device` (§6.3), then the session's logout: whatever the server answers — or if it
-    /// does not — the token and the document go here, and this Mac is signed out. The profiles stay.
-    /// Returns the record, and whether the server confirmed (its place is free at once; otherwise
-    /// it is freed when the device is unlinked on the site).
-    public func signOut(_ record: AccountRecord) async -> (AccountRecord, confirmed: Bool) {
+    /// What a sign-out did (§6.3).
+    public enum SignOut: Equatable, Sendable {
+        /// This Mac is signed out here. `confirmed`: the server freed its place at once; otherwise
+        /// it is freed when the device is unlinked on the site.
+        case signedOut(confirmed: Bool)
+        /// `429 unlink_cooldown`: another Mac of the license was unlinked recently. This one is NOT
+        /// signed out — its token, document and session stay, it works as before — until `availableAt`
+        /// (`signout.cooldown`); support can unlink it sooner.
+        case cooldown(availableAt: Date?)
+    }
+
+    /// `DELETE /v1/device` (§6.3), then the session's logout. Whatever else the server answers — or
+    /// if it does not answer — the token and the document go here, and this Mac is signed out; the
+    /// profiles stay. Only the cooldown leaves everything as it was.
+    public func signOut(_ record: AccountRecord) async -> (AccountRecord, SignOut) {
         var confirmed = false
         if let token = record.deviceToken, !token.isEmpty,
            let response = try? await transport.send(AccountAPI.signOutDevice(deviceToken: token)) {
             switch AccountAPI.failure(of: response) {
             case nil: confirmed = true
             case .server(let error)? where error.status == 401: confirmed = true
+            case .server(let error)? where error.status == 429 && error.code == "unlink_cooldown":
+                return (record, .cooldown(availableAt: error.availableAt))
             default: break
             }
         }
@@ -213,7 +246,7 @@ public struct LicenseClient: Sendable {
         var updated = record
         updated.signOut(because: nil)
         updated.signedOutReason = nil
-        return (updated, confirmed)
+        return (updated, .signedOut(confirmed: confirmed))
     }
 
     // MARK: The account screen

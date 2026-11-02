@@ -1,8 +1,11 @@
 # The licensing client
 
 The app's side of the account server's contract (`dainger-spec/lumen-api-server`,
-`docs/CONTRACT.md`, read on 1 November at 24ceb5e). The contract is the source; this page says
-where each part of it lives here and what checks it.
+`docs/CONTRACT.md`, read on 1 November at 24ceb5e and again on 2 November at 150b32b — the server's
+release v2026.11.04, deployed with the app's first release). The contract is the source; this page
+says where each part of it lives here and what checks it. Its texts are compared with the app's word
+for word, both languages: 80 of its 116 are the app's, the same; the 36 others are the site's alone
+(payments, teams, invoices) or for screens the app does not have (below, "Open").
 
 ## Two ways in, one mechanism
 
@@ -127,6 +130,56 @@ Settings › Account › Key, for a Mac connected with a key:
   the purchase code in no address (found in a body: the search can find), no `account.json`, log
   (a marker found first) or diagnostics ZIP.
 
+## The server of 2 November (v2026.11.04)
+
+What changed for the app, each working with the server live since 2 November (v2026.11.02) as well —
+before v2026.11.04 is deployed, and after a rollback to it:
+
+- **A sign-in that waits for the letter's code** (§5.2). The password right, the server may answer
+  `202 check_email` and send a code to the account's address: after five failed attempts for the
+  address, or five wrong passwords in a row for the account. Before, the app read only a session
+  and said "the Lumen server isn't responding" — this was already so with v2026.11.02. Now the code's
+  screen: `login.check_email`, `login.code_terms` (when the letter went, until when the code works,
+  how many tries — from the answer), the code → `POST /v1/auth/login/confirm` → the session, then
+  the activation as after a password. "Send the code again" → `POST /v1/auth/login/resend` with the
+  attempt's `challenge` (in memory only, never written or logged): `login.code_resent`, not before
+  `resendAvailableAt` (`login.resend_wait` counts down), at most three times (`login.resends_used`),
+  an attempt that ended (`login_expired`) back to the password with `error.login_expired`. A
+  v2026.11.02 answer has no challenge and no times: the screen counts from when it came and offers
+  no resend.
+- **The robot check** (§5.5). `403 robot_check` opens the site's `/robot-check?action=login` in a
+  sheet: a web view of the app's own process whose store keeps nothing, which takes a token from
+  `lumenRobotCheck` only from the site's own page — its main frame, the site's origin — and only one
+  that looks like one; the main frame cannot leave the site, nothing opens a window. The sign-in is
+  sent again with the token, once. `503 robot_check_unavailable` and `503 server_busy` are the
+  server's words with their wait (`error.robot_check_unavailable`, `error.server_busy`), no longer
+  "unreachable" — except for a refresh, which waits as long as the server said.
+- **Signing out under the unlink cooldown** (§6.3, F4). `429 unlink_cooldown` to `DELETE /v1/device`
+  leaves this Mac as it was — token, document, session, the key in the vault — and says until when
+  (`signout.cooldown`). The confirmation before says how long the next unlink waits
+  (`signout.consequences`, from `unlinkCooldownSeconds` of the last activation or refresh, kept in
+  `account.json`); a server that sends none has no cooldown on a sign-out, and the confirmation is
+  then the contract's text before it.
+- **A key replaced with the purchase code unlinks a linked email** (§11.1, F3):
+  `key.replace.confirm.email` says so before; after it this Mac's session goes and whether an email
+  is linked is asked again. With the account's password the email stays (`key.replace.confirm`);
+  a wrong password there is `error.invalid_credentials.password`.
+- **Export only, said** (§8.5 item 7): after the grace — `mode.expired.unreachable` (or
+  `.outdated`, then without `app.outdated` beside it); no document that checks — `mode.unverified`.
+- **The period's end can be closed** (§8.5 item 10): closed during the week it comes back for the
+  last day; closed on the last day, not again before the next end (kept per end and level).
+- **Texts** changed by the contract: `activation.trial_used` (the trial was this Mac's, with another
+  account), `key.no_reset` (the wallet's signature, a payer from an exchange).
+- Checked by `LicenseClientTests` (both servers' 202, confirm and resend with every refusal, the two
+  503s and a refresh's wait, the sign-out under the cooldown and after it, the cooldown from each
+  answer and none from an older server's), `LicenseTests` (the banners, the closing, `account.json`'s
+  new notes read back and an odd one left out), and the self-test against the server it plays: the
+  code's screen, a wrong and the right code, the activation after it, three resends then
+  `resend_limit`, another attempt over; an older server's code; the robot check's page handing over a
+  token from a frame of its own origin and a malformed one before the real one — only the real one
+  taken — and the sign-in going through with it; the sign-out under the cooldown leaving
+  `account.json` signed in, after it signing out.
+
 ## Documents that must be refused
 
 The self-test's licensing group, against the account server it plays, through the same activation
@@ -187,7 +240,15 @@ changed in one thing each (its keys removed; the development key added).
 
 ## Open
 
-- The contract's texts for export-only after the grace ran out (asked).
+- The site's `/robot-check?action=login` page for the app (`docs/SITE_API.md` §4.1 proposes it to
+  be confirmed with the app): the app takes the token exactly as the contract writes it —
+  `window.webkit.messageHandlers.lumenRobotCheck.postMessage(token)` from the page's main frame, at
+  the site's origin. Until the site has it, a sign-in that needs the check cannot be finished in the
+  app (the site's own sign-in can).
+- Texts for screens the app does not have: `profile.export_only.address` and `.strip` (a profile
+  that may only be exported does not open; it is exported from the list), `account.label_needs_session`
+  (a Mac's label is set at its activation only), `signup.trial` (registration is the site's),
+  `error.not_found.device` (an unlink of a Mac already unlinked refreshes the list).
 - A `master_password.same_as_key_existing` text for the unlock (the contract has the account's
   variant only); `signup.code_terms` on the email-link screen says "start the registration again"
   (asked of the server).

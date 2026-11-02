@@ -1478,7 +1478,7 @@
 "contract.error.account_disabled" = "This account is blocked. Contact support.";
 "contract.error.account_deletion_pending" = "This account is being deleted. You can cancel the deletion on the website.";
 "contract.error.unlink_cooldown" = "The next unlink is possible after %@. Urgent? Write to support.";
-"contract.activation.trial_used" = "This Mac or this account has already had a trial.";
+"contract.activation.trial_used" = "This Mac has already had a trial, with another account. A trial comes once per Mac, however many accounts are used on it, so here Lumen works with a plan. If you bought this Mac second-hand and never had a trial, write to support and we'll sort it out.";
 "contract.activation.device_limit" = "All Mac places are taken. Unlink one of your Macs — this one connects right after.";
 "contract.activation.device_limit_later" = "All Mac places are taken. You can unlink one of your Macs later.";
 "contract.activation.saved" = "Your rights are saved on this Mac: without the server, Lumen works as usual for up to %@.";
@@ -1528,7 +1528,10 @@
 "contract.account.profiles.left" = "%@ more possible";
 "contract.account.payment_received" = "Payment received: %1$@ until %2$@.";
 "contract.account.no_session" = "Sign in to see your devices. The session on this Mac has ended: it expires after %@ unused. Your rights aren’t affected — Lumen works as usual.";
-"contract.signout.consequences" = "This Mac’s place in the license is freed at once, and sync on it stops. Profiles stay here and open for export only until you sign in again.";
+"contract.signout.consequences" = "This Mac’s place in the license is freed at once, and sync on it stops. Profiles stay here and open for export only until you sign in again. Signing out counts as an unlink: the next Mac of this license can be unlinked in %@.";
+/* The same as the contract had it before v2026.11.04 (24ceb5e): for a server that sends no unlink cooldown,
+   whose sign-out has none (v2026.11.02, before the deployment and after a rollback). */
+"contract.signout.consequences.withoutCooldown" = "This Mac’s place in the license is freed at once, and sync on it stops. Profiles stay here and open for export only until you sign in again.";
 "contract.unlink.consequences" = "It loses access to the license and sync the next time it reaches the server, and without internet no later than in %1$@. Its profiles stay on it. The next unlink will be possible in %2$@.";
 "contract.master_password.same_as_account" = "This is your account password — we saw it when you signed in, so it can’t lock data we must not be able to read.";
 "contract.master_password.same_as_account_existing" = "Your master password is your account password — we see it every time you sign in, and it locks data we must not be able to read. Change your master password.";
@@ -1540,7 +1543,7 @@
 "contract.account.key_license.email" = "A license by key with an email address linked: you can sign in with the key or with the address and your password. We will also remind you by email when the period ends.";
 "contract.account.key_license" = "A license by key, without an account. We have no email address, so only Lumen will tell you when the period ends.";
 "contract.key.no_reset.email" = "An email address is linked to this purchase: sign in with it and your password. You can replace the key in your account on the website — the old one stops working, and every Mac has to be connected again with the new key.";
-"contract.key.no_reset" = "A key can’t be reset like a password: there’s nowhere to send the email — we don’t have your address. You can get the key again on the website with the invoice number and the purchase code — for %@ after the payment. Later — only through support, with the same invoice number and purchase code; a new key replaces the old one, and every Mac has to be connected again.";
+"contract.key.no_reset" = "A key can’t be reset like a password: there’s nowhere to send the email — we don’t have your address. You can get the key again on the website with the invoice number and the purchase code — for %@ after the payment. Later — only through support, with the same invoice number and purchase code; if the code is lost too — with a text from support signed by the wallet you paid from. If you paid from an exchange and lost the code, nothing can be signed: the purchase is then reviewed by hand, and that may end in a refusal. A new key replaces the old one, and every Mac has to be connected again.";
 "contract.error.account_deletion_pending.key" = "This purchase is being deleted at a request support received. Changed your mind? Write to support before the deletion completes.";
 "contract.purchase_code.typo" = "There’s a typo in the purchase code. It starts with LPC, followed by five groups of four characters.";
 "contract.email_link.explain" = "An email address is a way to recover access: sign-in with a password, a password reset by email, reminders before the period ends. The key keeps working, and your Macs stay connected. To link an address, you need the key and the purchase code: that way, no one who only has your key can link theirs.";
@@ -1553,6 +1556,24 @@
 "contract.error.letters_busy" = "We're sending a great many emails right now. Try again in %@.";
 "contract.signup.check_email" = "We sent an email to %@. If there is no account with that email yet, it has a six-digit code. If there is one, the email tells you how to sign in.";
 "contract.signup.code_terms" = "The code works for %1$@, and you can enter it %2$@. After that, start the registration again. No email? Check your spam folder.";
+/* The server's docs/CONTRACT.md §17 at 150b32b (v2026.11.04): a sign-in's code (§5.2), the robot check (§5.5),
+   a busy server (§3), signing out under the unlink cooldown (§6.3), a key replaced with an email linked (§11.1),
+   export only after the grace and without a document that checks (§8.5). Word for word. */
+"contract.login.check_email" = "This account had many failed sign-in attempts, so we sent a code to its email. Enter the code from the email.";
+"contract.login.code_terms" = "The email with the code was sent %1$@. The code works until %2$@, and you can enter it %3$@. No email? Check your spam folder.";
+"contract.login.code_resent" = "We sent the code again — the same one as in the last email.";
+"contract.login.resend_wait" = "You can send the code again in %@.";
+"contract.login.resends_used" = "The code can’t be sent again in this attempt. No email? Check your spam folder. Once the code expires (%@), sign in again and a new one will come.";
+"contract.error.login_expired" = "This sign-in attempt is over. Enter your password again.";
+"contract.error.robot_check" = "Confirm you're not a robot, then send again.";
+"contract.error.robot_check_unavailable" = "The robot check is unavailable right now. Try again in %@.";
+"contract.error.server_busy" = "The Lumen server is very busy right now. Try again in %@.";
+"contract.error.invalid_credentials.password" = "Wrong password.";
+"contract.signout.cooldown" = "You can’t sign out right now: another Mac of this license was unlinked recently. You can sign out after %@; until then Lumen works here as usual. Urgent? Write to support.";
+"contract.key.replace.confirm.email" = "The old key stops working at once. Every Mac of this license is disconnected — you will need to enter the new key on each one. The linked email address is unlinked: you can no longer sign in with it and the password, every sign-in by email is closed, and a letter goes to the address. You can link an address again with the new key and the purchase code. The new key is shown only once: keep it.";
+"contract.mode.expired.unreachable" = "Lumen has not been able to check the license since %@. Profiles open for export only until the Lumen server answers again. Check your connection.";
+"contract.mode.expired.outdated" = "Lumen has not been able to check the license since %@. Profiles open for export only until you update Lumen.";
+"contract.mode.unverified" = "The rights on this Mac can’t be checked. Profiles open for export only until the Lumen server answers. Check your connection.";
 "license.when.today" = "today at %@";
 "license.when.yesterday" = "yesterday at %@";
 "license.shortWhen.today" = "today";
@@ -1594,6 +1615,18 @@
 "license.signIn.create" = "No account? Create one on the website";
 "license.signIn.masterNote" = "The master password isn’t needed here: it encrypts your profiles and never leaves this Mac.";
 "license.signIn.later" = "Later";
+"license.code.title" = "Code from the email";
+"license.code.subtitle" = "The password is right — now the code.";
+"license.code.field" = "Code from the email";
+"license.code.action" = "Sign In";
+"license.code.working" = "Checking the code…";
+"license.code.resend" = "Send the Code Again";
+"license.code.back" = "Enter the password again";
+"license.robot.title" = "Robot check";
+"license.robot.subtitle" = "Lumen’s page with Cloudflare’s check. Once it passes, signing in goes on by itself.";
+"license.robot.action" = "Take the Check";
+"license.robot.failed" = "The check’s page did not open. Check your connection and try again.";
+"license.account.signOut.notNow" = "This Mac stays connected";
 "license.key.field" = "License key";
 "license.key.hint" = "Case and hyphens don’t matter. Lumen catches a typo itself — before anything is sent.";
 "license.key.purchaseCode" = "This is a purchase code (LPC-…), not a key. The key is shown after payment; with the purchase code you can get it again on the website.";

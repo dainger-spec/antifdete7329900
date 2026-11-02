@@ -327,8 +327,8 @@ final class LicenseClientTests: XCTestCase {
                 if request.path == "/v1/auth/logout" { return AccountResponse(status: 204, body: Data()) }
                 return try answer()
             }
-            let (after, didConfirm) = await client(server).signOut(record)
-            XCTAssertEqual(didConfirm, confirmed)
+            let (after, outcome) = await client(server).signOut(record)
+            XCTAssertEqual(outcome, .signedOut(confirmed: confirmed))
             XCTAssertFalse(after.isSignedIn)
             XCTAssertNil(after.entitlement)
             XCTAssertNil(after.session)
@@ -475,5 +475,165 @@ final class LicenseClientTests: XCTestCase {
         let activated = try await client(server).activate(.key(key), label: "", profileCount: 0, record: record,
                                                           wall: time("2026-11-01T10:00:00Z"), uptime: 1).get().record
         XCTAssertNil(activated.emailLinked, "another key may be another purchase: no letter is promised until the server says")
+    }
+    // MARK: Signing in with the letter's code (§5.2, v2026.11.04)
+
+    private func client(_ server: FakeServer, at now: Date) -> LicenseClient {
+        var made = self.client(server)
+        made.now = { now }
+        return made
+    }
+
+    func testASignInThatWaitsForTheLettersCodeIsACodeNotAnUnreachableServer() async throws {
+        let server = FakeServer { request in
+            self.answer(202, ["status": "check_email", "codeValidSeconds": 900, "codeAttempts": 5, "challenge": "lmc_challenge",
+                              "codeExpiresAt": "2026-11-02T09:15:00Z", "codeSentAt": "2026-11-02T09:00:00Z",
+                              "resendAvailableAt": "2026-11-02T09:01:00Z", "resendsLeft": 3])
+        }
+        let answer = await client(server).login(email: "anna@example.com", password: "correct horse battery")
+        guard case .code(let code) = try answer.get() else { return XCTFail("\(answer)") }
+        XCTAssertEqual(code.challenge?.unredacted(), "lmc_challenge")
+        XCTAssertEqual(code.codeAttempts, 5)
+        XCTAssertEqual(code.codeSentAt, time("2026-11-02T09:00:00Z"))
+        XCTAssertEqual(code.codeExpiresAt, time("2026-11-02T09:15:00Z"))
+        XCTAssertEqual(code.resendAvailableAt, time("2026-11-02T09:01:00Z"))
+        XCTAssertEqual(code.resendsLeft, 3)
+        XCTAssertTrue(code.canResend)
+        XCTAssertFalse(code.resendsUsed)
+        // The challenge never says itself.
+        XCTAssertFalse("\(code)".contains("lmc_challenge"), "\(code)")
+        XCTAssertFalse(String(reflecting: code).contains("lmc_challenge"))
+        let request = try XCTUnwrap(server.requests.first)
+        XCTAssertEqual(request.path, "/v1/auth/login")
+        XCTAssertNil(body(request)["robotToken"], "no robot check unless the server asked for one")
+        // A 200 is the session, as before.
+        let signedIn = FakeServer { _ in self.ok(["sessionToken": "lms_s", "expiresAt": "2026-12-01T00:00:00Z", "accountID": "a", "idleTimeoutSeconds": 604_800]) }
+        guard case .session(let session) = try await client(signedIn).login(email: "a@example.com", password: "p").get() else { return XCTFail() }
+        XCTAssertEqual(session.token.unredacted(), "lms_s")
+    }
+
+    /// v2026.11.02 — on the server now, and after a rollback — sends no challenge and no times: the
+    /// code's screen still works, counted from when its answer came, and offers no resend.
+    func testAnOlderServersCodeIsCountedFromItsAnswerWithoutAResend() async throws {
+        let now = time("2026-11-02T09:00:30Z")
+        let server = FakeServer { _ in self.answer(202, ["status": "check_email", "codeValidSeconds": 900, "codeAttempts": 5]) }
+        guard case .code(let code) = try await client(server, at: now).login(email: "a@example.com", password: "p").get() else { return XCTFail() }
+        XCTAssertNil(code.challenge)
+        XCTAssertEqual(code.codeSentAt, now)
+        XCTAssertEqual(code.codeExpiresAt, now.addingTimeInterval(900))
+        XCTAssertFalse(code.canResend)
+        XCTAssertFalse(code.resendsUsed, "no resend at all is not \"every resend spent\"")
+        // A 202 that is not the code's: not the server's answer.
+        let odd = FakeServer { _ in self.answer(202, ["status": "something_else"]) }
+        let oddAnswer = await client(odd).login(email: "a@example.com", password: "p")
+        XCTAssertEqual(oddAnswer, .failure(.unreachable))
+    }
+
+    func testTheRobotChecksTokenGoesWithTheSignInAskedForIt() async throws {
+        let server = FakeServer { _ in self.error(403, "robot_check") }
+        let refused = await client(server).login(email: "a@example.com", password: "p")
+        guard case .failure(.server(let error)) = refused else { return XCTFail("\(refused)") }
+        XCTAssertEqual(error.code, "robot_check")
+        _ = await client(server).login(email: "a@example.com", password: "p", robotToken: "0.token")
+        XCTAssertEqual(body(try XCTUnwrap(server.requests.last))["robotToken"] as? String, "0.token")
+    }
+
+    func testTheCodeIsConfirmedAndSentAgainByItsChallenge() async throws {
+        let confirm = FakeServer { _ in self.ok(["sessionToken": "lms_code", "expiresAt": "2026-12-01T00:00:00Z", "accountID": "a", "idleTimeoutSeconds": 604_800]) }
+        let session = try await client(confirm).confirmLogin(email: "anna@example.com", code: "123456").get()
+        XCTAssertEqual(session.token.unredacted(), "lms_code")
+        let confirmRequest = try XCTUnwrap(confirm.requests.first)
+        XCTAssertEqual(confirmRequest.path, "/v1/auth/login/confirm")
+        XCTAssertEqual(body(confirmRequest)["email"] as? String, "anna@example.com")
+        XCTAssertEqual(body(confirmRequest)["code"] as? String, "123456")
+
+        let resend = FakeServer { _ in
+            self.answer(202, ["status": "check_email", "codeValidSeconds": 900, "codeAttempts": 4, "challenge": "lmc_challenge",
+                              "codeExpiresAt": "2026-11-02T09:15:00Z", "codeSentAt": "2026-11-02T09:02:00Z",
+                              "resendAvailableAt": NSNull(), "resendsLeft": 0])
+        }
+        let again = try await client(resend).resendLoginCode(ServerToken("lmc_challenge")).get()
+        let resendRequest = try XCTUnwrap(resend.requests.first)
+        XCTAssertEqual(resendRequest.path, "/v1/auth/login/resend")
+        XCTAssertEqual(body(resendRequest)["challenge"] as? String, "lmc_challenge")
+        XCTAssertNil(resendRequest.bearer)
+        XCTAssertEqual(again.codeSentAt, time("2026-11-02T09:02:00Z"))
+        XCTAssertFalse(again.canResend)
+        XCTAssertTrue(again.resendsUsed, "the third resend spent: login.resends_used")
+
+        // Its refusals are the server's words, each by its code.
+        for (status, code) in [(429, "resend_limit"), (429, "rate_limited"), (400, "login_expired")] {
+            let refusing = FakeServer { _ in self.error(status, code, ["retryAfter": 40]) }
+            let result = await client(refusing).resendLoginCode(ServerToken("lmc_challenge"))
+            guard case .failure(.server(let error)) = result else { return XCTFail("\(code): \(result)") }
+            XCTAssertEqual(error.code, code)
+            XCTAssertEqual(error.retryAfter, 40)
+        }
+    }
+
+    /// `503 server_busy` and `503 robot_check_unavailable` are the server's own answers (§3), with
+    /// when to try again — not "unreachable"; any other 5xx still is. A refresh takes `server_busy` as
+    /// unreachable, and waits as long as the server said.
+    func testTheTwoBusyAnswersAreTheServersWordsAndARefreshWaitsThem() async throws {
+        for code in ["server_busy", "robot_check_unavailable"] {
+            let failure = AccountAPI.failure(of: error(503, code, retryAfter: "30"))
+            guard case .server(let error)? = failure else { return XCTFail("\(code): \(String(describing: failure))") }
+            XCTAssertEqual(error.code, code)
+            XCTAssertEqual(error.retryAfter, 30)
+        }
+        XCTAssertEqual(AccountAPI.failure(of: error(503, "internal")), .unreachable)
+        XCTAssertEqual(AccountAPI.failure(of: error(500, "server_busy")), .unreachable, "only a 503 says it")
+        XCTAssertEqual(AccountAPI.failure(of: AccountResponse(status: 503, body: Data("<html>busy</html>".utf8))), .unreachable)
+
+        let record = try await signedIn()
+        let busy = FakeServer { _ in self.error(503, "server_busy", ["retryAfter": 45]) }
+        let (after, result) = await client(busy).refresh(record, profileCount: 1, wall: Date(), uptime: 1)
+        XCTAssertEqual(result, .unreachable(retryAfter: 45))
+        XCTAssertEqual(after, record, "nothing changed")
+    }
+
+    // MARK: Signing out under the unlink cooldown (§6.3, F4)
+
+    func testASignOutUnderTheCooldownLeavesThisMacAsItWas() async throws {
+        let record = try await signedIn()
+        let server = FakeServer { _ in self.error(429, "unlink_cooldown", ["availableAt": "2026-11-08T09:00:00Z"]) }
+        let (after, outcome) = await client(server).signOut(record)
+        XCTAssertEqual(outcome, .cooldown(availableAt: time("2026-11-08T09:00:00Z")))
+        XCTAssertEqual(after, record, "token, document and session kept: this Mac works as before")
+        XCTAssertTrue(after.isSignedIn)
+        XCTAssertNotNil(after.session?.sessionToken)
+        XCTAssertEqual(server.requests.map(\.path), ["/v1/device"], "the session is not logged out either")
+        // Any other refusal still signs out here (the slot is freed when unlinked on the site).
+        let other = FakeServer { request in
+            request.path == "/v1/auth/logout" ? AccountResponse(status: 204, body: Data()) : self.error(429, "rate_limited", ["retryAfter": 60])
+        }
+        let (gone, signedOut) = await client(other).signOut(record)
+        XCTAssertEqual(signedOut, .signedOut(confirmed: false))
+        XCTAssertFalse(gone.isSignedIn)
+    }
+
+    func testTheCooldownIsWhatTheLastActivationOrRefreshSaid() async throws {
+        let server = FakeServer { _ in
+            self.ok(["device": ["deviceID": self.deviceID, "code": "B119", "label": "", "mine": true], "deviceToken": "lmd_device_token",
+                     "entitlement": self.document(), "serverTime": "2026-11-01T10:00:00Z", "unlinkCooldownSeconds": 604_800])
+        }
+        let session = AccountSession(token: ServerToken("lms_session"), expiresAt: nil, accountID: "a", idleTimeoutSeconds: nil)
+        let record = try await client(server).activate(.session(session.token), label: "", profileCount: 0, record: AccountRecord(),
+                                                         session: session, wall: time("2026-11-01T10:00:00Z"), uptime: 1).get().record
+        XCTAssertEqual(record.unlinkCooldownSeconds, 604_800)
+        let refreshed = FakeServer { _ in
+            self.ok(["entitlement": self.document(issued: "2026-11-02T10:00:00Z"), "serverTime": "2026-11-02T10:00:00Z", "unlinkCooldownSeconds": 259_200])
+        }
+        let (after, _) = await client(refreshed).refresh(record, profileCount: 0, wall: time("2026-11-02T10:00:00Z"), uptime: 2)
+        XCTAssertEqual(after.unlinkCooldownSeconds, 259_200)
+        // A server back on v2026.11.02 says none, and its sign-out has none: none is assumed.
+        let older = FakeServer { _ in self.ok(["entitlement": self.document(issued: "2026-11-03T10:00:00Z"), "serverTime": "2026-11-03T10:00:00Z"]) }
+        let (rolledBack, _) = await client(older).refresh(after, profileCount: 0, wall: time("2026-11-03T10:00:00Z"), uptime: 3)
+        XCTAssertNil(rolledBack.unlinkCooldownSeconds)
+        // A field that does not read leaves the cooldown unknown, not the answer.
+        let odd = FakeServer { _ in self.ok(["entitlement": self.document(issued: "2026-11-03T10:00:00Z"), "serverTime": "2026-11-03T10:00:00Z", "unlinkCooldownSeconds": "a week"]) }
+        let (oddRecord, oddResult) = await client(odd).refresh(after, profileCount: 0, wall: time("2026-11-03T10:00:00Z"), uptime: 3)
+        XCTAssertEqual(oddResult, .accepted(paymentReceived: false))
+        XCTAssertNil(oddRecord.unlinkCooldownSeconds)
     }
 }

@@ -88,8 +88,34 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     /// time it is needed. Absent: the key is remembered (the contract's default). Not a secret.
     public var rememberKey: Bool?
 
+    /// The license's unlink cooldown, as the last activation or refresh said it (§6.1, §6.2): for
+    /// `signout.consequences`. Nil from a server older than v2026.11.04, whose sign-out has none.
+    public var unlinkCooldownSeconds: Int?
+    /// The period-end warning the person closed (`period.ending`, §8.5 item 10).
+    public var periodEndingClosed: PeriodEndingClosed?
+
     /// The key is kept in the vault (§10.1): the default, unless the person chose otherwise.
     public var keepsKey: Bool { rememberKey != false }
+
+    /// Which `period.ending` was closed: for which end of the period, at which of its two warnings —
+    /// the week before, or the last day (§8.5 item 10). Closed during the week, it comes back for the
+    /// last day; closed on the last day, not again before the next end. A renewal moves the end, and
+    /// with it the count starts anew.
+    public struct PeriodEndingClosed: Codable, Equatable, Sendable {
+        public var endsAt: Date
+        /// The last day's warning.
+        public var final: Bool
+
+        public init(endsAt: Date, final: Bool) {
+            self.endsAt = endsAt
+            self.final = final
+        }
+
+        /// This closing hides the warning for `endsAt` at its `final` level.
+        public func hides(endsAt end: Date, final isFinal: Bool) -> Bool {
+            endsAt == end && (final || !isFinal)
+        }
+    }
 
     public init() {
         format = Self.currentFormat
@@ -98,7 +124,7 @@ public struct AccountRecord: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case format, deviceID, code, deviceToken, entitlement, floorTime, floorUptime, lastSuccessAt, appOutdated, session, emailLinked
-        case signedInWith, signedOutReason, clockSkewSeconds, trialNoticeClosedFor, rememberKey
+        case signedInWith, signedOutReason, clockSkewSeconds, trialNoticeClosedFor, rememberKey, unlinkCooldownSeconds, periodEndingClosed
     }
 
     public init(from decoder: Decoder) throws {
@@ -119,6 +145,9 @@ public struct AccountRecord: Codable, Equatable, Sendable {
         trialNoticeClosedFor = try container.decodeIfPresent(String.self, forKey: .trialNoticeClosedFor)
         emailLinked = try container.decodeIfPresent(Bool.self, forKey: .emailLinked)
         rememberKey = try container.decodeIfPresent(Bool.self, forKey: .rememberKey)
+        // Notes of their own: one that does not read is left out, not the whole file.
+        unlinkCooldownSeconds = try? container.decodeIfPresent(Int.self, forKey: .unlinkCooldownSeconds)
+        periodEndingClosed = try? container.decodeIfPresent(PeriodEndingClosed.self, forKey: .periodEndingClosed)
     }
 
     /// A device token is stored: this Mac is signed in (§8.2).
