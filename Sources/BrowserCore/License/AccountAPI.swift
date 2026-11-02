@@ -360,7 +360,7 @@ public enum AccountAPI {
         // words, with when to try again (§3): the queue to check a password is full, the robot
         // check's service did not answer. A refresh still takes them as unreachable (`LicenseClient`).
         if response.status >= 500 || response.status == 408 {
-            guard response.status == 503, let code = envelope?.error.code, busyCodes.contains(code) else { return .unreachable }
+            return .unreachable // MUTATION M5
         }
         guard let envelope, !envelope.error.code.isEmpty else {
             return .unreachable
@@ -393,7 +393,7 @@ public enum AccountAPI {
     /// `POST /v1/auth/login`'s answer: a session (200), or a code to type first (202, §5.2).
     /// `receivedAt`: when it came — for the times an older server does not send.
     public static func loginAnswer(from response: AccountResponse, receivedAt: Date) -> Result<LoginAnswer, AccountFailure> {
-        if response.status == 202 { return loginCode(from: response, receivedAt: receivedAt).map(LoginAnswer.code) }
+        // MUTATION M1: the 202 is not read.
         return session(from: response).map(LoginAnswer.session)
     }
 

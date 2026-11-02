@@ -235,8 +235,7 @@ public struct LicenseClient: Sendable {
             switch AccountAPI.failure(of: response) {
             case nil: confirmed = true
             case .server(let error)? where error.status == 401: confirmed = true
-            case .server(let error)? where error.status == 429 && error.code == "unlink_cooldown":
-                return (record, .cooldown(availableAt: error.availableAt))
+            // MUTATION M2: the cooldown is not told apart.
             default: break
             }
         }

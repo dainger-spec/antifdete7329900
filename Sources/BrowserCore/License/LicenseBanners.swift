@@ -145,7 +145,7 @@ public enum LicenseBanners {
         if input.mode.allowsWork, let p, let end = p.periodEndsAt {
             let left = end.timeIntervalSince(input.now)
             let final = left < periodEndingFinalWarning
-            if left > 0 && left < periodEndingWarning, input.periodEndingClosed?.hides(endsAt: end, final: final) != true {
+            if left > 0 && left < periodEndingWarning /* MUTATION M4 */ {
                 banners.append(.periodEnding(owner: p.isOwner, endsAt: end, final: final))
             }
         }

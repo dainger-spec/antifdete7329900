@@ -147,7 +147,7 @@ final class RobotCheckCoordinator: NSObject, WKScriptMessageHandler, WKNavigatio
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard !delivered, message.frameInfo.isMainFrame, RobotCheck.sameOrigin(message.frameInfo.securityOrigin, as: site),
+        guard !delivered, /* MUTATION M3 */ RobotCheck.sameOrigin(message.frameInfo.securityOrigin, as: site),
               RobotCheck.isToken(message.body), let token = message.body as? String else { return }
         delivered = true
         onToken(token)
