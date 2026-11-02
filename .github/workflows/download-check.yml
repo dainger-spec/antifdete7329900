@@ -12,9 +12,16 @@ on:
       url:
         description: The disk image's address (https://dl.lumenbrowser.io/Lumen-<version>.dmg)
         required: true
+  # This branch only, once: GitHub lets a workflow be run by hand only after it has seen it run,
+  # and this one had only ever been on branches other than the default. The push makes a run
+  # whose job is skipped; nothing is checked by it.
+  push:
+    branches: [claude/register-download-check]
+    paths: [".github/workflows/download-check.yml"]
 
 jobs:
   download:
+    if: github.event_name == 'workflow_dispatch'
     name: Download check — ${{ matrix.runner }}
     strategy:
       fail-fast: false
